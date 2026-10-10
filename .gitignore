@@ -1,0 +1,20 @@
+# 实验产物与临时文件
+runs/
+tmp/
+
+# 密钥
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# 系统
+.DS_Store
