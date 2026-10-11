@@ -16,6 +16,10 @@ curation_rounds: 3
 model_options:
   DEEPSEEK_up5zdj:
     reasoning_effort: max
+    # reasoning max burned the 5120 default on segmentation/authoring calls
+    # (finish_reason=length, empty content) on 2026-10-11; 32768 verified
+    # working on real views across SearchQA/ALFWorld/TB.
+    max_tokens: 32768
 weak_profile: >-
   The weak model is qwen3.6-flash-distill, a small distilled model. It follows
   short, concrete instructions well but is weak on obscure trivia, gets

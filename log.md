@@ -149,3 +149,27 @@ G9、试点配置）合入 dev。冲突四处：llm/call.py 与 client.py 取两
 被覆盖的两条；log.md 双方条目按时间全保留。一处取捨：TB 侧临时的
 EXPEDISTILL_LLM_TIMEOUT_SECONDS 环境变量删除，统一走主线 --llm-timeout 运行参数——
 pipeline 总是显式传超时，环境变量会被默认值静默盖掉，留双开关是陷阱（决定文档已加更正注）。
+
+## 2026-10-11 18:35 — 三 benchmark 合并后验证：链路全通，配置回填 max_tokens 32768
+
+合并主线（35d2c24）后三个子代理并行验证。TB（2 快题 × 强弱臂，--until-stage 1，真实远程，
+runs/tb_full_stage01_smoke_20261011_1701/）：4 trial 全成功、5.3 分钟、零 infra 重试零熔断，
+命名空间互异、attempt-major 派发、每 trial 一行记账与 final_metrics 逐位一致、远程无孤儿、
+续跑 1 秒零调用。SearchQA（3 次完整 0–6 run + K4 泄题审计直驱冒烟，runs/smoke_searchqa_full_*
+与 smoke_leak_audit_20261011_175552/）：LLM 判官审计判泄露/不泄露及 G6 作废重写闭环验证通过、
+理由不复述答案（程序化断言）；sub_EM 冻结与并列报告确认并实测动机场景（Lumbar vs lumbar
+vertebrae）；cached_tokens 按角色汇总确认；4 次续跑零调用。ALFWorld（2 次完整 0–6 run，
+runs/smoke_alfworld_merge*_20261011/）：照抄旧 pilot 配置的 run 1 切段六发六空（5120 被推理
+烧穿）整库为空——实锤配置缺口；run 2 配 max_tokens 32768 后全链通（库 1 条、阶段 6 两臂 2/3、
+delta 0），子进程全收割零残留，空 content 记 failure（termination=model_output_error）不断流程。
+端点侧 300s 服务端掉线仍在（两 run 共 5 次、约 25 分钟），infra 重试全部兜住，--llm-timeout
+未触发（服务端先掉线，参数对这类挂起不省时间）。修复：两个 pilot 配置回填
+model_options.DEEPSEEK_up5zdj.max_tokens=32768（照抄旧配置会得到空库）。三条观察（无代码
+bug）：n_attempts=1 时 F 不稳定（同题两次 run 一次 F=2 一次 F=∅）；weak_already_knows 主导
+验收漏斗（SearchQA 4/4、TB 7/9、ALFWorld 4/5），考题难度问题待多题分布；严格 EM 对强模型
+同样严苛，佐证 sub_EM 预注册。
+
+工件：`configs/experiments/pilot_{searchqa,alfworld}.yaml`（max_tokens 回填）、
+`scripts/smoke/launch_detached.py`、`scripts/smoke/smoke_leak_audit_k4.py`、
+run `runs/tb_full_stage01_smoke_20261011_1701/`、`runs/smoke_searchqa_full_*`、
+`runs/smoke_leak_audit_20261011_175552/`、`runs/smoke_alfworld_merge*_20261011/`。
