@@ -15,6 +15,7 @@ from expedistill.blocks.rules import (
     get_trajectory_select,
     register_task_select,
 )
+from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Subtask, Trajectory
 from expedistill.infra.reliability import ConfigError
 
@@ -34,14 +35,15 @@ def _subtask(source, success):
     )
 
 
-def _trajectory(status):
+def _trajectory(status, role="weak", attempt=0):
+    task_id = make_task_id("tb", "t")
     return Trajectory(
-        trajectory_id="t#0",
-        task_id="t",
+        trajectory_id=make_trajectory_id(task_id, role, attempt),
+        task_id=task_id,
         benchmark="tb",
-        model_role="weak",
+        model_role=role,
         model_name="test-model",
-        attempt_index=0,
+        attempt_index=attempt,
         status=status,
     )
 
@@ -71,11 +73,83 @@ def test_segment_select_strong_all_weak_failed():
     assert rule(_subtask("weak", True)) is False
 
 
-def test_trajectory_select_all_accepts_everything():
+def test_trajectory_select_all_returns_the_whole_task():
+    # The per-task contract: one call sees every stored trajectory of ONE
+    # task (both roles mixed) and returns the sublist to segment.
     rule = get_trajectory_select("all")
-    assert rule(_trajectory("success")) is True
-    assert rule(_trajectory("failure")) is True
-    assert rule(_trajectory("infra_error")) is True
+    trajectories = [
+        _trajectory("success", role="strong"),
+        _trajectory("failure", role="weak", attempt=0),
+        _trajectory("infra_error", role="weak", attempt=1),
+    ]
+    assert rule(trajectories) == trajectories
+    assert rule([]) == []
+
+
+def test_strong2_weak2_takes_two_per_role_with_status_preference():
+    rule = get_trajectory_select("strong2_weak2")
+    # 3 strong (a failure, then two successes) and 3 weak (a success, then
+    # two failures): enough for every branch of both preferences.
+    strong = [
+        _trajectory("failure", role="strong", attempt=0),
+        _trajectory("success", role="strong", attempt=1),
+        _trajectory("success", role="strong", attempt=2),
+    ]
+    weak = [
+        _trajectory("success", role="weak", attempt=0),
+        _trajectory("failure", role="weak", attempt=1),
+        _trajectory("failure", role="weak", attempt=2),
+    ]
+    selected = rule(strong + weak)
+    # Strong arm: successes first (stable by trajectory_id within the
+    # bucket), so the failure at attempt 0 is dropped; weak arm: failures
+    # first, so the success at attempt 0 is dropped.
+    assert [t.trajectory_id for t in selected] == [
+        "traj/tb:t/strong/01", "traj/tb:t/strong/02",
+        "traj/tb:t/weak/01", "traj/tb:t/weak/02",
+    ]
+
+
+def test_strong2_weak2_clamps_to_what_exists():
+    rule = get_trajectory_select("strong2_weak2")
+    # One strong and three weak: 1 + 2.
+    selected = rule([
+        _trajectory("success", role="strong", attempt=0),
+        _trajectory("failure", role="weak", attempt=0),
+        _trajectory("failure", role="weak", attempt=1),
+        _trajectory("failure", role="weak", attempt=2),
+    ])
+    assert [t.trajectory_id for t in selected] == [
+        "traj/tb:t/strong/00", "traj/tb:t/weak/00", "traj/tb:t/weak/01"]
+    # No strong trajectories at all: still the first two weak ones.
+    only_weak = [_trajectory("failure", role="weak", attempt=i)
+                 for i in range(3)]
+    assert rule(only_weak) == only_weak[:2]
+    # A weak arm with no failures (impossible on F, but the rule must be
+    # total): the quota falls back to the weak successes.
+    weak_successes = [_trajectory("success", role="weak", attempt=i)
+                      for i in range(3)]
+    assert rule(weak_successes) == weak_successes[:2]
+    # Nothing stored: nothing selected.
+    assert rule([]) == []
+
+
+def test_strong2_weak2_is_deterministic_under_input_order():
+    rule = get_trajectory_select("strong2_weak2")
+    trajectories = [
+        _trajectory("failure", role="weak", attempt=2),
+        _trajectory("success", role="strong", attempt=0),
+        _trajectory("failure", role="strong", attempt=1),
+        _trajectory("success", role="weak", attempt=1),
+        _trajectory("success", role="strong", attempt=2),
+        _trajectory("failure", role="weak", attempt=0),
+    ]
+    first = rule(trajectories)
+    assert rule(list(reversed(trajectories))) == first
+    assert rule(trajectories) == first
+    # A one-shot iterable is materialized once, not consumed by the first
+    # role's pass (the second role would silently select nothing).
+    assert rule(reversed(trajectories)) == first
 
 
 def test_unknown_names_raise_config_error_listing_known():

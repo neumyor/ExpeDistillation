@@ -1,0 +1,363 @@
+#!/usr/bin/env python
+"""Build and verify the SkillOpt-official split-mode experiment configs.
+
+Extracts the task-id lists from the SkillOpt split manifests, writes the two
+campaign configs, and verifies that every id resolves through OUR benchmark
+plugins exactly the way stage 0 will (blocks.tasks.load_tasks on the sorted
+union of the split lists, then blocks.tasks.split_tasks on the explicit
+lists). The SkillOpt val splits (ALFWorld 18, SearchQA 200) are intentionally
+not used; the campaign runs on train + test only.
+
+Id conventions (why they need no translation):
+- ALFWorld: the SkillOpt alfworld_path_split items carry ``gamefile`` paths
+  relative to $ALFWORLD_DATA, which is exactly the id convention of our
+  ALFWorld plugin (benchmarks/alfworld/plugin.py, resolve_gamefile).
+- SearchQA: the SkillOpt searchqa_id_split items carry the 32-hex ``id``
+  shared by the outer searchqa-eval repo's items.json, which is exactly the
+  id convention of our SearchQA plugin (benchmarks/searchqa/plugin.py).
+
+Inputs
+    --skillopt-data DIR  SkillOpt data root (default: the outer workspace
+                         checkout, repos/pulled/SkillOpt/data).
+    .env, sourced by the caller (example command below), must provide
+    ALFWORLD_DATA and EXPEDISTILL_SEARCHQA_EVAL_DIR.
+
+Outputs
+    configs/experiments/alfworld_skillopt_split.yaml
+    configs/experiments/searchqa_skillopt_split.yaml
+    stdout: per-split counts, resolution results, any misses. Exit 2 on any
+    miss or mismatch -- tasks are never silently dropped from a config.
+
+Modes
+    default: write both configs (deterministic, byte-identical on rerun),
+             then verify them end to end.
+    --check: write nothing; verify the configs already on disk against the
+             SkillOpt extraction and through the plugins.
+
+Example
+    cd <repo root>
+    set -a; . ./.env; set +a
+    .venv/bin/python scripts/run/build_skillopt_split_configs.py --check
+
+No model calls: config parsing and task loading only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: SkillOpt split manifests (outer workspace checkout); overridable.
+DEFAULT_SKILL_OPT_DATA = Path(
+    "/Users/yimingniu/Code/SkillEvolvePaperList/repos/pulled/SkillOpt/data")
+
+SPLIT_DIRS = {
+    "alfworld": "alfworld_path_split",
+    "searchqa": "searchqa_id_split",
+}
+ID_FIELDS = {
+    "alfworld": "gamefile",
+    "searchqa": "id",
+}
+#: The exact counts the SkillOpt manifests carry; a drift is a loud stop,
+#: never a silent shrink of the task set.
+EXPECTED_COUNTS = {
+    "alfworld": {"train": 39, "test": 134},
+    "searchqa": {"train": 400, "test": 1400},
+}
+CONFIG_PATHS = {
+    "alfworld": REPO_ROOT / "configs/experiments/alfworld_skillopt_split.yaml",
+    "searchqa": REPO_ROOT / "configs/experiments/searchqa_skillopt_split.yaml",
+}
+
+#: Weak-model profiles, carried over from the pilot configs verbatim: the
+#: campaign runs the same weak model through the same runner and prompts, so
+#: the pilot texts apply unchanged.
+WEAK_PROFILES = {
+    "alfworld": (
+        "The weak model is qwen3.6-flash-distill, a small distilled model. "
+        "It follows short, concrete instructions well but misses abstract "
+        "goals, gets confused when several conditions must be checked in "
+        "order, sometimes invents object ids it has not observed, and can "
+        "loop on a failing action. Write skills as short ordered steps with "
+        "explicit triggers and exact ALFWorld command forms."
+    ),
+    "searchqa": (
+        "The weak model is qwen3.6-flash-distill, a small distilled model. "
+        "It follows short, concrete instructions well but is weak on obscure "
+        "trivia, gets distracted by long clue preambles, often gives up "
+        "after one search instead of reformulating the query, and tends to "
+        "answer with a sentence instead of the short answer phrase. Write "
+        "skills as short ordered steps with explicit triggers, e.g. when to "
+        "reformulate a Search query and how to phrase the final Finish[...] "
+        "answer as a concise noun phrase."
+    ),
+}
+
+
+def _fail(message: str) -> None:
+    print(f"FATAL: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def extract_ids(skillopt_data: Path, benchmark: str) -> Dict[str, List[str]]:
+    """Train/test id lists from the SkillOpt manifest, count- and
+    duplicate-checked against the known split sizes."""
+    split_dir = skillopt_data / SPLIT_DIRS[benchmark]
+    field = ID_FIELDS[benchmark]
+    out: Dict[str, List[str]] = {}
+    for split in ("train", "test"):
+        path = split_dir / split / "items.json"
+        if not path.is_file():
+            _fail(f"SkillOpt split file missing: {path}")
+        items = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(items, list):
+            _fail(f"{path} is not a JSON array")
+        ids = [str(item[field]) for item in items]
+        expected = EXPECTED_COUNTS[benchmark][split]
+        if len(ids) != expected:
+            _fail(f"{path} carries {len(ids)} items, expected {expected}")
+        duplicates = sorted(t for t, c in Counter(ids).items() if c > 1)
+        if duplicates:
+            _fail(f"{path} carries duplicate ids: {duplicates}")
+        out[split] = ids
+    return out
+
+
+def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
+    """The full config text; deterministic (same input, same bytes)."""
+    if benchmark == "alfworld":
+        header = (
+            "# ALFWorld campaign: the SkillOpt official split, split mode.\n"
+            "# train = SkillOpt alfworld_path_split/train (39 games under\n"
+            "# json_2.1.1/train), test = SkillOpt .../test (134 games under\n"
+            "# json_2.1.1/valid_unseen); SkillOpt's val split (18 valid_seen\n"
+            "# games) is not used. Ids are gamefile paths relative to\n"
+            "# $ALFWORLD_DATA (the plugin's convention), extracted from the\n"
+            "# SkillOpt manifest by scripts/run/build_skillopt_split_configs.py.\n"
+        )
+    else:
+        header = (
+            "# SearchQA campaign: the SkillOpt official split, split mode.\n"
+            "# train = SkillOpt searchqa_id_split/train (400 items), test =\n"
+            "# SkillOpt .../test (1400 items); SkillOpt's val split (200\n"
+            "# items) is not used. Ids are the 32-hex item ids of the outer\n"
+            "# searchqa-eval repo (the plugin's convention), extracted from\n"
+            "# the SkillOpt manifest by scripts/run/build_skillopt_split_configs.py.\n"
+        )
+    lines: List[str] = [header]
+    lines.append(f"benchmark: {benchmark}")
+    lines.append("mode: split")
+    lines.append("split:")
+    for split in ("train", "test"):
+        lines.append(f"  {split}:")
+        lines.extend(f"    - {task_id}" for task_id in ids[split])
+    lines.append("models:")
+    lines.append("  executor_strong: DEEPSEEK_up5zdj")
+    lines.append("  executor_weak: qwen3.6-flash-distill")
+    lines.append("n_attempts_strong: 3")
+    lines.append("n_attempts_weak: 3")
+    lines.append("K: 5")
+    lines.append("segment_retry_limit: 2")
+    lines.append("retry_limit: 2")
+    lines.append("bank_token_budget: 4096")
+    lines.append("curation_rounds: 3")
+    lines.append("rules:")
+    lines.append("  task_select: all_valid_failed")
+    lines.append("  segment_select: strong_all_weak_failed")
+    lines.append("  # Segment only tasks where the strong model succeeded twice and")
+    lines.append("  # the weak failed twice; must be registered under this name in")
+    lines.append("  # blocks/rules.py (stage 0 validates every rule name).")
+    lines.append("  trajectory_select: strong2_weak2")
+    lines.append("model_options:")
+    lines.append("  DEEPSEEK_up5zdj:")
+    lines.append("    reasoning_effort: max")
+    lines.append("    # reasoning max burned the 5120 default on segmentation/authoring calls")
+    lines.append("    # (finish_reason=length, empty content) on 2026-10-11; 32768 verified")
+    lines.append("    # working on real views across SearchQA/ALFWorld/TB.")
+    lines.append("    max_tokens: 32768")
+    lines.append("weak_profile: >-")
+    # Single-paragraph profile text: fold-clean under >-, two-space indent.
+    lines.extend(f"  {part}" for part in WEAK_PROFILES[benchmark].split("\n"))
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Verification: config parse + the exact task pipeline stage 0 will run
+# ---------------------------------------------------------------------------
+
+def _alfworld_misses(union: List[str]) -> List[str]:
+    """Every id that would not load (gamefile or traj_data.json missing);
+    a complete miss list, because the plugin raises on the first one."""
+    raw = os.environ.get("ALFWORLD_DATA", "").strip()
+    if not raw:
+        _fail("ALFWORLD_DATA is not set; source .env before running (see "
+              "the module docstring example)")
+    root = Path(raw).expanduser()
+    misses = []
+    for task_id in union:
+        gamefile = root / task_id
+        if not gamefile.is_file() or not (gamefile.parent / "traj_data.json").is_file():
+            misses.append(task_id)
+    return misses
+
+
+def _searchqa_misses(union: List[str]) -> List[str]:
+    """Ids absent from the eval repo's materialized items (plus the
+    per-split provenance cross-check against the SkillOpt extraction)."""
+    raw = os.environ.get("EXPEDISTILL_SEARCHQA_EVAL_DIR", "").strip()
+    if not raw:
+        _fail("EXPEDISTILL_SEARCHQA_EVAL_DIR is not set; source .env before "
+              "running (see the module docstring example)")
+    data_dir = Path(raw).expanduser() / "data" / "searchqa_split"
+    eval_ids: Dict[str, set] = {}
+    for split in ("train", "val", "test"):
+        path = data_dir / split / "items.json"
+        if not path.is_file():
+            _fail(f"eval repo split file missing: {path}")
+        eval_ids[split] = {str(item["id"]) for item in
+                           json.loads(path.read_text(encoding="utf-8"))}
+    available = eval_ids["train"] | eval_ids["val"] | eval_ids["test"]
+    return [task_id for task_id in union if task_id not in available]
+
+
+def verify_config(benchmark: str, cfg_path: Path,
+                  ids: Dict[str, List[str]]) -> Dict[str, Any]:
+    """Parse the config and resolve its split through the plugins, exactly
+    the way stage 0 does (explicit lists, no ``tasks`` field: D1 loads the
+    sorted union, D2 checks unknown/overlap/coverage). Returns a summary
+    dict; exits 2 on any problem."""
+    from expedistill.core.config import load_config
+    from expedistill.blocks import tasks as tasks_block
+
+    print(f"[{benchmark}] config: {cfg_path}")
+    if not cfg_path.is_file():
+        _fail(f"config not found: {cfg_path}")
+    config = load_config(str(cfg_path))
+    problems: List[str] = []
+    if config.benchmark != benchmark:
+        problems.append(f"benchmark is {config.benchmark!r}, expected {benchmark!r}")
+    if config.mode != "split":
+        problems.append(f"mode is {config.mode!r}, expected 'split'")
+    if config.tasks is not None:
+        problems.append(
+            f"'tasks' must be absent in split mode with explicit lists "
+            f"(stage 0 loads the split union), got {config.tasks!r}")
+    for split in ("train", "test"):
+        listed = list(config.split.get(split) or [])
+        if listed != ids[split]:
+            problems.append(
+                f"split[{split!r}] does not match the SkillOpt extraction "
+                f"({len(listed)} listed vs {len(ids[split])} extracted); "
+                "regenerate the config")
+    overlap = sorted(set(config.split["train"]) & set(config.split["test"]))
+    if overlap:
+        problems.append(f"train/test overlap on: {overlap[:10]}")
+    if problems:
+        for problem in problems:
+            print(f"  PROBLEM: {problem}")
+        sys.exit(2)
+
+    # The exact spec stage 0 hands to D1: the sorted union of the lists
+    # (stages/stage0_freeze.py _explicit_split_ids / _tasks_spec).
+    union = sorted(set(config.split["train"]) | set(config.split["test"]))
+    misses = (_alfworld_misses(union) if benchmark == "alfworld"
+              else _searchqa_misses(union))
+    if misses:
+        print(f"  MISSING ({len(misses)} of {len(union)} ids do not resolve "
+              f"against the benchmark data):")
+        for task_id in misses:
+            print(f"    {task_id}")
+        _fail(f"{benchmark}: {len(misses)} task id(s) do not resolve; fix the "
+              "data or the split, never drop tasks silently")
+
+    tasks = tasks_block.load_tasks(benchmark, union)
+    train_tasks, test_tasks = tasks_block.split_tasks(
+        tasks, config.mode, config.split)
+    expected = EXPECTED_COUNTS[benchmark]
+    if len(train_tasks) != expected["train"] or len(test_tasks) != expected["test"]:
+        _fail(f"{benchmark}: loaded {len(train_tasks)}/{len(test_tasks)} "
+              f"train/test tasks, expected {expected['train']}/{expected['test']}")
+    if len(tasks) != expected["train"] + expected["test"]:
+        _fail(f"{benchmark}: loaded {len(tasks)} tasks, expected "
+              f"{expected['train'] + expected['test']}")
+
+    # Split provenance, for the record.
+    if benchmark == "alfworld":
+        for split, task_list in (("train", train_tasks), ("test", test_tasks)):
+            parts = Counter((task.meta.get("split") or Path(
+                task.task_id).parts[1]) for task in task_list)
+            print(f"  {split}: {len(task_list)} tasks, "
+                  f"engine split dirs {dict(parts)}")
+    else:
+        raw = os.environ.get("EXPEDISTILL_SEARCHQA_EVAL_DIR", "").strip()
+        data_dir = Path(raw).expanduser() / "data" / "searchqa_split"
+        eval_ids = {
+            split: {str(item["id"]) for item in json.loads(
+                (data_dir / split / "items.json").read_text(encoding="utf-8"))}
+            for split in ("train", "val", "test")}
+        provenance = {
+            split: Counter(
+                next(name for name in ("train", "val", "test")
+                     if task.task_id in eval_ids[name])
+                for task in task_list)
+            for split, task_list in (("train", train_tasks), ("test", test_tasks))}
+        for split, counts in provenance.items():
+            print(f"  {split}: {sum(counts.values())} tasks, "
+                  f"eval-repo splits {dict(counts)}")
+
+    print(f"  OK: {len(train_tasks)} train + {len(test_tasks)} test ids all "
+          f"resolve through the {benchmark} plugin "
+          f"({len(union)} union ids loaded)")
+    return {
+        "config": config,
+        "union": len(union),
+        "train": len(train_tasks),
+        "test": len(test_tasks),
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build/verify the SkillOpt split-mode experiment configs.")
+    parser.add_argument(
+        "--skillopt-data", type=Path, default=DEFAULT_SKILL_OPT_DATA,
+        help=f"SkillOpt data root (default: {DEFAULT_SKILL_OPT_DATA})")
+    parser.add_argument(
+        "--check", action="store_true",
+        help="verify the configs on disk instead of writing them")
+    args = parser.parse_args()
+
+    extracted = {
+        benchmark: extract_ids(args.skillopt_data, benchmark)
+        for benchmark in ("alfworld", "searchqa")
+    }
+    for benchmark, ids in extracted.items():
+        print(f"[{benchmark}] extracted from SkillOpt: "
+              f"train {len(ids['train'])}, test {len(ids['test'])} "
+              f"(counts match {EXPECTED_COUNTS[benchmark]})")
+
+    if not args.check:
+        for benchmark, ids in extracted.items():
+            text = render_config(benchmark, ids)
+            path = CONFIG_PATHS[benchmark]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            print(f"[{benchmark}] wrote {path} ({len(text.splitlines())} lines)")
+
+    for benchmark in ("alfworld", "searchqa"):
+        verify_config(benchmark, CONFIG_PATHS[benchmark], extracted[benchmark])
+
+    print("ALL OK: both configs load, match the SkillOpt splits exactly, and "
+          "every id resolves through our plugins.")
+
+
+if __name__ == "__main__":
+    main()

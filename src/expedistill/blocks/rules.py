@@ -14,9 +14,17 @@ exactly this shape):
   is one task's ``compute_task_metrics`` entry and ``n_attempts`` the frozen
   sampling depth;
 * segment_select: ``(subtask: Subtask) -> bool``;
-* trajectory_select: ``(trajectory: Trajectory) -> bool`` (the stage-2
-  "which trajectories of a task to segment" question is still open; ``all``
-  is the frozen default a config can rely on today).
+* trajectory_select: ``(trajectories: Sequence[Trajectory]) ->
+  List[Trajectory]`` -- a PER-TASK selector: the rule receives every stored
+  NON-EMPTY trajectory of ONE task (both roles mixed) and returns the
+  sublist to segment (stage 2, README stage 2). Per task, because the policy
+  question is "which of this task's samples to segment", which needs the
+  whole task's set (e.g. quotas per model role); a per-trajectory predicate
+  cannot express it. 0-step trajectories never reach a rule (stage 2
+  excludes them first: segmenting nothing is undefined input for G1/D7), so
+  a rule sees only informative samples. A rule must be deterministic and
+  must not mutate its input; the stage fixes the processing order, not the
+  rule.
 
 Unknown names raise ConfigError (the experiment config named something that
 does not exist), listing every registered rule in that namespace.
@@ -24,7 +32,7 @@ does not exist), listing every registered rule in that namespace.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, List, Sequence
 
 from expedistill.core.models import Subtask, Trajectory
 from expedistill.core.registry import make_registry
@@ -120,11 +128,44 @@ def _strong_all_weak_failed(subtask: Subtask) -> bool:
 
 
 @TRAJECTORY_SELECT.register("all")
-def _all(trajectory: Trajectory) -> bool:
+def _all(trajectories: Sequence[Trajectory]) -> List[Trajectory]:
     """Stage-2 default: segment every trajectory of the task.
 
-    The real policy (all samples vs. a fixed number per model) is still an
-    open question in README stage 2; ``all`` is the frozen default, and any
-    future policy registers under a new name.
+    The frozen default under the per-task contract (a frozen run that used
+    ``all`` resumes identically); policies with quotas or preferences
+    register under their own names.
     """
-    return True
+    return list(trajectories)
+
+
+@TRAJECTORY_SELECT.register("strong2_weak2")
+def _strong2_weak2(
+    trajectories: Sequence[Trajectory],
+) -> List[Trajectory]:
+    """Stage-2 quota rule: up to 2 strong + up to 2 weak per task.
+
+    Cost control for the full campaign (segmentation is a model call per
+    trajectory) while preferring the material each arm actually distills
+    from: the strong arm's successes are the success-distillation material,
+    so strong trajectories are ordered successes first (stable within the
+    bucket by trajectory_id), then failures; the weak arm's failures are the
+    diagnosis material by design (README D6 keeps only failed weak segments
+    anyway -- on F tasks every weak trajectory failed, so in practice the
+    weak quota takes the first two by trajectory_id), so weak trajectories
+    are ordered failures first, then successes. Fewer available than the
+    quota is fine: take what exists. ``infra_error`` trajectories are never
+    stored (K1), so "not the preferred status" covers them deterministically.
+    """
+    selected: List[Trajectory] = []
+    # Materialize once: the two role passes must not re-consume the input
+    # (a one-shot iterable would silently select nothing for the second role).
+    available = list(trajectories)
+    for role, prefer_success in (("strong", True), ("weak", False)):
+        of_role = sorted(
+            (trajectory for trajectory in available
+             if trajectory.model_role == role),
+            key=lambda trajectory: (trajectory.success != prefer_success,
+                                    trajectory.trajectory_id),
+        )
+        selected.extend(of_role[:2])
+    return selected

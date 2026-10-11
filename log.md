@@ -173,3 +173,34 @@ bug）：n_attempts=1 时 F 不稳定（同题两次 run 一次 F=2 一次 F=∅
 `scripts/smoke/launch_detached.py`、`scripts/smoke/smoke_leak_audit_k4.py`、
 run `runs/tb_full_stage01_smoke_20261011_1701/`、`runs/smoke_searchqa_full_*`、
 `runs/smoke_leak_audit_20261011_175552/`、`runs/smoke_alfworld_merge*_20261011/`。
+
+## 2026-10-11 22:31 — TB21 全量实验：stage-1 归档播种脚本、实验配置与 F@3 基线对照全过
+
+为 TB21 全量 campaign 完成三件事并把 stage 1 播种跑到底。（1）离线基线：预注册
+"每臂取归档 rank 1..3 作为 attempt 0..2"口径，写 `scripts/analysis/tb21_f3_baseline.py`
+从 campaign manifest（445+445 行，与审计逐行对上：reward 在则 VALID 同值、缺失则必为
+KEEP_MODEL）算出 F=36 题、弱臂 avg@3=40/89≈0.4494 / pass@3=53/89、强臂 avg@3=169/267≈0.6330 /
+pass@3=73/89、F 中强臂 rank1-3 有成功的 20 题；脚本用精确分数手算与仓库 D3/D4 积木各算一遍，
+两套逐项一致才落盘 `docs/tb21_f3_baseline_20261011.md`（后附播种 run 的对照结果）。
+（2）新脚本 `scripts/run/seed_tb_stage1.py`：走真实 CLI 冻结 manifest（--until-stage 0），
+归档里缺的两条轨迹（qwen extract-moves-from-video rank01、qwen path-tracing rank02，均为
+KEEP_MODEL 的 tmux 未装好即死 trial，agent 目录为空）探测一次记进缓存 absent_units.json，
+其余 532 条 trajectory.json 单条 ssh tar 流拉进 `tmp/tb_seed_cache/`（原子落盘、可续传、
+远端只读），reconstruct/reconstruct_skip_counts 重建后按 traj/tb:<task>/<role>/<NN> 的 ID
+规则存入 store，model_name/skills_injected 与 K1 的已存单元校验逐字段一致，meta 记
+rank/来源/skip 计数与 result.json 的 timing；幂等：重跑全跳过零下载。（3）新配置
+`configs/experiments/tb21_full.yaml`（89 题、n_attempts 3/3、K5、strong2_weak2 轨迹规则、
+DEEPSEEK_up5zdj max_tokens 32768、qwen 弱模型画像取材审计：11/13 次 KEEP_MODEL 死在
+tmux 按键层、2 次 AgentTimeout、avg@5 0.47 对 0.63）。先跑 3 题干跑
+（runs/tb21_seed_dry_20261011_1/，覆盖成功/失败/KEEP_MODEL/缺轨迹四条路径，复跑零下载，
+stage 1 零调用 0.9 秒，summary 与手算逐位一致），再全量
+run `runs/tb21_full_20261011_2242/`：534 单元全播种（515 文件 231.6MB、189 秒下载），
+`--until-stage 1 --workers 8` 零模型调用（llm_requests/ 空、无 work/、无 failed_units），
+stage-1 summary 与基线逐项一致：F 36 题清单逐项相同、弱 120/强 169 次成功、pass 53/73、
+每题 3 valid 0 infra；avg@3 浮点在第 16 位有 1 ulp 差（D3 先求和后除 vs 单次除法的舍入
+顺序，整数不变量完全相同），判为一致。远端全程只读（归档在 22:00 后零改动、无残留）。
+
+工件：`scripts/run/seed_tb_stage1.py`、`scripts/analysis/tb21_f3_baseline.py`、
+`configs/experiments/tb21_full.yaml`、`docs/tb21_f3_baseline_20261011.md`、
+run `runs/tb21_full_20261011_2242/`（全量播种 + stage 1）、`runs/tb21_seed_dry_20261011_1/`
+（3 题干跑）、缓存 `tmp/tb_seed_cache/`（532 条轨迹 + absent_units.json）。

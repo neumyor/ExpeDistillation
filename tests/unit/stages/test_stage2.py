@@ -2,8 +2,9 @@
 
 Trajectories are planted straight into the store (stage 1 has its own tests),
 so this file exercises exactly the stage's own wiring: which trajectories it
-offers to K2, in what order, and that a rerun offers them again only when K2
-has nothing stored. The segmenter is a fake handle whose script proves the
+offers to K2, in what order, which it excludes up front as empty (0 steps --
+nothing to segment), and that a rerun offers them again only when K2 has
+nothing stored. The segmenter is a fake handle whose script proves the
 model-call count."""
 
 import importlib
@@ -154,6 +155,18 @@ def _plant_failed_task(ctx):
     plant(ctx, "t2", "strong")
 
 
+def _plant_rich_task(ctx):
+    """t1 with 3 strong (failure, success, success) and 3 weak (success,
+    failure, failure) trajectories: every preference branch of
+    strong2_weak2 is reachable."""
+    plant(ctx, "t1", "strong", attempt=0, status="failure")
+    plant(ctx, "t1", "strong", attempt=1, status="success")
+    plant(ctx, "t1", "strong", attempt=2, status="success")
+    plant(ctx, "t1", "weak", attempt=0, status="success")
+    plant(ctx, "t1", "weak", attempt=1, status="failure")
+    plant(ctx, "t1", "weak", attempt=2, status="failure")
+
+
 # ---------------------------------------------------------------------------
 # Both roles segmented
 # ---------------------------------------------------------------------------
@@ -168,7 +181,7 @@ def test_segments_both_roles_and_writes_summary(monkeypatch, tmp_path):
         make_task_id(_FAKE, "t1")])
 
     assert result == {"segmented": 3, "skipped": 0, "total_subtasks": 6,
-                      "infra_failed": []}
+                      "infra_failed": [], "empty_skipped": []}
     assert read_json(ctx.run_dir / "stage2_summary.json") == result
     # One model call per trajectory (3 trajectories), via the segmenter role.
     assert len(ctx.handles["segmenter"].client.calls) == 3
@@ -223,7 +236,7 @@ def test_exhausted_trajectory_is_skipped_and_counted(monkeypatch, tmp_path):
         make_task_id(_FAKE, "t1")])
 
     assert result == {"segmented": 2, "skipped": 1, "total_subtasks": 4,
-                      "infra_failed": []}
+                      "infra_failed": [], "empty_skipped": []}
     audit = read_jsonl(
         ctx.run_dir / "stage2_segments" / "segmentation_audit.jsonl")
     assert [r["trajectory_id"] for r in audit] == ["traj/fakebench:t1/strong/00"]
@@ -238,8 +251,8 @@ def test_trajectory_select_rule_filters_the_units(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, StagePlugin())
 
     @register_trajectory_select("stage2_test_only_weak")
-    def _only_weak(trajectory):
-        return trajectory.model_role == "weak"
+    def _only_weak(trajectories):
+        return [t for t in trajectories if t.model_role == "weak"]
 
     ctx = make_ctx(
         tmp_path, make_config(rules={"trajectory_select": "stage2_test_only_weak"}),
@@ -250,8 +263,76 @@ def test_trajectory_select_rule_filters_the_units(monkeypatch, tmp_path):
         make_task_id(_FAKE, "t1")])
 
     assert result == {"segmented": 2, "skipped": 0, "total_subtasks": 4,
-                      "infra_failed": []}
+                      "infra_failed": [], "empty_skipped": []}
     assert not any("/strong/" in sid for sid in ctx.store.ids("subtasks"))
+
+
+def test_trajectory_select_sees_one_task_at_a_time(monkeypatch, tmp_path):
+    # The per-task contract: the rule is called once per failed task, sees
+    # only that task's trajectories (both roles mixed), and the calls come
+    # in sorted task_id order.
+    _install_plugin(monkeypatch, StagePlugin())
+    seen = []
+
+    @register_trajectory_select("stage2_test_spy")
+    def _spy(trajectories):
+        seen.append([t.task_id for t in trajectories])
+        return list(trajectories)
+
+    ctx = make_ctx(
+        tmp_path, make_config(rules={"trajectory_select": "stage2_test_spy"}),
+        segmenter=make_fake_handle(script=valid_script(4)))
+    plant(ctx, "t1", "strong")
+    plant(ctx, "t1", "weak", attempt=0)
+    plant(ctx, "t2", "strong")
+    plant(ctx, "t2", "weak", attempt=1)
+
+    stage2_segmentation.run(ctx, failed_task_ids=[
+        make_task_id(_FAKE, "t1"), make_task_id(_FAKE, "t2")])
+
+    assert seen == [[make_task_id(_FAKE, "t1")] * 2,
+                    [make_task_id(_FAKE, "t2")] * 2]
+
+
+def test_strong2_weak2_rule_segments_two_plus_two(monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(
+        tmp_path, make_config(rules={"trajectory_select": "strong2_weak2"}),
+        segmenter=make_fake_handle(script=valid_script(4)))
+    _plant_rich_task(ctx)
+
+    result = stage2_segmentation.run(ctx, failed_task_ids=[
+        make_task_id(_FAKE, "t1")])
+
+    assert result == {"segmented": 4, "skipped": 0, "total_subtasks": 8,
+                      "infra_failed": [], "empty_skipped": []}
+    # Exactly the strong successes (attempts 1, 2) and the weak failures
+    # (attempts 1, 2) were segmented.
+    segmented = sorted({sid.rpartition("/")[0]
+                        for sid in ctx.store.ids("subtasks")})
+    assert segmented == [
+        "traj/fakebench:t1/strong/01", "traj/fakebench:t1/strong/02",
+        "traj/fakebench:t1/weak/01", "traj/fakebench:t1/weak/02",
+    ]
+
+
+def test_same_store_yields_the_same_selection(monkeypatch, tmp_path):
+    # Determinism: identical stores (same trajectories, same rule) produce
+    # the identical selection and processing order -- the subtask ids embed
+    # the trajectory ids, so equal lists mean equal calls to K2.
+    _install_plugin(monkeypatch, StagePlugin())
+    subtask_ids = []
+    for run_name in ("run_a", "run_b"):
+        ctx = make_ctx(
+            tmp_path, make_config(
+                rules={"trajectory_select": "strong2_weak2"}),
+            segmenter=make_fake_handle(script=valid_script(4)),
+            run_name=run_name)
+        _plant_rich_task(ctx)
+        stage2_segmentation.run(ctx, failed_task_ids=[
+            make_task_id(_FAKE, "t1")])
+        subtask_ids.append(ctx.store.ids("subtasks"))
+    assert subtask_ids[0] == subtask_ids[1]
 
 
 def test_trajectory_select_is_read_from_config_rules(monkeypatch, tmp_path):
@@ -268,8 +349,8 @@ def test_trajectory_select_is_read_from_config_rules(monkeypatch, tmp_path):
     monkeypatch.setattr(stage2_segmentation, "get_trajectory_select", spy)
 
     @register_trajectory_select("stage2_test_none")
-    def _none(trajectory):
-        return False
+    def _none(trajectories):
+        return []
 
     ctx = make_ctx(
         tmp_path, make_config(rules={"trajectory_select": "stage2_test_none"}),
@@ -281,6 +362,139 @@ def test_trajectory_select_is_read_from_config_rules(monkeypatch, tmp_path):
 
     assert seen == ["stage2_test_none"]
     assert result["segmented"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 0-step trajectories: excluded before the rule, audited, never modeled
+# ---------------------------------------------------------------------------
+
+def test_empty_trajectory_is_excluded_audited_and_never_modeled(
+        monkeypatch, tmp_path):
+    # Real-data shape from the TB seeding (runs/tb21_full_20261011_2242): a
+    # trial whose agent died before acting stored a 0-step trajectory. There
+    # is nothing to segment, so the unit must not burn model calls.
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config(),
+                   segmenter=make_fake_handle(script=valid_script(2)))
+    plant(ctx, "t1", "strong")
+    plant(ctx, "t1", "weak", attempt=0, n_steps=0)
+    plant(ctx, "t1", "weak", attempt=1)
+
+    result = stage2_segmentation.run(ctx, failed_task_ids=[
+        make_task_id(_FAKE, "t1")])
+
+    empty_id = "traj/fakebench:t1/weak/00"
+    assert result == {"segmented": 2, "skipped": 0, "total_subtasks": 4,
+                      "infra_failed": [], "empty_skipped": [empty_id]}
+    # Only the informative trajectories cost a model call.
+    assert len(ctx.handles["segmenter"].client.calls) == 2
+    assert empty_id not in {sid.rpartition("/")[0]
+                            for sid in ctx.store.ids("subtasks")}
+    # The exclusion is visible in the same audit channel K2 uses.
+    audit = read_jsonl(
+        ctx.run_dir / "stage2_segments" / "segmentation_audit.jsonl")
+    assert audit == [{"trajectory_id": empty_id, "status": "skipped",
+                      "reason": "empty trajectory"}]
+
+
+def test_empty_trajectory_never_reaches_the_rule(monkeypatch, tmp_path):
+    # The rule's contract is "which NON-EMPTY trajectories to segment": the
+    # exclusion happens upstream, in the stage.
+    _install_plugin(monkeypatch, StagePlugin())
+    seen = []
+
+    @register_trajectory_select("stage2_test_spy_steps")
+    def _spy(trajectories):
+        seen.extend(t.trajectory_id for t in trajectories)
+        return list(trajectories)
+
+    ctx = make_ctx(
+        tmp_path, make_config(
+            rules={"trajectory_select": "stage2_test_spy_steps"}),
+        segmenter=make_fake_handle(script=valid_script(1)))
+    plant(ctx, "t1", "strong", n_steps=0)
+    plant(ctx, "t1", "weak")
+
+    result = stage2_segmentation.run(ctx, failed_task_ids=[
+        make_task_id(_FAKE, "t1")])
+
+    assert seen == ["traj/fakebench:t1/weak/00"]
+    assert result["empty_skipped"] == ["traj/fakebench:t1/strong/00"]
+
+
+def test_strong2_weak2_quota_fills_from_informative_trajectories(
+        monkeypatch, tmp_path):
+    # The two TB tasks' exact situation: weak/00 is empty, weak/01 and
+    # weak/02 are informative failures. The weak quota (2, failures first by
+    # id) must fill from the informative ones, not the empty one.
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(
+        tmp_path, make_config(rules={"trajectory_select": "strong2_weak2"}),
+        segmenter=make_fake_handle(script=valid_script(3)))
+    plant(ctx, "t1", "strong")
+    plant(ctx, "t1", "weak", attempt=0, n_steps=0)
+    plant(ctx, "t1", "weak", attempt=1)
+    plant(ctx, "t1", "weak", attempt=2)
+
+    result = stage2_segmentation.run(ctx, failed_task_ids=[
+        make_task_id(_FAKE, "t1")])
+
+    assert result == {"segmented": 3, "skipped": 0, "total_subtasks": 6,
+                      "infra_failed": [],
+                      "empty_skipped": ["traj/fakebench:t1/weak/00"]}
+    segmented = sorted({sid.rpartition("/")[0]
+                        for sid in ctx.store.ids("subtasks")})
+    assert segmented == ["traj/fakebench:t1/strong/00",
+                         "traj/fakebench:t1/weak/01",
+                         "traj/fakebench:t1/weak/02"]
+
+
+def test_task_with_only_empty_trajectories_segments_nothing(
+        monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config(),
+                   segmenter=make_fake_handle(script=[]))
+    plant(ctx, "t1", "weak", attempt=0, n_steps=0)
+    plant(ctx, "t1", "weak", attempt=1, n_steps=0)
+
+    result = stage2_segmentation.run(ctx, failed_task_ids=[
+        make_task_id(_FAKE, "t1")])
+
+    assert result == {"segmented": 0, "skipped": 0, "total_subtasks": 0,
+                      "infra_failed": [],
+                      "empty_skipped": ["traj/fakebench:t1/weak/00",
+                                        "traj/fakebench:t1/weak/01"]}
+    assert ctx.handles["segmenter"].client.calls == []
+    assert ctx.store.ids("subtasks") == []
+    # Both exclusions audited, in sorted id order.
+    audit = read_jsonl(
+        ctx.run_dir / "stage2_segments" / "segmentation_audit.jsonl")
+    assert [record["trajectory_id"] for record in audit] == [
+        "traj/fakebench:t1/weak/00", "traj/fakebench:t1/weak/01"]
+
+
+def test_rerun_does_not_duplicate_empty_skip_records(monkeypatch, tmp_path):
+    # Same terminal-within-a-run discipline as K2's exhaustion records: a
+    # rerun over the same run directory finds the record already there and
+    # appends nothing, with zero model calls and the same summary.
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config(),
+                   segmenter=make_fake_handle(script=valid_script(2)))
+    plant(ctx, "t1", "strong")
+    plant(ctx, "t1", "weak", attempt=0, n_steps=0)
+    plant(ctx, "t1", "weak", attempt=1)
+    failed = [make_task_id(_FAKE, "t1")]
+    first = stage2_segmentation.run(ctx, failed_task_ids=failed)
+
+    resumed = make_ctx(tmp_path, make_config(),
+                       segmenter=make_fake_handle(script=[]))
+    second = stage2_segmentation.run(resumed, failed_task_ids=failed)
+
+    assert second == first
+    assert resumed.handles["segmenter"].client.calls == []
+    audit = read_jsonl(
+        ctx.run_dir / "stage2_segments" / "segmentation_audit.jsonl")
+    assert len(audit) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +541,7 @@ def test_infra_failure_skips_one_trajectory_then_raises(monkeypatch, tmp_path):
     # (written before the raise) names the hole.
     summary = read_json(ctx.run_dir / "stage2_summary.json")
     assert summary == {"segmented": 2, "skipped": 0, "total_subtasks": 4,
-                       "infra_failed": [strong_id]}
+                       "infra_failed": [strong_id], "empty_skipped": []}
     assert not any("/strong/" in sid for sid in ctx.store.ids("subtasks"))
     # Infra is not a segmentation failure: no "skipped" audit record ...
     audit = read_jsonl(
@@ -346,7 +560,7 @@ def test_infra_failure_skips_one_trajectory_then_raises(monkeypatch, tmp_path):
     result = stage2_segmentation.run(resumed, failed_task_ids=failed)
 
     assert result == {"segmented": 3, "skipped": 0, "total_subtasks": 6,
-                      "infra_failed": []}
+                      "infra_failed": [], "empty_skipped": []}
     assert len(resumed.handles["segmenter"].client.calls) == 1
 
 
