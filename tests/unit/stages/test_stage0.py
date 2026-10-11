@@ -175,6 +175,8 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert manifest["split"] == {"train": ["t1", "t2"], "test": ["t3"]}
     assert manifest["model_roles"]["executor_strong"] == "big-model"
     assert manifest["rules"] == config.rules
+    # The fake plugin declares no auxiliary metric: frozen as null.
+    assert manifest["aux_metric"] is None
     assert manifest["prompt_digests"]["SEGMENT"]
     # The frozen config copy carries the digests (core.config contract).
     assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
@@ -483,11 +485,30 @@ def test_real_searchqa_plugin_freezes_its_task_prompt_digest(
                          tasks=["q1", "q2"])
     ctx = make_ctx(tmp_path, config)
     stage0_freeze.run(ctx)
-    frozen = load_manifest(ctx.run_dir)["prompt_digests"]
+    manifest = load_manifest(ctx.run_dir)
+    frozen = manifest["prompt_digests"]
     assert frozen["SEARCHQA_TASK_PROMPT"] == prompts.digest(
         "SEARCHQA_TASK_PROMPT")
     assert set(frozen) == (set(prompts.METHOD_PROMPT_NAMES)
                            | {"SEARCHQA_TASK_PROMPT"})
+    # The plugin's declared auxiliary metric is frozen by name.
+    assert manifest["aux_metric"] == "sub_em"
+
+
+def test_declared_aux_metric_name_is_frozen_and_changing_it_refuses(
+        monkeypatch, tmp_path):
+    plugin = _install_plugin(monkeypatch, StagePlugin())
+    plugin.aux_metric_name = "fake_aux"
+    ctx = make_ctx(tmp_path, make_config())
+    stage0_freeze.run(ctx)
+    assert load_manifest(ctx.run_dir)["aux_metric"] == "fake_aux"
+
+    # Same run directory, the plugin's declaration changed: the frozen
+    # protocol differs, so the resume is refused (pre-registration means
+    # the metric is part of the experiment identity, not a free choice).
+    plugin.aux_metric_name = None
+    with pytest.raises(FrozenProtocolChanged, match="aux_metric"):
+        stage0_freeze.run(make_ctx(tmp_path, make_config()))
 
 
 # ---------------------------------------------------------------------------

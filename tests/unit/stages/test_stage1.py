@@ -446,3 +446,97 @@ def test_accepted_unit_stored_later_is_still_excluded(monkeypatch, tmp_path):
     second = stage1_baseline.run(make_ctx(tmp_path, config),
                                  train_tasks=tasks, test_tasks=tasks)
     assert second == first
+
+
+# ---------------------------------------------------------------------------
+# Pre-registered auxiliary metric (plugin-declared; README D3 / stage 1)
+# ---------------------------------------------------------------------------
+
+class AuxPlugin(StagePlugin):
+    """Fake benchmark declaring an auxiliary metric: the behavior's
+    RunOutcome carries ``meta["fake_aux"]``, which aux_success reads."""
+
+    aux_metric_name = "fake_aux"
+
+    def aux_success(self, traj):
+        return traj.meta.get("fake_aux") is True
+
+
+def _aux_outcome(task_id, status, aux):
+    outcome = _outcome(task_id, status)
+    outcome.meta["fake_aux"] = aux
+    return outcome
+
+
+def test_arm_summaries_report_the_auxiliary_metric(monkeypatch, tmp_path):
+    def behavior(record):
+        if record["handle"].role == "strong":
+            return _aux_outcome(record["task_id"], "success", True)
+        # Weak arm per (task, attempt-index is unknown here, so per task):
+        aux = {"t1": [False, True], "t2": [False, False],
+               "t3": [True, True]}[record["task_id"]]
+        attempt = len([c for c in plugin.calls
+                       if c["task_id"] == record["task_id"]
+                       and c["handle"] is record["handle"]]) - 1
+        status = "success" if record["task_id"] == "t3" else "failure"
+        return _aux_outcome(record["task_id"], status, aux[attempt])
+
+    plugin = _install_plugin(monkeypatch, AuxPlugin(behavior=behavior))
+    ctx = make_ctx(tmp_path, make_config())
+    tasks = list(TASK_IDS)
+    result = stage1_baseline.run(ctx, train_tasks=tasks, test_tasks=tasks)
+
+    # Weak arm: aux rates t1 1/2, t2 0/2, t3 2/2 -> avg 0.5 (both
+    # disciplines: every task has a full valid sample).
+    weak_aux = result["weak"]["summary"]["aux"]
+    assert weak_aux["metric"] == "fake_aux"
+    assert weak_aux["avg_at_n"] == pytest.approx(0.5)
+    assert weak_aux["avg_at_n_conservative"] == pytest.approx(0.5)
+    # The strong arm reports its own aux under the same contract.
+    assert result["strong"]["summary"]["aux"]["avg_at_n"] == 1.0
+    # The primary metric is untouched: F is still the all-valid-failed set.
+    assert result["F"] == [_prefixed("t1"), _prefixed("t2")]
+    assert result["weak"]["summary"]["pass_at_n"] == pytest.approx(1 / 3)
+    # Per-task aux counts are part of the metrics (unit-level evidence).
+    assert result["weak"]["metrics"][_prefixed("t1")]["aux_success"] == 1
+    # JSON-safe, as always.
+    json.dumps(result)
+
+
+def test_plugin_without_aux_metric_reports_null_and_no_scorer_runs(
+        monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config())
+    result = stage1_baseline.run(ctx, train_tasks=list(TASK_IDS),
+                                test_tasks=list(TASK_IDS))
+    assert result["weak"]["summary"]["aux"] is None
+    assert result["strong"]["summary"]["aux"] is None
+    assert "aux_success" not in result["weak"]["metrics"][_prefixed("t1")]
+
+
+def test_declared_name_with_undeclared_scorer_is_a_code_bug(
+        monkeypatch, tmp_path):
+    class BrokenPlugin(StagePlugin):
+        aux_metric_name = "fake_aux"
+        # aux_success NOT overridden: the default answers None.
+
+    _install_plugin(monkeypatch, BrokenPlugin())
+    ctx = make_ctx(tmp_path, make_config())
+    from expedistill.infra.reliability import CodeBugError
+    with pytest.raises(CodeBugError, match="fake_aux"):
+        stage1_baseline.run(ctx, train_tasks=list(TASK_IDS),
+                           test_tasks=list(TASK_IDS))
+
+
+def test_aux_wiring_imports_the_plugin_package(monkeypatch):
+    # The wiring must not depend on an execution having imported the plugin
+    # (a pure-resume re-aggregation calls no model, but still summarizes).
+    _install_plugin(monkeypatch, AuxPlugin())
+    name, scorer = stage1_baseline.aux_wiring(_FAKE)
+    assert name == "fake_aux"
+    assert callable(scorer)
+
+
+def test_aux_wiring_without_a_declaration_is_none_none(monkeypatch):
+    _install_plugin(monkeypatch, StagePlugin())
+    assert stage1_baseline.aux_wiring(_FAKE) == (None, None)

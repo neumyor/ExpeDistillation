@@ -37,7 +37,8 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.react_loop import run_react
-from expedistill.infra.reliability import ConfigError
+from expedistill.core.models import Trajectory
+from expedistill.infra.reliability import CodeBugError, ConfigError
 from expedistill.prompts import PromptSpec, register
 
 # Same-package import through the module object (not ``from .env import``)
@@ -90,6 +91,13 @@ register(SEARCHQA_TASK_PROMPT)
 
 class SearchQAPlugin(BenchmarkPlugin):
     """Adapter plugin for the outer benchmark/searchqa-eval repo."""
+
+    #: Pre-registered AUXILIARY metric (the plugin contract in
+    #: benchmarks/base.py): the eval repo's sub_EM (substring match), which
+    #: scores e.g. answer "lumbar" against gold "lumbar vertebrae" where
+    #: the strict-EM primary scores 0. Reported always beside the primary,
+    #: never chosen between after seeing results.
+    aux_metric_name = "sub_em"
 
     @property
     def name(self) -> str:
@@ -237,6 +245,38 @@ class SearchQAPlugin(BenchmarkPlugin):
         if value < 1:
             raise ConfigError(f"{MAX_STEPS_ENV} must be >= 1, got {value}")
         return value
+
+    # ------------------------------------------------------------------
+    # auxiliary metric (aux_metric_name = "sub_em")
+    # ------------------------------------------------------------------
+
+    def aux_success(self, traj: Trajectory) -> bool:
+        """sub_EM of the submitted answer (1.0 = auxiliary success).
+
+        Strict about genuinely broken data, honest about a real zero:
+
+        - a scored episode carries ``meta["searchqa"]`` (the evaluator's
+          em/f1/sub_em dict, copied verbatim by ``run``); sub_em >= 1 is
+          the auxiliary success;
+        - a VALID trajectory without a submitted answer (step-budget
+          exhaustion / model output error) has no eval meta, and no
+          answer can be a substring of gold: sub_EM is 0, a real
+          measurement;
+        - a trajectory whose status or termination REQUIRES a score
+          (success, or an episode the env terminated via Finish) but has
+          no eval meta is broken data, not a zero: CodeBugError, so the
+          run stops loudly instead of quietly under-reporting.
+        """
+        meta = traj.meta.get("searchqa") if isinstance(traj.meta, dict) else None
+        if isinstance(meta, dict) and "sub_em" in meta:
+            return float(meta["sub_em"]) >= 1.0
+        if traj.status == "success" or traj.meta.get("termination") \
+                == "terminated":
+            raise CodeBugError(
+                f"trajectory {traj.trajectory_id} has no searchqa eval "
+                "result, but a scored Finish always records one; the "
+                "stored record is broken")
+        return False
 
 
 def _read_id_file(path: str) -> List[str]:

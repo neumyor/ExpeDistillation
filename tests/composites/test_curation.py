@@ -61,7 +61,6 @@ def _curate(store: Store, handles, *, budget=10 ** 6, rounds=3):
         weak_profile="a weak model that needs short sentences",
         bank_token_budget=budget,
         curation_rounds=rounds,
-        leak_threshold=0.5,
         run_dir=store.run_dir,
         **handles,
     )
@@ -213,7 +212,9 @@ def test_conflict_pair_merged_with_conflict_mode(store):
 
 
 # ---------------------------------------------------------------------------
-# Early break: nothing to merge and within budget -> done, no G9 call
+# Early break: nothing to merge and within budget -> done, no G9 call.
+# README stage 5 step 4: G9 runs whenever the bank has >= 2 members, even
+# with zero merge candidates; only a 1-member (or empty) bank skips it.
 # ---------------------------------------------------------------------------
 
 def test_nothing_mergeable_and_within_budget_breaks_early(store):
@@ -231,6 +232,37 @@ def test_nothing_mergeable_and_within_budget_breaks_early(store):
     assert bank[0]["group"] is None
     assert store.load("skills", skill.skill_id, Skill).group is None
     assert _log_of(store)["rounds_executed"] == 1
+
+
+def test_no_merge_candidates_still_groups_the_bank(store):
+    # Zero merge candidates, within budget, but a two-member bank: the
+    # round must still run G9 (the bank's groups are part of its shape),
+    # then stop. Before the fix this broke out before G9 and left every
+    # member with group=None against README stage 5 step 4.
+    for index in range(2):
+        _add_skill(store, index, f"Skill number {index} with advice.")
+        _add_exam(store, index)
+    handles = _handles(
+        curator_script=[_similarity(),
+                        _grouping({_skill_id(0): "debugging",
+                                   _skill_id(1): "tooling"})],
+        answer_script=[],
+        judge_script=[],
+    )
+    bank = _curate(store, handles)
+
+    assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(1)]
+    assert [row["group"] for row in bank] == ["debugging", "tooling"]
+    assert store.load("skills", _skill_id(0), Skill).group == "debugging"
+    # Exactly one G7 call and one G9 call; no merge, no regression exam.
+    assert len(handles["curator_handle"].client.calls) == 2
+    log = _log_of(store)
+    assert log["rounds_executed"] == 1
+    assert log["rounds"][0]["done"] is True
+    assert log["rounds"][0]["stop"] is True
+    assert log["rounds"][0]["grouping"] == {_skill_id(0): "debugging",
+                                             _skill_id(1): "tooling"}
+    assert log["merges"]["attempted"] == 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,16 @@
 """K4 acceptance composite tests (llm.fake + tmp run dir, no network).
 
 Verdict sequences are driven by FakeClient scripts on the answerer / judge /
-rewriter handles. Every resume case is built by pre-storing exactly the
-artifacts an interrupted run would have left, then asserting the flow
+auditor / rewriter handles. Every resume case is built by pre-storing exactly
+the artifacts an interrupted run would have left, then asserting the flow
 continues from the latest stored state without re-asking anything already on
-disk (AGENTS.md section 8 rule 2).
+disk (AGENTS.md section 8 rule 2). The leak audit is a model call now, so
+resume equality additionally rests on the persisted verdict ledger: the first
+verdict per (skill, version) sticks and the judge is never asked twice.
 """
 
 from expedistill.composites.acceptance import (
-    LEAK_AUDIT_LEDGER,
+    LEAK_VERDICTS_LEDGER,
     REWRITE_FAILURE_LEDGER,
     accept_skill,
     discard_skill,
@@ -27,7 +29,7 @@ from expedistill.core.models import Attempt, Exam, Skill
 import pytest
 
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
-from expedistill.infra.store import Store, read_jsonl
+from expedistill.infra.store import Store, append_jsonl, read_jsonl
 from expedistill.llm import json_script, make_fake_handle
 
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
@@ -39,14 +41,13 @@ REWRITE_V2 = "Stop the service, edit the configuration, then start it again."
 REWRITE_V3 = ("First stop the service, then edit the configuration file, "
               "then start the service again.")
 
-# An exam whose protected specifics ("svc-token-9", "9") do appear in the
-# leaky v1 but not in the rewritten v2.
 LEAK_QUESTION = 'The service prints "svc-token-9" and stops. What next?'
 LEAK_REFERENCE = 'Rotate the credential "svc-token-9" and restart the service.'
 LEAKY_SKILL_V1 = 'Use "svc-token-9" to authenticate before restarting.'
 CLEAN_V2 = "Rotate the printed credential, then restart the service."
 
 BARE_REASON = "the answer skips the restart step"
+LEAK_REASON = "the skill quotes the credential from the exam situation"
 
 
 def make_pair(content=SKILL_V1, question=QUESTION, reference=REFERENCE):
@@ -69,19 +70,23 @@ def correct():
     return json_script({"verdict": "correct", "error_description": ""})
 
 
+def leak_verdict(leaked, reason="generic method advice only"):
+    return json_script({"leaked": leaked, "reason": reason})
+
+
 def rewrite_result(text, category="misread",
                    reason="spelled out the intermediate steps"):
     return json_script({"skill_text": text, "failure_category": category,
                         "rewrite_reason": reason})
 
 
-def run_accept(store, skill, exam, answerer, judge, rewriter,
-               retry_limit=1, leak_threshold=0.0):
+def run_accept(store, skill, exam, answerer, judge, rewriter, auditor,
+               retry_limit=1):
     return accept_skill(
         store=store, skill=skill, exam=exam, weak_profile=WEAK_PROFILE,
         answerer_handle=answerer, judge_handle=judge,
-        rewriter_handle=rewriter, retry_limit=retry_limit,
-        leak_threshold=leak_threshold, run_dir=store.run_dir)
+        rewriter_handle=rewriter, auditor_handle=auditor,
+        retry_limit=retry_limit, run_dir=store.run_dir)
 
 
 def make_attempt(exam, serial, *, purpose, skill_id=None, skill_version=None,
@@ -115,8 +120,10 @@ def test_accept_on_first_round(tmp_path):
     answerer = make_fake_handle("weak", ["bare answer", "skilled answer"])
     judge = make_fake_handle("judge", [incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)])
 
-    result = run_accept(store, skill, exam, answerer, judge, rewriter)
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
 
     assert result.status == "accepted"
     assert result.version == 1
@@ -139,6 +146,13 @@ def test_accept_on_first_round(tmp_path):
     assert acceptance[0].skill_id == skill.skill_id
     assert acceptance[0].skill_version == 1
     assert acceptance[0].retry_round == 0
+    # the passing verdict is on disk, one row for this version
+    verdicts = read_jsonl(
+        store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER)
+    assert verdicts == [{
+        "skill_id": skill.skill_id, "skill_version": 1,
+        "leaked": False, "reason": "generic method advice only",
+    }]
 
 
 def test_discard_weak_already_knows(tmp_path):
@@ -147,14 +161,17 @@ def test_discard_weak_already_knows(tmp_path):
     answerer = make_fake_handle("weak", ["bare answer"])
     judge = make_fake_handle("judge", [correct()])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [])
 
-    result = run_accept(store, skill, exam, answerer, judge, rewriter)
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
 
     assert result.status == "discarded"
     assert result.discard_reason == "weak_already_knows"
     assert len(answerer.client.calls) == 1
     assert len(store.ids("attempts")) == 1
-    assert_no_calls(rewriter)
+    # the bare control passed before any audit happened
+    assert_no_calls(rewriter, auditor)
 
 
 def test_retry_exhausted_after_full_loop(tmp_path):
@@ -167,9 +184,10 @@ def test_retry_exhausted_after_full_loop(tmp_path):
         rewrite_result(REWRITE_V3, category="missing_step",
                       reason="named the configuration file explicitly"),
     ])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)] * 3)
 
     result = run_accept(store, skill, exam, answerer, judge, rewriter,
-                        retry_limit=2)
+                        auditor, retry_limit=2)
 
     assert result.status == "discarded"
     assert result.discard_reason == "retry_exhausted"
@@ -185,6 +203,10 @@ def test_retry_exhausted_after_full_loop(tmp_path):
     assert len(store.ids("attempts")) == 4
     assert store.load("skills", skill.skill_id, Skill).to_dict() == (
         result.to_dict())
+    # one judge verdict per version: v1, v2, v3
+    verdicts = read_jsonl(
+        store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER)
+    assert [row["skill_version"] for row in verdicts] == [1, 2, 3]
 
 
 def test_leak_audit_void_path(tmp_path):
@@ -193,8 +215,12 @@ def test_leak_audit_void_path(tmp_path):
     answerer = make_fake_handle("weak", ["bare answer", "clean answer"])
     judge = make_fake_handle("judge", [incorrect(), correct()])
     rewriter = make_fake_handle("strong", [rewrite_result(CLEAN_V2)])
+    auditor = make_fake_handle(
+        "auditor", [leak_verdict(True, LEAK_REASON),
+                    leak_verdict(False)])
 
-    result = run_accept(store, skill, exam, answerer, judge, rewriter)
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
 
     assert result.status == "accepted"
     assert result.version == 2
@@ -206,20 +232,141 @@ def test_leak_audit_void_path(tmp_path):
             if a.purpose == "acceptance"] == [2]
     # the history entry keeps the voided text as the previous version
     assert result.rewrite_history[0]["content"] == LEAKY_SKILL_V1
-    # the audit failure is recorded in the ledger with the report
-    ledger = read_jsonl(
-        store.run_dir / "stage4_acceptance" / LEAK_AUDIT_LEDGER)
-    assert len(ledger) == 1
-    assert ledger[0]["skill_id"] == skill.skill_id
-    assert ledger[0]["skill_version"] == 1
-    assert ledger[0]["retry_round"] == 0
-    assert "leak audit failed" in ledger[0]["report"]
-    # the rewrite prompt carried the audit note plus the bare attempt's
-    # context (round 0: no with-skill attempt exists yet)
+    # the judge verdicts are recorded, one row per version
+    verdicts = read_jsonl(
+        store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER)
+    assert verdicts == [
+        {"skill_id": skill.skill_id, "skill_version": 1, "leaked": True,
+         "reason": LEAK_REASON},
+        {"skill_id": skill.skill_id, "skill_version": 2, "leaked": False,
+         "reason": "generic method advice only"},
+    ]
+    # the rewrite prompt carried the audit note (with the judge's reason)
+    # plus the bare attempt's context (round 0: no with-skill attempt yet)
     prompt = rewriter.client.calls[0]["user"]
     assert "voided by the leak audit" in prompt
+    assert LEAK_REASON in prompt
     assert BARE_REASON in prompt
     assert "bare answer" in prompt
+
+
+def test_terminal_leak_discard_keeps_leak_audit_reason(tmp_path):
+    skill, exam = make_pair(LEAKY_SKILL_V1, LEAK_QUESTION, LEAK_REFERENCE)
+    store = Store(tmp_path / "run")
+    answerer = make_fake_handle("weak", ["bare answer"])
+    judge = make_fake_handle("judge", [incorrect()])
+    rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [leak_verdict(True, LEAK_REASON)])
+
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor, retry_limit=0)
+
+    assert result.status == "discarded"
+    assert result.discard_reason == "leak_audit"
+    assert result.version == 1
+    assert_no_calls(rewriter)
+
+
+# ---------------------------------------------------------------------------
+# Verdict persistence: first verdict sticks, the judge is never re-asked
+# ---------------------------------------------------------------------------
+
+def test_verdict_is_asked_once_per_version_across_rounds(tmp_path):
+    """A rewrite that exhausts its budget consumes the round without a
+    version bump; the next round re-audits the SAME version and must reuse
+    the stored verdict instead of asking the judge again."""
+    skill, exam = make_pair(LEAKY_SKILL_V1, LEAK_QUESTION, LEAK_REFERENCE)
+    store = Store(tmp_path / "run")
+    answerer = make_fake_handle("weak", ["bare answer"])
+    judge = make_fake_handle("judge", [incorrect()])
+    rewriter = make_fake_handle("strong", [
+        ModelOutputError("REWRITE: bad"), ModelOutputError("REWRITE: bad 2")])
+    # r0 voids v1 and the rewrite exhausts its budget; r1 re-audits v1.
+    # The single scripted verdict must serve both rounds.
+    auditor = make_fake_handle("auditor", [leak_verdict(True, LEAK_REASON)])
+
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor, retry_limit=1)
+
+    assert result.status == "discarded"
+    assert result.discard_reason == "leak_audit"
+    assert len(auditor.client.calls) == 1
+    verdicts = read_jsonl(
+        store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER)
+    assert len(verdicts) == 1
+    assert verdicts[0]["skill_version"] == 1
+
+
+def test_resume_reuses_stored_clean_verdict(tmp_path):
+    skill, exam = make_pair()
+    store = Store(tmp_path / "run")
+    store.save(skill, "skills")
+    store.save(make_attempt(exam, 0, purpose="bare", judge_verdict=False),
+               "attempts")
+    # An interrupted run already asked the judge about v1 and stored its
+    # clean verdict; the resumed run must not ask again.
+    append_jsonl(store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER,
+                  {"skill_id": skill.skill_id, "skill_version": 1,
+                   "leaked": False, "reason": "generic method advice only"})
+    answerer = make_fake_handle("weak", ["skilled answer"])
+    judge = make_fake_handle("judge", [correct()])
+    rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [])
+
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
+
+    assert result.status == "accepted"
+    assert_no_calls(auditor)
+
+
+def test_first_verdict_sticks_on_resume(tmp_path):
+    """The judge is nondeterministic; a stored leaked=true verdict must void
+    the version on resume even though a fresh ask would have said clean."""
+    skill, exam = make_pair()
+    store = Store(tmp_path / "run")
+    store.save(skill, "skills")
+    store.save(make_attempt(exam, 0, purpose="bare", judge_verdict=False),
+               "attempts")
+    append_jsonl(store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER,
+                  {"skill_id": skill.skill_id, "skill_version": 1,
+                   "leaked": True, "reason": LEAK_REASON})
+    answerer = make_fake_handle("weak", [])
+    judge = make_fake_handle("judge", [])
+    # If the resumed run asked the judge again, this clean verdict (and the
+    # acceptance attempt below) would turn the leak into an accept.
+    rewriter = make_fake_handle("strong", [rewrite_result(CLEAN_V2)])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)])
+
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor, retry_limit=0)
+
+    # last round + leaked verdict -> terminal leak discard, no second ask
+    assert result.status == "discarded"
+    assert result.discard_reason == "leak_audit"
+    assert_no_calls(auditor, answerer, judge)
+
+
+def test_auditor_model_output_error_propagates(tmp_path):
+    """The judge broke its JSON contract after call_model's repair budget:
+    the error propagates to the caller (stage 4's unit disposition), the
+    skill stays pending and no verdict row is written."""
+    skill, exam = make_pair()
+    store = Store(tmp_path / "run")
+    answerer = make_fake_handle("weak", ["bare answer"])
+    judge = make_fake_handle("judge", [incorrect()])
+    rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("strong", [
+        ModelOutputError("LEAK_AUDIT_JUDGE: leaked must be true or false")])
+
+    with pytest.raises(ModelOutputError, match="LEAK_AUDIT_JUDGE"):
+        run_accept(store, skill, exam, answerer, judge, rewriter, auditor)
+
+    stored = store.load("skills", skill.skill_id, Skill)
+    assert stored.status == "pending"
+    assert not (store.run_dir / "stage4_acceptance"
+                / LEAK_VERDICTS_LEDGER).exists()
+    assert_no_calls(rewriter)
 
 
 # ---------------------------------------------------------------------------
@@ -234,11 +381,13 @@ def test_resume_returns_stored_accepted_skill(tmp_path):
     answerer = make_fake_handle("weak", [])
     judge = make_fake_handle("judge", [])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [])
 
-    result = run_accept(store, skill, exam, answerer, judge, rewriter)
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
 
     assert result.to_dict() == skill.to_dict()
-    assert_no_calls(answerer, judge, rewriter)
+    assert_no_calls(answerer, judge, rewriter, auditor)
 
 
 def test_resume_recognizes_stored_accepted_attempt(tmp_path):
@@ -253,12 +402,14 @@ def test_resume_recognizes_stored_accepted_attempt(tmp_path):
     answerer = make_fake_handle("weak", [])
     judge = make_fake_handle("judge", [])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [])
 
-    result = run_accept(store, skill, exam, answerer, judge, rewriter)
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
 
     assert result.status == "accepted"
     assert store.load("skills", skill.skill_id, Skill).status == "accepted"
-    assert_no_calls(answerer, judge, rewriter)
+    assert_no_calls(answerer, judge, rewriter, auditor)
 
 
 def test_resume_mid_rewrite_continues_from_stored_version(tmp_path):
@@ -279,9 +430,10 @@ def test_resume_mid_rewrite_continues_from_stored_version(tmp_path):
     answerer = make_fake_handle("weak", ["v2 answer"])
     judge = make_fake_handle("judge", [correct()])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)])
 
     result = run_accept(store, skill, exam, answerer, judge, rewriter,
-                        retry_limit=1)
+                        auditor, retry_limit=1)
 
     assert result.status == "accepted"
     assert result.version == 2
@@ -294,6 +446,10 @@ def test_resume_mid_rewrite_continues_from_stored_version(tmp_path):
     assert len(answerer.client.calls) == 1
     # bare and round-0 attempts were reused: only round 1 was added
     assert len(store.ids("attempts")) == 3
+    # the resumed round audited the stored v2 (its verdict was not on disk)
+    verdicts = read_jsonl(
+        store.run_dir / "stage4_acceptance" / LEAK_VERDICTS_LEDGER)
+    assert [row["skill_version"] for row in verdicts] == [2]
 
 
 def test_resume_reuses_wrong_bare_attempt(tmp_path):
@@ -305,8 +461,10 @@ def test_resume_reuses_wrong_bare_attempt(tmp_path):
     answerer = make_fake_handle("weak", ["skilled answer"])
     judge = make_fake_handle("judge", [correct()])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)])
 
-    result = run_accept(store, skill, exam, answerer, judge, rewriter)
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor)
 
     assert result.status == "accepted"
     # the only model answer is the with-skill one
@@ -328,9 +486,10 @@ def test_rewrite_repaired_after_model_output_error(tmp_path):
         ModelOutputError("REWRITE: response was not valid JSON"),
         rewrite_result(REWRITE_V2),
     ])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)] * 2)
 
     result = run_accept(store, skill, exam, answerer, judge, rewriter,
-                        retry_limit=1)
+                        auditor, retry_limit=1)
 
     assert result.status == "accepted"
     assert result.version == 2
@@ -347,17 +506,20 @@ def test_rewrite_budget_exhaustion_consumes_the_round(tmp_path):
         ModelOutputError("REWRITE: bad"),
         ModelOutputError("REWRITE: still bad"),
     ])
+    # v1 is audited once in round 0 and again (same version) in round 1.
+    auditor = make_fake_handle("auditor", [leak_verdict(False)])
 
     result = run_accept(store, skill, exam, answerer, judge, rewriter,
-                        retry_limit=1)
+                        auditor, retry_limit=1)
 
     # the failed rewrite consumed round 0; round 1 re-audited the unchanged
-    # version and its failed attempt ended the run
+    # version (verdict reused) and its failed attempt ended the run
     assert result.status == "discarded"
     assert result.discard_reason == "retry_exhausted"
     assert result.version == 1
     assert result.rewrite_history == []
     assert len(rewriter.client.calls) == 2
+    assert len(auditor.client.calls) == 1
     # bare + one with-skill attempt per round, same version in both rounds
     acceptance = [store.load("attempts", a, Attempt)
                   for a in store.ids("attempts")]
@@ -396,11 +558,12 @@ def test_refuses_a_skill_that_is_not_a_stage3_candidate(tmp_path):
     answerer = make_fake_handle("weak", [])
     judge = make_fake_handle("judge", [])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [])
 
     with pytest.raises(CodeBugError, match="bank/merge/0000"):
-        run_accept(store, merged, exam, answerer, judge, rewriter)
+        run_accept(store, merged, exam, answerer, judge, rewriter, auditor)
 
-    assert_no_calls(answerer, judge, rewriter)
+    assert_no_calls(answerer, judge, rewriter, auditor)
     assert store.ids("skills") == [] and store.ids("attempts") == []
 
 

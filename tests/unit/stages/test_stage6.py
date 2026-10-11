@@ -280,10 +280,12 @@ def test_split_mode_empty_bank_still_runs_both_arms(tmp_path, monkeypatch):
     assert summary["bank_reference"] == bank_reference([])
     assert len(plugin.calls) == 4  # 1 task x 2 attempts x both arms
     assert all(c["skills_block"] == "" for c in plugin.calls)
-    # Both arms bare and identical in outcome -> delta of zero.
+    # Both arms bare and identical in outcome -> delta of zero (the fake
+    # benchmark declares no auxiliary metric, so the aux fields are null).
     assert summary["delta"] == {"avg_at_n": 0.0,
                                 "avg_at_n_conservative": 0.0,
-                                "pass_at_n": 0.0}
+                                "pass_at_n": 0.0,
+                                "aux": None}
 
 
 def test_resume_second_call_adds_no_executions(tmp_path, monkeypatch):
@@ -494,3 +496,89 @@ def test_full_mode_control_inherits_stage1_accepted_holes(
                                          "control": [_units("t2")[1]]}
     assert summary["infra_shortfall_accepted"] is True
     assert summary["control"]["infra_tasks"] == [make_task_id(_FAKE, "t2")]
+
+
+# ---------------------------------------------------------------------------
+# Pre-registered auxiliary metric (plugin-declared; README stage 6)
+# ---------------------------------------------------------------------------
+
+class AuxRecordingPlugin(RecordingPlugin):
+    """RecordingPlugin whose outcomes carry an auxiliary verdict.
+
+    ``aux_fn(task_id, token, armed) -> bool`` scripts it; the RunOutcome's
+    meta carries ``fake_aux`` the way the SearchQA plugin carries the
+    evaluator's sub_em, and the declared scorer reads it back."""
+
+    aux_metric_name = "fake_aux"
+
+    def __init__(self, outcome=None, aux_fn=None):
+        super().__init__(outcome)
+        self.aux_fn = aux_fn or (lambda task_id, token, armed: False)
+
+    def aux_success(self, traj):
+        return traj.meta.get("fake_aux") is True
+
+    def run(self, task, handle, skills_block, workdir):
+        outcome = super().run(task, handle, skills_block, workdir)
+        token = task.meta.get("attempt_token")
+        outcome.meta["fake_aux"] = self.aux_fn(
+            task.task_id, token, bool(skills_block))
+        return outcome
+
+
+def test_arms_report_aux_and_delta_has_the_same_aux_deltas(
+        tmp_path, monkeypatch):
+    # The pilot case, reproduced: the primary (status-based) delta is zero,
+    # the auxiliary view carries the signal. Both are reported; the primary
+    # is never swapped for the friendlier one.
+    ctx = _make_ctx(tmp_path, "split")
+
+    def outcome(task_id, token, armed):
+        return "failure"  # primary: nothing succeeds on either arm
+
+    def aux_fn(task_id, token, armed):
+        return armed and task_id == "t1"  # with-bank t1 answers aux-good
+
+    plugin = AuxRecordingPlugin(outcome, aux_fn)
+    summary = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
+
+    # Primary: both arms 0.0 everywhere.
+    assert summary["with_bank"]["avg_at_n"] == 0.0
+    assert summary["control"]["avg_at_n"] == 0.0
+    assert summary["delta"]["avg_at_n"] == 0.0
+    # Auxiliary: with-bank t1 2/2, t2 0/2 -> 0.5; control 0.0.
+    assert summary["with_bank"]["aux"] == {
+        "metric": "fake_aux", "avg_at_n": 0.5,
+        "avg_at_n_conservative": 0.5}
+    assert summary["control"]["aux"]["avg_at_n"] == 0.0
+    assert summary["delta"]["aux"] == {
+        "metric": "fake_aux", "avg_at_n": 0.5,
+        "avg_at_n_conservative": 0.5}
+    # JSON-safe, on disk and identical.
+    assert read_json(_summary_path(ctx)) == summary
+
+
+def test_without_a_declaration_aux_is_null_everywhere(tmp_path, monkeypatch):
+    ctx = _make_ctx(tmp_path, "split")
+    summary = _run_stage6(ctx, monkeypatch, RecordingPlugin(),
+                          _tasks("t1", "t2"))
+    assert summary["with_bank"]["aux"] is None
+    assert summary["control"]["aux"] is None
+    assert summary["delta"]["aux"] is None
+
+
+def test_aux_delta_conditional_none_when_an_arm_has_no_valid_trial():
+    # Same honesty rule as the primary: a delta between a number and an
+    # absent conditional average is null, not zero.
+    with_bank = {"avg_at_n": 0.5, "avg_at_n_conservative": 0.5,
+                 "pass_at_n": 0.5,
+                 "aux": {"metric": "fake_aux", "avg_at_n": 0.5,
+                         "avg_at_n_conservative": 0.5}}
+    control = {"avg_at_n": None, "avg_at_n_conservative": 0.0,
+               "pass_at_n": 0.0,
+               "aux": {"metric": "fake_aux", "avg_at_n": None,
+                       "avg_at_n_conservative": 0.0}}
+    delta = stage6_test._delta(with_bank, control)
+    assert delta["avg_at_n"] is None
+    assert delta["aux"]["avg_at_n"] is None
+    assert delta["aux"]["avg_at_n_conservative"] == pytest.approx(0.5)

@@ -7,6 +7,8 @@ the pooled success share -- a task with one valid trial weighs as much as a
 task with three.
 """
 
+import pytest
+
 from expedistill.blocks.metrics import (
     compute_task_metrics,
     failed_tasks,
@@ -116,6 +118,7 @@ def test_summarize_empty():
         "avg_at_n_conservative": 0.0,
         "pass_at_n": 0.0,
         "infra_tasks": [],
+        "aux": None,
     }
 
 
@@ -188,3 +191,80 @@ def test_trajectory_outside_expected_set_is_rejected():
 
     with pytest.raises(ValueError, match="b"):
         compute_task_metrics([_traj("b", 0, "success")], expected={"a": 1})
+
+
+# ---------------------------------------------------------------------------
+# Auxiliary metric (pre-registered, plugin-declared; always reported beside
+# the primary, never chosen between after seeing results)
+# ---------------------------------------------------------------------------
+
+def _even_attempt_aux(traj):
+    """Toy aux scorer: valid attempts with an even attempt_index succeed."""
+    return traj.attempt_index % 2 == 0
+
+
+def test_aux_scorer_counts_aux_success_over_valid_trials_only():
+    # a: attempts 0 (aux hit) and 1; b: one infra attempt (never aux).
+    trajectories = [
+        _traj("a", 0, "failure"),
+        _traj("a", 1, "failure"),
+        _traj("b", 0, "infra_error"),
+    ]
+    assert compute_task_metrics(
+        trajectories, aux_scorer=_even_attempt_aux) == {
+        "a": {"attempts": 2, "valid": 2, "success": 0, "infra": 0,
+              "aux_success": 1},
+        "b": {"attempts": 1, "valid": 0, "success": 0, "infra": 1,
+              "aux_success": 0},
+    }
+
+
+def test_aux_counts_absent_expected_units_as_never_aux():
+    # A missing (infra-exhausted) unit cannot be an aux success, exactly as
+    # it cannot be a primary success: same expected-unit denominator.
+    metrics = compute_task_metrics(
+        [_traj("a", 0, "failure")], expected={"a": 2, "b": 2},
+        aux_scorer=_even_attempt_aux)
+    assert metrics["a"]["aux_success"] == 1
+    assert metrics["b"] == {"attempts": 2, "valid": 0, "success": 0,
+                            "infra": 2, "aux_success": 0}
+
+
+def test_summarize_aux_both_avg_disciplines():
+    # a: aux 1/2 valid -> 0.5; b (odd attempt): aux 0/1 -> 0.0; c: all
+    # infra -> no rate. avg_at_n = mean(0.5, 0.0) = 0.25; conservative
+    # = (0.5 + 0.0 + 0.0) / 3.
+    trajectories = [
+        _traj("a", 0, "failure"),
+        _traj("a", 1, "failure"),
+        _traj("b", 1, "failure"),
+        _traj("c", 0, "infra_error"),
+    ]
+    metrics = compute_task_metrics(trajectories, aux_scorer=_even_attempt_aux)
+    summary = summarize(metrics, n_attempts=2, aux_metric="sub_em")
+    assert summary["aux"]["metric"] == "sub_em"
+    assert summary["aux"]["avg_at_n"] == 0.25
+    assert summary["aux"]["avg_at_n_conservative"] == pytest.approx(1 / 6)
+
+
+def test_summarize_aux_is_none_without_a_declared_metric():
+    summary = summarize(compute_task_metrics([_traj("a", 0, "failure")]),
+                        n_attempts=1)
+    assert summary["aux"] is None
+
+
+def test_summarize_aux_none_when_no_task_has_a_valid_trial():
+    trajectories = [_traj("a", 0, "infra_error")]
+    metrics = compute_task_metrics(trajectories, aux_scorer=_even_attempt_aux)
+    summary = summarize(metrics, n_attempts=1, aux_metric="sub_em")
+    assert summary["aux"] == {
+        "metric": "sub_em", "avg_at_n": None,
+        "avg_at_n_conservative": 0.0}
+
+
+def test_summarize_aux_metric_without_aux_counts_is_rejected():
+    import pytest
+
+    metrics = compute_task_metrics([_traj("a", 0, "failure")])
+    with pytest.raises(ValueError, match="aux_success"):
+        summarize(metrics, n_attempts=1, aux_metric="sub_em")

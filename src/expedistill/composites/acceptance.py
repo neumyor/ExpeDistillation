@@ -3,11 +3,22 @@
 README stage 4 / composite row K4: one bare answer first; only a skill whose
 bare answer is WRONG and whose with-skill answer is CORRECT is accepted. The
 loop is [with-skill exam (K3) -> rewrite (G6) -> leak audit (D8)] with at most
-``retry_limit`` rewrites after the first attempt. A version that fails the
-leak audit is voided and its round is consumed (README: 该版作废，本轮算用掉
-一次): the rewrite happens without a with-skill attempt for the voided
-version. This composite owns all disk IO and resume for the flow; the pieces
-it wires (K3 via ``exam_once``, G6, D8, D9) stay single-purpose.
+``retry_limit`` rewrites after the first attempt. The leak audit is a model
+judge (D8, ``blocks.audit.audit_leak``) made through the caller's auditor
+handle. A version the judge marks as leaked is voided and its round is
+consumed (README: 该版作废，本轮算用掉一次): the rewrite happens without a
+with-skill attempt for the voided version, and the judge's reason travels
+into the rewrite's error description. This composite owns all disk IO and
+resume for the flow; the pieces it wires (K3 via ``exam_once``, G6, D8, D9)
+stay single-purpose.
+
+Leak-verdict ledger ``stage4_acceptance/leak_verdicts.jsonl``: one JSON row
+``{"skill_id": str, "skill_version": int, "leaked": bool, "reason": str}``
+per (skill, version), the FIRST verdict the judge gave for that version.
+The row is appended BEFORE the round acts on the verdict. The judge is
+nondeterministic, so first verdict sticks: a resumed run looks the verdict
+up and never asks the judge again for the same (skill, version) -- resume
+must equal an uninterrupted run, which a re-ask could not guarantee.
 
 Round accounting: rounds are numbered 0..retry_limit inclusive, so a run makes
 at most retry_limit+1 with-skill attempts and retry_limit rewrites. Every
@@ -28,8 +39,9 @@ every crash point:
 * the skill is stored right after each rewrite, BEFORE the new version is
   audited or examined, so a stored attempt for (skill_id, version) was
   always taken on the stored content of that version;
-* a failed leak audit is appended to ``LEAK_AUDIT_LEDGER`` once per
-  (version, round) -- a resumed round finds its line and does not repeat it;
+* every leak verdict is appended to ``LEAK_VERDICTS_LEDGER`` exactly once
+  per (skill, version) before it is acted on -- a resumed round finds the
+  row and does not re-ask the judge (first verdict sticks);
 * each failed G6 try is appended before the next one, so a resumed round
   continues the same repair budget instead of starting a fresh one;
 * a terminal status is stored last; until then the verdict that decides it
@@ -45,23 +57,29 @@ never re-asked):
 * a stored bare attempt with a True verdict discards it (weak_already_knows);
 * a stored bare attempt with a False verdict is reused instead of re-asked;
 * a stored with-skill attempt for (skill_id, version, retry_round) with a
-  verdict is reused instead of re-asked.
+  verdict is reused instead of re-asked;
+* a stored leak verdict for the working version is reused: leaked=true
+  voids the round exactly as before the crash, leaked=false proceeds to the
+  exam.
 
 What resume cannot save is a model call whose result was not yet persisted
 (the call in flight, a K3 answer or verdict whose attempt save had not
-finished, a rewrite whose skill save had not finished): those are asked
-again. K3 stores the answer as an unjudged attempt before judging, so every
-lookup above requires a verdict (``judge_verdict is not None``); an unjudged
-attempt is completed by the next K3 call with the same key, not decided on. Failures K3 raises after its own repair budget (ModelOutputError,
-InfrastructureError) propagate unchanged; deciding what a failed unit means
-for the stage is the caller's job (stage 4 records it, see
+finished, a rewrite whose skill save had not finished, a leak verdict whose
+ledger line had not finished appending): those are asked again. K3 stores
+the answer as an unjudged attempt before judging, so every lookup above
+requires a verdict (``judge_verdict is not None``); an unjudged attempt is
+completed by the next K3 call with the same key, not decided on. Failures
+the wired blocks raise after their own repair budget (ModelOutputError,
+InfrastructureError -- from K3, G6 after ``_REWRITE_ATTEMPTS``, or the D8
+judge after call_model's budget) propagate unchanged; deciding what a failed
+unit means for the stage is the caller's job (stage 4 records it, see
 ``discard_skill``).
 """
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from expedistill.blocks.audit import leak_audit
+from expedistill.blocks.audit import audit_leak
 from expedistill.blocks.author import rewrite_skill
 from expedistill.composites.exam_once import exam_once
 from expedistill.core import ids
@@ -71,14 +89,16 @@ from expedistill.infra.store import Store, append_jsonl, read_jsonl
 from expedistill.inject.skills import format_skills_block
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["LEAK_AUDIT_LEDGER", "REWRITE_FAILURE_LEDGER", "accept_skill",
+__all__ = ["LEAK_VERDICTS_LEDGER", "REWRITE_FAILURE_LEDGER", "accept_skill",
            "discard_skill"]
 
-#: Ledger of failed leak audits, written into stage4_acceptance/ next to the
-#: attempts. Only failures are recorded: a passing audit is the non-event.
-LEAK_AUDIT_LEDGER = "leak_audits.jsonl"
+#: Ledger of leak-audit verdicts, written into stage4_acceptance/ next to
+#: the attempts: one row per (skill, version), the first verdict the judge
+#: gave for it (schema in the module docstring). It doubles as the discard
+#: bookkeeping: every leaked=true row is a voided version.
+LEAK_VERDICTS_LEDGER = "leak_verdicts.jsonl"
 
-#: Ledger of failed G6 tries, next to LEAK_AUDIT_LEDGER. One line per try
+#: Ledger of failed G6 tries, next to LEAK_VERDICTS_LEDGER. One line per try
 #: that raised ModelOutputError; the try that exhausts the budget carries
 #: ``exhausted: true`` and is what marks its round as consumed.
 REWRITE_FAILURE_LEDGER = "rewrite_failures.jsonl"
@@ -93,7 +113,7 @@ _REWRITE_ATTEMPTS = 2
 _VOID_NOTE = "The previous skill version was voided by the leak audit: "
 
 
-def _ledger_path(store: Store, name: str = LEAK_AUDIT_LEDGER) -> Path:
+def _ledger_path(store: Store, name: str = LEAK_VERDICTS_LEDGER) -> Path:
     # stage4_acceptance/ is the parent of the attempts directory.
     return Path(store.dir_for("attempts")).parent / name
 
@@ -105,16 +125,18 @@ def _skill_records(store: Store, name: str, skill_id: str
             if record.get("skill_id") == skill_id]
 
 
-def _record_leak_failure(store: Store, skill: Skill, exam: Exam,
-                         retry_round: int, report: str) -> None:
-    append_jsonl(_ledger_path(store), {
-        "schema": "leak-audit-v1",
-        "skill_id": skill.skill_id,
-        "skill_version": skill.version,
-        "exam_id": exam.exam_id,
-        "retry_round": retry_round,
-        "report": report,
-    })
+def _find_leak_verdict(store: Store, skill_id: str,
+                       skill_version: int) -> Optional[Dict[str, Any]]:
+    """The stored judge verdict for one (skill, version), if any.
+
+    The first matching row wins; only one row per (skill, version) is ever
+    appended, but reading the first keeps the lookup honest even if a
+    hand-edited ledger ever holds duplicates.
+    """
+    for record in _skill_records(store, LEAK_VERDICTS_LEDGER, skill_id):
+        if record.get("skill_version") == skill_version:
+            return record
+    return None
 
 
 def _serial(attempt: Attempt) -> int:
@@ -287,8 +309,8 @@ def accept_skill(
     answerer_handle: ModelHandle,
     judge_handle: ModelHandle,
     rewriter_handle: ModelHandle,
+    auditor_handle: ModelHandle,
     retry_limit: int,
-    leak_threshold: float,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Skill:
@@ -298,7 +320,8 @@ def accept_skill(
     The stored skill is the resume source of truth: rewrites bump the version
     in place, so the object passed in may be older than what is on disk, and
     resume must always read the latest version. Makes no model call when the
-    verdicts are already on disk.
+    verdicts are already on disk (a stored leak verdict for the working
+    version included: the judge is never asked twice).
     """
     if retry_limit < 0:
         raise ValueError(f"retry_limit must be >= 0, got {retry_limit}")
@@ -346,9 +369,6 @@ def accept_skill(
 
     start_round = _next_round(store, working)
     last_with_skill = _last_with_skill(attempts, working.skill_id, start_round)
-    voided = {(record.get("skill_version"), record.get("retry_round"))
-              for record in _skill_records(
-                  store, LEAK_AUDIT_LEDGER, working.skill_id)}
 
     # The range can be empty when retry_limit shrank between runs; the
     # fall-through discard below then ends a run that had already used up
@@ -356,14 +376,21 @@ def accept_skill(
     for retry_round in range(start_round, retry_limit + 1):
         last_round = retry_round == retry_limit
 
-        ok, report = leak_audit(
-            working.content, exam.question_text, exam.reference_answer,
-            leak_threshold)
-        if not ok:
-            if (working.version, retry_round) not in voided:
-                _record_leak_failure(store, working, exam, retry_round,
-                                     report)
-                voided.add((working.version, retry_round))
+        # The audit is one judge call per (skill, version), persisted before
+        # the round acts on it. A stored verdict (an interrupted run, or a
+        # later round on an unchanged version) is reused as is: first
+        # verdict sticks.
+        verdict = _find_leak_verdict(store, working.skill_id,
+                                     working.version)
+        if verdict is None:
+            leaked, reason = audit_leak(
+                working.content, exam.question_text, exam.reference_answer,
+                auditor_handle, usage=usage, run_dir=run_dir)
+            verdict = {"skill_id": working.skill_id,
+                       "skill_version": working.version,
+                       "leaked": leaked, "reason": reason}
+            append_jsonl(_ledger_path(store, LEAK_VERDICTS_LEDGER), verdict)
+        if verdict["leaked"]:
             if last_round:
                 working.status = "discarded"
                 working.discard_reason = "leak_audit"
@@ -374,7 +401,7 @@ def accept_skill(
             source = last_with_skill if last_with_skill is not None else bare
             _rewrite_round(
                 store, working, exam, retry_round, source.weak_answer,
-                _void_error_description(source, report),
+                _void_error_description(source, verdict["reason"]),
                 weak_profile, rewriter_handle, usage, run_dir)
             continue
 

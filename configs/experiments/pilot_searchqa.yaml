@@ -1,0 +1,33 @@
+# SearchQA pilot: 6 hard test-split trivia items, full mode.
+# Strong: DEEPSEEK_up5zdj (reasoning_effort max); weak: qwen3.6-flash-distill.
+# All method knobs are the documented defaults, written out for the manifest.
+benchmark: searchqa
+mode: full
+models:
+  executor_strong: DEEPSEEK_up5zdj
+  executor_weak: qwen3.6-flash-distill
+n_attempts_strong: 1
+n_attempts_weak: 1
+K: 5
+segment_retry_limit: 2
+retry_limit: 2
+bank_token_budget: 4096
+curation_rounds: 3
+model_options:
+  DEEPSEEK_up5zdj:
+    reasoning_effort: max
+weak_profile: >-
+  The weak model is qwen3.6-flash-distill, a small distilled model. It follows
+  short, concrete instructions well but is weak on obscure trivia, gets
+  distracted by long clue preambles, often gives up after one search instead
+  of reformulating the query, and tends to answer with a sentence instead of
+  the short answer phrase. Write skills as short ordered steps with explicit
+  triggers, e.g. when to reformulate a Search query and how to phrase the
+  final Finish[...] answer as a concise noun phrase.
+tasks:
+  - 48e0ed33e6794e50a1894269c8110e47
+  - 5b015d8aaea04ca68fb2150fad53f044
+  - 1c7f885133ce4b6eb2af794a2d430d2d
+  - 85d92d7d7410408780bc11c741de1676
+  - e9433b099ee14acf96e5cd7422e6c577
+  - a9600ebd49684f158a292964aef91319

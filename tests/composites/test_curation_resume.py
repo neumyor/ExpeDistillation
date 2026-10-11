@@ -147,7 +147,7 @@ def _handles(scripts):
 def _run(store, handles):
     return curate_bank(
         store=store, weak_profile="weak", bank_token_budget=BUDGET,
-        curation_rounds=3, leak_threshold=0.5, run_dir=store.run_dir,
+        curation_rounds=3, run_dir=store.run_dir,
         **handles)
 
 
@@ -525,3 +525,85 @@ def test_in_flight_merge_accepted_outside_k5_is_refused(tmp_path):
         _run(Store(tmp_path / "run"), idle)
     assert M0 in str(excinfo.value)
     assert not any(h.client.calls for h in idle.values())
+
+
+# ---------------------------------------------------------------------------
+# No-merge round: G9 runs (>= 2 members), is journaled, and replays on
+# resume with zero extra model calls
+# ---------------------------------------------------------------------------
+
+def _no_merge_scripts():
+    return {
+        "curator": [
+            _similarity([]),                                     # G7
+            _grouping({_sid(0): "g1", _sid(1): "g2"}),          # G9
+        ],
+        "answerer": [],
+        "judge": [],
+    }
+
+
+def _seed_two(store):
+    for index in range(2):
+        store.save(Skill(skill_id=_sid(index),
+                         content=f"skill {index} advice",
+                         subtask_id=_subtask(index), status="accepted"),
+                   "skills")
+
+
+@pytest.fixture(scope="module")
+def no_merge_reference(tmp_path_factory):
+    store = GuardStore(tmp_path_factory.mktemp("ref2") / "run")
+    _seed_two(store)
+    handles = _handles(_no_merge_scripts())
+    _run(store, handles)
+    assert _remaining(handles) == {"curator": [], "answerer": [], "judge": []}
+    return _snapshot(store)
+
+
+def test_no_merge_reference_groups_the_bank(no_merge_reference):
+    assert [row["skill_id"] for row in no_merge_reference["bank"]] == [
+        _sid(0), _sid(1)]
+    assert [row["group"] for row in no_merge_reference["bank"]] == ["g1", "g2"]
+    assert no_merge_reference["log"]["rounds_executed"] == 1
+    assert no_merge_reference["log"]["rounds"][0]["grouping"] == {
+        _sid(0): "g1", _sid(1): "g2"}
+
+
+def test_crash_mid_group_apply_resumes_with_zero_model_calls(
+        tmp_path, no_merge_reference):
+    # Crash after the G9 output was journaled but before its effects were
+    # fully applied: the resume replays the journaled grouping, so an idle
+    # handle (empty script) suffices -- zero extra model calls.
+    store = GuardStore(tmp_path / "run",
+                       crash=("before", _is_skill(_sid(0), group="g1")))
+    _seed_two(store)
+    with pytest.raises(Crash):
+        _run(store, _handles(_no_merge_scripts()))
+    assert store.bank() == []
+
+    resumed = GuardStore(tmp_path / "run")
+    _run(resumed, _idle())
+    assert _snapshot(resumed) == no_merge_reference
+
+
+def test_crash_during_g9_call_resumes_and_redoes_only_g9(
+        tmp_path, no_merge_reference):
+    # Crash inside the G9 model call itself: the output was never
+    # journaled, so the resume re-asks G9 once (the interrupted unit) and
+    # nothing else.
+    scripts = _no_merge_scripts()
+    scripts["curator"].insert(1, Crash("crash during G9"))
+    store = GuardStore(tmp_path / "run")
+    _seed_two(store)
+    handles = _handles(scripts)
+    with pytest.raises(Crash):
+        _run(store, handles)
+    assert store.bank() == []
+
+    resumed = GuardStore(tmp_path / "run")
+    resume_handles = _handles(_remaining(handles))
+    _run(resumed, resume_handles)
+    assert _remaining(resume_handles) == {
+        "curator": [], "answerer": [], "judge": []}
+    assert _snapshot(resumed) == no_merge_reference

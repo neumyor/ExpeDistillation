@@ -21,6 +21,7 @@ resumed run never under-reports.
 import json
 import math
 import sys
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
@@ -95,15 +96,19 @@ def ledger_path(run_dir: Path) -> Path:
     return Path(run_dir) / LOG_NAME
 
 
-def _default_client(model_name: str) -> OpenAICompatClient:
+def _default_client(model_name: str,
+                    timeout_sec: float = 300.0) -> OpenAICompatClient:
     """The real-endpoint builder: one OpenAICompatClient from the environment.
 
     ``from_env`` takes no model name (the client passes the model id per
     call), so this adapter gives it the ``make_client(model_name)`` shape.
     Building one per unique model keeps the documented one-client-per-model
-    layout, so a later per-model endpoint or timeout needs no pipeline change.
+    layout, so a later per-model endpoint needs no pipeline change.
+    ``timeout_sec`` is the run's per-request client timeout; _build_handles
+    threads it in as a partial so the ``make_client`` injection point keeps
+    its one-argument signature.
     """
-    return OpenAICompatClient.from_env()
+    return OpenAICompatClient.from_env(timeout_sec=timeout_sec)
 
 
 def _build_handles(
@@ -113,12 +118,16 @@ def _build_handles(
     *,
     infra_retries: int,
     infra_backoff_seconds: float,
+    llm_timeout_sec: float = 300.0,
 ) -> Dict[str, Any]:
     """One handle per role, one client per unique model name.
 
     Every handle carries the same per-call infra retry settings (call_model
     resends a request that failed with InfrastructureError); they are run
-    settings, not method parameters, so they never enter the manifest.
+    settings, not method parameters, so they never enter the manifest. The
+    same goes for ``llm_timeout_sec``, the per-request client timeout the
+    default builder bakes into its clients (an injected ``make_client``
+    owns its own timeout).
 
     A role missing from the config's role table is a ConfigError naming the
     role AND the config file (the reader must know which experiment is broken,
@@ -130,7 +139,7 @@ def _build_handles(
             raise ConfigError(
                 f"model role {role!r} is missing from the role table of "
                 f"config {config_path}")
-    builder = make_client or _default_client
+    builder = make_client or partial(_default_client, timeout_sec=llm_timeout_sec)
     clients: Dict[str, Any] = {}
 
     def client_for(model_name: str) -> Any:
@@ -154,7 +163,8 @@ def _build_handles(
 
 
 def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
-                        llm_infra_backoff_seconds: Any, infra_breaker: Any,
+                        llm_infra_backoff_seconds: Any, llm_timeout_sec: Any,
+                        infra_breaker: Any,
                         allow_infra_shortfall: Any, until_stage: Any) -> None:
     """Reject bad run settings as ConfigError before anything runs.
 
@@ -176,6 +186,11 @@ def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
             or not math.isfinite(backoff) or backoff < 0):
         problems.append("llm_infra_backoff_seconds must be a finite number "
                         f">= 0, got {backoff!r}")
+    timeout = llm_timeout_sec
+    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout) or timeout <= 0):
+        problems.append("llm_timeout_sec must be a finite number > 0, "
+                        f"got {timeout!r}")
     if not is_int(infra_breaker) or infra_breaker < 0:
         problems.append(f"infra_breaker must be an int >= 0 (0 disables), "
                         f"got {infra_breaker!r}")
@@ -217,6 +232,7 @@ def run_pipeline(
     on_stage: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     llm_infra_retries: int = 3,
     llm_infra_backoff_seconds: float = 5.0,
+    llm_timeout_sec: float = 300.0,
     allow_infra_shortfall: bool = False,
     infra_breaker: int = 5,
     until_stage: Optional[int] = None,
@@ -247,6 +263,13 @@ def run_pipeline(
     ExperimentConfig and the frozen manifest and may differ between a run
     and its resume.
 
+    ``llm_timeout_sec`` is the per-request client timeout the default client
+    builder bakes into its clients (an injected ``make_client`` owns its own
+    timeout). It is operational for the same reason: whether an endpoint
+    hung for 300 seconds says nothing about the experiment, so the value is
+    not frozen and a resume may change it. The default (300) fits
+    reasoning-effort=max calls that legitimately take minutes.
+
     ``allow_infra_shortfall`` is NOT operational: accepting holes changes
     what is measured (F, hence the bank). It lets stages 1 and 6 proceed over
     units that exhausted their infra retries instead of raising
@@ -270,6 +293,7 @@ def run_pipeline(
     _check_run_settings(
         workers=workers, llm_infra_retries=llm_infra_retries,
         llm_infra_backoff_seconds=llm_infra_backoff_seconds,
+        llm_timeout_sec=llm_timeout_sec,
         infra_breaker=infra_breaker,
         allow_infra_shortfall=allow_infra_shortfall,
         until_stage=until_stage)
@@ -295,7 +319,8 @@ def run_pipeline(
         handles = _build_handles(
             cfg, config_path, make_client,
             infra_retries=llm_infra_retries,
-            infra_backoff_seconds=llm_infra_backoff_seconds)
+            infra_backoff_seconds=llm_infra_backoff_seconds,
+            llm_timeout_sec=llm_timeout_sec)
         ctx = StageContext(
             run_dir=run_dir,
             store=store,

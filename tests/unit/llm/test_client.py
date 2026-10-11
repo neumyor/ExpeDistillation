@@ -97,6 +97,16 @@ def test_from_env_missing_variables_raise_config_error(monkeypatch):
         OpenAICompatClient.from_env()
 
 
+def test_from_env_passes_timeout_sec_to_sdk(monkeypatch, stub_sdk):
+    # The client timeout is a run setting threaded from the CLI/CLI tests
+    # through the pipeline into from_env; the default stays 300.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk()
+    OpenAICompatClient.from_env(timeout_sec=120.5)
+    assert StubSDKClient.last.init_kwargs["timeout"] == 120.5
+
+
 def test_from_env_blank_value_counts_as_missing(monkeypatch):
     monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
     monkeypatch.setenv(API_KEY_ENV, "   ")
@@ -237,6 +247,31 @@ def test_complete_empty_content_maps_to_model_output_error(
     # tell "budget burned on reasoning" from "model chose silence".
     assert "model-a" in str(info.value)
     assert "length" in str(info.value)
+
+
+def test_empty_content_error_carries_finish_reason_attribute(
+        monkeypatch, stub_sdk):
+    # The "(finish_reason=...)" in the message is for humans; the attribute
+    # lets call_model record it in the usage row and request dump instead of
+    # None (pilot finding: the info only lived in the exception message).
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("", finish_reason="length"))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ModelOutputError) as info:
+        client.complete("model-a", "s", "u")
+    assert info.value.finish_reason == "length"
+
+
+def test_none_content_error_finish_reason_attribute_is_none(
+        monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response(None, finish_reason=None))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ModelOutputError) as info:
+        client.complete("model-a", "s", "u")
+    assert info.value.finish_reason is None
 
 
 def test_complete_content_filter_check_precedes_empty_check(monkeypatch, stub_sdk):

@@ -66,9 +66,9 @@ when an accepted skill is not a member. Both are ConfigError: nothing is
 ever merged into a curation uncurated. An in-flight merged skill is
 "pending", never "accepted", so it never trips the guard.
 
-The ``weak_profile`` and ``leak_threshold`` parameters are accepted for
-signature uniformity with the stage entry point but unused here: stage 5
-runs no leak audit and no correctness judgment by design (README stage 5).
+The ``weak_profile`` parameter is accepted for signature uniformity with
+the stage entry point but unused here: stage 5 runs no leak audit and no
+correctness judgment by design (README stage 5).
 """
 
 import re
@@ -570,7 +570,6 @@ def curate_bank(
     curator_handle: ModelHandle,
     bank_token_budget: int,
     curation_rounds: int,
-    leak_threshold: float,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> List[Dict[str, Any]]:
@@ -584,8 +583,8 @@ def curate_bank(
     unit level (see module docstring). Raises ConfigError when the bank is still over budget after
     ``curation_rounds`` rounds; nothing is deleted in that case.
 
-    ``weak_profile`` / ``leak_threshold`` are part of the frozen stage
-    signature but unused (see module docstring).
+    ``weak_profile`` is part of the frozen stage signature but unused
+    (see module docstring).
     """
     if curation_rounds < 1:
         raise ConfigError(f"curation_rounds must be >= 1, got {curation_rounds}")
@@ -676,12 +675,18 @@ def curate_bank(
             _write_log(log, log_path)
 
         units = _round_units(round_record)
-        if not units and count_bank_tokens(members) <= bank_token_budget:
-            # Nothing to merge and already within budget: done, no G9.
+        if not units and len(members) < 2:
+            # No merge candidates and a bank of fewer than two skills:
+            # nothing to merge, and grouping a single skill (or nothing) is
+            # meaningless, so the round ends without G9 (README stage 5
+            # step 4 runs G9 whenever the bank has >= 2 members).
             round_record["done"] = True
-            round_record["stop"] = True
+            round_record["stop"] = (count_bank_tokens(members)
+                                    <= bank_token_budget)
             _write_log(log, log_path)
-            break
+            if round_record["stop"]:
+                break
+            continue
 
         decided_units = {record.get("unit")
                          for record in log["merge_records"]
@@ -778,8 +783,10 @@ def curate_bank(
                 _apply_reverted(store, merged, discard_reason)
 
         # G9 grouping over the surviving members (this round's merges
-        # included). G9 runs even on a revert-only round: the members are
-        # the same but their groups are still part of the bank's shape.
+        # included). G9 runs even on a revert-only or zero-merge round
+        # (README stage 5 step 4 groups the bank whenever it has >= 2
+        # members): the members are the same but their groups are still
+        # part of the bank's shape.
         if round_record.get("grouping") is None:
             try:
                 group_map = assign_groups(

@@ -25,7 +25,17 @@ What the manifest freezes (B4 compares field by field on every start):
 ``benchmark``, ``mode``, the explicit ``split`` id lists, the whole config
 (``config``: every ExperimentConfig field, including ``tasks``, the
 completed ``rules`` and the prompt digests), ``prompt_digests``, ``rules``,
-``model_roles`` and ``tasks_digest``. ``tasks_digest`` is a sha256 over the
+``model_roles``, ``tasks_digest`` and ``aux_metric``. ``aux_metric`` is the
+plugin-declared auxiliary metric's NAME (``BenchmarkPlugin.aux_metric_name``,
+None when the benchmark has none): the auxiliary metric is pre-registered --
+part of the experiment identity, frozen before any result exists, never
+picked between after seeing them. It is declared by the plugin, not a config
+field, so it appears in the manifest but not in ``config``. Note the scorer
+itself is CODE, not config: changing a plugin's scorer does not change any
+prompt digest, so an old run directory will not refuse a resume across a
+scorer change -- compare run directories produced by the same code, and
+record scorer changes in the repo history.
+``tasks_digest`` is a sha256 over the
 loaded tasks sorted by id -- each task's ``task_id``, ``instruction`` and
 ``meta`` -- serialised as canonical JSON (see ``tasks_digest``), so a task
 file whose text changed between resumes is refused even though the ids are
@@ -285,6 +295,9 @@ def run(ctx: StageContext) -> Dict[str, Any]:
         "rules": config.rules,
         "model_roles": config.models,
         "tasks_digest": tasks_digest(tasks),
+        # The plugin-declared auxiliary metric's name (module docstring):
+        # pre-registered here, before any result exists.
+        "aux_metric": get_plugin(config.benchmark).aux_metric_name,
     })
 
     summary = {"tasks": len(tasks), "train": train_ids, "test": test_ids}

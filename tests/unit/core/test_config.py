@@ -47,6 +47,17 @@ class TestRoleTable:
             expected = "model-w" if role in ("executor_weak", "answerer") else "model-s"
             assert cfg.models[role] == expected, role
 
+    def test_auditor_role_defaults_to_strong(self):
+        cfg = make_config()
+        assert "auditor" in MODEL_ROLES
+        assert cfg.models["auditor"] == "model-s"
+
+    def test_auditor_override_wins(self):
+        cfg = make_config(models={
+            "executor_strong": "model-s", "executor_weak": "model-w",
+            "auditor": "model-a"})
+        assert cfg.models["auditor"] == "model-a"
+
     def test_user_override_wins(self):
         cfg = make_config(models={
             "executor_strong": "model-s", "executor_weak": "model-w",
@@ -74,11 +85,21 @@ class TestValidation:
         with pytest.raises(ValueError, match="mode"):
             make_config(mode="hybrid")
 
-    def test_leak_threshold_bounds(self):
-        with pytest.raises(ValueError, match="leak_threshold"):
-            make_config(leak_threshold=1.5)
-        with pytest.raises(ValueError, match="leak_threshold"):
-            make_config(leak_threshold=-0.1)
+    def test_leak_threshold_field_is_gone(self):
+        with pytest.raises(TypeError):
+            make_config(leak_threshold=0.3)
+
+    def test_old_config_with_leak_threshold_still_loads(self, tmp_path):
+        # from_dict drops unknown keys, so a config written before the judge
+        # audit (with leak_threshold) keeps loading; the stray key is ignored.
+        cfg_file = tmp_path / "old.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "leak_threshold: 0.3\n",
+            encoding="utf-8")
+        cfg = load_config(str(cfg_file))
+        assert cfg.models["auditor"] == "s"
 
     @pytest.mark.parametrize("attempts", [0, -1])
     def test_attempts_must_be_positive(self, attempts):

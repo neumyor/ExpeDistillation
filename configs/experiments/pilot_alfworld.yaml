@@ -1,0 +1,29 @@
+# ALFWorld pilot: 4 valid_seen pick_and_place_simple games, full mode.
+# Strong: DEEPSEEK_up5zdj (reasoning_effort max); weak: qwen3.6-flash-distill.
+# All method knobs are the documented defaults, written out for the manifest.
+benchmark: alfworld
+mode: full
+models:
+  executor_strong: DEEPSEEK_up5zdj
+  executor_weak: qwen3.6-flash-distill
+n_attempts_strong: 1
+n_attempts_weak: 1
+K: 5
+segment_retry_limit: 2
+retry_limit: 2
+bank_token_budget: 4096
+curation_rounds: 3
+model_options:
+  DEEPSEEK_up5zdj:
+    reasoning_effort: max
+weak_profile: >-
+  The weak model is qwen3.6-flash-distill, a small distilled model. It follows
+  short, concrete instructions well but misses abstract goals, gets confused
+  when several conditions must be checked in order, sometimes invents object
+  ids it has not observed, and can loop on a failing action. Write skills as
+  short ordered steps with explicit triggers and exact ALFWorld command forms.
+tasks:
+  - json_2.1.1/valid_seen/pick_and_place_simple-ToiletPaper-None-ToiletPaperHanger-406/trial_T20190908_122858_883968/game.tw-pddl
+  - json_2.1.1/valid_seen/pick_and_place_simple-ToiletPaper-None-ToiletPaperHanger-415/trial_T20190908_050518_595510/game.tw-pddl
+  - json_2.1.1/valid_seen/pick_and_place_simple-SprayBottle-None-GarbageCan-409/trial_T20190908_054742_818364/game.tw-pddl
+  - json_2.1.1/valid_seen/pick_and_place_simple-SprayBottle-None-Cabinet-413/trial_T20190907_114931_692464/game.tw-pddl

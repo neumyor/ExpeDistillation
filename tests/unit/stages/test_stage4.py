@@ -30,9 +30,8 @@ from expedistill.stages.context import StageContext
 
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
 
-# Question/reference texts deliberately free of leak-audit "specifics" (no
-# quoted spans, numbers, file-like tokens or acronyms) so every fabricated
-# pair passes D8 regardless of the threshold under test.
+# Question/reference texts; the scripted auditor judge returns a clean
+# verdict for every (skill, version) it is asked about.
 QUESTION = "What should be done when the service refuses connections?"
 REFERENCE = "Update the configuration and restart the service."
 
@@ -45,14 +44,13 @@ def make_config(**overrides):
                 "executor_weak": "weak-model"},
         weak_profile=WEAK_PROFILE,
         retry_limit=1,
-        leak_threshold=0.5,
     )
     defaults.update(overrides)
     return ExperimentConfig(**defaults)
 
 
-def make_ctx(tmp_path, *, answerer, judge, rewriter, config=None,
-             run_dir=None):
+def make_ctx(tmp_path, *, answerer, judge, rewriter, auditor=None,
+             config=None, run_dir=None):
     run_dir = run_dir or tmp_path / "run"
     store = Store(run_dir)
     ctx = StageContext(
@@ -61,7 +59,8 @@ def make_ctx(tmp_path, *, answerer, judge, rewriter, config=None,
         config=config or make_config(),
         usage=None,
         handles={"answerer": answerer, "judge": judge,
-                 "rewriter": rewriter},
+                 "rewriter": rewriter,
+                 "auditor": auditor or make_fake_handle("auditor", [])},
         workdir_root=tmp_path / "work",
     )
     return ctx, store
@@ -92,6 +91,11 @@ def correct():
     return json_script({"verdict": "correct", "error_description": ""})
 
 
+def clean_verdict():
+    """The scripted auditor: the skill under audit carries no leak."""
+    return json_script({"leaked": False, "reason": "generic method advice"})
+
+
 def test_accepts_each_pending_skill_and_tallies(tmp_path):
     store = Store(tmp_path / "run")
     seed_pair(store, "t1", 0, skill_text="skill one")
@@ -104,7 +108,9 @@ def test_accepts_each_pending_skill_and_tallies(tmp_path):
                               incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter)
+                      rewriter=rewriter,
+                      auditor=make_fake_handle("auditor",
+                                               [clean_verdict()] * 2))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -140,7 +146,9 @@ def test_tallies_discards_by_reason(tmp_path):
                               incorrect(), incorrect()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter, config=make_config(retry_limit=0))
+                      rewriter=rewriter, config=make_config(retry_limit=0),
+                      auditor=make_fake_handle("auditor",
+                                               [clean_verdict()] * 2))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -162,7 +170,8 @@ def test_missing_exam_is_skipped_not_crashed(tmp_path):
     judge = make_fake_handle("strong", [incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter)
+                      rewriter=rewriter,
+                      auditor=make_fake_handle("auditor", [clean_verdict()]))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -181,7 +190,8 @@ def test_rerun_over_terminal_skills_makes_zero_calls(tmp_path):
     judge = make_fake_handle("strong", [incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter)
+                      rewriter=rewriter,
+                      auditor=make_fake_handle("auditor", [clean_verdict()]))
     stage4_acceptance.run(ctx)
 
     answerer2 = make_fake_handle("weak", [])
@@ -223,7 +233,9 @@ def test_iteration_order_follows_sorted_skill_ids(tmp_path):
                               incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter)
+                      rewriter=rewriter,
+                      auditor=make_fake_handle("auditor",
+                                               [clean_verdict()] * 2))
 
     stage4_acceptance.run(ctx)
 
@@ -255,7 +267,8 @@ def test_model_output_error_discards_the_skill_and_continues(tmp_path):
         incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter)
+                      rewriter=rewriter,
+                      auditor=make_fake_handle("auditor", [clean_verdict()]))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -292,7 +305,8 @@ def test_infrastructure_error_keeps_the_skill_pending_and_fails_the_stage(
     judge = make_fake_handle("strong", [incorrect(), correct()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter)
+                      rewriter=rewriter,
+                      auditor=make_fake_handle("auditor", [clean_verdict()]))
 
     with pytest.raises(InfrastructureError) as excinfo:
         stage4_acceptance.run(ctx)
@@ -317,7 +331,8 @@ def test_infrastructure_error_keeps_the_skill_pending_and_fails_the_stage(
     answerer2 = make_fake_handle("weak", ["bare zero", "skilled zero"])
     judge2 = make_fake_handle("strong", [incorrect(), correct()])
     ctx2, _ = make_ctx(tmp_path, answerer=answerer2, judge=judge2,
-                       rewriter=make_fake_handle("strong", []))
+                       rewriter=make_fake_handle("strong", []),
+                       auditor=make_fake_handle("auditor", [clean_verdict()]))
     summary2 = stage4_acceptance.run(ctx2)
     assert summary2 == {"accepted": 2, "discarded": {},
                         "skipped_missing_exam": [], "infra_failed": [],
@@ -398,7 +413,8 @@ def test_summary_is_cumulative_across_resumes(tmp_path):
         "bare two"])
     judge = make_fake_handle("strong", [incorrect(), correct(), correct()])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=make_fake_handle("strong", []))
+                      rewriter=make_fake_handle("strong", []),
+                      auditor=make_fake_handle("auditor", [clean_verdict()]))
     with pytest.raises(InfrastructureError):
         stage4_acceptance.run(ctx)
 

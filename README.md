@@ -136,12 +136,12 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 |---|---|---|---|
 | D1 | 任务加载 | （benchmark, 任务表）→ 任务列表 | 是 |
 | D2 | 划分 | （任务列表, 模式 split/full, 种子）→ train / test | 否 |
-| D3 | 成绩统计 | （Trajectory 列表, 应有单元集合（可选））→ 每题有效次数 / 成功次数 / 基础设施异常次数（应有而缺失的单元计入基础设施异常），以及两种口径的 avg@N、pass@N | 否 |
+| D3 | 成绩统计 | （Trajectory 列表, 应有单元集合（可选）, 辅助打分器（可选，由 benchmark 插件声明））→ 每题有效次数 / 成功次数 / 基础设施异常次数（应有而缺失的单元计入基础设施异常），以及两种口径的 avg@N、pass@N；插件声明了辅助指标时，同一分母、同两种口径的辅助 avg@N（`aux` 一节，未声明为 null） | 否（辅助指标由插件声明，本积木只收打分器） |
 | D4 | 挑题 | （每题成绩, 具名规则）→ 题目集合。阶段 1 的规则是"有效采样数达到 N 且全部失败" | 否 |
 | D5 | 轨迹视图 | （Trajectory 或段内步骤, 视图配置）→ 给模型看的文本；超长观察按规则截断，截断处明确标注 | 是：截断规则按 benchmark 配置 |
 | D6 | 段筛选 | （Subtask 列表, 规则）→ 要生成 skill 的 Subtask。当前规则：强模型段全要，弱模型段只要 `success = false` | 否 |
 | D7 | 切段校验 | （Trajectory, Subtask 列表, K）→ 通过 / 错误清单 | 否 |
-| D8 | 泄题审计 | （Skill, Exam）→ 通过 / 重合报告。skill 与参考答案、考题情境中具体实体的字面重合超过阈值即不通过 | 否 |
+| D8 | 泄题审计 | （Skill, Exam, 模型（auditor 角色，默认强模型））→ 泄露 / 不泄露 + 理由。LLM 判官：skill 包含、平凡改写或直接揭示参考答案及考题答案特有实体（名字、数值、文件名）即泄露；通用方法建议、协议词、动作名、环境反馈串不算泄露。理由永不复述参考答案 | 否 |
 | D9 | skill 注入 | （skill 列表, 分组信息（可选））→ 插入 prompt 的规则文本块 | 否 |
 | D10 | 库长度统计 | skill 列表 → 注入后的 token 数 | 否 |
 
@@ -369,8 +369,9 @@ Attempt（作答记录）
                                  写 skill / 出题的模型输出失败的段，本 run 内不再重试
   stage3_generation/stage3_summary.json
   stage4_acceptance/attempts/    每次作答（裸答、带 skill、阶段 5 回归考试）与判卷记录
-  stage4_acceptance/leak_audits.jsonl
-                                 泄题审计未通过的报告，每个（版本, 轮次）一行
+  stage4_acceptance/leak_verdicts.jsonl
+                                 泄题判官（auditor 角色）的每次判决，每个
+                                 （skill, 版本）恰一行、首判为准，续跑不重问
   stage4_acceptance/rewrite_failures.jsonl
                                  改写每失败一次一行，耗尽的那次标 exhausted；续跑据此推导轮次
   stage4_acceptance/stage4_summary.json
@@ -436,8 +437,14 @@ Attempt（作答记录）
   模型角色表、`model_options`（按模型名给出的额外 chat 调用参数，如
   `reasoning_effort`，随完整配置冻结——它改变模型产出，不是运行设置，见 B1）、
   弱模型画像、采样次数、K、`segment_retry_limit`、`retry_limit`、
-  `bank_token_budget`、`curation_rounds`、泄题阈值、生效的规则名）、prompt digest、
-  任务内容摘要 `tasks_digest`，写进 manifest；之后每次启动逐字段比对，再改即视为新实验。
+  `bank_token_budget`、`curation_rounds`、生效的规则名）、prompt digest、
+  任务内容摘要 `tasks_digest`、辅助指标名 `aux_metric`，写进 manifest；之后每次
+  启动逐字段比对，再改即视为新实验。
+  - `aux_metric`：benchmark 插件声明的**辅助指标**的名字（插件没声明就是 null；
+    SearchQA 声明 `sub_em`）。它是实验身份的一部分，在任何结果存在之前就冻结
+    （预登记，见 D3）。注意辅助指标的**打分器是代码不是配置**：改打分器不改变
+    任何 prompt digest，旧 run 目录不会因此拒绝续跑——跨打分器版本比较 run 时
+    以代码历史为准，改打分器要在 log.md 记录。
   - `tasks_digest`：按 task_id 排序，对每道题的 ID、指令、meta 做规范 JSON 后取
     sha256。任务文件里的指令改了而 ID 没变，续跑同样会被拒绝。它只覆盖插件放进
     Task 的内容：TB 的指令在远程任务目录里，远程那边的改动不在摘要内；ALFWorld 的
@@ -466,6 +473,15 @@ Attempt（作答记录）
   轨迹也不算。原因：`F` 是从有洞的样本推出来的，库是从 `F` 建出来的；如果续跑时
   补上了空洞，`F` 和库都会变，而阶段 6 已存的轨迹对应旧库，这个 run 目录就废了。
   开关只决定"新出现的空洞接不接受"。
+- **辅助指标与主指标并列报告**（预登记，见 D3 与阶段 0 的 `aux_metric`）：
+  主指标恒为 EM / 状态口径；benchmark 插件声明了辅助指标时（SearchQA 的
+  `sub_em`，子串匹配——EM 里 "lumbar" 对金标 "lumbar vertebrae" 记 0，sub_EM 记 1），
+  两臂的 summary 各加一节 `aux`（指标名 + 同两种口径的辅助 avg@N），
+  分母与主指标完全一致（缺失 / 基础设施单元不可能算辅助成功）。辅助指标
+  **永远只并列**，不因为结果好看就替换主指标、也不看结果后再挑。
+  插件未声明时 `aux` 为 null，不打分。SearchQA 的打分器对数据严格：成功或
+  已提交答案的轨迹必须有评测 meta，缺失即数据损坏（报错停下）；从未提交答案的
+  失败轨迹 sub_EM 记 0（没有答案可匹配，是真实的 0，不是缺数据）。
 - 产出：强模型轨迹库、弱模型轨迹库、失败题清单 `F`。
 
 ### 阶段 2：轨迹切段（K2，方法参照 AMD）
@@ -529,8 +545,15 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
 - **G6 先归类弱模型为什么没做对**（没读懂 / 漏了步骤 / 误判触发条件 / 其他），
   再针对原因改写法；不得写入考题情境里的具体数值、文件名、实体名。归类结果
   存进 `rewrite_history`，它本身就是关于弱模型能力局限的数据。
-- **D8 泄题审计**：每版 skill 都过一次，不通过则该版作废、本轮算用掉一次，并记入
-  `leak_audits.jsonl`；最后一轮仍不通过则丢弃（`discard_reason = leak_audit`）。
+- **D8 泄题审计**：LLM 判官（auditor 角色，默认强模型，可在角色表里换模型），
+  每版 skill 问一次。判泄露（skill 包含、平凡改写或直接揭示参考答案及考题答案
+  特有实体）则该版作废、本轮算用掉一次，判官理由进改写的错误描述；通用方法
+  建议、协议词、动作名、环境反馈串不算泄露。判决按 (skill, version) 落盘进
+  `leak_verdicts.jsonl`、**首判为准**：续跑查表复用，绝不重问（判官不可复现，
+  续跑必须等于一次跑完）。理由永不复述参考答案——它正是 G6 的改写上下文，而
+  G6 不得看到答案。最后一轮仍判泄露则丢弃（`discard_reason = leak_audit`）。
+  已知局限：auditor 默认与写 skill 的是同一个强模型（判官自审），换配置里
+  `auditor` 角色的模型即可打破。
 
 验收的范围与单元失败：
 
@@ -538,7 +561,7 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
   阶段 5 的合并 skill（`bank/merge/NNNN`）不进验收：K5 在合并途中崩溃时，它以
   pending 状态留在 store 里，修复前续跑的阶段 4 会把它当成候选、只凭锚点那一道考题
   就验收通过，K5 再合并一次，库里就多出一个没经过回归考试的合并 skill；
-- 作答或判卷的模型输出失败耗尽 K3 的修复预算 → 该 skill 丢弃
+- 作答、判卷或 D8 判官的模型输出失败耗尽修复预算 → 该 skill 丢弃
   （`discard_reason = model_output_error`），本 run 内终态；
 - 基础设施错误 → skill 保持 pending、记入失败账本，继续其他 skill；全部处理完、
   摘要写下后以基础设施错误停下，流水线不会带着缺了 pending skill 的库进入阶段 5；
@@ -562,7 +585,10 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
      （沿 `merged_from` 递归展开到阶段 3 的 skill）的考题，任一道过不了 → 撤销这次
      合并，来源 skill 保持 accepted；
   4. **按能力分组**（G9）：每条 skill 归入一个能力分组（AgentBrew 的 skill
-     scope），D9 注入时按组排列，减少不相关 skill 互相干扰；
+     scope），D9 注入时按组排列，减少不相关 skill 互相干扰。只要库里有
+     ≥ 2 条成员就跑 G9——**包括整轮没有任何合并候选、且已在 token 预算内的
+     轮次**（这一轮的 G9 输出照常写进整理日志、续照原样重放）；只有 1 条
+     成员（或空库）的轮次跳过分组，给单条 skill 分组没有意义；
   5. **长度预算**（D10）：整库注入后不超过 `bank_token_budget`；超出时
      继续合并，而不是直接删掉通过验收的 skill；合并最多 `curation_rounds` 轮，
      仍超出则阶段 5 停下报告，由人决定（调预算或改合并策略，均为新实验）。
@@ -598,6 +624,10 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
   - 另有 pass@N（至少一次成功的题占比，全部为基础设施异常的题在分母里、不可能通过）。
   - delta 对这三项各算一次（带库 − 对照）；任一臂没有有效执行时条件口径的 delta
     记 null，不当成 0。
+- **辅助指标同口径并列**（与阶段 1 同一份预登记合同）：插件声明了辅助指标时
+  （阶段 0 冻结的 `aux_metric`），两臂的 summary 各带 `aux` 一节，`delta` 对辅助
+  avg@N 的两种口径各算一次，null 规则与主指标相同；未声明时相关字段全为 null。
+  主指标（EM / 状态口径）始终是主指标，两套数字并列报告，不得互换或事后挑选。
 - **空洞处置同阶段 1**：有未接受的空洞时先写摘要（`infra_missing` 按臂分开列出），
   再以基础设施错误停下；带 `--allow-infra-shortfall` 时按臂写进
   `stage6_test/accepted_infra_shortfall.json`，之后持久跳过、按空洞计分。`full` 模式的

@@ -21,6 +21,15 @@ frozen rule, so a rerun of this stage is a pure re-aggregation over stored
 trajectories: K1 resumes (already-stored units are skipped, no model calls),
 and the metrics/F/shortfall columns are recomputed from the same store.
 
+Auxiliary metric. When the benchmark plugin declares one (stage 0 froze its
+name into the manifest as ``aux_metric``), both arms additionally report it
+under D3's ``aux`` section -- same expected-unit denominator, same two
+avg@N disciplines as the primary, never swapped in or picked between after
+seeing results (README stage 1). Without a declaration the section is null
+and no scorer ever runs. The scorer is plugin code and the trajectory meta
+it reads is unit-level evidence, so a rerun re-derives the aux numbers from
+the same stored trajectories.
+
 Infra holes. K1 never stores an ``infra_error`` trajectory, so a unit whose
 infra retries ran out is simply ABSENT from what K1 returns. D3 is therefore
 given each arm's full expected unit set (prefixed task id -> frozen
@@ -54,14 +63,17 @@ mode its control inherits these holes.
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Sequence, Tuple
+from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.blocks import metrics as metrics_block
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.rules import get_task_select
+from expedistill.benchmarks.registry import get_plugin
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core.ids import make_task_id, make_trajectory_id
+from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import (
     CodeBugError,
     ConfigError,
@@ -73,6 +85,7 @@ from expedistill.stages.context import StageContext
 __all__ = [
     "accepted_infra_shortfall",
     "accepted_shortfall_path",
+    "aux_wiring",
     "run",
     "write_accepted_infra_shortfall",
 ]
@@ -192,14 +205,58 @@ def _run_arm(ctx: StageContext, *, tasks: Sequence[Any], role: str,
     return trajectories, expected, missing
 
 
+def aux_wiring(
+    benchmark: str,
+) -> Tuple[Optional[str], Optional[Callable[[Trajectory], bool]]]:
+    """(aux metric name, strict scorer) the benchmark's plugin declares.
+
+    Imports the plugin package first (registration at import, D1's
+    discipline), so a pure-resume re-aggregation that executes nothing
+    still resolves the plugin. A plugin that declares no auxiliary metric
+    yields ``(None, None)`` -- the summary's ``aux`` is null and no scorer
+    ever runs. A plugin that declares a name must answer True / False for
+    every valid trajectory; the default method's None leaking through a
+    declared name is a plugin contract violation and raises CodeBugError
+    here (never silently a zero). Stage 6 reuses this wiring so both
+    scoring stages read the auxiliary metric the same way.
+    """
+    importlib.import_module("expedistill.benchmarks." + benchmark)
+    plugin = get_plugin(benchmark)
+    name = plugin.aux_metric_name
+    if name is None:
+        return None, None
+
+    def scorer(traj: Trajectory) -> bool:
+        value = plugin.aux_success(traj)
+        if not isinstance(value, bool):
+            raise CodeBugError(
+                f"benchmark {benchmark!r} declares auxiliary metric "
+                f"{name!r} but aux_success answered {value!r} for "
+                f"{traj.trajectory_id}; a declared scorer must answer "
+                "True/False for every valid trajectory")
+        return value
+
+    return name, scorer
+
+
 def _arm_summary(trajectories: List[Any], expected: Dict[str, int],
-                 n_attempts: int) -> Dict[str, Any]:
-    """D3 over the arm's full unit set (absent units counted as infra)."""
+                 n_attempts: int,
+                 aux: Optional[Tuple[Optional[str],
+                                    Optional[Callable[[Trajectory], bool]]]],
+                 ) -> Dict[str, Any]:
+    """D3 over the arm's full unit set (absent units counted as infra).
+
+    ``aux`` is ``aux_wiring``'s (name, scorer) pair; the name is None for
+    benchmarks without an auxiliary metric, and then the scorer is never
+    passed on (no extra work happens).
+    """
+    aux_metric, aux_scorer = aux if aux is not None else (None, None)
     task_metrics = metrics_block.compute_task_metrics(
-        trajectories, expected=expected)
+        trajectories, expected=expected, aux_scorer=aux_scorer)
     return {
         "metrics": task_metrics,
-        "summary": metrics_block.summarize(task_metrics, n_attempts),
+        "summary": metrics_block.summarize(
+            task_metrics, n_attempts, aux_metric=aux_metric),
     }
 
 
@@ -237,9 +294,11 @@ def run(ctx: StageContext, *, train_tasks: Sequence[str],
         write_accepted_infra_shortfall(ctx.run_dir, accepted)
         new_holes = []
 
+    aux = aux_wiring(config.benchmark)
     strong = _arm_summary(strong_trajs, strong_expected,
-                          config.n_attempts_strong)
-    weak = _arm_summary(weak_trajs, weak_expected, config.n_attempts_weak)
+                          config.n_attempts_strong, aux)
+    weak = _arm_summary(weak_trajs, weak_expected, config.n_attempts_weak,
+                        aux)
 
     # config.rules is complete by construction (core.config DEFAULT_RULES)
     # and stage 0 already resolved the name, so this lookup cannot miss.
