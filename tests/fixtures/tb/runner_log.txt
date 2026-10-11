@@ -1,0 +1,6 @@
+[harbor] job ed_train-fasttext_tok config written
+[harbor] trial 1 started
+Traceback (most recent call last):
+  File "run_tencent_job.py", line 88, in <module>
+    main()
+ConfigValidationError: E2B_API_KEY missing in live shell

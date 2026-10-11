@@ -1,0 +1,14 @@
+{
+  "_comment": "Recorded SearchQAEnv interaction against tests/fixtures/searchqa/items.json item 0, with the stub evaluator used by the unit tests (case-insensitive exact match). Replay must reproduce these observations bit for bit; a change here is a protocol change.",
+  "task_id": "1758dc50625e46ee814e44a6061f091d",
+  "steps": [
+    {
+      "action": "Search[red cent]",
+      "observation": "[TLE] Lincoln cent - Wikipedia [PAR] The Lincoln cent is a one-cent coin that has been struck by the United States Mint since 1909. The cent's alloy was bronze and later copper-plated zinc, giving the coin its familiar reddish color."
+    },
+    {
+      "action": "Finish[red cent]",
+      "observation": "Answer is CORRECT."
+    }
+  ]
+}

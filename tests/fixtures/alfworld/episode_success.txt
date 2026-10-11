@@ -1,0 +1,4 @@
+H {"budget": 50}
+O {"text": "You are in the middle of a room. Looking quickly around you, you see a fridge 1, a countertop 1, and a garbagecan 1.", "won": false, "done": false, "reason": null}
+O {"text": "You pick up the apple 1 from the countertop 1.", "won": false, "done": false, "reason": null}
+O {"text": "Task is SOLVED.", "won": true, "done": true, "reason": "won"}

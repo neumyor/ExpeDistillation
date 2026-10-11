@@ -1,0 +1,20 @@
+[
+  {
+    "id": "1758dc50625e46ee814e44a6061f091d",
+    "question": "From the color of a penny, this term for something trivial often follows the words \"Not worth a...\"",
+    "context": "[DOC] [TLE] Lincoln cent - Wikipedia [PAR] The Lincoln cent is a one-cent coin that has been struck by the United States Mint since 1909. The cent's alloy was bronze and later copper-plated zinc, giving the coin its familiar reddish color. [DOC] [TLE] Red cent (idiom) - Wiktionary [PAR] The phrase not worth a red cent means completely worthless or trivial. The red cent refers to the reddish copper color of the one-cent coin. [DOC] [TLE] Penny (United States coin) - Wikipedia [PAR] The United States one-cent coin is often called the penny, a term borrowed from the British coin of the same name. [DOC] [TLE] Farthing - Britannica [PAR] The farthing was a coin of the United Kingdom worth one quarter of a penny, withdrawn from circulation in 1960.",
+    "answers": ["red cent"]
+  },
+  {
+    "id": "52967b20d9564d5b94756bc0b3d113d6",
+    "question": "\"We had joy, we had fun, we had\" this 1974 Terry Jacks hit",
+    "context": "[DOC] [TLE] Seasons in the Sun - Wikipedia [PAR] Seasons in the Sun is an English-language adaptation of the song Le Moribond by Belgian singer Jacques Brel, released by Canadian singer Terry Jacks in 1974. The opening lines include: We had joy, we had fun, we had seasons in the sun. [DOC] [TLE] Terry Jack - Discography [PAR] Terry Jacks is a Canadian singer, songwriter and record producer who found international fame with his 1974 single. [DOC] [TLE] Sunshine pop - AllMusic [PAR] Sunshine pop is a subgenre of pop music that originated in California in the 1960s, using elaborate studio production and warm vocal harmonies.",
+    "answers": ["\"Seasons In The Sun\""]
+  },
+  {
+    "id": "e77dbfc0d45e476b9ed5b2204b6d9fc8",
+    "question": "Possibly echoing the strum of an instrument, it's sing 3 times as part of a traditional Christmas carol",
+    "context": "[DOC] [TLE] The Little Drummer Boy - Wikipedia [PAR] The Little Drummer Boy is a popular Christmas song written in 1941. The refrain sings pa rum pum pum pum, said to echo the strum of a stringed instrument. [DOC] [TLE] Carol of the Drum - Hymnology [PAR] Carol of the Drum is the original title of the song later known as The Little Drummer Boy. [DOC] [TLE] Fum, fum, fum - Catalan carol [PAR] Fum, fum, fum is a traditional Catalan Christmas carol; the syllable fum is sung three times as part of its refrain, possibly imitating the strumming of a stringed instrument or the sound of a drum.",
+    "answers": ["fum"]
+  }
+]

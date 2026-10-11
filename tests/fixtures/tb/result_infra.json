@@ -1,0 +1,12 @@
+{
+  "id": "b78772db-0000-4000-8000-000000000003",
+  "task_name": "train-fasttext",
+  "trial_name": "train-fasttext__AbCdEf3",
+  "verifier_result": null,
+  "exception_info": {
+    "exception_type": "AgentSetupTimeoutError",
+    "exception_message": "agent setup timed out after 1080 seconds"
+  },
+  "started_at": "2026-10-10T08:00:00+00:00",
+  "finished_at": "2026-10-10T08:20:00+00:00"
+}

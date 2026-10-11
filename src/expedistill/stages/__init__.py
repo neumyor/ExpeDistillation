@@ -1,0 +1,5 @@
+from expedistill.stages import stage0_freeze, stage1_baseline, stage2_segmentation  # noqa: F401  (stage 0: freeze; stage 1: dual baseline; stage 2: segmentation)
+from expedistill.stages import stage3_generation  # noqa: F401  (stage 3: skills + exams)
+from expedistill.stages import stage4_acceptance  # noqa: F401  (stage 4: K4 acceptance)
+from expedistill.stages import stage5_curation, stage6_test  # noqa: F401  (stage 5: bank curation; stage 6: test)
+from expedistill.stages import pipeline  # noqa: F401  (pipeline: stages 0-6 in one run)

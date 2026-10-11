@@ -1,0 +1,1 @@
+X {"error": "RuntimeError: ALFWORLD_DATA is not set. Set it to the directory containing json_2.1.1/ and logic/."}

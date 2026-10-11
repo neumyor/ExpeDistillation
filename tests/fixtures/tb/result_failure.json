@@ -1,0 +1,13 @@
+{
+  "id": "b78772db-0000-4000-8000-000000000002",
+  "task_name": "train-fasttext",
+  "trial_name": "train-fasttext__AbCdEf2",
+  "verifier_result": {
+    "rewards": {
+      "reward": 0.0
+    }
+  },
+  "exception_info": null,
+  "started_at": "2026-10-10T08:00:00+00:00",
+  "finished_at": "2026-10-10T08:40:00+00:00"
+}

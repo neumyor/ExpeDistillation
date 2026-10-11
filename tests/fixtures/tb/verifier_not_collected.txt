@@ -1,0 +1,4 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-7.4.0
+ERROR: could not install torch from the verifier requirements
+============================== 1 error in 3.10s ================================

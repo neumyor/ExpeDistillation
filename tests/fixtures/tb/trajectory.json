@@ -1,0 +1,91 @@
+{
+  "schema_version": "harbor-trajectory-1",
+  "session_id": "sess-ed-fixture",
+  "agent": {"model_name": "qwen3.6-flash-distill"},
+  "steps": [
+    {
+      "step_id": 1,
+      "timestamp": "2026-10-10T08:00:00.000000+00:00",
+      "source": "user",
+      "message": "You are an AI assistant tasked with solving command-line tasks in a Linux environment. TASK: train a fasttext model on the yelp data in data/."
+    },
+    {
+      "step_id": 2,
+      "timestamp": "2026-10-10T08:00:12.000000+00:00",
+      "source": "agent",
+      "model_name": "qwen3.6-flash-distill",
+      "message": "Analysis: I am at /app. I should explore the environment first.",
+      "reasoning_content": "Need to inspect the data directory before training.",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_0_1",
+          "function_name": "bash_command",
+          "arguments": {"keystrokes": "ls -la\n", "duration": 0.1}
+        },
+        {
+          "tool_call_id": "call_0_2",
+          "function_name": "bash_command",
+          "arguments": {"keystrokes": "ls -la data/\n", "duration": 0.1}
+        }
+      ],
+      "observation": {
+        "results": [
+          {
+            "content": "New Terminal Output:\n\nroot@0fa59dab:/app# ls -la\ntotal 12\ndrwxr-xr-x 3 root root 4096 data\n\nroot@0fa59dab:/app# ls -la data/\ntotal 2\ndrwxr-xr-x train.parquet test.parquet\n"
+          }
+        ]
+      },
+      "metrics": {"prompt_tokens": 1486, "completion_tokens": 158}
+    },
+    {
+      "step_id": 3,
+      "timestamp": "2026-10-10T08:01:00.000000+00:00",
+      "source": "agent",
+      "model_name": "qwen3.6-flash-distill",
+      "message": "Analysis: Data is parquet; convert then train.",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_1_1",
+          "function_name": "bash_command",
+          "arguments": {"keystrokes": "python train.py --data data/train.parquet\n", "duration": 30.0}
+        }
+      ],
+      "observation": {
+        "results": [
+          {"content": "New Terminal Output:\n\nepoch 1 done, loss 0.42\nmodel saved to /app/model.bin\n"}
+        ]
+      },
+      "metrics": {"prompt_tokens": 2210, "completion_tokens": 201}
+    },
+    {
+      "step_id": 4,
+      "timestamp": "2026-10-10T08:02:00.000000+00:00",
+      "source": "agent",
+      "model_name": "qwen3.6-flash-distill",
+      "message": "Analysis: verify the model file.",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_2_1",
+          "function_name": "bash_command",
+          "arguments": {"keystrokes": "ls -la model.bin\n", "duration": 0.1}
+        }
+      ],
+      "observation": {},
+      "metrics": {"prompt_tokens": 2600, "completion_tokens": 12}
+    },
+    {
+      "step_id": 5,
+      "timestamp": "2026-10-10T08:02:30.000000+00:00",
+      "source": "agent",
+      "model_name": "qwen3.6-flash-distill",
+      "message": "malformed: tool_calls is not a list",
+      "tool_calls": "bash_command",
+      "observation": {"results": [{"content": "shell: ok"}]}
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 6333,
+    "total_completion_tokens": 1224,
+    "total_cached_tokens": 0
+  }
+}

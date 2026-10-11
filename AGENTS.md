@@ -101,8 +101,8 @@ src/expedistill/
   prompts/                第 1 层：B2 prompt 注册表
     registry.py           登记、取用、计算 digest
     segment.py            G1 切段
-    author.py             G2 提炼 / 诊断、G3 出考题、G6 改写
-    exam.py               G4 作答、G5 判卷
+    author.py             G2 提炼 / 诊断、G6 改写
+    exam.py               G3 出考题、G4 作答、G5 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
   llm/                    第 2 层：B1 调用模型
@@ -126,7 +126,7 @@ src/expedistill/
     author.py             G2 写 skill、G3 出考题、G6 改写 skill
     exam.py               G4 作答、G5 判卷
     audit.py              D8 泄题审计
-    curate.py             G7 找相似、G8 合并、G9 分组、D10 库长度统计
+    curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
   composites/             第 5 层：组合积木（负责落盘与续跑）
     batch_execute.py      K1
     segment_checked.py    K2
@@ -145,7 +145,7 @@ src/expedistill/
 
 | 层 | 目录 | 可以依赖 |
 |---|---|---|
-| 0 | `core` | 只有标准库 |
+| 0 | `core` | 只有标准库（唯一例外：`config.py` 的 YAML 读写，函数内按需 import pyyaml） |
 | 1 | `infra`、`prompts`、`inject` | 第 0 层 |
 | 2 | `llm` | 第 0–1 层 |
 | 3 | `benchmarks` | 第 0–2 层 |
@@ -257,8 +257,10 @@ configs/
 ### 新增一个 benchmark
 
 1. 在 `benchmarks/<名字>/` 实现插件接口的四项：`load_tasks`、`run`（单题单次
-   执行，返回统一 Trajectory，基础设施异常标 `infra_error`）、`view_rules`
-   （截断规则）、`task_prompt`（执行 prompt，登记进 prompt 注册表）；
+   执行，返回统一结果 `RunOutcome{steps, status, meta}`——status 为
+   success / failure / `infra_error`；Trajectory 的 ID、角色等簿记字段由
+   E1 组装）、`view_rules`（截断规则）、`task_prompt`（执行 prompt，
+   登记进 prompt 注册表）；
 2. 在 `benchmarks/registry.py` 登记名字；
 3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
    真实执行冒烟（标 `live`）；

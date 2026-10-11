@@ -1,0 +1,12 @@
+{
+  "id": "b78772db-0000-4000-8000-000000000004",
+  "task_name": "train-fasttext",
+  "trial_name": "train-fasttext__AbCdEf4",
+  "verifier_result": null,
+  "exception_info": {
+    "exception_type": "AgentTimeoutError",
+    "exception_message": "agent exceeded its 7200s timeout while working in tmux"
+  },
+  "started_at": "2026-10-10T08:00:00+00:00",
+  "finished_at": "2026-10-10T10:00:00+00:00"
+}

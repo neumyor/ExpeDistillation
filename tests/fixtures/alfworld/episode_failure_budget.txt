@@ -1,0 +1,6 @@
+H {"budget": 50}
+O {"text": "You are in the middle of a room. Looking quickly around you, you see a cabinet 4, a cabinet 3, a countertop 1, and a garbagecan 1.", "won": false, "done": false, "reason": null}
+O {"text": "Nothing happens.", "won": false, "done": false, "reason": null}
+O {"text": "The cabinet 4 is closed.", "won": false, "done": false, "reason": null}
+O {"text": "On the countertop 1, you see a bread 1, and a knife 1.", "won": false, "done": false, "reason": null}
+O {"text": "Nothing happens.", "won": false, "done": true, "reason": "budget"}
