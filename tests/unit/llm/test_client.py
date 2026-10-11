@@ -16,6 +16,7 @@ from expedistill.infra.reliability import (
 from expedistill.llm.client import (
     API_KEY_ENV,
     ENDPOINT_ENV,
+    TIMEOUT_ENV,
     OpenAICompatClient,
 )
 
@@ -116,6 +117,42 @@ def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
     assert StubSDKClient.last.init_kwargs["max_retries"] == 0
     # The wrapper itself must never hold the key.
     assert not hasattr(client, "api_key")
+
+
+def test_from_env_without_timeout_env_keeps_default_300(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "secret-key")
+    monkeypatch.delenv(TIMEOUT_ENV, raising=False)
+    stub_sdk()
+    OpenAICompatClient.from_env()
+    assert StubSDKClient.last.init_kwargs["timeout"] == 300
+
+
+def test_from_env_timeout_env_override_reaches_sdk(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "secret-key")
+    monkeypatch.setenv(TIMEOUT_ENV, "90.5")
+    stub_sdk()
+    OpenAICompatClient.from_env()
+    assert StubSDKClient.last.init_kwargs["timeout"] == 90.5
+
+
+def test_from_env_timeout_env_non_numeric_raises_config_error(monkeypatch):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "secret-key")
+    monkeypatch.setenv(TIMEOUT_ENV, "soon")
+    with pytest.raises(ConfigError, match=TIMEOUT_ENV):
+        OpenAICompatClient.from_env()
+
+
+@pytest.mark.parametrize("bad", ["0", "-30"])
+def test_from_env_timeout_env_non_positive_raises_config_error(
+        monkeypatch, bad):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "secret-key")
+    monkeypatch.setenv(TIMEOUT_ENV, bad)
+    with pytest.raises(ConfigError, match=TIMEOUT_ENV):
+        OpenAICompatClient.from_env()
 
 
 def test_complete_roundtrip_with_usage(monkeypatch, stub_sdk):
@@ -237,6 +274,49 @@ def test_complete_empty_content_maps_to_model_output_error(
     # tell "budget burned on reasoning" from "model chose silence".
     assert "model-a" in str(info.value)
     assert "length" in str(info.value)
+
+
+def test_complete_empty_content_error_carries_usage(monkeypatch, stub_sdk):
+    # Real-data finding: with finish_reason=length the model burned ~40k
+    # input + 5120 output tokens on reasoning and returned nothing; the
+    # empty-content error must carry that usage so the ledger does not
+    # record a real spend as null.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response(
+        "", finish_reason="length", usage=sdk_usage(40000, 5120, 45120)))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ModelOutputError) as info:
+        client.complete("model-a", "s", "u")
+    assert info.value.usage == {
+        "prompt_tokens": 40000,
+        "completion_tokens": 5120,
+        "total_tokens": 45120,
+    }
+    assert info.value.finish_reason == "length"
+
+
+def test_complete_empty_content_without_usage_carries_none(
+        monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response(None, usage=None))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ModelOutputError) as info:
+        client.complete("model-a", "s", "u")
+    assert info.value.usage is None
+    # finish_reason is still carried through from the response ("stop":
+    # the model chose silence rather than burning its budget).
+    assert info.value.finish_reason == "stop"
+
+
+def test_model_output_error_defaults_carry_no_usage():
+    # Backward compatibility: the single-message constructor keeps working
+    # and other raise sites (e.g. extract_json) carry no usage attribute
+    # value; a successful response must not leave attributes behind either.
+    exc = ModelOutputError("response did not contain JSON")
+    assert exc.usage is None
+    assert exc.finish_reason is None
 
 
 def test_complete_content_filter_check_precedes_empty_check(monkeypatch, stub_sdk):

@@ -214,6 +214,66 @@ def test_classify_exceptions_split_model_vs_infra():
     assert info["verdict_reason"] == "no_reward_no_exception"
 
 
+def test_classify_tmux_rule_matches_only_runtime_error():
+    # The campaign's audit rule (audit_trials.py): a broken tmux session is
+    # the model's own doing ONLY when the exception is a RuntimeError; an
+    # infra exception that merely mentions tmux stays infra.
+    def _result(etype, message):
+        return {"verifier_result": None,
+                "exception_info": {"exception_type": etype,
+                                   "exception_message": message}}
+
+    status, _, _ = classify_result(
+        _result("RuntimeError", "tmux: command not found"), None)
+    assert status == "failure"
+    status, _, _ = classify_result(
+        _result("RuntimeError", "RuntimeError: send keys failed"), None)
+    assert status == "failure"
+    status, _, _ = classify_result(
+        _result("SandboxException", "tmux session died during run"), None)
+    assert status == "infra_error"
+    status, _, _ = classify_result(
+        _result("AgentTimeoutError", "stuck waiting on tmux"), None)
+    assert status == "failure"  # model exception set wins outright
+
+
+def test_default_deadline_covers_one_trials_worst_case():
+    # A trial's own ceiling with the campaign knobs: agent cap 7200s +
+    # verifier override 7200s (the override wins; the x2 multiplier does not
+    # stack) + sandbox setup 360s x3 = 15480s. The default deadline must
+    # never drop below it, or a slow-but-healthy trial gets killed early.
+    from expedistill.benchmarks.tb.plugin import DEFAULT_DEADLINE_SECONDS
+    assert DEFAULT_DEADLINE_SECONDS >= 7200 + 7200 + 360 * 3
+
+
+def test_runner_env_is_the_submission_contract(monkeypatch):
+    # The DRY_RUN smoke reuses runner_env, so pin its exact content: what a
+    # fresh bare launch puts in front of the runner. Forwarded campaign knobs
+    # are cleared so the pinned dict cannot depend on the test shell.
+    from expedistill.benchmarks.tb.plugin import _FORWARDED_KNOBS, runner_env
+    for knob in _FORWARDED_KNOBS:
+        monkeypatch.delenv(knob, raising=False)
+    env = runner_env("ed_x_a00", "/data2/niuyiming/expedistill/jobs",
+                     "/data2/niuyiming/expedistill/retry_archives",
+                     "git-leak-recovery", "qwen3.6-flash-distill", "bare", None)
+    assert env == {
+        "RUN_ID": "ed_x_a00",
+        "JOBS_DIR": "/data2/niuyiming/expedistill/jobs",
+        "RETRY_ARCHIVE_ROOT": "/data2/niuyiming/expedistill/retry_archives",
+        "TBENCH_RUN_MODE": "selected",
+        "TBENCH_TASK_NAMES": "git-leak-recovery",
+        "TBENCH_EVAL_MODE": "bare",
+        "TBENCH_N_ATTEMPTS": "1",
+        "TBENCH_N_CONCURRENT": "1",
+        "TBENCH_MAX_TRIAL_RETRIES": "0",
+        "MODEL_NAME": "qwen3.6-flash-distill",
+    }
+    env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "skills",
+                     "/data2/niuyiming/expedistill/skills/ed_x_a00")
+    assert env["TBENCH_SKILL_ROOT"] == (
+        "/data2/niuyiming/expedistill/skills/ed_x_a00")
+
+
 # ---------------------------------------------------------------------------
 # run(): end to end against the fake link
 # ---------------------------------------------------------------------------
@@ -250,6 +310,25 @@ def test_run_success_end_to_end(tmp_path):
     assert totals["overall"]["request_count"] == 1
     assert totals["overall"]["in"] == 6333
     assert totals["overall"]["out"] == 1224
+
+
+def test_run_reports_categorized_skip_counts_in_meta(tmp_path):
+    # The reconstruct-level skip categories flow into RunOutcome.meta (E1
+    # copies meta wholesale into Trajectory.meta), additively to the
+    # pre-existing skipped_steps count.
+    link = FakeRemoteLink(
+        polls=["PENDING\n", f"RESULT {TRIAL}/result.json\n"],
+        remote_files=_completed_trial_files())
+    plugin = _make_plugin(link)
+    outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
+
+    assert outcome.status == "success"
+    # The fixture's two unmapped steps both carry tool_calls, so they land
+    # in "other" (see test_skip_counts_of_fixture_malformed_steps_are_other).
+    assert outcome.meta["skipped_steps"] == 2
+    assert outcome.meta["skipped_parse_failures"] == 0
+    assert outcome.meta["skipped_handoffs"] == 0
+    assert outcome.meta["skipped_other"] == 2
 
 
 def test_run_with_skills_uploads_skill_md(tmp_path):

@@ -49,9 +49,22 @@ class InfrastructureError(ReliabilityError):
 class ModelOutputError(ReliabilityError):
     """Model output broke its declared format contract. Retried, but only a
     bounded number of repair attempts per call (resampling forever would
-    only burn tokens); the bound is an experiment parameter."""
+    only burn tokens); the bound is an experiment parameter.
+
+    ``usage`` (a plain dict, as the client's ``_usage_dict`` produces it) and
+    ``finish_reason`` are attached by the client when it raises on a response
+    that actually consumed tokens (e.g. empty content after reasoning burned
+    the whole budget), so the ledger records the real spend; every other
+    raise site leaves them None.
+    """
 
     retryable = True
+
+    def __init__(self, message: str, *, usage: Optional[Dict[str, Any]] = None,
+                 finish_reason: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.usage = usage
+        self.finish_reason = finish_reason
 
 
 class ProviderRefusalError(ReliabilityError):

@@ -76,7 +76,7 @@ fixed before looking at data, outer AGENTS.md section 2):
   -> ``infra_error`` (the campaign's "pseudo zero": a broken verifier
   download misread as a model failure);
 - reward absent + exception of the model's own making (AgentTimeoutError,
-  context/output length, tmux keystroke errors) -> ``failure``;
+  context/output length, RuntimeError tmux keystroke errors) -> ``failure``;
 - reward absent + anything else (sandbox/setup/verifier infra, transport
   errors, no exception at all) -> ``infra_error``.
 
@@ -103,7 +103,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
-from expedistill.benchmarks.tb.trajectory import reconstruct, total_usage
+from expedistill.benchmarks.tb.trajectory import (
+    reconstruct_skip_counts,
+    reconstruct_steps,
+    total_usage,
+)
 from expedistill.infra.reliability import (
     CodeBugError,
     ConfigError,
@@ -112,7 +116,7 @@ from expedistill.infra.reliability import (
 from expedistill.infra.store import write_json
 from expedistill.prompts.registry import PromptSpec, register
 
-__all__ = ["TBPlugin", "TB_TASK_PROMPT", "classify_result"]
+__all__ = ["TBPlugin", "TB_TASK_PROMPT", "classify_result", "runner_env"]
 
 # --------------------------------------------------------------------------
 # B2: the TB task execution prompt.
@@ -162,9 +166,11 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 POLL_ENV = "EXPEDISTILL_TB_POLL_SECONDS"
 DEADLINE_ENV = "EXPEDISTILL_TB_DEADLINE_SECONDS"
 DEFAULT_POLL_SECONDS = 60.0
-#: Agent cap is 7200s; the default deadline adds verifier (x2) and sandbox
-#: setup (360s x3) margins -> 3 hours.
-DEFAULT_DEADLINE_SECONDS = 10800.0
+#: A trial's own worst case with the campaign knobs: agent cap 7200s +
+#: verifier override 7200s (TBENCH_VERIFIER_OVERRIDE wins, the x2 multiplier
+#: does not stack) + sandbox setup 360s x3 = 15480s; the default deadline
+#: adds a transport margin on top -> 4.5 hours. (.env sets the same value.)
+DEFAULT_DEADLINE_SECONDS = 16200.0
 
 SUBMIT_TIMEOUT_SECONDS = 120.0
 POLL_TIMEOUT_SECONDS = 60.0
@@ -212,7 +218,11 @@ _MODEL_EXCEPTIONS = frozenset({
     "ContextLengthExceededError",
     "OutputLengthExceededError",
 })
+#: The campaign's tmux rule (audit_trials.py classify_exception): the exception
+#: must BE a RuntimeError whose message shows a broken tmux/send-keys -- an
+#: infra exception that merely mentions tmux stays infra.
 _TMUX_ERROR_RE = re.compile(r"tmux|send.{0,20}keys", re.IGNORECASE)
+_TMUX_ERROR_TYPE = "RuntimeError"
 
 #: The campaign's pseudo-zero guard: every TB2.1 verifier is pytest, so a
 #: reward claimed without pytest having collected anything is a broken
@@ -250,7 +260,10 @@ def classify_result(result: Dict[str, Any],
     if not exception_type:
         return "infra_error", None, dict(info, verdict_reason="no_reward_no_exception")
     message = str(exception.get("exception_message") or "")
-    if exception_type in _MODEL_EXCEPTIONS or _TMUX_ERROR_RE.search(message):
+    if exception_type in _MODEL_EXCEPTIONS:
+        return "failure", None, info
+    if (exception_type == _TMUX_ERROR_TYPE
+            and _TMUX_ERROR_RE.search(message)):
         return "failure", None, info
     return "infra_error", None, info
 
@@ -308,6 +321,44 @@ def _env_float(name: str, default: float, override: Optional[float]) -> float:
 
 def _q(value: str) -> str:
     return shlex.quote(str(value))
+
+
+def runner_env(run_id: str, jobs_dir: str, retry_archive_root: str,
+               task_name: str, model_name: str, eval_mode: str,
+               skill_root: Optional[str]) -> Dict[str, str]:
+    """The environment the tb21 runner is launched with, verbatim.
+
+    ``_submit`` puts exactly these variables in front of ``bash <runner>``
+    (plus the forwarded campaign knobs below); the DRY_RUN smoke reuses this
+    function so the pre-flight validation exercises the real submission
+    contract, not a copy of it. One Harbor trial per invocation:
+    n_attempts=1, concurrency=1, max_trial_retries=0 -- K1 owns sampling and
+    infra retries (B6), so a RunOutcome maps 1:1 onto one remote trial
+    directory and an internal retry could never hide inside a unit.
+    """
+    env: Dict[str, str] = {
+        "RUN_ID": run_id,
+        "JOBS_DIR": jobs_dir,
+        # Keep every remote artifact inside our root, including the
+        # runner's retry archive (its skills-mode default lives under
+        # another user's directory).
+        "RETRY_ARCHIVE_ROOT": retry_archive_root,
+        "TBENCH_RUN_MODE": "selected",
+        "TBENCH_TASK_NAMES": task_name,
+        "TBENCH_EVAL_MODE": eval_mode,
+        "TBENCH_N_ATTEMPTS": "1",
+        "TBENCH_N_CONCURRENT": "1",
+        "TBENCH_MAX_TRIAL_RETRIES": "0",
+        # The runner adds the openai/ provider prefix itself.
+        "MODEL_NAME": model_name,
+    }
+    if eval_mode == "skills":
+        env["TBENCH_SKILL_ROOT"] = str(skill_root)
+    for knob in _FORWARDED_KNOBS:
+        value = os.environ.get(knob)
+        if value:
+            env[knob] = value
+    return env
 
 
 def _ours(pid: int, run_id: str) -> str:
@@ -791,34 +842,12 @@ class TBPlugin(BenchmarkPlugin):
                 skill_root: Optional[str]) -> int:
         """Launch the runner detached from the ssh session; return its pid.
 
-        One Harbor trial per run(): n_attempts=1, concurrency=1,
-        max_trial_retries=0. K1 owns sampling and infra retries (B6), so a
-        RunOutcome maps 1:1 onto one remote trial directory and an internal
-        retry could never hide inside a unit.
+        The launch environment comes from :func:`runner_env` (one Harbor
+        trial per run(): the knobs and their rationale live there).
         """
         log_path = f"{root}/logs/{run_id}.log"
-        env: Dict[str, str] = {
-            "RUN_ID": run_id,
-            "JOBS_DIR": f"{root}/jobs",
-            # Keep every remote artifact inside our root, including the
-            # runner's retry archive (its skills-mode default lives under
-            # another user's directory).
-            "RETRY_ARCHIVE_ROOT": f"{root}/retry_archives",
-            "TBENCH_RUN_MODE": "selected",
-            "TBENCH_TASK_NAMES": task_name,
-            "TBENCH_EVAL_MODE": eval_mode,
-            "TBENCH_N_ATTEMPTS": "1",
-            "TBENCH_N_CONCURRENT": "1",
-            "TBENCH_MAX_TRIAL_RETRIES": "0",
-            # The runner adds the openai/ provider prefix itself.
-            "MODEL_NAME": model_name,
-        }
-        if eval_mode == "skills":
-            env["TBENCH_SKILL_ROOT"] = str(skill_root)
-        for knob in _FORWARDED_KNOBS:
-            value = os.environ.get(knob)
-            if value:
-                env[knob] = value
+        env = runner_env(run_id, f"{root}/jobs", f"{root}/retry_archives",
+                         task_name, model_name, eval_mode, skill_root)
         exports = " ".join(f"{key}={_q(value)}" for key, value in env.items())
         runner_script = (self._runner_script
                          or os.environ.get(RUNNER_ENV, DEFAULT_RUNNER))
@@ -966,8 +995,8 @@ class TBPlugin(BenchmarkPlugin):
             # costs the stepwise view. Recorded, not raised.
             meta["trajectory_error"] = _short(exc)
             return [], (None, None)
-        steps, skipped = reconstruct(traj)
-        meta["skipped_steps"] = skipped
+        steps = reconstruct_steps(traj)
+        meta.update(reconstruct_skip_counts(traj))
         return steps, total_usage(traj)
 
     def _augment_partial(self, link: RemoteLink, meta: Dict[str, Any],
@@ -987,10 +1016,9 @@ class TBPlugin(BenchmarkPlugin):
             if path:
                 local = workdir / "trajectory_partial.json"
                 link.get(path, str(local), timeout=FETCH_TIMEOUT_SECONDS)
-                steps, skipped = reconstruct(
-                    json.loads(local.read_text(encoding="utf-8")))
-                meta["partial_steps"] = steps
-                meta["skipped_steps"] = skipped
+                partial = json.loads(local.read_text(encoding="utf-8"))
+                meta["partial_steps"] = reconstruct_steps(partial)
+                meta.update(reconstruct_skip_counts(partial))
                 meta["remote"]["partial_trajectory"] = path
             log_path = f"{meta['remote_root']}/logs/{run_id}.log"
             out, _, _ = link.run(f"tail -c 2000 {_q(log_path)} 2>/dev/null",

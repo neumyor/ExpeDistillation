@@ -28,12 +28,18 @@ from expedistill.infra.reliability import (
 __all__ = [
     "API_KEY_ENV",
     "ENDPOINT_ENV",
+    "TIMEOUT_ENV",
     "CompletionResult",
     "OpenAICompatClient",
 ]
 
 ENDPOINT_ENV = "EXPEDISTILL_LLM_ENDPOINT"
 API_KEY_ENV = "EXPEDISTILL_LLM_API_KEY"
+TIMEOUT_ENV = "EXPEDISTILL_LLM_TIMEOUT_SECONDS"
+
+#: Default per-request timeout (seconds); a weak-model ANSWER has been
+#: observed to hit exactly 300s, hence the env override.
+DEFAULT_TIMEOUT_SEC = 300.0
 
 #: finish_reason values that mean the provider refused the content policy.
 _REFUSAL_FINISH_REASONS = frozenset({"content_filter"})
@@ -49,6 +55,28 @@ def _status_is_permanent(status: Any) -> bool:
     as the SkillExpand classifier did."""
     return isinstance(status, int) and 400 <= status < 500 \
         and status not in TRANSIENT_HTTP_STATUSES
+
+
+def _env_timeout() -> float:
+    """Read EXPEDISTILL_LLM_TIMEOUT_SECONDS, same validation style as the
+    other optional env knobs (e.g. the TB plugin's _env_float): a malformed
+    or non-positive value is a ConfigError, an unset/blank one keeps the
+    default. Read here in from_env (config resolution point), not per call,
+    so one run holds one timeout."""
+    raw = os.environ.get(TIMEOUT_ENV, "")
+    if not raw.strip():
+        return DEFAULT_TIMEOUT_SEC
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ConfigError(
+            f"{TIMEOUT_ENV} must be a number, got {raw!r}"
+        ) from None
+    if value <= 0:
+        raise ConfigError(
+            f"{TIMEOUT_ENV} must be positive, got {value!r}"
+        ) from None
+    return value
 
 
 @dataclass(frozen=True)
@@ -124,7 +152,8 @@ class OpenAICompatClient:
     the same endpoint can serve both the strong and the weak model.
     """
 
-    def __init__(self, endpoint: str, api_key: str, timeout_sec: float = 300):
+    def __init__(self, endpoint: str, api_key: str,
+                 timeout_sec: float = DEFAULT_TIMEOUT_SEC):
         # Imported lazily so test doubles can patch this attribute without
         # importing the SDK for registry-only use.
         from openai import OpenAI
@@ -159,7 +188,8 @@ class OpenAICompatClient:
                 + ", ".join(missing)
                 + "; copy .env.example to .env and fill them in (never commit .env)"
             )
-        return cls(endpoint=endpoint, api_key=api_key)
+        return cls(endpoint=endpoint, api_key=api_key,
+                   timeout_sec=_env_timeout())
 
     def complete(
         self,
@@ -219,6 +249,12 @@ class OpenAICompatClient:
             message = getattr(choices[0], "message", None)
             content = getattr(message, "content", None)
             finish_reason = getattr(choices[0], "finish_reason", None)
+        # Usage is read before the empty-content check so a response that
+        # consumed tokens (empty content with finish_reason="length" burned
+        # the whole budget on reasoning) carries its real spend into the
+        # usage ledger instead of null.
+        usage_obj = getattr(response, "usage", None)
+        usage = _usage_dict(usage_obj)
         if content is None or not str(content).strip():
             # Empty with finish_reason="length" is the reasoning-effort=max
             # failure mode: the model burned its whole output budget on
@@ -230,10 +266,10 @@ class OpenAICompatClient:
                 else "empty or whitespace-only content"
             raise ModelOutputError(
                 f"model {model} returned {why} "
-                f"(finish_reason={finish_reason!r})"
+                f"(finish_reason={finish_reason!r})",
+                usage=usage,
+                finish_reason=finish_reason,
             )
-        usage_obj = getattr(response, "usage", None)
-        usage = _usage_dict(usage_obj)
         return CompletionResult(
             text=content,
             in_tokens=(usage or {}).get("prompt_tokens"),

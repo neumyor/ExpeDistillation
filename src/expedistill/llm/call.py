@@ -431,14 +431,24 @@ def call_model(
                 meta: Dict[str, Any] = {"error": type(exc).__name__}
                 if isinstance(exc, InfrastructureError):
                     meta.update(infra_attempt=infra_attempt, retried=retry)
-                _record(usage, handle, prompt_name, request_id, None, None,
-                        status="error", meta=meta)
+                # A ModelOutputError from the client may carry the usage of
+                # the response it rejected (empty content after the budget
+                # burned on reasoning): the spend was real, so the ledger
+                # row and dump record it instead of null. Exceptions without
+                # the attribute (every other raise site) stay null, never 0.
+                exc_usage = getattr(exc, "usage", None)
+                exc_in = exc_usage.get("prompt_tokens") \
+                    if isinstance(exc_usage, dict) else None
+                exc_out = exc_usage.get("completion_tokens") \
+                    if isinstance(exc_usage, dict) else None
+                _record(usage, handle, prompt_name, request_id, exc_in,
+                        exc_out, status="error", meta=meta)
                 log.write(handle, prompt_name,
                           request_id=request_id, attempt=retries_used,
                           infra_attempt=infra_attempt, system=system,
                           request_text=current_user, response_text=None,
-                          parsed=None, in_tokens=None, out_tokens=None,
-                          finish_reason=None,
+                          parsed=None, in_tokens=exc_in, out_tokens=exc_out,
+                          finish_reason=getattr(exc, "finish_reason", None),
                           duration_ms=duration_ms, status="error",
                           error=type(exc).__name__)
                 if not retry:

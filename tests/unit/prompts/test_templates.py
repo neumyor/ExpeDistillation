@@ -71,3 +71,16 @@ def test_answer_template_renders_with_empty_skills_block():
 def test_templates_are_nonempty():
     for name in EXPECTED:
         assert get(name).strip()
+
+
+def test_judge_error_description_forbids_handing_over_the_fix():
+    # G6 (rewrite) consumes error_description verbatim, so if the judge may
+    # say or imply how to fix the answer, "rewrite changes wording, not the
+    # idea" loses its independence. The JUDGE template must keep the
+    # never-reveal-the-answer rule AND explicitly forbid the fix direction.
+    template = get("JUDGE")
+    assert "Never restate, quote, or paraphrase" in template
+    assert "how to fix" in template
+    assert "should have said instead" in template
+    # The JSON field description repeats both prohibitions.
+    assert "never how to fix it" in template

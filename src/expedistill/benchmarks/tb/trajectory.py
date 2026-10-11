@@ -33,7 +33,12 @@ Mapping rules (fixed before looking at any data):
   crashed on (spec: a malformed step must never take the whole trajectory
   down). ``reconstruct`` also returns how many steps looked like
   interactions (had tool calls or an observation) but failed to map, so the
-  plugin can record the count in meta.
+  plugin can record the count in meta. ``reconstruct_skip_counts`` breaks
+  that count down by category, because on real trials the dropped steps are
+  themselves behaviour signals the stepwise view cannot show: rounds where
+  the model's output failed to parse (no tool calls, the environment
+  answered with its "Previous response had parsing errors" feedback) and
+  context-handoff system steps (nothing readable on the observation side).
 - Non-interaction steps (the leading ``source: "user"`` instruction) are
   neither kept nor counted as skipped.
 """
@@ -42,7 +47,7 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = ["render_action", "render_observation", "reconstruct",
-           "reconstruct_steps", "total_usage"]
+           "reconstruct_skip_counts", "reconstruct_steps", "total_usage"]
 
 
 def render_action(step: Dict[str, Any]) -> Optional[str]:
@@ -83,21 +88,49 @@ def render_observation(step: Dict[str, Any]) -> Optional[str]:
     return "\n".join(texts)
 
 
-def reconstruct(traj_json: Any) -> Tuple[List[Dict[str, str]], int]:
-    """Map a trajectory dict to (steps, skipped_count).
+def _zero_skip_counts() -> Dict[str, int]:
+    return {"skipped_steps": 0, "skipped_parse_failures": 0,
+            "skipped_handoffs": 0, "skipped_other": 0}
 
-    Never raises: garbage input maps to ``([], 0)``.
+
+def _skip_category(step: Dict[str, Any], observation: Optional[str]) -> str:
+    """Bucket key for a step that looked like an interaction but could not
+    be mapped. Deterministic and observation-based (fixed from the real
+    Harbor trial shapes; the counts land in meta, the pairing is untouched):
+
+    - ``skipped_parse_failures``: the model emitted no tool calls and the
+      environment answered with its parse-error feedback -- the recorded
+      observation text contains "parsing error" ("Previous response had
+      parsing errors: ...");
+    - ``skipped_handoffs``: no tool calls and nothing readable on the
+      observation side (missing/None/unrenderable observation) -- Harbor's
+      context-summarization handoff steps (source "system", observation
+      "None" or a results entry carrying only ``subagent_trajectory_ref``);
+    - ``skipped_other``: anything else, including steps whose tool calls
+      were present but malformed and steps with a readable observation
+      that is not parse-error feedback.
     """
+    if step.get("tool_calls"):
+        return "skipped_other"
+    if observation is None:
+        return "skipped_handoffs"
+    if "parsing error" in observation.lower():
+        return "skipped_parse_failures"
+    return "skipped_other"
+
+
+def _scan(traj_json: Any) -> Tuple[List[Dict[str, str]], Dict[str, int]]:
+    """Shared loop: kept {action, observation} pairs plus skip counts."""
     if not isinstance(traj_json, dict):
-        return [], 0
+        return [], _zero_skip_counts()
     raw_steps = traj_json.get("steps")
     if not isinstance(raw_steps, list):
-        return [], 0
+        return [], _zero_skip_counts()
     steps: List[Dict[str, str]] = []
-    skipped = 0
+    counts = _zero_skip_counts()
     for step in raw_steps:
         if not isinstance(step, dict):
-            skipped += 1
+            counts["skipped_other"] += 1
             continue
         action = render_action(step)
         observation = render_observation(step)
@@ -105,8 +138,32 @@ def reconstruct(traj_json: Any) -> Tuple[List[Dict[str, str]], int]:
             steps.append({"action": action, "observation": observation})
         elif step.get("tool_calls") or step.get("observation"):
             # Looked like an interaction but could not be mapped.
-            skipped += 1
-    return steps, skipped
+            counts[_skip_category(step, observation)] += 1
+    counts["skipped_steps"] = (counts["skipped_parse_failures"]
+                               + counts["skipped_handoffs"]
+                               + counts["skipped_other"])
+    return steps, counts
+
+
+def reconstruct(traj_json: Any) -> Tuple[List[Dict[str, str]], int]:
+    """Map a trajectory dict to (steps, skipped_count).
+
+    Never raises: garbage input maps to ``([], 0)``.
+    """
+    steps, counts = _scan(traj_json)
+    return steps, counts["skipped_steps"]
+
+
+def reconstruct_skip_counts(traj_json: Any) -> Dict[str, int]:
+    """Categorized view of the steps ``reconstruct`` drops.
+
+    Returns ``{"skipped_steps": n, "skipped_parse_failures": n,
+    "skipped_handoffs": n, "skipped_other": n}`` where ``skipped_steps`` is
+    the same total ``reconstruct`` reports and the other three are the
+    disjoint categories documented on ``_skip_category``. Steps content is
+    unaffected: this only counts, never keeps or reorders.
+    """
+    return _scan(traj_json)[1]
 
 
 def reconstruct_steps(traj_json: Any) -> List[Dict[str, str]]:

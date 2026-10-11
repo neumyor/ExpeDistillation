@@ -3,7 +3,8 @@
 Stage-4 acceptance rules constrain these templates: the judge never reveals the
 reference answer, and the rewrite prompt (G6, in author.py) must be able to work
 from the judge's error description alone, so JUDGE's error_description below may
-only say what is wrong.
+only say what is wrong -- never how to fix it, or the rewrite step would be
+handed the fix instead of rephrasing the idea.
 """
 
 from expedistill.prompts.registry import PromptSpec, register
@@ -90,17 +91,20 @@ The answer to grade is correct when it states the right action for the situation
 and a sound reason for it, even if worded differently from the reference answer.
 
 If it is incorrect, the error description must say only WHAT is wrong with the
-answer. Never restate, quote, or paraphrase the correct answer in the error
-description.
+answer: describe the defect itself (for example, a wrong action is named, the
+reason is missing, or the situation is misread). Do not state or imply how to
+fix it: never describe the correct approach, a step to add or remove, or what
+the answer should have said instead. Never restate, quote, or paraphrase the
+correct answer in the error description.
 
 Output ONLY JSON with exactly these fields:
 {{"verdict": "<correct|incorrect>",
-  "error_description": "<empty string when correct; otherwise only what is wrong,
-  never the correct answer>"}}
+  "error_description": "<empty string when correct; otherwise only what is wrong
+  with the answer, never the correct answer and never how to fix it>"}}
 """,
         description=(
             "G5 judging: verdict correct/incorrect plus an error description "
-            "that never reveals the correct answer."
+            "that never reveals the correct answer or how to fix it."
         ),
     )
 )

@@ -283,6 +283,53 @@ def test_usage_records_client_error_and_reraises():
     assert usage.records[0]["in_tokens"] is None
 
 
+def test_usage_records_tokens_from_client_model_output_error(tmp_path):
+    # Real-data finding: the client raises ModelOutputError on empty content
+    # AFTER reading response.usage, so a ~40k-token spend was recorded as
+    # null in/out. When the exception carries usage, the ledger row and the
+    # request dump must carry the real tokens (status stays "error", and
+    # client-side ModelOutputError is still not retried: exactly one call).
+    exc = ModelOutputError(
+        "model fake-model returned empty or whitespace-only content "
+        "(finish_reason='length')",
+        usage={"prompt_tokens": 40000, "completion_tokens": 5120,
+               "total_tokens": 45120},
+        finish_reason="length",
+    )
+    handle = make_fake_handle(script=[exc])
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError):
+        call_model(handle, "ANSWER", ANSWER_VARS, usage=usage, run_dir=tmp_path)
+    assert len(handle.client.calls) == 1
+    record = usage.records[0]
+    assert record["status"] == "error"
+    assert record["in_tokens"] == 40000
+    assert record["out_tokens"] == 5120
+    dump = json.loads(
+        (tmp_path / "llm_requests" / "0001_ANSWER.json").read_text())
+    assert dump["status"] == "error"
+    assert dump["in_tokens"] == 40000
+    assert dump["out_tokens"] == 5120
+    assert dump["finish_reason"] == "length"
+
+
+def test_model_output_error_without_usage_still_records_null(tmp_path):
+    # Regression: raise sites that carry no usage (old clients, extract_json)
+    # must keep recording null tokens, never 0.
+    handle = make_fake_handle(script=[ModelOutputError("bad output")])
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError):
+        call_model(handle, "ANSWER", ANSWER_VARS, usage=usage, run_dir=tmp_path)
+    assert usage.records[0]["status"] == "error"
+    assert usage.records[0]["in_tokens"] is None
+    assert usage.records[0]["out_tokens"] is None
+    dump = json.loads(
+        (tmp_path / "llm_requests" / "0001_ANSWER.json").read_text())
+    assert dump["status"] == "error"
+    assert dump["in_tokens"] is None
+    assert dump["out_tokens"] is None
+
+
 def test_request_dump_written_and_holds_no_api_key(tmp_path):
     handle = make_fake_handle(script="the answer")
     call_model(handle, "ANSWER", ANSWER_VARS, run_dir=tmp_path)
