@@ -195,8 +195,30 @@ class OpenAICompatClient:
         try:
             response = self._client.chat.completions.create(**payload)
         except Exception as exc:  # openai exceptions below; keep the cause chained
-            from openai import APIConnectionError, APIStatusError
+            import json as _json
+            from openai import (
+                APIConnectionError,
+                APIResponseValidationError,
+                APIStatusError,
+            )
 
+            # Protocol-level failures from inside the SDK call: the endpoint
+            # answered with something the SDK could not turn into a response
+            # (an empty/non-JSON body on a 200 raised a bare JSONDecodeError
+            # during the 2026-10-12 campaign and killed the process). The
+            # client boundary owns the whole translation -- anything the SDK
+            # raises about the exchange itself is an infrastructure failure
+            # for the retry budget to absorb, never a crash.
+            if isinstance(exc, _json.JSONDecodeError):
+                raise InfrastructureError(
+                    f"LLM endpoint returned a non-JSON body for model "
+                    f"{model}: {exc}"
+                ) from exc
+            if isinstance(exc, APIResponseValidationError):
+                raise InfrastructureError(
+                    f"LLM endpoint returned a schema-invalid response for "
+                    f"model {model}: {exc}"
+                ) from exc
             if isinstance(exc, APIStatusError):
                 # Status and error type only: the SDK message carries the
                 # provider's error body, which may echo the request.

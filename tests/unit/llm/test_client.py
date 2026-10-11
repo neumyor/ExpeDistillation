@@ -444,3 +444,35 @@ def test_complete_no_usage_reports_none_tokens(monkeypatch, stub_sdk):
     assert result.in_tokens is None
     assert result.out_tokens is None
     assert result.raw_usage is None
+
+
+def test_malformed_endpoint_body_is_infrastructure(monkeypatch, stub_sdk):
+    # 2026-10-12 campaign crash: the gateway returned an empty/invalid body on
+    # a 200 and the openai SDK surfaced a bare JSONDecodeError from inside
+    # create(), which slipped past the APIStatusError/APIConnectionError
+    # mapping and killed the pipeline. The client boundary must translate
+    # protocol-level failures into InfrastructureError so the retry budget
+    # (not the process) absorbs them.
+    import json as _json
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(error=_json.JSONDecodeError("Expecting value", "", 0))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(InfrastructureError, match="non-JSON body"):
+        client.complete("model-a", "s", "u")
+
+
+def test_schema_invalid_response_is_infrastructure(monkeypatch, stub_sdk):
+    # APIResponseValidationError (the SDK's own wrapper for responses that
+    # fail its schema) is also an endpoint-protocol failure, not our bug.
+    import openai as _openai
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    import httpx2 as _httpx  # openai>=3 depends on httpx2
+    _req = _httpx.Request("POST", "http://endpoint/v1/chat/completions")
+    _resp = _httpx.Response(200, request=_req)
+    stub_sdk(error=_openai.APIResponseValidationError(
+        _resp, body=None, message="invalid response"))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(InfrastructureError, match="invalid response"):
+        client.complete("model-a", "s", "u")

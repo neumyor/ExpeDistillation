@@ -204,3 +204,18 @@ stage-1 summary 与基线逐项一致：F 36 题清单逐项相同、弱 120/强
 `configs/experiments/tb21_full.yaml`、`docs/tb21_f3_baseline_20261011.md`、
 run `runs/tb21_full_20261011_2242/`（全量播种 + stage 1）、`runs/tb21_seed_dry_20261011_1/`
 （3 题干跑）、缓存 `tmp/tb_seed_cache/`（532 条轨迹 + absent_units.json）。
+
+## 2026-10-12 02:15 — TB 正式实验启动；首夜崩溃（网关空响应体）根源修复
+
+TB21 阶段 2–5 于 22:35 开始（阶段 0–1 播种零调用、F@3 基线对账一致，见 docs/tb21_f3_baseline_20261011.md）。
+02:01 进程死亡：网关对一次 200 返回了空响应体，openai SDK 在 create() 内部抛出裸
+JSONDecodeError，而 llm/client.py 的异常边界只翻译 APIStatusError/APIConnectionError 两类，
+协议层异常穿透到顶层。根源修复：客户端边界补全翻译——SDK 调用期间抛出的协议类异常
+（json.JSONDecodeError、APIResponseValidationError）一律转 InfrastructureError 交给重试预算，
+不裸抛（该边界本来就拥有全部翻译职责，任何 benchmark 的端点协议故障都不该打死进程）。
+先写两个复现测试（裸 JSONDecodeError 与 schema-invalid 响应）确认失败再修。当晚端点很不稳
+（3.5 小时内 17 次 300s 超时，infra 重试全部兜住），崩溃前已存 415 个 subtask、审计 2 条
+（两条 0 步轨迹按预期跳过）。同命令续跑，已完成单元零重跑。
+
+工件：`src/expedistill/llm/client.py`、`tests/unit/llm/test_client.py`、
+run `runs/tb21_full_20261011_2242/`。pytest 1277 passed。
