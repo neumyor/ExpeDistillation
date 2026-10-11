@@ -161,8 +161,8 @@ def run(ctx: Any) -> Dict[str, Any]:
                 answerer_handle=ctx.handle("answerer"),
                 judge_handle=ctx.handle("judge"),
                 rewriter_handle=ctx.handle("rewriter"),
+                auditor_handle=ctx.handle("auditor"),
                 retry_limit=ctx.config.retry_limit,
-                leak_threshold=ctx.config.leak_threshold,
                 usage=ctx.usage,
                 run_dir=ctx.run_dir,
             )

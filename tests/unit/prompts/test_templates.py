@@ -1,4 +1,4 @@
-"""Template-level tests: the 10 method prompts are registered, each template's
+"""Template-level tests: the 11 method prompts are registered, each template's
 placeholders are exactly its documented variables, and every template renders."""
 
 import string
@@ -20,6 +20,7 @@ EXPECTED = {
     "EXAM_GEN": ("G3", {"label", "description", "steps_view"}),
     "ANSWER": ("G4", {"question_text", "skills_block"}),
     "JUDGE": ("G5", {"question_text", "reference_answer", "weak_answer"}),
+    "LEAK_AUDIT_JUDGE": ("D8", {"skill_text", "question_text", "reference_answer"}),
     "SIMILARITY": ("G7", {"skills_listing"}),
     "MERGE": ("G8", {"mode", "skills_block"}),
     "GROUP": ("G9", {"skills_listing"}),

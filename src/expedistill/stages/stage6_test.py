@@ -6,6 +6,13 @@ control is -- in ``full`` mode -- stage 1's stored weak bare trajectories
 (reused, never re-run), or -- in ``split`` mode -- a fresh weak bare run on
 the test set. The improvement is with-bank minus control, from D3.
 
+Auxiliary metric. When the benchmark plugin declares one (stage 0 froze
+its name as manifest ``aux_metric``), both arms additionally report it and
+``delta`` gains the same two aux deltas -- same expected-unit denominator,
+same avg@N disciplines, same None-when-unmeasured rule as the primary
+(``stage1_baseline.aux_wiring`` is the shared wiring). The primary metric
+is never swapped for it; without a declaration every aux field is null.
+
 Storage layout (the stage's own call, AGENTS.md section 4 rule 3):
 
 Trajectory ids are ``traj/<task>/<role>/<attempt>`` and carry no arm
@@ -61,7 +68,7 @@ against the wrong bank.
 """
 
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Sequence
+from typing import Any, Collection, Dict, List, Optional, Sequence
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks.metrics import compute_task_metrics, summarize
@@ -192,6 +199,12 @@ def _delta(with_bank: Dict[str, Any],
     between a number and nothing is not zero (that would claim "no
     improvement" from absent evidence), it is None -- recorded honestly
     rather than coerced.
+
+    The plugin-declared auxiliary metric (when there is one) gets the same
+    treatment: ``aux`` carries its name and the same two deltas under the
+    same None rule, always beside the primary, never instead of it. It is
+    None when the plugin declares no auxiliary metric (both arms' summaries
+    carry ``aux: null`` then).
     """
     with_avg = with_bank["avg_at_n"]
     control_avg = control["avg_at_n"]
@@ -204,6 +217,25 @@ def _delta(with_bank: Dict[str, Any],
         "avg_at_n_conservative": (with_bank["avg_at_n_conservative"]
                                   - control["avg_at_n_conservative"]),
         "pass_at_n": with_bank["pass_at_n"] - control["pass_at_n"],
+        "aux": _aux_delta(with_bank.get("aux"), control.get("aux")),
+    }
+
+
+def _aux_delta(with_aux: Optional[Dict[str, Any]],
+               control_aux: Optional[Dict[str, Any]]
+               ) -> Optional[Dict[str, Any]]:
+    """With-bank minus control for the auxiliary metric (None when absent)."""
+    if with_aux is None or control_aux is None:
+        return None
+    with_avg = with_aux["avg_at_n"]
+    control_avg = control_aux["avg_at_n"]
+    return {
+        "metric": with_aux["metric"],
+        "avg_at_n": (with_avg - control_avg
+                     if with_avg is not None and control_avg is not None
+                     else None),
+        "avg_at_n_conservative": (with_aux["avg_at_n_conservative"]
+                                  - control_aux["avg_at_n_conservative"]),
     }
 
 
@@ -216,7 +248,10 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     ``blocks.metrics`` D3 aggregates over the shared expected unit set (both
     avg@N disciplines / pass@N / infra task list) and ``delta`` is the
     with-bank minus control difference of each (the conditional avg@N None
-    when either arm has no valid trial). Raises InfrastructureError after
+    when either arm has no valid trial); when the plugin declares an
+    auxiliary metric, the arm summaries carry its ``aux`` section and
+    ``delta`` carries the matching ``aux`` deltas (null without a
+    declaration). Raises InfrastructureError after
     writing the summary when a unit outside the accepted set is missing and
     the shortfall is not accepted now. The strong model is never invoked: only the weak executor
     handle leaves ``ctx.handles``.
@@ -312,16 +347,25 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
                    {arm: sorted(own[arm]) for arm in _ARMS}, indent=2)
         new_holes = {arm: [] for arm in _ARMS}
 
-    with_bank_metrics = compute_task_metrics(with_bank, expected=expected)
-    control_metrics = compute_task_metrics(control, expected=expected)
+    # The plugin-declared auxiliary metric (module docstring): the same
+    # wiring stage 1 uses, so both scoring stages read it identically. A
+    # benchmark without one yields (None, None) and no scorer ever runs.
+    aux_metric, aux_scorer = stage1_baseline.aux_wiring(ctx.config.benchmark)
+
+    with_bank_metrics = compute_task_metrics(with_bank, expected=expected,
+                                             aux_scorer=aux_scorer)
+    control_metrics = compute_task_metrics(control, expected=expected,
+                                           aux_scorer=aux_scorer)
     if set(with_bank_metrics) != set(control_metrics):
         # Unreachable while both share ``expected``; a delta over different
         # task sets is exactly the bug this guards against.
         raise CodeBugError(
             "stage 6 arms cover different task sets: with-bank "
             f"{sorted(with_bank_metrics)} vs control {sorted(control_metrics)}")
-    with_bank_summary = summarize(with_bank_metrics, n_attempts)
-    control_summary = summarize(control_metrics, n_attempts)
+    with_bank_summary = summarize(with_bank_metrics, n_attempts,
+                                  aux_metric=aux_metric)
+    control_summary = summarize(control_metrics, n_attempts,
+                                 aux_metric=aux_metric)
     n_missing = sum(len(ids) for ids in missing.values())
     n_new = sum(len(ids) for ids in new_holes.values())
     summary = {

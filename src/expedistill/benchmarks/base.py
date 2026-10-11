@@ -31,6 +31,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
+from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
 
 __all__ = [
@@ -291,6 +292,13 @@ class BenchmarkPlugin(abc.ABC):
     - ``task_prompt_name``: the B2 name this plugin registered its task
       execution prompt under; the template's variables are
       ``{instruction}``, ``{skills_block}`` and ``{history}``.
+    - the optional AUXILIARY metric (``aux_metric_name`` /
+      ``aux_success``): a second, pre-registered success notion reported
+      ALWAYS beside the primary one (which stays status-based), never
+      swapped in or picked between after seeing results. The primary
+      metric's strictness (e.g. SearchQA's exact-match EM) is exactly why
+      an auxiliary view exists; see ``aux_metric_name`` below for the
+      freeze / change discipline.
     """
 
     @property
@@ -316,3 +324,28 @@ class BenchmarkPlugin(abc.ABC):
     @abc.abstractmethod
     def task_prompt_name(self) -> str:
         """B2 registry name of this benchmark's task execution prompt."""
+
+    #: Name of the auxiliary metric this plugin pre-registers (e.g.
+    #: ``"sub_em"``), or None (the default) when the benchmark has none.
+    #: Stage 0 freezes this name into the manifest as ``aux_metric`` -- the
+    #: auxiliary metric is part of the experiment identity. It is CODE,
+    #: not config: changing the scorer is a plugin code change that does
+    #: NOT change any prompt digest, so an old run directory will not
+    #: refuse a resume across it (README's auxiliary-metric contract
+    #: records this limitation; compare against run directories, not
+    #: across scorer versions).
+    aux_metric_name: Optional[str] = None
+
+    def aux_success(self, traj: Trajectory) -> Optional[bool]:
+        """Auxiliary success of one trajectory.
+
+        The default returns None: this plugin declares no auxiliary metric
+        (``aux_metric_name`` is None) and no stage ever calls this method.
+        A plugin that declares ``aux_metric_name`` must override this to
+        answer for every VALID trajectory (status success / failure):
+        True / False is the measurement; a None from a declared scorer is
+        a contract violation and the stage wiring raises on it. Infra
+        trajectories and missing units are never shown to the scorer (an
+        infrastructure failure is not a measurement of anything).
+        """
+        return None

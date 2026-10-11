@@ -153,6 +153,29 @@ def test_error_dump_carries_finish_reason_none(tmp_path):
     assert dump["finish_reason"] is None
 
 
+def test_client_output_error_finish_reason_reaches_usage_and_dump(tmp_path):
+    # Pilot finding: a client-raised ModelOutputError (empty content,
+    # finish_reason=length) was recorded and dumped with finish_reason=None;
+    # when the exception carries the finish_reason as an attribute, both the
+    # usage meta and the request dump must show it instead.
+    error = ModelOutputError(
+        "model fake-model returned empty or whitespace-only content "
+        "(finish_reason='length')")
+    error.finish_reason = "length"
+    handle = make_fake_handle(script=[error])
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError):
+        call_model(handle, "ANSWER", ANSWER_VARS, usage=usage, run_dir=tmp_path)
+    record = usage.records[0]
+    assert record["status"] == "error"
+    assert record["meta"]["error"] == "ModelOutputError"
+    assert record["meta"]["finish_reason"] == "length"
+    dump = json.loads(
+        (tmp_path / "llm_requests" / "0001_ANSWER.json").read_text())
+    assert dump["status"] == "error"
+    assert dump["finish_reason"] == "length"
+
+
 def test_json_fenced_extraction():
     handle = make_fake_handle(
         script=json_script({"verdict": "correct", "error_description": ""})

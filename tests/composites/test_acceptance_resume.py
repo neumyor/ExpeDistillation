@@ -14,7 +14,11 @@ whose result was still in flight (not yet persisted) at the crash:
   whose re-save had not finished (K3 stores the answer first, then the same
   attempt id with its verdict, see exam_once);
 * a G6 rewrite whose result was not yet saved (skill save or the
-  failed-try ledger line).
+  failed-try ledger line);
+* a D8 leak verdict whose ledger line had not finished appending: the
+  verdict ledger is the audit's only persistence, so the judge is asked
+  again; once the line is on disk the verdict is final (first verdict
+  sticks) and the judge is never re-asked for that (skill, version).
 """
 
 import pytest
@@ -48,7 +52,7 @@ CLEAN_V2 = "Rotate the printed credential, then restart the service."
 CLEAN_V3 = ("First rotate the printed credential, then restart the service "
             "and check that it stays up.")
 
-ROLES = ("answerer", "judge", "rewriter")
+ROLES = ("answerer", "auditor", "judge", "rewriter")
 
 
 class Crash(Exception):
@@ -70,6 +74,10 @@ def correct():
     return json_script({"verdict": "correct", "error_description": ""})
 
 
+def leak(leaked, reason):
+    return json_script({"leaked": leaked, "reason": reason})
+
+
 def rewrite(text, category):
     return json_script({"skill_text": text, "failure_category": category,
                         "rewrite_reason": f"rewrote for {category}"})
@@ -78,9 +86,13 @@ def rewrite(text, category):
 # Every scenario: (skill text, question, reference, retry_limit, scripts).
 SCENARIOS = {
     # leak-void r0 -> rewrite v2; r1 fails, rewrite budget exhausted;
-    # r2 fails on the unchanged v2 -> rewrite v3; r3 passes.
+    # r2 re-audits the unchanged v2 (stored verdict reused) and fails ->
+    # rewrite v3; r3 passes.
     "void_exhaust_accept": (LEAKY_V1, LEAK_QUESTION, LEAK_REFERENCE, 3, {
         "answerer": ["bare answer", "r1 answer", "r2 answer", "r3 answer"],
+        "auditor": [leak(True, "quotes the exam credential"),
+                    leak(False, "generic method advice only"),
+                    leak(False, "generic method advice only")],
         "judge": [incorrect("bare skips the rotation"),
                   incorrect("r1 misses the rotation"),
                   incorrect("r2 restarts too early"), correct()],
@@ -92,6 +104,9 @@ SCENARIOS = {
         LEAKY_V1, LEAK_QUESTION, LEAK_REFERENCE, 3, {
             "answerer": ["bare answer", "r1 answer", "r2 answer",
                          "r3 answer"],
+            "auditor": [leak(True, "quotes the exam credential"),
+                        leak(False, "generic method advice only"),
+                        leak(False, "generic method advice only")],
             "judge": [incorrect("bare skips the rotation"),
                       incorrect("r1 misses the rotation"),
                       incorrect("r2 restarts too early"),
@@ -100,11 +115,13 @@ SCENARIOS = {
                          MOE("bad json two"),
                          rewrite(CLEAN_V3, "missing_step")],
         }),
-    # Voided rounds only: r0 void + exhausted rewrite, r1 void + leaky
-    # rewrite, r2 (last) void -> leak_audit discard.
+    # Voided rounds only: r0 void + exhausted rewrite, r1 void (verdict
+    # reused) + leaky rewrite, r2 (last) void on v2 -> leak_audit discard.
     "void_exhaust_leak_discard": (
         LEAKY_V1, LEAK_QUESTION, LEAK_REFERENCE, 2, {
             "answerer": ["bare answer"],
+            "auditor": [leak(True, "quotes the exam credential"),
+                        leak(True, "still quotes the exam credential")],
             "judge": [incorrect("bare skips the rotation")],
             "rewriter": [MOE("bad json one"), MOE("bad json two"),
                          rewrite(LEAKY_V2, "misread")],
@@ -112,12 +129,15 @@ SCENARIOS = {
     # Plain loop: r0 fails -> rewrite, r1 passes.
     "plain_accept": (CLEAN_V1, QUESTION, REFERENCE, 1, {
         "answerer": ["bare answer", "r0 answer", "r1 answer"],
+        "auditor": [leak(False, "generic method advice only"),
+                    leak(False, "generic method advice only")],
         "judge": [incorrect("bare skips the restart"),
                   incorrect("r0 skips the restart"), correct()],
         "rewriter": [rewrite(CLEAN_V2, "misread")],
     }),
     "weak_already_knows": (CLEAN_V1, QUESTION, REFERENCE, 1, {
         "answerer": ["bare answer"],
+        "auditor": [],
         "judge": [correct()],
         "rewriter": [],
     }),
@@ -162,9 +182,10 @@ def run_once(store, scenario, scripts):
         result = accept_skill(
             store=store, skill=skill, exam=exam, weak_profile=WEAK_PROFILE,
             answerer_handle=handles["answerer"],
+            auditor_handle=handles["auditor"],
             judge_handle=handles["judge"],
             rewriter_handle=handles["rewriter"], retry_limit=retry_limit,
-            leak_threshold=0.0, run_dir=store.run_dir)
+            run_dir=store.run_dir)
     except Crash:
         result = None
     return result, handles, log
@@ -269,7 +290,8 @@ def test_crash_at_every_model_call_resumes_identically(tmp_path, name,
     crash_prompts = prompts(handles)
 
     # K3 stores the answer before judging, so only the crashed call itself
-    # is asked again (a judge crash never re-asks the answerer).
+    # is asked again (a judge crash never re-asks the answerer); a crashed
+    # audit call left no verdict behind, so the auditor is asked again.
     repeats = {role: 1}
     resume_and_compare(store, scenario, crash_prompts, repeats, reference,
                        reference_prompts)
@@ -317,6 +339,8 @@ class _IOCrasher:
             def describe():
                 if "rewrite" in str(record.get("schema", "")):
                     return {"rewriter": 1}   # a failed rewrite try
+                if "leaked" in record:
+                    return {"auditor": 1}    # a leak verdict still in flight
                 return {}
             return self._event(describe, lambda: original(path, record))
         return wrapped
@@ -336,12 +360,12 @@ def _count_writes(tmp_path, monkeypatch, name):
 
 
 # Per scenario: initial skill save + 2 writes per K3 attempt (answer, then
-# verdict) + one per leak line, failed rewrite try and stored rewrite + the
-# terminal save.
-_WRITE_COUNTS = {"void_exhaust_accept": 15,
-                 "void_exhaust_retry_exhausted": 15,
-                 "void_exhaust_leak_discard": 10,
-                 "plain_accept": 9,
+# verdict) + one per leak verdict, failed rewrite try and stored rewrite +
+# the terminal save.
+_WRITE_COUNTS = {"void_exhaust_accept": 17,
+                 "void_exhaust_retry_exhausted": 17,
+                 "void_exhaust_leak_discard": 9,
+                 "plain_accept": 11,
                  "weak_already_knows": 4}
 
 
@@ -433,11 +457,13 @@ def test_passing_attempt_of_another_version_does_not_accept(tmp_path):
     answerer = make_fake_handle("weak", ["v1 answer"])
     judge = make_fake_handle("judge", [incorrect("still skips")])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [leak(False, "generic advice")])
 
     result = accept_skill(
         store=store, skill=skill, exam=exam, weak_profile=WEAK_PROFILE,
-        answerer_handle=answerer, judge_handle=judge,
-        rewriter_handle=rewriter, retry_limit=0, leak_threshold=0.0,
+        answerer_handle=answerer, auditor_handle=auditor,
+        judge_handle=judge,
+        rewriter_handle=rewriter, retry_limit=0,
         run_dir=store.run_dir)
 
     # v1 was examined for real and failed.
@@ -485,11 +511,13 @@ def test_unjudged_attempts_never_decide_anything(tmp_path):
     judge = make_fake_handle("judge", [incorrect("bare skips the restart"),
                                        correct()])
     rewriter = make_fake_handle("strong", [])
+    auditor = make_fake_handle("auditor", [leak(False, "generic advice")])
 
     result = accept_skill(
         store=store, skill=skill, exam=exam, weak_profile=WEAK_PROFILE,
-        answerer_handle=answerer, judge_handle=judge,
-        rewriter_handle=rewriter, retry_limit=0, leak_threshold=0.0,
+        answerer_handle=answerer, auditor_handle=auditor,
+        judge_handle=judge,
+        rewriter_handle=rewriter, retry_limit=0,
         run_dir=store.run_dir)
 
     assert result.status == "accepted"
@@ -499,3 +527,38 @@ def test_unjudged_attempts_never_decide_anything(tmp_path):
     stored = [store.load("attempts", a, Attempt) for a in store.ids("attempts")]
     assert [(a.purpose, a.judge_verdict) for a in stored] == [
         ("bare", False), ("acceptance", True)]
+
+
+def test_crash_between_verdict_save_and_round_continuation(tmp_path,
+                                                           monkeypatch):
+    """The verdict line is appended BEFORE the round acts on it. Crash after
+    that append (before the round-0 exam): resume must reuse the stored
+    verdict -- first verdict sticks -- and never ask the auditor again."""
+    name = "void_exhaust_accept"
+    scenario = SCENARIOS[name]
+    reference, reference_prompts, _ = reference_run(tmp_path, name)
+    store = Store(tmp_path / "crashed")
+
+    # Crash right after the first verdict append (v1 leaked).
+    state = {"done": False}
+    original_append = acceptance_mod.append_jsonl
+
+    def append(path, record):
+        out = original_append(path, record)
+        if "leaked" in record and not state["done"]:
+            state["done"] = True
+            raise Crash("crash after the v1 verdict line")
+        return out
+
+    monkeypatch.setattr(acceptance_mod, "append_jsonl", append)
+    result, handles, _ = run_once(store, scenario, scenario[4])
+    monkeypatch.undo()
+    assert result is None
+    verdicts = read_jsonl(store.run_dir / "stage4_acceptance"
+                           / "leak_verdicts.jsonl")
+    assert len(verdicts) == 1 and verdicts[0]["leaked"] is True
+
+    # Resume: the auditor is never re-asked for v1; the run replays the
+    # stored verdict and ends exactly like the reference.
+    resume_and_compare(store, scenario, prompts(handles), {},
+                       reference, reference_prompts)

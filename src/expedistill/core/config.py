@@ -42,7 +42,7 @@ MODES = ("split", "full")
 #: Every role a stage may request from the role table.
 MODEL_ROLES = (
     "executor_strong", "executor_weak", "segmenter", "author", "examiner",
-    "answerer", "judge", "rewriter", "curator",
+    "answerer", "judge", "rewriter", "curator", "auditor",
 )
 
 #: Keys of the named-rule selections.
@@ -141,8 +141,6 @@ class ExperimentConfig:
     retry_limit: int = 2
     bank_token_budget: int = 4096
     curation_rounds: int = 3
-    #: Literal-overlap threshold for the leak audit (D8), in [0, 1].
-    leak_threshold: float = 0.3
     #: Named-rule selections; missing keys are filled from DEFAULT_RULES,
     #: and stage 0 validates every name against the rule registries.
     rules: Dict[str, str] = field(default_factory=dict)
@@ -161,9 +159,6 @@ class ExperimentConfig:
             raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
         if not self.benchmark:
             raise ValueError("benchmark is required")
-        if not 0.0 <= self.leak_threshold <= 1.0:
-            raise ValueError(
-                f"leak_threshold must be in [0, 1], got {self.leak_threshold!r}")
         if self.n_attempts_strong < 1 or self.n_attempts_weak < 1:
             raise ValueError("n_attempts_strong and n_attempts_weak must be >= 1")
         if self.K < 1:

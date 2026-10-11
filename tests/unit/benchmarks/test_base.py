@@ -277,3 +277,17 @@ def test_toy_plugin_satisfies_interface():
     assert outcome.status == "success"
     assert plugin.view_rules.max_obs_chars == ViewRules().max_obs_chars
     assert plugin.task_prompt_name == "TOY_TASK"
+
+
+def test_plugin_defaults_declare_no_auxiliary_metric():
+    # A plugin that does nothing declares no auxiliary metric: the name is
+    # None (what stage 0 freezes as manifest "aux_metric": null) and the
+    # scorer answers None, so stages never call it and no extra work
+    # happens (benchmarks/base.py contract).
+    plugin = _ToyPlugin()
+    assert plugin.aux_metric_name is None
+    from expedistill.core.models import Trajectory
+    traj = Trajectory(trajectory_id="traj/t:1/weak/00", task_id="t:1",
+                      benchmark="toy", model_role="weak", model_name="m",
+                      attempt_index=0)
+    assert plugin.aux_success(traj) is None

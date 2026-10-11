@@ -87,6 +87,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         on_stage=on_stage,
         llm_infra_retries=args.llm_infra_retries,
         llm_infra_backoff_seconds=args.llm_infra_backoff,
+        llm_timeout_sec=args.llm_timeout,
         allow_infra_shortfall=args.allow_infra_shortfall,
         infra_breaker=args.infra_breaker,
         until_stage=args.until_stage,
@@ -104,6 +105,7 @@ def _resume_command(args: argparse.Namespace) -> str:
         "--workers", str(args.workers),
         "--llm-infra-retries", str(args.llm_infra_retries),
         "--llm-infra-backoff", str(args.llm_infra_backoff),
+        "--llm-timeout", str(args.llm_timeout),
         "--infra-breaker", str(args.infra_breaker),
     ]
     if args.until_stage is not None:
@@ -182,6 +184,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--llm-infra-backoff", type=float, default=5.0,
                      help="base seconds of the exponential backoff between "
                           "those resends (default 5.0)")
+    run.add_argument("--llm-timeout", type=float, default=300,
+                     help="per-request client timeout in seconds for the LLM "
+                          "endpoint (default 300); reasoning-effort=max calls "
+                          "legitimately take minutes, so lower it only when "
+                          "the endpoint is unstable and hung requests would "
+                          "otherwise burn the full timeout each")
     run.add_argument("--infra-breaker", type=int, default=5,
                      help="skip the rest of an execution batch until resume "
                           "once the current streak of infra-exhausted units "

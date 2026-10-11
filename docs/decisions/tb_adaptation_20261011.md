@@ -217,4 +217,4 @@ token 真实消耗，`tmp/tbval/g1_smoke/llm_requests/0001_SEGMENT.json`）。
 再决定是否调整 EXAM_GEN 难度要求或向程序化考题演化。
 
 同轮修复（已合入）：JUDGE 模板禁止错误描述陈述或暗示修法（防把答案递给 G6）；
-`EXPEDISTILL_LLM_TIMEOUT_SECONDS` 可调客户端超时（默认 300s）。
+`EXPEDISTILL_LLM_TIMEOUT_SECONDS` 可调客户端超时（默认 300s）。（合并主线后更正：该环境变量已删除，统一用主线的 `--llm-timeout` 运行参数，避免"设了环境变量却被 pipeline 默认值盖掉"的陷阱。）

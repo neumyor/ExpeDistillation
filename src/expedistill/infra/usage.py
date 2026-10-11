@@ -53,19 +53,32 @@ class UsageRecorder:
         append_jsonl(self.path, row)
 
     def totals(self) -> Dict[str, Any]:
-        """{"overall": {in, out, request_count}, "by_role": {...}}, folded
-        from the file so every process sees every line (absent file: zeros)."""
-        overall = {"in": 0, "out": 0, "request_count": 0}
+        """{"overall": {in, out, cached_tokens, request_count},
+        "by_role": {...}}, folded from the file so every process sees every
+        line (absent file: zeros).
+
+        ``cached_tokens`` is folded from the rows' ``meta.cached_tokens``
+        (present only when the provider reported gateway-cache hits): 0 when
+        never reported. The provider already counts cached prompt tokens
+        inside ``in``, so the cached total is reported alongside, never
+        folded into in/out (that would double-count).
+        """
+        overall = {"in": 0, "out": 0, "cached_tokens": 0, "request_count": 0}
         by_role: Dict[str, Dict[str, int]] = {}
         for row in read_jsonl(self.path):
+            meta = row.get("meta")
+            cached = (meta.get("cached_tokens")
+                      if isinstance(meta, dict) else None) or 0
             overall["request_count"] += 1
             # None (unknown) contributes nothing; it is not a zero-cost call.
             overall["in"] += row.get("in_tokens") or 0
             overall["out"] += row.get("out_tokens") or 0
+            overall["cached_tokens"] += cached
             slot = by_role.setdefault(
                 str(row.get("role")),
-                {"in": 0, "out": 0, "request_count": 0})
+                {"in": 0, "out": 0, "cached_tokens": 0, "request_count": 0})
             slot["request_count"] += 1
             slot["in"] += row.get("in_tokens") or 0
             slot["out"] += row.get("out_tokens") or 0
+            slot["cached_tokens"] += cached
         return {"overall": overall, "by_role": by_role}

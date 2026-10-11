@@ -114,3 +114,38 @@
 `src/expedistill/prompts/exam.py`、`src/expedistill/llm/client.py`、
 `docs/decisions/tb_adaptation_20261011.md`（新增"已知观察"节）、`.env.example`。
 pytest 1202 passed，3 个 live 冒烟默认免跑。
+## 2026-10-11 16:42 — 修复试点发现的两个问题：SearchQA 预登记辅助指标 sub_EM；K5 无合并轮也跑 G9 分组
+
+试点（pilot）在 SearchQA 上发现主指标 EM 过严（答案 "lumbar" 对金标 "lumbar vertebrae" 记 0），按子串匹配 sub_EM 结论会翻转。用户决定把 sub_EM 预登记为辅助指标：benchmark 插件契约新增可选声明（`benchmarks/base.py` 的 `aux_metric_name` 属性与 `aux_success(traj)` 方法，默认 None），SearchQA 插件声明 `sub_em` 并读轨迹 meta 里评测仓库算好的子串分；阶段 0 把声明的名字冻结进 manifest 顶层 `aux_metric`（不是配置字段），改声明即拒绝旧 run 续跑；D3 在同一套应有单元分母上另算辅助 avg@N（与主指标同一对口径，缺失/基础设施单元不可能算辅助成功），阶段 1 两臂的 summary 与阶段 6 的两臂及 delta 各增加 `aux` 一节，未声明时为 null、零额外工作。缺失 meta 的取舍已写进决定文档：从未提交答案的失败轨迹 sub_EM 记 0（真实的 0），成功或已提交答案却没有评测 meta 的轨迹按数据损坏停下。已知局限：打分器是代码不是配置，改它不改变 prompt digest，旧 run 不会因此拒绝续跑。第二个问题：README 阶段 5 第 4 步说 skill 总会分组，但 K5 在"无合并候选且已在预算内"时提前跳出、跳过了 G9，库里成员 group 全是 None。修复为只要库里有 ≥ 2 条成员就跑 G9（无合并轮也跑，输出照常写进整理日志、续跑零次模型调用原样重放），只有 1 条成员或空库才跳过。测试先行：metrics / 插件契约 / 阶段 0 / 阶段 1 / 阶段 6 / 整理的新测试先失败再实现。运行 `.venv/bin/python -m pytest -q tests/unit tests/test_layering.py`：本会话负责的测试全过；剩余 18 个失败全部集中在 `tests/unit/stages/test_pipeline.py`，由并行的泄题审计改造（另一批文件）造成，不属本次改动。全部改动未提交。
+
+工件：`src/expedistill/benchmarks/base.py`（辅助指标契约）、`src/expedistill/benchmarks/searchqa/plugin.py`、`src/expedistill/blocks/metrics.py`、`src/expedistill/stages/stage0_freeze.py`、`src/expedistill/stages/stage1_baseline.py`（`aux_wiring` 共享接线）、`src/expedistill/stages/stage6_test.py`、`src/expedistill/composites/curation.py`、`tests/unit/blocks/test_metrics.py`、`tests/unit/benchmarks/{test_base,test_searchqa_plugin}.py`、`tests/unit/stages/test_stage{0,1,6}.py`、`tests/composites/{test_curation,test_curation_resume}.py`、`README.md`（D3、阶段 0 冻结、阶段 1 / 6 辅助指标合同、阶段 5 第 4 步）、`docs/decisions/aux_metric_preregistration_20261011.md`
+
+## 2026-10-11 16:50 — D8 泄题审计换成 LLM 判官：判决按（skill, version）落盘、首判为准
+
+机械审计（子串重合 + `leak_threshold`）在真实 pilot 上系统性误报（无词边界的缩写匹配、引号里的协议 token（动作名 "Finish"、环境反馈 "answer is incorrect."）被当成受保护实体），杀掉了合法 skill。改为语义判官：`blocks/audit.py` 的 `audit_leak` 一次调用、prompt `LEAK_AUDIT_JUDGE`，泄露判定标准（含/平凡改写/直接揭示参考答案与考题答案特有实体）与非泄露豁免（通用方法建议、协议词、动作名、环境反馈串）写进 prompt；新角色 `auditor` 加入 MODEL_ROLES、默认取强模型；`leaked` 闭集校验 + 非空 `reason`，违反即 ModelOutputError，沿阶段 4 既有处置终态丢弃（model_output_error）。判官不可复现，续跑等式改为落盘回放：每个 (skill_id, skill_version) 的判决恰一行写入 `stage4_acceptance/leak_verdicts.jsonl`、落盘先于本轮行动，续跑查表复用、绝不重问（首判为准）；旧 `leak_audits.jsonl` 并入该账本（`leaked=true` 行即作废簿记），避免双账本漂移。理由永不复述参考答案：它是 G6 改写的错误描述输入，而 G6 不得看到答案——这是 prompt 的硬约束。`leak_threshold` 字段与校验删除，from_dict 丢弃未知键故旧配置仍可加载。两个设计取舍：账本合并（单一事实来源）；判官格式错误传播给阶段 4 单元处置（与 K3 修复预算耗尽同类，无组合级重试）。已知局限：auditor 默认与写 skill 同为强模型（判官自审），换配置角色表即可打破，README 已标注。测试先行：判官积木 / 判决落盘与复用 / 崩溃注入续跑（含判决落盘与轮次推进之间的崩溃）/ 角色默认 / 字段删除的新测试先失败（188 个）再实现。运行 `.venv/bin/python -m pytest -q`：1235 过、18 败，失败全部在 `tests/unit/stages/test_pipeline.py`（其 `_script` 尚未识别新 prompt，属并行改动的文件），另有 1 个 ruff F841 预先存在于 `tests/unit/stages/test_stage1.py`（基线即有）。全部改动未提交。
+
+工件：`src/expedistill/blocks/audit.py`、`src/expedistill/prompts/audit.py`、`src/expedistill/prompts/__init__.py`、`src/expedistill/core/config.py`、`src/expedistill/composites/acceptance.py`、`src/expedistill/stages/stage4_acceptance.py`（最小改动：auditor 句柄接线）、`src/expedistill/stages/stage5_curation.py`（最小改动：透传占位）、`src/expedistill/blocks/__init__.py`、`tests/unit/blocks/test_audit.py`、`tests/composites/{test_acceptance,test_acceptance_resume,test_curation_stage4_interleave}.py`、`tests/unit/core/test_config.py`、`tests/unit/prompts/test_templates.py`、`tests/unit/stages/test_stage4.py`、`docs/decisions/leak_audit_llm_judge_20261011.md`、`README.md`（1.3 D8 行、阶段 4 审计与单元失败两条）
+
+## 2026-10-11 16:55 — K5 签名清理：删除从未使用的 leak_threshold 形参
+
+泄题审计改为 LLM 判官（`docs/decisions/leak_audit_llm_judge_20261011.md`）后，`leak_threshold` 配置字段已删除，`curate_bank` 里那个从未被使用的同名必填形参成了遗留：D8 那波改动让阶段 5 传占位值 0.0 顶住签名。本次把它彻底删掉：`composites/curation.py` 的 `curate_bank` 签名、模块与函数 docstring 里的说明、`stages/stage5_curation.py` 的占位传参一并去除，grep 确认仓库内无其他调用方（`tests/unit/core/test_config.py` 里只剩 D8 自己关于配置字段已删的字符串）。README 阶段 0 的冻结清单同步删去已不存在的"泄题阈值"一项。运行 `.venv/bin/python -m pytest -q`：1253 个测试全过，3 个 live 冒烟默认免跑。全部改动未提交。
+
+工件：`src/expedistill/composites/curation.py`、`src/expedistill/stages/stage5_curation.py`、`tests/composites/{test_curation,test_curation_resume}.py`、`README.md`
+
+## 2026-10-11 16:50 — 两个 benchmark 全链路试点（阶段 0–6，真实模型）跑通
+
+用真实 CLI `expedistill run` 与真实端点（强 DEEPSEEK_up5zdj / 弱 qwen3.6-flash-distill）完成 SearchQA 与 ALFWorld 的全流程试点，均逐段 `--until-stage 1..6` 推进、跑完原样续跑零成本验证。SearchQA（`configs/experiments/pilot_searchqa.yaml`，6 题）：F=2、库 1 条 skill（236 token）、delta=0（1 题转好 1 题转差抵消；EM 主口径下近失算全错，催生 sub_EM 预注册辅助口径）；ALFWorld（`configs/experiments/pilot_alfworld.yaml`，4 题）：F=1、库 1 条（263 token）、delta=+0.25（F 题 7 步由败转胜，n=1 无统计意义）。成本：SearchQA 37 分钟、75 请求、in 11.6 万 / out 5.9 万；ALFWorld 111 分钟（约 80 分钟耗于端点对弱模型请求挂起、每次烧满 300s 超时）、165 请求、in 31.1 万 / out 15 万。
+
+试点发现并随后修复（各条由子代理测试先行落地，见当日 16:42 / 16:55 等条目）：① 客户端超时不可配 → 新增 `--llm-timeout` 运行参数；② 错误路径落盘丢 finish_reason → 客户端异常携带该值；③ summary 缺 cached_tokens → 按角色折叠输出；④ 机械泄题审计误杀（缩写无词边界、协议词当保护实体，两试点共误杀 1-2 个 skill）→ 按用户决定整体替换为 LLM 判官（`auditor` 角色，判决按（skill, 版本）落盘、首判为准，理由不复述参考答案，`leak_threshold` 配置项删除，`docs/decisions/leak_audit_llm_judge_20261011.md`）；⑤ EM 近失问题 → sub_EM 预注册为辅助口径（插件声明、manifest 冻结、与主口径并列报告永不事后挑选，`docs/decisions/aux_metric_preregistration_20261011.md`）；⑥ K5 无合并轮跳过分组与 README 不符 → ≥2 条成员必跑 G9。待办：阶段 6 曾发生一次驱动进程无痕死亡（无 traceback / 崩溃报告，续跑兜住，未定位）；考题难度（6/9 候选因弱模型裸答即对被弃）按用户决定暂不改，待更大试点量化。运行 `.venv/bin/python -m pytest -q`：1253 个测试全过，3 个 live 冒烟默认免跑。
+
+工件：`configs/experiments/pilot_searchqa.yaml`、`configs/experiments/pilot_alfworld.yaml`、`runs/pilot_searchqa_20261011/`、`runs/pilot_alfworld_20261011_150000/`；修复涉及 `llm/client.py`、`llm/call.py`、`blocks/audit.py`、`prompts/audit.py`、`composites/acceptance.py`、`composites/curation.py`、`blocks/metrics.py`、`benchmarks/base.py`、`benchmarks/searchqa/plugin.py`、`stages/{pipeline,stage0_freeze,stage1_baseline,stage4_acceptance,stage5_curation,stage6_test}.py`、`cli.py`、`infra/usage.py`。
+
+## 2026-10-11 17:05 — 合并主线（3db8447 试点修复）到 dev，统一超时开关
+
+把主线新提交 3db8447（SearchQA/ALFWorld 全链路试点后的六项修复：LLM 判官泄题审计、
+sub_EM 预注册辅助指标、--llm-timeout、finish_reason/cached_tokens 记账、K5 ≥2 成员必跑
+G9、试点配置）合入 dev。冲突四处：llm/call.py 与 client.py 取两侧并集（TB 的 usage 随异常
+携带 + 主线的 finish_reason 记录与超时参数化）；test_client.py 保留 TB 的超集测试、删主线
+被覆盖的两条；log.md 双方条目按时间全保留。一处取捨：TB 侧临时的
+EXPEDISTILL_LLM_TIMEOUT_SECONDS 环境变量删除，统一走主线 --llm-timeout 运行参数——
+pipeline 总是显式传超时，环境变量会被默认值静默盖掉，留双开关是陷阱（决定文档已加更正注）。

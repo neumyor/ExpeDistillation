@@ -374,3 +374,53 @@ def test_live_one_task_against_eval_repo(tmp_path):
     assert outcome.status == "success", outcome.meta
     assert outcome.meta["termination"] == "terminated"
     assert outcome.meta["searchqa"]["em"] == 1.0
+
+
+# ----------------------------------------------------------------------
+# Pre-registered auxiliary metric: sub_EM (README D3 / stage 1 / stage 6)
+# ----------------------------------------------------------------------
+
+def _aux_traj(status, meta):
+    from expedistill.core.models import Trajectory
+    return Trajectory(
+        trajectory_id="traj/searchqa:q1/weak/00", task_id="searchqa:q1",
+        benchmark="searchqa", model_role="weak", model_name="m",
+        attempt_index=0, status=status, meta=meta)
+
+
+def test_aux_metric_name_is_declared():
+    # The name is what stage 0 freezes into the manifest ("aux_metric").
+    assert SearchQAPlugin.aux_metric_name == "sub_em"
+    assert get_plugin("searchqa").aux_metric_name == "sub_em"
+
+
+def test_aux_success_reads_sub_em_from_the_eval_meta():
+    plugin = SearchQAPlugin()
+    assert plugin.aux_success(_aux_traj("failure", {
+        "termination": "terminated",
+        "searchqa": {"em": 0.0, "f1": 0.5, "sub_em": 1.0}})) is True
+    assert plugin.aux_success(_aux_traj("failure", {
+        "termination": "terminated",
+        "searchqa": {"em": 0.0, "f1": 0.0, "sub_em": 0.0}})) is False
+
+
+def test_aux_success_without_a_submitted_answer_is_false():
+    # A step-budget exhaustion (or a model output error) never reached
+    # Finish, so no answer exists to be a substring of gold: sub_EM is 0.
+    plugin = SearchQAPlugin()
+    assert plugin.aux_success(_aux_traj(
+        "failure", {"termination": "step_budget"})) is False
+    assert plugin.aux_success(_aux_traj(
+        "failure", {"termination": "model_output_error"})) is False
+
+
+def test_aux_success_missing_meta_where_a_score_must_exist_is_a_bug():
+    # A success was only possible through a scored Finish, and a terminated
+    # episode always scored one: a missing eval meta there is broken data,
+    # not a measurement -- strict, never silently False.
+    from expedistill.infra.reliability import CodeBugError
+    plugin = SearchQAPlugin()
+    with pytest.raises(CodeBugError, match="searchqa"):
+        plugin.aux_success(_aux_traj("success", {"termination": "terminated"}))
+    with pytest.raises(CodeBugError, match="searchqa"):
+        plugin.aux_success(_aux_traj("failure", {"termination": "terminated"}))

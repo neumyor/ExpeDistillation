@@ -168,8 +168,45 @@ def test_summary_complete_run_prints_stages_and_usage(capsys, tmp_path):
     usage_line = next(line for line in captured.out.splitlines()
                       if line.startswith("usage: "))
     totals = json.loads(usage_line[len("usage: "):])
-    assert totals["overall"] == {"in": 3, "out": 5, "request_count": 1}
+    assert totals["overall"] == {"in": 3, "out": 5, "cached_tokens": 0,
+                                  "request_count": 1}
     assert totals["by_role"]["judge"]["request_count"] == 1
+
+
+def test_summary_prints_cached_tokens_from_usage_meta(capsys, tmp_path):
+    # Pilot finding: cached_tokens lived only in usage.jsonl's meta; summary
+    # must fold and show it without a manual re-read.
+    run_dir = tmp_path / "run"
+    _fabricate_ledger(run_dir, STAGE_NAMES)
+    usage_path = run_dir / "llm_requests" / "usage.jsonl"
+    usage_path.parent.mkdir(parents=True)
+    rows = [
+        {"role": "strong", "prompt": "SKILL", "model": "m",
+         "in_tokens": 3927, "out_tokens": 4, "request_id": "r1",
+         "status": "ok",
+         "meta": {"finish_reason": "stop", "cached_tokens": 3712}},
+        {"role": "strong", "prompt": "SKILL", "model": "m",
+         "in_tokens": 100, "out_tokens": 4, "request_id": "r2",
+         "status": "ok", "meta": {"finish_reason": "stop"}},
+        {"role": "weak", "prompt": "ANSWER", "model": "m",
+         "in_tokens": 5, "out_tokens": 1, "request_id": "r3",
+         "status": "ok", "meta": {"cached_tokens": 3}},
+    ]
+    with usage_path.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+
+    code = cli.main(["summary", "--run-dir", str(run_dir)])
+    assert code == 0
+    usage_line = next(line for line in capsys.readouterr().out.splitlines()
+                      if line.startswith("usage: "))
+    totals = json.loads(usage_line[len("usage: "):])
+    assert totals["overall"]["cached_tokens"] == 3715
+    assert totals["by_role"]["strong"]["cached_tokens"] == 3712
+    assert totals["by_role"]["weak"]["cached_tokens"] == 3
+    # in/out are not inflated by the folding.
+    assert totals["overall"]["in"] == 4032
+    assert totals["overall"]["out"] == 9
 
 
 def test_summary_incomplete_run_exits_one(capsys, tmp_path):
@@ -225,6 +262,44 @@ def test_run_passes_infra_retry_settings(monkeypatch, tmp_path):
                             "--llm-infra-backoff", "1.5"]) == 0
     assert calls["llm_infra_retries"] == 0
     assert calls["llm_infra_backoff_seconds"] == 1.5
+
+
+def test_run_passes_llm_timeout(monkeypatch, tmp_path):
+    calls = {}
+    monkeypatch.setattr(cli, "run_pipeline",
+                        lambda **kwargs: calls.update(kwargs))
+    base = ["run", "--config", str(tmp_path / "cfg.yaml"),
+            "--run-dir", str(tmp_path / "run")]
+    assert cli.main(base) == 0
+    assert calls["llm_timeout_sec"] == 300
+    assert cli.main(base + ["--llm-timeout", "120.5"]) == 0
+    assert calls["llm_timeout_sec"] == 120.5
+
+
+def test_resume_command_keeps_llm_timeout(monkeypatch, capsys, tmp_path):
+    import shlex
+
+    def fake_run_pipeline(**kwargs):
+        raise InfrastructureError("1 unit failed on infrastructure")
+
+    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
+                     "--run-dir", str(tmp_path / "r"), "--llm-timeout", "90"])
+    assert code == cli.EXIT_INFRA_RESUMABLE
+    argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
+    assert float(argv[argv.index("--llm-timeout") + 1]) == 90.0
+
+
+def test_llm_timeout_help_documents_the_tradeoff():
+    parser = cli.build_parser()
+    run_parser = parser._subparsers._group_actions[0].choices["run"]
+    help_text = next(action.help for action in run_parser._actions
+                     if "--llm-timeout" in action.option_strings)
+    # Reasoning-max calls legitimately take minutes, so the help must say to
+    # lower the timeout only when the endpoint is unstable (pilot finding:
+    # hung requests each burned the full 300s).
+    assert "reasoning" in help_text
+    assert "unstable" in help_text
 
 
 def test_resume_command_quotes_paths_and_keeps_infra_flags(
@@ -290,6 +365,8 @@ def test_resume_command_keeps_shortfall_and_breaker(
     ("--infra-breaker", "-1", "infra_breaker"),
     ("--llm-infra-retries", "-2", "llm_infra_retries"),
     ("--llm-infra-backoff", "nan", "llm_infra_backoff_seconds"),
+    ("--llm-timeout", "0", "llm_timeout_sec"),
+    ("--llm-timeout", "nan", "llm_timeout_sec"),
     ("--workers", "0", "workers"),
     ("--until-stage", "-1", "until_stage"),
     ("--until-stage", "7", "until_stage"),

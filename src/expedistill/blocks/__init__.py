@@ -4,8 +4,7 @@ happens in composites/, and prompts/model calls come from the layers below."""
 # Redundant-alias re-exports (no shared __all__: several agents append here,
 # each exporting its own block's names).
 from expedistill.blocks.audit import (
-    extract_specifics as extract_specifics,
-    leak_audit as leak_audit,
+    audit_leak as audit_leak,
 )
 from expedistill.blocks.exam import answer as answer, judge as judge
 from expedistill.blocks.metrics import (

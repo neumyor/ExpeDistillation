@@ -429,6 +429,13 @@ def call_model(
                 retry = (isinstance(exc, InfrastructureError)
                          and infra_attempt < handle.infra_retries)
                 meta: Dict[str, Any] = {"error": type(exc).__name__}
+                # A client-raised ModelOutputError (empty content) can carry
+                # the provider's finish_reason as an attribute; record it in
+                # the usage row and the dump instead of None so "budget
+                # burned on reasoning" stays diagnosable from the ledgers.
+                failed_finish_reason = getattr(exc, "finish_reason", None)
+                if failed_finish_reason is not None:
+                    meta["finish_reason"] = failed_finish_reason
                 if isinstance(exc, InfrastructureError):
                     meta.update(infra_attempt=infra_attempt, retried=retry)
                 # A ModelOutputError from the client may carry the usage of
@@ -448,7 +455,7 @@ def call_model(
                           infra_attempt=infra_attempt, system=system,
                           request_text=current_user, response_text=None,
                           parsed=None, in_tokens=exc_in, out_tokens=exc_out,
-                          finish_reason=getattr(exc, "finish_reason", None),
+                          finish_reason=failed_finish_reason,
                           duration_ms=duration_ms, status="error",
                           error=type(exc).__name__)
                 if not retry:

@@ -17,7 +17,7 @@ from expedistill.prompts.registry import (
 )
 
 # Importing the modules registers their prompts in PROMPTS.
-from expedistill.prompts import author, curate, exam, llm, segment  # noqa: F401
+from expedistill.prompts import audit, author, curate, exam, llm, segment  # noqa: F401
 
 #: Names of the method prompts (everything this package registers). Exact by
 #: import order: a plugin can only call ``register`` after importing this

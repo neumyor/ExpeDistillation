@@ -54,7 +54,6 @@ def run(ctx: Any) -> Dict[str, Any]:
         curator_handle=ctx.handle("curator"),
         bank_token_budget=ctx.config.bank_token_budget,
         curation_rounds=ctx.config.curation_rounds,
-        leak_threshold=ctx.config.leak_threshold,
         usage=ctx.usage,
         run_dir=ctx.run_dir,
     )

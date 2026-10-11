@@ -164,6 +164,11 @@ def _script(system: str, user: str) -> str:
             return ("The skill applies. Inspect the state first, then act. "
                     "Final answer: inspect the state first.")
         return "I have no idea what should be done here."
+    if user.startswith("Judge whether the skill below leaks"):
+        # D8 leak audit: the skills this harness scripts are generic method
+        # advice, so the judge never finds protected answer material in them
+        # and every version passes the audit (the 4-skill bank).
+        return json_script({"leaked": False, "reason": "generic advice"})
     if user.startswith("Grade an exam answer."):
         graded = user.split("ANSWER TO GRADE:", 1)[1]
         if "no idea" in graded:
@@ -184,7 +189,15 @@ def _script(system: str, user: str) -> str:
         return "Inspect the state first. Then take the matching action."
     if user.startswith("You are curating a bank of skills written for a "
                        "weak model. Assign"):
-        return json_script({"groups": {}})
+        # G9 requires every listed skill id to appear in the mapping. The
+        # listing lines are "- <skill_id>: <content>" and the ids themselves
+        # contain colons, so the id is everything before the first ": ".
+        # All scripted skills teach the same ability: one shared group name.
+        ids = [line[2:].split(": ", 1)[0]
+               for line in user.splitlines()
+               if line.startswith("- ")]
+        return json_script({"groups": {skill_id: "state inspection"
+                                       for skill_id in ids}})
     raise AssertionError(f"unexpected prompt text:\n{user[:200]}")
 
 
@@ -265,9 +278,10 @@ def test_pipeline_full_mode_end_to_end(plugin, config_path, tmp_path):
     assert len(read_jsonl(run_dir / "skill_bank.jsonl")) == 4
     # 4 stage-1 executions (strong + weak bare) + 2 stage-6 with-bank runs.
     assert len(plugin.calls) == 6
-    # Model calls: 4 segments + 4 skills + 4 exams + 8 answers + 8 judgments
-    # + 1 similarity (curation found nothing to merge and stayed in budget).
-    assert log.call_count == 29
+    # Model calls: 4 segments + 4 skills + 4 exams + 4 leak audits
+    # + 8 answers + 8 judgments + 1 similarity + 1 grouping (curation found
+    # nothing to merge, but G9 still groups the bank).
+    assert log.call_count == 34
 
 
 def test_pipeline_rerun_makes_no_new_calls(plugin, config_path, tmp_path):
@@ -426,6 +440,7 @@ class _StubSDK:
     def __init__(self, *, base_url, api_key, timeout, max_retries):
         self.base_url = base_url
         self.api_key = api_key
+        self.timeout = timeout
         self.max_retries = max_retries
         self.models = []
         self.chat = types.SimpleNamespace(
@@ -465,6 +480,8 @@ def test_default_client_builder_runs_end_to_end(
     assert {sdk.base_url for sdk in _StubSDK.instances} == {
         "http://dummy-endpoint/v1"}
     assert all(sdk.max_retries == 0 for sdk in _StubSDK.instances)
+    # The default client timeout stays 300 unless the run setting overrides.
+    assert all(sdk.timeout == 300 for sdk in _StubSDK.instances)
     # Each client is only ever asked for its own model.
     assert sorted(set(sdk.models) for sdk in _StubSDK.instances
                   if sdk.models) == [{"strong-model"}, {"weak-model"}]
@@ -478,6 +495,25 @@ def test_default_client_builder_missing_env_is_config_error(
     monkeypatch.delenv(API_KEY_ENV, raising=False)
     with pytest.raises(ConfigError, match=ENDPOINT_ENV):
         run_pipeline(config_path=config_path, run_dir=tmp_path / "run")
+
+
+def test_llm_timeout_sec_reaches_every_default_client(
+        plugin, config_path, tmp_path, monkeypatch):
+    import openai
+
+    from expedistill.llm.client import API_KEY_ENV, ENDPOINT_ENV
+
+    monkeypatch.setenv(ENDPOINT_ENV, "http://dummy-endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "dummy-key")
+    _StubSDK.instances = []
+    monkeypatch.setattr(openai, "OpenAI", _StubSDK)
+
+    run_pipeline(config_path=config_path, run_dir=tmp_path / "run",
+                 llm_timeout_sec=120.5)
+
+    # One client per unique model, each built with the run's timeout.
+    assert len(_StubSDK.instances) == 2
+    assert all(sdk.timeout == 120.5 for sdk in _StubSDK.instances)
 
 
 # ---------------------------------------------------------------------------
@@ -562,9 +598,9 @@ def test_transient_infra_error_is_retried_and_run_completes(
     assert result["delta"]["avg_at_n"] == 1.0
     assert failures["left"] == 0
     # The failed request was resent once after the first backoff step; the
-    # rest of the conversation is the same 29 calls as a clean run.
+    # rest of the conversation is the same 34 calls as a clean run.
     assert waits == [5.0]
-    assert sum(len(client.calls) for client in clients) == 30
+    assert sum(len(client.calls) for client in clients) == 35
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +700,12 @@ def test_infra_breaker_reaches_every_k1_call(
     ("llm_infra_backoff_seconds", -0.5),
     ("llm_infra_backoff_seconds", float("nan")),
     ("llm_infra_backoff_seconds", float("inf")),
+    ("llm_timeout_sec", 0),
+    ("llm_timeout_sec", -30),
+    ("llm_timeout_sec", float("nan")),
+    ("llm_timeout_sec", float("inf")),
+    ("llm_timeout_sec", True),
+    ("llm_timeout_sec", "300"),
     ("infra_breaker", -1),
     ("allow_infra_shortfall", "yes"),
     ("until_stage", -1),
@@ -757,7 +799,7 @@ def test_stopped_run_resumes_with_no_extra_calls_for_finished_stages(
 
     # Continue to the end: the finished stages 0-1 add nothing. The only new
     # executions are stage 6's two with-bank runs; the fresh model calls are
-    # exactly the stages 2-5 conversation (the same 29 a clean run spends).
+    # exactly the stages 2-5 conversation (the same 34 a clean run spends).
     second_log = ClientLog()
     result = run_pipeline(
         config_path=config_path, run_dir=run_dir,
@@ -767,7 +809,7 @@ def test_stopped_run_resumes_with_no_extra_calls_for_finished_stages(
     new_calls = plugin.calls[4:]
     assert len(new_calls) == 2
     assert all(call["with_skills"] for call in new_calls)
-    assert second_log.call_count == 29
+    assert second_log.call_count == 34
     # The resume re-ran stages 0-1 (finding everything finished) and then
     # 2-6: the ledger keeps the full history, one fresh line per stage.
     lines = read_jsonl(ledger_path(run_dir))

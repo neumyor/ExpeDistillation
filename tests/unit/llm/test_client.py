@@ -16,7 +16,6 @@ from expedistill.infra.reliability import (
 from expedistill.llm.client import (
     API_KEY_ENV,
     ENDPOINT_ENV,
-    TIMEOUT_ENV,
     OpenAICompatClient,
 )
 
@@ -98,6 +97,16 @@ def test_from_env_missing_variables_raise_config_error(monkeypatch):
         OpenAICompatClient.from_env()
 
 
+def test_from_env_passes_timeout_sec_to_sdk(monkeypatch, stub_sdk):
+    # The client timeout is a run setting threaded from the CLI/CLI tests
+    # through the pipeline into from_env; the default stays 300.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk()
+    OpenAICompatClient.from_env(timeout_sec=120.5)
+    assert StubSDKClient.last.init_kwargs["timeout"] == 120.5
+
+
 def test_from_env_blank_value_counts_as_missing(monkeypatch):
     monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
     monkeypatch.setenv(API_KEY_ENV, "   ")
@@ -117,42 +126,6 @@ def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
     assert StubSDKClient.last.init_kwargs["max_retries"] == 0
     # The wrapper itself must never hold the key.
     assert not hasattr(client, "api_key")
-
-
-def test_from_env_without_timeout_env_keeps_default_300(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "secret-key")
-    monkeypatch.delenv(TIMEOUT_ENV, raising=False)
-    stub_sdk()
-    OpenAICompatClient.from_env()
-    assert StubSDKClient.last.init_kwargs["timeout"] == 300
-
-
-def test_from_env_timeout_env_override_reaches_sdk(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "secret-key")
-    monkeypatch.setenv(TIMEOUT_ENV, "90.5")
-    stub_sdk()
-    OpenAICompatClient.from_env()
-    assert StubSDKClient.last.init_kwargs["timeout"] == 90.5
-
-
-def test_from_env_timeout_env_non_numeric_raises_config_error(monkeypatch):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "secret-key")
-    monkeypatch.setenv(TIMEOUT_ENV, "soon")
-    with pytest.raises(ConfigError, match=TIMEOUT_ENV):
-        OpenAICompatClient.from_env()
-
-
-@pytest.mark.parametrize("bad", ["0", "-30"])
-def test_from_env_timeout_env_non_positive_raises_config_error(
-        monkeypatch, bad):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "secret-key")
-    monkeypatch.setenv(TIMEOUT_ENV, bad)
-    with pytest.raises(ConfigError, match=TIMEOUT_ENV):
-        OpenAICompatClient.from_env()
 
 
 def test_complete_roundtrip_with_usage(monkeypatch, stub_sdk):

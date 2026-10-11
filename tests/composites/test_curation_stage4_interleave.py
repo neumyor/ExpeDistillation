@@ -35,7 +35,7 @@ def _stage4_ctx(store):
         benchmark="tb", mode="full",
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
-        weak_profile="weak", retry_limit=1, leak_threshold=0.5)
+        weak_profile="weak", retry_limit=1)
     # Scripted so that a stage 4 which DID drive the merged skill would
     # accept it on the first try (bare answer wrong, with-skill right).
     handles = {
@@ -44,6 +44,7 @@ def _stage4_ctx(store):
             json_script({"verdict": "incorrect", "error_description": "x"}),
             json_script({"verdict": "correct", "error_description": ""})]),
         "rewriter": make_fake_handle("rewriter", []),
+        "auditor": make_fake_handle("auditor", []),
     }
     return StageContext(run_dir=store.run_dir, store=store, config=config,
                         usage=None, handles=handles,

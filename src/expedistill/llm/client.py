@@ -28,18 +28,12 @@ from expedistill.infra.reliability import (
 __all__ = [
     "API_KEY_ENV",
     "ENDPOINT_ENV",
-    "TIMEOUT_ENV",
     "CompletionResult",
     "OpenAICompatClient",
 ]
 
 ENDPOINT_ENV = "EXPEDISTILL_LLM_ENDPOINT"
 API_KEY_ENV = "EXPEDISTILL_LLM_API_KEY"
-TIMEOUT_ENV = "EXPEDISTILL_LLM_TIMEOUT_SECONDS"
-
-#: Default per-request timeout (seconds); a weak-model ANSWER has been
-#: observed to hit exactly 300s, hence the env override.
-DEFAULT_TIMEOUT_SEC = 300.0
 
 #: finish_reason values that mean the provider refused the content policy.
 _REFUSAL_FINISH_REASONS = frozenset({"content_filter"})
@@ -56,27 +50,6 @@ def _status_is_permanent(status: Any) -> bool:
     return isinstance(status, int) and 400 <= status < 500 \
         and status not in TRANSIENT_HTTP_STATUSES
 
-
-def _env_timeout() -> float:
-    """Read EXPEDISTILL_LLM_TIMEOUT_SECONDS, same validation style as the
-    other optional env knobs (e.g. the TB plugin's _env_float): a malformed
-    or non-positive value is a ConfigError, an unset/blank one keeps the
-    default. Read here in from_env (config resolution point), not per call,
-    so one run holds one timeout."""
-    raw = os.environ.get(TIMEOUT_ENV, "")
-    if not raw.strip():
-        return DEFAULT_TIMEOUT_SEC
-    try:
-        value = float(raw)
-    except ValueError:
-        raise ConfigError(
-            f"{TIMEOUT_ENV} must be a number, got {raw!r}"
-        ) from None
-    if value <= 0:
-        raise ConfigError(
-            f"{TIMEOUT_ENV} must be positive, got {value!r}"
-        ) from None
-    return value
 
 
 @dataclass(frozen=True)
@@ -153,7 +126,7 @@ class OpenAICompatClient:
     """
 
     def __init__(self, endpoint: str, api_key: str,
-                 timeout_sec: float = DEFAULT_TIMEOUT_SEC):
+                 timeout_sec: float = 300.0):
         # Imported lazily so test doubles can patch this attribute without
         # importing the SDK for registry-only use.
         from openai import OpenAI
@@ -168,8 +141,13 @@ class OpenAICompatClient:
         )
 
     @classmethod
-    def from_env(cls) -> "OpenAICompatClient":
+    def from_env(cls, timeout_sec: float = 300) -> "OpenAICompatClient":
         """Build a client from EXPEDISTILL_LLM_ENDPOINT / EXPEDISTILL_LLM_API_KEY.
+
+        ``timeout_sec`` is the per-request client timeout, a run setting
+        threaded in from the pipeline (an unstable endpoint that hangs
+        otherwise burns the full default per request); it is NOT frozen into
+        the manifest.
 
         A missing variable is a configuration error, not an infrastructure
         error: it stops the run immediately. The message points at
@@ -188,8 +166,7 @@ class OpenAICompatClient:
                 + ", ".join(missing)
                 + "; copy .env.example to .env and fill them in (never commit .env)"
             )
-        return cls(endpoint=endpoint, api_key=api_key,
-                   timeout_sec=_env_timeout())
+        return cls(endpoint=endpoint, api_key=api_key, timeout_sec=timeout_sec)
 
     def complete(
         self,
@@ -261,15 +238,18 @@ class OpenAICompatClient:
             # reasoning and produced no answer; recording it as ok would
             # waste the step's budget silently. The finish_reason is in the
             # message so operators can tell "budget burned on reasoning"
-            # from "model chose silence" (finish_reason="stop").
+            # from "model chose silence" (finish_reason="stop"), and travels
+            # as an attribute so call_model records it in the usage row and
+            # request dump instead of None.
             why = "no content" if content is None \
                 else "empty or whitespace-only content"
-            raise ModelOutputError(
+            error = ModelOutputError(
                 f"model {model} returned {why} "
                 f"(finish_reason={finish_reason!r})",
                 usage=usage,
                 finish_reason=finish_reason,
             )
+            raise error
         return CompletionResult(
             text=content,
             in_tokens=(usage or {}).get("prompt_tokens"),

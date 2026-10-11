@@ -14,6 +14,15 @@ and stage-6 numbers stay comparable with the reference pipeline:
 * ``pass@N`` -- the share of tasks with at least one success among their
   valid trials; an infra-only task counts in the denominator but can never
   pass, matching tb_stats.py.
+* the AUXILIARY metric -- an optional, plugin-declared second success
+  notion (e.g. SearchQA's sub_EM substring match beside the strict-EM
+  primary) reported ALWAYS alongside the primary under both avg@N
+  disciplines, never swapped in or chosen between after seeing results.
+  The metric stays benchmark-blind here: the caller passes the scorer as a
+  callable and the metric's frozen NAME; the plugin contract
+  (``benchmarks/base.py``) maps trajectories to auxiliary success. An
+  infra/missing unit is never an auxiliary success, and the auxiliary
+  averages use the same denominators as the primary.
 
 ``infra_error`` is never a model failure (README 1.3, E1 row): it is counted
 separately and excluded from valid/success everywhere.
@@ -48,6 +57,7 @@ VALID_STATUSES = ("success", "failure")
 def compute_task_metrics(
     trajectories: List[Trajectory],
     expected: Optional[Mapping[str, int]] = None,
+    aux_scorer: Optional[Callable[[Trajectory], bool]] = None,
 ) -> Dict[str, Dict[str, int]]:
     """Count per-task attempts / valid / success / infra, keyed by raw task_id.
 
@@ -61,6 +71,12 @@ def compute_task_metrics(
     outside ``expected`` is a ValueError -- the caller's unit set and its
     trajectories disagree, and silently widening the denominator would hide
     it. ``expected=None`` counts exactly the given trajectories.
+
+    ``aux_scorer`` (plugin-declared auxiliary metric, module docstring)
+    adds an ``aux_success`` count per task: valid trajectories the scorer
+    accepts. An infra trajectory and an absent expected unit are never
+    auxiliary successes. Without a scorer no key is added, so the per-task
+    dicts keep their exact four-field shape.
     """
     if expected is not None:
         unexpected = sorted({traj.task_id for traj in trajectories}
@@ -70,22 +86,28 @@ def compute_task_metrics(
                 f"trajectories for tasks outside the expected unit set: "
                 f"{unexpected}")
     metrics: Dict[str, Dict[str, int]] = {}
+
+    def new_counts() -> Dict[str, int]:
+        counts = {"attempts": 0, "valid": 0, "success": 0, "infra": 0}
+        if aux_scorer is not None:
+            counts["aux_success"] = 0
+        return counts
+
     seen: Dict[str, Set[int]] = {}
     for traj in trajectories:
         seen.setdefault(traj.task_id, set()).add(traj.attempt_index)
-        per_task = metrics.setdefault(
-            traj.task_id,
-            {"attempts": 0, "valid": 0, "success": 0, "infra": 0})
+        per_task = metrics.setdefault(traj.task_id, new_counts())
         per_task["attempts"] += 1
         if traj.status in VALID_STATUSES:
             per_task["valid"] += 1
+            if aux_scorer is not None and aux_scorer(traj):
+                per_task["aux_success"] += 1
         if traj.status == "success":
             per_task["success"] += 1
         if traj.status == "infra_error":
             per_task["infra"] += 1
     for task_id, n_attempts in (expected or {}).items():
-        per_task = metrics.setdefault(
-            task_id, {"attempts": 0, "valid": 0, "success": 0, "infra": 0})
+        per_task = metrics.setdefault(task_id, new_counts())
         present = {i for i in seen.get(task_id, ()) if 0 <= i < n_attempts}
         missing = n_attempts - len(present)
         per_task["attempts"] += missing
@@ -96,6 +118,7 @@ def compute_task_metrics(
 def summarize(
     task_metrics: Dict[str, Dict[str, int]],
     n_attempts: int,
+    aux_metric: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Aggregate per-task metrics into avg@N / pass@N (definitions above).
 
@@ -112,6 +135,15 @@ def summarize(
     - ``avg_at_n_conservative`` (conservative): tb_stats.py's denominator —
       every task counts, a task with no valid trial contributes 0. Use this
       one when comparing against the TB21 campaign numbers; report both.
+
+    ``aux_metric`` names the plugin-declared auxiliary metric whose per-task
+    ``aux_success`` counts ``task_metrics`` carries (pass the same plugin's
+    scorer to ``compute_task_metrics``); the summary then reports ``aux`` =
+    ``{"metric": <name>, "avg_at_n": ..., "avg_at_n_conservative": ...}``
+    under the SAME two disciplines as the primary. Without a name ``aux`` is
+    None -- the field is always present, never silently dropped, and a name
+    over counts without ``aux_success`` is a ValueError (the wiring forgot
+    the scorer, and a silent zero would fake a measured number).
     """
     n_tasks = len(task_metrics)
     rates = [
@@ -124,6 +156,28 @@ def summarize(
         task_id for task_id, per_task in task_metrics.items()
         if per_task["success"] >= 1
     ]
+    aux: Optional[Dict[str, Any]] = None
+    if aux_metric is not None:
+        without_counts = sorted(
+            task_id for task_id, per_task in task_metrics.items()
+            if "aux_success" not in per_task)
+        if without_counts:
+            raise ValueError(
+                f"summarize(aux_metric={aux_metric!r}) got task metrics "
+                f"without aux_success counts for {without_counts}; pass the "
+                "plugin's auxiliary scorer to compute_task_metrics")
+        aux_rates = [
+            per_task["aux_success"] / per_task["valid"]
+            for per_task in task_metrics.values()
+            if per_task["valid"] > 0
+        ]
+        aux = {
+            "metric": aux_metric,
+            "avg_at_n": (sum(aux_rates) / len(aux_rates)
+                         if aux_rates else None),
+            "avg_at_n_conservative": (sum(aux_rates) / n_tasks
+                                      if n_tasks else 0.0),
+        }
     return {
         "tasks": n_tasks,
         "avg_at_n": sum(rates) / len(rates) if rates else None,
@@ -132,6 +186,7 @@ def summarize(
         "infra_tasks": sorted(
             task_id for task_id, per_task in task_metrics.items()
             if per_task["infra"] > 0),
+        "aux": aux,
     }
 
 
