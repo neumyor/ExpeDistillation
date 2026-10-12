@@ -38,6 +38,32 @@ def _listing(skills: List[Skill]) -> str:
     )
 
 
+_STAGE3_ID_SUFFIX = "/skill"
+
+
+def _normalize_ids(entry: List[str], known: Set[str]) -> Optional[str]:
+    """Deterministic recovery for the mixed-format listing failure mode.
+
+    Round-1+ G7/G9 listings mix stage-3 skill ids (``traj/.../segNN/skill``)
+    with merge ids (``bank/merge/NNNN``, no suffix); models then tend to
+    harmonize to the SHORTER style and drop the ``/skill`` suffix from every
+    stage-3 id (observed on the TB v3 run: all 68 output ids suffix-free,
+    2026-10-12). An unknown id that matches exactly one known id after
+    appending the stage-3 suffix is that id -- the model's grouping intent
+    is recovered, not guessed. Returns the id of the first unrecoverable
+    entry (for the error message), or None when the whole entry normalizes.
+    """
+    for position, item in enumerate(entry):
+        if item in known:
+            continue
+        candidate = item + _STAGE3_ID_SUFFIX
+        if candidate in known:
+            entry[position] = candidate
+            continue
+        return item
+    return None
+
+
 def _validate_id_entries(
         value: Any, known: Set[str], field: str,
         size_ok: Callable[[int], bool], size_message: str) -> List[List[str]]:
@@ -61,9 +87,12 @@ def _validate_id_entries(
                 f"skill ids, got {entry!r}")
         unknown = sorted(item for item in entry if item not in known)
         if unknown:
-            raise ModelOutputError(
-                f"SIMILARITY: {field} entry {entry!r} references skill ids "
-                f"that are not in the input: {unknown}")
+            # The mixed-format recovery runs per entry before the hard error.
+            unrecoverable = _normalize_ids(entry, known)
+            if unrecoverable is not None:
+                raise ModelOutputError(
+                    f"SIMILARITY: {field} entry {entry!r} references skill ids "
+                    f"that are not in the input: {[unrecoverable]!r}")
         if not size_ok(len(entry)):
             raise ModelOutputError(
                 f"SIMILARITY: {field} entry {entry!r} is invalid: "

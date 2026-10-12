@@ -257,3 +257,56 @@ def test_assign_groups_groups_field_not_object():
     with pytest.raises(ModelOutputError) as excinfo:
         assign_groups(SKILLS, handle)
     assert "groups" in str(excinfo.value)
+
+
+def test_find_similar_normalizes_missing_skill_suffix():
+    """Mixed-format listings make models harmonize to the shorter id style.
+
+    Round 1+ listings mix stage-3 ids (traj/.../segNN/skill) with merge ids
+    (bank/merge/NNNN, no suffix); the model then drops the /skill suffix from
+    the stage-3 ids (observed twice on the TB v3 run, 2026-10-12: all 68
+    output ids missing the suffix). The deterministic recovery: an unknown id
+    that matches exactly one known id after appending "/skill" is that id.
+    """
+    from expedistill.core.models import Skill
+    from expedistill.blocks.curate import find_similar
+
+    s1 = Skill(skill_id="traj/tb:t1/strong/00/seg00/skill", content="alpha",
+               subtask_id="traj/tb:t1/strong/00/seg00")
+    s2 = Skill(skill_id="traj/tb:t1/strong/00/seg01/skill", content="beta",
+               subtask_id="traj/tb:t1/strong/00/seg01")
+    m1 = Skill(skill_id="bank/merge/0000", content="merged", version=1,
+               status="accepted", subtask_id="traj/tb:t1/strong/00/seg00",
+               merged_from=["traj/tb:t1/strong/00/seg00/skill"])
+    script = [
+        json_script({
+            "similar_groups": [
+                ["traj/tb:t1/strong/00/seg00", "bank/merge/0000"],
+                ["traj/tb:t1/strong/00/seg01", "traj/tb:t1/strong/00/seg00"],
+            ],
+            "conflicts": [["traj/tb:t1/strong/00/seg01", "bank/merge/0000"]],
+        })
+    ]
+    handle = make_fake_handle(script=script)
+    groups, conflicts = find_similar([s1, s2, m1], handle)
+    assert groups == [
+        ["traj/tb:t1/strong/00/seg00/skill", "bank/merge/0000"],
+        ["traj/tb:t1/strong/00/seg01/skill", "traj/tb:t1/strong/00/seg00/skill"],
+    ]
+    assert conflicts == [["traj/tb:t1/strong/00/seg01/skill", "bank/merge/0000"]]
+
+
+def test_find_similar_rejects_ambiguous_suffix_free_ids():
+    """A suffix-free id that matches nothing even after '/skill' is still an error."""
+    from expedistill.core.models import Skill
+    from expedistill.blocks.curate import find_similar
+
+    s1 = Skill(skill_id="traj/tb:t1/strong/00/seg00/skill", content="alpha",
+               subtask_id="traj/tb:t1/strong/00/seg00")
+    script = [json_script({
+        "similar_groups": [["traj/tb:t1/strong/00/seg00", "traj/tb:t9/nope"]],
+        "conflicts": [],
+    })]
+    handle = make_fake_handle(script=script)
+    with pytest.raises(ModelOutputError, match="traj/tb:t9/nope"):
+        find_similar([s1], handle)

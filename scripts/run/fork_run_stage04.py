@@ -100,6 +100,7 @@ def main() -> int:
         ".config.bank_token_budget",
         ".config.model_options.deepseek-v4-flash-0731--ali.max_tokens",
         ".config.token_budgets",
+        ".config.schema_version",
     )
     unexpected = [x for x in d if not any(
         x == p or x.startswith(p + ".") for p in allowed_prefixes)]

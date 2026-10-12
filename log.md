@@ -374,3 +374,18 @@ length 截断对照）；(4) 迁移：三份配置按行为保持表迁移（强
 `src/expedistill/infra/usage.py`、`src/expedistill/cli.py`、`configs/experiments/*.yaml`（3 份）、
 `scripts/run/{build_skillopt_split_configs,fork_run_stage04}.py`、`scripts/smoke/smoke_tb_distill_chain.py`、
 `runs/tb21_full_20261011_2242/INVALID.md`。
+
+## 2026-10-12 22:35 — TB v3 阶段 5 单轮收官（波次并行+新预算首跑）；id 后缀归一化
+
+v3 run（runs/tb21_full_v3_212702）阶段 5 首跑暴露混合格式清单的系统性失败：清单首次同时含
+长 id（traj/.../segNN/skill）与短 id（bank/merge/NNNN），模型把格式统一成短的——两次 G7 输出
+全部 68 个 id 缺 /skill 后缀（v1 从未触发因当时清单格式单一）。根源修复在验证层：_normalize_ids
+对未知 id 补 /skill 后若唯一匹配即采纳（模型的分组意图恢复而非重掷；歧义仍报错）。修复后首跑：
+G7 通过（65536 预算生效、requested_max_tokens/estimated_in 观测字段全上线）、23 单元波次派发
+（5 分钟 52 次调用全 ok）、单轮收官：6 kept / 15 回归撤销 / 2 skipped，97 条成员、62 能力分组、
+81,280 估算 token ≤ 96,000。merge/0008 截断修复生效（3 来源恢复、作为候选重入本轮）。
+fork 白名单补 .config.schema_version。阶段 6 以爬坡方案启动（8→16→24→32，纠正首启 32 的
+偏离；在飞 trial 由提交记录+远程 meta 重连零损失）。pytest 1440 passed。
+
+工件：`src/expedistill/blocks/curate.py`、`tests/unit/blocks/test_curate.py`、
+`scripts/run/fork_run_stage04.py`、run `runs/tb21_full_v3_212702/`。
