@@ -404,3 +404,18 @@ _upload_launch_files 对别名 mkdir+上传同一 SKILL.md——两种拼法都�
 修复生效后由下次派发自然恢复。测试先行（双拼法上传 + 无点名单文件）。pytest 1441。
 
 工件：`src/expedistill/benchmarks/tb/plugin.py`、`tests/unit/benchmarks/test_tb_plugin.py`。
+
+## 2026-10-13 09:40 — 阶段 6 卡滞诊断与恢复；启动器无缓冲化
+
+阶段 6 在 04:50 重启后的驱动上停摆 3.5 小时：0% CPU、30 线程锁等待、零新提交、零存储增长，
+只有 4 个旧 trial 的重连轮询在跑（进程样本 sample 证实）。三个假说逐一排除（磁盘双侧充足、
+66 条已存轨迹的续跑输入校验手工重放全过、classify 对坏 result 结构安全）。真凶线索最终来自
+两处：(a) console 日志因 stdout 块缓冲"说谎"——04:50 重启的 stage5 摘要一直躺在缓冲区里，
+日志尾部显示的 stage 行全部来自更早的重启，误导诊断近一小时；(b) 杀掉后以 PYTHONUNBUFFERED=1
+重启，前 90 秒即恢复 15 个新提交、stage5 摘要即时落盘——卡滞未复现（最可能为 04:50 恢复时
+32 worker 同时 ssh 探测触发的端点侧瞬时故障，致命异常被池排空机制扣住未及打印即被杀）。
+修复：launch_detached.py 默认给子进程注入 PYTHONUNBUFFERED=1（console 日志必须实时）。
+当前驱动（driver_stage6_dbg）健康运转：72/267 已存、派发与存储稳定增长。教训入档：
+诊断 hang 时第一步先确认日志缓冲，而不是相信日志尾部。
+
+工件：`scripts/smoke/launch_detached.py`、run `runs/tb21_full_v3_212702/`（driver_stage6_dbg）。

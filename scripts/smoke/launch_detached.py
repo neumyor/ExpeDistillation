@@ -53,10 +53,16 @@ def main() -> int:
     # start_new_session=True = os.setsid() in the child: its own session and
     # process group, immune to the launcher's death (outer AGENTS.md rule 7).
     with open(args.log, "ab") as log_fh:
+        # Console log must be live: the child's stdout is block-buffered
+        # otherwise, and during the 2026-10-13 stage-6 stall the buffer hid
+        # the current restart's progress entirely (the log showed only old
+        # restarts' lines), which sent the diagnosis down wrong paths.
+        env = dict(os.environ, PYTHONUNBUFFERED="1")
         proc = subprocess.Popen(
             command,
             stdout=log_fh,
             stderr=subprocess.STDOUT,
+            env=env,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
         )
