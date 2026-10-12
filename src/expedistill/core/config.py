@@ -24,6 +24,23 @@ a plugin may reject it, TB does), a list of raw task ids, or a path to a
 task file whose format the plugin defines. ``load_config`` resolves a
 relative path against the config file's directory.
 
+``token_budgets`` (schema v2) is the single source of every call's token
+caps: a required ``default_max_output_tokens`` whenever the mapping is
+present, an optional global ``max_input_tokens`` (null = measure only),
+and optional per-role entries under ``roles``.
+``max_output_tokens_for`` resolves a role's effective cap and fails closed
+when no budgets are configured. ``model_options`` must not carry
+``max_tokens`` (or any request-shape key): a second budget source silently
+won or lost against the real one depending on merge order.
+
+Schema v2 also makes config files fail loud: unknown top-level keys and
+schema versions from the future are ConfigErrors instead of being silently
+dropped. The trap this closes: a new config run by old code dropped
+``token_budgets`` without a trace and fell back to the dead 5120 default
+(5120 was burned end-to-end by reasoning-max models on 2026-10-11; 65536
+is the endpoint-verified safe ceiling for that family; a cap is a ceiling,
+not a spend).
+
 Deviation from the layer rule "core depends on stdlib only": ``load_config`` /
 ``save_config`` need YAML, and the wave spec places them here. The ``yaml``
 import is function-local so that importing the data model never pulls the
@@ -62,7 +79,34 @@ DEFAULT_RULES = {
 _SPLIT_LIST_KEYS = ("train", "test")
 _SPLIT_RATIO_KEYS = ("ratio", "seed")
 
-CONFIG_SCHEMA_VERSION = 1
+#: Chat-call keys ``model_options`` must never carry (schema v2):
+#: ``max_tokens`` is owned by ``token_budgets`` -- a second source silently
+#: won or lost against the real one depending on merge order -- and the rest
+#: are not provider knobs: ``model``/``messages``/``stream`` ARE the request,
+#: and ``temperature`` belongs to the client, not the experiment identity.
+#: model_options only forwards per-model sampling knobs (reasoning_effort).
+MODEL_OPTIONS_RESERVED_KEYS = ("max_tokens", "temperature", "model",
+                               "messages", "stream")
+
+#: Keys accepted inside ``token_budgets``.
+_TOKEN_BUDGET_KEYS = ("default_max_output_tokens", "max_input_tokens", "roles")
+
+#: Keys accepted inside one ``token_budgets.roles`` entry.
+_ROLE_BUDGET_KEYS = ("max_output_tokens", "max_input_tokens")
+
+#: v2: ``token_budgets`` added; ``model_options`` reserved keys; config
+#: files fail loud on unknown top-level keys and future schema versions.
+CONFIG_SCHEMA_VERSION = 2
+
+
+class ConfigError(ValueError):
+    """Invalid experiment config: bad shape, unknown key or bad value.
+
+    Defined in core (not imported from infra.reliability) because core is
+    stdlib-only. Subclassing ValueError keeps every existing contract:
+    pipeline.py wraps load_config's ValueErrors into infra's ConfigError for
+    the CLI, and callers matching ValueError keep matching.
+    """
 
 
 def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:
@@ -119,6 +163,91 @@ def _validate_split(split: Dict[str, Any]) -> None:
             f"{{'ratio': float, 'seed': int}}, got keys {sorted(keys)}")
 
 
+def _is_positive_int(value: Any) -> bool:
+    """True for a positive int; bool is an int subclass but never a budget."""
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and value > 0)
+
+
+def _validate_input_cap(value: Any, where: str) -> None:
+    """Check a ``max_input_tokens`` value: positive int, or null.
+
+    Null defers input enforcement until a full run's calibration data
+    exists (converged v1 decision): the threshold only flags, never aborts.
+    The flagging side lives in the call pipeline; here only the type is
+    checked.
+    """
+    if value is None or _is_positive_int(value):
+        return
+    raise ConfigError(
+        f"{where} must be a positive int or null (null = measure only), "
+        f"got {value!r}")
+
+
+def _validate_token_budgets(budgets: Any) -> Dict[str, Any]:
+    """Validate ``token_budgets``; returns a deep copy so the frozen config
+    is never aliased to the caller's mapping (same contract as
+    model_options)."""
+    if not isinstance(budgets, dict):
+        raise ConfigError(
+            f"token_budgets must be a mapping, got {type(budgets).__name__}")
+    unknown = set(budgets) - set(_TOKEN_BUDGET_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"token_budgets has unknown keys {sorted(unknown, key=str)}, "
+            f"expected a subset of {list(_TOKEN_BUDGET_KEYS)}")
+    if not budgets:
+        # Absent/empty: no budgets configured (the helper then fails closed).
+        return {}
+    default = budgets.get("default_max_output_tokens")
+    if not _is_positive_int(default):
+        raise ConfigError(
+            "token_budgets is present but default_max_output_tokens is "
+            "missing or not a positive int; it is required whenever "
+            "token_budgets is given and is the fallback cap for every role "
+            f"without its own entry, got {default!r}")
+    if "max_input_tokens" in budgets:
+        _validate_input_cap(budgets["max_input_tokens"],
+                            "token_budgets.max_input_tokens")
+    roles = budgets.get("roles", {})
+    if not isinstance(roles, dict):
+        raise ConfigError(
+            "token_budgets.roles must be a mapping of role -> budget entry, "
+            f"got {type(roles).__name__}")
+    unknown_roles = set(roles) - set(MODEL_ROLES)
+    if unknown_roles:
+        raise ConfigError(
+            f"token_budgets.roles has unknown roles "
+            f"{sorted(unknown_roles, key=str)}, expected a subset of "
+            f"{list(MODEL_ROLES)}")
+    for role, entry in roles.items():
+        if not isinstance(entry, dict):
+            raise ConfigError(
+                f"token_budgets.roles[{role!r}] must be a mapping with "
+                f"max_output_tokens (and optionally max_input_tokens), "
+                f"got {entry!r}")
+        unknown_keys = set(entry) - set(_ROLE_BUDGET_KEYS)
+        if unknown_keys:
+            raise ConfigError(
+                f"token_budgets.roles[{role!r}] has unknown keys "
+                f"{sorted(unknown_keys, key=str)}, expected a subset of "
+                f"{list(_ROLE_BUDGET_KEYS)}")
+        if not _is_positive_int(entry.get("max_output_tokens")):
+            raise ConfigError(
+                f"token_budgets.roles[{role!r}].max_output_tokens is "
+                "required and must be a positive int; omit the role entry "
+                "to fall back to default_max_output_tokens")
+        if "max_input_tokens" in entry:
+            _validate_input_cap(
+                entry["max_input_tokens"],
+                f"token_budgets.roles[{role!r}].max_input_tokens")
+    frozen = dict(budgets)
+    if "roles" in frozen:
+        frozen["roles"] = {role: dict(entry)
+                           for role, entry in frozen["roles"].items()}
+    return frozen
+
+
 @dataclass
 class ExperimentConfig:
     """All method parameters of one experiment (frozen into the manifest)."""
@@ -152,6 +281,18 @@ class ExperimentConfig:
     #: role makes it. Changes what the model produces, so it is part of the
     #: experiment's frozen identity, not an operational setting.
     model_options: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: Per-role token budgets (schema v2), the single source of every call's
+    #: caps: ``default_max_output_tokens`` (positive int, required when this
+    #: mapping is non-empty) is the fallback for roles without an entry;
+    #: ``max_input_tokens`` (positive int or null = measure only) is global;
+    #: ``roles`` maps MODEL_ROLES names to entries carrying a required
+    #: ``max_output_tokens`` and an optional ``max_input_tokens``. Why the
+    #: defaults are what they are: reasoning-max models burned 5120 entirely
+    #: on thinking (2026-10-11, recorded in configs/experiments/
+    #: tb21_full_v2.yaml), while 65536 is the endpoint-verified safe ceiling
+    #: for that family -- and a cap is a ceiling, not a spend, so capping
+    #: high costs nothing when the answer is short.
+    token_budgets: Dict[str, Any] = field(default_factory=dict)
     schema_version: int = CONFIG_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -212,6 +353,26 @@ class ExperimentConfig:
                 raise ValueError(
                     f"model_options[{name!r}] must be a non-empty dict of "
                     f"chat-call parameters, got {options!r}")
+            reserved = sorted(set(options) & set(MODEL_OPTIONS_RESERVED_KEYS),
+                               key=str)
+            if reserved:
+                guidance = []
+                if "max_tokens" in reserved:
+                    guidance.append(
+                        "max_tokens lives in token_budgets (schema v2): give "
+                        "token_budgets.default_max_output_tokens, and "
+                        "token_budgets.roles.<role>.max_output_tokens for "
+                        "per-role caps")
+                others = [key for key in reserved if key != "max_tokens"]
+                if others:
+                    guidance.append(
+                        "not provider knobs (the client owns the request "
+                        "shape): " + ", ".join(others) + "; model_options "
+                        "only forwards sampling knobs such as "
+                        "reasoning_effort")
+                raise ConfigError(
+                    f"model_options[{name!r}] carries reserved key(s) "
+                    f"{reserved}: " + "; ".join(guidance))
             try:
                 json.dumps(options)
             except (TypeError, ValueError) as exc:
@@ -220,6 +381,10 @@ class ExperimentConfig:
                     f"(it freezes into the manifest): {exc}") from None
         self.model_options = {name: dict(options) for name, options
                               in self.model_options.items()}
+        # Token budgets: validated and deep-copied here, so the frozen config
+        # cannot change through the caller's mapping and stage 0's replace()
+        # re-validation is a no-op on an already-valid structure.
+        self.token_budgets = _validate_token_budgets(self.token_budgets)
 
     def model_for(self, role: str) -> str:
         """Model name for a role (KeyError with the known roles on a typo)."""
@@ -228,6 +393,28 @@ class ExperimentConfig:
         except KeyError:
             raise KeyError(
                 f"unknown model role {role!r}; known: {sorted(self.models)}") from None
+
+    def max_output_tokens_for(self, role: str) -> int:
+        """Effective output cap for a role.
+
+        ``roles[role].max_output_tokens`` when the role has an entry, else
+        ``default_max_output_tokens``. Fails closed when no budgets are
+        configured: returning any number here would resurrect the dead 5120
+        default this schema removed, so the pipeline treats it as a hard
+        config error (every experiment config carries token_budgets).
+        """
+        if not self.token_budgets:
+            raise ConfigError(
+                "token_budgets not configured: add "
+                "token_budgets.default_max_output_tokens to the experiment "
+                "config")
+        if role not in MODEL_ROLES:
+            raise KeyError(
+                f"unknown model role {role!r}; known: {list(MODEL_ROLES)}")
+        entry = self.token_budgets.get("roles", {}).get(role)
+        if entry is not None:
+            return entry["max_output_tokens"]
+        return self.token_budgets["default_max_output_tokens"]
 
     def to_dict(self) -> Dict[str, Any]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
@@ -238,6 +425,28 @@ class ExperimentConfig:
             raise TypeError(
                 f"config must be a mapping, got {type(data).__name__}")
         known = {f.name for f in fields(cls)}
+        # Schema version first, so a record from newer code says "needs
+        # newer code" instead of drowning in unknown-key errors its own
+        # schema would explain. Unlike the data model's from_dict (lenient
+        # for stored records), the config IS the experiment's identity: an
+        # unknown key is a typo or a version mismatch, and dropping it
+        # silently once ran a new config on old code with dead defaults.
+        version = data.get("schema_version", CONFIG_SCHEMA_VERSION)
+        if not isinstance(version, int) or isinstance(version, bool):
+            raise ConfigError(
+                f"schema_version must be an int, got {version!r}")
+        if version > CONFIG_SCHEMA_VERSION:
+            raise ConfigError(
+                f"config schema_version is {version}, newer than this code's "
+                f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
+                "update the repository and retry")
+        unknown = [key for key in data if key not in known]
+        if unknown:
+            raise ConfigError(
+                f"unknown config keys {sorted(unknown, key=str)}; known keys: "
+                f"{sorted(known)}")
+        # The field filter stays: construction only ever receives dataclass
+        # fields, whatever the checks above grow to allow.
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
@@ -254,6 +463,12 @@ def load_config(path: str) -> ExperimentConfig:
     against the config file's directory and stored absolute (``~`` is
     expanded), so the frozen value does not depend on the cwd a run or a
     resume was started from. A ``tasks`` list is kept as is.
+
+    Schema v2 fails loud on the RAW mapping: unknown top-level keys and a
+    schema version from the future are ConfigErrors naming the offender.
+    from_dict re-checks both (defense in depth); the checks here run first
+    so the file's own schema -- the dataclass fields plus the file-only
+    ``weak_profile_file`` key -- is what the error message lists.
     """
     import yaml  # function-local: see the module docstring
 
@@ -267,6 +482,22 @@ def load_config(path: str) -> ExperimentConfig:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
+    version = data.get("schema_version", CONFIG_SCHEMA_VERSION)
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ConfigError(
+            f"{path}: schema_version must be an int, got {version!r}")
+    if version > CONFIG_SCHEMA_VERSION:
+        raise ConfigError(
+            f"{path} has schema_version {version}, newer than this code's "
+            f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
+            "update the repository and retry")
+    known_file_keys = ({f.name for f in fields(ExperimentConfig)}
+                       | {"weak_profile_file"})
+    unknown = [key for key in data if key not in known_file_keys]
+    if unknown:
+        raise ConfigError(
+            f"{path} has unknown top-level key(s) {sorted(unknown, key=str)}; "
+            f"known keys: {sorted(known_file_keys)}")
     profile_file = data.pop("weak_profile_file", None)
     if profile_file is not None:
         if data.get("weak_profile"):

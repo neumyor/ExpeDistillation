@@ -122,6 +122,20 @@ def _build_handles(
 ) -> Dict[str, Any]:
     """One handle per role, one client per unique model name.
 
+    Every handle's ``max_tokens`` comes from the config's token budgets:
+    ``cfg.max_output_tokens_for(role)`` answers a per-role
+    ``max_output_tokens`` override, else the config's
+    ``default_max_output_tokens`` -- role granularity, one budget per role,
+    and never the ModelHandle's built-in default (the dead 5120 is gone
+    from this path). The helper raises ConfigError when the config carries
+    no ``token_budgets``; the failure era that produces is deliberate: the
+    run stops while handles are being built, before stage 0 freezes
+    anything and before any client is built. Budget boundary: only requests
+    through call_model are capped. TB's remote execution arm does NOT go
+    through call_model (the sandbox runs the model behind the TBENCH_* env
+    knobs), so executor output budgets do not apply to that arm -- real
+    TB-side budgets live in those env knobs, not in this table.
+
     Every handle carries the same per-call infra retry settings (call_model
     resends a request that failed with InfrastructureError); they are run
     settings, not method parameters, so they never enter the manifest. The
@@ -148,6 +162,16 @@ def _build_handles(
         return clients[model_name]
 
     def handle_for(role: str) -> Any:
+        # Resolved BEFORE the client is built: a config whose budgets are
+        # unusable fails without touching the endpoint. The helper's
+        # ConfigError is core's (a ValueError subclass); re-raise it as the
+        # infra ConfigError the CLI prints as a clean stop, naming the
+        # config file like every other config failure here.
+        try:
+            budget = cfg.max_output_tokens_for(role)
+        except ValueError as exc:
+            raise ConfigError(
+                f"invalid config {config_path}: {exc}") from exc
         model_name = cfg.models[role]
         return make_handle(
             role, model_name, client_for(model_name),
@@ -155,6 +179,7 @@ def _build_handles(
             # a fresh dict per handle, empty for models the config does not
             # list (never a shared mutable default).
             extra_body=dict(cfg.model_options.get(model_name, {})),
+            max_tokens=budget,
             infra_retries=infra_retries,
             infra_backoff_seconds=infra_backoff_seconds,
         )

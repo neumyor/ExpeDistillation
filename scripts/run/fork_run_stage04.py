@@ -10,8 +10,8 @@ Usage:
 What it does (the 2026-10-12 budget decision, docs/decisions/
 bank_token_budget_20261012.md):
 1. Runs the REAL stage 0 via the CLI (--until-stage 0) to freeze the new
-   config's manifest (the new bank_token_budget; every other field must
-   match the old manifest -- verified below).
+   config's manifest (the new bank_token_budget and token_budgets schema;
+   every other field must match the old manifest -- verified below).
 2. Copies the stage-0..4 products from the old run, keyed by the same
    deterministic IDs (zero model calls):
    - stage1_baseline/trajectories/          (534 files)
@@ -74,7 +74,10 @@ def main() -> int:
         print("error: stage 0 freeze failed", file=sys.stderr)
         return 1
 
-    # the new manifest may differ from the old ONLY in bank_token_budget
+    # the new manifest may differ from the old ONLY in the budget paths
+    # listed below (the 2026-10-12 decisions: bank budget 4096 -> 96000,
+    # the strong model's max_tokens leaving model_options, and the
+    # token_budgets section that value moved into)
     old_m = json.loads((old / "manifest.json").read_text())
     new_m = json.loads((new / "manifest.json").read_text())
 
@@ -88,12 +91,21 @@ def main() -> int:
         return out
 
     d = diffs(old_m, new_m)
-    allowed = {".config.bank_token_budget",
-               ".config.model_options.deepseek-v4-flash-0731--ali.max_tokens"}
-    unexpected = [x for x in d if x not in allowed]
+    # Prefix matching rather than exact paths: an added/removed subtree
+    # (token_budgets) shows up as one path, a changed leaf inside it as
+    # several, and both must count under their section. The "+"-boundary
+    # check keeps a sibling like ".config.bank_token_budget_x" from
+    # matching its prefix by accident.
+    allowed_prefixes = (
+        ".config.bank_token_budget",
+        ".config.model_options.deepseek-v4-flash-0731--ali.max_tokens",
+        ".config.token_budgets",
+    )
+    unexpected = [x for x in d if not any(
+        x == p or x.startswith(p + ".") for p in allowed_prefixes)]
     if unexpected:
-        print(f"error: manifests differ beyond bank_token_budget: "
-              f"{unexpected}", file=sys.stderr)
+        print(f"error: manifests differ beyond the allowed budget paths "
+              f"{list(allowed_prefixes)}: {unexpected}", file=sys.stderr)
         return 1
     if d:
         print("manifest differs only in:", d)

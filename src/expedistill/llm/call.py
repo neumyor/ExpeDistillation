@@ -29,6 +29,7 @@ from expedistill.infra.reliability import (
     InfrastructureError,
     ModelOutputError,
 )
+from expedistill.inject import estimate_tokens
 
 __all__ = [
     "DEFAULT_SYSTEM",
@@ -44,6 +45,18 @@ __all__ = [
 # frozen into the manifest; kept as module-level names for callers/tests.
 DEFAULT_SYSTEM = prompts.get("DEFAULT_SYSTEM")
 REPAIR_INSTRUCTION = prompts.get("REPAIR_INSTRUCTION")
+
+#: Appended to the original prompt when a PLAIN-TEXT reply arrives with
+#: finish_reason="length": the reply was cut off at the output limit, so the
+#: re-ask asks for the complete answer again, more concisely. Same
+#: bounded-re-ask pattern as the empty-content repair; REPAIR_INSTRUCTION is
+#: JSON-specific and must never reach plain-text callers (SKILL_DISTILL,
+#: MERGE).
+_TRUNCATION_NOTE = (
+    "Your previous reply was cut off at the output limit before it was "
+    "complete. Reply again with the complete answer, but more concisely, "
+    "so that it fits within the output limit."
+)
 
 _FENCED_RE = re.compile(r"```(?:json|javascript|js)?\s*(.*?)\s*```", re.S | re.I)
 
@@ -66,13 +79,22 @@ class ModelHandle:
     anything with the ``complete`` signature (OpenAICompatClient, FakeClient,
     or a benchmark runner's adapter).
 
-    ``max_tokens`` defaults to 5120: reasoning models (reasoning_effort=max)
-    need several thousand output tokens, and an uncapped call lets a runaway
-    reasoning trace burn the whole step budget. A per-model override goes
-    through ``extra_body`` (wired from the config's ``model_options``): the
-    client merges ``extra`` into the payload after the handle-level
+    ``max_tokens`` is the output cap call_model sends with every request.
+    It defaults to 5120 for hand-built handles (reasoning models with
+    reasoning_effort=max need several thousand output tokens, and an
+    uncapped call lets a runaway reasoning trace burn the whole step
+    budget); the stage pipeline does NOT rely on that default -- it wires
+    the config's token budgets here via ``cfg.max_output_tokens_for(role)``
+    (see stages.pipeline._build_handles). A per-model override goes through
+    ``extra_body`` (wired from the config's ``model_options``): the client
+    merges ``extra`` into the payload after the handle-level
     ``max_tokens``, so ``extra_body={"max_tokens": 128}`` wins over this
     field.
+
+    ``max_input_tokens`` (default None) never aborts a call: when the
+    pre-request estimate of system+user exceeds it, the usage row's meta
+    carries ``input_violation: true`` -- v1 measures the overflow instead of
+    rejecting the prompt, so real data can calibrate the limit first.
     """
 
     name: str
@@ -80,6 +102,8 @@ class ModelHandle:
     client: Any
     temperature: float = 0.0
     max_tokens: Optional[int] = 5120
+    # Measure-only input ceiling; None = measure nothing (see class doc).
+    max_input_tokens: Optional[int] = None
     # Accounting attachments for callers that thread a handle through layers
     # that do not carry usage/run_dir parameters (E1 -> plugin.run ->
     # run_react -> call_model). call_model falls back to these when its own
@@ -109,6 +133,13 @@ class ModelHandle:
             raise ConfigError(
                 "infra_backoff_seconds must be a finite number >= 0, "
                 f"got {backoff!r}")
+        limit = self.max_input_tokens
+        if limit is not None and (
+                isinstance(limit, bool) or not isinstance(limit, int)
+                or limit <= 0):
+            raise ConfigError(
+                "max_input_tokens must be a positive int or None, "
+                f"got {limit!r}")
 
 
 def make_handle(role: str, model_name: str, client: Any, **kw: Any) -> ModelHandle:
@@ -264,17 +295,56 @@ def _unpack(result: Any) -> Tuple[str, Optional[int], Optional[int],
     )
 
 
+def _exceeds(value: Optional[int], limit: Optional[int]) -> bool:
+    """True when both are known and ``value`` > ``limit``.
+
+    Either side None (unknown tokens / uncapped) means nothing to compare,
+    so no violation -- a flag that fires only on evidence, never on
+    absence of data.
+    """
+    return value is not None and limit is not None and value > limit
+
+
 def _result_meta(finish_reason: Optional[str],
                  cached_tokens: Optional[int],
+                 *,
+                 requested_max_tokens: Optional[int],
+                 estimated_in: int,
+                 cap_violation: bool = False,
+                 input_violation: bool = False,
                  **entries: Any) -> Dict[str, Any]:
-    """Usage-row meta for one answered request: caller entries plus the
-    provider-reported finish_reason (always; unknown as None) and
-    cached_tokens (only when the provider reported it)."""
+    """Usage-row meta for one request: caller entries plus the
+    provider-reported finish_reason (always; unknown as None), cached_tokens
+    (only when the provider reported it), and the budget measurement this
+    module adds to every row: the output cap actually sent
+    (``requested_max_tokens``, None = uncapped), the pre-request estimate of
+    the prompt's own size (``estimated_in``), and the two violation flags
+    (present only when observed).
+    """
     meta: Dict[str, Any] = dict(entries)
     meta["finish_reason"] = finish_reason
     if cached_tokens is not None:
         meta["cached_tokens"] = cached_tokens
+    meta["requested_max_tokens"] = requested_max_tokens
+    meta["estimated_in"] = estimated_in
+    if cap_violation:
+        meta["cap_violation"] = True
+    if input_violation:
+        meta["input_violation"] = True
     return meta
+
+
+def _reask_prompt(user_text: str, outcome: str,
+                  instruction: str = "") -> str:
+    """The shared re-ask shape: the ORIGINAL prompt, a separator, what went
+    wrong with the previous reply, and (for JSON calls) the repair
+    instruction. Rebuilding from the original prompt keeps re-asks from
+    nesting: every attempt quotes the first reply's problem, not the
+    previous re-ask."""
+    suffix = f"\n\n---\n{outcome}"
+    if instruction:
+        suffix += f"\n\n{instruction}"
+    return user_text + suffix
 
 
 def _record(usage: Any, handle: ModelHandle, prompt_name: str, request_id: str,
@@ -383,6 +453,31 @@ def call_model(
     kinds. Every request and response is recorded via ``usage`` and dumped
     under ``run_dir/llm_requests/`` (never the api key).
 
+    Plain-text calls (``output_json=False``) treat a response with
+    finish_reason="length" like empty content: a reply cut off at the output
+    limit is never silently accepted (the truncated-merge-in-bank incident
+    put a half merge into the bank); it consumes the same
+    ``max_format_retries`` budget and is re-asked from the original prompt
+    with a suffix saying the previous reply was cut off and asking for a
+    complete, more concise reply. Exhaustion raises ModelOutputError naming
+    the truncation, so per-unit dispositions downstream handle it honestly.
+    JSON calls reject truncation via ``extract_json`` (a truncated JSON
+    value fails to parse and takes the existing format retry); the length
+    signal still lands in every row's meta either way.
+
+    Every request is measured before it is sent. ``meta.requested_max_tokens``
+    is the output cap actually sent (the handle's ``max_tokens``).
+    ``meta.estimated_in`` is ``estimate_tokens(system + user)`` from
+    expedistill.inject -- ``len(text) // 4``, a budgeting heuristic, not a
+    tokenizer. Known bias: it underestimates terminal-dump-heavy texts by
+    roughly 1.4-1.5x and overestimates prose slightly; the per-row ratio of
+    ``estimated_in`` to the provider's real ``in_tokens`` is the calibration
+    instrument. When the provider reports ``out_tokens`` over the requested
+    cap (the endpoint ignored it), the row carries ``cap_violation: true``.
+    When the handle sets ``max_input_tokens`` and the estimate exceeds it,
+    the row carries ``input_violation: true`` -- measured, never enforced
+    (v1: the call always proceeds).
+
     Transient endpoint failures (``InfrastructureError`` from the client)
     resend the same request up to ``handle.infra_retries`` times with
     exponential backoff; exhaustion re-raises the last error. With
@@ -408,11 +503,18 @@ def call_model(
     current_user = user_text
     retries_used = 0
     infra_total = 0
+    # The output cap actually sent with every request (None = uncapped).
+    requested = handle.max_tokens
     # Sent only when non-empty: a client double without an ``extra``
     # parameter (an old adapter) must keep working for option-less handles.
     extra_kwargs: Dict[str, Any] = (
         {"extra": handle.extra_body} if handle.extra_body else {})
     while True:
+        # Measured BEFORE the request: the estimate covers this exact prompt.
+        # The repair/empty/truncation re-asks below build longer prompts, so
+        # each attempt gets its own row and its own estimate.
+        estimated_in = estimate_tokens(system + current_user)
+        input_violation = _exceeds(estimated_in, handle.max_input_tokens)
         # Infra retries resend the same request; a response arriving proves the
         # endpoint recovered, so each request (the first ask and every repair
         # re-ask) gets the handle's full infra budget.
@@ -453,21 +555,11 @@ def call_model(
                     and (exc.finish_reason is not None
                          or exc.usage is not None))
                 format_retry = format_failure and retries_used < max_format_retries
-                meta: Dict[str, Any] = {"error": type(exc).__name__}
                 # A client-raised ModelOutputError (empty content) can carry
                 # the provider's finish_reason as an attribute; record it in
                 # the usage row and the dump instead of None so "budget
                 # burned on reasoning" stays diagnosable from the ledgers.
                 failed_finish_reason = getattr(exc, "finish_reason", None)
-                if failed_finish_reason is not None:
-                    meta["finish_reason"] = failed_finish_reason
-                if isinstance(exc, InfrastructureError):
-                    meta.update(infra_attempt=infra_attempt, retried=retry)
-                if format_failure:
-                    # Distinguishes a re-asked empty reply from a terminal
-                    # one in the ledger; the success row's format_retries
-                    # counter covers both empty and malformed re-asks.
-                    meta["format_retried"] = format_retry
                 # A ModelOutputError from the client may carry the usage of
                 # the response it rejected (empty content after the budget
                 # burned on reasoning): the spend was real, so the ledger
@@ -478,6 +570,20 @@ def call_model(
                     if isinstance(exc_usage, dict) else None
                 exc_out = exc_usage.get("completion_tokens") \
                     if isinstance(exc_usage, dict) else None
+                meta = _result_meta(
+                    failed_finish_reason, None,
+                    requested_max_tokens=requested,
+                    estimated_in=estimated_in,
+                    cap_violation=_exceeds(exc_out, requested),
+                    input_violation=input_violation,
+                    error=type(exc).__name__)
+                if isinstance(exc, InfrastructureError):
+                    meta.update(infra_attempt=infra_attempt, retried=retry)
+                if format_failure:
+                    # Distinguishes a re-asked empty reply from a terminal
+                    # one in the ledger; the success row's format_retries
+                    # counter covers both empty and malformed re-asks.
+                    meta["format_retried"] = format_retry
                 _record(usage, handle, prompt_name, request_id, exc_in,
                         exc_out, status="error", meta=meta)
                 log.write(handle, prompt_name,
@@ -507,14 +613,11 @@ def call_model(
                     # Same repair-suffix pattern as the malformed-JSON path:
                     # rebuild from the original prompt, quoting the previous
                     # (empty) outcome so the model knows what to fix.
-                    current_user = (
-                        user_text
-                        + "\n\n---\nYour previous reply was empty and could "
-                        "not be parsed:\n"
-                        + str(exc)
-                        + "\n\n"
-                        + REPAIR_INSTRUCTION
-                    )
+                    current_user = _reask_prompt(
+                        user_text,
+                        "Your previous reply was empty and could not be "
+                        "parsed:\n" + str(exc),
+                        REPAIR_INSTRUCTION)
                     LOGGER.warning(
                         "call_model %s (role %s, model %s): empty response "
                         "(finish_reason=%r), format retry %d/%d: %s",
@@ -535,13 +638,64 @@ def call_model(
         text, in_tokens, out_tokens, finish_reason, cached_tokens = \
             _unpack(result)
         duration_ms = int((time.monotonic() - started) * 1000)
+        cap_violation = _exceeds(out_tokens, requested)
 
         if not output_json:
+            if finish_reason == "length":
+                # The truncated-merge-in-bank incident: a plain-text reply
+                # cut off at the output limit used to be silently accepted.
+                # It is now treated like empty content -- the SAME format
+                # budget, a re-ask from the original prompt with a suffix
+                # naming the truncation -- so a truncated skill/merge is
+                # never quietly kept, and exhaustion raises for the
+                # per-unit dispositions downstream.
+                format_retry = retries_used < max_format_retries
+                _record(usage, handle, prompt_name, request_id, in_tokens,
+                        out_tokens, status="format_error",
+                        meta=_result_meta(
+                            finish_reason, cached_tokens,
+                            requested_max_tokens=requested,
+                            estimated_in=estimated_in,
+                            cap_violation=cap_violation,
+                            input_violation=input_violation,
+                            error="response cut off at the output limit "
+                                  "(finish_reason='length')",
+                            format_retried=format_retry))
+                log.write(handle, prompt_name,
+                          request_id=request_id, attempt=retries_used,
+                          infra_attempt=infra_attempt, system=system,
+                          request_text=current_user, response_text=text,
+                          parsed=None, in_tokens=in_tokens,
+                          out_tokens=out_tokens,
+                          finish_reason=finish_reason,
+                          duration_ms=duration_ms, status="format_error")
+                if not format_retry:
+                    raise ModelOutputError(
+                        f"prompt {prompt_name}: response was cut off at the "
+                        f"output limit (finish_reason='length') after "
+                        f"{retries_used + 1} attempt(s)",
+                        finish_reason="length")
+                retries_used += 1
+                current_user = _reask_prompt(user_text, _TRUNCATION_NOTE)
+                LOGGER.warning(
+                    "call_model %s (role %s, model %s): response cut off "
+                    "at the output limit, format retry %d/%d",
+                    prompt_name, handle.role, handle.name, retries_used,
+                    max_format_retries)
+                continue
             # finish_reason is recorded even when None: unknown as unknown
             # (AGENTS.md section 6), never silently absent.
-            meta = _result_meta(finish_reason, cached_tokens)
+            meta = _result_meta(finish_reason, cached_tokens,
+                                requested_max_tokens=requested,
+                                estimated_in=estimated_in,
+                                cap_violation=cap_violation,
+                                input_violation=input_violation)
             if infra_total:
                 meta["infra_retries"] = infra_total
+            if retries_used:
+                # Only plain-text calls that survived a truncation re-ask
+                # carry the counter; a clean plain reply keeps today's meta.
+                meta["format_retries"] = retries_used
             _record(usage, handle, prompt_name, request_id, in_tokens,
                     out_tokens, status="ok", meta=meta)
             log.write(handle, prompt_name,
@@ -559,6 +713,10 @@ def call_model(
             _record(usage, handle, prompt_name, request_id, in_tokens,
                     out_tokens, status="format_error",
                     meta=_result_meta(finish_reason, cached_tokens,
+                                      requested_max_tokens=requested,
+                                      estimated_in=estimated_in,
+                                      cap_violation=cap_violation,
+                                      input_violation=input_violation,
                                       error=str(exc)))
             log.write(handle, prompt_name,
                       request_id=request_id, attempt=retries_used,
@@ -573,16 +731,17 @@ def call_model(
                     f"{retries_used + 1} attempt(s)"
                 ) from exc
             retries_used += 1
-            current_user = (
-                user_text
-                + "\n\n---\nYour previous reply was not valid JSON:\n"
-                + text
-                + "\n\n"
-                + REPAIR_INSTRUCTION
-            )
+            current_user = _reask_prompt(
+                user_text,
+                "Your previous reply was not valid JSON:\n" + text,
+                REPAIR_INSTRUCTION)
             continue
 
         meta = _result_meta(finish_reason, cached_tokens,
+                            requested_max_tokens=requested,
+                            estimated_in=estimated_in,
+                            cap_violation=cap_violation,
+                            input_violation=input_violation,
                             format_retries=retries_used)
         if infra_total:
             meta["infra_retries"] = infra_total

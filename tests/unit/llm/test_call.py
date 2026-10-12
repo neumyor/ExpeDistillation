@@ -7,7 +7,8 @@ import uuid
 
 import pytest
 
-from expedistill.infra.reliability import ModelOutputError
+from expedistill.infra.reliability import ConfigError, ModelOutputError
+from expedistill.inject import estimate_tokens
 from expedistill.llm import (
     DEFAULT_SYSTEM,
     REPAIR_INSTRUCTION,
@@ -94,6 +95,14 @@ def _result_script(text, **result_kw):
         return CompletionResult(text=text, **result_kw)
 
     return script
+
+
+def _result(text, **result_kw):
+    """A CompletionResult instance, for LIST scripts: a list item is
+    returned as-is (only a whole-callable script gets invoked)."""
+    from expedistill.llm.client import CompletionResult
+
+    return CompletionResult(text=text, **result_kw)
 
 
 def test_usage_meta_and_dump_record_finish_reason_and_cached_tokens(tmp_path):
@@ -460,7 +469,12 @@ def test_usage_records_client_error_and_reraises():
     with pytest.raises(ValueError):
         call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
     assert usage.records[0]["status"] == "error"
-    assert usage.records[0]["meta"] == {"error": "ValueError"}
+    assert usage.records[0]["meta"]["error"] == "ValueError"
+    # The budget measurement keys land on error rows too: the request was
+    # sent with the handle's cap, and the prompt was measured before it.
+    assert usage.records[0]["meta"]["requested_max_tokens"] == 5120
+    assert usage.records[0]["meta"]["estimated_in"] == estimate_tokens(
+        DEFAULT_SYSTEM + handle.client.calls[0]["user"])
     assert usage.records[0]["in_tokens"] is None
 
 
@@ -600,3 +614,259 @@ def test_extra_body_survives_dataclasses_replace():
     working = dataclasses.replace(handle, usage=None, run_dir=None)
     call_model(working, "ANSWER", ANSWER_VARS)
     assert working.client.calls[0]["extra"] == {"reasoning_effort": "max"}
+
+
+# ---------------------------------------------------------------------------
+# Token budget measurement: requested_max_tokens, estimated_in,
+# cap_violation, input_violation -- measured on every row, never enforced.
+# ---------------------------------------------------------------------------
+
+def test_requested_max_tokens_in_meta_for_ok_row():
+    handle = make_fake_handle(role="judge", script="x", max_tokens=64)
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert usage.records[0]["meta"]["requested_max_tokens"] == 64
+
+
+def test_requested_max_tokens_none_when_handle_uncapped():
+    handle = make_fake_handle(script="x", max_tokens=None)
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert usage.records[0]["meta"]["requested_max_tokens"] is None
+
+
+def test_requested_max_tokens_in_meta_for_every_row_kind(tmp_path):
+    # ok, format_error and (client-raised) error rows all carry the cap
+    # that was actually sent with the request.
+    handle = make_fake_handle(
+        role="judge",
+        script=["broken", _empty_content_error(),
+                json_script({"verdict": "correct", "error_description": ""})],
+        max_tokens=77)
+    usage = RecordingUsage()
+    call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage,
+               run_dir=tmp_path)
+    assert [record["status"] for record in usage.records] == [
+        "format_error", "error", "ok"]
+    for record in usage.records:
+        assert record["meta"]["requested_max_tokens"] == 77
+
+
+def test_estimated_in_present_and_exact():
+    handle = make_fake_handle(script="x")
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    # The estimate covers system + user of THIS request.
+    assert usage.records[0]["meta"]["estimated_in"] == estimate_tokens(
+        DEFAULT_SYSTEM + handle.client.calls[0]["user"])
+
+
+def test_estimated_in_grows_on_repair_reask():
+    handle = make_fake_handle(
+        script=["not json", json_script({"verdict": "correct",
+                                         "error_description": ""})])
+    usage = RecordingUsage()
+    call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert [record["status"] for record in usage.records] == [
+        "format_error", "ok"]
+    first = estimate_tokens(DEFAULT_SYSTEM + handle.client.calls[0]["user"])
+    second = estimate_tokens(DEFAULT_SYSTEM + handle.client.calls[1]["user"])
+    assert usage.records[0]["meta"]["estimated_in"] == first
+    assert usage.records[1]["meta"]["estimated_in"] == second
+    assert second > first
+
+
+def test_estimated_in_grows_on_empty_reask():
+    handle = make_fake_handle(
+        script=[_empty_content_error(),
+                json_script({"verdict": "correct", "error_description": ""})])
+    usage = RecordingUsage()
+    call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert (usage.records[1]["meta"]["estimated_in"]
+            > usage.records[0]["meta"]["estimated_in"])
+
+
+def test_cap_violation_flagged_when_output_exceeds_requested():
+    # Real-data evidence (qwen ignored the cap 99/727 times): a response
+    # with out_tokens over the requested cap is flagged in the row's meta.
+    handle = make_fake_handle(
+        script=_result_script("long reply", in_tokens=10, out_tokens=6000),
+        max_tokens=5120)
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert usage.records[0]["meta"]["cap_violation"] is True
+
+
+def test_cap_violation_absent_at_or_below_the_cap():
+    handle = make_fake_handle(
+        script=_result_script("x", out_tokens=5120), max_tokens=5120)
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert "cap_violation" not in usage.records[0]["meta"]
+
+
+def test_cap_violation_absent_when_out_tokens_or_cap_unknown():
+    # Plain-string results have no out_tokens; an uncapped handle has no
+    # requested cap: nothing to compare, so no flag.
+    handle = make_fake_handle(script="plain text")
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert "cap_violation" not in usage.records[0]["meta"]
+
+    uncapped = make_fake_handle(
+        script=_result_script("x", out_tokens=5), max_tokens=None)
+    usage2 = RecordingUsage()
+    call_model(uncapped, "ANSWER", ANSWER_VARS, usage=usage2)
+    assert "cap_violation" not in usage2.records[0]["meta"]
+
+
+def test_input_violation_flagged_and_call_proceeds():
+    # v1 decision: measure only. A prompt estimated over the handle's
+    # max_input_tokens NEVER aborts the call; the flag lands in the row.
+    handle = make_fake_handle(script="the answer", max_input_tokens=8)
+    usage = RecordingUsage()
+    out = call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert out == "the answer"
+    assert len(handle.client.calls) == 1
+    assert usage.records[0]["meta"]["input_violation"] is True
+
+
+def test_input_violation_absent_without_limit_or_under_it():
+    handle = make_fake_handle(script="the answer")
+    usage = RecordingUsage()
+    call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert "input_violation" not in usage.records[0]["meta"]
+
+    capped = make_fake_handle(script="the answer", max_input_tokens=10**9)
+    usage2 = RecordingUsage()
+    call_model(capped, "ANSWER", ANSWER_VARS, usage=usage2)
+    assert "input_violation" not in usage2.records[0]["meta"]
+
+
+def test_handle_max_input_tokens_validation():
+    # Like the other handle numerics: positive int or None.
+    client = FakeClient("x")
+    assert make_handle("judge", "m", client).max_input_tokens is None
+    make_handle("judge", "m", client, max_input_tokens=131072)
+    for bad in (0, -5, True, "512", 1.5):
+        with pytest.raises(ConfigError):
+            make_handle("judge", "m", client, max_input_tokens=bad)
+
+
+def test_max_input_tokens_survives_dataclasses_replace():
+    import dataclasses
+
+    handle = make_handle("judge", "m", FakeClient("x"), max_input_tokens=999)
+    working = dataclasses.replace(handle, usage=None, run_dir=None)
+    assert working.max_input_tokens == 999
+
+
+# ---------------------------------------------------------------------------
+# Plain-text length truncation -> bounded re-ask (the truncated-merge-in-bank
+# incident): a reply cut off at the output limit is never silently accepted.
+# ---------------------------------------------------------------------------
+
+def test_plain_text_truncation_reask_then_success(tmp_path):
+    handle = make_fake_handle(
+        script=[_result("half a merge that just stops mid-",
+                        finish_reason="length"),
+                "complete merge"])
+    usage = RecordingUsage()
+    out = call_model(handle, "ANSWER", ANSWER_VARS, usage=usage,
+                     run_dir=tmp_path)
+    assert out == "complete merge"
+    assert len(handle.client.calls) == 2
+    # The re-ask rebuilds from the original prompt with a suffix naming the
+    # truncation and asking for a complete, more concise reply. It must NOT
+    # append the JSON repair instruction: this is a plain-text caller.
+    first_user = handle.client.calls[0]["user"]
+    second_user = handle.client.calls[1]["user"]
+    assert first_user in second_user
+    assert "cut off at the output limit" in second_user
+    assert "concisely" in second_user
+    assert REPAIR_INSTRUCTION not in second_user
+    # Both attempts are accounted: the truncated one is a format_error
+    # carrying the length signal and the re-ask flag, the retry an ok row
+    # with the shared format budget counter.
+    assert [record["status"] for record in usage.records] == [
+        "format_error", "ok"]
+    assert usage.records[0]["meta"]["finish_reason"] == "length"
+    assert "cut off at the output limit" in usage.records[0]["meta"]["error"]
+    assert usage.records[0]["meta"]["format_retried"] is True
+    assert usage.records[1]["meta"]["format_retries"] == 1
+    # Measurement on both rows; the re-ask prompt is longer, so is its
+    # estimate.
+    assert usage.records[0]["meta"]["requested_max_tokens"] == 5120
+    assert (usage.records[1]["meta"]["estimated_in"]
+            > usage.records[0]["meta"]["estimated_in"])
+    dump_dir = tmp_path / "llm_requests"
+    first = json.loads((dump_dir / "0001_ANSWER.json").read_text())
+    second = json.loads((dump_dir / "0002_ANSWER.json").read_text())
+    assert first["status"] == "format_error"
+    assert first["finish_reason"] == "length"
+    assert second["status"] == "ok"
+
+
+def test_plain_text_truncation_exhaustion_raises_model_output_error():
+    def always_truncated(system, user):
+        return _result_script("cut short", finish_reason="length")(system, user)
+
+    handle = make_fake_handle(script=always_truncated)
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError,
+                       match="cut off at the output limit"):
+        call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    # One ask plus every format re-ask, then the error.
+    assert len(handle.client.calls) == 1 + 3
+    assert [record["status"] for record in usage.records] == [
+        "format_error"] * 4
+    # The last, exhausted attempt is marked terminal, not re-asked.
+    assert usage.records[-1]["meta"]["format_retried"] is False
+
+
+def test_plain_text_stop_is_accepted_as_today():
+    handle = make_fake_handle(
+        script=_result_script("full reply", finish_reason="stop"))
+    usage = RecordingUsage()
+    out = call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert out == "full reply"
+    assert len(handle.client.calls) == 1
+    assert usage.records[0]["status"] == "ok"
+    assert usage.records[0]["meta"]["finish_reason"] == "stop"
+    assert "format_retries" not in usage.records[0]["meta"]
+
+
+def test_json_call_valid_despite_length_is_accepted():
+    # JSON calls keep the extract_json contract: a response that parses is
+    # accepted even with finish_reason=length (no plain-text re-ask), but
+    # the length signal still lands in meta -- and so does the cap
+    # violation, since out_tokens exceeded the requested cap.
+    handle = make_fake_handle(
+        script=_result_script(
+            json_script({"verdict": "correct", "error_description": ""}),
+            in_tokens=10, out_tokens=6000, finish_reason="length"),
+        max_tokens=5120)
+    usage = RecordingUsage()
+    out = call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert out == {"verdict": "correct", "error_description": ""}
+    assert len(handle.client.calls) == 1
+    assert usage.records[0]["meta"]["finish_reason"] == "length"
+    assert usage.records[0]["meta"]["cap_violation"] is True
+
+
+def test_json_truncated_text_keeps_extract_json_retry():
+    # The JSON path rejects truncation via extract_json (a truncated value
+    # fails to parse -> the existing format retry), NOT via the new
+    # plain-text truncation re-ask.
+    handle = make_fake_handle(
+        script=[_result('{"verdict": "corr', finish_reason="length"),
+                json_script({"verdict": "correct", "error_description": ""})])
+    usage = RecordingUsage()
+    out = call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert out["verdict"] == "correct"
+    assert len(handle.client.calls) == 2
+    second_user = handle.client.calls[1]["user"]
+    assert "not valid JSON" in second_user
+    assert "cut off at the output limit" not in second_user
+    assert usage.records[0]["status"] == "format_error"
+    assert usage.records[0]["meta"]["finish_reason"] == "length"

@@ -1,10 +1,14 @@
 """Unit tests for ExperimentConfig and its YAML round trip."""
+import dataclasses
+
 import pytest
 
 from expedistill.core.config import (
+    CONFIG_SCHEMA_VERSION,
     DEFAULT_RULES,
     MODEL_ROLES,
     RULE_KEYS,
+    ConfigError,
     ExperimentConfig,
     load_config,
     save_config,
@@ -89,17 +93,19 @@ class TestValidation:
         with pytest.raises(TypeError):
             make_config(leak_threshold=0.3)
 
-    def test_old_config_with_leak_threshold_still_loads(self, tmp_path):
-        # from_dict drops unknown keys, so a config written before the judge
-        # audit (with leak_threshold) keeps loading; the stray key is ignored.
+    def test_unknown_top_level_key_in_file_rejected(self, tmp_path):
+        # Schema v2 closes the silent-drop leniency: a config FILE with an
+        # unknown top-level key used to load with the stray key ignored,
+        # which let "new config + old code" fall back to dead defaults (the
+        # 5120 cap) with no trace. A typo must stop the run instead.
         cfg_file = tmp_path / "old.yaml"
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
             "leak_threshold: 0.3\n",
             encoding="utf-8")
-        cfg = load_config(str(cfg_file))
-        assert cfg.models["auditor"] == "s"
+        with pytest.raises(ConfigError, match="leak_threshold"):
+            load_config(str(cfg_file))
 
     @pytest.mark.parametrize("attempts", [0, -1])
     def test_attempts_must_be_positive(self, attempts):
@@ -139,6 +145,7 @@ class TestValidation:
         assert cfg.prompts_digests == {}
         assert cfg.split is None
         assert cfg.tasks is None
+        assert cfg.token_budgets == {}
 
 
 class TestModelOptions:
@@ -199,6 +206,237 @@ class TestModelOptions:
         out = tmp_path / "out.yaml"
         save_config(cfg, str(out))
         assert load_config(str(out)) == cfg
+
+
+class TestModelOptionsReservedKeys:
+    """Schema v2 kills the dual-source pattern: request-shape keys are
+    reserved. ``max_tokens`` used to ride inside model_options, and whether
+    it won over the handle default depended on merge order -- the effective
+    budget was invisible to anything that read the config. Now it must live
+    in token_budgets, the single source."""
+
+    def test_max_tokens_rejected_with_migration_guidance(self):
+        with pytest.raises(ConfigError, match="token_budgets"):
+            make_config(model_options={
+                "model-s": {"reasoning_effort": "max", "max_tokens": 65536}})
+
+    def test_max_tokens_alone_rejected(self):
+        with pytest.raises(ConfigError, match="max_tokens"):
+            make_config(model_options={"model-s": {"max_tokens": 5120}})
+
+    @pytest.mark.parametrize("key,value", [
+        ("temperature", 0.7), ("model", "other-model"),
+        ("messages", []), ("stream", True)])
+    def test_non_provider_knobs_rejected(self, key, value):
+        with pytest.raises(ConfigError, match="not provider knobs"):
+            make_config(model_options={"model-s": {key: value}})
+
+    def test_clean_options_still_pass(self):
+        # reasoning_effort is the intended use of model_options: a sampling
+        # knob the provider accepts per model.
+        cfg = make_config(
+            model_options={"model-s": {"reasoning_effort": "max"}},
+            token_budgets={"default_max_output_tokens": 65536})
+        assert cfg.model_options == {"model-s": {"reasoning_effort": "max"}}
+
+
+#: The pinned schema-v2 shape with every role explicit. 5120 is what the
+#: answerer needs; 65536 is the endpoint-verified safe ceiling for
+#: reasoning-max models (5120 burned entirely on thinking, 2026-10-11).
+FULL_BUDGETS = {
+    "default_max_output_tokens": 65536,
+    "max_input_tokens": None,
+    "roles": {
+        "executor_strong": {"max_output_tokens": 65536,
+                            "max_input_tokens": None},
+        "executor_weak": {"max_output_tokens": 65536},
+        "segmenter": {"max_output_tokens": 32768},
+        "author": {"max_output_tokens": 65536},
+        "examiner": {"max_output_tokens": 32768},
+        "answerer": {"max_output_tokens": 5120, "max_input_tokens": 65536},
+        "judge": {"max_output_tokens": 65536},
+        "rewriter": {"max_output_tokens": 65536},
+        "curator": {"max_output_tokens": 65536},
+        "auditor": {"max_output_tokens": 65536},
+    },
+}
+
+
+class TestTokenBudgets:
+    def test_full_schema_all_roles_explicit_loads(self):
+        cfg = make_config(token_budgets=FULL_BUDGETS)
+        for role, entry in FULL_BUDGETS["roles"].items():
+            assert cfg.max_output_tokens_for(role) == entry["max_output_tokens"]
+
+    def test_roles_fall_back_to_default(self):
+        cfg = make_config(token_budgets={
+            "default_max_output_tokens": 65536,
+            "roles": {"answerer": {"max_output_tokens": 5120}}})
+        assert cfg.max_output_tokens_for("answerer") == 5120
+        for role in MODEL_ROLES:
+            if role != "answerer":
+                assert cfg.max_output_tokens_for(role) == 65536, role
+
+    def test_default_only_budgets_cover_every_role(self):
+        cfg = make_config(token_budgets={"default_max_output_tokens": 65536})
+        for role in MODEL_ROLES:
+            assert cfg.max_output_tokens_for(role) == 65536, role
+
+    def test_yaml_pinned_shape_loads(self, tmp_path):
+        cfg_file = tmp_path / "exp.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "token_budgets:\n"
+            "  default_max_output_tokens: 65536\n"
+            "  max_input_tokens: null\n"
+            "  roles:\n"
+            "    executor_strong: {max_output_tokens: 65536}\n"
+            "    answerer: {max_output_tokens: 5120}\n",
+            encoding="utf-8")
+        cfg = load_config(str(cfg_file))
+        assert cfg.max_output_tokens_for("executor_strong") == 65536
+        assert cfg.max_output_tokens_for("answerer") == 5120
+        assert cfg.token_budgets["max_input_tokens"] is None
+        for role in MODEL_ROLES:
+            if role not in ("executor_strong", "answerer"):
+                assert cfg.max_output_tokens_for(role) == 65536, role
+
+    def test_absent_budgets_leave_helper_fail_closed(self):
+        cfg = make_config()
+        assert cfg.token_budgets == {}
+        with pytest.raises(ConfigError, match="token_budgets not configured"):
+            cfg.max_output_tokens_for("executor_strong")
+
+    def test_empty_budgets_are_unconfigured(self):
+        cfg = make_config(token_budgets={})
+        with pytest.raises(ConfigError, match="token_budgets not configured"):
+            cfg.max_output_tokens_for("judge")
+
+    def test_unknown_helper_role_is_a_caller_bug(self):
+        # A typo'd role silently falling back to the default cap would make
+        # a budget bug invisible; like model_for, it is a KeyError.
+        cfg = make_config(token_budgets=FULL_BUDGETS)
+        with pytest.raises(KeyError, match="known"):
+            cfg.max_output_tokens_for("juge")
+
+    def test_missing_default_rejected(self):
+        with pytest.raises(ConfigError, match="default_max_output_tokens"):
+            make_config(token_budgets={
+                "roles": {"answerer": {"max_output_tokens": 5120}}})
+        with pytest.raises(ConfigError, match="default_max_output_tokens"):
+            make_config(token_budgets={"max_input_tokens": 100000})
+
+    @pytest.mark.parametrize("bad", [0, -1, True, None, "65536", 65536.5])
+    def test_default_must_be_positive_int(self, bad):
+        with pytest.raises(ConfigError, match="default_max_output_tokens"):
+            make_config(token_budgets={"default_max_output_tokens": bad})
+
+    def test_unknown_budget_key_rejected(self):
+        with pytest.raises(ConfigError, match="unknown keys"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536, "max_output": 512})
+
+    def test_unknown_role_rejected_with_valid_roles_listed(self):
+        with pytest.raises(ConfigError, match="oracle") as excinfo:
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536,
+                "roles": {"oracle": {"max_output_tokens": 1}}})
+        assert "executor_strong" in str(excinfo.value)
+
+    def test_role_entry_requires_max_output_tokens(self):
+        with pytest.raises(ConfigError, match="max_output_tokens"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536,
+                "roles": {"answerer": {"max_input_tokens": 4096}}})
+
+    @pytest.mark.parametrize("bad", [0, -5, True, None, "5120", 5120.5])
+    def test_role_output_must_be_positive_int(self, bad):
+        with pytest.raises(ConfigError, match="max_output_tokens"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536,
+                "roles": {"answerer": {"max_output_tokens": bad}}})
+
+    def test_global_max_input_tokens_null_or_positive_int(self):
+        for value in (None, 131072):
+            cfg = make_config(token_budgets={
+                "default_max_output_tokens": 65536, "max_input_tokens": value})
+            assert cfg.token_budgets["max_input_tokens"] == value
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "x", 1.5])
+    def test_global_max_input_tokens_positive_int_or_null(self, bad):
+        with pytest.raises(ConfigError, match="max_input_tokens"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536, "max_input_tokens": bad})
+
+    def test_role_max_input_tokens_optional(self):
+        cfg = make_config(token_budgets={
+            "default_max_output_tokens": 65536,
+            "roles": {"answerer": {"max_output_tokens": 5120,
+                                   "max_input_tokens": None}}})
+        assert cfg.token_budgets["roles"]["answerer"]["max_input_tokens"] is None
+
+    def test_role_max_input_tokens_invalid_rejected(self):
+        with pytest.raises(ConfigError, match="max_input_tokens"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536,
+                "roles": {"answerer": {"max_output_tokens": 5120,
+                                        "max_input_tokens": 0}}})
+
+    def test_role_entry_unknown_key_rejected(self):
+        with pytest.raises(ConfigError, match="unknown keys"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536,
+                "roles": {"answerer": {"max_output_tokens": 5120,
+                                        "temperature": 0}}})
+
+    @pytest.mark.parametrize("bad", [None, [], "big"])
+    def test_token_budgets_must_be_a_mapping(self, bad):
+        with pytest.raises(ConfigError, match="mapping"):
+            make_config(token_budgets=bad)
+
+    @pytest.mark.parametrize("bad", [None, [], "big"])
+    def test_roles_must_be_a_mapping(self, bad):
+        with pytest.raises(ConfigError, match="roles"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536, "roles": bad})
+
+    def test_role_entry_must_be_a_mapping(self):
+        with pytest.raises(ConfigError, match="mapping"):
+            make_config(token_budgets={
+                "default_max_output_tokens": 65536,
+                "roles": {"answerer": 5120}})
+
+    def test_budgets_not_shared_with_caller_mapping(self):
+        given = {"default_max_output_tokens": 65536,
+                 "roles": {"answerer": {"max_output_tokens": 5120}}}
+        cfg = make_config(token_budgets=given)
+        given["roles"]["answerer"]["max_output_tokens"] = 1
+        assert cfg.max_output_tokens_for("answerer") == 5120
+
+    def test_to_dict_carries_budgets_verbatim(self):
+        # Stage 0 freezes config.to_dict() into the manifest, so the frozen
+        # copy must carry exactly what the config file said.
+        cfg = make_config(token_budgets=FULL_BUDGETS)
+        assert cfg.to_dict()["token_budgets"] == FULL_BUDGETS
+
+    def test_from_dict_round_trip_with_budgets(self):
+        cfg = make_config(token_budgets=FULL_BUDGETS)
+        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_yaml_round_trip_carries_budgets(self, tmp_path):
+        cfg = make_config(token_budgets=FULL_BUDGETS)
+        out = tmp_path / "out.yaml"
+        save_config(cfg, str(out))
+        assert load_config(str(out)) == cfg
+
+    def test_dataclasses_replace_keeps_budgets(self):
+        # Stage 0 freezes via dataclasses.replace(config, prompts_digests=..):
+        # the copy must keep the budgets (and re-validate them harmlessly).
+        cfg = make_config(token_budgets=FULL_BUDGETS)
+        frozen = dataclasses.replace(cfg, prompts_digests={"p": "d"})
+        assert frozen.token_budgets == FULL_BUDGETS
+        assert frozen.max_output_tokens_for("answerer") == 5120
 
 
 class TestRuleDefaults:
@@ -264,10 +502,99 @@ class TestSerialisation:
         payload = make_config().to_dict()
         assert set(payload) == {f.name for f in fields(ExperimentConfig)}
 
-    def test_from_dict_ignores_unknown_keys(self):
-        cfg = make_config()
-        payload = {**cfg.to_dict(), "future_field": 1}
-        assert ExperimentConfig.from_dict(payload) == cfg
+    def test_from_dict_rejects_unknown_keys(self):
+        # Unlike the data model's from_dict (lenient for stored records from
+        # newer code), the config IS the experiment's identity: an unknown
+        # key is a typo or a version mismatch, and dropping it silently once
+        # ran a new config on old code with dead defaults. Defense in depth
+        # on top of load_config's own check.
+        payload = {**make_config().to_dict(), "future_field": 1}
+        with pytest.raises(ConfigError, match="future_field"):
+            ExperimentConfig.from_dict(payload)
+
+    def test_schema_version_is_two(self):
+        # v2: token_budgets added, model_options reserved keys, config files
+        # fail loud on unknown top-level keys.
+        assert CONFIG_SCHEMA_VERSION == 2
+
+    def test_future_schema_version_rejected_by_load_config(self, tmp_path):
+        cfg_file = tmp_path / "future.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: %d\n" % (CONFIG_SCHEMA_VERSION + 1),
+            encoding="utf-8")
+        with pytest.raises(ConfigError, match="newer"):
+            load_config(str(cfg_file))
+
+    def test_future_schema_version_rejected_by_from_dict(self):
+        payload = make_config().to_dict()
+        payload["schema_version"] = CONFIG_SCHEMA_VERSION + 1
+        with pytest.raises(ConfigError, match="newer"):
+            ExperimentConfig.from_dict(payload)
+
+    def test_explicit_current_schema_version_loads(self, tmp_path):
+        cfg_file = tmp_path / "v2.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: %d\n" % CONFIG_SCHEMA_VERSION,
+            encoding="utf-8")
+        assert load_config(str(cfg_file)).schema_version == CONFIG_SCHEMA_VERSION
+
+    def test_older_schema_version_still_loads(self, tmp_path):
+        # Only versions from the future are rejected; the current code knows
+        # how to read everything it has ever written.
+        cfg_file = tmp_path / "v1.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 1\n",
+            encoding="utf-8")
+        cfg = load_config(str(cfg_file))
+        assert cfg.schema_version == 1
+        assert cfg.token_budgets == {}
+
+    def test_non_int_schema_version_rejected(self):
+        payload = make_config().to_dict()
+        payload["schema_version"] = "2"
+        with pytest.raises(ConfigError, match="schema_version"):
+            ExperimentConfig.from_dict(payload)
+
+    def test_unknown_key_error_lists_unknown_and_known_keys(self, tmp_path):
+        # The exact trap v2 closes: "token_budget" (missing the s) silently
+        # vanished under v1 leniency and the run continued uncapped at the
+        # dead 5120 default. The error must name the unknown key and list
+        # what a config file accepts.
+        cfg_file = tmp_path / "typo.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "token_budget: {default_max_output_tokens: 65536}\n",
+            encoding="utf-8")
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(str(cfg_file))
+        message = str(excinfo.value)
+        assert "token_budget" in message
+        assert "token_budgets" in message
+        assert "weak_profile_file" in message
+
+    def test_weak_profile_file_still_a_file_key(self, tmp_path):
+        # weak_profile_file is consumed by load_config itself, so it stays a
+        # known FILE key even though it is not a dataclass field.
+        profile = tmp_path / "p.md"
+        profile.write_text("profile", encoding="utf-8")
+        cfg_file = tmp_path / "exp.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "weak_profile_file: p.md\n"
+            "token_budgets:\n"
+            "  default_max_output_tokens: 65536\n",
+            encoding="utf-8")
+        cfg = load_config(str(cfg_file))
+        assert cfg.weak_profile == "profile"
+        assert cfg.max_output_tokens_for("judge") == 65536
 
     def test_yaml_round_trip(self, tmp_path):
         path = tmp_path / "exp.yaml"

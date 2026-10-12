@@ -234,6 +234,10 @@ def _write_config(path: Path, **overrides) -> Path:
         rules={"task_select": "all_valid_failed",
                "segment_select": "strong_all_weak_failed",
                "trajectory_select": "all"},
+        # The pipeline takes every handle's output budget from
+        # cfg.max_output_tokens_for(role); every fixture config therefore
+        # carries token_budgets (here: one uniform default).
+        token_budgets={"default_max_output_tokens": 65536},
     )
     for key, value in overrides.items():
         setattr(config, key, value)
@@ -387,6 +391,7 @@ def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
                 "judge": "judge-model"},
         model_options={"strong-model": {"reasoning_effort": "max"},
                        "judge-model": {"top_p": 0.9}},
+        token_budgets={"default_max_output_tokens": 65536},
     )
     log = ClientLog()
     handles = pipeline._build_handles(
@@ -424,6 +429,75 @@ def test_model_options_reach_every_client_call(plugin, tmp_path):
         encoding="utf-8"))
     assert manifest["config"]["model_options"] == {
         "strong-model": {"reasoning_effort": "max"}}
+
+
+# ---------------------------------------------------------------------------
+# Output token budgets: cfg.max_output_tokens_for(role) -> handle.max_tokens
+# ---------------------------------------------------------------------------
+
+def test_build_handles_wires_output_budget_per_role(plugin, tmp_path):
+    from expedistill.stages import pipeline
+
+    # Per-role overrides fall back to default_max_output_tokens; the
+    # handle's max_tokens is the only place the budget becomes live.
+    config = ExperimentConfig(
+        benchmark=_FAKE, mode="full",
+        models={"executor_strong": "strong-model",
+                "executor_weak": "weak-model"},
+        token_budgets={
+            "default_max_output_tokens": 65536,
+            "roles": {"judge": {"max_output_tokens": 1024},
+                      "segmenter": {"max_output_tokens": 2048}},
+        },
+    )
+    handles = pipeline._build_handles(
+        config, tmp_path / "experiment.yaml", ClientLog().make_client,
+        infra_retries=0, infra_backoff_seconds=0.0)
+    assert set(handles) == set(MODEL_ROLES)
+    for role in MODEL_ROLES:
+        expected = {"judge": 1024, "segmenter": 2048}.get(role, 65536)
+        assert handles[role].max_tokens == expected, role
+
+
+def test_pipeline_requests_carry_the_budget_not_the_dead_default(
+        plugin, config_path, tmp_path):
+    # The handle field is the single live mechanism: the ModelHandle's
+    # built-in 5120 never applies on the pipeline path; every request
+    # carries the configured cap (the fixture config's default).
+    log = ClientLog()
+    run_pipeline(config_path=config_path, run_dir=tmp_path / "run",
+                 make_client=log.make_client)
+    calls = [call for client in log.clients for call in client.calls]
+    assert calls
+    assert all(call["max_tokens"] == 65536 for call in calls)
+
+
+def test_config_without_token_budgets_stops_before_any_stage(
+        plugin, tmp_path):
+    # The token_budgets field is optional at load time, but the helper
+    # fails closed; the pipeline surfaces that at handle-build time as an
+    # infra ConfigError naming the config -- stage-0 era: no client built,
+    # nothing frozen, no ledger line.
+    config_path = tmp_path / "no_budgets.yaml"
+    config_path.write_text(
+        "benchmark: fakebench\n"
+        "mode: full\n"
+        "models:\n"
+        "  executor_strong: strong-model\n"
+        "  executor_weak: weak-model\n",
+        encoding="utf-8")
+    log = ClientLog()
+    run_dir = tmp_path / "run"
+    with pytest.raises(ConfigError) as excinfo:
+        run_pipeline(config_path=config_path, run_dir=run_dir,
+                     make_client=log.make_client)
+    assert "token_budgets" in str(excinfo.value)
+    assert str(config_path) in str(excinfo.value)
+    # The budget is resolved before any client is built, so a config
+    # without budgets fails without touching the endpoint.
+    assert log.clients == []
+    assert plugin.calls == []
+    assert not ledger_path(run_dir).exists()
 
 
 # ---------------------------------------------------------------------------

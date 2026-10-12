@@ -1833,11 +1833,28 @@ rules:
   trajectory_select: strong2_weak2
 model_options:
   deepseek-v4-flash-0731--ali:
+    # Output budgets moved to token_budgets below (2026-10-12
+    # behavior-preserving migration); only generation-behavior
+    # parameters stay here.
     reasoning_effort: max
-    # Output budget history: 5120 default burned 2026-10-11; 32768 worked
-    # across benchmarks but G7/G9 whole-bank calls (74.5k-token listings)
-    # burned it twice on 2026-10-12 (finish_reason=length, empty content);
-    # 65536 endpoint-verified, pre-registered before this run started.
-    max_tokens: 65536
+token_budgets:
+  # Output budgets by role. Behavior-preserving migration (2026-10-12):
+  # strong-model roles carried 65536 (pre-registered 2026-10-12 after G7
+  # burned 32768 twice); qwen roles requested 5120 today (the endpoint
+  # ignores it -- usage meta cap_violation will keep flagging, which is
+  # the evidence we want). Input: measure-only in v1 (no thresholds).
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    executor_strong: {max_output_tokens: 65536}
+    segmenter:       {max_output_tokens: 65536}
+    author:          {max_output_tokens: 65536}
+    examiner:        {max_output_tokens: 65536}
+    judge:           {max_output_tokens: 65536}
+    rewriter:        {max_output_tokens: 65536}
+    curator:         {max_output_tokens: 65536}
+    auditor:         {max_output_tokens: 65536}
+    executor_weak:   {max_output_tokens: 5120}
+    answerer:        {max_output_tokens: 5120}
 weak_profile: >-
   The weak model is qwen3.6-flash-distill, a small distilled model. It follows short, concrete instructions well but is weak on obscure trivia, gets distracted by long clue preambles, often gives up after one search instead of reformulating the query, and tends to answer with a sentence instead of the short answer phrase. Write skills as short ordered steps with explicit triggers, e.g. when to reformulate a Search query and how to phrase the final Finish[...] answer as a concise noun phrase.

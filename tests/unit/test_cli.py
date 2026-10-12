@@ -209,6 +209,67 @@ def test_summary_prints_cached_tokens_from_usage_meta(capsys, tmp_path):
     assert totals["overall"]["out"] == 9
 
 
+def test_summary_prints_role_prompt_usage_section(capsys, tmp_path):
+    # The per-(role, prompt) section: one line per group after the existing
+    # usage totals line. Mixed rows prove the tolerance rules (new meta
+    # keys, an error row, a TB-style row without meta).
+    run_dir = tmp_path / "run"
+    _fabricate_ledger(run_dir, STAGE_NAMES)
+    usage_path = run_dir / "llm_requests" / "usage.jsonl"
+    usage_path.parent.mkdir(parents=True)
+    rows = [
+        {"role": "judge", "prompt": "JUDGE", "model": "m",
+         "in_tokens": 120, "out_tokens": 10, "request_id": "r1",
+         "status": "ok",
+         "meta": {"finish_reason": "length", "cap_violation": True,
+                  "estimated_in": 100, "cached_tokens": 90}},
+        {"role": "judge", "prompt": "JUDGE", "model": "m",
+         "in_tokens": None, "out_tokens": None, "request_id": "r2",
+         "status": "error", "meta": {"error": "InfrastructureError"}},
+        {"role": "executor_weak", "prompt": "TB_TASK_PROMPT", "model": "m",
+         "in_tokens": 2000, "out_tokens": None, "request_id": "r3",
+         "status": "ok", "meta": None},
+    ]
+    with usage_path.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row) + "\n")
+
+    code = cli.main(["summary", "--run-dir", str(run_dir)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "usage by (role, prompt):" in out
+    judge_line = next(line for line in out.splitlines() if "JUDGE" in line)
+    assert "judge | JUDGE |" in judge_line
+    assert "calls=2 ok=1 err=1" in judge_line
+    assert 'errors={"InfrastructureError": 1}' in judge_line
+    assert "in_med=120 in_max=120 in_tot=120" in judge_line
+    assert "cap_viol=1" in judge_line
+    assert "len_trunc=1" in judge_line
+    assert "est_in_med=100" in judge_line
+    assert "in_over_est=1.2" in judge_line
+    tb_line = next(line for line in out.splitlines()
+                   if "TB_TASK_PROMPT" in line)
+    assert "executor_weak | TB_TASK_PROMPT |" in tb_line
+    # Never-reported output usage prints as unknown, never as a fake 0 size.
+    assert "out_med=-" in tb_line
+    assert "unknown=" in tb_line
+    # The existing totals line is unchanged and still present.
+    totals_line = next(line for line in out.splitlines()
+                       if line.startswith("usage: "))
+    assert json.loads(totals_line[len("usage: "):])["overall"] == {
+        "in": 2120, "out": 10, "cached_tokens": 90, "request_count": 3}
+
+
+def test_fmt_stat_renders_unknown_and_bounded_floats():
+    # Unknown is '-', never a fake 0; integral medians (statistics.median
+    # of an even count) print as integers; ratios stay bounded.
+    assert cli._fmt_stat(None) == "-"
+    assert cli._fmt_stat(120) == "120"
+    assert cli._fmt_stat(75000.0) == "75000"
+    assert cli._fmt_stat(150.5) == "150.5"
+    assert cli._fmt_stat(1.7646666) == "1.765"
+
+
 def test_summary_incomplete_run_exits_one(capsys, tmp_path):
     run_dir = tmp_path / "run"
     _fabricate_ledger(run_dir, STAGE_NAMES[:-1])  # stage 6 never completed

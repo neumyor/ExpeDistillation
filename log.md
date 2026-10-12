@@ -319,3 +319,58 @@ token 输入与一次弱模型 87k 输出超上限未被端点执行的证据）
 
 工件：`src/expedistill/llm/call.py`、`tests/unit/llm/test_call.py`、
 `configs/experiments/*.yaml`（max_tokens 65536 预注册）。
+
+## 2026-10-12 21:22 — token_budgets 按角色预算表迁移落地；补记已删除的 v2 run；旧 run 标记作废
+
+按已批复的 token_budgets 设计把三份实验配置（tb21_full_v2、alfworld_skillopt_split、
+searchqa_skillopt_split）迁移到统一预算段（评审收敛值，各实验启动前预注册：
+default_max_output_tokens 65536、max_input_tokens null——v1 输入只测量不设阈值；
+强模型八个角色 65536，qwen 的 executor_weak/answerer 5120），deepseek-v4-flash-0731--ali 的
+model_options 只保留 reasoning_effort: max（max_tokens 移出，行为保持不变：qwen 角色此前即走
+客户端 5120 默认值）。生成器 build_skillopt_split_configs.py 同步产出新形状——此前它还停在
+DEEPSEEK_up5zdj / 预算 4096 / max_tokens 32768 的旧形状，重跑会悄悄覆盖手工预注册，顺手修正——
+并给 --check 新增字节一致性校验（配置是生成文件，手工漂移必须当场报错；故意加杂行验证过确实
+拦截），两份 split 配置重生成 round-trip 逐字节一致，任务解析与 load_config 校验全部通过；
+smoke_tb_distill_chain.py 的内联配置同步迁移；fork_run_stage04.py 的 manifest 差异白名单从精确
+路径改为前缀匹配（.config.bank_token_budget、.config.model_options.deepseek-v4-flash-0731--ali.
+max_tokens 的移除、.config.token_budgets 三处，"." 边界防止 bank_token_budget_x 之类兄弟键误
+匹配）——用旧 run 真实 manifest 加模拟 v3 新 manifest 验证：恰好三条允许路径通过，改 K、加
+兄弟键、token_budgets 内部叶差异均按预期处置。记账（补录）：runs/tb21_full_v2_202544 已于约
+21:15 删除——该 run 唯一一次阶段 5 G7 调用（74.5k token 输入）把 32768 输出预算全部烧在思考上、
+空内容返回，零已提交轮次、无保留价值；其 usage 台账 6 行（fork 脚本缺口导致的 5 次阶段 3 误
+重生成 + 1 次 G7 尝试）即评审发现的 4,872 对 4,866 差额的记账缺口，特此记录在案（旧 run
+usage.jsonl 实测 4,866 行，为 TB 链路调用计数的权威记录）。旧 run runs/tb21_full_20261011_2242
+写入 INVALID.md 标记作废：19:46 停止于阶段 5 第 1 轮（22/29 单元，11 kept / 9 reverted /
+2 skipped），被 v3 fork（预算 96000 + 输出 65536 + token_budgets 表）取代，其阶段 0–4 产物为
+fork 复制源，已知缺陷（content 截断的 bank/merge/0008 被判 kept 入库）将在 fork 中修复，阶段 5
+产物不得直接消费。全量 pytest：1435 通过、3 失败——失败均在 call/pipeline 侧的测试夹具（构造
+ExperimentConfig 未带 token_budgets，新的 max_output_tokens_for 拒绝空预算），文件属并行代理，
+与本迁移无关。更正：上一条目标题时间 21:40 有误，该条实际写于约 20:54（log.md 修改时刻；本机
+时钟已对照外部时间源核对），内容不受影响。
+
+工件：`configs/experiments/tb21_full_v2.yaml`、`configs/experiments/alfworld_skillopt_split.yaml`、
+`configs/experiments/searchqa_skillopt_split.yaml`、`scripts/run/build_skillopt_split_configs.py`、
+`scripts/smoke/smoke_tb_distill_chain.py`、`scripts/run/fork_run_stage04.py`、
+`runs/tb21_full_20261011_2242/INVALID.md`（新）；run `runs/tb21_full_v2_202544/`（已删除，记账见上）。
+
+## 2026-10-12 21:26 — token_budgets 统一管理（三评审收敛方案实施）
+
+三份同题独立评审（A/B/C）对初版方案全部判定"有条件合理"，收敛修订后由四个并行代理实施：
+(1) 配置 schema：token_budgets 冻结节（按角色 max_output_tokens 必填、default 65536——5120 已被
+实证烧穿证伪、max_input_tokens 只测不罚）、model_options 保留键五连禁（max_tokens/temperature/
+model/messages/stream——temperature 与 max_tokens 同属要消灭的双源模式）、CONFIG_SCHEMA_VERSION→2、
+未知顶层键拒绝（堵死"新配置+旧代码静默回落 5120"，三评审中的降级陷阱）；(2) pipeline+call：
+handle_for 按角色接线预算（5120 死值从主流水线路径消失）、每行 usage meta 记 requested_max_tokens/
+estimated_in（每次尝试重估，len//4 偏差与 in_tokens 的比值即校准仪器）/cap_violation（端点无视
+上限的证据——qwen 实测 99/727 次）/input_violation（只标记不中断）、纯文本 finish_reason=length
+截断从"静默接受"改为有界重问（起因：merge/0008 以 32,768/length 被判 kept、截断文本已入库）；
+(3) usage/cli：by_role_prompt 预注册口径聚合（ok 行中位、全行成本、unknown 不折算、cap 违规与
+length 截断对照）；(4) 迁移：三份配置按行为保持表迁移（强模型 8 角色 65536、qwen 两角色 5120）、
+生成器修复（此前停在旧形状，重跑会覆盖手工预注册）+ 字节一致性校验、fork 白名单前缀化、
+旧 run INVALID.md、v2 run 删除补记（6 行台账缺口落账）。不做（收敛结论）：per-prompt 覆盖表、
+输入执法 v1、客户端截断。pytest 1438 passed。
+
+工件：`src/expedistill/core/config.py`、`src/expedistill/stages/pipeline.py`、`src/expedistill/llm/call.py`、
+`src/expedistill/infra/usage.py`、`src/expedistill/cli.py`、`configs/experiments/*.yaml`（3 份）、
+`scripts/run/{build_skillopt_split_configs,fork_run_stage04}.py`、`scripts/smoke/smoke_tb_distill_chain.py`、
+`runs/tb21_full_20261011_2242/INVALID.md`。

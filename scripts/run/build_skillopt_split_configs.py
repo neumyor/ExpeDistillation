@@ -31,8 +31,9 @@ Outputs
 Modes
     default: write both configs (deterministic, byte-identical on rerun),
              then verify them end to end.
-    --check: write nothing; verify the configs already on disk against the
-             SkillOpt extraction and through the plugins.
+    --check: write nothing; verify the configs already on disk byte-match
+             this generator's render_config output, against the SkillOpt
+             extraction, and through the plugins.
 
 Example
     cd <repo root>
@@ -101,6 +102,33 @@ WEAK_PROFILES = {
     ),
 }
 
+#: The token_budgets section, identical in both generated configs (and in
+#: tb21_full_v2.yaml): the reviewed, behavior-preserving 2026-10-12
+#: migration table. Output budgets by role -- strong-model roles carry
+#: 65536, the weak/qwen roles keep requesting the 5120 they always did;
+#: input is measure-only in v1 (no thresholds).
+TOKEN_BUDGETS_LINES = [
+    "token_budgets:",
+    "  # Output budgets by role. Behavior-preserving migration (2026-10-12):",
+    "  # strong-model roles carried 65536 (pre-registered 2026-10-12 after G7",
+    "  # burned 32768 twice); qwen roles requested 5120 today (the endpoint",
+    "  # ignores it -- usage meta cap_violation will keep flagging, which is",
+    "  # the evidence we want). Input: measure-only in v1 (no thresholds).",
+    "  default_max_output_tokens: 65536",
+    "  max_input_tokens: null",
+    "  roles:",
+    "    executor_strong: {max_output_tokens: 65536}",
+    "    segmenter:       {max_output_tokens: 65536}",
+    "    author:          {max_output_tokens: 65536}",
+    "    examiner:        {max_output_tokens: 65536}",
+    "    judge:           {max_output_tokens: 65536}",
+    "    rewriter:        {max_output_tokens: 65536}",
+    "    curator:         {max_output_tokens: 65536}",
+    "    auditor:         {max_output_tokens: 65536}",
+    "    executor_weak:   {max_output_tokens: 5120}",
+    "    answerer:        {max_output_tokens: 5120}",
+]
+
 
 def _fail(message: str) -> None:
     print(f"FATAL: {message}", file=sys.stderr)
@@ -160,14 +188,18 @@ def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
         lines.append(f"  {split}:")
         lines.extend(f"    - {task_id}" for task_id in ids[split])
     lines.append("models:")
-    lines.append("  executor_strong: DEEPSEEK_up5zdj")
+    lines.append("  executor_strong: deepseek-v4-flash-0731--ali")
     lines.append("  executor_weak: qwen3.6-flash-distill")
     lines.append("n_attempts_strong: 3")
     lines.append("n_attempts_weak: 3")
     lines.append("K: 5")
     lines.append("segment_retry_limit: 2")
     lines.append("retry_limit: 2")
-    lines.append("bank_token_budget: 4096")
+    lines.append("# Pre-registered before this experiment started (2026-10-12): the budget is a")
+    lines.append("# context-overflow safety valve, not a compression target; 4096 was a pilot")
+    lines.append("# placeholder that a 100+ member bank mathematically cannot meet (merges")
+    lines.append("# compress ~0.98). See docs/decisions/bank_token_budget_20261012.md.")
+    lines.append("bank_token_budget: 96000")
     lines.append("curation_rounds: 3")
     lines.append("rules:")
     lines.append("  task_select: all_valid_failed")
@@ -177,12 +209,12 @@ def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
     lines.append("  # blocks/rules.py (stage 0 validates every rule name).")
     lines.append("  trajectory_select: strong2_weak2")
     lines.append("model_options:")
-    lines.append("  DEEPSEEK_up5zdj:")
+    lines.append("  deepseek-v4-flash-0731--ali:")
+    lines.append("    # Output budgets moved to token_budgets below (2026-10-12")
+    lines.append("    # behavior-preserving migration); only generation-behavior")
+    lines.append("    # parameters stay here.")
     lines.append("    reasoning_effort: max")
-    lines.append("    # reasoning max burned the 5120 default on segmentation/authoring calls")
-    lines.append("    # (finish_reason=length, empty content) on 2026-10-11; 32768 verified")
-    lines.append("    # working on real views across SearchQA/ALFWorld/TB.")
-    lines.append("    max_tokens: 32768")
+    lines.extend(TOKEN_BUDGETS_LINES)
     lines.append("weak_profile: >-")
     # Single-paragraph profile text: fold-clean under >-, two-space indent.
     lines.extend(f"  {part}" for part in WEAK_PROFILES[benchmark].split("\n"))
@@ -240,6 +272,13 @@ def verify_config(benchmark: str, cfg_path: Path,
     print(f"[{benchmark}] config: {cfg_path}")
     if not cfg_path.is_file():
         _fail(f"config not found: {cfg_path}")
+    # The configs are generated files, so the on-disk bytes must be exactly
+    # what render_config produces: a hand edit the generator cannot
+    # reproduce is drift, and --check must fail on it loudly rather than
+    # bless a config that a rerun would silently overwrite.
+    if render_config(benchmark, ids) != cfg_path.read_text(encoding="utf-8"):
+        _fail(f"{cfg_path} does not byte-match render_config output; "
+              "regenerate it (default mode) or update the generator")
     config = load_config(str(cfg_path))
     problems: List[str] = []
     if config.benchmark != benchmark:

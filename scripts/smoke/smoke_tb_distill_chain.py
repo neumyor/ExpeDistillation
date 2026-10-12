@@ -70,7 +70,22 @@ tasks: [{TASK}]
 model_options:
   {STRONG_MODEL}:
     reasoning_effort: max
-    max_tokens: 32768
+token_budgets:
+  # Output budgets by role; same reviewed table as the campaign configs
+  # (behavior-preserving migration 2026-10-12).
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    executor_strong: {{max_output_tokens: 65536}}
+    segmenter:       {{max_output_tokens: 65536}}
+    author:          {{max_output_tokens: 65536}}
+    examiner:        {{max_output_tokens: 65536}}
+    judge:           {{max_output_tokens: 65536}}
+    rewriter:        {{max_output_tokens: 65536}}
+    curator:         {{max_output_tokens: 65536}}
+    auditor:         {{max_output_tokens: 65536}}
+    executor_weak:   {{max_output_tokens: 5120}}
+    answerer:        {{max_output_tokens: 5120}}
 """
 
 

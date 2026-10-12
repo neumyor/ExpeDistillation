@@ -27,7 +27,11 @@ Two subcommands:
 * ``summary`` -- read a finished (or running) run's progress ledger and usage
   totals WITHOUT recomputing anything (the ledger is the source of truth;
   re-running stages to check them would burn model calls). A resumed run
-  appends a fresh line per stage, so the LAST line per stage wins. Exit 1
+  appends a fresh line per stage, so the LAST line per stage wins. Usage is
+  printed twice: the overall/by-role totals, then one line per (role, prompt)
+  with the pre-registered token statistics of
+  ``infra.usage.UsageStats.by_role_prompt`` (medians over ok rows, totals
+  over all rows, unknown never coerced to 0). Exit 1
   when the ledger shows the run is incomplete (a stage never completed).
 """
 
@@ -47,7 +51,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.runlock import RunLockedError
 from expedistill.infra.store import read_jsonl
-from expedistill.infra.usage import UsageRecorder
+from expedistill.infra.usage import UsageRecorder, UsageStats
 from expedistill.stages.pipeline import (
     STAGE_NAMES,
     ledger_path,
@@ -74,6 +78,48 @@ def _stage_line(name: str, summary: Dict[str, object]) -> str:
     if len(payload) > _LINE_LIMIT:
         payload = payload[:_LINE_LIMIT - 3] + "..."
     return f"{name}: {payload}"
+
+
+def _fmt_stat(value: object) -> str:
+    """Compact field text for the usage table: unknown (None) is '-', never
+    a fake 0; integral floats (statistics.median of an even count) print as
+    integers, ratios stay bounded to 4 significant digits."""
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return f"{value:.4g}"
+    return str(value)
+
+
+def _usage_role_prompt_line(role: str, prompt: str,
+                            stats: Dict[str, object]) -> str:
+    """One bounded line per (role, prompt): the pre-registered metrics of
+    infra.usage.UsageStats as key=value fields (dict fields as JSON)."""
+    parts = [f"calls={stats['n_calls']}", f"ok={stats['n_ok']}",
+             f"err={stats['n_error']}"]
+    if stats["n_error"]:
+        parts.append("errors=" + json.dumps(stats["errors_by_type"],
+                                            ensure_ascii=False,
+                                            sort_keys=True))
+    parts += [
+        f"in_med={_fmt_stat(stats['in_median'])}",
+        f"in_max={_fmt_stat(stats['in_max'])}",
+        f"in_tot={stats['total_in']}",
+        f"out_med={_fmt_stat(stats['out_median'])}",
+        f"out_max={_fmt_stat(stats['out_max'])}",
+        f"out_tot={stats['total_out']}",
+        f"cap_viol={stats['cap_violations']}",
+        f"len_trunc={stats['length_truncations']}",
+        f"est_in_med={_fmt_stat(stats['estimated_in_median'])}",
+        f"in_over_est={_fmt_stat(stats['in_over_estimated_median'])}",
+    ]
+    if stats["unknown"]:
+        parts.append("unknown=" + json.dumps(stats["unknown"],
+                                             ensure_ascii=False,
+                                             sort_keys=True))
+    return f"{role} | {prompt} | " + " ".join(parts)
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -151,6 +197,16 @@ def _cmd_summary(args: argparse.Namespace) -> int:
 
     totals = UsageRecorder(usage_path(run_dir)).totals()
     print("usage: " + json.dumps(totals, ensure_ascii=False, sort_keys=True))
+
+    # Per-(role, prompt) token statistics (the token-budget observability
+    # instrument): one bounded line per group; nothing extra when the ledger
+    # is empty or absent.
+    by_role_prompt = UsageStats(usage_path(run_dir)).by_role_prompt()
+    if by_role_prompt:
+        print("usage by (role, prompt):")
+        for role, prompt in sorted(by_role_prompt):
+            print("  " + _usage_role_prompt_line(
+                role, prompt, by_role_prompt[(role, prompt)]))
 
     missing = [name for name in STAGE_NAMES if name not in latest]
     if missing:
