@@ -235,3 +235,24 @@ config.models/config.model_options 键、267 条轨迹记录、三份实验配�
 
 工件：`configs/experiments/{tb21_full,alfworld_skillopt_split,searchqa_skillopt_split}.yaml`、
 run `runs/tb21_full_20261011_2242/`（manifest 与轨迹记录重路由）。
+
+## 2026-10-12 10:25 — 阶段 2–4 并行化（B5 run_units），TB 实验暂停待续跑
+
+TB 实验暂停（09:48，589 subtask 已落盘）后按用户决定做并行化改造：暂停时独立审查
+（runs/tb21_full_20261011_2242）结论"可原样续跑"——534 轨迹/589 subtask 逐文件校验通过，
+三次驱动重启对账闭合（87+29+9 条轨迹），重路由零残留；剩余阶段 2 = 19 条轨迹/约 20 次调用，
+阶段 3 候选 ≈477。改造（三个代理并行 + 一个统一代理）：B5 新增共享单元池 run_units
+（有界线程池、输入序聚合、致命错误停止派发、在飞单元跑完、**按单元序解包第一个致命异常、
+ParallelError 全量上下文链为 cause**——该浮出规则统一适用于所有异常类型，三阶段行为一致；
+K1 的 _reraise 保留旧分裂，统一是后续工作）；阶段 2（单元=轨迹）、阶段 3（单元=subtask）、
+阶段 4（单元=skill 对）逐单元循环改为池派发，单元粒度/落盘/续跑语义/summary 聚合不变，
+workers 取 run 设置（默认 1 = 原串行行为，既有测试零改动全过）。每个阶段配 workers 1 vs 4
+等价性测试（store/summary 逐字段一致）、Barrier 并发证明、单元失败隔离、部分落盘续跑等价。
+预计阶段 3+4 从串行约 42 小时缩到 8 并发约 5–6 小时。
+更正（应审查要求）：09:40 条目"22:35–02:01 切段 103 条轨迹"应为 87 条（415 subtask 不变）。
+播种脚本强臂模型 id 同步为重路由后的新 id。
+
+工件：`src/expedistill/infra/parallel.py`、`src/expedistill/stages/{stage2_segmentation,stage3_generation,stage4_acceptance}.py`、
+`tests/unit/infra/test_parallel.py`、`tests/unit/stages/test_stage2_parallel.py`、
+`tests/unit/stages/test_stage3.py`、`tests/unit/stages/test_stage4.py`、
+`scripts/run/seed_tb_stage1.py`。pytest 1304 passed。

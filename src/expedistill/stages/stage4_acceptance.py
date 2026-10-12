@@ -1,11 +1,19 @@
 """Stage 4: acceptance of candidate skills (README section 3, stage 4).
 
 Layer-6 wiring only: the K4 loop itself is ``composites.acceptance.accept_skill``
-(which also owns the per-skill disk IO and resume); this stage iterates the
+(which also owns the per-skill disk IO and resume); this stage enumerates the
 stored pending stage-3 candidate skills (id == ``make_skill_id(subtask_id)``;
-stage-5 merged skills are K5's, see ``_candidates``) in ``skill_id`` order, resolves each one's exam through
-the shared ``subtask_id`` (the ONLY link between a skill and its exam, README
-section 2), and tallies the outcomes.
+stage-5 merged skills are K5's, see ``_candidates``) in ``skill_id`` order,
+resolves each one's exam through the shared ``subtask_id`` (the ONLY link
+between a skill and its exam, README section 2), dispatches one unit per
+(skill, exam) pair through B5 ``run_units`` (``ctx`` carries the worker
+count; the default 1 is the old serial loop), and tallies the outcomes.
+
+Enumeration is serial and deterministic: store scan, stage-3-candidate
+filter, pending filter, exam resolution. The outcomes come back in input
+order, so the summary never depends on the dispatch interleaving; only the
+APPEND ORDER of K4's ledgers does (they are written from several threads;
+``append_jsonl`` serialises the writes themselves).
 
 A skill whose exam is missing is recorded in the summary under
 ``skipped_missing_exam`` and skipped, not crashed on: one orphaned skill must
@@ -19,8 +27,9 @@ filtering them out here keeps a completed stage 4 a zero-model-call stage.
 
 One skill is one unit; its failure is recorded in the unit-failure ledger
 (``failed_units.jsonl``, stage label ``STAGE_LABEL``) and never stops the
-other skills (AGENTS.md section 6 rule 6). The disposition lives here, not
-in K4, so the composite stays a plain "raise what failed" building block:
+other skills (AGENTS.md section 6 rule 6). The disposition lives in the
+unit's worker, not in K4, so the composite stays a plain "raise what
+failed" building block:
 
 * ModelOutputError (K3's repair budget exhausted): the skill is stored as
   discarded with ``discard_reason = "model_output_error"`` -- terminal,
@@ -29,19 +38,23 @@ in K4, so the composite stays a plain "raise what failed" building block:
   two is completed by the next call);
 * InfrastructureError (call-level retries exhausted): the skill stays
   pending exactly as K4 stored it, so a resume continues it; after every
-  other skill ran and the summary (with ``infra_failed``) is written, the
+  other unit ran and the summary (with ``infra_failed``) is written, the
   stage raises InfrastructureError, so the pipeline never moves on to
   stage 5 with pending skills missing from the bank;
 * anything else (ConfigError, ProviderRefusalError, CodeBugError, plain
-  bugs) propagates immediately: continuing would not help, or would persist
-  corrupt results.
+  bugs) is fatal to the batch: no further unit starts, in-flight units run
+  to completion, and the first failure by unit order is re-raised unwrapped
+  with its original type and message (run_units' rule for every pool
+  caller; the ParallelError carrying every failure stays chained as its
+  __cause__) -- continuing would not help, or would persist corrupt results.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from expedistill.composites.acceptance import accept_skill, discard_skill
 from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import Exam, Skill
+from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -64,6 +77,22 @@ STAGE_LABEL = "stage4_acceptance"
 
 #: discard_reason of a skill whose K3 repair budget ran out.
 MODEL_OUTPUT_DISCARD = "model_output_error"
+
+#: Outcome kinds a unit's worker returns; aggregated in input order into the
+#: summary (see run). A unit that reached a terminal status (accepted, or
+#: discarded -- the model_output_error discard included) counts as processed.
+_PROCESSED = "processed"
+_INFRA_FAILED = "infra_failed"
+_MISSING_EXAM = "missing_exam"
+
+
+def _workers(ctx: Any) -> int:
+    """Parallelism from the config/context if either carries it, else serial
+    (same lookup stages 1 and 6 use)."""
+    workers = getattr(ctx.config, "workers", None)
+    if workers is None:
+        workers = getattr(ctx, "workers", 1)
+    return int(workers)
 
 
 def _candidates(store: Any) -> List[Skill]:
@@ -115,6 +144,10 @@ def run(ctx: Any) -> Dict[str, Any]:
     pending by an InfrastructureError, and how many candidates this call
     drove to a terminal status. Raises InfrastructureError after storing the
     summary when ``infra_failed`` is not empty (see module docstring).
+
+    The units run through B5 ``run_units`` on ``_workers(ctx)`` threads
+    (default 1 = the old serial loop); outcomes arrive in input order, so
+    the summary never depends on the dispatch interleaving.
     """
     store = ctx.store
     recorder = UnitFailureRecorder(ctx.run_dir)
@@ -128,30 +161,39 @@ def run(ctx: Any) -> Dict[str, Any]:
             recorder.record(skill_id, STAGE_LABEL, ModelOutputError, message)
             recorded.add(skill_id)
 
+    # Serial, deterministic enumeration (module docstring): store scan ->
+    # stage-3-candidate filter -> pending filter -> exam resolution. A unit
+    # is one (skill, exam) pair; a skill whose exam is missing carries None
+    # and its worker only reports the skip. A terminal candidate is never a
+    # unit, but a model_output_error discard whose ledger row a crash lost
+    # gets the row completed here (the discard is the truth).
     candidates = _candidates(store)
-    skipped_missing_exam: List[str] = []
-    infra_failed: List[str] = []
-    processed = 0
-
+    units: List[Tuple[Skill, Optional[Exam]]] = []
     for skill in candidates:
-        skill_id = skill.skill_id
         if skill.status != "pending":
             if (skill.status == "discarded"
                     and skill.discard_reason == MODEL_OUTPUT_DISCARD):
                 # A crash between the discard and its ledger row: the
                 # discard is the truth, the row is completed from it.
                 record_model_output(
-                    skill_id, "discarded as model_output_error; the "
+                    skill.skill_id, "discarded as model_output_error; the "
                     "original error message was lost to a crash before "
                     "this ledger row was written")
             continue
-
         exam_id = make_exam_id(skill.subtask_id)
         if not store.exists("exams", exam_id):
-            skipped_missing_exam.append(skill_id)
+            units.append((skill, None))
             continue
-        exam = store.load("exams", exam_id, Exam)
+        units.append((skill, store.load("exams", exam_id, Exam)))
 
+    def accept_unit(
+            unit: Tuple[Skill, Optional[Exam]]) -> Tuple[str, str]:
+        """Run one unit: the per-skill body the serial loop always had (module
+        docstring). Expected-failure dispositions live here; anything else
+        escaping is fatal to the batch."""
+        skill, exam = unit
+        if exam is None:
+            return _MISSING_EXAM, skill.skill_id
         try:
             result = accept_skill(
                 store=store,
@@ -171,19 +213,32 @@ def run(ctx: Any) -> Dict[str, Any]:
             # leaves a discard whose row the next call completes (above),
             # never a ledger row for a skill that a resume then accepts.
             result = discard_skill(store, skill, MODEL_OUTPUT_DISCARD)
-            record_model_output(skill_id, str(exc))
+            record_model_output(skill.skill_id, str(exc))
         except InfrastructureError as exc:
-            recorder.record(skill_id, STAGE_LABEL, exc, exc)
-            infra_failed.append(skill_id)
-            continue
-
+            recorder.record(skill.skill_id, STAGE_LABEL, exc, exc)
+            return _INFRA_FAILED, skill.skill_id
         if result.status not in ("accepted", "discarded"):
             # accept_skill always ends in a terminal status; anything else is
             # a bug in the composite, not a stage outcome.
             raise CodeBugError(
-                f"accept_skill left skill {skill_id!r} in non-terminal "
+                f"accept_skill left skill {skill.skill_id!r} in non-terminal "
                 f"status {result.status!r}")
-        processed += 1
+        return _PROCESSED, skill.skill_id
+
+    outcomes = run_units(accept_unit, units, _workers(ctx))
+
+    # Outcomes are in input order, so the summary is deterministic however
+    # the units interleaved.
+    skipped_missing_exam: List[str] = []
+    infra_failed: List[str] = []
+    processed = 0
+    for kind, skill_id in outcomes:
+        if kind == _MISSING_EXAM:
+            skipped_missing_exam.append(skill_id)
+        elif kind == _INFRA_FAILED:
+            infra_failed.append(skill_id)
+        else:
+            processed += 1
 
     summary = _tally(store, candidates)
     summary.update({

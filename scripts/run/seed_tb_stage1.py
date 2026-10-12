@@ -5,7 +5,7 @@ The TB21 full campaign does not need live rollouts for stage 1: the tb21
 bare-rollout campaign already produced, per task and arm, five ranked valid
 trials on node29 (/data2/niuyiming/e1_final_archive/{qwen,dpsk}/<task>/).
 The pre-registered seeding rule maps archive rank 1..3 to attempt 0..2 of
-each arm (strong = dpsk / DEEPSEEK_up5zdj, weak = qwen / qwen3.6-flash-
+each arm (strong = dpsk / deepseek-v4-flash-0731--ali, weak = qwen / qwen3.6-flash-
 distill), so a run configured with n_attempts 3/3 gets its whole stage-1
 unit set (89 tasks x 2 arms x 3 attempts = 534 units) from the archive and
 K1 skips every unit -- zero model calls, zero remote rollouts.
@@ -89,7 +89,7 @@ ARCHIVE_ROOT = "/data2/niuyiming/e1_final_archive"
 #: against the campaign model names below; a different experiment needs a
 #: new rule, not a flag.
 ARMS = {
-    "strong": ("dpsk", "DEEPSEEK_up5zdj", "manifest_dpsk.tsv"),
+    "strong": ("dpsk", "deepseek-v4-flash-0731--ali", "manifest_dpsk.tsv"),
     "weak": ("qwen", "qwen3.6-flash-distill", "manifest_qwen.tsv"),
 }
 

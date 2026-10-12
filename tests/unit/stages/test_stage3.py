@@ -3,6 +3,10 @@ llm.fake handles, no network. Covers generation, the per-source mode, the
 segment_select rule, step_range slicing, resume (full pairs and half pairs)
 and the deterministic iteration order."""
 
+import re
+import threading
+import time
+
 import pytest
 
 from expedistill.benchmarks.registry import plugin_names, register_plugin
@@ -24,6 +28,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store, read_json, write_json
 from expedistill.llm import json_script, make_fake_handle
+from expedistill.llm.call import ModelHandle
 from expedistill.prompts import get as get_prompt
 from expedistill.stages import stage3_generation
 from expedistill.stages.context import StageContext
@@ -604,3 +609,227 @@ def test_crash_after_failure_record_resumes_identically(monkeypatch,
     assert rows(ctx2) == rows(ref_ctx)
     assert ([r["subtask_id"] for r in _failures_file(ctx2)]
             == [r["subtask_id"] for r in _failures_file(ref_ctx)])
+
+
+# ---------------------------------------------------------------------------
+# Parallel dispatch: ctx.workers > 1 (B5 run_units) must match serial runs
+# ---------------------------------------------------------------------------
+
+_LABEL_RE = re.compile(r"SUBTASK LABEL: (.+)")
+
+
+class _PureClient:
+    """Thread-safe FakeClient stand-in, built here because llm/fake.py's
+    list script is consumed in arrival order, which a thread pool makes
+    nondeterministic.
+
+    Responses are a pure function of the request, so any interleaving
+    yields the same per-subtask outputs; calls are still recorded for
+    count/content assertions. ``respond`` runs OUTSIDE the calls lock, so a
+    sleep or barrier inside it cannot block sibling threads from entering.
+    """
+
+    def __init__(self, respond):
+        self.respond = respond
+        self.calls = []
+        self._lock = threading.Lock()
+
+    def complete(self, model, system, user, *, temperature=0.0,
+                 max_tokens=None, extra=None):
+        with self._lock:
+            self.calls.append(
+                {"model": model, "system": system, "user": user})
+        return self.respond(system, user)
+
+
+def _pure_handle(respond):
+    """A ModelHandle wired to _PureClient (mirrors make_fake_handle)."""
+    return ModelHandle(name="fake-model", role="test",
+                       client=_PureClient(respond))
+
+
+def _subtask_label(user):
+    match = _LABEL_RE.search(user)
+    assert match, f"no subtask label in prompt: {user[:120]!r}"
+    return match.group(1)
+
+
+def _author_responder(system, user):
+    # The mode is readable from the template's opening line (DISTILL_LINE /
+    # DIAGNOSE_LINE above; both G2 prompts carry the label).
+    mode = "distill" if DISTILL_LINE in user else "diagnose"
+    return f"SKILL {mode} {_subtask_label(user)}"
+
+
+def _exam_responder(system, user):
+    label = _subtask_label(user)
+    return json_script({"question_text": f"question {label}",
+                        "reference_answer": f"reference {label}"})
+
+
+def _slow_author_responder(system, user):
+    # Hold the model call long enough that sibling units really interleave;
+    # a pure-Python call can otherwise finish before the next worker thread
+    # starts, and workers=4 would silently behave serially.
+    time.sleep(0.02)
+    return _author_responder(system, user)
+
+
+def test_workers_4_run_matches_workers_1_run(tmp_path):
+    # Two run directories, the same pure-function model, workers=1 vs
+    # workers=4: identical summaries (field by field) and identical stores.
+    subtasks = None
+    summaries = {}
+    for workers in (1, 4):
+        run_dir = tmp_path / f"run-w{workers}"
+        subtasks = seed_store(Store(run_dir))
+        ctx, _ = make_ctx(tmp_path,
+                          author=_pure_handle(_slow_author_responder),
+                          examiner=_pure_handle(_exam_responder),
+                          run_dir=run_dir)
+        ctx.workers = workers
+        summaries[workers] = stage3_generation.run(ctx)
+
+    for field in ("selected", "generated", "model_output_failed",
+                  "infra_failed", "exam_missing_advanced"):
+        assert summaries[4][field] == summaries[1][field], field
+    # And both are the correct result, not just mutually equal.
+    assert summaries[4]["generated"] == expected_ids(subtasks)
+    for kind_dir in ("skills", "exams"):
+        files = {}
+        for workers in (1, 4):
+            directory = (tmp_path / f"run-w{workers}" / "stage3_generation"
+                         / kind_dir)
+            files[workers] = {path.name: read_json(path)
+                              for path in sorted(directory.glob("*.json"))}
+        assert files[4] == files[1]
+
+
+def test_workers_4_generates_subtasks_concurrently(monkeypatch, tmp_path):
+    # A barrier that only opens once every selected unit is in flight:
+    # with serial dispatch the first unit would wait out the timeout and
+    # the run would raise, so completing proves >= 2 (here: 3) units
+    # really ran at the same time.
+    subtasks = seed_store(Store(tmp_path / "run"))
+    selected = expected_ids(subtasks)
+    barrier = threading.Barrier(len(selected), timeout=10)
+    real = stage3_generation.write_skill
+
+    def gated(subtask, *args, **kwargs):
+        barrier.wait()
+        return real(subtask, *args, **kwargs)
+
+    monkeypatch.setattr(stage3_generation, "write_skill", gated)
+    author = _pure_handle(_author_responder)
+    examiner = _pure_handle(_exam_responder)
+    ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
+    ctx.workers = 4
+
+    summary = stage3_generation.run(ctx)
+
+    assert summary["generated"] == selected
+    assert len(author.client.calls) == len(selected)
+    assert len(examiner.client.calls) == len(selected)
+
+
+def test_model_output_error_under_workers_4_is_isolated(monkeypatch, tmp_path):
+    subtasks = seed_store(Store(tmp_path / "run"))
+    target = subtasks[1].subtask_id  # the middle unit
+    _failing_write_skill(monkeypatch, target,
+                         ModelOutputError("skill text unusable"))
+    author = _pure_handle(_author_responder)
+    examiner = _pure_handle(_exam_responder)
+    ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
+    ctx.workers = 4
+
+    summary = stage3_generation.run(ctx)  # terminal, not fatal: no raise
+
+    others = [sid for sid in expected_ids(subtasks) if sid != target]
+    assert summary["generated"] == others
+    assert summary["model_output_failed"] == [target]
+    assert summary["infra_failed"] == []
+    assert _summary_on_disk(ctx) == summary
+    for sid in others:
+        assert ctx.store.exists("skills", make_skill_id(sid))
+        assert ctx.store.exists("exams", make_exam_id(sid))
+    assert not ctx.store.exists("skills", make_skill_id(target))
+    assert not ctx.store.exists("exams", make_exam_id(target))
+    # The terminal failure was recorded exactly once.
+    assert [r["subtask_id"] for r in _failures_file(ctx)] == [target]
+    assert [(r["unit_id"], r["error_class"]) for r in _ledger(ctx)] == [
+        (target, "ModelOutputError")]
+
+
+def test_infra_error_under_workers_4_completes_others_then_raises(
+        monkeypatch, tmp_path):
+    subtasks = seed_store(Store(tmp_path / "run"))
+    target = subtasks[1].subtask_id
+    _failing_write_skill(monkeypatch, target,
+                         InfrastructureError("endpoint unreachable"))
+    author = _pure_handle(_author_responder)
+    examiner = _pure_handle(_exam_responder)
+    ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
+    ctx.workers = 4
+
+    with pytest.raises(InfrastructureError) as info:
+        stage3_generation.run(ctx)
+
+    assert "1 unit" in str(info.value)
+    others = [sid for sid in expected_ids(subtasks) if sid != target]
+    # The summary was written before the raise and names the hole.
+    summary = _summary_on_disk(ctx)
+    assert summary["generated"] == others
+    assert summary["infra_failed"] == [target]
+    for sid in others:
+        assert ctx.store.exists("exams", make_exam_id(sid))
+    assert not ctx.store.exists("skills", make_skill_id(target))
+    assert [(r["unit_id"], r["error_class"]) for r in _ledger(ctx)] == [
+        (target, "InfrastructureError")]
+
+    # Resume (service back): exactly the failed unit is re-offered.
+    monkeypatch.undo()
+    author2 = _pure_handle(_author_responder)
+    examiner2 = _pure_handle(_exam_responder)
+    ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
+    ctx2.workers = 4
+    summary2 = stage3_generation.run(ctx2)
+
+    assert summary2["generated"] == expected_ids(subtasks)
+    assert summary2["infra_failed"] == []
+    # Infrastructure failures are not terminal: no terminal record.
+    assert _failures_file(ctx2) == []
+    assert len(author2.client.calls) == 1
+    assert len(examiner2.client.calls) == 1
+
+
+def test_resume_under_workers_4_regenerates_only_pending(tmp_path):
+    subtasks = seed_store(Store(tmp_path / "run"))
+    ctx, _ = make_ctx(tmp_path, author=_pure_handle(_author_responder),
+                      examiner=_pure_handle(_exam_responder))
+    ctx.workers = 4
+    first = stage3_generation.run(ctx)
+
+    # A partially filled store: one pair lost in full, one halved, one
+    # intact (the crash points a resume can land on).
+    ids = expected_ids(subtasks)
+    ctx.store.path_for("skills", make_skill_id(ids[0])).unlink()
+    ctx.store.path_for("exams", make_exam_id(ids[0])).unlink()
+    ctx.store.path_for("exams", make_exam_id(ids[1])).unlink()
+
+    author2 = _pure_handle(_author_responder)
+    examiner2 = _pure_handle(_exam_responder)
+    ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
+    ctx2.workers = 4
+    resumed = stage3_generation.run(ctx2)
+
+    assert resumed == first
+    # Only the two pending units made model calls; the intact pair was
+    # skipped with zero calls.
+    assert len(author2.client.calls) == 2
+    assert len(examiner2.client.calls) == 2
+    # The regenerated halves are exactly what an uninterrupted run writes
+    # (pure-function model, deterministic ids).
+    skill = ctx2.store.load("skills", make_skill_id(ids[1]), Skill)
+    exam = ctx2.store.load("exams", make_exam_id(ids[1]), Exam)
+    assert skill.content == f"SKILL distill {subtasks[1].label}"
+    assert exam.question_text == f"question {subtasks[1].label}"

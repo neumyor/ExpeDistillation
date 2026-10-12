@@ -3,6 +3,9 @@ scripted llm.fake handles, no network. Covers the K4 drive per pending
 skill, the outcome tallies, the missing-exam skip, the zero-call rerun over
 terminal skills and the deterministic iteration order."""
 
+import json
+import threading
+
 from expedistill.core.config import ExperimentConfig
 from expedistill.core.ids import (
     make_exam_id,
@@ -23,7 +26,7 @@ from expedistill.infra.reliability import (
     ProviderRefusalError,
     UnitFailureRecorder,
 )
-from expedistill.infra.store import Store, read_json
+from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.stages import stage4_acceptance
 from expedistill.stages.context import StageContext
@@ -512,3 +515,396 @@ def test_crash_before_the_discard_is_stored_leaves_no_ledger_row(
         "discarded", "model_output_error")
     assert len(_moe_failures(ctx2)) == 1
     assert ctx2.handle("answerer").client.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Parallel dispatch (B5 run_units): workers from the context, equivalence
+# between workers=1 and workers=4, a concurrency proof, the per-unit infra
+# disposition under parallelism, and resume after a fatal crash.
+# ---------------------------------------------------------------------------
+
+def _question(i):
+    return f"QMARK{i}: what should be done in this situation?"
+
+
+def _skill_text(i):
+    return f"SMARK{i}: original advice for situation {i}."
+
+
+def _rewritten_text(i):
+    return f"SMARK{i}: rewritten advice with the missing step spelled out."
+
+
+def _seed_marked(store, i, *, status="pending", with_exam=True):
+    """One (skill, exam) pair with content markers that make every prompt
+    self-identifying, so scripted responses can dispatch on content instead
+    of call order (call order is the one thing workers>1 does not pin)."""
+    return seed_pair(store, "t1", i, skill_text=_skill_text(i),
+                     question=_question(i), status=status,
+                     with_exam=with_exam)
+
+
+def _answerer(plan):
+    """Answer handle dispatching on the exam marker and injected content.
+
+    ``plan`` maps a question marker to ``{"bare": item, "skill":
+    [(content marker, item), ...]}``; an item is an answer string or an
+    exception to raise. The with-skill prompt is matched by the injected
+    skill content, so the script is order-independent under any dispatch
+    interleaving.
+    """
+    def respond(system, user):
+        for marker, spec in plan.items():
+            if marker not in user:
+                continue
+            if "## Skill rules" not in user:
+                item = spec["bare"]
+            else:
+                item = next(out for token, out in spec["skill"]
+                            if token in user)
+            if isinstance(item, BaseException):
+                raise item
+            return item
+        raise AssertionError(f"unexpected ANSWER prompt: {user[:120]!r}")
+    return make_fake_handle("weak", respond)
+
+
+def _judge(verdicts):
+    """Judge handle dispatching on the weak answer's marker: verdict JSON or
+    an exception to raise (every time, so K3's repair budget exhausts)."""
+    def respond(system, user):
+        for marker, item in verdicts.items():
+            if marker in user:
+                if isinstance(item, BaseException):
+                    raise item
+                return item
+        raise AssertionError(f"unexpected JUDGE prompt: {user[:120]!r}")
+    return make_fake_handle("strong", respond)
+
+
+def _rewriter(rewrites):
+    """Rewriter handle dispatching on the current skill content marker."""
+    def respond(system, user):
+        for marker, item in rewrites.items():
+            if marker in user:
+                return item
+        raise AssertionError(f"unexpected REWRITE prompt: {user[:120]!r}")
+    return make_fake_handle("strong", respond)
+
+
+_CLEAN_AUDIT = json_script(
+    {"leaked": False, "reason": "generic method advice"})
+
+
+def _snapshot(store):
+    """Field-by-field snapshot of the skills and attempts stores."""
+    skills = {skill_id: store.load("skills", skill_id, Skill).to_dict()
+              for skill_id in store.ids("skills")}
+    attempts = {attempt_id: store.load("attempts", attempt_id,
+                                       Attempt).to_dict()
+                for attempt_id in store.ids("attempts")}
+    return skills, attempts
+
+
+def _ledger_rows(run_dir, relative):
+    """Stage-4 ledger rows without wall-clock times, sorted: workers>1 pins
+    every row's content but not the append order. ``relative`` is the path
+    under the run dir: failed_units.jsonl sits at the root, K4's ledgers
+    under stage4_acceptance/."""
+    rows = [{key: value for key, value in row.items() if key != "time"}
+            for row in read_jsonl(run_dir / relative)]
+    return sorted(rows, key=lambda row: json.dumps(
+        row, sort_keys=True, ensure_ascii=False))
+
+
+def _mixed_scenario(store):
+    """Seed the six-way mix and build its scripted handles.
+
+    Skill 0 accepts; skill 1 the weak model already knows (bare correct ->
+    weak_already_knows); skill 2's judge never satisfies its contract
+    (model_output_error discard); skill 3 needs one rewrite round before it
+    accepts on the rewritten version; skill 4's first version is voided by
+    the leak audit and it accepts on the rewrite; skill 5's rewriter never
+    satisfies its contract, so its round is consumed without a new version
+    and it discards as retry_exhausted. Between them the units exercise all
+    three K4 ledgers from several threads at once.
+    """
+    for i in range(6):
+        _seed_marked(store, i)
+    answerer = _answerer({
+        f"QMARK{i}": {"bare": f"AMARK{i}bare",
+                      "skill": [(_skill_text(i), f"AMARK{i}v1")]}
+        for i in (0, 1, 2, 5)
+    } | {
+        f"QMARK{i}": {"bare": f"AMARK{i}bare",
+                      "skill": [(_skill_text(i), f"AMARK{i}v1"),
+                                (_rewritten_text(i), f"AMARK{i}v2")]}
+        for i in (3, 4)
+    })
+    judge = _judge({
+        "AMARK0bare": incorrect(), "AMARK0v1": correct(),
+        "AMARK1bare": correct(),
+        "AMARK2bare": ModelOutputError(
+            "JUDGE for QMARK2: verdict outside the vocabulary"),
+        "AMARK3bare": incorrect(), "AMARK3v1": incorrect(),
+        "AMARK3v2": correct(),
+        # Skill 4's v1 is voided by the leak audit before it is examined;
+        # a call for it would be a bug, so it has no script entry.
+        "AMARK4bare": incorrect(), "AMARK4v2": correct(),
+        "AMARK5bare": incorrect(), "AMARK5v1": incorrect(),
+    })
+    rewriter = _rewriter({
+        _skill_text(3): json_script({
+            "failure_category": "missing_step",
+            "skill_text": _rewritten_text(3),
+            "rewrite_reason": "spelled out the intermediate step",
+        }),
+        _skill_text(4): json_script({
+            "failure_category": "wrong_trigger",
+            "skill_text": _rewritten_text(4),
+            "rewrite_reason": "made the trigger condition concrete",
+        }),
+        # Skill 5's G6 never satisfies its contract: both tries of its
+        # rewrite round are spent (rewrite_failures.jsonl).
+        _skill_text(5): ModelOutputError(
+            "G6 for QMARK5: rewrite outside the vocabulary"),
+    })
+
+    def audit_respond(system, user):
+        # Skill 4's first version leaks; everything else is clean.
+        if _skill_text(4) in user:
+            return json_script({"leaked": True,
+                                "reason": "a concrete value from the exam "
+                                "situation"})
+        return _CLEAN_AUDIT
+
+    return answerer, judge, rewriter, make_fake_handle("auditor",
+                                                       audit_respond)
+
+
+@pytest.mark.parametrize("workers", [1, 2, 4])
+def test_runs_at_any_worker_count_produce_identical_stores_and_summaries(
+        tmp_path, workers):
+    def run_once(tag, worker_count):
+        run_dir = tmp_path / f"run-{tag}"
+        store = Store(run_dir)
+        answerer, judge, rewriter, auditor = _mixed_scenario(store)
+        ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
+                          rewriter=rewriter, auditor=auditor,
+                          run_dir=run_dir)
+        ctx.workers = worker_count
+        return ctx, store, stage4_acceptance.run(ctx)
+
+    # The reference run is serial (workers=1, the old loop); every other
+    # worker count (2, 4 = more units than workers either way) must land on
+    # exactly the same stores, summaries and ledger contents.
+    ctx1, store1, summary1 = run_once("serial", 1)
+    ctxN, storeN, summaryN = run_once(f"w{workers}", workers)
+
+    assert summary1 == summaryN == {
+        "accepted": 3, "discarded": {"weak_already_knows": 1,
+                                     "model_output_error": 1,
+                                     "retry_exhausted": 1},
+        "skipped_missing_exam": [], "infra_failed": [],
+        "processed_this_call": 6}
+    assert _snapshot(store1) == _snapshot(storeN)
+    assert read_json(ctx1.run_dir / "stage4_acceptance"
+                     / "stage4_summary.json") == summary1
+    assert read_json(ctxN.run_dir / "stage4_acceptance"
+                     / "stage4_summary.json") == summaryN
+    for relative in ("stage4_acceptance/leak_verdicts.jsonl",
+                     "stage4_acceptance/rewrite_failures.jsonl",
+                     "failed_units.jsonl"):
+        assert _ledger_rows(ctx1.run_dir, relative) == \
+            _ledger_rows(ctxN.run_dir, relative)
+
+    # The mix itself is pinned, not merely self-consistent: every skill's
+    # terminal state is what its script says (status, discard reason,
+    # version -- skills 3 and 4 accepted on a rewritten version 2 -- and
+    # rewrite history length).
+    expected = {
+        0: ("accepted", None, 1, 0),
+        1: ("discarded", "weak_already_knows", 1, 0),
+        2: ("discarded", "model_output_error", 1, 0),
+        3: ("accepted", None, 2, 1),
+        4: ("accepted", None, 2, 1),
+        5: ("discarded", "retry_exhausted", 1, 0),
+    }
+    for index, (status, reason, version, rewrites) in expected.items():
+        skill = store1.load("skills", make_skill_id(make_subtask_id(
+            make_trajectory_id(make_task_id("tb", "t1"), "strong", 0),
+            index)), Skill)
+        assert (skill.status, skill.discard_reason, skill.version,
+                len(skill.rewrite_history)) == (status, reason, version,
+                                                rewrites)
+    # One leak verdict per examined version: skill 4's v1 is the leaked one.
+    leaks = _ledger_rows(ctx1.run_dir,
+                         "stage4_acceptance/leak_verdicts.jsonl")
+    assert len(leaks) == 6
+    assert [row for row in leaks if row["leaked"]] == [{
+        "skill_id": make_skill_id(make_subtask_id(make_trajectory_id(
+            make_task_id("tb", "t1"), "strong", 0), 4)),
+        "skill_version": 1, "leaked": True,
+        "reason": "a concrete value from the exam situation"}]
+    # Skill 5's rewrite round burned both G6 tries without a new version.
+    failures = _ledger_rows(ctx1.run_dir,
+                            "stage4_acceptance/rewrite_failures.jsonl")
+    assert [row["try_index"] for row in failures] == [0, 1]
+    assert failures[-1]["exhausted"] is True
+    # Only skill 2's judge produced a unit-failure ledger row.
+    assert [row["error_class"] for row in _ledger_rows(
+        ctx1.run_dir, "failed_units.jsonl")] == ["ModelOutputError"]
+
+
+def test_workers4_runs_units_concurrently(tmp_path, monkeypatch):
+    store = Store(tmp_path / "run")
+    for i in range(4):
+        _seed_marked(store, i)
+    barrier = threading.Barrier(4, timeout=10)
+
+    def stub_accept(*, store, skill, **kwargs):
+        # Opens only with all four units really in flight; a serial loop
+        # (or a pool that serializes) times out here and fails the test.
+        barrier.wait()
+        skill.status = "accepted"
+        store.save(skill, "skills")
+        return skill
+
+    monkeypatch.setattr(stage4_acceptance, "accept_skill", stub_accept)
+    ctx, _ = make_ctx(tmp_path, answerer=make_fake_handle("weak", []),
+                      judge=make_fake_handle("strong", []),
+                      rewriter=make_fake_handle("strong", []))
+    ctx.workers = 4
+
+    summary = stage4_acceptance.run(ctx)
+
+    assert summary == {"accepted": 4, "discarded": {},
+                       "skipped_missing_exam": [], "infra_failed": [],
+                       "processed_this_call": 4}
+    for skill_id in store.ids("skills"):
+        assert store.load("skills", skill_id, Skill).status == "accepted"
+
+
+def test_infra_failed_unit_leaves_the_rest_complete_with_workers4(tmp_path):
+    store = Store(tmp_path / "run")
+    stuck = _seed_marked(store, 1)
+    done = [_seed_marked(store, 0).skill_id,
+            _seed_marked(store, 2).skill_id]
+    answerer = _answerer({
+        "QMARK0": {"bare": "AMARK0bare",
+                   "skill": [(_skill_text(0), "AMARK0v1")]},
+        # The stuck unit's first model call exhausts the endpoint.
+        "QMARK1": {"bare": InfrastructureError("endpoint timed out")},
+        "QMARK2": {"bare": "AMARK2bare",
+                   "skill": [(_skill_text(2), "AMARK2v1")]},
+    })
+    judge = _judge({
+        "AMARK0bare": incorrect(), "AMARK0v1": correct(),
+        "AMARK2bare": incorrect(), "AMARK2v1": correct(),
+    })
+    ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
+                      rewriter=make_fake_handle("strong", []),
+                      auditor=make_fake_handle("auditor", _CLEAN_AUDIT))
+    ctx.workers = 4
+
+    with pytest.raises(InfrastructureError) as excinfo:
+        stage4_acceptance.run(ctx)
+
+    assert "1 skill" in str(excinfo.value) and "resume" in str(excinfo.value)
+    # The stuck skill stayed pending; every other unit ran to completion.
+    assert store.load("skills", stuck.skill_id, Skill).status == "pending"
+    for skill_id in done:
+        assert store.load("skills", skill_id, Skill).status == "accepted"
+    summary = read_json(ctx.run_dir / "stage4_acceptance"
+                        / "stage4_summary.json")
+    assert summary == {"accepted": 2, "discarded": {},
+                       "skipped_missing_exam": [],
+                       "infra_failed": [stuck.skill_id],
+                       "processed_this_call": 2}
+    failures = UnitFailureRecorder(ctx.run_dir).list_failures()
+    assert [(f["unit_id"], f["error_class"]) for f in failures] == [
+        (stuck.skill_id, "InfrastructureError")]
+
+
+def _accepting_answers(indices):
+    """Content-dispatch plan for all-accept skills: bare wrong, with-skill
+    right, first version."""
+    plan, verdicts = {}, {}
+    for i in indices:
+        plan[f"QMARK{i}"] = {"bare": f"AMARK{i}bare",
+                             "skill": [(_skill_text(i), f"AMARK{i}v1")]}
+        verdicts[f"AMARK{i}bare"] = incorrect()
+        verdicts[f"AMARK{i}v1"] = correct()
+    return plan, verdicts
+
+
+def test_resume_after_fatal_crash_completes_only_pending(tmp_path):
+    run_dir = tmp_path / "run"
+    store = Store(run_dir)
+    first = _seed_marked(store, 0)
+    crashed = _seed_marked(store, 1)
+    # Unit 1 must not raise before unit 0 has started answering: unit 0 is
+    # then in flight when the batch stops, and runs to completion either
+    # way, so the interrupted state is deterministic.
+    unit0_answering = threading.Event()
+
+    def crash_or_answer(system, user):
+        if "QMARK0" in user:
+            unit0_answering.set()
+            return ("AMARK0bare" if "## Skill rules" not in user
+                    else "AMARK0v1")
+        assert "QMARK1" in user
+        assert unit0_answering.wait(10), "unit 1 ran before unit 0 started"
+        raise RuntimeError("worker thread exploded")
+
+    plan, verdicts = _accepting_answers((0, 1))
+    ctx, _ = make_ctx(tmp_path, answerer=make_fake_handle("weak",
+                                                          crash_or_answer),
+                      judge=_judge(verdicts),
+                      rewriter=_rewriter({}),
+                      auditor=make_fake_handle("auditor", _CLEAN_AUDIT),
+                      run_dir=run_dir)
+    ctx.workers = 4
+
+    with pytest.raises(RuntimeError):
+        stage4_acceptance.run(ctx)
+
+    # The fatal crash recorded no unit failure, wrote no summary, and left
+    # the crashed skill pending with nothing stored for its exam.
+    assert store.load("skills", first.skill_id, Skill).status == "accepted"
+    assert store.load("skills", crashed.skill_id, Skill).status == "pending"
+    assert UnitFailureRecorder(run_dir).list_failures() == []
+    assert not (run_dir / "stage4_acceptance"
+                / "stage4_summary.json").exists()
+    crashed_exam = make_exam_id(crashed.subtask_id)
+    assert all(store.load("attempts", attempt_id, Attempt).exam_id
+               != crashed_exam for attempt_id in store.ids("attempts"))
+
+    # Resume: only the crashed skill is pending, so only its exam is asked
+    # (its two answer calls); the finished one makes no model call.
+    ctx2, _ = make_ctx(tmp_path, answerer=_answerer(plan),
+                       judge=_judge(verdicts), rewriter=_rewriter({}),
+                       auditor=make_fake_handle("auditor", _CLEAN_AUDIT),
+                       run_dir=run_dir)
+    ctx2.workers = 4
+    summary = stage4_acceptance.run(ctx2)
+
+    prompts = [call["user"]
+               for call in ctx2.handle("answerer").client.calls]
+    assert len(prompts) == 2 and all("QMARK1" in p for p in prompts)
+    assert summary == {"accepted": 2, "discarded": {},
+                       "skipped_missing_exam": [], "infra_failed": [],
+                       "processed_this_call": 1}
+
+    # The converged store equals an uninterrupted workers=4 run's.
+    baseline_dir = tmp_path / "baseline"
+    baseline_store = Store(baseline_dir)
+    for i in (0, 1):
+        _seed_marked(baseline_store, i)
+    bctx, _ = make_ctx(tmp_path, answerer=_answerer(plan),
+                       judge=_judge(verdicts), rewriter=_rewriter({}),
+                       auditor=make_fake_handle("auditor", _CLEAN_AUDIT),
+                       run_dir=baseline_dir)
+    bctx.workers = 4
+    stage4_acceptance.run(bctx)
+    assert _snapshot(store) == _snapshot(baseline_store)

@@ -22,6 +22,17 @@ is serial-numbered, but the fixed order keeps the run's audit log and the
 model-call sequence deterministic across resumes whatever order a rule
 returned).
 
+Dispatch (B5 run_units): the selected trajectories are processed as units
+through ``run_units`` with the run's ``workers`` setting (the same lookup
+stages 1/6 use; default 1 is the serial path, i.e. the historical
+behavior). Everything before dispatch -- loading, grouping, the per-task
+rule calls, the empty-skip exclusion and its audit records -- stays serial
+and deterministic, and the summary is aggregated from the returned
+outcomes in input order, so it is identical for any ``workers``. Only the
+order of concurrent appends varies (K2's exhaustion audit records, ledger
+lines): append_jsonl serializes the writers themselves, and readers must
+not depend on that order.
+
 The summary is cumulative over the run directory, not over this call: K2
 returns stored subtasks for finished trajectories and None, without a model
 call, for trajectories an earlier call already skipped (exhaustion is
@@ -34,24 +45,32 @@ errors stay inside K2 (retry rounds, then a "skipped" audit record). An
 ``InfrastructureError`` is not a segmentation failure: the trajectory is
 recorded in the unit-failure ledger (unit id = trajectory_id), nothing is
 stored or audited for it, and the remaining trajectories are still
-segmented; after the loop the summary is written (``infra_failed`` lists the
-ids) and the stage raises ``InfrastructureError`` so the pipeline never
+segmented; after the batch the summary is written (``infra_failed`` lists
+the ids) and the stage raises ``InfrastructureError`` so the pipeline never
 advances past a stage with holes. A resume re-offers exactly those
-trajectories. Every other exception propagates at once.
+trajectories. Every other exception is fatal for the batch (run_units
+semantics): units in flight run to completion, no further unit starts, and
+the first failure by unit order is re-raised unwrapped with its original
+type and message, whatever its kind (a ParallelError carrying every
+failure stays chained as its __cause__) -- so a run that died on a fatal
+error writes no summary.
 """
 
 from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Sequence, Tuple
 
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks.rules import get_trajectory_select
 from expedistill.composites.segment_checked import segment_checked
 from expedistill.core.ids import parse_trajectory_id
 from expedistill.core.models import Trajectory
-from expedistill.infra.reliability import InfrastructureError, UnitFailureRecorder
+from expedistill.infra.parallel import run_units
+from expedistill.infra.reliability import (
+    CodeBugError, InfrastructureError, UnitFailureRecorder,
+)
 from expedistill.infra.store import append_jsonl, read_jsonl, write_json
 from expedistill.stages.context import StageContext
 
@@ -66,6 +85,30 @@ _AUDIT_PATH = Path("stage2_segments") / "segmentation_audit.jsonl"
 
 #: Stage label written into the unit-failure ledger.
 _FAILURE_STAGE = "stage2_segmentation"
+
+
+class _UnitOutcome(NamedTuple):
+    """What one selected trajectory's unit produced.
+
+    ``kind`` is the unit's disposition: "segmented" (``subtasks`` built or
+    reloaded from the store), "skipped" (K2 exhausted, or an earlier call
+    already skipped it) or "infra" (recorded in the unit-failure ledger by
+    the worker). The stage aggregates the outcomes in input order, so the
+    summary does not depend on the dispatch interleaving.
+    """
+
+    trajectory_id: str
+    kind: str
+    subtasks: int
+
+
+def _workers(ctx: StageContext) -> int:
+    """Parallelism from the config/context if either carries it, else serial
+    (same lookup stages 1/6 use: the pipeline sets ``ctx.workers``)."""
+    workers = getattr(ctx.config, "workers", None)
+    if workers is None:
+        workers = getattr(ctx, "workers", 1)
+    return int(workers)
 
 
 def _plugin(benchmark: str) -> Any:
@@ -141,6 +184,11 @@ def _record_empty_skips(run_dir: Path, empty_ids: Sequence[str]) -> None:
 def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
     """Segment every selected trajectory of the failed tasks via K2.
 
+    The selected trajectories are dispatched as units through run_units with
+    the run's ``workers`` setting (default 1 = serial); the summary is
+    aggregated from the returned outcomes in input order, so it is identical
+    whatever the dispatch interleaving was.
+
     Returns and writes ``stage2_summary.json`` with ``segmented`` /
     ``skipped`` (per-trajectory K2 outcomes, cumulative over the run),
     ``total_subtasks`` (subtasks of the segmented trajectories, stored ones
@@ -171,11 +219,11 @@ def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
     selected.sort(key=lambda traj: traj.trajectory_id)
 
     recorder = UnitFailureRecorder(ctx.run_dir)
-    segmented = 0
-    skipped = 0
-    total_subtasks = 0
-    infra_failed: List[str] = []
-    for trajectory in selected:
+
+    def segment_unit(trajectory: Trajectory) -> _UnitOutcome:
+        # One selected trajectory: the K2 call plus its expected-failure
+        # disposition. Expected failures are handled HERE, not outside the
+        # batch; only a fatal error escapes the worker (run_units contract).
         try:
             subtasks = segment_checked(
                 store=ctx.store,
@@ -188,14 +236,33 @@ def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
                 run_dir=ctx.run_dir,
             )
         except InfrastructureError as exc:
-            recorder.record(trajectory.trajectory_id, _FAILURE_STAGE, exc, exc)
-            infra_failed.append(trajectory.trajectory_id)
-            continue
+            recorder.record(trajectory.trajectory_id, _FAILURE_STAGE,
+                            exc, exc)
+            return _UnitOutcome(trajectory.trajectory_id, "infra", 0)
         if subtasks is None:
-            skipped += 1
-        else:
+            return _UnitOutcome(trajectory.trajectory_id, "skipped", 0)
+        return _UnitOutcome(trajectory.trajectory_id, "segmented",
+                            len(subtasks))
+
+    # run_units returns only when no unit failed fatally (a fatal error
+    # raises instead), so every outcome below is a real _UnitOutcome.
+    outcomes = run_units(segment_unit, selected, workers=_workers(ctx))
+
+    segmented = 0
+    skipped = 0
+    total_subtasks = 0
+    infra_failed: List[str] = []
+    for outcome in outcomes:
+        if outcome.kind == "segmented":
             segmented += 1
-            total_subtasks += len(subtasks)
+            total_subtasks += outcome.subtasks
+        elif outcome.kind == "skipped":
+            skipped += 1
+        elif outcome.kind == "infra":
+            infra_failed.append(outcome.trajectory_id)
+        else:  # segment_unit only ever returns the three kinds above
+            raise CodeBugError(
+                f"unknown per-unit segmentation outcome {outcome!r}")
 
     result = {
         "segmented": segmented,

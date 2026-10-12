@@ -7,9 +7,25 @@ Which model plays each role comes from the context's role table
 (``author`` writes skills, ``examiner`` writes exams); the stage never names a
 model itself.
 
-Determinism: selected subtasks are processed in ``subtask_id`` order, the
+Determinism: selected subtasks are dispatched in ``subtask_id`` order, the
 fixed creation order the ids module pins down -- a resumed run replays it, so
-serial-numbered ids elsewhere stay reproducible.
+serial-numbered ids elsewhere stay reproducible. Every summary list is
+aggregated from the input-ordered unit outcomes, so it stays in that selection
+order whatever order the workers finished in.
+
+Parallel dispatch: the selected subtasks run through B5 ``run_units`` with
+``ctx.workers`` threads (default 1; stages 1/6 read the same attribute). The
+unit is one selected subtask, and every expected failure is dispositioned
+INSIDE the worker, per run_units' contract: anything escaping it is fatal and
+stops the batch (in-flight units run to completion, then the first failure by
+unit order surfaces unwrapped with its original type and message, whatever
+its kind, the full-failure ParallelError chained as its __cause__). The
+worker state shared
+across threads is safe by construction: each unit touches only its own
+``terminal`` / ledger key, and every disk write goes through append_jsonl's
+per-path lock or store.save's distinct atomic file. With workers > 1 the
+order of ledger lines on disk varies run to run; nothing here reads it back
+in order.
 
 Resume: a subtask whose (skill, exam) pair is already stored is skipped
 without a model call. A pair missing either half (a crash between the two
@@ -41,8 +57,10 @@ both G2 and G3 succeeded, so a failed unit leaves nothing behind:
   run, then the summary is written and the stage raises
   ``InfrastructureError`` so the pipeline never advances past a stage with
   holes. These units ARE re-offered on resume.
-* Anything else (ConfigError, ProviderRefusalError, CodeBugError, ...)
-  propagates immediately.
+* Anything else (ConfigError, ProviderRefusalError, CodeBugError, ...) is
+  fatal to the batch: no further unit is started, in-flight units finish,
+  and the first failure by unit order is then surfaced (B5's rule above);
+  no summary is written, exactly as before.
 
 The summary describes the run directory's state after this call, not this
 call's work: re-running a finished stage makes zero model calls and writes
@@ -58,6 +76,7 @@ from expedistill.blocks.view import render_steps_view
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import Skill, Subtask, Trajectory
+from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
     ConfigError,
     InfrastructureError,
@@ -80,6 +99,16 @@ FAILURES_FILENAME = "generation_failures.jsonl"
 
 #: Stage label written into the unit-failure ledger.
 _FAILURE_STAGE = "stage3_generation"
+
+#: Per-unit dispositions: the summary list a processed subtask belongs to.
+#: The worker returns one of these; run() buckets the input-ordered outcomes
+#: into the summary, which keeps them in selection order.
+_GENERATED = "generated"
+_MODEL_OUTPUT_FAILED = "model_output_failed"
+_INFRA_FAILED = "infra_failed"
+_EXAM_MISSING_ADVANCED = "exam_missing_advanced"
+_DISPOSITIONS = (
+    _GENERATED, _MODEL_OUTPUT_FAILED, _INFRA_FAILED, _EXAM_MISSING_ADVANCED)
 
 #: Same cap as the unit-failure ledger's message field.
 _MESSAGE_LIMIT = UnitFailureRecorder.MESSAGE_LIMIT
@@ -126,6 +155,11 @@ class _Ledger:
     Terminal failures are recorded once per (unit, error class) however
     often the stage is re-run; infrastructure failures are fresh events each
     time and use ``record`` directly.
+
+    Safe under the stage's worker threads: within one run each (unit, error
+    class) pair is decided by exactly one unit (dispositions are mutually
+    exclusive inside a worker), so the check-then-add on ``_seen`` cannot
+    race, and the appends themselves lock the ledger file (B6/B3).
     """
 
     def __init__(self, run_dir: Any) -> None:
@@ -155,15 +189,25 @@ def _terminal_failures(path: Any) -> Dict[str, Dict[str, Any]]:
     return rows
 
 
+def _workers(ctx: Any) -> int:
+    """Parallelism from the config/context if either carries it, else serial
+    (same lookup stages 1/6 use)."""
+    workers = getattr(ctx.config, "workers", None)
+    if workers is None:
+        workers = getattr(ctx, "workers", 1)
+    return int(workers)
+
+
 def run(ctx: Any) -> Dict[str, Any]:
     """Generate one candidate skill and one exam per selected subtask.
 
     Returns and stores ``{"selected", "generated", "model_output_failed",
     "infra_failed", "exam_missing_advanced"}``, all subtask-id lists in
-    processing order and all describing the run directory after this call:
-    the subtasks the D6 rule kept, those with a stored (skill, exam) pair,
-    the terminal model-output failures, the infrastructure holes still open,
-    and the advanced skills whose exam is missing (module docstring). Raises
+    selection order (the unit outcomes run_units returns are input-ordered)
+    and all describing the run directory after this call: the subtasks the
+    D6 rule kept, those with a stored (skill, exam) pair, the terminal
+    model-output failures, the infrastructure holes still open, and the
+    advanced skills whose exam is missing (module docstring). Raises
     ``InfrastructureError`` after storing the summary when ``infra_failed``
     is non-empty.
     """
@@ -189,33 +233,34 @@ def run(ctx: Any) -> Dict[str, Any]:
     failures_path = ctx.run_dir / STAGE3_DIR / FAILURES_FILENAME
     terminal = _terminal_failures(failures_path)
 
-    generated: List[str] = []
-    model_output_failed: List[str] = []
-    infra_failed: List[str] = []
-    exam_missing_advanced: List[str] = []
-    for subtask in selected:
+    def process(subtask: Subtask) -> str:
+        """One selected subtask -> its disposition (a _DISPOSITIONS tag).
+
+        The whole per-unit body of the old loop, unchanged: with
+        ``ctx.workers > 1`` it runs on B5's pool, and every expected failure
+        is dispositioned here so anything escaping is fatal to the batch.
+        The state shared with sibling workers (``terminal``, the ledger) is
+        safe by construction -- one key per unit, appends locked in B3/B6.
+        """
         subtask_id = subtask.subtask_id
         skill_id = make_skill_id(subtask_id)
         exam_id = make_exam_id(subtask_id)
         skill_stored = store.exists("skills", skill_id)
         if skill_stored and store.exists("exams", exam_id):
-            generated.append(subtask_id)
-            continue
+            return _GENERATED
         if subtask_id in terminal:
             # Decided by an earlier call; restore a ledger row a crash
             # between the two writes may have lost.
             row = terminal[subtask_id]
             ledger.record_once(subtask_id, row["error_class"], row["message"])
-            model_output_failed.append(subtask_id)
-            continue
+            return _MODEL_OUTPUT_FAILED
         if skill_stored and not _untouched_since_stage3(
                 store.load("skills", skill_id, Skill)):
             ledger.record_once(
                 subtask_id, "ExamMissingError",
                 f"exam {exam_id} is missing but skill {skill_id} has already "
                 "advanced past stage 3; not regenerating it")
-            exam_missing_advanced.append(subtask_id)
-            continue
+            return _EXAM_MISSING_ADVANCED
 
         # A selected subtask without its trajectory is a broken run, not a
         # skippable unit: fail loudly instead of silently shrinking the stage.
@@ -244,28 +289,37 @@ def run(ctx: Any) -> Dict[str, Any]:
             append_jsonl(failures_path, row)
             terminal[subtask_id] = row
             ledger.record_once(subtask_id, row["error_class"], row["message"])
-            model_output_failed.append(subtask_id)
-            continue
+            return _MODEL_OUTPUT_FAILED
         except InfrastructureError as exc:
             ledger.record(subtask_id, exc, exc)
-            infra_failed.append(subtask_id)
-            continue
+            return _INFRA_FAILED
 
         store.save(skill, "skills")
         store.save(exam, "exams")
-        generated.append(subtask_id)
+        return _GENERATED
 
+    # Selection stays serial and deterministic; only the per-subtask units
+    # parallelize. A fatal escape raises out of run_units (no summary is
+    # written, exactly as before), so a returned outcomes list holds one
+    # disposition per unit.
+    outcomes = run_units(process, selected, _workers(ctx))
+
+    # Buckets keep the selection order: outcomes are input-ordered, never
+    # completion-ordered, however the workers interleaved.
+    buckets: Dict[str, List[str]] = {name: [] for name in _DISPOSITIONS}
+    for subtask, disposition in zip(selected, outcomes):
+        buckets[disposition].append(subtask.subtask_id)
     summary = {
         "selected": [subtask.subtask_id for subtask in selected],
-        "generated": generated,
-        "model_output_failed": model_output_failed,
-        "infra_failed": infra_failed,
-        "exam_missing_advanced": exam_missing_advanced,
+        "generated": buckets[_GENERATED],
+        "model_output_failed": buckets[_MODEL_OUTPUT_FAILED],
+        "infra_failed": buckets[_INFRA_FAILED],
+        "exam_missing_advanced": buckets[_EXAM_MISSING_ADVANCED],
     }
     write_json(ctx.run_dir / STAGE3_DIR / SUMMARY_FILENAME, summary, indent=2)
-    if infra_failed:
+    if summary["infra_failed"]:
         raise InfrastructureError(
-            f"stage 3: {len(infra_failed)} unit(s) (subtasks) failed on "
-            f"infrastructure errors, recorded in {ledger.recorder.path}; "
-            "resume the run to retry them")
+            f"stage 3: {len(summary['infra_failed'])} unit(s) (subtasks) "
+            f"failed on infrastructure errors, recorded in "
+            f"{ledger.recorder.path}; resume the run to retry them")
     return summary
