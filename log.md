@@ -256,3 +256,21 @@ workers 取 run 设置（默认 1 = 原串行行为，既有测试零改动全�
 `tests/unit/infra/test_parallel.py`、`tests/unit/stages/test_stage2_parallel.py`、
 `tests/unit/stages/test_stage3.py`、`tests/unit/stages/test_stage4.py`、
 `scripts/run/seed_tb_stage1.py`。pytest 1304 passed。
+
+## 2026-10-12 17:25 — 网关 300 秒非流式切断线：客户端改内部流式传输（根源修复）
+
+TB 阶段 3 收尾时发现顽固单元 write-compressor/strong/00/seg00 死循环：请求本身正常大小
+（44k 字符），但该内容令强模型满预算思考（流式实测 414 秒、13387/32768 token、内容为空、
+finish_reason=length），而网关对非流式请求在 300.3 秒服务端切断（v8 在客户端超时 900s 下
+仍精确 300 秒报 APIConnectionError 证实）。300 秒超时把"慢思考"误分类为基础设施错误 →
+无限重试。决定性实验：同一请求流式重放 414 秒完成。修复（系统层）：OpenAICompatClient
+的 complete() 改为内部流式 + 手工聚合（组装纪律复用老仓库 GPTWrapper：delta.content/refusal
+跨 chunk 累积、usage 取自 include_usage 的末 chunk），公开契约不变；所有 reasoning-max
+调用从此不受网关 300 秒天花板约束。该单元修复后首次调用即按设计得到模型输出终态失败
+（与同批 18 个同类一致，损失 1/470≈0.2%），阶段 3 收尾。附带运维决定：--llm-timeout 900
+（满预算思考约 600 秒 + 余量）。测试：流式决策回归 + 多 chunk 组装 + usage 捕获 + refusal
+累积 + 中途断流，1309 passed；stub 层机械改造，43 个既有调用点零改动。
+
+工件：`src/expedistill/llm/client.py`、`tests/unit/llm/test_client.py`、
+`tests/unit/stages/test_pipeline.py`（stub 机械适配）、
+run `runs/tb21_full_20261011_2242/`（诊断证据 dumps 2946-2953）。

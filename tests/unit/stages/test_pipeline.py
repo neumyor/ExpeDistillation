@@ -452,10 +452,13 @@ class _StubSDK:
         system = next((m["content"] for m in messages
                        if m["role"] == "system"), "")
         user = next(m["content"] for m in messages if m["role"] == "user")
-        message = types.SimpleNamespace(content=_script(system, user),
-                                        refusal=None)
-        choice = types.SimpleNamespace(message=message, finish_reason="stop")
-        return types.SimpleNamespace(choices=[choice], usage=None)
+        # The real client now opens every call as a stream (the 300s gateway
+        # cutoff on non-streaming chat), so the stub answers with the chunk
+        # stream an endpoint would emit for this content.
+        delta = types.SimpleNamespace(content=_script(system, user),
+                                      refusal=None)
+        choice = types.SimpleNamespace(delta=delta, finish_reason="stop")
+        return [types.SimpleNamespace(choices=[choice], usage=None)]
 
 
 def test_default_client_builder_runs_end_to_end(

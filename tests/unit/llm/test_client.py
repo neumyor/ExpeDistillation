@@ -20,11 +20,49 @@ from expedistill.llm.client import (
 )
 
 
+def _chunk(delta_content=None, delta_refusal=None, finish_reason=None):
+    """One streamed chunk shaped like SDK ChatCompletionChunk."""
+    delta = SimpleNamespace(content=delta_content, refusal=delta_refusal)
+    choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
+    return SimpleNamespace(choices=[choice], usage=None)
+
+
+def _usage_chunk(usage):
+    """The final, choice-less chunk gateways send for include_usage."""
+    return SimpleNamespace(choices=[], usage=usage)
+
+
+def _content_pieces(content):
+    """Split scripted content across delta chunks so tests exercise assembly.
+
+    Short strings stay one piece; an explicitly empty string stays one
+    (empty) delta so the client's none-vs-empty distinction stays observable
+    (no content delta at all vs. a delta that carries "").
+    """
+    if len(content) <= 4:
+        return [content]
+    return [content[i:i + 4] for i in range(0, len(content), 4)]
+
+
 def chat_response(content, *, finish_reason="stop", refusal=None, usage=None):
-    """Build an object shaped like an SDK chat.completions response."""
-    message = SimpleNamespace(content=content, refusal=refusal)
-    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
-    return SimpleNamespace(choices=[choice], usage=usage)
+    """Script the chunk stream an endpoint emits for this final response.
+
+    Same signature the non-streaming stub had, so existing tests only change
+    through this helper: refusal and content travel as delta chunks (content
+    split across several chunks), finish_reason rides the last choice chunk,
+    and usage arrives on a final choice-less chunk, exactly the wire shape
+    this gateway produces with ``stream_options.include_usage``.
+    """
+    chunks = []
+    if refusal is not None:
+        chunks.append(_chunk(delta_refusal=refusal))
+    if content is not None:
+        for piece in _content_pieces(content):
+            chunks.append(_chunk(delta_content=piece))
+    chunks.append(_chunk(finish_reason=finish_reason))
+    if usage is not None:
+        chunks.append(_usage_chunk(usage))
+    return chunks
 
 
 def sdk_usage(prompt_tokens=10, completion_tokens=4, total_tokens=14,
@@ -41,7 +79,13 @@ def sdk_usage(prompt_tokens=10, completion_tokens=4, total_tokens=14,
 
 
 class StubSDKClient:
-    """Stands in for openai.OpenAI: records init kwargs and create() calls."""
+    """Stands in for openai.OpenAI: records init kwargs and create() calls.
+
+    ``create()`` behaves like the SDK's streaming mode: it opens immediately
+    (raising ``error`` there if scripted -- the stream-open failure path) and
+    returns an iterator over the scripted chunks in ``response``; a generator
+    that raises partway scripts a mid-stream failure.
+    """
 
     last = None
 
@@ -64,7 +108,7 @@ class StubSDKClient:
         self.create_kwargs = kwargs
         if self.error is not None:
             raise self.error
-        return self.response
+        return iter(self.response)
 
 
 @pytest.fixture
@@ -126,6 +170,101 @@ def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
     assert StubSDKClient.last.init_kwargs["max_retries"] == 0
     # The wrapper itself must never hold the key.
     assert not hasattr(client, "api_key")
+
+
+def test_complete_uses_streaming_transport(monkeypatch, stub_sdk):
+    # Regression for the 2026-10-12 incident: the campaign gateway
+    # (llm-center.modelbest.co) kills NON-streaming chat requests at ~300.3s
+    # server-side (APIConnectionError at 300.2-300.4s, runs/
+    # tb21_full_20261011_2242/llm_requests dumps 2946-2953), while a
+    # reasoning-effort-max call that thinks for the full 32,768-token budget
+    # needs ~414s and can therefore NEVER complete non-streaming -- the same
+    # request with stream=True finished in 414s. A stub cannot wait 300s, so
+    # this test pins the DECISION: every call must open a stream and ask for
+    # usage in the stream options (the assembly itself is covered by the
+    # other tests below).
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    client.complete("model-a", "s", "u")
+    kwargs = StubSDKClient.last.create_kwargs
+    assert kwargs["stream"] is True
+    assert kwargs["stream_options"] == {"include_usage": True}
+
+
+def test_complete_assembles_unicode_split_across_chunks(monkeypatch, stub_sdk):
+    # The wire splits content at arbitrary token boundaries: multi-byte
+    # characters and even ZWJ graphemes can straddle chunk edges. The
+    # assembled text must be the exact original string.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    pieces = ["héllo ", "世", "界 ", "👨‍", "👩"]
+    chunks = [_chunk(delta_content=p) for p in pieces]
+    chunks.append(_chunk(finish_reason="stop"))
+    stub_sdk(response=chunks)
+    client = OpenAICompatClient.from_env()
+    assert client.complete("model-a", "s", "u").text == "héllo 世界 👨‍👩"
+
+
+def test_complete_captures_usage_and_finish_from_final_chunks(
+        monkeypatch, stub_sdk):
+    # With stream_options include_usage the gateway sends usage on a final,
+    # choice-less chunk and finish_reason on the last choice chunk (verified
+    # against the 2026-10-12 capture: the 414s reasoning call reported
+    # usage=(13387, 32768) with finish_reason="length"). Both must land in
+    # the assembled result.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    chunks = [
+        _chunk(delta_content="answer"),
+        _chunk(finish_reason="length"),
+        _usage_chunk(sdk_usage(13387, 32768, 46155)),
+    ]
+    stub_sdk(response=chunks)
+    client = OpenAICompatClient.from_env()
+    result = client.complete("model-a", "s", "u")
+    assert result.finish_reason == "length"
+    assert result.in_tokens == 13387
+    assert result.out_tokens == 32768
+    assert result.raw_usage["total_tokens"] == 46155
+
+
+def test_complete_refusal_accumulated_across_chunks(monkeypatch, stub_sdk):
+    # delta.refusal streams exactly like content; the assembled refusal
+    # string must end up in the ProviderRefusalError.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    chunks = [
+        _chunk(delta_refusal="I cannot "),
+        _chunk(delta_refusal="help with that."),
+        _chunk(finish_reason="stop"),
+    ]
+    stub_sdk(response=chunks)
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ProviderRefusalError, match="I cannot help with that"):
+        client.complete("model-a", "s", "u")
+
+
+def test_complete_mid_stream_failure_maps_to_infrastructure(
+        monkeypatch, stub_sdk):
+    # A stream that dies partway is the same endpoint failure as one that
+    # never opens: the iteration runs inside the create() protection, so a
+    # mid-stream APIConnectionError maps to InfrastructureError instead of
+    # surfacing partial content or crashing the pipeline.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    request = httpx.Request("POST", "http://endpoint/v1/chat/completions")
+
+    def failing_stream():
+        yield _chunk(delta_content="partial answ")
+        raise openai.APIConnectionError(message="died mid-stream",
+                                        request=request)
+
+    stub_sdk(response=failing_stream())
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(InfrastructureError, match="APIConnectionError"):
+        client.complete("model-a", "s", "u")
 
 
 def test_complete_roundtrip_with_usage(monkeypatch, stub_sdk):

@@ -8,6 +8,10 @@ hanging), and map transport failures onto the B6 exception taxonomy. Rewritten
 on the ``openai>=1`` SDK instead of the old langchain-0.0.x/0.27 stack; see
 docs/decisions for the migration note.
 
+Transport: every call is streamed on the wire and assembled before it is
+returned (see ``OpenAICompatClient.complete`` for the 300s gateway cutoff
+that forced this, and for why the public contract is unchanged by it).
+
 The API key is read from the environment, held only inside the SDK client,
 and never logged, stored, or returned.
 """
@@ -16,7 +20,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from expedistill.infra.reliability import (
     ConfigError,
@@ -102,20 +106,80 @@ def _cached_tokens(usage: Any) -> Optional[int]:
     return value if isinstance(value, int) else None
 
 
-def _refusal_reason(response: Any) -> Optional[str]:
-    """Return why the provider refused the request, or None if it did not."""
-    choices = getattr(response, "choices", None) or []
-    if not choices:
-        return None
-    choice = choices[0]
-    finish_reason = getattr(choice, "finish_reason", None)
+def _refusal_detail(finish_reason: Any, refusal: Any) -> Optional[str]:
+    """Return why the provider refused the request, or None if it did not.
+
+    Same rule as the non-streaming wrapper: a refusal finish_reason wins, a
+    populated refusal channel (here assembled from ``delta.refusal`` chunks)
+    is checked after it.
+    """
     if finish_reason in _REFUSAL_FINISH_REASONS:
         return f"finish_reason={finish_reason!r}"
-    message = getattr(choice, "message", None)
-    refusal = getattr(message, "refusal", None)
     if refusal:
         return f"message.refusal={refusal!r}"
     return None
+
+
+@dataclass(frozen=True)
+class _StreamedReply:
+    """One drained stream: the assembled message plus final-chunk metadata.
+
+    ``content`` is None when the stream never opened the content channel
+    (no ``delta.content`` chunk arrived at all) and the joined string
+    otherwise -- the streaming counterpart of ``message.content is None``.
+    """
+
+    content: Optional[str]
+    refusal: Optional[str]
+    finish_reason: Optional[str]
+    #: The raw SDK usage object (kept as-is so _usage_dict/_cached_tokens see
+    #: the same object shape the non-streaming path saw), from the last chunk
+    #: that carried one.
+    usage: Any
+
+
+def _drain_stream(stream: Iterable[Any]) -> _StreamedReply:
+    """Assemble one streamed chat completion into its final response parts.
+
+    Reuses the old repo's assembly discipline (SkillExpand
+    runtime/llm_relay.py ``coalesce_sse``, built for the same gateway
+    family): accumulate ``delta.content`` pieces in order, accumulate
+    ``delta.refusal`` the same way, let the last non-None ``finish_reason``
+    win, and take usage from the last chunk that carries one -- with
+    ``stream_options.include_usage`` that is the final, choice-less chunk
+    this gateway sends. Tolerates test doubles: every field is read with
+    getattr, so SimpleNamespace chunks and SDK chunks behave identically.
+    """
+    content_parts = []
+    refusal_parts = []
+    finish_reason: Optional[str] = None
+    usage_obj: Any = None
+    for chunk in stream:
+        usage = getattr(chunk, "usage", None)
+        if usage is not None:
+            usage_obj = usage
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        choice = choices[0]
+        reason = getattr(choice, "finish_reason", None)
+        if reason is not None:
+            finish_reason = reason
+        delta = getattr(choice, "delta", None)
+        if delta is None:
+            continue
+        piece = getattr(delta, "content", None)
+        if piece is not None:
+            content_parts.append(piece)
+        refusal_piece = getattr(delta, "refusal", None)
+        if refusal_piece:
+            refusal_parts.append(refusal_piece)
+    return _StreamedReply(
+        content="".join(content_parts) if content_parts else None,
+        refusal="".join(refusal_parts) if refusal_parts else None,
+        finish_reason=finish_reason,
+        usage=usage_obj,
+    )
 
 
 class OpenAICompatClient:
@@ -178,7 +242,33 @@ class OpenAICompatClient:
         max_tokens: Optional[int] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> CompletionResult:
-        """One non-streaming chat call; raises on transport, refusal, or empty output."""
+        """One chat call, streamed on the wire and fully assembled on return.
+
+        Streaming is the default transport because the campaign gateway
+        (llm-center.modelbest.co) kills NON-streaming chat requests at
+        ~300.3s server-side (measured 2026-10-12: APIConnectionError at
+        300.2-300.4s on every attempt, runs/tb21_full_20261011_2242/
+        llm_requests dumps 2946-2953), while a reasoning-effort-max call
+        that thinks for the full 32,768-token budget needs ~414s and can
+        therefore NEVER complete non-streaming; the same request with
+        stream=True finished in 414s. The old repo was forced onto the same
+        transport by the same gateway family (SkillExpand
+        runtime/models/llm.py GPTWrapper ``streaming=True``; the manual
+        assembly discipline lives in runtime/llm_relay.py ``coalesce_sse``).
+
+        To callers the contract is unchanged: this method blocks until the
+        stream ends, then returns one CompletionResult with the same fields
+        and raises the same taxonomy on transport failure, refusal, or empty
+        output. ``stream``/``stream_options`` are set after the ``extra``
+        merge on purpose: the transport choice is not a per-call option
+        anymore, and a stray ``stream: false`` in model options must not
+        reintroduce the 300s cutoff.
+
+        The constructor timeout bounds stream reads, not total think time:
+        a stream that stops sending bytes dies at the timeout (httpx read
+        timeout), while the 414s call above survives a 300s timeout because
+        its chunks keep arriving.
+        """
         messages: list = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -192,8 +282,16 @@ class OpenAICompatClient:
             payload["max_tokens"] = max_tokens
         if extra:
             payload.update(extra)
+        # Forced last so `extra` cannot turn the transport back into the
+        # mode the gateway kills at ~300s.
+        payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
         try:
-            response = self._client.chat.completions.create(**payload)
+            # The try covers the stream open AND the iteration: a stream that
+            # dies partway is the same endpoint failure as one that never
+            # opens, and must reach the same mapping below.
+            stream = self._client.chat.completions.create(**payload)
+            reply = _drain_stream(stream)
         except Exception as exc:  # openai exceptions below; keep the cause chained
             import json as _json
             from openai import (
@@ -236,23 +334,18 @@ class OpenAICompatClient:
                 ) from exc
             raise
 
-        refusal = _refusal_reason(response)
+        refusal = _refusal_detail(reply.finish_reason, reply.refusal)
         if refusal is not None:
             raise ProviderRefusalError(
                 f"model {model} refused the request ({refusal})"
             )
-        choices = getattr(response, "choices", None) or []
-        content = None
-        finish_reason = None
-        if choices:
-            message = getattr(choices[0], "message", None)
-            content = getattr(message, "content", None)
-            finish_reason = getattr(choices[0], "finish_reason", None)
+        content = reply.content
+        finish_reason = reply.finish_reason
         # Usage is read before the empty-content check so a response that
         # consumed tokens (empty content with finish_reason="length" burned
         # the whole budget on reasoning) carries its real spend into the
         # usage ledger instead of null.
-        usage_obj = getattr(response, "usage", None)
+        usage_obj = reply.usage
         usage = _usage_dict(usage_obj)
         if content is None or not str(content).strip():
             # Empty with finish_reason="length" is the reasoning-effort=max
