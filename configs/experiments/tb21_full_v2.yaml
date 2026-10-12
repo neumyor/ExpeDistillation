@@ -1,5 +1,5 @@
 # TB21 full campaign: all 89 TerminalBench 2.1 tasks, full mode.
-# Strong: deepseek-v4-flash-0731--ali (reasoning_effort max, max_tokens 32768 -- the
+# Strong: deepseek-v4-flash-0731--ali (reasoning_effort max, max_tokens 65536 -- the
 # 5120 default is burned by reasoning on real TB views, verified 2026-10-11);
 # weak: qwen3.6-flash-distill. Stage 1 is seeded from the campaign archive
 # by scripts/run/seed_tb_stage1.py (attempt 0..2 = archive rank 1..3);
@@ -38,7 +38,11 @@ rules:
 model_options:
   deepseek-v4-flash-0731--ali:
     reasoning_effort: max
-    max_tokens: 32768
+    # Output budget history: 5120 default burned 2026-10-11; 32768 worked
+    # across benchmarks but G7/G9 whole-bank calls (74.5k-token listings)
+    # burned it twice on 2026-10-12 (finish_reason=length, empty content);
+    # 65536 endpoint-verified, pre-registered before the TB v3 run.
+    max_tokens: 65536
 tasks:
   - adaptive-rejection-sampler
   - bn-fit-modify

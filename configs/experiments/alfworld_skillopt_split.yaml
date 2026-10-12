@@ -208,9 +208,10 @@ rules:
 model_options:
   deepseek-v4-flash-0731--ali:
     reasoning_effort: max
-    # reasoning max burned the 5120 default on segmentation/authoring calls
-    # (finish_reason=length, empty content) on 2026-10-11; 32768 verified
-    # working on real views across SearchQA/ALFWorld/TB.
-    max_tokens: 32768
+    # Output budget history: 5120 default burned 2026-10-11; 32768 worked
+    # across benchmarks but G7/G9 whole-bank calls (74.5k-token listings)
+    # burned it twice on 2026-10-12 (finish_reason=length, empty content);
+    # 65536 endpoint-verified, pre-registered before this run started.
+    max_tokens: 65536
 weak_profile: >-
   The weak model is qwen3.6-flash-distill, a small distilled model. It follows short, concrete instructions well but misses abstract goals, gets confused when several conditions must be checked in order, sometimes invents object ids it has not observed, and can loop on a failing action. Write skills as short ordered steps with explicit triggers and exact ALFWorld command forms.

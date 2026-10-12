@@ -233,6 +233,164 @@ def test_format_retry_exhaustion_raises_model_output_error():
     assert len(handle.client.calls) == 4
 
 
+def _empty_content_error(finish_reason="length", usage=None):
+    """A client-raised ModelOutputError shaped like OpenAICompatClient's
+    empty-content raise: carries the burned usage and finish_reason."""
+    if usage is None:
+        usage = {"prompt_tokens": 40000, "completion_tokens": 5120,
+                 "total_tokens": 45120}
+    return ModelOutputError(
+        "model fake-model returned empty or whitespace-only content "
+        f"(finish_reason={finish_reason!r})",
+        usage=usage,
+        finish_reason=finish_reason,
+    )
+
+
+def test_empty_content_json_reask_then_success(tmp_path):
+    # Incident 2026-10-12: a G7 call with a 74.5k-token prompt died because
+    # reasoning burned the whole output budget (empty content, finish_reason
+    # length) and the client's ModelOutputError propagated with ZERO re-asks
+    # -- the same failure class as malformed JSON. On output_json calls it
+    # must consume the same format budget and re-ask with the repair suffix.
+    handle = make_fake_handle(
+        script=[_empty_content_error(),
+                json_script({"verdict": "correct", "error_description": ""})])
+    usage = RecordingUsage()
+    out = call_model(handle, "JUDGE", JUDGE_VARS, output_json=True,
+                    usage=usage, run_dir=tmp_path)
+    assert out == {"verdict": "correct", "error_description": ""}
+    assert len(handle.client.calls) == 2
+    # The re-ask appends the previous empty outcome and the repair
+    # instruction to the original prompt.
+    first_user = handle.client.calls[0]["user"]
+    second_user = handle.client.calls[1]["user"]
+    assert first_user in second_user
+    assert "empty or whitespace-only content" in second_user
+    assert REPAIR_INSTRUCTION in second_user
+    # Both attempts are accounted: the empty one as an error row carrying the
+    # burned tokens, the successful re-ask as ok with format_retries=1.
+    assert [record["status"] for record in usage.records] == ["error", "ok"]
+    assert usage.records[0]["in_tokens"] == 40000
+    assert usage.records[0]["out_tokens"] == 5120
+    assert usage.records[0]["meta"]["error"] == "ModelOutputError"
+    assert usage.records[0]["meta"]["finish_reason"] == "length"
+    assert usage.records[1]["meta"]["format_retries"] == 1
+    dump_dir = tmp_path / "llm_requests"
+    first = json.loads((dump_dir / "0001_JUDGE.json").read_text())
+    second = json.loads((dump_dir / "0002_JUDGE.json").read_text())
+    assert first["status"] == "error"
+    assert first["in_tokens"] == 40000
+    assert first["finish_reason"] == "length"
+    assert second["status"] == "ok"
+
+
+def test_empty_content_json_exhaustion_raises_model_output_error():
+    def always_empty(system, user):
+        raise _empty_content_error()
+
+    handle = make_fake_handle(script=always_empty)
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError, match="empty") as exc_info:
+        call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    # One ask plus every format re-ask, then the error.
+    assert len(handle.client.calls) == 1 + 3
+    assert len(usage.records) == 4
+    assert all(record["status"] == "error" for record in usage.records)
+    # The exhaustion error still carries the last response's diagnostics.
+    assert exc_info.value.finish_reason == "length"
+    assert exc_info.value.usage["prompt_tokens"] == 40000
+
+
+def test_empty_content_reask_disabled_makes_one_call():
+    handle = make_fake_handle(script=[_empty_content_error()])
+    with pytest.raises(ModelOutputError, match="empty"):
+        call_model(handle, "JUDGE", JUDGE_VARS, output_json=True,
+                   max_format_retries=0)
+    assert len(handle.client.calls) == 1
+
+
+def test_empty_content_plain_text_propagates_immediately():
+    # Plain-text calls (SKILL_DISTILL, MERGE) keep the current contract:
+    # empty content fails the unit at once, exactly one request.
+    handle = make_fake_handle(script=[_empty_content_error()])
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError):
+        call_model(handle, "ANSWER", ANSWER_VARS, usage=usage)
+    assert len(handle.client.calls) == 1
+    assert len(usage.records) == 1
+    assert usage.records[0]["status"] == "error"
+
+
+def test_bare_client_model_output_error_on_json_call_propagates():
+    # Only the client's empty-content raise (the one carrying the rejected
+    # response's usage/finish_reason, per reliability.py's contract) is a
+    # format failure. A bare ModelOutputError from another raise site keeps
+    # today's disposition: propagate at once, exactly one request.
+    handle = make_fake_handle(script=[ModelOutputError("JUDGE: bad verdict")])
+    usage = RecordingUsage()
+    with pytest.raises(ModelOutputError, match="bad verdict"):
+        call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert len(handle.client.calls) == 1
+    assert len(usage.records) == 1
+
+
+def test_empty_content_finish_reason_stop_still_reasked():
+    # "Model chose silence" (finish_reason=stop) is the same failure class as
+    # budget burned on reasoning (finish_reason=length): re-ask either way.
+    handle = make_fake_handle(
+        script=[_empty_content_error("stop"),
+                json_script({"verdict": "correct", "error_description": ""})])
+    out = call_model(handle, "JUDGE", JUDGE_VARS, output_json=True)
+    assert out["verdict"] == "correct"
+    assert len(handle.client.calls) == 2
+
+
+def test_mixed_empty_and_malformed_share_one_budget():
+    # Empty and malformed replies are re-asks of the SAME budget: empty,
+    # malformed, valid takes three attempts and format_retries=2.
+    handle = make_fake_handle(
+        script=[_empty_content_error(), "not json",
+                json_script({"verdict": "correct", "error_description": ""})])
+    usage = RecordingUsage()
+    out = call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert out["verdict"] == "correct"
+    assert len(handle.client.calls) == 3
+    assert [record["status"] for record in usage.records] == [
+        "error", "format_error", "ok"]
+    assert usage.records[2]["meta"]["format_retries"] == 2
+
+
+def test_shared_budget_exhausts_across_failure_kinds():
+    # With two re-asks allowed, empty -> malformed -> empty exhausts the
+    # shared budget on the third attempt.
+    handle = make_fake_handle(
+        script=[_empty_content_error(), "not json", _empty_content_error()])
+    with pytest.raises(ModelOutputError, match="empty"):
+        call_model(handle, "JUDGE", JUDGE_VARS, output_json=True,
+                   max_format_retries=2)
+    assert len(handle.client.calls) == 3
+
+
+def test_empty_reask_gets_full_infra_budget():
+    # Infra retries compose as before: the first ask burns its infra retry,
+    # then the empty re-ask starts with a fresh infra budget.
+    from expedistill.infra.reliability import InfrastructureError
+
+    handle = make_fake_handle(
+        script=[InfrastructureError("endpoint down"), _empty_content_error(),
+                json_script({"verdict": "correct", "error_description": ""})],
+        infra_retries=1, infra_backoff_seconds=0.0)
+    usage = RecordingUsage()
+    out = call_model(handle, "JUDGE", JUDGE_VARS, output_json=True, usage=usage)
+    assert out["verdict"] == "correct"
+    assert len(handle.client.calls) == 3
+    assert [record["status"] for record in usage.records] == [
+        "error", "error", "ok"]
+    assert usage.records[2]["meta"]["infra_retries"] == 1
+    assert usage.records[2]["meta"]["format_retries"] == 1
+
+
 def test_format_retry_disabled_makes_one_call():
     handle = make_fake_handle(script=["not json", "also not json"])
     with pytest.raises(ModelOutputError):

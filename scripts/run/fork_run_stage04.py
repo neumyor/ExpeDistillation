@@ -88,7 +88,8 @@ def main() -> int:
         return out
 
     d = diffs(old_m, new_m)
-    allowed = {".config.bank_token_budget"}
+    allowed = {".config.bank_token_budget",
+               ".config.model_options.deepseek-v4-flash-0731--ali.max_tokens"}
     unexpected = [x for x in d if x not in allowed]
     if unexpected:
         print(f"error: manifests differ beyond bank_token_budget: "

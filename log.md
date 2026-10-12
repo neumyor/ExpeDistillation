@@ -302,3 +302,20 @@ Store 空目录骨架误判"已复制"），以及本条记录的干跑漏复制
 `configs/experiments/{alfworld_skillopt_split,searchqa_skillopt_split}.yaml`、
 `scripts/run/fork_run_stage04.py`、`docs/decisions/bank_token_budget_20261012.md`、
 run `runs/tb21_full_v2_202544/`。pytest 1339 passed。
+
+## 2026-10-12 21:40 — 空内容与坏 JSON 同类化：输出预算内重问（G7 烧穿事故的根源修复之一）
+
+TB v2 新 run 的首次 G7 调用（输入 74.5k 真实 token）把 32768 输出预算全部烧在思考上、
+空内容返回（finish_reason=length），而 call_model 对"格式坏"有 3 次有界重问、对"空内容"
+却是零重试直接判死——不对称是实现顺序的意外而非设计。修复：output_json 调用中，客户端
+携带 usage/finish_reason 附件的 ModelOutputError（空内容路径的精确指纹）消耗同一个
+max_format_retries 预算、以相同模式重问（原文 + 空结果说明 + 修复指令）；纯文本调用与裸
+ModelOutputError 保持立即穿透（阶段 2–4 的单元处置语义不变）。实测同调用此前成功过——
+非确定性烧穿靠重问吸收。与输出预算 32768→65536（三份配置已预注册）互补：预算翻倍让思考
+装得下，重问兜住偶发烧穿。测试先行：新增 9 个（6 个修前失败），全量 1348 passed。
+规划中（等用户批复）：token_budgets 统一管理方案（按角色的输入/输出预算、单一生效路径、
+调用前输入测量与超支证据落盘——依据 4872 次真实调用的 in/out 分布实测，含一次 54 万
+token 输入与一次弱模型 87k 输出超上限未被端点执行的证据）。
+
+工件：`src/expedistill/llm/call.py`、`tests/unit/llm/test_call.py`、
+`configs/experiments/*.yaml`（max_tokens 65536 预注册）。

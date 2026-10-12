@@ -375,20 +375,26 @@ def call_model(
     a caller bug and propagates. With ``output_json=True`` the response is
     parsed with ``extract_json`` and, on failure, re-asked up to
     ``max_format_retries`` times with ``REPAIR_INSTRUCTION`` appended to the
-    conversation; exhaustion raises ModelOutputError. Every request and
-    response is recorded via ``usage`` and dumped under
-    ``run_dir/llm_requests/`` (never the api key).
+    conversation; exhaustion raises ModelOutputError. Failure means either
+    malformed JSON or a client-raised ModelOutputError (empty content, e.g.
+    reasoning burned the whole output budget) -- the same failure class,
+    "no parseable response" -- and both kinds share the ONE format budget:
+    the ``format_retries`` meta on the success row counts re-asks of both
+    kinds. Every request and response is recorded via ``usage`` and dumped
+    under ``run_dir/llm_requests/`` (never the api key).
 
     Transient endpoint failures (``InfrastructureError`` from the client)
     resend the same request up to ``handle.infra_retries`` times with
-    exponential backoff; exhaustion re-raises the last error. Every other
-    client exception (ProviderRefusalError, ConfigError, a client-side
-    ModelOutputError such as empty content, code bugs) propagates at once.
-    The two budgets are independent: infra retries never consume format
-    retries, and each request -- the first ask and every repair re-ask --
-    gets the full infra budget, so one call makes at most
-    ``(1 + max_format_retries) * (1 + infra_retries)`` client calls. Failed
-    attempts are recorded (status "error") and dumped like any other.
+    exponential backoff; exhaustion re-raises the last error. With
+    ``output_json=False`` every other client exception (ProviderRefusalError,
+    ConfigError, a client-side ModelOutputError such as empty content, code
+    bugs) propagates at once: plain-text callers (SKILL_DISTILL, MERGE) turn
+    that into their per-unit dispositions. The two budgets are independent:
+    infra retries never consume format retries, and each request -- the
+    first ask and every repair re-ask -- gets the full infra budget, so one
+    call makes at most ``(1 + max_format_retries) * (1 + infra_retries)``
+    client calls. Failed attempts are recorded (status "error") and dumped
+    like any other.
     """
     template = prompts.get(prompt_name)
     user_text = template.format(**variables)
@@ -411,6 +417,10 @@ def call_model(
         # endpoint recovered, so each request (the first ask and every repair
         # re-ask) gets the handle's full infra budget.
         infra_attempt = 0
+        # Set when the request below failed with empty content and the format
+        # budget allows a re-ask: the outer loop must resend a NEW prompt, not
+        # fall through to _unpack with no result.
+        empty_reask = False
         while True:
             request_id = uuid.uuid4().hex
             started = time.monotonic()
@@ -428,6 +438,21 @@ def call_model(
                 duration_ms = int((time.monotonic() - started) * 1000)
                 retry = (isinstance(exc, InfrastructureError)
                          and infra_attempt < handle.infra_retries)
+                # A client-raised ModelOutputError for empty content on an
+                # output_json call is the same failure class as malformed
+                # JSON ("no parseable response"): it consumes the SAME format
+                # budget. The empty-content raise is the one carrying the
+                # rejected response's diagnostics (reliability.py: usage /
+                # finish_reason are attached by the client when it raises on
+                # a response that actually consumed tokens); bare
+                # ModelOutputErrors from other raise sites, and every error
+                # on plain-text calls, keep propagating at once -- their
+                # per-unit dispositions downstream depend on it.
+                format_failure = (
+                    output_json and isinstance(exc, ModelOutputError)
+                    and (exc.finish_reason is not None
+                         or exc.usage is not None))
+                format_retry = format_failure and retries_used < max_format_retries
                 meta: Dict[str, Any] = {"error": type(exc).__name__}
                 # A client-raised ModelOutputError (empty content) can carry
                 # the provider's finish_reason as an attribute; record it in
@@ -438,6 +463,11 @@ def call_model(
                     meta["finish_reason"] = failed_finish_reason
                 if isinstance(exc, InfrastructureError):
                     meta.update(infra_attempt=infra_attempt, retried=retry)
+                if format_failure:
+                    # Distinguishes a re-asked empty reply from a terminal
+                    # one in the ledger; the success row's format_retries
+                    # counter covers both empty and malformed re-asks.
+                    meta["format_retried"] = format_retry
                 # A ModelOutputError from the client may carry the usage of
                 # the response it rejected (empty content after the budget
                 # burned on reasoning): the spend was real, so the ledger
@@ -458,19 +488,50 @@ def call_model(
                           finish_reason=failed_finish_reason,
                           duration_ms=duration_ms, status="error",
                           error=type(exc).__name__)
-                if not retry:
-                    raise
-                delay = min(handle.infra_backoff_seconds * 2 ** infra_attempt,
-                            MAX_INFRA_BACKOFF_SECONDS)
-                infra_attempt += 1
-                infra_total += 1
-                LOGGER.warning(
-                    "call_model %s (role %s, model %s): infra retry %d/%d "
-                    "in %.1fs after %s: %s", prompt_name, handle.role,
-                    handle.name, infra_attempt, handle.infra_retries, delay,
-                    type(exc).__name__, exc)
-                if delay > 0:
-                    _sleep(delay)
+                if retry:
+                    delay = min(
+                        handle.infra_backoff_seconds * 2 ** infra_attempt,
+                        MAX_INFRA_BACKOFF_SECONDS)
+                    infra_attempt += 1
+                    infra_total += 1
+                    LOGGER.warning(
+                        "call_model %s (role %s, model %s): infra retry "
+                        "%d/%d in %.1fs after %s: %s", prompt_name,
+                        handle.role, handle.name, infra_attempt,
+                        handle.infra_retries, delay, type(exc).__name__, exc)
+                    if delay > 0:
+                        _sleep(delay)
+                    continue
+                if format_retry:
+                    retries_used += 1
+                    # Same repair-suffix pattern as the malformed-JSON path:
+                    # rebuild from the original prompt, quoting the previous
+                    # (empty) outcome so the model knows what to fix.
+                    current_user = (
+                        user_text
+                        + "\n\n---\nYour previous reply was empty and could "
+                        "not be parsed:\n"
+                        + str(exc)
+                        + "\n\n"
+                        + REPAIR_INSTRUCTION
+                    )
+                    LOGGER.warning(
+                        "call_model %s (role %s, model %s): empty response "
+                        "(finish_reason=%r), format retry %d/%d: %s",
+                        prompt_name, handle.role, handle.name,
+                        failed_finish_reason, retries_used, max_format_retries,
+                        exc)
+                    empty_reask = True
+                    break
+                if format_failure:
+                    raise ModelOutputError(
+                        f"prompt {prompt_name}: model returned empty content "
+                        f"after {retries_used + 1} attempt(s)",
+                        usage=exc.usage, finish_reason=exc.finish_reason,
+                    ) from exc
+                raise
+        if empty_reask:
+            continue
         text, in_tokens, out_tokens, finish_reason, cached_tokens = \
             _unpack(result)
         duration_ms = int((time.monotonic() - started) * 1000)
