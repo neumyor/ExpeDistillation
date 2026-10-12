@@ -637,11 +637,23 @@ class TBPlugin(BenchmarkPlugin):
         if not skills_block.strip():
             return "bare", {"eval_mode": "bare", "skills_injected": False}
         remote_dir = f"{root}/skills/{run_id}"
+        # The E2B skill env looks the skill directory up by the environment
+        # name, whose authoring export normalizes dots to dashes (the tb21
+        # bundle's _TASK_SKILL_DIRECTORY_OVERRIDES: "install-windows-3.11" ->
+        # "install-windows-3-11"). Uploading only the dotted spelling made
+        # every skills-mode trial of install-windows-3.11 die in env setup
+        # ("task skill directory is unavailable", TB v3 run 2026-10-13).
+        # Both spellings are therefore uploaded; the meta records the dashed
+        # alias when one exists.
+        dash_alias = task_name.replace(".", "-")
         return "skills", {
             "eval_mode": "skills",
             "skills_injected": True,
             "remote_skill_root": remote_dir,
             "remote_skill_file": f"{remote_dir}/{task_name}/SKILL.md",
+            "remote_skill_alias_file": (
+                f"{remote_dir}/{dash_alias}/SKILL.md"
+                if dash_alias != task_name else None),
         }
 
     def _upload_launch_files(self, link: RemoteLink, root: str, run_id: str,
@@ -655,6 +667,9 @@ class TBPlugin(BenchmarkPlugin):
         dirs = [f"{root}/jobs"]
         if skill_meta["eval_mode"] == "skills":
             dirs.append(f"{skill_meta['remote_skill_root']}/{task_name}")
+            alias_file = skill_meta.get("remote_skill_alias_file")
+            if alias_file:
+                dirs.append(str(Path(alias_file).parent))
         out, err, rc = link.run(
             "mkdir -p " + " ".join(_q(d) for d in dirs),
             timeout=SUBMIT_TIMEOUT_SECONDS)
@@ -668,6 +683,10 @@ class TBPlugin(BenchmarkPlugin):
             local.write_text(skills_block, encoding="utf-8")
             link.put(str(local), skill_meta["remote_skill_file"],
                      timeout=SUBMIT_TIMEOUT_SECONDS)
+            alias_file = skill_meta.get("remote_skill_alias_file")
+            if alias_file:
+                link.put(str(local), alias_file,
+                         timeout=SUBMIT_TIMEOUT_SECONDS)
         local_meta = workdir / _RECORD_DIR / f"{run_id}{_REMOTE_META_SUFFIX}"
         write_json(local_meta, conditions)
         link.put(str(local_meta),

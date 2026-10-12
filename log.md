@@ -389,3 +389,18 @@ fork 白名单补 .config.schema_version。阶段 6 以爬坡方案启动（8→
 
 工件：`src/expedistill/blocks/curate.py`、`tests/unit/blocks/test_curate.py`、
 `scripts/run/fork_run_stage04.py`、run `runs/tb21_full_v3_212702/`。
+
+## 2026-10-13 04:50 — TB skills 模式的点号任务目录 bug（install-windows-3.11 修复）
+
+TB v3 阶段 6 首批 skills 模式 trial 中，install-windows-3.11 的三个 token（a00/r1/r2）
+全部死于 env setup："task skill directory is unavailable:
+.../skills/<run_id>/install-windows-3-11"。机制：tb21 捆绑包的任务包目录名带点
+（install-windows-3.11），但 E2B skill 环境按 environment_name 查找 skill 目录，其
+授权导出把点规范成横线——捆绑包自己有 _TASK_SKILL_DIRECTORY_OVERRIDES
+（"install-windows-3.11"→"install-windows-3-11"）。我们的插件只上传了带点拼法。
+修复（benchmark 代码）：_skill_plan 的 meta 记录 dashed 别名（含点时），
+_upload_launch_files 对别名 mkdir+上传同一 SKILL.md——两种拼法都在，无论环境按
+哪个找。89 题里只有这一题带点。该单元卡在重试链（cursor=3、暂存无 failed_units 行），
+修复生效后由下次派发自然恢复。测试先行（双拼法上传 + 无点名单文件）。pytest 1441。
+
+工件：`src/expedistill/benchmarks/tb/plugin.py`、`tests/unit/benchmarks/test_tb_plugin.py`。
