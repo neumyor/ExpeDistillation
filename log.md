@@ -219,3 +219,19 @@ JSONDecodeError，而 llm/client.py 的异常边界只翻译 APIStatusError/APIC
 
 工件：`src/expedistill/llm/client.py`、`tests/unit/llm/test_client.py`、
 run `runs/tb21_full_20261011_2242/`。pytest 1277 passed。
+
+## 2026-10-12 09:40 — 强模型端点重路由（用户授权的等价替换）
+
+DEEPSEEK_up5zdj 部署自 02:01 起故障（对一切请求返回空响应体，小时级仅约 4 次成功窗口；
+弱模型全程健康）。用户确认 deepseek-v4-flash-0731--ali 与 DEEPSEEK_up5zdj 指向同一模型
+（deepseek-v4-flash-0731）并授权替换。因模型 id 冻结在 manifest、也写在 267 条已播种强臂
+轨迹的 model_name 里，做了一次外科手术式等价重路由（零代码改动）：manifest 的 model_roles/
+config.models/config.model_options 键、267 条轨迹记录、三份实验配置全部替换；run 内活跃
+记录 grep 确认无旧 id 残留（历史账本行按历史保留）。stage0 冻结比对通过，v3 驱动续跑，
+首个 SEGMENT 调用即成功。设计缺口记录："实验身份"与"端点路由串"耦合——provider 换路由
+就要动冻结记录；后续可考虑把路由映射做成运维层机制（配置保留规范模型名，发送时翻译）。
+此前一夜：22:35–02:01 切段 103 条轨迹（415 subtask）后崩溃一次（已修，见 02:15 条目）；
+02:01–09:33 端点故障期间重试机制消化全部故障、失败单元 22 条零损失待补。
+
+工件：`configs/experiments/{tb21_full,alfworld_skillopt_split,searchqa_skillopt_split}.yaml`、
+run `runs/tb21_full_20261011_2242/`（manifest 与轨迹记录重路由）。

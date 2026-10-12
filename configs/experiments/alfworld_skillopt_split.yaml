@@ -185,7 +185,7 @@ split:
     - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064309_357168/game.tw-pddl
     - json_2.1.1/valid_unseen/pick_two_obj_and_place-ToiletPaper-None-Cabinet-424/trial_T20190906_202926_527010/game.tw-pddl
 models:
-  executor_strong: DEEPSEEK_up5zdj
+  executor_strong: deepseek-v4-flash-0731--ali
   executor_weak: qwen3.6-flash-distill
 n_attempts_strong: 3
 n_attempts_weak: 3
@@ -202,7 +202,7 @@ rules:
   # blocks/rules.py (stage 0 validates every rule name).
   trajectory_select: strong2_weak2
 model_options:
-  DEEPSEEK_up5zdj:
+  deepseek-v4-flash-0731--ali:
     reasoning_effort: max
     # reasoning max burned the 5120 default on segmentation/authoring calls
     # (finish_reason=length, empty content) on 2026-10-11; 32768 verified
