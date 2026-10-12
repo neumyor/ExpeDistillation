@@ -532,23 +532,26 @@ def test_merge_model_output_error_skips_that_merge_and_continues(store):
             ModelOutputError("merge text unusable"),
             "merged two and three",
             _grouping({_skill_id(0): "a", _skill_id(1): "a",
-                       "bank/merge/0000": "b"})],
+                       "bank/merge/0001": "b"})],
         answer_script=["a", "b"],
         judge_script=[_CORRECT(), _CORRECT()],
     )
 
     bank = _curate(store, handles)
 
-    # The failed G8 consumed no serial; the next merge is bank/merge/0000.
+    # Serials are allocated at dispatch, so the failed G8 BURNS serial 0
+    # (v3 semantic change, recorded in its skipped record); the next merge
+    # is bank/merge/0001.
     assert [row["skill_id"] for row in bank] == sorted(
-        ["bank/merge/0000", _skill_id(0), _skill_id(1)])
-    assert store.load("skills", "bank/merge/0000", Skill).merged_from == [
+        ["bank/merge/0001", _skill_id(0), _skill_id(1)])
+    assert store.load("skills", "bank/merge/0001", Skill).merged_from == [
         _skill_id(2), _skill_id(3)]
     log = _log_of(store)
     assert log["merges"] == {"attempted": 2, "kept": 1, "reverted": 0,
                              "skipped": 1}
     skipped = log["merge_records"][0]
     assert skipped["outcome"] == "skipped"
+    assert skipped["serial"] == 0
     assert "ModelOutputError" in skipped["reason"]
     failures = _failures(store)
     assert len(failures) == 1

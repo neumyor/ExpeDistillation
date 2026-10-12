@@ -63,6 +63,28 @@ This composite owns the bookkeeping the blocks must not do:
   budget. Accepted as a reproducibility caveat: a failed answer is never
   observed downstream, so it cannot leak into any record.
 
+* same-exam mutual exclusion (parallel-safety net). The serial above is
+  allocated count-then-save, a check-then-act over the store: two
+  concurrent calls on the SAME exam would both count the same stored set,
+  allocate the same attempt id, and the second save would silently
+  overwrite the first attempt's record -- evidence destroyed, no error
+  raised. A per-exam-id lock therefore serializes the WHOLE body of
+  exam_once for one exam, the model calls included. That is a deliberate
+  choice over locking only the pending-lookup/serial/save span with the
+  answer call outside: same-exam concurrency is not a scenario any caller
+  has today (stage-4 units are per-skill with per-skill exams; the
+  wave-parallel K5 design makes overlapping units structurally impossible
+  within a wave), so the lock only ever contends when a caller bug shares
+  an exam -- and contention then degrades to plain sequential calls, which
+  are always semantically correct, while the narrower lock would buy only
+  a duplicated answer call that no real scenario needs. Simplicity beats
+  micro-parallelism in a safety net. Different exams take different locks
+  and never block each other. The lock is per-process: keeping two
+  PROCESSES off one run directory is B7's job (infra.runlock), not K3's.
+
+  Contract: callers must not rely on same-exam parallelism -- it is not
+  provided, by design.
+
 K3 is NOT idempotent: every call is a fresh attempt by design (a retry round
 answers the same exam again on purpose). Callers check completion -- i.e.
 decide whether a JUDGED attempt with this meaning already exists -- before
@@ -70,9 +92,11 @@ calling; the only stored state this function reuses is an unjudged answer
 with the identical key (above), never a judged attempt.
 """
 
+import os
 import re
+import threading
 from pathlib import Path
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from expedistill.blocks.exam import answer, judge
 from expedistill.core import ids
@@ -93,6 +117,32 @@ _BLOCK_REPAIR_ATTEMPTS = 2
 _JUDGE_FAILURES_PREFIX = "judge_failed_tries="
 _JUDGE_FAILURES_RE = re.compile(
     re.escape(_JUDGE_FAILURES_PREFIX) + r"(\d+)(?:;|$)")
+
+#: One threading.Lock per exam id: the serial is count-then-act, so calls
+#: on the SAME exam must not interleave (module docstring). Keyed by exam
+#: id, not by store, so two Store instances over one directory in one
+#: process are covered too. Growth is bounded by the exams of the run
+#: (themselves bounded by the frozen candidate set).
+_EXAM_LOCKS: Dict[str, threading.Lock] = {}
+_EXAM_LOCKS_GUARD = threading.Lock()
+
+
+def _reset_exam_locks_in_child() -> None:
+    # A fork copies locks held by threads that do not exist in the child;
+    # start the child with fresh, unheld ones (same rationale as
+    # infra.store's per-ledger registry -- B5 also offers a process pool).
+    global _EXAM_LOCKS_GUARD
+    _EXAM_LOCKS_GUARD = threading.Lock()
+    _EXAM_LOCKS.clear()
+
+
+os.register_at_fork(after_in_child=_reset_exam_locks_in_child)
+
+
+def _exam_lock(exam_id: str) -> threading.Lock:
+    """The lock of one exam, created lazily under the registry guard."""
+    with _EXAM_LOCKS_GUARD:
+        return _EXAM_LOCKS.setdefault(exam_id, threading.Lock())
 
 
 def _next_serial(store: Store, exam_id: str) -> int:
@@ -200,43 +250,52 @@ def exam_once(
     on the unjudged attempt, so a resumed call only gets the tries that
     remain, and raises ModelOutputError without a model call when none do.
     Returns the stored (judged) Attempt.
+
+    The whole body runs under the per-exam lock (module docstring): callers
+    must not rely on same-exam parallelism.
     """
     if purpose not in ATTEMPT_PURPOSES:
         raise ValueError(
             f"purpose must be one of {ATTEMPT_PURPOSES}, got {purpose!r}")
 
-    attempt = _pending_attempt(store, exam.exam_id, purpose, skill_id,
-                               skill_version, retry_round)
-    if attempt is None:
-        weak_answer = with_retries(
-            lambda: answer(
-                exam.question_text,
-                skills_block,
-                answerer_handle,
-                usage=usage,
-                run_dir=run_dir,
-            ),
-            attempts=_BLOCK_REPAIR_ATTEMPTS,
-            retry_on=ModelOutputError,
-        )
-        serial = _next_serial(store, exam.exam_id)
-        attempt = Attempt(
-            attempt_id=ids.make_attempt_id(exam.exam_id, serial),
-            exam_id=exam.exam_id,
-            skill_id=skill_id,
-            skill_version=skill_version,
-            purpose=purpose,
-            weak_answer=weak_answer,
-            judge_verdict=None,
-            retry_round=retry_round,
-        )
-        # Persist the answer before judging: a crash in the judge call must
-        # not cost (and later resample) the weak model's answer.
-        store.save(attempt, "attempts")
+    # Whole body under the per-exam lock: the serial allocation is
+    # count-then-act over the store, so same-exam calls must not interleave
+    # (module docstring). The model calls are inside on purpose -- the lock
+    # only ever contends on a caller bug, and simplicity beats
+    # micro-parallelism in a safety net.
+    with _exam_lock(exam.exam_id):
+        attempt = _pending_attempt(store, exam.exam_id, purpose, skill_id,
+                                   skill_version, retry_round)
+        if attempt is None:
+            weak_answer = with_retries(
+                lambda: answer(
+                    exam.question_text,
+                    skills_block,
+                    answerer_handle,
+                    usage=usage,
+                    run_dir=run_dir,
+                ),
+                attempts=_BLOCK_REPAIR_ATTEMPTS,
+                retry_on=ModelOutputError,
+            )
+            serial = _next_serial(store, exam.exam_id)
+            attempt = Attempt(
+                attempt_id=ids.make_attempt_id(exam.exam_id, serial),
+                exam_id=exam.exam_id,
+                skill_id=skill_id,
+                skill_version=skill_version,
+                purpose=purpose,
+                weak_answer=weak_answer,
+                judge_verdict=None,
+                retry_round=retry_round,
+            )
+            # Persist the answer before judging: a crash in the judge call
+            # must not cost (and later resample) the weak model's answer.
+            store.save(attempt, "attempts")
 
-    verdict, error_description = _judge_with_persistent_budget(
-        store, exam, attempt, judge_handle, usage, run_dir)
-    attempt.judge_verdict = verdict
-    attempt.judge_reason = error_description
-    store.save(attempt, "attempts")
-    return attempt
+        verdict, error_description = _judge_with_persistent_budget(
+            store, exam, attempt, judge_handle, usage, run_dir)
+        attempt.judge_verdict = verdict
+        attempt.judge_reason = error_description
+        store.save(attempt, "attempts")
+        return attempt

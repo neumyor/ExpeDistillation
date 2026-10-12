@@ -1818,7 +1818,11 @@ n_attempts_weak: 3
 K: 5
 segment_retry_limit: 2
 retry_limit: 2
-bank_token_budget: 4096
+# Pre-registered before this experiment started (2026-10-12): the budget is a
+# context-overflow safety valve, not a compression target; 4096 was a pilot
+# placeholder that a 100+ member bank mathematically cannot meet (merges
+# compress ~0.98). See docs/decisions/bank_token_budget_20261012.md.
+bank_token_budget: 96000
 curation_rounds: 3
 rules:
   task_select: all_valid_failed

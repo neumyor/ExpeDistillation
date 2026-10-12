@@ -1,0 +1,131 @@
+# TB21 full campaign: all 89 TerminalBench 2.1 tasks, full mode.
+# Strong: deepseek-v4-flash-0731--ali (reasoning_effort max, max_tokens 32768 -- the
+# 5120 default is burned by reasoning on real TB views, verified 2026-10-11);
+# weak: qwen3.6-flash-distill. Stage 1 is seeded from the campaign archive
+# by scripts/run/seed_tb_stage1.py (attempt 0..2 = archive rank 1..3);
+# baseline to reproduce: docs/tb21_f3_baseline_20261011.md.
+benchmark: tb
+mode: full
+models:
+  executor_strong: deepseek-v4-flash-0731--ali
+  executor_weak: qwen3.6-flash-distill
+weak_profile: |-
+  qwen3.6-flash-distill is a small, fast, distilled terminal agent: in the
+  TB2.1 campaign over these 89 tasks it solved 47% of attempts on average
+  (avg@5 0.4697) against the strong model's 63%. Its terminal interaction is
+  fragile: 11 of its 13 kept-as-model-failure trials died in the tmux keystroke
+  layer (unparseable command rounds, or keystrokes fired before tmux was even
+  installed), two more overran the agent time cap (AgentTimeoutError), and it
+  intermittently emits unparseable output turns that waste interaction rounds.
+  When it does run to completion it writes plausible-looking but subtly wrong
+  numerical or statistical code and declares success without validating the
+  result against the task's tests, so skills should give exact commands,
+  concrete verification steps, and explicit guards against its early-exit habit.
+n_attempts_strong: 3
+n_attempts_weak: 3
+K: 5
+segment_retry_limit: 2
+retry_limit: 2
+# Sized to the real bank (2026-10-12 decision: 102 members ~ 80k est-tokens,
+# merges compress ~0.98 by prompt contract, 4096 was a pilot placeholder that
+# mathematically cannot be met; see docs/decisions/bank_token_budget_20261012.md)
+bank_token_budget: 96000
+curation_rounds: 3
+rules:
+  task_select: all_valid_failed
+  segment_select: strong_all_weak_failed
+  trajectory_select: strong2_weak2
+model_options:
+  deepseek-v4-flash-0731--ali:
+    reasoning_effort: max
+    max_tokens: 32768
+tasks:
+  - adaptive-rejection-sampler
+  - bn-fit-modify
+  - break-filter-js-from-html
+  - build-cython-ext
+  - build-pmars
+  - build-pov-ray
+  - caffe-cifar-10
+  - cancel-async-tasks
+  - chess-best-move
+  - circuit-fibsqrt
+  - cobol-modernization
+  - code-from-image
+  - compile-compcert
+  - configure-git-webserver
+  - constraints-scheduling
+  - count-dataset-tokens
+  - crack-7z-hash
+  - custom-memory-heap-crash
+  - db-wal-recovery
+  - distribution-search
+  - dna-assembly
+  - dna-insert
+  - extract-elf
+  - extract-moves-from-video
+  - feal-differential-cryptanalysis
+  - feal-linear-cryptanalysis
+  - filter-js-from-html
+  - financial-document-processor
+  - fix-code-vulnerability
+  - fix-git
+  - fix-ocaml-gc
+  - gcode-to-text
+  - git-leak-recovery
+  - git-multibranch
+  - gpt2-codegolf
+  - headless-terminal
+  - hf-model-inference
+  - install-windows-3.11
+  - kv-store-grpc
+  - large-scale-text-editing
+  - largest-eigenval
+  - llm-inference-batching-scheduler
+  - log-summary-date-ranges
+  - mailman
+  - make-doom-for-mips
+  - make-mips-interpreter
+  - mcmc-sampling-stan
+  - merge-diff-arc-agi-task
+  - model-extraction-relu-logits
+  - modernize-scientific-stack
+  - mteb-leaderboard
+  - mteb-retrieve
+  - multi-source-data-merger
+  - nginx-request-logging
+  - openssl-selfsigned-cert
+  - overfull-hbox
+  - password-recovery
+  - path-tracing
+  - path-tracing-reverse
+  - polyglot-c-py
+  - polyglot-rust-c
+  - portfolio-optimization
+  - protein-assembly
+  - prove-plus-comm
+  - pypi-server
+  - pytorch-model-cli
+  - pytorch-model-recovery
+  - qemu-alpine-ssh
+  - qemu-startup
+  - query-optimize
+  - raman-fitting
+  - regex-chess
+  - regex-log
+  - reshard-c4-data
+  - rstan-to-pystan
+  - sam-cell-seg
+  - sanitize-git-repo
+  - schemelike-metacircular-eval
+  - sparql-university
+  - sqlite-db-truncate
+  - sqlite-with-gcov
+  - torch-pipeline-parallelism
+  - torch-tensor-parallelism
+  - train-fasttext
+  - tune-mjcf
+  - video-processing
+  - vulnerable-secret
+  - winning-avg-corewars
+  - write-compressor

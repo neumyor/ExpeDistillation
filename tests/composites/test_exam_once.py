@@ -4,11 +4,19 @@ Both handles share one FakeClient so the ANSWER-then-JUDGE call order is a
 single list assertion. Every test gets its own temporary run directory: the
 Store, the request dumps (run_dir) and the usage ledger all land in tmp_path,
 never in runs/ (AGENTS.md section 8).
+
+The parallel-safety tests at the bottom drive exam_once from real threads:
+the attempt serial is a count-then-act over the store, so same-exam calls
+must be serialized by the composite (a per-exam lock) while different exams
+must stay free to run concurrently.
 """
+
+import threading
 
 import pytest
 
 from expedistill.composites import exam_once
+from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.infra.store import Store, read_jsonl
@@ -362,3 +370,162 @@ def test_judged_attempt_is_never_reused(tmp_path):
     again, client = call_once(store, [ANSWER_TEXT, json_script(CORRECT)])
     assert len(client.calls) == 2
     assert again.attempt_id == f"{EXAM_ID}/att01"
+
+
+# ---------------------------------------------------------------------------
+# Parallel safety: same exam serialized, different exams still concurrent
+# ---------------------------------------------------------------------------
+
+#: How long a thread waits at the save rendezvous for its partner before
+#: giving up on pairing. Generous next to the microseconds two started
+#: threads need to meet (a missed pairing would only flake the PRE-fix
+#: reproduction); in the serialized post-fix case the lone first waiter
+#: always pays this timeout once, so it stays small.
+_PAIR_TIMEOUT = 2.0
+
+
+class _FirstAttemptSaveRendezvous:
+    """Hold threads at the first attempt write until two of them arrive.
+
+    Installed at the top of Store.save by the race test: while two threads
+    sit here, neither has written an attempt yet, so both have already
+    counted the same stored set -- exactly the check-then-act window the
+    per-exam lock must close, pinned deterministically instead of left to
+    GIL luck. When no partner arrives (post-fix: the partner is blocked
+    outside the critical section on the exam lock), the lone waiter gives
+    up after ``timeout`` rather than deadlock on it.
+    """
+
+    def __init__(self, timeout: float) -> None:
+        self._timeout = timeout
+        self._arrived = 0
+        self._paired = False
+        self._cond = threading.Condition()
+
+    def sync(self) -> None:
+        with self._cond:
+            if self._paired:
+                return  # pairing window over: every later save passes
+            self._arrived += 1
+            if self._arrived >= 2:
+                self._paired = True
+                self._cond.notify_all()
+                return
+            self._cond.wait_for(lambda: self._paired, self._timeout)
+            self._paired = True  # timed out: proceed alone
+
+
+def _run_in_threads(target, argument_sets):
+    """Run ``target(*args)`` in one thread per argument set; join them all.
+
+    Returns one ``(result, error)`` pair per argument set. A stuck thread
+    fails the join assert instead of hanging the suite (a lock regression
+    must fail loudly, not indefinitely).
+    """
+    outcomes = [None] * len(argument_sets)
+
+    def run(index, args):
+        try:
+            outcomes[index] = (target(*args), None)
+        except BaseException as exc:  # surfaced by the caller's asserts
+            outcomes[index] = (None, exc)
+
+    threads = [threading.Thread(target=run, args=(i, args))
+               for i, args in enumerate(argument_sets)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads), "deadlock"
+    return outcomes
+
+
+def _threaded_call(store, exam, script):
+    """One exam_once call wired to its own FakeClient (thread entry point)."""
+    client, answerer, judge = make_handles(script)
+    return exam_once(
+        store=store,
+        exam=exam,
+        answerer_handle=answerer,
+        judge_handle=judge,
+        skills_block="",
+        purpose="bare",
+    )
+
+
+def test_concurrent_same_exam_calls_keep_both_attempts(tmp_path):
+    # The serial is count-then-act over the store: two threads taking the
+    # SAME exam both counted the same stored set, allocated the same
+    # attempt id, and the second save silently destroyed the first record.
+    # The rendezvous pins both threads at the save step with nothing written
+    # yet, so pre-fix the collision is deterministic; post-fix the per-exam
+    # lock serializes the two calls and the lone first waiter times out.
+    store = Store(tmp_path)
+    original_save = store.save
+    rendezvous = _FirstAttemptSaveRendezvous(_PAIR_TIMEOUT)
+
+    def saving(obj, kind):
+        if kind == "attempts":
+            rendezvous.sync()
+        return original_save(obj, kind)
+
+    store.save = saving  # both threads share this store instance
+
+    answers = ("answer from thread A", "answer from thread B")
+    outcomes = _run_in_threads(
+        _threaded_call,
+        [(store, make_exam(), [text, json_script(CORRECT)])
+         for text in answers])
+    attempts = []
+    for result, error in outcomes:
+        assert error is None  # pre-fix the overwrite is SILENT, not an error
+        attempts.append(result)
+
+    # Distinct serials, and both records intact on disk with their own
+    # answer and verdict -- nothing overwrote anything.
+    serials = sorted(ids.parse_attempt_id(a.attempt_id)[1] for a in attempts)
+    assert serials == [0, 1]
+    assert store.ids("attempts") == [f"{EXAM_ID}/att00", f"{EXAM_ID}/att01"]
+    by_answer = {attempt.weak_answer: attempt for attempt in attempts}
+    assert set(by_answer) == set(answers)
+    for attempt in attempts:
+        assert attempt.judge_verdict is True
+        stored = store.load("attempts", attempt.attempt_id, Attempt)
+        assert stored.to_dict() == attempt.to_dict()
+
+
+def test_concurrent_different_exams_do_not_block_each_other(tmp_path):
+    # Both ANSWER calls meet at a two-party barrier: it only trips if the
+    # two exam_once calls are inside their model calls at the same moment,
+    # which proves the lock is per exam -- a single global lock would leave
+    # each thread waiting for a partner that is blocked behind itself.
+    store = Store(tmp_path)
+    barrier = threading.Barrier(2, timeout=10)
+
+    def meet_then_answer(answer_text):
+        calls = []
+
+        def script(system, user):
+            calls.append(user)
+            if len(calls) == 1:  # the ANSWER call
+                barrier.wait()
+                return answer_text
+            return json_script(CORRECT)  # the JUDGE call
+
+        return script
+
+    other_exam_id = f"{SUBTASK_ID[:-2]}01/exam"
+    outcomes = _run_in_threads(
+        _threaded_call,
+        [(store, make_exam(exam_id),
+          meet_then_answer(text))
+         for exam_id, text in [
+             (EXAM_ID, "answer for the first exam"),
+             (other_exam_id, "answer for the second exam")]])
+    attempts = []
+    for result, error in outcomes:
+        assert error is None
+        attempts.append(result)
+    assert not barrier.broken  # both were inside their calls at once
+    assert sorted(a.attempt_id for a in attempts) == [
+        f"{EXAM_ID}/att00", f"{other_exam_id}/att00"]

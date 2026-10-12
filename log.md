@@ -274,3 +274,31 @@ finish_reason=length），而网关对非流式请求在 300.3 秒服务端切�
 工件：`src/expedistill/llm/client.py`、`tests/unit/llm/test_client.py`、
 `tests/unit/stages/test_pipeline.py`（stub 机械适配）、
 run `runs/tb21_full_20261011_2242/`（诊断证据 dumps 2946-2953）。
+
+## 2026-10-12 20:36 — 预算决策（4096→96000）、阶段 5 波次并行化、TB 换新 run 续跑
+
+两项用户批准的决策落地。(1) 预算：TB 阶段 5 实测 102 条成员 ≈80k 估算 token vs 冻结预算
+4096，而 MERGE 合同"一条建议不丢"（压缩率 ~0.98），数学上不可能达标——阶段 5 注定
+ConfigError。bank_token_budget 的角色重定义为"上下文溢出安全阀"（docs/decisions/
+bank_token_budget_20261012.md），TB 开新 run（tb21_full_v2_202544，manifest 与旧 run 仅
+预算一处不同），ALFWorld/SearchQA 在各自实验启动前统一预注册 96000。(2) 阶段 5 并行化：
+五份同题独立评审一致否决"都保留+批末推导"（G7 冲突对实际大量重叠、同考题 attempt 竞态、
+批末推导破坏续跑等价、跨 benchmark 方法混杂），收敛到"并行计算+有序提交"：波内单元互不
+共享成员、run_units 并行，波间按序提交，产出与串行逐位一致（实现代理并修正了设计稿的
+朴素贪心不保 first-wins 的缺陷——受约束贪心 wave(j)=1+max(更早重叠单元)）；调度期序号
+预分配+烧号、重复源组去重（两项 v2 语义变更已记录）、dispatch map 落盘作在途识别、
+journal 单写者+定序、schema v3；单元内回归考题保持串行（保早停）。等价性：5 场景
+workers 1 vs 8 全量逐位相等；多在途崩溃注入 4 点，续跑与一次跑完一致且调用数精确；
+既有 61 个串行测试零改动通过。附带加固：exam_once 按考题粒度互斥（修复前实测竞态
+——两线程同 serial 互相覆盖、零报错）。TB fork：scripts/run/fork_run_stage04.py 复制
+阶段 0–4 产物到新 run（含阶段 5 已保留合并，新阶段 5 从 102 成员继续），干跑验证
+零调用、各阶段复算与旧 run 逐项一致。期间两个 fork 脚本 bug 被发现修复（argv 空格、
+Store 空目录骨架误判"已复制"），以及本条记录的干跑漏复制 generation_failures.jsonl
+导致 18 个终态单元被误重生成（2 个产物已清理，usage 5 行真实消耗保留不篡改）。
+
+工件：`src/expedistill/composites/curation.py`、`src/expedistill/composites/exam_once.py`、
+`src/expedistill/stages/stage5_curation.py`、`tests/composites/test_curation_parallel.py`（新，28 测试）、
+`tests/composites/test_exam_once.py`、`configs/experiments/tb21_full_v2.yaml`、
+`configs/experiments/{alfworld_skillopt_split,searchqa_skillopt_split}.yaml`、
+`scripts/run/fork_run_stage04.py`、`docs/decisions/bank_token_budget_20261012.md`、
+run `runs/tb21_full_v2_202544/`。pytest 1339 passed。
