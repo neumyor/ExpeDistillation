@@ -86,6 +86,7 @@ sorted by trajectory_id, including trajectories a previous call stored.
 """
 
 import dataclasses
+import sys
 import hashlib
 import json
 import os
@@ -454,6 +455,17 @@ def batch_execute(
                 )
             except Exception:
                 control.raised()
+                # The pool holds the exception until every future drains, which
+                # can be hours (remote pollers with 4.5h deadlines) -- during
+                # the 2026-10-13 stage-6 stalls each pass silently skipped the
+                # whole queue and the real error only surfaced (if ever) much
+                # later. Print it the moment it happens so the pass is
+                # diagnosable while it is still running.
+                import traceback
+                print(
+                    "K1 unit raised (dispatch stops, pool draining): "
+                    f"{unit.trajectory_id}\n{traceback.format_exc()}",
+                    file=sys.stderr, flush=True)
                 raise
             control.completed(unit.task.task_id, exhausted=traj is None)
             return traj

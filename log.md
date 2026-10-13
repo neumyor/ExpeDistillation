@@ -419,3 +419,18 @@ _upload_launch_files 对别名 mkdir+上传同一 SKILL.md——两种拼法都�
 诊断 hang 时第一步先确认日志缓冲，而不是相信日志尾部。
 
 工件：`scripts/smoke/launch_detached.py`、run `runs/tb21_full_v3_212702/`（driver_stage6_dbg）。
+
+## 2026-10-13 12:10 — 阶段 6 卡滞根因诊断（faulthandler 线程转储）+ 致命异常即时打印
+
+阶段 6 的驱动卡滞（两次复现：运行 0.5–4 小时后停止派发、0% CPU、静默跳过全部队列单元）
+最终用 PYTHONFAULTHANDLER=1 + SIGABRT 拿到全线程栈：主线程在 run_parallel._collect 等
+future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即除初始 32 个单元外，
+其余单元全部被"error 门"静默跳过（某单元早期抛出致命异常 → control.raised() 置位 →
+后续单元 gate 判 error 直接返回 None 且不留任何账目），而该异常被线程池扣住，
+要等全部在飞 future 排空（最长达 4.5h 轮询期限）才浮现——静默本身是缺陷。
+修复（batch_execute）：worker 捕获致命异常时立即打印单元 ID + 全部 traceback 到 stderr
+（flush），卡滞从"数小时不可诊断"变成"发生即可见"。重启后 r4 正常运转中
+（13 新提交、118/267）。若致命异常复发，console 日志即刻给出根因；faulthandler
+武装保留（SIGABRT 随时可取全栈）。pytest 1442 passed。
+
+工件：`src/expedistill/composites/batch_execute.py`。
