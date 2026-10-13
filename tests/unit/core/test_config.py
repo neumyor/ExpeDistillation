@@ -443,16 +443,16 @@ class TestRuleDefaults:
     def test_default_rules_cover_every_rule_key(self):
         assert set(DEFAULT_RULES) == set(RULE_KEYS)
         assert DEFAULT_RULES == {
-            "task_select": "all_valid_failed",
-            "segment_select": "strong_all_weak_failed",
+            "task_select": "any_weak_failed",
+            "segment_select": "strong_success_weak_failed",
             "trajectory_select": "all",
         }
 
     def test_missing_rule_keys_filled_explicit_ones_kept(self):
         cfg = make_config(rules={"trajectory_select": "custom"})
         assert cfg.rules == {
-            "task_select": "all_valid_failed",
-            "segment_select": "strong_all_weak_failed",
+            "task_select": "any_weak_failed",
+            "segment_select": "strong_success_weak_failed",
             "trajectory_select": "custom",
         }
 
@@ -463,14 +463,158 @@ class TestRuleDefaults:
     def test_default_rules_not_shared_between_configs(self):
         first = make_config()
         first.rules["task_select"] = "mutated"
-        assert make_config().rules["task_select"] == "all_valid_failed"
-        assert DEFAULT_RULES["task_select"] == "all_valid_failed"
+        assert make_config().rules["task_select"] == "any_weak_failed"
+        assert DEFAULT_RULES["task_select"] == "any_weak_failed"
 
     def test_rule_name_must_be_non_empty_string(self):
         with pytest.raises(ValueError, match="task_select"):
             make_config(rules={"task_select": ""})
         with pytest.raises(ValueError, match="segment_select"):
             make_config(rules={"segment_select": 3})
+
+
+#: The pinned retrieval-delivery shape (protocol v2 / retrieval split).
+RETRIEVAL_DELIVERY = {
+    "mode": "retrieval", "top_k": 5,
+    "max_categories": 3, "min_score": 0.05,
+}
+
+
+class TestSkillDelivery:
+    def test_absent_means_whole_bank_and_is_completed(self):
+        # The frozen config names the effective delivery like it names the
+        # effective rule selections: absent is completed, not left empty.
+        cfg = make_config()
+        assert cfg.skill_delivery == {"mode": "whole_bank"}
+        assert cfg.to_dict()["skill_delivery"] == {"mode": "whole_bank"}
+        assert make_config(skill_delivery={}).skill_delivery == \
+            {"mode": "whole_bank"}
+
+    def test_explicit_whole_bank_loads(self):
+        cfg = make_config(skill_delivery={"mode": "whole_bank"})
+        assert cfg.skill_delivery == {"mode": "whole_bank"}
+
+    def test_retrieval_with_all_params_loads(self):
+        cfg = make_config(skill_delivery=RETRIEVAL_DELIVERY)
+        assert cfg.skill_delivery == RETRIEVAL_DELIVERY
+        # Part of the frozen manifest: to_dict carries it verbatim.
+        assert cfg.to_dict()["skill_delivery"] == RETRIEVAL_DELIVERY
+
+    def test_illegal_mode_rejected(self):
+        with pytest.raises(ConfigError, match="mode"):
+            make_config(skill_delivery={"mode": "top3"})
+
+    @pytest.mark.parametrize("bad", [None, [], "retrieval", 5])
+    def test_must_be_a_mapping(self, bad):
+        with pytest.raises(ConfigError, match="mapping"):
+            make_config(skill_delivery=bad)
+
+    def test_unknown_keys_rejected(self):
+        with pytest.raises(ConfigError, match="unknown keys"):
+            make_config(skill_delivery={
+                **RETRIEVAL_DELIVERY, "temperature": 0})
+
+    def test_retrieval_requires_all_three_params(self):
+        for missing in ("top_k", "max_categories", "min_score"):
+            delivery = {key: value for key, value in RETRIEVAL_DELIVERY.items()
+                        if key != missing}
+            with pytest.raises(ConfigError, match=missing):
+                make_config(skill_delivery=delivery)
+
+    @pytest.mark.parametrize("key,bad", [
+        ("top_k", 0), ("top_k", -1), ("top_k", True), ("top_k", "5"),
+        ("top_k", 5.0), ("top_k", None),
+        ("max_categories", 0), ("max_categories", -2),
+        ("max_categories", True), ("max_categories", "3"),
+        ("max_categories", None),
+    ])
+    def test_retrieval_counts_must_be_ints_at_least_one(self, key, bad):
+        with pytest.raises(ConfigError, match=key):
+            make_config(skill_delivery={**RETRIEVAL_DELIVERY, key: bad})
+
+    @pytest.mark.parametrize("bad", [-0.1, 1.0, 1.5, True, "0.05", None])
+    def test_min_score_must_be_a_number_below_one(self, bad):
+        with pytest.raises(ConfigError, match="min_score"):
+            make_config(skill_delivery={**RETRIEVAL_DELIVERY,
+                                        "min_score": bad})
+
+    def test_min_score_bounds_are_inclusive_zero_exclusive_one(self):
+        # The interval is [0, 1): the grid's lower bound is legal here
+        # (the calibration protocol rejects 0 on its own grounds).
+        cfg = make_config(skill_delivery={**RETRIEVAL_DELIVERY, "min_score": 0})
+        assert cfg.skill_delivery["min_score"] == 0
+
+    def test_whole_bank_rejects_retrieval_params(self):
+        # An ineffective key under whole_bank would mislead about what the
+        # run injects; the config is the experiment's identity.
+        for key in ("top_k", "max_categories", "min_score"):
+            with pytest.raises(ConfigError, match="whole_bank"):
+                make_config(skill_delivery={"mode": "whole_bank",
+                                            key: RETRIEVAL_DELIVERY[key]})
+
+    def test_not_shared_with_caller_mapping(self):
+        given = dict(RETRIEVAL_DELIVERY)
+        cfg = make_config(skill_delivery=given)
+        given["top_k"] = 99
+        assert cfg.skill_delivery["top_k"] == 5
+
+    def test_from_dict_round_trip(self):
+        cfg = make_config(skill_delivery=RETRIEVAL_DELIVERY)
+        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_yaml_round_trip(self, tmp_path):
+        cfg_file = tmp_path / "exp.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "skill_delivery:\n"
+            "  mode: retrieval\n"
+            "  top_k: 5\n"
+            "  max_categories: 3\n"
+            "  min_score: 0.05\n",
+            encoding="utf-8")
+        cfg = load_config(str(cfg_file))
+        assert cfg.skill_delivery == RETRIEVAL_DELIVERY
+        out = tmp_path / "out.yaml"
+        save_config(cfg, str(out))
+        assert load_config(str(out)) == cfg
+
+
+class TestSplitKeySpec:
+    """The explicit-list ``split`` accepts exactly the two-key or the
+    three-key form (same contract as D2 in blocks/tasks.py, one layer up:
+    core validates the shape, D2 validates the lists against the loaded
+    task set). A subset like ``{"train": [...]}`` used to pass silently."""
+
+    def test_two_key_split_is_valid(self):
+        cfg = make_config(mode="split",
+                          split={"train": ["tb:1"], "test": ["tb:2"]})
+        assert cfg.split == {"train": ["tb:1"], "test": ["tb:2"]}
+
+    def test_three_key_split_is_valid(self):
+        # "reserved" is the frozen partition held back from both arms.
+        cfg = make_config(mode="split", split={
+            "train": ["tb:1"], "test": ["tb:2"], "reserved": ["tb:3"]})
+        assert cfg.split == {"train": ["tb:1"], "test": ["tb:2"],
+                             "reserved": ["tb:3"]}
+
+    def test_extra_key_rejected(self):
+        with pytest.raises(ValueError, match="split"):
+            make_config(split={"train": ["tb:1"], "test": ["tb:2"],
+                              "val": ["tb:3"]})
+
+    def test_missing_train_rejected(self):
+        with pytest.raises(ValueError, match="split"):
+            make_config(split={"test": ["tb:2"]})
+
+    def test_missing_test_rejected(self):
+        with pytest.raises(ValueError, match="split"):
+            make_config(split={"train": ["tb:1"]})
+
+    def test_reserved_must_be_a_task_id_list(self):
+        with pytest.raises(ValueError, match="reserved"):
+            make_config(split={"train": ["tb:1"], "test": ["tb:2"],
+                              "reserved": "tb:3"})
 
 
 class TestTaskSet:

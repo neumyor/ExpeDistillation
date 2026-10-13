@@ -31,7 +31,7 @@ from expedistill.core.config import ExperimentConfig
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import InfrastructureError
-from expedistill.infra.store import Store, read_json
+from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.inject import bank_reference
 from expedistill.llm.fake import make_fake_handle
 from expedistill.stages import stage6_test
@@ -142,16 +142,31 @@ def _tasks(*ids_):
             for i in ids_]
 
 
+def _retrieval_tasks():
+    """Two tasks whose instructions each share vocabulary with exactly one
+    bank skill, so the real select_skills routes them apart."""
+    return [
+        Task(task_id="t1", instruction="read the log file and debug",
+             meta={"gold": "t1"}),
+        Task(task_id="t2", instruction="restart after the config check",
+             meta={"gold": "t2"}),
+    ]
+
+
+_BANK_SKILL_A = "traj/tb:t1/strong/00/seg00/skill"
+_BANK_SKILL_B = "traj/tb:t2/strong/00/seg01/skill"
+
+
 def _bank_rows():
     return [
-        {"skill_id": "traj/tb:t1/strong/00/seg00/skill", "version": 1,
+        {"skill_id": _BANK_SKILL_A, "version": 1,
          "content": "Always read the log file first.", "group": "debugging"},
-        {"skill_id": "traj/tb:t2/strong/00/seg01/skill", "version": 1,
+        {"skill_id": _BANK_SKILL_B, "version": 1,
          "content": "Restart only after the config check.", "group": None},
     ]
 
 
-def _make_ctx(tmp_path, mode, *, n_attempts=2):
+def _make_ctx(tmp_path, mode, *, n_attempts=2, skill_delivery=None):
     run_dir = tmp_path / "run"
     handles = {
         "executor_strong": make_fake_handle("strong"),
@@ -163,7 +178,8 @@ def _make_ctx(tmp_path, mode, *, n_attempts=2):
     config = ExperimentConfig(
         benchmark=_FAKE, mode=mode,
         models={"executor_strong": "strong-x", "executor_weak": "weak-7b"},
-        n_attempts_weak=n_attempts)
+        n_attempts_weak=n_attempts,
+        skill_delivery=skill_delivery if skill_delivery is not None else {})
     ctx = StageContext(run_dir=run_dir, store=Store(run_dir), config=config,
                        usage=None, handles=handles,
                        workdir_root=run_dir / "work")
@@ -324,6 +340,138 @@ def test_resume_second_call_adds_no_executions(tmp_path, monkeypatch):
     assert len(ctx.handles["executor_weak"].client.calls) == n_client_calls
     assert second == first
     assert n_plugin_calls == 8
+
+
+# ---------------------------------------------------------------------------
+# Retrieval skill delivery (protocol v2): per-task top-k injection
+# ---------------------------------------------------------------------------
+
+#: The with-bank block each retrieval task must receive (verified against the
+#: real select_skills/derive_categories over the fabricated two-skill bank).
+_EXPECTED_T1_BLOCK = ("## Skill rules\n### debugging\n"
+                     "- Always read the log file first.")
+_EXPECTED_T2_BLOCK = "## Skill rules\n- Restart only after the config check."
+
+
+def test_retrieval_mode_selects_and_injects_per_task(tmp_path, monkeypatch):
+    ctx = _make_ctx(tmp_path, "split", skill_delivery={
+        "mode": "retrieval", "top_k": 1, "max_categories": 2,
+        "min_score": 0.0})
+    plugin = RecordingPlugin()
+    summary = _run_stage6(ctx, monkeypatch, plugin, _retrieval_tasks())
+
+    # Each with-bank unit saw exactly its task's retrieved block; the
+    # control arm stayed bare.
+    armed_blocks = {call["task_id"]: call["skills_block"]
+                   for call in plugin.calls if call["skills_block"]}
+    assert armed_blocks == {"t1": _EXPECTED_T1_BLOCK, "t2": _EXPECTED_T2_BLOCK}
+    assert all(call["skills_block"] == "" for call in plugin.calls
+               if not call["skills_block"])
+
+    # The stored with-bank trajectories carry the per-task injection records
+    # (the new skills_injected shape: a list of {skill_id, version}).
+    bank_store = Store(ctx.run_dir / "stage6_test" / "bank")
+    injected = {}
+    for trajectory_id in bank_store.ids("trajectories"):
+        traj = bank_store.load("trajectories", trajectory_id, Trajectory)
+        injected[traj.task_id] = traj.skills_injected
+    assert injected == {
+        make_task_id(_FAKE, "t1"): [{"skill_id": _BANK_SKILL_A, "version": 1}],
+        make_task_id(_FAKE, "t2"): [{"skill_id": _BANK_SKILL_B, "version": 1}],
+    }
+
+    # The audit names the full resolution of every test task, one line each.
+    audit = read_jsonl(ctx.run_dir / stage6_test.TEST_DIR
+                       / stage6_test.RETRIEVAL_AUDIT_NAME)
+    assert [row["task_id"] for row in audit] == ["t1", "t2"]
+    t1_row, t2_row = audit
+    assert t1_row["routed"] == ["debugging", _BANK_SKILL_B]
+    assert t1_row["selected"] == [{"skill_id": _BANK_SKILL_A, "version": 1}]
+    assert t1_row["threshold_passed"] is True
+    assert [entry["skill_id"] for entry in t1_row["scores"]] == [
+        _BANK_SKILL_A, _BANK_SKILL_B]
+    assert all("score" in entry for entry in t1_row["scores"])
+    assert t1_row["categories"] == {"debugging": "debugging",
+                                    _BANK_SKILL_B: _BANK_SKILL_B}
+    assert t2_row["routed"] == [_BANK_SKILL_B, "debugging"]
+    assert t2_row["selected"] == [{"skill_id": _BANK_SKILL_B, "version": 1}]
+
+    # Summary compatibility: the whole-bank digest stays the bank identity
+    # and every pre-existing key keeps its meaning.
+    assert summary["bank_reference"] == bank_reference(_bank_rows())
+    assert {"mode", "bank_reference", "control_source", "with_bank",
+            "control", "delta", "infra_missing", "infra_accepted",
+            "complete", "infra_shortfall_accepted"} <= set(summary)
+    assert summary["control_source"] == "fresh_bare_run"
+
+
+def test_retrieval_below_threshold_runs_bare(tmp_path, monkeypatch):
+    # No task can clear a 0.99 gate: the with-bank arm is a bare run whose
+    # skills_injected is [] -- distinguishable from the control's None.
+    ctx = _make_ctx(tmp_path, "split", skill_delivery={
+        "mode": "retrieval", "top_k": 2, "max_categories": 2,
+        "min_score": 0.99})
+    plugin = RecordingPlugin()
+    _run_stage6(ctx, monkeypatch, plugin, _retrieval_tasks())
+    assert all(call["skills_block"] == "" for call in plugin.calls)
+
+    bank_store = Store(ctx.run_dir / "stage6_test" / "bank")
+    gated = [bank_store.load("trajectories", trajectory_id, Trajectory)
+             for trajectory_id in bank_store.ids("trajectories")]
+    assert len(gated) == 4
+    assert all(traj.skills_injected == [] for traj in gated)
+    bare_store = Store(ctx.run_dir / "stage6_test" / "bare")
+    bare = [bare_store.load("trajectories", trajectory_id, Trajectory)
+            for trajectory_id in bare_store.ids("trajectories")]
+    assert all(traj.skills_injected is None for traj in bare)
+
+    # The audit kept the full ranking even though the gate failed.
+    audit = read_jsonl(ctx.run_dir / stage6_test.TEST_DIR
+                       / stage6_test.RETRIEVAL_AUDIT_NAME)
+    assert len(audit) == 2
+    assert all(row["selected"] == [] and row["threshold_passed"] is False
+               and row["scores"] for row in audit)
+
+
+def test_retrieval_audit_is_overwritten_not_appended(tmp_path, monkeypatch):
+    ctx = _make_ctx(tmp_path, "split", skill_delivery={
+        "mode": "retrieval", "top_k": 1, "max_categories": 2,
+        "min_score": 0.0})
+    audit_path = (ctx.run_dir / stage6_test.TEST_DIR
+                  / stage6_test.RETRIEVAL_AUDIT_NAME)
+    # A stale row an earlier resolution left behind: dispatch replaces the
+    # whole file, never appends under it.
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    audit_path.write_text('{"stale": true}\n', encoding="utf-8")
+
+    plugin = RecordingPlugin()
+    _run_stage6(ctx, monkeypatch, plugin, _retrieval_tasks())
+    first = read_jsonl(audit_path)
+    assert [row["task_id"] for row in first] == ["t1", "t2"]
+    assert all("stale" not in row for row in first)
+
+    # The resume re-resolves and overwrites: still one line per task, and
+    # zero new executions (the per-task resume comparison held).
+    plugin.calls.clear()
+    _run_stage6(ctx, monkeypatch, plugin, _retrieval_tasks())
+    assert plugin.calls == []
+    assert read_jsonl(audit_path) == first
+
+
+def test_whole_bank_delivery_writes_no_retrieval_audit(tmp_path, monkeypatch):
+    # The default delivery keeps the scalar path: digest injection, no
+    # retrieval artifact.
+    ctx = _make_ctx(tmp_path, "split")
+    plugin = RecordingPlugin()
+    summary = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
+    assert not (ctx.run_dir / stage6_test.TEST_DIR
+                / stage6_test.RETRIEVAL_AUDIT_NAME).exists()
+    reference = bank_reference(_bank_rows())
+    assert summary["bank_reference"] == reference
+    bank_store = Store(ctx.run_dir / "stage6_test" / "bank")
+    for trajectory_id in bank_store.ids("trajectories"):
+        traj = bank_store.load("trajectories", trajectory_id, Trajectory)
+        assert traj.skills_injected == reference
 
 
 # ---------------------------------------------------------------------------

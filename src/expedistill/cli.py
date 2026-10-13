@@ -1,6 +1,6 @@
 """Layer 7: the command-line entry point (the only method entry, AGENTS.md 5).
 
-Two subcommands:
+Three subcommands:
 
 * ``run`` -- one experiment run: load the config, take the run directory, and
   print one line per stage as it completes (progress comes from the
@@ -33,6 +33,20 @@ Two subcommands:
   ``infra.usage.UsageStats.by_role_prompt`` (medians over ok rows, totals
   over all rows, unknown never coerced to 0). Exit 1
   when the ledger shows the run is incomplete (a stage never completed).
+* ``assemble-reuse`` -- assemble a fresh run directory from a finished
+  source run and a reuse config (the TB frozen-split reuse experiment).
+  ``--level`` picks the reuse level (revision 3 of the integration plan):
+  ``bank`` (default) copies the source run's stage 1-5 train-lineage
+  artifacts and the filtered bank (zero model calls downstream), while
+  ``baseline`` copies ONLY the train-side stage-1 trajectories (plus the
+  accepted stage-1 infra shortfall) and stages 2-6 run fresh under the
+  current protocol. Both levels validate the identity (the ruling-4
+  whitelist diff, respectively revision 3's pinned minimum), copy under
+  the run lock, assert the negative list and write ASSEMBLED_FROM.md
+  provenance. Prints the returned per-class counts and checksums as one
+  JSON line. No model calls; its expected failures (ConfigError, a locked
+  run directory, an identity mismatch) exit 1 with a clear message, the
+  same contract as ``run``.
 """
 
 import argparse
@@ -42,6 +56,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from expedistill.composites.assemble_reuse import LEVELS, assemble_reuse
 from expedistill.infra.manifest import FrozenProtocolChanged
 from expedistill.infra.reliability import (
     ConfigError,
@@ -170,6 +185,31 @@ def _resume_hint(args: argparse.Namespace) -> str:
             else "the same command")
 
 
+def _cmd_assemble_reuse(args: argparse.Namespace) -> int:
+    # The default level IS the historical assembly, so the default call
+    # keeps the historical three-argument shape; only an explicitly
+    # requested non-default level changes the contract being invoked.
+    if args.level == "bank":
+        summary = assemble_reuse(
+            source_run=args.source_run,
+            config_path=args.config,
+            run_dir=args.run_dir,
+        )
+    else:
+        summary = assemble_reuse(
+            source_run=args.source_run,
+            config_path=args.config,
+            run_dir=args.run_dir,
+            level=args.level,
+        )
+    # One compact JSON line, the same style as the per-stage lines: the
+    # console output is a progress record, ASSEMBLED_FROM.md at the run
+    # root is the durable provenance record.
+    print("assemble-reuse: " + json.dumps(
+        summary, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def _cmd_summary(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir)
     ledger = ledger_path(run_dir)
@@ -265,6 +305,32 @@ def build_parser() -> argparse.ArgumentParser:
                           "recorded in the run directory and stay accepted "
                           "(never re-executed) on every later resume")
     run.set_defaults(func=_cmd_run)
+
+    assemble = sub.add_parser(
+        "assemble-reuse",
+        help="assemble a fresh run from a finished source run's "
+             "train-lineage artifacts (zero model calls)")
+    assemble.add_argument("--source-run", required=True, type=Path,
+                          help="the finished source run directory "
+                               "(its manifest defines the protocol the "
+                               "reuse config must match)")
+    assemble.add_argument("--config", required=True, type=Path,
+                          help="the reuse experiment config YAML "
+                               "(configs/experiments/)")
+    assemble.add_argument("--run-dir", required=True, type=Path,
+                          help="fresh run directory to assemble (created; "
+                               "must not contain a manifest -- the "
+                               "pipeline freezes one on its first start)")
+    assemble.add_argument("--level", choices=LEVELS, default="bank",
+                          help="reuse level (revision 3): 'bank' (default) "
+                               "copies the source run's stage 1-5 "
+                               "train-lineage artifacts and the filtered "
+                               "bank -- zero model calls downstream; "
+                               "'baseline' copies ONLY the train-side "
+                               "stage-1 trajectories (plus the accepted "
+                               "stage-1 infra shortfall) and stages 2-6 "
+                               "run fresh under the current protocol")
+    assemble.set_defaults(func=_cmd_assemble_reuse)
 
     summary = sub.add_parser(
         "summary", help="print a run's stage summaries and usage totals")

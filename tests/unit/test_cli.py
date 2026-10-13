@@ -1,11 +1,16 @@
-"""CLI (layer 7) tests: run/summary wiring and the error contract.
+"""CLI (layer 7) tests: run/summary/assemble-reuse wiring and the error
+contract.
 
-No stage is executed: ``run`` is tested against a monkeypatched run_pipeline,
-``summary`` against a fabricated ledger. The pipeline's own behavior (real
+``run`` is tested against a monkeypatched run_pipeline, ``summary`` against
+a fabricated ledger, and ``assemble-reuse`` against both a monkeypatched
+assemble_reuse (wiring, printing, error contract) and one REAL end-to-end
+assembly over the synthetic source run of
+tests/composites/test_assemble_reuse.py. The pipeline's own behavior (real
 stages, fake benchmark) is covered by tests/unit/stages/test_pipeline.py.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -533,3 +538,99 @@ def test_until_stage_non_integer_is_usage_error(monkeypatch, tmp_path):
         cli.main(["run", "--config", str(tmp_path / "cfg.yaml"),
                   "--run-dir", str(tmp_path / "run"), "--until-stage", "x"])
     assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# assemble-reuse
+# ---------------------------------------------------------------------------
+
+def test_assemble_reuse_calls_through_and_prints_the_summary(
+        monkeypatch, capsys, tmp_path):
+    calls = {}
+    summary = {"source_run": "src", "counts": {"skills": 6},
+               "checksums": {"skills": "abc"}}
+
+    def fake_assemble_reuse(source_run, config_path, run_dir):
+        calls.update(source_run=source_run, config_path=config_path,
+                     run_dir=run_dir)
+        return summary
+
+    monkeypatch.setattr(cli, "assemble_reuse", fake_assemble_reuse)
+    code = cli.main([
+        "assemble-reuse",
+        "--source-run", str(tmp_path / "source"),
+        "--config", str(tmp_path / "cfg.yaml"),
+        "--run-dir", str(tmp_path / "run"),
+    ])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert calls == {"source_run": tmp_path / "source",
+                     "config_path": tmp_path / "cfg.yaml",
+                     "run_dir": tmp_path / "run"}
+    line = captured.out.splitlines()[-1]
+    assert line.startswith("assemble-reuse: ")
+    assert json.loads(line[len("assemble-reuse: "):]) == summary
+
+
+def test_assemble_reuse_reports_expected_errors_nonzero(
+        monkeypatch, capsys, tmp_path):
+    def fake_assemble_reuse(source_run, config_path, run_dir):
+        raise ConfigError("the reuse config differs from the source run")
+
+    monkeypatch.setattr(cli, "assemble_reuse", fake_assemble_reuse)
+    code = cli.main([
+        "assemble-reuse",
+        "--source-run", str(tmp_path / "source"),
+        "--config", str(tmp_path / "cfg.yaml"),
+        "--run-dir", str(tmp_path / "run"),
+    ])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "differs from the source run" in captured.err
+    assert captured.out == ""
+
+
+def test_assemble_reuse_missing_args_is_usage_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        cli, "assemble_reuse",
+        lambda *a, **k: pytest.fail("assemble_reuse must not be called"))
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["assemble-reuse", "--config", str(tmp_path / "cfg.yaml")])
+    assert excinfo.value.code == 2
+
+
+def test_assemble_reuse_end_to_end_smoke(capsys, tmp_path):
+    # The REAL assemble_reuse through the CLI: the synthetic source run of
+    # tests/composites/test_assemble_reuse.py (a stub benchmark registered
+    # through the real import machinery), assembled into a fresh directory.
+    from tests.composites.test_assemble_reuse import (
+        _MODULE,
+        build_source_run,
+        install_plugin,
+        write_reuse_config,
+    )
+    from expedistill.benchmarks.registry import _reset_registry
+
+    install_plugin()
+    try:
+        source = build_source_run(tmp_path)
+        config_path = write_reuse_config(tmp_path)
+        run_dir = tmp_path / "assembled"
+        code = cli.main([
+            "assemble-reuse",
+            "--source-run", str(source.run_dir),
+            "--config", str(config_path),
+            "--run-dir", str(run_dir),
+        ])
+    finally:
+        sys.modules.pop(_MODULE, None)
+        _reset_registry()
+    captured = capsys.readouterr()
+    assert code == 0
+    line = captured.out.splitlines()[-1]
+    assert line.startswith("assemble-reuse: ")
+    summary = json.loads(line[len("assemble-reuse: "):])
+    assert summary["counts"]["bank_rows"] == 2
+    assert summary["counts"]["trajectories"] == 2
+    assert (run_dir / "ASSEMBLED_FROM.md").is_file()
+    assert not (run_dir / "manifest.json").exists()

@@ -53,6 +53,29 @@ SKILL_STATUSES = ("pending", "accepted", "discarded", "merged")
 #: is the stage-4 loop, ``regression`` re-checks merged skills in stage 5.
 ATTEMPT_PURPOSES = ("bare", "acceptance", "regression")
 
+# ---------------------------------------------------------------------------
+# Skill content section markers (stage 2/3 protocol v2, revision 3)
+# ---------------------------------------------------------------------------
+
+# A content-structure constant of the Skill object, placed by the
+# field-value vocabularies on purpose: NOT a _check_vocab vocabulary itself
+# (no field ever holds a marker as a value). Why it lives in core and not
+# next to its first consumer (blocks/author.py): blocks never import each
+# other, and a second block consumer exists (blocks/retrieve.py), so core
+# is the only legal home both can import. The REWRITE/MERGE/SIMILARITY
+# prompts embed these markers literally (their outputs must reproduce
+# them); the G2 prompts carry the JSON field names that map 1:1 onto the
+# four sections (blocks/author.py's renderer adds the markers);
+# blocks/retrieve.py weights them for retrieval.
+
+#: The four sections of a stored PROCEDURE skill's content.
+PROCEDURE_MARKERS = ("[When to use]", "[Steps]", "[Verify]", "[Do not use when]")
+
+#: The four sections of a stored FAILURE REFERENCE's content. The last
+#: marker is shared by both kinds; the other three identify the kind.
+FAILURE_REFERENCE_MARKERS = ("[Trigger]", "[Why it fails]", "[Do instead]",
+                             "[Do not use when]")
+
 
 def _check_vocab(value: str, allowed: Tuple[str, ...], owner: str,
                  field_name: str) -> None:

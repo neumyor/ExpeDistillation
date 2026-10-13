@@ -50,8 +50,9 @@ REPAIR_INSTRUCTION = prompts.get("REPAIR_INSTRUCTION")
 #: finish_reason="length": the reply was cut off at the output limit, so the
 #: re-ask asks for the complete answer again, more concisely. Same
 #: bounded-re-ask pattern as the empty-content repair; REPAIR_INSTRUCTION is
-#: JSON-specific and must never reach plain-text callers (SKILL_DISTILL,
-#: MERGE).
+#: JSON-specific and must never reach plain-text callers. Method-level
+#: plain-text callers since protocol v2: MERGE alone (SKILL_DISTILL, like
+#: REWRITE, calls with output_json=True).
 _TRUNCATION_NOTE = (
     "Your previous reply was cut off at the output limit before it was "
     "complete. Reply again with the complete answer, but more concisely, "
@@ -483,8 +484,10 @@ def call_model(
     exponential backoff; exhaustion re-raises the last error. With
     ``output_json=False`` every other client exception (ProviderRefusalError,
     ConfigError, a client-side ModelOutputError such as empty content, code
-    bugs) propagates at once: plain-text callers (SKILL_DISTILL, MERGE) turn
-    that into their per-unit dispositions. The two budgets are independent:
+    bugs) propagates at once: plain-text callers (method-level since
+    protocol v2 that is MERGE alone -- SKILL_DISTILL and REWRITE call with
+    ``output_json=True``) turn that into their per-unit dispositions. The
+    two budgets are independent:
     infra retries never consume format retries, and each request -- the
     first ask and every repair re-ask -- gets the full infra budget, so one
     call makes at most ``(1 + max_format_retries) * (1 + infra_retries)``

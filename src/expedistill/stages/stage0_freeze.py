@@ -15,14 +15,26 @@ names frozen below are the effective ones.
 
 Task set: D1 loads exactly ``config.tasks`` (None = the plugin's full set,
 which a plugin may reject -- TB does). With explicit split lists and no
-``config.tasks``, the union of the lists is loaded; with both given, the
-union must equal the loaded set exactly (ConfigError naming the ids on
-either side otherwise). A loaded set with a repeated id (e.g. a task file
-naming one twice) is a ConfigError listing the ids, checked before any
-split derivation. A ratio split is derived from the loaded set.
+``config.tasks``, the union of the lists (``reserved`` included) is loaded;
+with both given, the union must equal the loaded set exactly (ConfigError
+naming the ids on either side otherwise). A loaded set with a repeated id
+(e.g. a task file naming one twice) is a ConfigError listing the ids,
+checked before any split derivation. A ratio split is derived from the
+loaded set.
+
+The frozen split carries three lists: ``train``, ``test`` and
+``reserved``. ``reserved`` is the partition held back from BOTH arms
+(protocol v2 / the TB frozen-split reuse experiment): it is loaded -- the
+split lists must cover the loaded task set exactly -- but neither distilled
+on nor tested on; it exists so a dev smoke can run held-out tasks without
+touching the measurement. A two-key spec (``{"train", "test"}``) is still
+accepted and freezes ``reserved: []``, so every manifest and summary
+downstream can rely on all three keys being present (integration plan
+ruling 7).
 
 What the manifest freezes (B4 compares field by field on every start):
-``benchmark``, ``mode``, the explicit ``split`` id lists, the whole config
+``benchmark``, ``mode``, the explicit ``split`` id lists (all three keys),
+the whole config
 (``config``: every ExperimentConfig field, including ``tasks``, the
 completed ``rules`` and the prompt digests), ``prompt_digests``, ``rules``,
 ``model_roles``, ``tasks_digest`` and ``aux_metric``. ``aux_metric`` is the
@@ -60,9 +72,10 @@ from the frozen split fails loudly inside D2 (unknown ids / uncovered tasks
 are ConfigErrors), and drifted content fails on ``tasks_digest``.
 
 The returned dict is exactly ``{"tasks": total, "train": [...ids],
-"test": [...ids]}`` -- task-id lists only, never Task objects, so callers
-can JSON-serialise it (the pipeline writes it straight into its ledger).
-A stage that needs the Task objects rebuilds them from these ids through
+"test": [...ids], "reserved": [...ids]}`` -- task-id lists only, never
+Task objects, so callers can JSON-serialise it (the pipeline writes it
+straight into its ledger; it reads only ``train`` and ``test``). A stage
+that needs the Task objects rebuilds them from these ids through
 ``blocks.tasks.load_tasks``, which is deterministic from the frozen config.
 """
 
@@ -139,11 +152,14 @@ def _derive_split_spec(task_ids: List[str],
 
 
 def _explicit_split_ids(config: Any) -> Optional[List[str]]:
-    """Sorted union of explicit split lists, or None if there are none."""
+    """Sorted union of the explicit split lists (``reserved`` included:
+    the held-back tasks are loaded even though neither arm runs them), or
+    None if there are no explicit lists."""
     if (config.mode == "split" and isinstance(config.split, dict)
             and "train" in config.split):
         return sorted(set(config.split.get("train") or [])
-                      | set(config.split.get("test") or []))
+                      | set(config.split.get("test") or [])
+                      | set(config.split.get("reserved") or []))
     return None
 
 
@@ -260,9 +276,10 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
 def run(ctx: StageContext) -> Dict[str, Any]:
     """Validate rules, load and split the task set, freeze, write summary.
 
-    Returns ``{"tasks": total, "train": [...ids], "test": [...ids]}`` (raw
-    task ids, JSON-safe) and writes the same dict to ``stage0_summary.json``
-    next to the manifest.
+    Returns ``{"tasks": total, "train": [...ids], "test": [...ids],
+    "reserved": [...ids]}`` (raw task ids, JSON-safe; ``reserved`` is
+    ``[]`` for a two-key spec) and writes the same dict to
+    ``stage0_summary.json`` next to the manifest.
     """
     config = ctx.config
     _validate_rules(config.rules)
@@ -275,11 +292,12 @@ def run(ctx: StageContext) -> Dict[str, Any]:
             and "ratio" in split_spec):
         split_spec = _derive_split_spec(
             [task.task_id for task in tasks], split_spec)
-    train_tasks, test_tasks = tasks_block.split_tasks(
+    train_tasks, test_tasks, reserved_tasks = tasks_block.split_tasks(
         tasks, config.mode, split_spec)
 
     train_ids = [task.task_id for task in train_tasks]
     test_ids = [task.task_id for task in test_tasks]
+    reserved_ids = [task.task_id for task in reserved_tasks]
     prompt_digests = _prompt_digests(config.benchmark)
     # The config's frozen copy carries the digests too (core.config: the
     # field is "filled by the prompt registry when the stages freeze the
@@ -289,7 +307,10 @@ def run(ctx: StageContext) -> Dict[str, Any]:
     freeze(ctx.run_dir, {
         "benchmark": config.benchmark,
         "mode": config.mode,
-        "split": {"train": train_ids, "test": test_ids},
+        # All three keys, always (ruling 7): downstream readers never have
+        # to branch on which form the source config used.
+        "split": {"train": train_ids, "test": test_ids,
+                  "reserved": reserved_ids},
         "config": frozen_config.to_dict(),
         "prompt_digests": prompt_digests,
         "rules": config.rules,
@@ -300,6 +321,7 @@ def run(ctx: StageContext) -> Dict[str, Any]:
         "aux_metric": get_plugin(config.benchmark).aux_metric_name,
     })
 
-    summary = {"tasks": len(tasks), "train": train_ids, "test": test_ids}
+    summary = {"tasks": len(tasks), "train": train_ids, "test": test_ids,
+               "reserved": reserved_ids}
     write_json(ctx.run_dir / _SUMMARY_NAME, summary, indent=2)
     return summary

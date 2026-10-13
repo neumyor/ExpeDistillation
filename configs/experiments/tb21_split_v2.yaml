@@ -1,0 +1,293 @@
+# TB21 frozen-split v2 re-distillation campaign (revision 3, 2026-10-13).
+# Method source: docs/decisions/retrieval_delivery_tb_split_
+# 20261013.md (revision 3, the user ruling: the TB re-run is a FULL v2
+# re-distillation, not a filtered-bank reuse); stage 2/3 protocol in
+# docs/decisions/stage23_protocol_v2_20261013.md. This experiment =
+# stage 1 trajectory reuse + stages 2-6 FRESH v2 distillation: assemble
+# with `expedistill assemble-reuse --level baseline`, which copies ONLY
+# the train-41 two-arm stage-1 trajectories (plus the source run's
+# accepted stage-1 infra shortfall, train side); every stage 2-6
+# product is produced fresh under the CURRENT protocol. The
+# mixed-protocol declaration of tb21_split_reuse.yaml therefore does NOT
+# apply here: this run's G2 really calls the v2 prompts (no zero-call
+# reuse downstream). The bank-level assembly (tb21_split_reuse.yaml)
+# stays available as the optional filtered-bank ablation of revision 3
+# item 6 and is not launched by this campaign.
+#
+# Method keys are verbatim copies of configs/experiments/
+# tb21_full_v2.yaml except mode, split, rules and skill_delivery (the
+# same copy discipline as tb21_split_reuse.yaml). The rules are the
+# protocol v2 names: task_select any_weak_failed recomputes F on the
+# train-41 side = 28 tasks (the v1 criterion all_valid_failed would say
+# 16), segment_select strong_success_weak_failed, trajectory_select
+# strong2_weak2.
+#
+# Split provenance: the three lists are bit-exact copies of the
+# AgentBrew frozen split JSONs (seed 42, revision
+# 2fd12b88aafdd04a52c298e3940bcb189f9766d6): train = evolve (41), test =
+# test (28), reserved = validation (20); pairwise disjoint, union 89.
+# Verify with scripts/run/freeze_tb_split.py. reserved is loaded but
+# belongs to NEITHER arm: it is held out for development smokes only
+# and the formal run never executes it.
+benchmark: tb
+mode: split
+split:
+  # train = AgentBrew evolve (41 tasks, seed 42) -- the distillation pool
+  train:
+    - break-filter-js-from-html
+    - build-pmars
+    - chess-best-move
+    - code-from-image
+    - constraints-scheduling
+    - count-dataset-tokens
+    - custom-memory-heap-crash
+    - distribution-search
+    - dna-insert
+    - extract-elf
+    - extract-moves-from-video
+    - feal-linear-cryptanalysis
+    - fix-code-vulnerability
+    - fix-git
+    - fix-ocaml-gc
+    - gcode-to-text
+    - git-leak-recovery
+    - gpt2-codegolf
+    - largest-eigenval
+    - llm-inference-batching-scheduler
+    - log-summary-date-ranges
+    - merge-diff-arc-agi-task
+    - mteb-retrieve
+    - multi-source-data-merger
+    - openssl-selfsigned-cert
+    - overfull-hbox
+    - path-tracing-reverse
+    - polyglot-c-py
+    - polyglot-rust-c
+    - portfolio-optimization
+    - protein-assembly
+    - pypi-server
+    - query-optimize
+    - raman-fitting
+    - reshard-c4-data
+    - sam-cell-seg
+    - sanitize-git-repo
+    - sparql-university
+    - torch-tensor-parallelism
+    - train-fasttext
+    - write-compressor
+  # test = AgentBrew test (28 tasks) -- both arms run fresh in stage 6
+  test:
+    - adaptive-rejection-sampler
+    - build-cython-ext
+    - build-pov-ray
+    - caffe-cifar-10
+    - cancel-async-tasks
+    - compile-compcert
+    - configure-git-webserver
+    - crack-7z-hash
+    - dna-assembly
+    - feal-differential-cryptanalysis
+    - hf-model-inference
+    - kv-store-grpc
+    - large-scale-text-editing
+    - mailman
+    - make-doom-for-mips
+    - mcmc-sampling-stan
+    - modernize-scientific-stack
+    - password-recovery
+    - prove-plus-comm
+    - pytorch-model-cli
+    - qemu-alpine-ssh
+    - regex-chess
+    - regex-log
+    - rstan-to-pystan
+    - sqlite-with-gcov
+    - torch-pipeline-parallelism
+    - vulnerable-secret
+    - winning-avg-corewars
+  # reserved = AgentBrew validation (20 tasks) -- held out of both
+  # arms; dev-smoke only, never executed by the formal run
+  reserved:
+    - bn-fit-modify
+    - circuit-fibsqrt
+    - cobol-modernization
+    - db-wal-recovery
+    - filter-js-from-html
+    - financial-document-processor
+    - git-multibranch
+    - headless-terminal
+    - install-windows-3.11
+    - make-mips-interpreter
+    - model-extraction-relu-logits
+    - mteb-leaderboard
+    - nginx-request-logging
+    - path-tracing
+    - pytorch-model-recovery
+    - qemu-startup
+    - schemelike-metacircular-eval
+    - sqlite-db-truncate
+    - tune-mjcf
+    - video-processing
+models:
+  executor_strong: deepseek-v4-flash-0731--ali
+  executor_weak: qwen3.6-flash-distill
+weak_profile: |-
+  qwen3.6-flash-distill is a small, fast, distilled terminal agent: in the
+  TB2.1 campaign over these 89 tasks it solved 47% of attempts on average
+  (avg@5 0.4697) against the strong model's 63%. Its terminal interaction is
+  fragile: 11 of its 13 kept-as-model-failure trials died in the tmux keystroke
+  layer (unparseable command rounds, or keystrokes fired before tmux was even
+  installed), two more overran the agent time cap (AgentTimeoutError), and it
+  intermittently emits unparseable output turns that waste interaction rounds.
+  When it does run to completion it writes plausible-looking but subtly wrong
+  numerical or statistical code and declares success without validating the
+  result against the task's tests, so skills should give exact commands,
+  concrete verification steps, and explicit guards against its early-exit habit.
+n_attempts_strong: 3
+n_attempts_weak: 3
+K: 5
+segment_retry_limit: 2
+retry_limit: 2
+# Sized to the real bank (2026-10-12 decision: 102 members ~ 80k est-tokens,
+# merges compress ~0.98 by prompt contract, 4096 was a pilot placeholder that
+# mathematically cannot be met; see docs/decisions/bank_token_budget_20261012.md)
+bank_token_budget: 96000
+curation_rounds: 3
+rules:
+  # Protocol v2 rule names (docs/decisions/stage23_protocol_v2_20261013.md):
+  # F = train-41 tasks with any weak failure = 28 under any_weak_failed;
+  # the v1 names of tb21_full_v2.yaml stay registered for the historical
+  # configs but do not run here (new protocol = new experiment).
+  task_select: any_weak_failed
+  segment_select: strong_success_weak_failed
+  trajectory_select: strong2_weak2
+skill_delivery:
+  # Retrieval-based per-task skill selection at test time (protocol v2 /
+  # the retrieval split). min_score 0.02 is a PLACEHOLDER, not frozen:
+  # before the 168-game launch, gate 4 of the acceptance sequence
+  # (retrieval preflight, zero executions) re-probes select_skills on
+  # the 48 test+validation tasks ON THE NEW v2 BANK (bank scale to be
+  # measured at stage 5) and freezes the value per the pre-registered
+  # protocol in docs/decisions/retrieval_delivery_tb_split_20261013.md
+  # section 0 ruling 8: the smallest grid value in {0.02, 0.05, 0.10}
+  # that excludes every zero-overlap task. The tb21_split_reuse.yaml
+  # probe does NOT carry over -- IDF scales with the bank.
+  mode: retrieval
+  top_k: 5
+  max_categories: 3
+  min_score: 0.02
+model_options:
+  deepseek-v4-flash-0731--ali:
+    # Output budgets moved to token_budgets below (2026-10-12
+    # behavior-preserving migration); only generation-behavior
+    # parameters stay here.
+    reasoning_effort: max
+token_budgets:
+  # Output budgets by role. Behavior-preserving migration (2026-10-12):
+  # strong-model roles carried 65536 (pre-registered 2026-10-12 after G7
+  # burned 32768 twice); qwen roles requested 5120 today (the endpoint
+  # ignores it -- usage meta cap_violation will keep flagging, which is
+  # the evidence we want). Input: measure-only in v1 (no thresholds).
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    executor_strong: {max_output_tokens: 65536}
+    segmenter:       {max_output_tokens: 65536}
+    author:          {max_output_tokens: 65536}
+    examiner:        {max_output_tokens: 65536}
+    judge:           {max_output_tokens: 65536}
+    rewriter:        {max_output_tokens: 65536}
+    curator:         {max_output_tokens: 65536}
+    auditor:         {max_output_tokens: 65536}
+    executor_weak:   {max_output_tokens: 5120}
+    answerer:        {max_output_tokens: 5120}
+tasks:
+  - adaptive-rejection-sampler
+  - bn-fit-modify
+  - break-filter-js-from-html
+  - build-cython-ext
+  - build-pmars
+  - build-pov-ray
+  - caffe-cifar-10
+  - cancel-async-tasks
+  - chess-best-move
+  - circuit-fibsqrt
+  - cobol-modernization
+  - code-from-image
+  - compile-compcert
+  - configure-git-webserver
+  - constraints-scheduling
+  - count-dataset-tokens
+  - crack-7z-hash
+  - custom-memory-heap-crash
+  - db-wal-recovery
+  - distribution-search
+  - dna-assembly
+  - dna-insert
+  - extract-elf
+  - extract-moves-from-video
+  - feal-differential-cryptanalysis
+  - feal-linear-cryptanalysis
+  - filter-js-from-html
+  - financial-document-processor
+  - fix-code-vulnerability
+  - fix-git
+  - fix-ocaml-gc
+  - gcode-to-text
+  - git-leak-recovery
+  - git-multibranch
+  - gpt2-codegolf
+  - headless-terminal
+  - hf-model-inference
+  - install-windows-3.11
+  - kv-store-grpc
+  - large-scale-text-editing
+  - largest-eigenval
+  - llm-inference-batching-scheduler
+  - log-summary-date-ranges
+  - mailman
+  - make-doom-for-mips
+  - make-mips-interpreter
+  - mcmc-sampling-stan
+  - merge-diff-arc-agi-task
+  - model-extraction-relu-logits
+  - modernize-scientific-stack
+  - mteb-leaderboard
+  - mteb-retrieve
+  - multi-source-data-merger
+  - nginx-request-logging
+  - openssl-selfsigned-cert
+  - overfull-hbox
+  - password-recovery
+  - path-tracing
+  - path-tracing-reverse
+  - polyglot-c-py
+  - polyglot-rust-c
+  - portfolio-optimization
+  - protein-assembly
+  - prove-plus-comm
+  - pypi-server
+  - pytorch-model-cli
+  - pytorch-model-recovery
+  - qemu-alpine-ssh
+  - qemu-startup
+  - query-optimize
+  - raman-fitting
+  - regex-chess
+  - regex-log
+  - reshard-c4-data
+  - rstan-to-pystan
+  - sam-cell-seg
+  - sanitize-git-repo
+  - schemelike-metacircular-eval
+  - sparql-university
+  - sqlite-db-truncate
+  - sqlite-with-gcov
+  - torch-pipeline-parallelism
+  - torch-tensor-parallelism
+  - train-fasttext
+  - tune-mjcf
+  - video-processing
+  - vulnerable-secret
+  - winning-avg-corewars
+  - write-compressor

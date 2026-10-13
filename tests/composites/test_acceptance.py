@@ -7,6 +7,9 @@ continues from the latest stored state without re-asking anything already on
 disk (AGENTS.md section 8 rule 2). The leak audit is a model call now, so
 resume equality additionally rests on the persisted verdict ledger: the first
 verdict per (skill, version) sticks and the judge is never asked twice.
+Protocol v2's rewrite keep-structure rule is covered at this K4 level as
+well: a section-dropping rewrite rides the existing ModelOutputError repair
+path, and an unmarked original is never marker-checked.
 """
 
 from expedistill.composites.acceptance import (
@@ -40,6 +43,34 @@ SKILL_V1 = "Restart the service after editing its configuration."
 REWRITE_V2 = "Stop the service, edit the configuration, then start it again."
 REWRITE_V3 = ("First stop the service, then edit the configuration file, "
               "then start the service again.")
+
+# Protocol-v2 contents: four bracket sections at line starts, so
+# blocks.author.skill_markers reads the procedure set off them.
+MARKED_V1 = "\n".join([
+    "[When to use] You need to restart a stuck service.",
+    "[Steps]",
+    "1. Check the service status.",
+    "2. Restart the service.",
+    "[Verify] The status command reports running.",
+    "[Do not use when] The service already reports running.",
+])
+#: The rewrite dropped [Verify]: skill_markers now reads None.
+MARKED_V2_DROPPED = "\n".join([
+    "[When to use] A service is stuck and needs a restart.",
+    "[Steps]",
+    "1. Run the status command on the service.",
+    "2. Restart the service with its restart command.",
+    "[Do not use when] The status command already reports running.",
+])
+#: The same four sections, reworded: passes the keep-structure check.
+MARKED_V2_KEPT = "\n".join([
+    "[When to use] A service is stuck and needs a restart.",
+    "[Steps]",
+    "1. Run the status command on the service.",
+    "2. Restart the service with its restart command.",
+    "[Verify] The status command reports the service as running.",
+    "[Do not use when] The status command already reports running.",
+])
 
 LEAK_QUESTION = 'The service prints "svc-token-9" and stops. What next?'
 LEAK_REFERENCE = 'Rotate the credential "svc-token-9" and restart the service.'
@@ -532,6 +563,65 @@ def test_rewrite_budget_exhaustion_consumes_the_round(tmp_path):
         store.run_dir / "stage4_acceptance" / REWRITE_FAILURE_LEDGER)
     assert [(f["retry_round"], f["try_index"], f["exhausted"])
             for f in failures] == [(0, 0, False), (0, 1, True)]
+
+
+# ---------------------------------------------------------------------------
+# Protocol v2: the rewrite keeps the section structure (K4 level)
+# ---------------------------------------------------------------------------
+
+def test_rewrite_that_drops_sections_hits_the_model_output_error_path(tmp_path):
+    """A protocol-v2 skill carries bracket section markers, and
+    rewrite_skill (blocks/author.py, A2) rejects a rewrite that drops
+    them with ModelOutputError. K4's disposition is the existing one: the
+    failed try is ledgered, the repair budget retries, and a
+    structure-keeping rewrite bumps the version."""
+    skill, exam = make_pair(content=MARKED_V1)
+    store = Store(tmp_path / "run")
+    answerer = make_fake_handle("weak", ["bare", "v1", "v2"])
+    judge = make_fake_handle("judge", [incorrect(), incorrect(), correct()])
+    rewriter = make_fake_handle("strong", [
+        rewrite_result(MARKED_V2_DROPPED),
+        rewrite_result(MARKED_V2_KEPT),
+    ])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)] * 2)
+
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor, retry_limit=1)
+
+    assert result.status == "accepted"
+    assert result.version == 2
+    assert result.content == MARKED_V2_KEPT
+    # The structure-losing try is on the failure ledger (not exhausted:
+    # the second try succeeded) with the keep-structure message.
+    failures = read_jsonl(
+        store.run_dir / "stage4_acceptance" / REWRITE_FAILURE_LEDGER)
+    assert [(f["try_index"], f["exhausted"]) for f in failures] == [(0, False)]
+    assert "four bracket sections" in failures[0]["message"]
+    # The history keeps the marked v1 and exactly two rewrites ran.
+    assert [entry["content"] for entry in result.rewrite_history] == [MARKED_V1]
+    assert len(rewriter.client.calls) == 2
+
+
+def test_rewrite_of_an_unmarked_skill_is_never_marker_checked(tmp_path):
+    """An original without section markers (prose; test and foreign
+    content, unreachable in a pure v2 run) passes through without any
+    marker check: even a rewrite carrying a full section structure is
+    accepted as the new version."""
+    skill, exam = make_pair()  # SKILL_V1: unmarked prose
+    store = Store(tmp_path / "run")
+    answerer = make_fake_handle("weak", ["bare", "v1", "v2"])
+    judge = make_fake_handle("judge", [incorrect(), incorrect(), correct()])
+    rewriter = make_fake_handle("strong", [rewrite_result(MARKED_V2_KEPT)])
+    auditor = make_fake_handle("auditor", [leak_verdict(False)] * 2)
+
+    result = run_accept(store, skill, exam, answerer, judge, rewriter,
+                        auditor, retry_limit=1)
+
+    assert result.status == "accepted"
+    assert result.version == 2
+    assert result.content == MARKED_V2_KEPT
+    assert not (store.run_dir / "stage4_acceptance"
+                / REWRITE_FAILURE_LEDGER).exists()
 
 
 def test_discard_skill_discards_the_stored_version(tmp_path):

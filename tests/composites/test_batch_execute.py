@@ -517,6 +517,137 @@ def test_working_handle_carries_usage_and_run_dir(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Per-task skill delivery (retrieval): per-unit values, namespaces, resume
+# ---------------------------------------------------------------------------
+
+def test_skills_for_task_injects_each_units_own_values(monkeypatch, tmp_path):
+    plugin = RecordingPlugin()
+    tasks = _tasks("t1", "t2")
+    resolver_calls = []
+
+    def skills_for_task(task):
+        resolver_calls.append(task.task_id)
+        if task.task_id == "t1":
+            return [{"skill_id": "skill/a", "version": 1}], "- a\n"
+        return [{"skill_id": "skill/b", "version": 2}], "- b\n"
+
+    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                        n_attempts=2, skills_for_task=skills_for_task)
+    # The resolver ran once per unit (task x attempt), before any dispatch.
+    assert resolver_calls == ["t1", "t1", "t2", "t2"]
+    # Each executed unit saw exactly its task's block...
+    assert {c["task_id"]: c["skills_block"] for c in plugin.calls} == {
+        "t1": "- a\n", "t2": "- b\n"}
+    # ...and each stored trajectory records its task's injection.
+    assert {t.task_id: t.skills_injected for t in result} == {
+        make_task_id(_FAKE, "t1"): [{"skill_id": "skill/a", "version": 1}],
+        make_task_id(_FAKE, "t2"): [{"skill_id": "skill/b", "version": 2}],
+    }
+
+
+def test_skills_for_task_rejects_conflicting_scalar_skills(
+        monkeypatch, tmp_path):
+    plugin = RecordingPlugin()
+    with pytest.raises(CodeBugError, match="skills_for_task"):
+        _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
+                   skills_injected="bank:9f2c1a",
+                   skills_for_task=lambda task: ([], ""))
+    with pytest.raises(CodeBugError, match="skills_for_task"):
+        _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r2",
+                   skills_block="- a\n",
+                   skills_for_task=lambda task: ([], ""))
+    assert plugin.calls == []
+
+
+def test_run_namespace_is_per_task_under_skills_for_task(
+        monkeypatch, tmp_path):
+    def infra_on_first(record):
+        if record["attempt_token"] == "a00":
+            return RunOutcome(status="infra_error", meta={"error": "blip"})
+        return _success(record["task_id"])
+
+    plugin = RecordingPlugin(behavior=infra_on_first)
+
+    def skills_for_task(task):
+        return ([{"skill_id": f"skill/{task.task_id}", "version": 1}],
+                f"- {task.task_id}\n")
+
+    _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2"), name="r1",
+               n_attempts=3, infra_retries=1, infra_backoff=(0.0, 0.0),
+               skills_for_task=skills_for_task)
+    per_task = {}
+    for call in plugin.calls:
+        per_task.setdefault(call["task_id"], set()).add(
+            call["meta"]["run_namespace"])
+    # Same task: all 3 attempts plus the infra retry share one namespace...
+    assert sorted(per_task) == ["t1", "t2"]
+    assert all(len(namespaces) == 1 for namespaces in per_task.values())
+    # ...different tasks (different injections) never share one.
+    assert per_task["t1"] != per_task["t2"]
+
+
+def test_per_task_resume_reuses_stored_units_without_rerunning(
+        monkeypatch, tmp_path):
+    # Decision 3's resume pitfall as a case: the stored comparison must read
+    # the per-task resolution, or every resume of a per-task run would
+    # reject its own stored units.
+    plugin = RecordingPlugin()
+    mapping = {"t1": ([{"skill_id": "skill/a", "version": 1}], "- a\n"),
+               "t2": ([{"skill_id": "skill/b", "version": 1}], "- b\n")}
+
+    def skills_for_task(task):
+        return mapping[task.task_id]
+
+    tasks = _tasks("t1", "t2")
+    first = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                       n_attempts=2, skills_for_task=skills_for_task)
+    assert len(first) == 4
+
+    plugin.calls.clear()
+    second = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                        n_attempts=2, skills_for_task=skills_for_task)
+    # Zero re-runs: every stored unit passed the comparison.
+    assert plugin.calls == []
+    assert [_fingerprint(t) for t in second] == [_fingerprint(t) for t in first]
+
+
+def test_per_task_resume_rejects_a_changed_injection(monkeypatch, tmp_path):
+    plugin = RecordingPlugin()
+    mapping = {"t1": ([{"skill_id": "skill/a", "version": 1}], "- a\n"),
+               "t2": ([{"skill_id": "skill/b", "version": 1}], "- b\n")}
+
+    def skills_for_task(task):
+        return mapping[task.task_id]
+
+    tasks = _tasks("t1", "t2")
+    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+               n_attempts=2, skills_for_task=skills_for_task)
+
+    plugin.calls.clear()
+    mapping["t1"] = ([{"skill_id": "skill/c", "version": 1}], "- c\n")
+    with pytest.raises(ReliabilityConfigError) as excinfo:
+        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                   n_attempts=2, skills_for_task=skills_for_task)
+    assert "skills_injected" in str(excinfo.value)
+    assert "new run directory" in str(excinfo.value)
+    assert plugin.calls == []
+
+
+def test_scalar_skills_path_unchanged_without_skills_for_task(
+        monkeypatch, tmp_path):
+    # whole_bank regression: with no resolver, every unit shares the
+    # call-level injection and ONE namespace -- the contrast to per-task
+    # delivery, and the behaviour stage 1 keeps depending on.
+    plugin = RecordingPlugin()
+    result = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2"),
+                        name="r1", n_attempts=2,
+                        skills_injected=["skill/a"], skills_block="- a\n")
+    assert all(call["skills_block"] == "- a\n" for call in plugin.calls)
+    assert all(t.skills_injected == ["skill/a"] for t in result)
+    assert len(_namespaces(plugin)) == 1
+
+
+# ---------------------------------------------------------------------------
 # Ordering and parallelism
 # ---------------------------------------------------------------------------
 

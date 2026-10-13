@@ -25,6 +25,11 @@ SKILLS:
 - conflicts: pairs of skills that give OPPOSITE advice for the same situation.
   Each conflict is a two-element list [skill_id, skill_id].
 
+Only group or pair skills of the same kind: procedure skills (whose content
+contains the '[When to use]' section header) with procedure skills, failure
+references (whose content contains the '[Trigger]' section header) with
+failure references -- in similar_groups AND in conflicts.
+
 Judge by literal meaning, not surface wording: skills about the same behavior
 with different examples still belong to one group. Do not force anything:
 return empty lists when there is nothing to merge and no conflicts.
@@ -59,6 +64,9 @@ SKILLS:
 Rules:
 - Keep every piece of advice from the source skills; lose none.
 - Do not invent new advice that none of the sources contains.
+- Preserve the bracketed section structure of the source skills: the merged
+  skill carries the same four sections, merged section by section. Reproduce
+  the bracketed section headers exactly as written, each on its own line.
 - Keep the weak-model-friendly style: short sentences, one instruction per
   sentence, explicit order, concrete trigger conditions.
 - In conflict mode, state the distinguishing conditions explicitly.

@@ -320,8 +320,10 @@ def test_empty_content_reask_disabled_makes_one_call():
 
 
 def test_empty_content_plain_text_propagates_immediately():
-    # Plain-text calls (SKILL_DISTILL, MERGE) keep the current contract:
-    # empty content fails the unit at once, exactly one request.
+    # Plain-text calls (method-level since protocol v2 that is MERGE alone --
+    # SKILL_DISTILL, like REWRITE, calls with output_json=True) keep the
+    # current contract: empty content fails the unit at once, exactly one
+    # request.
     handle = make_fake_handle(script=[_empty_content_error()])
     usage = RecordingUsage()
     with pytest.raises(ModelOutputError):

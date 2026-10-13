@@ -17,17 +17,32 @@ Pinned design decisions (see the repo docs this was specified against):
 - Remote run identity (docs/decisions/tb_run_namespace_20261011.md): each
   unit's task carries two keys before ``run_one`` is called.
   ``meta["run_namespace"]`` is 10 hex of sha256 over the resolved
-  ``store.run_dir``, ``role``, ``model_name``, the canonical JSON of
-  ``skills_injected`` and the sha256 of the rendered ``skills_block`` (a
-  regrouped bank keeps its reference but changes what the remote agent
-  reads) -- identical across resumes of the same call, and
-  different for every arm (stage 1 strong vs weak, the stage-6 arm stores)
-  and every experiment, because trajectory ids alone do not carry the arm.
-  ``meta["attempt_token"]`` is ``a{attempt:02d}``, plus ``r{retry}`` on
-  infra retries (e.g. ``a03r1``). The TB plugin builds its remote RUN_ID
-  from both, so arms sharing a remote root never read each other's trials.
-  The caller's Task objects are never mutated -- K1 works on ``replace``
-  copies.
+  ``store.run_dir``, ``role``, ``model_name``, the canonical JSON of the
+  unit's ``skills_injected`` and the sha256 of its rendered
+  ``skills_block`` (a regrouped bank keeps its reference but changes what
+  the remote agent reads) -- identical across resumes of the same call,
+  and different for every arm (stage 1 strong vs weak, the stage-6 arm
+  stores) and every experiment, because trajectory ids alone do not carry
+  the arm. The digest is computed PER UNIT (retrieval delivery decision 3):
+  under ``skills_for_task`` two tasks of one batch carry different
+  injections, and a batch-level digest would alias them onto one remote
+  run id; a task's attempts share their task's inputs, so they share the
+  namespace without any memoisation. ``meta["attempt_token"]`` is
+  ``a{attempt:02d}``, plus ``r{retry}`` on infra retries (e.g. ``a03r1``).
+  The TB plugin builds its remote RUN_ID from both, so arms sharing a
+  remote root never read each other's trials. The caller's Task objects
+  are never mutated -- K1 works on ``replace`` copies.
+- Per-task skill delivery (retrieval, protocol v2 decision 3): when
+  ``skills_for_task`` is given, each unit's (``skills_injected``,
+  ``skills_block``) are resolved from its Task by that callable -- once
+  per unit, at enumeration, BEFORE the stored-unit check, so a stored
+  unit is compared against exactly the injection this call would render
+  for it and the executor renders the same values the comparison
+  validated (resolving twice could disagree, and a resume would then
+  trust a unit that was never produced under what it is about to run).
+  The scalar ``skills_injected`` / ``skills_block`` path
+  (``skills_for_task=None``) resolves every unit to the call-level
+  values -- the frozen whole-bank behaviour, byte for byte.
 - Resume of remote trials is the plugin's half of the contract: given the
   same (namespace, token) a resumed unit asks for the same run id, and the
   TB plugin reuses its ``result.json`` or rejoins its live runner instead of
@@ -54,9 +69,11 @@ Pinned design decisions (see the repo docs this was specified against):
   ``a00``, ``a00r1``, ...
 - Resume trusts a stored unit only if it was produced under the same
   inputs: a stored trajectory whose ``model_role`` / ``model_name`` /
-  ``skills_injected`` differ from the request is a ConfigError naming the
-  unit and both values (a re-curated bank or a swapped model must go to a
-  new run directory); stored files are never overwritten.
+  ``skills_injected`` differ from the unit's resolved request values (the
+  per-task resolution under ``skills_for_task``, the call-level skills
+  otherwise) is a ConfigError naming the unit and both values (a
+  re-curated bank or a swapped model must go to a new run directory);
+  stored files are never overwritten.
 - Stopping: once any unit raises (a non-infrastructure error), no further
   unit is started; units already running finish and are stored, and each
   gated-off unit is appended to ``<run_dir>/skip_audit.jsonl`` (gate
@@ -108,7 +125,7 @@ import traceback
 import urllib.parse
 from pathlib import Path
 from typing import (
-    Any, Collection, Dict, List, Optional, Sequence, Tuple, Union,
+    Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple, Union,
 )
 
 from expedistill.benchmarks.base import Task
@@ -148,11 +165,19 @@ _HEARTBEAT_SECONDS = 300.0
 
 @dataclasses.dataclass(frozen=True)
 class _Unit:
-    """One pending (task, attempt) execution, resolved to its durable ID."""
+    """One pending (task, attempt) execution, resolved to its durable ID.
+
+    ``skills_injected`` / ``skills_block`` are the unit's OWN skill
+    delivery values, resolved once at enumeration (module docstring, the
+    per-task delivery bullet) so the stored-unit comparison and the
+    executor read one and the same resolution.
+    """
 
     task: Task
     attempt_index: int
     trajectory_id: str
+    skills_injected: Any = None
+    skills_block: str = ""
 
 
 def _attempt_token(attempt_index: int, retry: int) -> str:
@@ -181,6 +206,11 @@ def _run_namespace(store_dir: Union[str, Path], role: str, model_name: str,
     The store dir is resolved (``realpath``) so a symlinked or relative
     path to the same run dir is the same experiment. ``skills_injected``
     must be JSON-serialisable -- it is stored in every Trajectory anyway.
+
+    Called per unit (module docstring, remote run identity): the values
+    are the unit's own delivery resolution, so a per-task batch yields
+    one digest per task while the scalar path yields the same digest for
+    every unit.
     """
     payload = json.dumps(
         {
@@ -210,7 +240,14 @@ def _read_retry_cursor(path: Path) -> int:
 
 def _check_stored(traj: Trajectory, *, role: str, model_name: str,
                   skills_injected: Any) -> None:
-    """A stored unit is "done" only for the inputs it was produced under."""
+    """A stored unit is "done" only for the inputs it was produced under.
+
+    ``skills_injected`` is the unit's own resolved request value: under
+    ``skills_for_task`` the comparison must validate the same resolution
+    the executor would render, never a call-level scalar -- a scalar
+    comparison would reject every per-task resume (decision 3's resume
+    pitfall).
+    """
     diffs = []
     if traj.model_role != role:
         diffs.append(f"model_role: stored {traj.model_role!r}, "
@@ -354,6 +391,7 @@ def batch_execute(
     n_attempts: int,
     skills_injected: Any = None,
     skills_block: str = "",
+    skills_for_task: Optional[Callable[[Task], Tuple[Any, str]]] = None,
     workdir_root: Union[str, Path],
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
@@ -373,6 +411,15 @@ def batch_execute(
     unit runs through its benchmark plugin in its own workdir and is saved
     immediately on completion.
 
+    ``skills_for_task`` (retrieval delivery) optionally resolves each
+    unit's (``skills_injected``, ``skills_block``) from its Task. It is
+    invoked once per unit at enumeration -- before the stored-unit check
+    -- so a stored unit is compared against exactly the injection this
+    call would render for it, and the unit's run namespace (module
+    docstring) is the digest of those same values. Without it the scalar
+    ``skills_injected`` / ``skills_block`` apply to every unit (the frozen
+    whole-bank path); giving both is a CodeBugError.
+
     ``handle`` is the model handle the plugin's runner calls through; the
     working handle handed to the runners is a copy carrying ``usage`` and
     ``run_dir`` so per-attempt accounting works without E1 knowing about it.
@@ -380,7 +427,8 @@ def batch_execute(
     unit raises, no new unit starts, and the error propagates after the
     running ones finish (ConfigError / ProviderRefusalError unwrapped, code
     bugs as ParallelError), leaving the units that finished safely stored.
-    Stored units are verified against the request (module docstring).
+    Stored units are verified against the request's per-unit skills (module
+    docstring).
     Infra retries sleep ``random.uniform(*infra_backoff)`` seconds between
     attempts, and each worker sleeps ``random.uniform(0,
     dispatch_stagger)`` seconds before starting a unit, so a burst of
@@ -409,15 +457,36 @@ def batch_execute(
         raise CodeBugError(
             "skip_unit_ids must be a collection of trajectory ids, got a "
             f"bare string {skip_unit_ids!r}")
+    if skills_for_task is not None and (skills_injected is not None
+                                        or skills_block):
+        # Half-wired call: the scalar values would be silently ignored under
+        # skills_for_task, and a reader of the code (or of a stored
+        # trajectory) would believe an injection that never ran.
+        raise CodeBugError(
+            "batch_execute got both skills_for_task and the scalar "
+            "skills (skills_injected / skills_block); under skills_for_task "
+            "the scalar values are ignored -- pass skills_for_task=None for "
+            "the whole-bank scalar path")
     skipped = frozenset(skip_unit_ids)
     units: List[_Unit] = []
     for task in sorted(tasks, key=lambda t: t.task_id):
         task_id = make_task_id(benchmark, task.task_id)
         for attempt in range(n_attempts):
+            # Per-unit skill resolution (module docstring, per-task
+            # delivery): resolved here, once, so the stored-unit check and
+            # the executor share one value. The scalar path resolves to the
+            # call-level skills for every unit; a task's attempts share
+            # their resolution, and hence their run namespace.
+            if skills_for_task is None:
+                unit_skills, unit_block = skills_injected, skills_block
+            else:
+                unit_skills, unit_block = skills_for_task(task)
             units.append(_Unit(
                 task=task,
                 attempt_index=attempt,
                 trajectory_id=make_trajectory_id(task_id, role, attempt),
+                skills_injected=unit_skills,
+                skills_block=unit_block,
             ))
     pending: List[_Unit] = []
     for unit in units:
@@ -425,7 +494,7 @@ def batch_execute(
             _check_stored(
                 store.load("trajectories", unit.trajectory_id, Trajectory),
                 role=role, model_name=model_name,
-                skills_injected=skills_injected)
+                skills_injected=unit.skills_injected)
         elif unit.trajectory_id not in skipped:
             pending.append(unit)
     # Attempt-major dispatch (stable sort keeps task order within an
@@ -446,8 +515,6 @@ def batch_execute(
         working_handle = dataclasses.replace(handle, usage=usage, run_dir=run_dir)
         recorder = UnitFailureRecorder(store.run_dir)
         skip_audit_path = Path(store.run_dir) / "skip_audit.jsonl"
-        namespace = _run_namespace(store.run_dir, role, model_name,
-                                   skills_injected, skills_block)
         # Error stop (module docstring, Stopping): a plain Event, set the
         # moment a unit raises; after that the gate below audits every
         # queued unit instead of starting it.
@@ -469,9 +536,18 @@ def batch_execute(
                     benchmark=benchmark,
                     role=role,
                     model_name=model_name,
-                    run_namespace=namespace,
-                    skills_injected=skills_injected,
-                    skills_block=skills_block,
+                    # Per-unit namespace (module docstring, remote run
+                    # identity): the digest of THIS unit's injection, so
+                    # two tasks that resolved different skills never share
+                    # a remote run id; same task -> same inputs -> same
+                    # digest on every retry and resume. Computed here, not
+                    # at enumeration, so an all-stored resume (nothing
+                    # pending) never computes one.
+                    run_namespace=_run_namespace(
+                        store.run_dir, role, model_name,
+                        unit.skills_injected, unit.skills_block),
+                    skills_injected=unit.skills_injected,
+                    skills_block=unit.skills_block,
                     workdir_root=Path(workdir_root),
                     handle=working_handle,
                     recorder=recorder,

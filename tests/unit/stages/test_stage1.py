@@ -153,7 +153,7 @@ def make_config(**overrides):
         n_attempts_strong=1,
         n_attempts_weak=2,
         K=4,
-        rules={"task_select": "all_valid_failed", "trajectory_select": "all"},
+        rules={"task_select": "any_weak_failed", "trajectory_select": "all"},
     )
     defaults.update(overrides)
     return ExperimentConfig(**defaults)
@@ -186,13 +186,21 @@ def _prefixed(task_id):
 # Both arms, metrics, F
 # ---------------------------------------------------------------------------
 
-def test_both_arms_run_and_F_is_all_valid_failed(monkeypatch, tmp_path):
+def test_both_arms_run_and_F_is_any_weak_failed(monkeypatch, tmp_path):
     def behavior(record):
         if record["handle"].role == "strong":
             return _outcome(record["task_id"], "success")
-        # Weak arm: t1 and t2 fail every attempt, t3 succeeds once.
-        status = "failure" if record["task_id"] in ("t1", "t2") else "success"
-        return _outcome(record["task_id"], status)
+        if record["task_id"] == "t3":
+            # A mixed task: the first weak attempt fails, the second
+            # succeeds. plugin.calls already holds this call, so 1 means
+            # attempt 0 (the failure).
+            t3_calls = sum(1 for call in plugin.calls
+                           if call["task_id"] == "t3"
+                           and call["handle"] is record["handle"])
+            status = "failure" if t3_calls == 1 else "success"
+            return _outcome("t3", status)
+        # Weak arm: t1 and t2 fail every attempt.
+        return _outcome(record["task_id"], "failure")
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
     ctx = make_ctx(tmp_path, make_config())
@@ -206,12 +214,14 @@ def test_both_arms_run_and_F_is_all_valid_failed(monkeypatch, tmp_path):
         for t in TASK_IDS}
     assert result["strong"]["summary"]["tasks"] == 3
     assert result["strong"]["summary"]["pass_at_n"] == 1.0
-    # Weak arm: two attempts per task, only t3 succeeded.
+    # Weak arm: two attempts per task, only t3 has a success.
     assert result["weak"]["metrics"][_prefixed("t1")] == {
         "attempts": 2, "valid": 2, "success": 0, "infra": 0}
     assert result["weak"]["summary"]["pass_at_n"] == pytest.approx(1 / 3)
-    # F = weak tasks with a full valid sample and zero successes.
-    assert result["F"] == [_prefixed("t1"), _prefixed("t2")]
+    # F (v2 rule any_weak_failed): every task with at least one failed
+    # valid weak attempt. t3 enters too, despite its success -- a mixed
+    # task is exactly what the v2 rule admits and the v1 rule did not.
+    assert result["F"] == [_prefixed(t) for t in TASK_IDS]
     assert result["infra_shortfalls"] == []
     # Executions: 3 strong + 6 weak, one model call each.
     assert len(plugin.calls) == 9
@@ -323,6 +333,48 @@ def test_resume_after_infra_holes_completes(monkeypatch, tmp_path):
     assert result["infra_missing"] == []
     assert result["infra_shortfall_accepted"] is False
     assert result["infra_shortfalls"] == []
+
+
+def test_partial_sample_with_real_failure_is_in_F_and_shortfalls(
+        monkeypatch, tmp_path):
+    # The v2 F rule (any_weak_failed) on the case the v1 rule deferred wholly
+    # to the infra list: t1's weak arm fails for real on attempt 0 and
+    # loses attempt 1 to infra for good (an accepted hole). The task has a
+    # PARTIAL valid sample with a real failure, so it enters F -- and stays
+    # listed in infra_shortfalls: under v2 the two lists are no longer
+    # disjoint by construction (decision section 3.1).
+    _pin_k1_infra(monkeypatch)
+
+    def behavior(record):
+        if record["handle"].role == "strong":
+            return _outcome(record["task_id"], "success")
+        if record["task_id"] == "t1":
+            # plugin.calls already holds this call, and the strong arm's
+            # t1 run is in there too -- count this handle's calls only:
+            # the first weak t1 attempt fails for real, every later one
+            # (attempt 1 + its K1 retry) infra-errors, so the unit stays a
+            # hole.
+            t1_calls = sum(1 for call in plugin.calls
+                           if call["task_id"] == "t1"
+                           and call["handle"] is record["handle"])
+            if t1_calls == 1:
+                return _outcome("t1", "failure")
+            return RunOutcome(status="infra_error", meta={"error": "sandbox"})
+        return _outcome(record["task_id"], "success")
+
+    plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
+    ctx = make_ctx(tmp_path, make_config())
+    ctx.allow_infra_shortfall = True
+    tasks = list(TASK_IDS)
+
+    result = stage1_baseline.run(ctx, train_tasks=tasks, test_tasks=tasks)
+
+    assert result["infra_shortfall_accepted"] is True
+    # One valid failed attempt is enough for F under any_weak_failed.
+    assert result["F"] == [_prefixed("t1")]
+    # The same task is still short of a full valid sample: it appears in
+    # BOTH lists, which is the v2 overlap this test pins.
+    assert result["infra_shortfalls"] == [_prefixed("t1")]
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +574,8 @@ def test_arm_summaries_report_the_auxiliary_metric(monkeypatch, tmp_path):
     assert weak_aux["avg_at_n_conservative"] == pytest.approx(0.5)
     # The strong arm reports its own aux under the same contract.
     assert result["strong"]["summary"]["aux"]["avg_at_n"] == 1.0
-    # The primary metric is untouched: F is still the all-valid-failed set.
+    # The primary metric is untouched: F is still the failed-weak set (t3's
+    # weak arm succeeded on every attempt, so it stays out).
     assert result["F"] == [_prefixed("t1"), _prefixed("t2")]
     assert result["weak"]["summary"]["pass_at_n"] == pytest.approx(1 / 3)
     # Per-task aux counts are part of the metrics (unit-level evidence).

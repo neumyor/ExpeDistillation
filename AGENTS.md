@@ -127,12 +127,14 @@ src/expedistill/
     exam.py               G4 作答、G5 判卷
     audit.py              D8 泄题审计
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
+    retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
   composites/             第 5 层：组合积木（负责落盘与续跑）
     batch_execute.py      K1
     segment_checked.py    K2
     exam_once.py          K3
     acceptance.py         K4
     curation.py           K5
+    assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run
   stages/                 第 6 层：阶段 0–6 的流程
     stage0_freeze.py … stage6_test.py
     pipeline.py           按实验模式（split / full）串起各阶段
@@ -197,6 +199,7 @@ src/expedistill/
 scripts/
   run/        启动实验：按配置调用 cli，例如 run_experiment.sh <配置名>
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
+              freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
   remote/     远程（node29）相关：部署代码、同步产物、查看进度、停止任务
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
   audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节

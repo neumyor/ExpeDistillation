@@ -1,7 +1,9 @@
 """Stage 3 tests: fabricated subtasks/trajectories in a tmp store, scripted
 llm.fake handles, no network. Covers generation, the per-source mode, the
-segment_select rule, step_range slicing, resume (full pairs and half pairs)
-and the deterministic iteration order."""
+segment_select rule, step_range slicing, resume (full pairs and half pairs),
+the deterministic iteration order, and the protocol-v2 precondition guards
+(a subtask outcome that contradicts its write_skill mode stops the batch
+fatally, before any model call for that unit)."""
 
 import re
 import threading
@@ -10,6 +12,8 @@ import time
 import pytest
 
 from expedistill.benchmarks.registry import plugin_names, register_plugin
+from expedistill.blocks.author import render_skill_content, skill_markers
+from expedistill.blocks.rules import register_segment_select
 from expedistill.core.config import ExperimentConfig
 from expedistill.core.ids import (
     make_exam_id,
@@ -18,8 +22,15 @@ from expedistill.core.ids import (
     make_task_id,
     make_trajectory_id,
 )
-from expedistill.core.models import Exam, Skill, Step, Subtask, Trajectory
-from expedistill.blocks.rules import register_segment_select
+from expedistill.core.models import (
+    FAILURE_REFERENCE_MARKERS,
+    PROCEDURE_MARKERS,
+    Exam,
+    Skill,
+    Step,
+    Subtask,
+    Trajectory,
+)
 from expedistill.infra.reliability import (
     InfrastructureError,
     ModelOutputError,
@@ -64,6 +75,41 @@ def tb_plugin_registered():
 DISTILL_LINE = get_prompt("SKILL_DISTILL").splitlines()[0]
 DIAGNOSE_LINE = get_prompt("SKILL_DIAGNOSE").splitlines()[0]
 
+#: One valid JSON-contract payload per G2 mode (protocol v2), plus a second
+#: distill payload so the two strong units and any regeneration are
+#: distinguishable by content. The stored Skill.content is the deterministic
+#: marker-text rendering of these sections.
+DISTILL_SECTIONS = {
+    "when_to_use": "when a service reports an unexpected state",
+    "steps": ["inspect the reported state",
+              "run the command that matches the state"],
+    "verify": "the service reports the expected state",
+    "not_applicable_when": "no state was reported",
+}
+DISTILL_SECTIONS_ALT = {
+    "when_to_use": "when a task needs a fixed setup sequence",
+    "steps": ["run the setup commands in order"],
+    "verify": "the setup reports done",
+    "not_applicable_when": "the setup already ran",
+}
+DIAGNOSE_SECTIONS = {
+    "trigger": "acting on a report without inspecting it first",
+    "why_it_fails": "the action does not match the actual state.",
+    "do_instead": ["inspect the reported state",
+                   "run the command that matches the state"],
+    "not_applicable_when": "the state was already inspected",
+}
+
+
+def distill_script(sections=DISTILL_SECTIONS):
+    """A scripted G2 distill response (the prompt's JSON contract)."""
+    return json_script(sections)
+
+
+def diagnose_script(sections=DIAGNOSE_SECTIONS):
+    """A scripted G2 diagnose response (the prompt's JSON contract)."""
+    return json_script(sections)
+
 
 def make_config(**overrides):
     defaults = dict(
@@ -72,7 +118,7 @@ def make_config(**overrides):
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
         weak_profile=WEAK_PROFILE,
-        rules={"segment_select": "strong_all_weak_failed"},
+        rules={"segment_select": "strong_success_weak_failed"},
     )
     defaults.update(overrides)
     return ExperimentConfig(**defaults)
@@ -127,8 +173,9 @@ def make_subtask(trajectory, index, source, success, step_range):
 def seed_store(store):
     """One strong and one weak trajectory, four subtasks over them.
 
-    The D6 rule (strong_all_weak_failed) keeps the strong segments (both), the
-    failed weak segment, and drops the weak segment that succeeded.
+    The D6 rule (strong_success_weak_failed, protocol v2) keeps the strong
+    segments (both succeeded: procedure material), the failed weak segment
+    (diagnosis material), and drops the weak segment that succeeded.
     """
     strong = make_trajectory("t1", "strong", 0, ["a0", "a1", "a2", "a3"])
     weak = make_trajectory("t1", "weak", 0, ["w0", "w1", "w2", "w3"])
@@ -136,7 +183,7 @@ def seed_store(store):
         store.save(trajectory, "trajectories")
     subtasks = [
         make_subtask(strong, 0, "strong", True, (0, 2)),
-        make_subtask(strong, 1, "strong", False, (2, 4)),
+        make_subtask(strong, 1, "strong", True, (2, 4)),
         make_subtask(weak, 0, "weak", True, (0, 2)),     # dropped by the rule
         make_subtask(weak, 1, "weak", False, (2, 4)),
     ]
@@ -151,16 +198,22 @@ def exam_script(index):
 
 
 def expected_ids(subtasks):
-    """The three kept subtask ids in subtask_id order."""
-    kept = [s for s in subtasks if s.source == "strong" or not s.success]
+    """The three kept subtask ids in subtask_id order (v2 D6: strong
+    successes and weak failures)."""
+    kept = [
+        s for s in subtasks
+        if (s.source == "strong" and s.success is True)
+        or (s.source == "weak" and s.success is False)
+    ]
     return sorted(s.subtask_id for s in kept)
 
 
 def test_generates_skill_and_exam_per_selected_subtask(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     examiner = make_fake_handle("strong",
                                 [exam_script(0), exam_script(1),
                                  exam_script(2)])
@@ -195,8 +248,9 @@ def test_generates_skill_and_exam_per_selected_subtask(tmp_path):
 def test_mode_follows_subtask_source(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     examiner = make_fake_handle("strong",
                                 [exam_script(0), exam_script(1),
                                  exam_script(2)])
@@ -209,20 +263,32 @@ def test_mode_follows_subtask_source(tmp_path):
     assert DISTILL_LINE in users[0]
     assert DISTILL_LINE in users[1]
     assert DIAGNOSE_LINE in users[2]
-    # The skill text lands in the stored skill, one per subtask, in order.
-    assert ctx.store.load("skills",
-                          make_skill_id(subtasks[0].subtask_id),
-                          Skill).content == "SKILL STRONG 0"
-    assert ctx.store.load("skills",
-                          make_skill_id(subtasks[3].subtask_id),
-                          Skill).content == "SKILL WEAK 1"
+    # The stored skill is the rendered marker text of the fake's sections,
+    # one per subtask, in order: a strong source yields a procedure skill,
+    # a weak source a failure reference (protocol v2's mode->structure
+    # mapping, visible as the stored marker set).
+    strong_skill = ctx.store.load("skills",
+                                  make_skill_id(subtasks[0].subtask_id), Skill)
+    assert strong_skill.content == render_skill_content(
+        "distill", DISTILL_SECTIONS)
+    assert strong_skill.content.splitlines()[0] == \
+        "[When to use] when a service reports an unexpected state"
+    assert skill_markers(strong_skill.content) == PROCEDURE_MARKERS
+    weak_skill = ctx.store.load("skills",
+                                make_skill_id(subtasks[3].subtask_id), Skill)
+    assert weak_skill.content == render_skill_content(
+        "diagnose", DIAGNOSE_SECTIONS)
+    assert weak_skill.content.splitlines()[0] == \
+        "[Trigger] acting on a report without inspecting it first"
+    assert skill_markers(weak_skill.content) == FAILURE_REFERENCE_MARKERS
 
 
 def test_steps_view_slices_step_range(tmp_path):
     seed_store(Store(tmp_path / "run"))
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     examiner = make_fake_handle("strong",
                                 [exam_script(0), exam_script(1),
                                  exam_script(2)])
@@ -249,8 +315,9 @@ def test_steps_view_slices_step_range(tmp_path):
 def test_resume_skips_existing_pairs_with_zero_calls(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     examiner = make_fake_handle("strong",
                                 [exam_script(0), exam_script(1),
                                  exam_script(2)])
@@ -275,8 +342,9 @@ def test_resume_skips_existing_pairs_with_zero_calls(tmp_path):
 def test_half_pair_is_regenerated(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     examiner = make_fake_handle("strong",
                                 [exam_script(0), exam_script(1),
                                  exam_script(2)])
@@ -287,17 +355,23 @@ def test_half_pair_is_regenerated(tmp_path):
     halved = subtasks[1].subtask_id
     ctx.store.path_for("exams", make_exam_id(halved)).unlink()
 
-    author2 = make_fake_handle("strong", ["SKILL STRONG 1 REGEN"])
+    regen_sections = {
+        "when_to_use": "when the halved pair is regenerated",
+        "steps": ["regenerate the missing half"],
+        "verify": "the pair is stored again",
+        "not_applicable_when": "the pair is intact",
+    }
+    author2 = make_fake_handle("strong", [distill_script(regen_sections)])
     examiner2 = make_fake_handle("strong", [exam_script(9)])
     ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
     summary = stage3_generation.run(ctx2)
 
     assert summary["generated"] == expected_ids(subtasks)
-    # Only the halved pair was regenerated.
+    # Only the halved pair was regenerated, from the fresh response.
     assert len(author2.client.calls) == 1
     assert len(examiner2.client.calls) == 1
     skill = ctx2.store.load("skills", make_skill_id(halved), Skill)
-    assert skill.content == "SKILL STRONG 1 REGEN"
+    assert skill.content == render_skill_content("distill", regen_sections)
 
 
 def test_iteration_order_is_deterministic(tmp_path):
@@ -307,8 +381,9 @@ def test_iteration_order_is_deterministic(tmp_path):
         fresh = tmp_path / f"run{index}"
         seed_store(Store(fresh))
         author = make_fake_handle("strong",
-                                  ["SKILL STRONG 0", "SKILL STRONG 1",
-                                   "SKILL WEAK 1"])
+                                  [distill_script(),
+                                   distill_script(DISTILL_SECTIONS_ALT),
+                                   diagnose_script()])
         examiner = make_fake_handle("strong",
                                     [exam_script(0), exam_script(1),
                                      exam_script(2)])
@@ -324,13 +399,28 @@ def test_iteration_order_is_deterministic(tmp_path):
 
 def test_uses_exactly_the_rule_named_in_config(tmp_path):
     # A rule that keeps only weak segments: the stage must apply exactly the
-    # rule config.rules names, with no fallback of its own.
+    # rule config.rules names, with no fallback of its own. Both kept weak
+    # segments failed their own goal, so both are legal diagnose material
+    # under the protocol-v2 guards.
     @register_segment_select("stage3_test_only_weak")
     def _only_weak(subtask):
         return subtask.source == "weak"
 
-    subtasks = seed_store(Store(tmp_path / "run"))
-    author = make_fake_handle("strong", ["SKILL WEAK 0", "SKILL WEAK 1"])
+    store = Store(tmp_path / "run")
+    strong = make_trajectory("t1", "strong", 0, ["a0", "a1", "a2", "a3"])
+    weak = make_trajectory("t1", "weak", 0, ["w0", "w1", "w2", "w3"])
+    for trajectory in (strong, weak):
+        store.save(trajectory, "trajectories")
+    subtasks = [
+        make_subtask(strong, 0, "strong", True, (0, 2)),
+        make_subtask(weak, 0, "weak", False, (0, 2)),
+        make_subtask(weak, 1, "weak", False, (2, 4)),
+    ]
+    for subtask in subtasks:
+        store.save(subtask, "subtasks")
+
+    author = make_fake_handle("strong", [diagnose_script(),
+                                         diagnose_script()])
     examiner = make_fake_handle("strong", [exam_script(0), exam_script(1)])
     ctx, _ = make_ctx(
         tmp_path, author=author, examiner=examiner,
@@ -372,7 +462,7 @@ def test_g2_model_output_error_skips_only_that_unit(monkeypatch, tmp_path):
     target = subtasks[1].subtask_id  # strong seg01, the middle unit
     _failing_write_skill(monkeypatch, target,
                          ModelOutputError("skill text unusable"))
-    author = make_fake_handle("strong", ["SKILL STRONG 0", "SKILL WEAK 1"])
+    author = make_fake_handle("strong", [distill_script(), diagnose_script()])
     examiner = make_fake_handle("strong", [exam_script(0), exam_script(2)])
     ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
 
@@ -394,8 +484,9 @@ def test_g3_model_output_error_skips_only_that_unit(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     target = subtasks[1].subtask_id
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     # Valid JSON with an empty field: gen_exam's own contract check raises
     # ModelOutputError for the second unit (no format repair applies).
     bad_exam = json_script({"question_text": "", "reference_answer": "x"})
@@ -423,7 +514,7 @@ def test_infra_error_finishes_other_units_then_raises(monkeypatch, tmp_path):
     target = subtasks[1].subtask_id
     _failing_write_skill(monkeypatch, target,
                          InfrastructureError("endpoint unreachable"))
-    author = make_fake_handle("strong", ["SKILL STRONG 0", "SKILL WEAK 1"])
+    author = make_fake_handle("strong", [distill_script(), diagnose_script()])
     examiner = make_fake_handle("strong", [exam_script(0), exam_script(2)])
     ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
 
@@ -446,7 +537,7 @@ def test_infra_error_finishes_other_units_then_raises(monkeypatch, tmp_path):
 
     # Resume (service back): exactly the failed unit is processed.
     monkeypatch.undo()
-    author2 = make_fake_handle("strong", ["SKILL STRONG 1"])
+    author2 = make_fake_handle("strong", [distill_script()])
     examiner2 = make_fake_handle("strong", [exam_script(1)])
     ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
     summary2 = stage3_generation.run(ctx2)
@@ -477,11 +568,88 @@ def test_provider_refusal_propagates_immediately(monkeypatch, tmp_path):
     assert _ledger(ctx) == []
 
 
+# ---------------------------------------------------------------------------
+# Protocol v2 precondition guards: a subtask outcome that contradicts its
+# write_skill mode is a fatal stop, not a skipped unit (decision section 3.3)
+# ---------------------------------------------------------------------------
+
+def test_strong_failed_segment_into_distill_stops_the_batch(tmp_path):
+    # The v1 segment rule (still registered) selects a FAILED strong
+    # segment; its source routes it to distill, and write_skill's guard
+    # refuses the contradiction before any model call for that unit. The
+    # ValueError is fatal to the batch: the unit before it completed and
+    # persists, later units never start, no summary is written.
+    store = Store(tmp_path / "run")
+    strong = make_trajectory("t1", "strong", 0, ["a0", "a1", "a2", "a3"])
+    weak = make_trajectory("t1", "weak", 0, ["w0", "w1", "w2", "w3"])
+    for trajectory in (strong, weak):
+        store.save(trajectory, "trajectories")
+    subtasks = [
+        make_subtask(strong, 0, "strong", True, (0, 2)),    # runs, persists
+        make_subtask(strong, 1, "strong", False, (2, 4)),   # the bad material
+        make_subtask(weak, 1, "weak", False, (2, 4)),      # never started
+    ]
+    for subtask in subtasks:
+        store.save(subtask, "subtasks")
+
+    author = make_fake_handle("strong", [distill_script()])
+    examiner = make_fake_handle("strong", [exam_script(0)])
+    ctx, _ = make_ctx(
+        tmp_path, author=author, examiner=examiner,
+        config=make_config(rules={"segment_select": "strong_all_weak_failed"}))
+
+    with pytest.raises(ValueError, match="subtask.success is True"):
+        stage3_generation.run(ctx)
+
+    # The unit before the fatal one completed and persisted its pair.
+    assert len(author.client.calls) == 1
+    assert len(examiner.client.calls) == 1
+    assert ctx.store.exists("skills", make_skill_id(subtasks[0].subtask_id))
+    assert ctx.store.exists("exams", make_exam_id(subtasks[0].subtask_id))
+    # The refused unit made no model call and stored nothing; the unit
+    # after it never started. Fatal: no summary, no ledger row.
+    assert not ctx.store.exists("skills", make_skill_id(subtasks[1].subtask_id))
+    assert not ctx.store.exists("skills", make_skill_id(subtasks[2].subtask_id))
+    assert not (ctx.run_dir / "stage3_generation"
+                / "stage3_summary.json").exists()
+    assert _ledger(ctx) == []
+
+
+def test_weak_succeeded_segment_into_diagnose_stops_the_batch(tmp_path):
+    # The mirror guard: a weak segment that reached its own goal. Only a
+    # rule that selects it regardless of the v2 material order can feed it
+    # to diagnose; the guard refuses before any model call, so the very
+    # first unit stops the batch with nothing stored.
+    @register_segment_select("stage3_test_weak_succeeded")
+    def _weak_succeeded(subtask):
+        return subtask.source == "weak" and subtask.success is True
+
+    seed_store(Store(tmp_path / "run"))
+    author = make_fake_handle("strong", [])
+    examiner = make_fake_handle("strong", [])
+    ctx, _ = make_ctx(
+        tmp_path, author=author, examiner=examiner,
+        config=make_config(
+            rules={"segment_select": "stage3_test_weak_succeeded"}))
+
+    with pytest.raises(ValueError, match="subtask.success is False"):
+        stage3_generation.run(ctx)
+
+    assert author.client.calls == []
+    assert examiner.client.calls == []
+    assert ctx.store.ids("skills") == []
+    assert ctx.store.ids("exams") == []
+    assert not (ctx.run_dir / "stage3_generation"
+                / "stage3_summary.json").exists()
+    assert _ledger(ctx) == []
+
+
 def test_advanced_skill_with_missing_exam_is_never_overwritten(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     examiner = make_fake_handle("strong",
                                 [exam_script(0), exam_script(1),
                                  exam_script(2)])
@@ -528,8 +696,9 @@ def test_advanced_skill_with_missing_exam_is_never_overwritten(tmp_path):
 def _g3_failure_handles():
     """Handles for a fresh run where the middle unit's G3 output is bad."""
     author = make_fake_handle("strong",
-                              ["SKILL STRONG 0", "SKILL STRONG 1",
-                               "SKILL WEAK 1"])
+                              [distill_script(),
+                               distill_script(DISTILL_SECTIONS_ALT),
+                               diagnose_script()])
     bad_exam = json_script({"question_text": "", "reference_answer": "x"})
     examiner = make_fake_handle("strong",
                                 [exam_script(0), bad_exam, exam_script(2)])
@@ -592,7 +761,7 @@ def test_crash_after_failure_record_resumes_identically(monkeypatch,
         stage3_generation.run(ctx)
     monkeypatch.undo()
 
-    author2 = make_fake_handle("strong", ["SKILL WEAK 1"])
+    author2 = make_fake_handle("strong", [diagnose_script()])
     examiner2 = make_fake_handle("strong", [exam_script(2)])
     ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
     resumed = stage3_generation.run(ctx2)
@@ -654,11 +823,31 @@ def _subtask_label(user):
     return match.group(1)
 
 
+def _sections_for(mode, label):
+    """A valid G2 JSON-contract payload per (mode, label): a pure function
+    of the request, so any worker interleaving yields the same per-subtask
+    sections, and the stored content is their rendering."""
+    if mode == "distill":
+        return {
+            "when_to_use": f"when you face {label}",
+            "steps": [f"act on {label}"],
+            "verify": f"{label} is handled",
+            "not_applicable_when": f"never {label}",
+        }
+    return {
+        "trigger": f"failing at {label}",
+        "why_it_fails": "the step was skipped.",
+        "do_instead": [f"act on {label}"],
+        "not_applicable_when": f"never {label}",
+    }
+
+
 def _author_responder(system, user):
     # The mode is readable from the template's opening line (DISTILL_LINE /
-    # DIAGNOSE_LINE above; both G2 prompts carry the label).
+    # DIAGNOSE_LINE above; both G2 prompts carry the label), and the
+    # response satisfies that mode's JSON contract (protocol v2).
     mode = "distill" if DISTILL_LINE in user else "diagnose"
-    return f"SKILL {mode} {_subtask_label(user)}"
+    return json_script(_sections_for(mode, _subtask_label(user)))
 
 
 def _exam_responder(system, user):
@@ -828,8 +1017,11 @@ def test_resume_under_workers_4_regenerates_only_pending(tmp_path):
     assert len(author2.client.calls) == 2
     assert len(examiner2.client.calls) == 2
     # The regenerated halves are exactly what an uninterrupted run writes
-    # (pure-function model, deterministic ids).
+    # (pure-function model, deterministic ids): the rendered marker text of
+    # the responder's sections for this subtask's label.
     skill = ctx2.store.load("skills", make_skill_id(ids[1]), Skill)
     exam = ctx2.store.load("exams", make_exam_id(ids[1]), Exam)
-    assert skill.content == f"SKILL distill {subtasks[1].label}"
+    assert skill.content == render_skill_content(
+        "distill", _sections_for("distill", subtasks[1].label))
+    assert skill_markers(skill.content) == PROCEDURE_MARKERS
     assert exam.question_text == f"question {subtasks[1].label}"

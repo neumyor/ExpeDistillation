@@ -135,22 +135,23 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | 编号 | 名称 | 输入 → 输出 | benchmark 相关 |
 |---|---|---|---|
 | D1 | 任务加载 | （benchmark, 任务表）→ 任务列表 | 是 |
-| D2 | 划分 | （任务列表, 模式 split/full, 种子）→ train / test | 否 |
+| D2 | 划分 | （任务列表, 模式 split/full, 种子）→ train / test / reserved（reserved 不进任何阶段；显式划分只给两键时恒为空列表） | 否 |
 | D3 | 成绩统计 | （Trajectory 列表, 应有单元集合（可选）, 辅助打分器（可选，由 benchmark 插件声明））→ 每题有效次数 / 成功次数 / 基础设施异常次数（应有而缺失的单元计入基础设施异常），以及两种口径的 avg@N、pass@N；插件声明了辅助指标时，同一分母、同两种口径的辅助 avg@N（`aux` 一节，未声明为 null） | 否（辅助指标由插件声明，本积木只收打分器） |
-| D4 | 挑题 | （每题成绩, 具名规则）→ 题目集合。阶段 1 的规则是"有效采样数达到 N 且全部失败" | 否 |
+| D4 | 挑题 | （每题成绩, 具名规则）→ 题目集合。阶段 1 由配置的 `task_select` 规则决定，v2 默认 `any_weak_failed`：任一有效尝试失败即入 F；部分 infra + 有失败的题既进 F、也在 shortfall 清单 | 否 |
 | D5 | 轨迹视图 | （Trajectory 或段内步骤, 视图配置）→ 给模型看的文本；超长观察按规则截断，截断处明确标注 | 是：截断规则按 benchmark 配置 |
-| D6 | 段筛选 | （Subtask 列表, 规则）→ 要生成 skill 的 Subtask。当前规则：强模型段全要，弱模型段只要 `success = false` | 否 |
+| D6 | 段筛选 | （Subtask 列表, 规则）→ 要生成 skill 的 Subtask。由配置的 `segment_select` 规则决定，v2 默认 `strong_success_weak_failed`：强模型段只取 `success = true`（做法材料），弱模型段只取 `success = false`（教训材料）。旧名 `strong_all_weak_failed` 为 v1，与 v2 的 G2 prompt 不兼容 | 否 |
 | D7 | 切段校验 | （Trajectory, Subtask 列表, K）→ 通过 / 错误清单 | 否 |
 | D8 | 泄题审计 | （Skill, Exam, 模型（auditor 角色，默认强模型））→ 泄露 / 不泄露 + 理由。LLM 判官：skill 包含、平凡改写或直接揭示参考答案及考题答案特有实体（名字、数值、文件名）即泄露；通用方法建议、协议词、动作名、环境反馈串不算泄露。理由永不复述参考答案 | 否 |
 | D9 | skill 注入 | （skill 列表, 分组信息（可选））→ 插入 prompt 的规则文本块 | 否 |
 | D10 | 库长度统计 | skill 列表 → 注入后的 token 数 | 否 |
+| D11 | skill 检索 | （任务文本, skill 库, top_k / max_categories / min_score）→ 选中 skill 子集 + 审计记录（`selected`、`routed` 类别名、`scores` 逐条分数、`threshold_passed`）。词法两步检索纯函数：`derive_categories` 把 G9 细组确定性凝聚成粗类别，`select_skills` 先路由到至多 `max_categories` 个类别、再类内 TF-IDF 余弦取 top-`top_k`（检索文档 = skill 全文，标记节权重 ×3）；`min_score` 只门 top-1，低于阈值返回空集 | 否 |
 
 **模型类**（每块对应注册表里的一个或两个 prompt，模型由调用方传入）
 
 | 编号 | 名称 | 输入 → 输出 |
 |---|---|---|
 | G1 | 切段 | （轨迹视图, K, 模型）→ 段列表（未校验）。模型只给每段的**起止步号**和 label / description / success，不复述步骤原文；段内步骤由程序按步号从 Trajectory 取 |
-| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 模型）→ Skill v1。提炼用于强模型段（成功段提炼做法、失败段提炼教训）；诊断用于弱模型段（哪一步开始错、正确做法是什么） |
+| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 模型）→ Skill v1。提炼用于强模型段，写成 procedure（执行步骤）写法；诊断用于弱模型段，写成 failure reference（失败参考：哪一步开始错、正确做法是什么）写法。两种写法都是固定四节结构：模型按 JSON 契约输出，程序做字段校验、再确定性渲染成标记文本；write_skill 带前提守卫——提炼要求段 `success = true`，诊断要求段 `success = false` |
 | G3 | 出考题 | （Subtask, 模型）→ Exam。**不接收 skill** |
 | G4 | 作答 | （模型, Exam, skill 列表（可选））→ 作答文本。带 skill 与裸答用**同一个 prompt 模板**，唯一差别是 D9 注入的规则块是否为空 |
 | G5 | 判卷 | （Exam, 作答, 模型）→ 对 / 错 + 错误描述。错误描述只说哪里不对，不复述正确答案，也不说明或暗示该怎么改（正确做法、缺什么步骤、答案本该说什么） |
@@ -171,6 +172,7 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt | skill 列表为空即裸答；Attempt 记录用途（裸答 / 验收 / 回归）；先存作答、再判卷 |
 | K4 | 验收 | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写 |
 | K5 | 库整理（Curator） | G7 → G8 → K3 回归考试 → G9 → D10 | 回归考试覆盖合并所代表的全部原始 skill 的考题，任一不过就撤销该次合并；超出 `bank_token_budget` 时回到 G7/G8 继续合并，最多 `curation_rounds` 轮；仍超出则阶段 5 停下报告，不自动删 skill |
+| — | 装配工具 | `composites/assemble_reuse.py`：从源 run 按 train 溯源过滤，装配出新 run 的阶段 0–5 产物与 skill 库 | 复用已完结 run 的蒸馏产物、只重跑 test 侧实验（如检索式分发对同一冻结库重测）的入口：allowlist 拷贝（未列即不拷）+ 负清单断言 + 与源 manifest 的白名单 diff（仅 `mode` / `split` / `tasks` / `skill_delivery` / `schema_version` 允许不同），库行与拷贝对象逐位一致、零 test / reserved 溯源，run 根写 `ASSEMBLED_FROM.md` 溯源，拒绝已含 manifest 的目录。**不给 K 号**：它是装配工具，不是把积木串成阶段动作的组合件，放 `composites/` 只因它负责落盘与校验。两档位：bank=过滤旧库零调用复用（消融用）；baseline=仅拷阶段 1 轨迹，阶段 2–6 按当前协议全新执行（修订三默认） |
 
 组合积木负责落盘和续跑：每一步的产物按确定 ID 存进 B3，再次运行时已完成的
 单元直接读盘跳过。功能积木本身不读写磁盘。总的要求是：**在任何一处崩溃后续跑，
@@ -252,7 +254,7 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | 3 skill 与考题生成 | D6、G2（提炼 / 诊断）、G3，G2 与 G3 互相独立可并行 |
 | 4 验收 | K4（内含 K3、G6、D8） |
 | 5 库整理 | K5（内含 G7、G8、K3、G9、D10） |
-| 6 test | K1（弱模型, 带整个库）、K1（弱模型, 裸跑，仅 split 模式）、D3 |
+| 6 test | K1（弱模型, 带库：whole_bank 整库注入，或 retrieval 模式先经 D11 逐任务检索、由 D9 的 `format_skills_block` 渲染选中子集）、K1（弱模型, 裸跑，仅 split 模式）、D3 |
 
 **复用最多的几块**
 
@@ -353,6 +355,8 @@ Attempt（作答记录）
 ```
 <run>/
   manifest.json                  冻结的输入与协议
+  ASSEMBLED_FROM.md              装配溯源（仅装配产出的 run 有，见 1.4 装配工具）：源 run、
+                                 划分 provenance、拷贝口径与逐类计数、校验和、未拷贝清单
   run.lock                       run 目录排他锁（B7），记持有者 pid
   pipeline_log.jsonl             逐阶段完成的摘要账本（续跑时追加新行，读取时取每阶段最后一行）
   failed_units.jsonl             单元失败账本（单元 ID、阶段、错误类别、消息），只追加；
@@ -387,6 +391,10 @@ Attempt（作答记录）
   stage6_test/bare/              对照臂（split 模式的弱模型裸跑）的独立 store，布局同上
   stage6_test/accepted_infra_shortfall.json
                                  阶段 6 接受的空洞，按臂（with_bank / control）记录
+  stage6_test/retrieval_audit.jsonl
+                                 skill_delivery = retrieval 时的逐任务检索审计（选中的
+                                 skill、路由类别、逐条分数、阈值判定），dispatch 前
+                                 覆盖式写出一次
   stage6_test/stage6_summary.json
                                  两臂成绩与 delta
   work/                          执行单元的工作目录：work/stage1/、work/stage6_bank/、
@@ -419,7 +427,11 @@ Attempt（作答记录）
 - 数据划分是**实验模式**，不是固定选择（以 TB 为例两种都做）：
   - 模式一 `split`：任务集划分 train / test，蒸馏只用 train，test 独立评测；
   - 模式二 `full`：全部题目一起蒸馏，test 时弱模型带 skill 重跑，
-    直接看"原来做不出来的题现在能不能做出来"。
+    直接看"原来做不出来的题现在能不能做出来"；
+  - 划分是**三列表**：train / test / reserved。`reserved` 不进任何阶段
+    （既不蒸馏也不评测），留作开发冒烟与后续校准切片；显式划分只给
+    train / test 两键时 `reserved` 恒为空列表，stage 0 摘要与 manifest 的
+    `split` 恒含三键。
 - **任务集 `tasks`**（`docs/decisions/stage0_task_set_freeze_20261011.md`）有三种写法：
   不写（插件的全集；插件可以拒绝，TB 就拒绝，必须显式给出）、任务 ID 列表、
   任务文件路径（格式由插件解释）。列表不得为空、不得有重复 ID。
@@ -428,15 +440,15 @@ Attempt（作答记录）
     目录启动或续跑，冻结的都是同一个值；
   - 插件加载任务后先查重复 ID（例如任务文件把同一道题写了两次），有重复即配置
     错误，在任何划分之前就停下；
-  - `split` 模式给了显式 train / test 列表时：同时给了 `tasks` 的，两者必须完全一致
-    （报出两边各自多出的 ID）；只给列表的，加载列表的并集。按比例 + 种子划分时，
-    从加载到的任务集派生。
+  - `split` 模式给了显式划分列表（train / test，或再加 reserved）时：同时给了
+    `tasks` 的，两者必须完全一致（报出两边各自多出的 ID；并集含 reserved）；
+    只给列表的，加载列表的并集。按比例 + 种子划分时，从加载到的任务集派生。
 - **具名规则**：配置里没写的规则由 `DEFAULT_RULES`（`core/config.py`）补齐——
-  `task_select = all_valid_failed`、`segment_select = strong_all_weak_failed`、
+  `task_select = any_weak_failed`、`segment_select = strong_success_weak_failed`、
   `trajectory_select = all`，所以冻结的是实际生效的名字。阶段 0 在加载任务、
   写任何文件之前就逐个核对规则名是否已登记，名字拼错在这里就停下，不会等到
   昂贵的阶段 1 跑完才报错；后面各阶段直接读 `config.rules`，不再各自带默认值。
-- 冻结：benchmark、模式、显式的 train / test 列表、完整配置（任务集、划分、
+- 冻结：benchmark、模式、显式的 train / test / reserved 列表、完整配置（任务集、划分、
   模型角色表、`model_options`（按模型名给出的额外 chat 调用参数，如
   `reasoning_effort`，随完整配置冻结——它改变模型产出，不是运行设置，见 B1）、
   弱模型画像、采样次数、K、`segment_retry_limit`、`retry_limit`、
@@ -460,9 +472,12 @@ Attempt（作答记录）
 
 - 强模型在每道蒸馏题上执行 `n_attempts_strong` 次，弱模型执行 `n_attempts_weak`
   次，均为裸跑；两边的 Trajectory 全部落盘（成功和失败都保留）。
-- **失败题集合 `F` = 弱模型有效采样全部失败的题**（基础设施异常不算失败，
-  重试后有效采样仍不足 `n_attempts_weak` 的题单独列出，不进 `F`）；
-  只要有一次做出来，该题就不进入后续流程。
+- **失败题集合 `F` 由配置的 `task_select` 规则决定**。v2 默认
+  `any_weak_failed`：弱模型**任一有效尝试失败**（success < valid）该题即入
+  `F`；全部有效尝试都成功的题不入（没有可修的），一次有效尝试都没有的题
+  也不入——基础设施异常不算模型失败，只进 infra shortfall 清单。部分采样
+  耗尽基础设施重试（0 < 有效数 < `n_attempts_weak`）但确有有效失败的题
+  **既进 `F`、也仍在 shortfall 清单**，两张表不再构造性不相交。
 - **基础设施空洞按应有单元计分**：K1 不保存耗尽基础设施重试的单元，所以空洞在
   磁盘上表现为"轨迹缺失"。D3 按每个臂的应有单元集合（每道题 × 冻结的采样次数）
   计分，缺失的单元算一次基础设施异常；所有采样都缺的题仍留在分母里，不会消失。
@@ -501,21 +516,39 @@ Attempt（作答记录）
   （只检查字段存在，不判断 `success` 的值）。不通过就重切，见 K2。
 - **每个 Subtask 带两个成败字段**：
   - `success`：该段目标是否达成，阶段 3 据此区别对待；
-  - `trajectory_success`：来源轨迹本身是否成功。弱模型轨迹都来自 `F`，恒为
+  - `trajectory_success`：来源轨迹本身是否成功。v2 下 `F` 含弱模型"既有成功
+    也有失败"的混合题，弱成功轨迹可在失败轨迹不足配额时补位入切（轨迹挑选
+    规则 `strong2_weak2`），所以弱段的 `trajectory_success` 不再恒为
     false；强模型轨迹两种都有，便于事后单独统计"强模型自己也没做出来的题"
     产出的 skill 的入库率与效果。
 - **切段失败**：G1 输出不合格算一次失败的切段尝试，重切耗尽后跳过这条轨迹、写进
   `stage2_segments/segmentation_audit.jsonl`，本 run 内不再重切（换一次采样重试就是
   新实验，用新 run 目录）。切段调用遇到基础设施错误不算切段失败：这条轨迹记入失败
   账本、什么都不存，其余轨迹照常切，阶段末以基础设施错误停下，续跑只重做这些轨迹。
-- **待定**：一道题有多次采样时，切哪几条轨迹（全部，还是每个模型取若干条）。
-  无论怎么定，都做成一条具名的"轨迹挑选规则"（与 D4、D6 同一个规则注册表），
-  以后换策略只新增规则、不改流程。
+- **轨迹挑选（已由 `strong2_weak2` 落地）**：一道题有多次采样时切哪几条轨迹
+  （全部，还是每个模型取若干条）由具名的"轨迹挑选规则"（与 D4、D6 同一个
+  规则注册表）决定。当前配置用 `strong2_weak2`：每臂至多取两条，强臂成功
+  优先、弱臂失败优先——恰是 v2 的材料序，不足配额时用另一类补位；换策略
+  只新增规则、不改流程。
 
 ### 阶段 3：skill 与考题生成（D6、G2、G3）
 
-- D6 筛段：强模型段全部生成；弱模型段只处理 `success = false` 的段。
-- G2 写 skill：强模型段用"提炼"写法，弱模型段用"诊断"写法。
+- D6 筛段：由配置的 `segment_select` 规则决定（v2 默认
+  `strong_success_weak_failed`）——强模型段只取 `success = true` 的段
+  （做法材料），弱模型段只取 `success = false` 的段（教训材料）。v1 规则
+  `strong_all_weak_failed` 与 v2 的 G2 prompt 不兼容（失败的强段会撞
+  write_skill 的前提守卫）。
+- G2 写 skill：强模型段用"提炼"写法（procedure，执行步骤），弱模型段用
+  "诊断"写法（failure reference，失败参考）。**四节结构契约**：模型按 JSON
+  契约输出——提炼是 `when_to_use` / `steps` / `verify` / `not_applicable_when`，
+  诊断是 `trigger` / `why_it_fails` / `do_instead` / `not_applicable_when`；
+  程序校验字段（缺字段、空清单、条目自带编号等不合格直接终态），再确定性
+  渲染成标记文本（[When to use] / [Steps] / [Verify] / [Do not use when]，
+  或 [Trigger] / [Why it fails] / [Do instead] / [Do not use when]）存进
+  `Skill.content`，步骤编号由渲染器统一添加。
+- **write_skill 前提守卫**：提炼要求该段 `success = true`、诊断要求该段
+  `success = false`，不满足直接报错停批——规则与写法配错时响亮失败，
+  不静默失真。
 - **写 skill 面向弱模型**：prompt 中带上弱模型画像，要求用弱模型能执行的粒度
   和措辞来写（短句、明确顺序、具体触发条件），不写弱模型无法操作的抽象要求
   （参照 AgentBrew §2.4.2 student-aware prompting）。
@@ -558,6 +591,11 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
   已知局限：auditor 默认与写 skill 的是同一个强模型（判官自审），换配置里
   `auditor` 角色的模型即可打破。
 
+**G6 改写保持节结构**：skill 是固定四节的标记文本（见阶段 3），改写产物必须
+保持与原文相同的四个节——只改写各节内容、不并成散文，节头逐字复现、独占
+一行；程序校验改写产物的节标记集合与原文一致，不一致按模型输出失败处置
+（K4 既有路径）。
+
 验收的范围与单元失败：
 
 - **只处理阶段 3 产出的候选 skill**（`skill_id` 由 `subtask_id` 按规则生成的那些）。
@@ -572,18 +610,24 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
 
 ### 阶段 5：skill 库整理（K5，参照 AgentBrew Curator）
 
-通过验收的 skill 都只是**单独**被证明有用；test 时弱模型要一次读入整个库，
-多个 skill 放在一起可能互相冲突、互相稀释，总长度也可能超出 prompt 容量。
-做法参照 AgentBrew §2.3.3 Note Curator 与 §2.5 Lifelong Memory：
+通过验收的 skill 都只是**单独**被证明有用；test 时弱模型要读入 skill 库
+（`whole_bank` 交付模式一次读入整个库，`retrieval` 模式逐任务注入选中子集，
+见阶段 6），多个 skill 放在一起可能互相冲突、互相稀释，总长度也可能超出
+prompt 容量。做法参照 AgentBrew §2.3.3 Note Curator 与 §2.5 Lifelong Memory：
 
 - **只读取通过验收的 skill**，没过验收的版本不得进入库（UpSkill 仓库实现里
   先 curate 后验证、导致未验证笔记入库的顺序问题，见外层
   `docs/design/agentbrew_upskill_porting_plan_20261008.md`）。
 - **不重新判断对错**，只做库的维护：
   1. **去重合并**（G7 → G8）：意思相近的 skill 合并成一条新 Skill，来源 skill
-     状态改为 `merged`，原文留档；
+     状态改为 `merged`，原文留档。G7 只在同类 skill 之间给候选——procedure
+     与 procedure、failure reference 与 failure reference，`similar_groups` 与
+     `conflicts` 两组字段都受此约束；G8 逐节合并，产物保持与来源相同的四个
+     标记节、节头逐字复现独占一行。混合写法的合并组在调 G8 前被程序预检
+     拦下、合并产物缺节在落盘前被后检拦下，都记因跳过该次合并；
   2. **冲突处理**（G7 → G8）：同一情境下给出相反做法的 skill，合并为带条件
-     区分的一条，或保留证据更强的一条（记录理由）；
+     区分的一条，或保留证据更强的一条（记录理由）；配对同样只在同类 skill
+     之间进行；
   3. **合并后回归考试**（K3）：合并出的新 skill 重做它所代表的每个原始 skill
      （沿 `merged_from` 递归展开到阶段 3 的 skill）的考题，任一道过不了 → 撤销这次
      合并，来源 skill 保持 accepted；
@@ -605,11 +649,22 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
   它们的模型输出失败停下整个阶段（退出码 1，先看一眼落盘的响应再重跑）。跳过和
   撤销的合并续跑时不重试。
 
-### 阶段 6：test（K1、D3）
+### 阶段 6：test（K1、D3；skill_delivery = retrieval 时另有 D11）
 
 - 强模型完全退出。
-- 弱模型带库回测：K1（弱模型, skill = 整个 `skill_bank.jsonl`）
-  （`split` 模式跑 test 集；`full` 模式重跑任务集）。
+- **skill 交付由配置 `skill_delivery` 决定**，两种模式：
+  - `whole_bank`（缺省）：整库注入——K1（弱模型, skill = 整个
+    `skill_bank.jsonl`）；
+  - `retrieval`：逐任务两步检索（D11）。开局对全库 `derive_categories`
+    一次，每道任务以 `Task.instruction` 为检索文本路由到至多
+    `max_categories` 个类别、再类内取 top-`top_k` 条 skill，由 D9 渲染
+    选中子集注入；`min_score` 只门 top-1，最高分低于阈值的任务不注入
+    任何 skill、等价裸跑。逐任务的选中清单、路由类别、逐条分数与阈值
+    判定在 dispatch 前覆盖式写进 `stage6_test/retrieval_audit.jsonl`；
+  - 两种模式注入的 skill 引用清单都记在 `Trajectory.skills_injected`
+    （retrieval 记选中条目的 skill_id + version，低于阈值记空列表、与
+    裸跑的 null 可区分），summary 的 `bank_reference` 仍记整库 digest；
+  - 执行范围：`split` 模式跑 test 集；`full` 模式重跑任务集。
 - 对照组（弱模型裸跑成绩）：
   - `full` 模式：直接使用阶段 1 的弱模型裸跑成绩；
   - `split` 模式：阶段 1 只跑了 train，因此在 test 集上单独跑一组 K1（弱模型, 裸跑）。
@@ -661,11 +716,14 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
 ```
 expedistill run --config <配置文件> --run-dir <run 目录> [运行设置]
 expedistill summary --run-dir <run 目录>
+expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置> --run-dir <新 run 目录> [--level bank|baseline]
 ```
 
 - `run` 每完成一个阶段打印一行摘要；用同一条命令重跑即续跑，各阶段按确定 ID
   跳过已完成的单元；
-- `summary` 只读进度账本和用量账本，不重算任何东西；账本里缺阶段时退出码 1。
+- `summary` 只读进度账本和用量账本，不重算任何东西；账本里缺阶段时退出码 1；
+- `assemble-reuse` 按复用配置的 train 列表从源 run 装配阶段 0–5 产物与过滤库
+  （见 1.4 装配工具行），产出可直接 `run` 的新 run 目录。
 
 **运行设置**（只影响"怎么跑"，不进配置、不进 manifest）：
 

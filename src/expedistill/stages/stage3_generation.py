@@ -271,7 +271,15 @@ def run(ctx: Any) -> Dict[str, Any]:
 
         # Strong segments are distilled, weak ones diagnosed (README stage 3);
         # ``source`` is vocab-checked to strong/weak by the model, so the
-        # branch covers every legal value.
+        # branch covers every legal value. Protocol v2 ties each mode to a
+        # stored content structure: "distill" renders a four-section
+        # procedure skill (core.models.PROCEDURE_MARKERS), "diagnose" a
+        # failure reference (FAILURE_REFERENCE_MARKERS), and write_skill's
+        # precondition guard refuses a subtask outcome that contradicts the
+        # mode (fatal here, AGENTS section 6 rule 6). This mode->structure
+        # mapping is the extension point for a third skill kind: a new mode
+        # on this line comes with its sections contract in blocks.author
+        # (SKILL_SECTION_FIELDS) and its marker set in core.models.
         mode = "distill" if subtask.source == "strong" else "diagnose"
         try:
             skill = write_skill(

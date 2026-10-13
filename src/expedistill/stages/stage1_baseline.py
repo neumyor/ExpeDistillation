@@ -36,7 +36,12 @@ given each arm's full expected unit set (prefixed task id -> frozen
 n_attempts): every absent unit counts as one infra attempt, so a task whose
 every attempt exhausted infra stays in every all-task denominator instead of
 vanishing. ``infra_shortfalls`` lists the tasks whose weak valid sample came
-up short (README stage 1: they are listed separately and stay out of F).
+up short (README stage 1). Under the protocol v2 default rule
+(``any_weak_failed``) that list and F are no longer disjoint by
+construction: a partially sampled task (0 < valid < n_attempts) with a real
+valid failure enters F AND stays on the shortfall list, while a task with
+no valid attempt at all still never enters F (infra is not a model failure)
+and appears only as a shortfall.
 
 Holes never pass silently. After both arms ran, the summary records
 ``infra_missing`` (the absent unit ids of both arms), ``complete`` and

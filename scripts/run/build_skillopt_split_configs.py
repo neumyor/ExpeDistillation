@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Build and verify the SkillOpt-official split-mode experiment configs.
+"""Build and verify the SkillOpt-official split-mode experiment configs
+(stage 2/3 protocol v2).
 
 Extracts the task-id lists from the SkillOpt split manifests, writes the two
 campaign configs, and verifies that every id resolves through OUR benchmark
@@ -7,6 +8,18 @@ plugins exactly the way stage 0 will (blocks.tasks.load_tasks on the sorted
 union of the split lists, then blocks.tasks.split_tasks on the explicit
 lists). The SkillOpt val splits (ALFWorld 18, SearchQA 200) are intentionally
 not used; the campaign runs on train + test only.
+
+Protocol v2 (2026-10-13): the generated configs carry the v2 rule names
+(any_weak_failed / strong_success_weak_failed) and the skill_delivery block
+(retrieval delivery with a not-yet-frozen min_score placeholder). The v1
+config paths are RETIRED from this script and never regenerated: they are
+frozen records of the v1 experiments, and a regeneration that silently
+wrote v2 content over a frozen v1 file would corrupt history. The
+alfworld v2 config also exists as a hand-copied file -- render_config must
+produce it BYTE-IDENTICALLY (integration plan ruling 12), or --check fails
+and the default mode would overwrite a hand edit; the searchqa v2 config
+has no handwritten copy, so the default mode generating it IS its source
+of truth.
 
 Id conventions (why they need no translation):
 - ALFWorld: the SkillOpt alfworld_path_split items carry ``gamefile`` paths
@@ -23,14 +36,15 @@ Inputs
     ALFWORLD_DATA and EXPEDISTILL_SEARCHQA_EVAL_DIR.
 
 Outputs
-    configs/experiments/alfworld_skillopt_split.yaml
-    configs/experiments/searchqa_skillopt_split.yaml
+    configs/experiments/alfworld_skillopt_split_v2.yaml
+    configs/experiments/searchqa_skillopt_split_v2.yaml
     stdout: per-split counts, resolution results, any misses. Exit 2 on any
     miss or mismatch -- tasks are never silently dropped from a config.
 
 Modes
-    default: write both configs (deterministic, byte-identical on rerun),
-             then verify them end to end.
+    default: write both v2 configs (deterministic, byte-identical on
+             rerun), then verify them end to end. This also materialises
+             searchqa_skillopt_split_v2.yaml, which no one hand-writes.
     --check: write nothing; verify the configs already on disk byte-match
              this generator's render_config output, against the SkillOpt
              extraction, and through the plugins.
@@ -73,9 +87,13 @@ EXPECTED_COUNTS = {
     "alfworld": {"train": 39, "test": 134},
     "searchqa": {"train": 400, "test": 1400},
 }
+#: v2 output paths. The v1 files are retired from this script (frozen
+#: records of finished v1 experiments, never regenerated or overwritten).
 CONFIG_PATHS = {
-    "alfworld": REPO_ROOT / "configs/experiments/alfworld_skillopt_split.yaml",
-    "searchqa": REPO_ROOT / "configs/experiments/searchqa_skillopt_split.yaml",
+    "alfworld": REPO_ROOT
+    / "configs/experiments/alfworld_skillopt_split_v2.yaml",
+    "searchqa": REPO_ROOT
+    / "configs/experiments/searchqa_skillopt_split_v2.yaml",
 }
 
 #: Weak-model profiles, carried over from the pilot configs verbatim: the
@@ -159,11 +177,39 @@ def extract_ids(skillopt_data: Path, benchmark: str) -> Dict[str, List[str]]:
     return out
 
 
+#: The skill_delivery section, identical in both generated configs (protocol
+#: v2 / retrieval split). min_score is a pre-registered PLACEHOLDER: it is
+#: frozen per campaign only after the calibration protocol runs on that
+#: campaign's own development slice (integration plan ruling 9), never
+#: inherited from another bank.
+SKILL_DELIVERY_LINES = [
+    "skill_delivery:",
+    "  # Retrieval-based delivery at test time (protocol v2). min_score",
+    "  # 0.05 is a PLACEHOLDER, not frozen: before this campaign's full",
+    "  # launch it must be calibrated on this benchmark's own development",
+    "  # slice with the same protocol (integration plan, ruling 9 in",
+    "  # docs/decisions/retrieval_delivery_tb_split_20261013.md) -- a",
+    "  # value calibrated on another bank does not transfer (the IDF scale",
+    "  # follows the bank).",
+    "  mode: retrieval",
+    "  top_k: 5",
+    "  max_categories: 3",
+    "  min_score: 0.05",
+]
+
+
 def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
-    """The full config text; deterministic (same input, same bytes)."""
+    """The full config text; deterministic (same input, same bytes).
+
+    Byte-identical to the hand-copied alfworld v2 config (integration plan
+    ruling 12): any divergence would make --check fatal or let the default
+    mode silently overwrite a hand edit."""
     if benchmark == "alfworld":
         header = (
-            "# ALFWorld campaign: the SkillOpt official split, split mode.\n"
+            "# ALFWorld campaign: the SkillOpt official split, split mode,\n"
+            "# protocol v2 (stage 2/3 protocol v2, 2026-10-13; see\n"
+            "# docs/decisions/stage23_protocol_v2_20261013.md and\n"
+            "# docs/decisions/retrieval_delivery_tb_split_20261013.md).\n"
             "# train = SkillOpt alfworld_path_split/train (39 games under\n"
             "# json_2.1.1/train), test = SkillOpt .../test (134 games under\n"
             "# json_2.1.1/valid_unseen); SkillOpt's val split (18 valid_seen\n"
@@ -173,7 +219,10 @@ def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
         )
     else:
         header = (
-            "# SearchQA campaign: the SkillOpt official split, split mode.\n"
+            "# SearchQA campaign: the SkillOpt official split, split mode,\n"
+            "# protocol v2 (stage 2/3 protocol v2, 2026-10-13; see\n"
+            "# docs/decisions/stage23_protocol_v2_20261013.md and\n"
+            "# docs/decisions/retrieval_delivery_tb_split_20261013.md).\n"
             "# train = SkillOpt searchqa_id_split/train (400 items), test =\n"
             "# SkillOpt .../test (1400 items); SkillOpt's val split (200\n"
             "# items) is not used. Ids are the 32-hex item ids of the outer\n"
@@ -202,12 +251,15 @@ def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
     lines.append("bank_token_budget: 96000")
     lines.append("curation_rounds: 3")
     lines.append("rules:")
-    lines.append("  task_select: all_valid_failed")
-    lines.append("  segment_select: strong_all_weak_failed")
-    lines.append("  # Segment only tasks where the strong model succeeded twice and")
-    lines.append("  # the weak failed twice; must be registered under this name in")
-    lines.append("  # blocks/rules.py (stage 0 validates every rule name).")
+    lines.append("  task_select: any_weak_failed")
+    lines.append("  segment_select: strong_success_weak_failed")
+    lines.append("  # Quota rule: up to 2 strong + up to 2 weak trajectories per")
+    lines.append("  # task, successes first within the strong arm, failures first")
+    lines.append("  # within the weak arm (the v2 material order); must be")
+    lines.append("  # registered under this name in blocks/rules.py (stage 0")
+    lines.append("  # validates every rule name).")
     lines.append("  trajectory_select: strong2_weak2")
+    lines.extend(SKILL_DELIVERY_LINES)
     lines.append("model_options:")
     lines.append("  deepseek-v4-flash-0731--ali:")
     lines.append("    # Output budgets moved to token_budgets below (2026-10-12")
@@ -318,8 +370,13 @@ def verify_config(benchmark: str, cfg_path: Path,
               "data or the split, never drop tasks silently")
 
     tasks = tasks_block.load_tasks(benchmark, union)
-    train_tasks, test_tasks = tasks_block.split_tasks(
+    # Contract 3: split_tasks returns (train, test, reserved); a two-key
+    # split spec (what these configs carry) must yield no reserved tasks.
+    train_tasks, test_tasks, reserved_tasks = tasks_block.split_tasks(
         tasks, config.mode, config.split)
+    if reserved_tasks:
+        _fail(f"{benchmark}: split_tasks returned {len(reserved_tasks)} "
+              "reserved tasks for a two-key split spec; expected none")
     expected = EXPECTED_COUNTS[benchmark]
     if len(train_tasks) != expected["train"] or len(test_tasks) != expected["test"]:
         _fail(f"{benchmark}: loaded {len(train_tasks)}/{len(test_tasks)} "

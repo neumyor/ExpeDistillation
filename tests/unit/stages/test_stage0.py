@@ -165,14 +165,18 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert result["train"] == ["t1", "t2"]
     assert result["test"] == ["t3"]
     # The returned dict is id lists only (the pipeline JSON-dumps it into
-    # its ledger), so its exact key set is part of the contract.
-    assert set(result) == {"tasks", "train", "test"}
+    # its ledger), so its exact key set is part of the contract. All three
+    # split keys are always present (ruling 7); a two-key spec means
+    # reserved is [], never absent.
+    assert set(result) == {"tasks", "train", "test", "reserved"}
+    assert result["reserved"] == []
     json.dumps(result)
 
     manifest = load_manifest(ctx.run_dir)
     assert manifest["benchmark"] == _FAKE
     assert manifest["mode"] == "split"
-    assert manifest["split"] == {"train": ["t1", "t2"], "test": ["t3"]}
+    assert manifest["split"] == {"train": ["t1", "t2"], "test": ["t3"],
+                                "reserved": []}
     assert manifest["model_roles"]["executor_strong"] == "big-model"
     assert manifest["rules"] == config.rules
     # The fake plugin declares no auxiliary metric: frozen as null.
@@ -181,11 +185,13 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     # The frozen config copy carries the digests (core.config contract).
     assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
     assert manifest["config"]["K"] == config.K
-    # Explicit-list configs load exactly the union of the two lists.
+    # Explicit-list configs load exactly the union of the lists (reserved
+    # included -- held-back tasks are still loaded).
     assert plugin.load_specs == [["t1", "t2", "t3"]]
 
     summary = read_json(ctx.run_dir / "stage0_summary.json")
-    assert summary == {"tasks": 3, "train": ["t1", "t2"], "test": ["t3"]}
+    assert summary == {"tasks": 3, "train": ["t1", "t2"], "test": ["t3"],
+                       "reserved": []}
 
 
 def test_full_mode_freezes_whole_set_as_train_and_test(monkeypatch, tmp_path):
@@ -196,9 +202,63 @@ def test_full_mode_freezes_whole_set_as_train_and_test(monkeypatch, tmp_path):
     assert result["tasks"] == 3
     assert result["train"] == list(TASK_IDS)
     assert result["test"] == list(TASK_IDS)
+    assert result["reserved"] == []
     manifest = load_manifest(ctx.run_dir)
     assert manifest["split"] == {
-        "train": list(TASK_IDS), "test": list(TASK_IDS)}
+        "train": list(TASK_IDS), "test": list(TASK_IDS), "reserved": []}
+
+
+# ---------------------------------------------------------------------------
+# reserved: the third split list is loaded, frozen, held out of both arms
+# ---------------------------------------------------------------------------
+
+def test_reserved_flow_freezes_three_keys_and_loads_reserved(
+        monkeypatch, tmp_path):
+    plugin = _install_plugin(monkeypatch, StagePlugin())
+    config = make_config(
+        split={"train": ["t1"], "test": ["t2"], "reserved": ["t3"]})
+    ctx = make_ctx(tmp_path, config)
+    result = stage0_freeze.run(ctx)
+
+    # reserved is LOADED (the lists must cover the task set exactly) but
+    # lands in neither arm's list.
+    assert result == {"tasks": 3, "train": ["t1"], "test": ["t2"],
+                      "reserved": ["t3"]}
+    # The union of all three lists is what D1 loaded.
+    assert plugin.load_specs == [["t1", "t2", "t3"]]
+
+    manifest = load_manifest(ctx.run_dir)
+    assert manifest["split"] == {"train": ["t1"], "test": ["t2"],
+                                "reserved": ["t3"]}
+    summary = read_json(ctx.run_dir / "stage0_summary.json")
+    assert summary == result
+
+
+def test_reserved_with_config_tasks_must_cover_exactly(monkeypatch, tmp_path):
+    plugin = _install_plugin(monkeypatch, StagePlugin())
+    # Reserved counts toward coverage like any other list: a task set
+    # missing the reserved task is a ConfigError naming it.
+    config = make_config(
+        split={"train": ["t1"], "test": ["t2"], "reserved": ["t3"]},
+        tasks=["t1", "t2"])
+    ctx = make_ctx(tmp_path, config)
+    with pytest.raises(ConfigError, match="t3"):
+        stage0_freeze.run(ctx)
+    assert not (ctx.run_dir / "manifest.json").exists()
+    assert plugin.load_specs == [["t1", "t2"]]
+
+
+def test_two_key_spec_regression_freezes_empty_reserved(monkeypatch, tmp_path):
+    # The pre-v2 shape keeps working and freezes reserved: [] -- old
+    # configs are historical records that must still load and resume.
+    _install_plugin(monkeypatch, StagePlugin())
+    config = make_config()
+    ctx = make_ctx(tmp_path, config)
+    stage0_freeze.run(ctx)
+    # A resume of the same two-key run is byte-stable.
+    manifest_bytes = (ctx.run_dir / "manifest.json").read_bytes()
+    stage0_freeze.run(make_ctx(tmp_path, config))
+    assert (ctx.run_dir / "manifest.json").read_bytes() == manifest_bytes
 
 
 def test_ratio_split_derived_deterministically(monkeypatch, tmp_path):
@@ -321,7 +381,7 @@ def test_tb_like_plugin_full_mode_with_task_list(monkeypatch, tmp_path):
     result = stage0_freeze.run(ctx)
     assert plugin.load_specs == [["t1", "t3"]]
     assert result == {"tasks": 2, "train": ["t1", "t3"],
-                      "test": ["t1", "t3"]}
+                      "test": ["t1", "t3"], "reserved": []}
     manifest = load_manifest(ctx.run_dir)
     assert manifest["config"]["tasks"] == ["t1", "t3"]
 
@@ -377,7 +437,8 @@ def test_explicit_split_matching_task_set_loads_task_set(
                          tasks=["t1", "t2"])
     result = stage0_freeze.run(make_ctx(tmp_path, config))
     assert plugin.load_specs == [["t1", "t2"]]
-    assert result == {"tasks": 2, "train": ["t2"], "test": ["t1"]}
+    assert result == {"tasks": 2, "train": ["t2"], "test": ["t1"],
+                      "reserved": []}
 
 
 # ---------------------------------------------------------------------------

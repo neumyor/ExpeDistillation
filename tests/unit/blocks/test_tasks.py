@@ -168,44 +168,81 @@ def test_load_tasks_rejects_non_string_benchmark():
 
 def test_split_full_mode_passthrough():
     tasks = _tasks("a", "b")
-    train, test = split_tasks(tasks, "full", None)
+    train, test, reserved = split_tasks(tasks, "full", None)
     assert train == tasks and test == tasks
     assert train is not tasks  # fresh lists: mutating one side changes neither
+    assert reserved == []  # full mode holds nothing back
 
 
 def test_split_mode_explicit_lists():
     tasks = _tasks("a", "b", "c")
-    train, test = split_tasks(
+    train, test, reserved = split_tasks(
         tasks, "split", {"train": ["a", "b"], "test": ["c"]})
     assert [t.task_id for t in train] == ["a", "b"]
     assert [t.task_id for t in test] == ["c"]
+    assert reserved == []
+
+
+def test_split_mode_three_keys_returns_reserved():
+    tasks = _tasks("a", "b", "c", "d")
+    train, test, reserved = split_tasks(
+        tasks, "split",
+        {"train": ["a"], "test": ["b"], "reserved": ["c", "d"]})
+    assert [t.task_id for t in train] == ["a"]
+    assert [t.task_id for t in test] == ["b"]
+    assert [t.task_id for t in reserved] == ["c", "d"]
+    # Reserved tasks are in NEITHER arm, whatever the old shape would say.
+    assert "c" not in [t.task_id for t in train + test]
 
 
 def test_split_output_follows_input_task_order():
     # The frozen lists carry membership, not ordering.
-    tasks = _tasks("a", "b", "c")
-    train, _ = split_tasks(
-        tasks, "split", {"train": ["c", "a"], "test": ["b"]})
+    tasks = _tasks("a", "b", "c", "d")
+    train, _, reserved = split_tasks(
+        tasks, "split",
+        {"train": ["c", "a"], "test": ["b"], "reserved": ["d"]})
     assert [t.task_id for t in train] == ["a", "c"]
+    assert [t.task_id for t in reserved] == ["d"]
 
 
 def test_split_unknown_ids():
     with pytest.raises(ConfigError, match="zz"):
         split_tasks(
             _tasks("a", "b"), "split", {"train": ["a"], "test": ["zz", "b"]})
-
-
-def test_split_overlap_rejected():
-    with pytest.raises(ConfigError, match="overlap"):
+    with pytest.raises(ConfigError, match="zz"):
         split_tasks(
-            _tasks("a", "b", "c"), "split",
-            {"train": ["a", "b"], "test": ["b", "c"]})
+            _tasks("a", "b"), "split",
+            {"train": ["a"], "test": ["b"], "reserved": ["zz"]})
+
+
+@pytest.mark.parametrize("spec", [
+    # Every pair of lists must be disjoint, not just train/test: a task
+    # listed twice across arms silently double-counts wherever it lands.
+    # (Each spec covers a, b and c exactly once across the three lists
+    # except for the one duplicated task.)
+    pytest.param({"train": ["a", "b"], "test": ["b", "c"], "reserved": []},
+                 id="train-test"),
+    pytest.param({"train": ["a", "b"], "test": ["c"], "reserved": ["b"]},
+                 id="train-reserved"),
+    pytest.param({"train": ["a"], "test": ["b", "c"], "reserved": ["c"]},
+                 id="test-reserved"),
+])
+def test_split_overlap_rejected(spec):
+    with pytest.raises(ConfigError, match="overlap"):
+        split_tasks(_tasks("a", "b", "c"), "split", spec)
 
 
 def test_split_must_cover_every_task():
     with pytest.raises(ConfigError, match="missing"):
         split_tasks(
             _tasks("a", "b", "c"), "split", {"train": ["a"], "test": ["c"]})
+    # A task in reserved is covered too: it is loaded, just not run -- but
+    # a task missing from ALL THREE lists is still an error, reserved or
+    # not.
+    with pytest.raises(ConfigError, match="missing"):
+        split_tasks(
+            _tasks("a", "b", "c", "d"), "split",
+            {"train": ["a"], "test": ["b"], "reserved": ["c"]})
 
 
 def test_split_spec_shape_validated():
@@ -218,6 +255,25 @@ def test_split_spec_shape_validated():
         split_tasks(tasks, "split", ["a"])
     with pytest.raises(ConfigError):
         split_tasks(tasks, "split", {"train": "a", "test": ["a"]})
+    # Exactly one of the two accepted key sets -- no extras, no missing
+    # test, no ratio shorthand leaking in here (stage 0 derives that).
+    with pytest.raises(ConfigError):
+        split_tasks(tasks, "split", {"train": ["a"], "test": ["a"],
+                                    "reserved": [], "extra": []})
+    with pytest.raises(ConfigError):
+        split_tasks(tasks, "split", {"train": ["a"], "reserved": ["a"]})
+    with pytest.raises(ConfigError):
+        split_tasks(tasks, "split", {"train": ["a"], "test": ["a"],
+                                    "ratio": 0.5})
+
+
+def test_split_reserved_must_be_id_list():
+    with pytest.raises(ConfigError, match="reserved"):
+        split_tasks(_tasks("a", "b"), "split",
+                    {"train": ["a"], "test": ["b"], "reserved": "a"})
+    with pytest.raises(ConfigError, match="reserved"):
+        split_tasks(_tasks("a", "b"), "split",
+                    {"train": ["a"], "test": ["b"], "reserved": [1]})
 
 
 def test_split_unknown_mode():

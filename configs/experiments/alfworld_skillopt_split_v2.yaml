@@ -1,0 +1,251 @@
+# ALFWorld campaign: the SkillOpt official split, split mode,
+# protocol v2 (stage 2/3 protocol v2, 2026-10-13; see
+# docs/decisions/stage23_protocol_v2_20261013.md and
+# docs/decisions/retrieval_delivery_tb_split_20261013.md).
+# train = SkillOpt alfworld_path_split/train (39 games under
+# json_2.1.1/train), test = SkillOpt .../test (134 games under
+# json_2.1.1/valid_unseen); SkillOpt's val split (18 valid_seen
+# games) is not used. Ids are gamefile paths relative to
+# $ALFWORLD_DATA (the plugin's convention), extracted from the
+# SkillOpt manifest by scripts/run/build_skillopt_split_configs.py.
+
+benchmark: alfworld
+mode: split
+split:
+  train:
+    - json_2.1.1/train/look_at_obj_in_light-AlarmClock-None-DeskLamp-305/trial_T20190908_082736_108723/game.tw-pddl
+    - json_2.1.1/train/look_at_obj_in_light-CD-None-DeskLamp-304/trial_T20190907_185649_782438/game.tw-pddl
+    - json_2.1.1/train/look_at_obj_in_light-CD-None-DeskLamp-320/trial_T20190907_224439_174735/game.tw-pddl
+    - json_2.1.1/train/look_at_obj_in_light-Pillow-None-DeskLamp-316/trial_T20190908_232421_645610/game.tw-pddl
+    - json_2.1.1/train/look_at_obj_in_light-Statue-None-DeskLamp-319/trial_T20190907_035546_167548/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-CellPhone-None-Shelf-313/trial_T20190908_123725_452958/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-Newspaper-None-Sofa-211/trial_T20190906_175004_203092/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-Pencil-None-Desk-302/trial_T20190908_032836_462632/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-SoapBar-None-GarbageCan-416/trial_T20190908_020839_714699/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-Statue-None-CoffeeTable-222/trial_T20190907_131249_788749/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-ToiletPaper-None-ToiletPaperHanger-406/trial_T20190908_122807_136741/game.tw-pddl
+    - json_2.1.1/train/pick_and_place_simple-ToiletPaper-None-ToiletPaperHanger-415/trial_T20190908_050443_333939/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Apple-None-DiningTable-4/trial_T20190908_104413_450768/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-DishSponge-None-Shelf-20/trial_T20190907_222429_992578/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-DishSponge-None-Shelf-401/trial_T20190908_072225_397518/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Kettle-None-Cabinet-2/trial_T20190909_043103_418752/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Knife-None-Drawer-22/trial_T20190907_224827_746945/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Lettuce-None-DiningTable-20/trial_T20190906_191148_519826/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Lettuce-None-Fridge-13/trial_T20190908_203022_601787/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Plate-None-Fridge-5/trial_T20190909_112954_869911/game.tw-pddl
+    - json_2.1.1/train/pick_clean_then_place_in_recep-Spoon-None-DiningTable-18/trial_T20190909_102159_277894/game.tw-pddl
+    - json_2.1.1/train/pick_cool_then_place_in_recep-Bread-None-CounterTop-1/trial_T20190908_212439_711334/game.tw-pddl
+    - json_2.1.1/train/pick_cool_then_place_in_recep-Bread-None-CounterTop-15/trial_T20190909_085448_256298/game.tw-pddl
+    - json_2.1.1/train/pick_cool_then_place_in_recep-Bread-None-CounterTop-16/trial_T20190908_143948_082471/game.tw-pddl
+    - json_2.1.1/train/pick_cool_then_place_in_recep-Pan-None-StoveBurner-27/trial_T20190906_212619_469871/game.tw-pddl
+    - json_2.1.1/train/pick_cool_then_place_in_recep-Plate-None-DiningTable-17/trial_T20190909_122939_032098/game.tw-pddl
+    - json_2.1.1/train/pick_cool_then_place_in_recep-Pot-None-CounterTop-1/trial_T20190909_124252_504581/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Apple-None-Fridge-20/trial_T20190908_013911_274341/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Egg-None-CounterTop-12/trial_T20190908_215527_416490/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-1/trial_T20190907_222924_821086/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-28/trial_T20190908_062730_537428/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Plate-None-Cabinet-13/trial_T20190907_062749_759882/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Potato-None-Fridge-2/trial_T20190909_030845_198194/game.tw-pddl
+    - json_2.1.1/train/pick_heat_then_place_in_recep-Tomato-None-CounterTop-26/trial_T20190907_005525_499114/game.tw-pddl
+    - json_2.1.1/train/pick_two_obj_and_place-CD-None-Drawer-319/trial_T20190907_145515_348252/game.tw-pddl
+    - json_2.1.1/train/pick_two_obj_and_place-Candle-None-Drawer-427/trial_T20190909_043917_251333/game.tw-pddl
+    - json_2.1.1/train/pick_two_obj_and_place-KeyChain-None-ArmChair-222/trial_T20190909_100312_677332/game.tw-pddl
+    - json_2.1.1/train/pick_two_obj_and_place-Newspaper-None-Sofa-212/trial_T20190908_112632_208041/game.tw-pddl
+    - json_2.1.1/train/pick_two_obj_and_place-SaltShaker-None-SideTable-21/trial_T20190909_041626_844806/game.tw-pddl
+  test:
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222917_366542/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222933_607649/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222951_616606/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Book-None-DeskLamp-308/trial_T20190908_020029_636862/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Book-None-DeskLamp-308/trial_T20190908_020048_814402/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Book-None-DeskLamp-308/trial_T20190908_144951_587345/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133919_856963/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133935_066606/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133953_562557/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_141942_810052/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_141958_463362/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-CD-None-DeskLamp-308/trial_T20190908_142046_281296/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_161733_213242/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_201421_021646/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_201444_037645/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220545_153480/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220604_010430/game.tw-pddl
+    - json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220656_510400/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Mug-None-Desk-308/trial_T20190908_125200_737896/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Mug-None-Desk-308/trial_T20190909_203041_433487/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Mug-None-Desk-308/trial_T20190909_210238_431966/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Pencil-None-Shelf-308/trial_T20190908_121952_610012/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Pencil-None-Shelf-308/trial_T20190908_122024_052056/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Pencil-None-Shelf-308/trial_T20190908_122154_042763/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190906_184021_215264/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190918_154326_823501/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190918_154424_844749/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191429_743650/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191445_723170/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191501_563086/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021613_077537/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021650_880235/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021728_339782/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SoapBottle-None-Toilet-424/trial_T20190907_004321_405868/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SoapBottle-None-Toilet-424/trial_T20190907_004351_281384/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-SoapBottle-None-Toilet-424/trial_T20190907_004404_604165/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205204_244321/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205221_748352/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205246_776817/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074524_006355/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074556_124850/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074643_810052/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Bowl-None-Cabinet-10/trial_T20190909_061130_844814/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Bowl-None-Cabinet-10/trial_T20190909_061158_110530/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Bowl-None-Cabinet-10/trial_T20190909_061232_368489/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-Cabinet-424/trial_T20190908_022321_380927/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-Cabinet-424/trial_T20190908_022436_073995/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-CounterTop-424/trial_T20190908_100632_546757/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-CounterTop-424/trial_T20190908_114340_674467/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Egg-None-Microwave-10/trial_T20190909_120554_888709/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Egg-None-Microwave-10/trial_T20190909_120632_691361/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Egg-None-Microwave-10/trial_T20190909_120712_273910/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Knife-None-CounterTop-10/trial_T20190909_110347_624008/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Knife-None-CounterTop-10/trial_T20190909_110445_675754/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Knife-None-CounterTop-10/trial_T20190909_110531_148235/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221208_560499/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221300_362511/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_221355_558505/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_032434_013084/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_032518_891433/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_032543_712058/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Plate-None-CounterTop-10/trial_T20190908_213356_017769/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Plate-None-CounterTop-10/trial_T20190908_213420_728917/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Plate-None-CounterTop-10/trial_T20190908_213533_897289/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-424/trial_T20190908_214926_337906/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-424/trial_T20190908_214946_567644/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-424/trial_T20190908_215019_162873/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074045_109439/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074106_050405/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074124_966890/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080730_211959/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080800_275989/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080825_222432/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091747_866951/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091811_414150/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091835_825830/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_123133_763972/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_174807_646433/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_174840_771703/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_121559_082363/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_121635_622676/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_121710_650938/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_183715_299073/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_183807_477267/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_183853_958104/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114545_244903/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114622_738670/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114656_768805/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Potato-None-Microwave-10/trial_T20190907_033157_424297/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Potato-None-Microwave-10/trial_T20190907_033228_194678/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Potato-None-Microwave-10/trial_T20190907_033306_962974/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Tomato-None-Microwave-10/trial_T20190909_102608_318800/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Tomato-None-Microwave-10/trial_T20190909_102644_926781/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Tomato-None-Microwave-10/trial_T20190909_102710_795182/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-Fridge-10/trial_T20190906_182259_116320/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-Fridge-10/trial_T20190906_182353_418140/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-Fridge-10/trial_T20190906_182435_622538/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-GarbageCan-10/trial_T20190908_145050_918567/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-GarbageCan-10/trial_T20190908_145143_820541/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-GarbageCan-10/trial_T20190908_145356_918528/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083346_800823/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083429_887065/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083507_594820/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113432_673307/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113523_123938/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113610_425142/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021100_341887/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021200_669381/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021247_306737/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_171806_406231/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_171850_960211/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_171933_349922/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Potato-None-GarbageCan-10/trial_T20190907_161745_664033/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Potato-None-GarbageCan-10/trial_T20190907_161853_945788/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225046_020282/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225359_617900/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225453_272533/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-CD-None-Safe-308/trial_T20190907_050942_897916/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-CD-None-Safe-308/trial_T20190907_051013_060265/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-CD-None-Safe-308/trial_T20190907_051056_585414/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-KeyChain-None-Safe-219/trial_T20190909_011803_423115/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-KeyChain-None-Safe-219/trial_T20190909_012027_782483/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190908_010306_215435/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190912_221016_460197/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190912_221141_608117/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-Pillow-None-Sofa-219/trial_T20190907_163240_345855/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-Pillow-None-Sofa-219/trial_T20190907_163327_486300/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-Pillow-None-Sofa-219/trial_T20190907_163408_914117/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-Cabinet-424/trial_T20190909_081720_491733/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-Cabinet-424/trial_T20190909_081746_857594/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064053_839817/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064221_368939/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064309_357168/game.tw-pddl
+    - json_2.1.1/valid_unseen/pick_two_obj_and_place-ToiletPaper-None-Cabinet-424/trial_T20190906_202926_527010/game.tw-pddl
+models:
+  executor_strong: deepseek-v4-flash-0731--ali
+  executor_weak: qwen3.6-flash-distill
+n_attempts_strong: 3
+n_attempts_weak: 3
+K: 5
+segment_retry_limit: 2
+retry_limit: 2
+# Pre-registered before this experiment started (2026-10-12): the budget is a
+# context-overflow safety valve, not a compression target; 4096 was a pilot
+# placeholder that a 100+ member bank mathematically cannot meet (merges
+# compress ~0.98). See docs/decisions/bank_token_budget_20261012.md.
+bank_token_budget: 96000
+curation_rounds: 3
+rules:
+  task_select: any_weak_failed
+  segment_select: strong_success_weak_failed
+  # Quota rule: up to 2 strong + up to 2 weak trajectories per
+  # task, successes first within the strong arm, failures first
+  # within the weak arm (the v2 material order); must be
+  # registered under this name in blocks/rules.py (stage 0
+  # validates every rule name).
+  trajectory_select: strong2_weak2
+skill_delivery:
+  # Retrieval-based delivery at test time (protocol v2). min_score
+  # 0.05 is a PLACEHOLDER, not frozen: before this campaign's full
+  # launch it must be calibrated on this benchmark's own development
+  # slice with the same protocol (integration plan, ruling 9 in
+  # docs/decisions/retrieval_delivery_tb_split_20261013.md) -- a
+  # value calibrated on another bank does not transfer (the IDF scale
+  # follows the bank).
+  mode: retrieval
+  top_k: 5
+  max_categories: 3
+  min_score: 0.05
+model_options:
+  deepseek-v4-flash-0731--ali:
+    # Output budgets moved to token_budgets below (2026-10-12
+    # behavior-preserving migration); only generation-behavior
+    # parameters stay here.
+    reasoning_effort: max
+token_budgets:
+  # Output budgets by role. Behavior-preserving migration (2026-10-12):
+  # strong-model roles carried 65536 (pre-registered 2026-10-12 after G7
+  # burned 32768 twice); qwen roles requested 5120 today (the endpoint
+  # ignores it -- usage meta cap_violation will keep flagging, which is
+  # the evidence we want). Input: measure-only in v1 (no thresholds).
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    executor_strong: {max_output_tokens: 65536}
+    segmenter:       {max_output_tokens: 65536}
+    author:          {max_output_tokens: 65536}
+    examiner:        {max_output_tokens: 65536}
+    judge:           {max_output_tokens: 65536}
+    rewriter:        {max_output_tokens: 65536}
+    curator:         {max_output_tokens: 65536}
+    auditor:         {max_output_tokens: 65536}
+    executor_weak:   {max_output_tokens: 5120}
+    answerer:        {max_output_tokens: 5120}
+weak_profile: >-
+  The weak model is qwen3.6-flash-distill, a small distilled model. It follows short, concrete instructions well but misses abstract goals, gets confused when several conditions must be checked in order, sometimes invents object ids it has not observed, and can loop on a failing action. Write skills as short ordered steps with explicit triggers and exact ALFWorld command forms.

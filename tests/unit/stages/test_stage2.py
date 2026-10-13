@@ -99,7 +99,7 @@ def make_config(**overrides):
         n_attempts_weak=2,
         K=4,
         segment_retry_limit=0,
-        rules={"task_select": "all_valid_failed", "trajectory_select": "all"},
+        rules={"task_select": "any_weak_failed", "trajectory_select": "all"},
     )
     defaults.update(overrides)
     return ExperimentConfig(**defaults)

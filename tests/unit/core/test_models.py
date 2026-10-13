@@ -3,6 +3,8 @@ import pytest
 
 from expedistill.core.models import (
     ATTEMPT_PURPOSES,
+    FAILURE_REFERENCE_MARKERS,
+    PROCEDURE_MARKERS,
     SKILL_STATUSES,
     TRAJECTORY_STATUSES,
     Attempt,
@@ -224,3 +226,32 @@ class TestStep:
     def test_round_trip(self):
         step = Step(action="cd /tmp", observation="")
         assert Step.from_dict(step.to_dict()) == step
+
+
+class TestSkillSectionMarkers:
+    """Protocol v2 pins these constants BIT FOR BIT: they are the contract
+    surface other agents import -- the REWRITE/MERGE/SIMILARITY prompt
+    literals, the G2 renderer in blocks/author.py, and the retrieval
+    weighting in blocks/retrieve.py all key off the exact strings. A marker
+    that drifts silently disarms every downstream marker check."""
+
+    def test_procedure_markers_pinned(self):
+        assert PROCEDURE_MARKERS == (
+            "[When to use]", "[Steps]", "[Verify]", "[Do not use when]")
+
+    def test_failure_reference_markers_pinned(self):
+        assert FAILURE_REFERENCE_MARKERS == (
+            "[Trigger]", "[Why it fails]", "[Do instead]", "[Do not use when]")
+
+    def test_both_kinds_carry_four_sections(self):
+        assert len(PROCEDURE_MARKERS) == 4
+        assert len(FAILURE_REFERENCE_MARKERS) == 4
+
+    def test_not_applicable_marker_is_shared_the_rest_disjoint(self):
+        # "[Do not use when]" is the one section both skill kinds share; the
+        # other three identify the kind (blocks/author.py skill_markers
+        # decides kind membership from the full marker set).
+        assert PROCEDURE_MARKERS[-1] == "[Do not use when]"
+        assert FAILURE_REFERENCE_MARKERS[-1] == "[Do not use when]"
+        assert (set(PROCEDURE_MARKERS) & set(FAILURE_REFERENCE_MARKERS)
+                == {"[Do not use when]"})

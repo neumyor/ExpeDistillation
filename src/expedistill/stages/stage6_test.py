@@ -1,10 +1,29 @@
-"""Stage 6: test the weak model with the whole bank against its control arm.
+"""Stage 6: test the weak model with the bank against its control arm.
 
 README stage 6, pinned: the strong model is fully OUT (no handle of the
-strong role is ever touched), the weak model reads the WHOLE bank, and the
+strong role is ever touched), the weak model reads the bank, and the
 control is -- in ``full`` mode -- stage 1's stored weak bare trajectories
 (reused, never re-run), or -- in ``split`` mode -- a fresh weak bare run on
 the test set. The improvement is with-bank minus control, from D3.
+
+Skill delivery (protocol v2 / retrieval split, decisions 3 and 15):
+``whole_bank`` (the frozen v1 behaviour) injects the entire bank into
+every with-bank unit. ``retrieval`` resolves each task's injection ONCE
+before dispatch -- ``derive_categories`` over the bank, then
+``select_skills`` per task instruction -- and hands K1 a per-task
+(``skills_injected``, ``skills_block``) resolver, so K1's per-unit run
+namespace and its stored-unit comparison read one and the same mapping
+(decision 3: a batch-level resolution would alias differently-injected
+tasks onto one remote run id, and a resume would validate against an
+injection that was never rendered). A task whose top-1 score misses
+``min_score`` injects nothing: its ``skills_injected`` is ``[]``
+(distinguishable from the bare control's ``None``) and its block is the
+empty D9 block, i.e. a bare run under the with-bank label. The
+resolution is audited to ``stage6_test/retrieval_audit.jsonl`` -- one
+line per test task, overwritten in full before dispatch, so a resume
+never grows a second copy of a row -- and the summary's
+``bank_reference`` stays the WHOLE-bank digest either way: it names the
+bank identity, not what any one task was injected with.
 
 Auxiliary metric. When the benchmark plugin declares one (stage 0 froze
 its name as manifest ``aux_metric``), both arms additionally report it and
@@ -67,11 +86,18 @@ change F and hence the bank, so with-bank runs made now could be measured
 against the wrong bank.
 """
 
+import json
+import os
+import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Optional, Sequence
+from typing import (
+    Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple,
+)
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks.metrics import compute_task_metrics, summarize
+from expedistill.blocks.retrieve import derive_categories, select_skills
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
@@ -85,6 +111,9 @@ __all__ = ["run"]
 #: Directory inside the run for everything stage 6 produces (README section 2).
 TEST_DIR = "stage6_test"
 SUMMARY_NAME = "stage6_summary.json"
+#: The per-task retrieval resolution audit (decision 15): one line per
+#: test task, overwritten in full before the with-bank dispatch.
+RETRIEVAL_AUDIT_NAME = "retrieval_audit.jsonl"
 #: The durable per-arm accepted-hole record (module docstring).
 ACCEPTED_SHORTFALL_NAME = "accepted_infra_shortfall.json"
 _ARMS = ("with_bank", "control")
@@ -114,6 +143,106 @@ def _read_accepted(ctx: Any) -> Dict[str, List[str]]:
 def _arm_store(ctx: Any, arm: str) -> Store:
     """A per-arm B3 store under ``stage6_test/`` (see module docstring)."""
     return Store(Path(ctx.run_dir) / TEST_DIR / arm)
+
+
+def _selected_references(selected: Sequence[Any]) -> List[Dict[str, Any]]:
+    """The injection record of each selected skill: id and version.
+
+    The per-task ``skills_injected`` shape (decision 13: a NEW shape -- the
+    field is ``Any`` and carried the bank digest until now):
+    ``[{"skill_id": ..., "version": ...}, ...]``, in selection order. The
+    selected records are bank rows (mappings) or Skill objects; both are
+    accepted the way ``blocks.retrieve`` accepts them.
+    """
+    references: List[Dict[str, Any]] = []
+    for record in selected:
+        if isinstance(record, Mapping):
+            references.append(
+                {"skill_id": record["skill_id"],
+                 "version": record.get("version", 1)})
+        else:
+            references.append(
+                {"skill_id": record.skill_id, "version": record.version})
+    return references
+
+
+def _resolve_per_task_delivery(
+        ctx: Any, test_tasks: Sequence[Task], bank: Sequence[Any],
+) -> Tuple[Callable[[Task], Tuple[Any, str]], List[Dict[str, Any]]]:
+    """Resolve every test task's retrieval injection once (decision 3).
+
+    ``derive_categories`` runs once over the bank; ``select_skills`` runs
+    once per task instruction. The returned resolver only READS the
+    finished mapping, so K1's per-unit lookups (one per task and attempt)
+    never re-retrieve. Returns the resolver plus the audit rows (one per
+    task, task-id order): the routed categories, the full ``scores``
+    ranking (kept even when the gate fails -- decision 15), the selected
+    ``[{"skill_id", "version"}]`` manifest, ``threshold_passed`` and the
+    full ``categories`` mapping. A task below ``min_score`` resolves to
+    ``([], "")``: a bare run whose ``skills_injected`` is ``[]``, never
+    confused with the control's ``None``.
+    """
+    delivery = ctx.config.skill_delivery
+    categories = derive_categories(bank)
+    resolved: Dict[str, Tuple[Any, str]] = {}
+    rows: List[Dict[str, Any]] = []
+    for task in sorted(test_tasks, key=lambda t: t.task_id):
+        result = select_skills(
+            task.instruction, bank, categories,
+            top_k=delivery["top_k"],
+            max_categories=delivery["max_categories"],
+            min_score=delivery["min_score"])
+        selected = _selected_references(result["selected"])
+        resolved[task.task_id] = (
+            selected, format_skills_block(result["selected"]))
+        rows.append({
+            "task_id": task.task_id,
+            "routed": result["routed"],
+            "scores": result["scores"],
+            "selected": selected,
+            "threshold_passed": result["threshold_passed"],
+            "categories": categories,
+        })
+
+    def skills_for_task(task: Task) -> Tuple[Any, str]:
+        try:
+            return resolved[task.task_id]
+        except KeyError:
+            raise CodeBugError(
+                f"task {task.task_id!r} has no retrieval resolution: the "
+                "per-task mapping was built over a different task set"
+            ) from None
+
+    return skills_for_task, rows
+
+
+def _write_retrieval_audit(path: Path,
+                           rows: Sequence[Dict[str, Any]]) -> None:
+    """Overwrite the retrieval audit with one canonical JSON line per task.
+
+    A full rewrite on every call (decision 15): the file always mirrors the
+    current resolution and can never accumulate a stale row from an
+    earlier dispatch. Atomic (temp file + rename, B3's pattern) so a crash
+    mid-write leaves the previous file intact instead of a torn ledger.
+    """
+    payload = "".join(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+        for row in rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _workers(ctx: Any) -> int:
@@ -255,6 +384,11 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     writing the summary when a unit outside the accepted set is missing and
     the shortfall is not accepted now. The strong model is never invoked: only the weak executor
     handle leaves ``ctx.handles``.
+
+    Under ``skill_delivery.mode == "retrieval"`` the with-bank arm injects a
+    per-task top-k selection instead of the whole bank (module docstring);
+    the resolution is audited to ``stage6_test/retrieval_audit.jsonl`` and
+    the summary keys are the same in both delivery modes.
     """
     bank = ctx.store.bank()
     skills_block = format_skills_block(bank)
@@ -278,9 +412,12 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         _bare_stage1_trajectories(ctx, test_tasks, accepted["control"])
         if ctx.config.mode == "full" else None)
 
-    # -- with-bank arm: the weak model reads the WHOLE bank -----------------
+    # -- with-bank arm -------------------------------------------------------
+    # Retrieval delivery (module docstring): resolve every task's injection
+    # once, audit it, and hand K1 the per-task resolver; whole_bank keeps
+    # the scalar path -- one injection for the whole arm.
     bank_store = _arm_store(ctx, "bank")
-    with_bank = batch_execute(
+    bank_kwargs: Dict[str, Any] = dict(
         store=bank_store,
         benchmark=ctx.config.benchmark,
         tasks=test_tasks,
@@ -288,8 +425,6 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         model_name=model_name,
         handle=handle,
         n_attempts=n_attempts,
-        skills_injected=reference,
-        skills_block=skills_block,
         workdir_root=Path(ctx.workdir_root) / "stage6_bank",
         usage=ctx.usage,
         run_dir=ctx.run_dir,
@@ -297,6 +432,18 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         dispatch_stagger=_k1_stagger(ctx),
         skip_unit_ids=frozenset(accepted["with_bank"]),
     )
+    if ctx.config.skill_delivery.get("mode") == "retrieval":
+        resolver, audit_rows = _resolve_per_task_delivery(
+            ctx, test_tasks, bank)
+        # Before dispatch, overwritten in full (decision 15): the audit
+        # names the injection this dispatch is about to render.
+        _write_retrieval_audit(
+            Path(ctx.run_dir) / TEST_DIR / RETRIEVAL_AUDIT_NAME, audit_rows)
+        bank_kwargs["skills_for_task"] = resolver
+    else:
+        bank_kwargs["skills_injected"] = reference
+        bank_kwargs["skills_block"] = skills_block
+    with_bank = batch_execute(**bank_kwargs)
 
     # -- control arm --------------------------------------------------------
     if ctx.config.mode == "full":

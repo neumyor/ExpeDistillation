@@ -1,5 +1,5 @@
 """Unit tests for D9 skill injection and D10 bank-length accounting."""
-from expedistill.core.models import Skill
+from expedistill.core.models import PROCEDURE_MARKERS, Skill
 from expedistill.inject.skills import (
     bank_reference,
     count_bank_tokens,
@@ -97,6 +97,26 @@ def test_internal_newlines_collapse_to_single_spaces():
     block = format_skills_block([skill])
     assert block.count("\n") == 1  # header + one single-line bullet
     assert block == "## Skill rules\n- Step one. Step two. Step three."
+
+
+def test_section_markers_survive_single_line_compression():
+    # Protocol v2: a stored skill is multi-line marker text, and the
+    # injection block compresses it onto one bullet. The compression
+    # destroys the line structure (so skill_markers must never read the
+    # block) but keeps every marker literal, so the weak model still sees
+    # the section headers -- pinned here instead of asserted by eye.
+    content = "\n".join([
+        "[When to use] when a service reports an unexpected state",
+        "[Steps]",
+        "1. inspect the reported state",
+        "2. run the command that matches the state",
+        "[Verify] the service reports the expected state",
+        "[Do not use when] no state was reported",
+    ])
+    block = format_skills_block([make_skill("s1", content)])
+    assert block.count("\n") == 1  # header + one single-line bullet
+    for marker in PROCEDURE_MARKERS:
+        assert marker in block
 
 
 def test_dict_and_object_inputs_render_identically():

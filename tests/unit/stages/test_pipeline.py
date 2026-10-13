@@ -34,7 +34,9 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import _reset_registry
+from expedistill.blocks.author import render_skill_content, skill_markers
 from expedistill.core.config import MODEL_ROLES, ExperimentConfig, save_config
+from expedistill.core.models import FAILURE_REFERENCE_MARKERS, PROCEDURE_MARKERS
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLockedError
 from expedistill.infra.store import read_jsonl
@@ -77,7 +79,13 @@ class FakePipelinePlugin(BenchmarkPlugin):
             "role": handle.role,
             "with_skills": bool(skills_block),
         })
-        if handle.role == "strong":
+        # The pipeline wires executor handles under their full role names
+        # (MODEL_ROLES: "executor_strong" / "executor_weak" -- the same
+        # convention BareT2InfraPlugin below already keys on). The strong
+        # arm really must succeed: protocol v2's SEGMENT fake keys the
+        # strong-arm segments on the trajectory's "final status: success"
+        # view header, and D6/G2 distill material has to be successes.
+        if handle.role == "executor_strong":
             status = "success"
         else:
             status = "success" if skills_block else "failure"
@@ -130,6 +138,26 @@ def plugin(monkeypatch):
 # The scripted model side
 # ---------------------------------------------------------------------------
 
+#: One valid JSON-contract payload per G2 mode (protocol v2, decision
+#: section 3.2): the fake answers must satisfy the same contract the real
+#: model is held to, and the stored skill is the deterministic marker-text
+#: rendering of these sections (asserted below).
+_DISTILL_SECTIONS = {
+    "when_to_use": "when a service reports an unexpected state",
+    "steps": ["inspect the reported state",
+              "run the command that matches the state"],
+    "verify": "the service reports the expected state",
+    "not_applicable_when": "no state was reported",
+}
+_DIAGNOSE_SECTIONS = {
+    "trigger": "acting on a report without inspecting it first",
+    "why_it_fails": "the action does not match the actual state.",
+    "do_instead": ["inspect the reported state",
+                   "run the command that matches the state"],
+    "not_applicable_when": "the state was already inspected",
+}
+
+
 def _script(system: str, user: str) -> str:
     """One correct response per B2 prompt, dispatched by the prompt's text.
 
@@ -140,9 +168,14 @@ def _script(system: str, user: str) -> str:
     """
     if user.startswith("You are given the view"):
         # SEGMENT: one subtask covering the whole single-step trajectory.
+        # Protocol v2 D6 material: the strong arm's segment succeeded
+        # (procedure material), the weak arm's failed (diagnosis material).
+        # In this fixture the trajectory's final status names the arm:
+        # strong runs always succeed, weak bare runs always fail.
+        success = "(final status: success)" in user
         return json_script([{
             "start": 0, "end": 1, "label": "whole",
-            "description": "do the whole task", "success": False,
+            "description": "do the whole task", "success": success,
         }])
     if user.startswith("Write one exam question"):
         return json_script({
@@ -152,11 +185,15 @@ def _script(system: str, user: str) -> str:
             "reference_answer": "Inspect the reported state first, then "
                                 "take the matching corrective action.",
         })
-    if user.startswith("You are writing a skill for a weaker model, distilled"):
-        return "Inspect the state first. Then take the matching action."
-    if user.startswith("You are writing a skill for a weaker model, based on"):
-        return "Inspect the state before acting. Then take the action that " \
-               "matches the inspection."
+    if "The subtask SUCCEEDED" in user:
+        # SKILL_DISTILL (protocol v2), dispatched by a phrase unique to the
+        # distill template ("SUBTASK LABEL" is shared by both G2 prompts
+        # and cannot discriminate). The response is the prompt's JSON
+        # contract; blocks.author renders it into the stored marker text.
+        return json_script(_DISTILL_SECTIONS)
+    if "WHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING" in user:
+        # SKILL_DIAGNOSE (protocol v2), same anchor discipline.
+        return json_script(_DIAGNOSE_SECTIONS)
     if user.startswith("Answer the question below."):
         # The D9 block header is the with/without-skill discriminator (an
         # empty block renders to nothing at all).
@@ -176,9 +213,16 @@ def _script(system: str, user: str) -> str:
                                 "error_description": "No action is stated."})
         return json_script({"verdict": "correct", "error_description": ""})
     if user.startswith("A skill written for a weak model failed"):
+        # G6 must keep the original's marker set (protocol v2): echo the
+        # original content back, so the rewrite is marker-identical for
+        # either skill kind. The happy path never reaches this branch
+        # (every skilled answer passes on round 0); it stays for any flow
+        # that does.
+        original = user.split("SKILL (current version):\n", 1)[1].split(
+            "\n\nEXAM QUESTION:", 1)[0]
         return json_script({
             "failure_category": "misread",
-            "skill_text": "Inspect the state before acting. Then act.",
+            "skill_text": original,
             "rewrite_reason": "Shorter sentences.",
         })
     if user.startswith("You are curating a bank of skills written for a "
@@ -231,9 +275,12 @@ def _write_config(path: Path, **overrides) -> Path:
         n_attempts_strong=1,
         n_attempts_weak=1,
         K=1,
-        rules={"task_select": "all_valid_failed",
-               "segment_select": "strong_all_weak_failed",
-               "trajectory_select": "all"},
+        # Protocol v2 rule names (any_weak_failed /
+        # strong_success_weak_failed; strong2_weak2 keeps the v2 material
+        # order for trajectory selection).
+        rules={"task_select": "any_weak_failed",
+               "segment_select": "strong_success_weak_failed",
+               "trajectory_select": "strong2_weak2"},
         # The pipeline takes every handle's output budget from
         # cfg.max_output_tokens_for(role); every fixture config therefore
         # carries token_budgets (here: one uniform default).
@@ -274,12 +321,27 @@ def test_pipeline_full_mode_end_to_end(plugin, config_path, tmp_path):
     lines = read_jsonl(ledger_path(run_dir))
     assert [row["stage"] for row in lines] == list(STAGE_NAMES)
     assert all(isinstance(row["summary"], dict) for row in lines)
-    assert lines[0]["summary"]["train"] == ["t1", "t2"]
+    # Stage 0 always freezes all three split keys (ruling 7): a full-mode
+    # run reserves nothing.
+    assert lines[0]["summary"] == {"tasks": 2, "train": ["t1", "t2"],
+                                  "test": ["t1", "t2"], "reserved": []}
 
     # -- the run layout the stages promised to fill -------------------------
     assert (run_dir / "manifest.json").exists()
     assert (run_dir / "skill_bank.jsonl").exists()
-    assert len(read_jsonl(run_dir / "skill_bank.jsonl")) == 4
+    # The bank holds the rendered marker text (protocol v2): two procedure
+    # skills from the strong arms, two failure references from the weak
+    # arms, each exactly the deterministic rendering of its fake payload.
+    bank = read_jsonl(run_dir / "skill_bank.jsonl")
+    assert len(bank) == 4
+    marker_sets = [skill_markers(row["content"]) for row in bank]
+    assert marker_sets.count(PROCEDURE_MARKERS) == 2
+    assert marker_sets.count(FAILURE_REFERENCE_MARKERS) == 2
+    by_subtask = {row["subtask_id"]: row["content"] for row in bank}
+    assert by_subtask["traj/fakebench:t1/strong/00/seg00"] == \
+        render_skill_content("distill", _DISTILL_SECTIONS)
+    assert by_subtask["traj/fakebench:t1/weak/00/seg00"] == \
+        render_skill_content("diagnose", _DIAGNOSE_SECTIONS)
     # 4 stage-1 executions (strong + weak bare) + 2 stage-6 with-bank runs.
     assert len(plugin.calls) == 6
     # Model calls: 4 segments + 4 skills + 4 exams + 4 leak audits

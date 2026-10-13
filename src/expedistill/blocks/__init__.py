@@ -1,8 +1,9 @@
 """Layer 4: functional blocks. Blocks do not import each other; composition
 happens in composites/, and prompts/model calls come from the layers below."""
 
-# Redundant-alias re-exports (no shared __all__: several agents append here,
-# each exporting its own block's names).
+# Redundant-alias re-exports (no shared __all__). New block names are
+# registered here centrally by the integrator when a block lands -- parallel
+# implementation agents never edit this file (protocol v2 integration rule).
 from expedistill.blocks.audit import (
     audit_leak as audit_leak,
 )
@@ -44,4 +45,13 @@ from expedistill.blocks.curate import (
     assign_groups as assign_groups,
     find_similar as find_similar,
     merge_skills as merge_skills,
+)
+from expedistill.blocks.author import (
+    render_skill_content as render_skill_content,
+    skill_markers as skill_markers,
+    validate_skill_sections as validate_skill_sections,
+)
+from expedistill.blocks.retrieve import (
+    derive_categories as derive_categories,
+    select_skills as select_skills,
 )

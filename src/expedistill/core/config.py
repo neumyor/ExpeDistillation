@@ -19,6 +19,14 @@ frozen config carries the effective names (not a raw, possibly empty,
 mapping). Stage 0 validates the names against the rule registries before
 anything runs; later stages read ``config.rules[key]`` directly.
 
+``skill_delivery`` (protocol v2 / retrieval split) follows the same
+complete-don't-reject discipline: absent means the default ``whole_bank``
+and is completed to ``{"mode": "whole_bank"}``, so the frozen config names
+the effective delivery the way it names the effective rule selections.
+``mode: retrieval`` requires its three parameters (``top_k``,
+``max_categories``, ``min_score``) together; under ``whole_bank`` they are
+rejected rather than ignored.
+
 ``tasks`` names the experiment's task set: ``None`` (the plugin's full set;
 a plugin may reject it, TB does), a list of raw task ids, or a path to a
 task file whose format the plugin defines. ``load_config`` resolves a
@@ -65,18 +73,43 @@ MODEL_ROLES = (
 #: Keys of the named-rule selections.
 RULE_KEYS = ("task_select", "segment_select", "trajectory_select")
 
-#: Rule name per key when the config names none: the README definitions of
-#: stage 1 (D4), stage 3 (D6) and stage 2's frozen default (all trajectories).
-#: Each must be registered in ``blocks/rules.py`` under exactly this name.
+#: Rule name per key when the config names none: the stage 2/3 protocol v2
+#: definitions of stage 1 (D4) and stage 3 (D6), plus stage 2's frozen
+#: default (all trajectories). The defaults ARE the method canon (every
+#: formal series config names them explicitly anyway), so switching them
+#: declares v2 rather than migrating anything; the v1 names stay registered
+#: in ``blocks/rules.py`` (old configs are historical records).
 DEFAULT_RULES = {
-    "task_select": "all_valid_failed",
-    "segment_select": "strong_all_weak_failed",
+    "task_select": "any_weak_failed",
+    "segment_select": "strong_success_weak_failed",
     "trajectory_select": "all",
 }
 
-#: Keys accepted in the ``split`` field: either explicit task-id lists, or a
-#: ratio + seed from which stage 0 derives the lists deterministically.
-_SPLIT_LIST_KEYS = ("train", "test")
+#: Delivery modes for the skill bank at test time (stage 6, protocol v2 /
+#: retrieval split): inject the whole bank (the frozen v1 behaviour) or
+#: retrieve a per-task top-k from it.
+SKILL_DELIVERY_MODES = ("retrieval", "whole_bank")
+
+#: Keys accepted inside ``skill_delivery``.
+_SKILL_DELIVERY_KEYS = ("mode", "top_k", "max_categories", "min_score")
+
+#: Retrieval-mode parameters: all three are required together under
+#: ``mode: retrieval`` and all three are meaningless under ``whole_bank``.
+_SKILL_DELIVERY_RETRIEVAL_PARAMS = ("top_k", "max_categories", "min_score")
+
+#: Key sets accepted in the ``split`` field with explicit task-id lists:
+#: exactly the two-key or the three-key form (``reserved`` is the frozen
+#: partition held back from both arms). Same contract as D2 in
+#: ``blocks/tasks.py`` but a different layer: this validates the SHAPE at
+#: config load, D2 validates the lists against the loaded task set.
+_SPLIT_LIST_KEY_SETS = (
+    frozenset({"train", "test"}),
+    frozenset({"train", "test", "reserved"}),
+)
+#: Every list-shaped ``split`` key that can carry task ids.
+_SPLIT_LIST_KEYS = ("train", "test", "reserved")
+#: The ratio + seed shorthand, from which stage 0 derives the lists
+#: deterministically before D2 sees them.
 _SPLIT_RATIO_KEYS = ("ratio", "seed")
 
 #: Chat-call keys ``model_options`` must never carry (schema v2):
@@ -136,8 +169,8 @@ def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:
 
 
 def _validate_split(split: Dict[str, Any]) -> None:
-    keys = set(split)
-    if keys <= set(_SPLIT_LIST_KEYS) and keys:
+    keys = frozenset(split)
+    if keys in _SPLIT_LIST_KEY_SETS:
         for name in _SPLIT_LIST_KEYS:
             value = split.get(name)
             if value is None:
@@ -154,13 +187,77 @@ def _validate_split(split: Dict[str, Any]) -> None:
         seed = split.get("seed", 0)
         if not isinstance(seed, int) or isinstance(seed, bool):
             raise ValueError(f"split seed must be an int, got {seed!r}")
-        if keys - set(_SPLIT_RATIO_KEYS):
+        if keys - frozenset(_SPLIT_RATIO_KEYS):
             raise ValueError(
                 f"split mixes ratio and explicit lists: {sorted(keys)}")
     else:
         raise ValueError(
-            "split must give either {'train': [...], 'test': [...]} or "
+            "split must give exactly {'train': [...], 'test': [...]}, "
+            "{'train': [...], 'test': [...], 'reserved': [...]}, or "
             f"{{'ratio': float, 'seed': int}}, got keys {sorted(keys)}")
+
+
+def _validate_skill_delivery(delivery: Any) -> Dict[str, Any]:
+    """Validate ``skill_delivery``; returns a copy with ``mode`` always
+    present, so the frozen config names the effective delivery like it
+    names the effective rule selections (never a raw, possibly empty,
+    mapping). A copy, not the caller's mapping: the frozen value must not
+    change through a later mutation there (same contract as
+    token_budgets)."""
+    if not isinstance(delivery, dict):
+        raise ConfigError(
+            f"skill_delivery must be a mapping, got {type(delivery).__name__}")
+    unknown = set(delivery) - set(_SKILL_DELIVERY_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"skill_delivery has unknown keys {sorted(unknown, key=str)}, "
+            f"expected a subset of {list(_SKILL_DELIVERY_KEYS)}")
+    if not delivery:
+        # Absent/empty: the default delivery, spelled out so the frozen
+        # config names it (module docstring, "complete-don't-reject").
+        return {"mode": "whole_bank"}
+    mode = delivery.get("mode", "whole_bank")
+    if mode not in SKILL_DELIVERY_MODES:
+        raise ConfigError(
+            f"skill_delivery.mode must be one of {SKILL_DELIVERY_MODES}, "
+            f"got {mode!r}")
+    if mode == "whole_bank":
+        # An ineffective retrieval key under whole_bank would mislead about
+        # what the run injects (the reader would assume per-task selection
+        # is on); the config is the experiment's identity, so fail loud.
+        stray = sorted(set(delivery) - {"mode"}, key=str)
+        if stray:
+            raise ConfigError(
+                "skill_delivery carries retrieval parameter(s) "
+                + ", ".join(stray) + " under mode 'whole_bank'; they only "
+                "apply to mode 'retrieval'")
+        return {"mode": "whole_bank"}
+    # mode == "retrieval": the three parameters are required together.
+    missing = [key for key in _SKILL_DELIVERY_RETRIEVAL_PARAMS
+               if key not in delivery]
+    if missing:
+        raise ConfigError(
+            "skill_delivery mode 'retrieval' requires "
+            f"{list(_SKILL_DELIVERY_RETRIEVAL_PARAMS)}; missing {missing}")
+    if not _is_positive_int(delivery["top_k"]):
+        raise ConfigError(
+            f"skill_delivery.top_k must be an int >= 1, "
+            f"got {delivery['top_k']!r}")
+    if not _is_positive_int(delivery["max_categories"]):
+        raise ConfigError(
+            f"skill_delivery.max_categories must be an int >= 1, "
+            f"got {delivery['max_categories']!r}")
+    min_score = delivery["min_score"]
+    # int is accepted beside float: a YAML "0" parses as int, and the grid's
+    # lower bound is a legal value. bool is an int subclass but never a
+    # score. NaN and inf fail the range check, as does anything >= 1.
+    if (isinstance(min_score, bool)
+            or not isinstance(min_score, (int, float))
+            or not 0.0 <= min_score < 1.0):
+        raise ConfigError(
+            f"skill_delivery.min_score must be a number in [0, 1), "
+            f"got {min_score!r}")
+    return dict(delivery)
 
 
 def _is_positive_int(value: Any) -> bool:
@@ -273,6 +370,18 @@ class ExperimentConfig:
     #: Named-rule selections; missing keys are filled from DEFAULT_RULES,
     #: and stage 0 validates every name against the rule registries.
     rules: Dict[str, str] = field(default_factory=dict)
+    #: Stage-6 skill delivery (protocol v2 / retrieval split): ``mode`` is
+    #: ``whole_bank`` (the frozen v1 behaviour: inject the entire bank) or
+    #: ``retrieval`` (per-task top-k selection). Absent/empty means
+    #: whole_bank and is COMPLETED to ``{"mode": "whole_bank"}`` so the
+    #: frozen config always names the effective delivery. Under
+    #: ``retrieval`` the three parameters are required together:
+    #: ``top_k`` (int >= 1), ``max_categories`` (int >= 1) and ``min_score``
+    #: (number in [0, 1), the top-1 gate below which nothing is injected);
+    #: under ``whole_bank`` they are rejected (an ineffective key would
+    #: mislead about what the run injects). Delivery changes what the test
+    #: arm sees, so it is part of the experiment's frozen identity.
+    skill_delivery: Dict[str, Any] = field(default_factory=dict)
     #: Prompt name -> digest; filled by the prompt registry (B2) when the
     #: stages freeze the manifest, empty in the source config.
     prompts_digests: Dict[str, str] = field(default_factory=dict)
@@ -307,6 +416,10 @@ class ExperimentConfig:
         if self.split is not None:
             _validate_split(self.split)
         self.tasks = _normalise_tasks(self.tasks)
+        # Skill delivery: validated and completed here (the frozen config
+        # always carries the effective mode), copied so a later mutation of
+        # the caller's mapping cannot change the frozen value.
+        self.skill_delivery = _validate_skill_delivery(self.skill_delivery)
         unknown_rules = set(self.rules) - set(RULE_KEYS)
         if unknown_rules:
             raise ValueError(

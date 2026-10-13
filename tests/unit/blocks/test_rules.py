@@ -65,10 +65,43 @@ def test_task_select_all_valid_failed_truth_table():
     assert rule(_metrics(3, 1), 3) is False
 
 
+def test_task_select_any_weak_failed_truth_table():
+    # Protocol v2 default: any failed VALID attempt puts the task in F.
+    rule = get_task_select("any_weak_failed")
+    # Full sample, all failed: the v1 F case, still in F under v2.
+    assert rule(_metrics(3, 0), 3) is True
+    # Mixed sample with at least one failure: in F (the v2 widening).
+    assert rule(_metrics(3, 1), 3) is True
+    assert rule(_metrics(3, 2), 3) is True
+    # Every valid attempt succeeded: nothing to fix, stays out.
+    assert rule(_metrics(3, 3), 3) is False
+    # No valid attempt at all: infra is not a model failure, stays out.
+    assert rule(_metrics(0, 0, infra=3), 3) is False
+    # Partial sample (0 < valid < n_attempts) WITH a real failure: in F
+    # AND still on the infra_shortfalls list (the lists overlap now).
+    assert rule(_metrics(2, 0, infra=1), 3) is True
+    assert rule(_metrics(1, 0, infra=2), 3) is True
+    # Partial sample whose valid attempts all succeeded: stays out.
+    assert rule(_metrics(2, 2, infra=1), 3) is False
+    # Boundary: exactly one valid attempt, and it failed.
+    assert rule(_metrics(1, 0), 1) is True
+
+
 def test_segment_select_strong_all_weak_failed():
     rule = get_segment_select("strong_all_weak_failed")
     assert rule(_subtask("strong", True)) is True
     assert rule(_subtask("strong", False)) is True
+    assert rule(_subtask("weak", False)) is True
+    assert rule(_subtask("weak", True)) is False
+
+
+def test_segment_select_strong_success_weak_failed_four_quadrants():
+    # Protocol v2 default: strong segments are procedure material only
+    # when they succeeded; weak segments are diagnosis material only when
+    # they failed.
+    rule = get_segment_select("strong_success_weak_failed")
+    assert rule(_subtask("strong", True)) is True
+    assert rule(_subtask("strong", False)) is False
     assert rule(_subtask("weak", False)) is True
     assert rule(_subtask("weak", True)) is False
 

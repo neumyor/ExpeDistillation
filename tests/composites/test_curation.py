@@ -4,12 +4,20 @@ Covers the stage-5 contract (README stage 5 / AGENTS.md section 8): dedup
 merges kept, regression failures reverted, the conflict-merge path, G9
 grouping, the token-budget round loop, the over-budget ConfigError stop,
 bank-level resume (including a crash mid-append), the empty accepted set,
-and determinism. No network; every model call is scripted.
+determinism, and the protocol-v2 marker checks (mixed-kind groups skipped
+before any G8 call, structure-losing merges never stored, prose groups
+exempt, reused pending merges never re-validated). No network; every
+model call is scripted.
 """
 
 import pytest
 
-from expedistill.composites.curation import LOG_DIR, LOG_NAME, curate_bank
+from expedistill.composites.curation import (
+    LOG_DIR,
+    LOG_NAME,
+    LOG_SCHEMA,
+    curate_bank,
+)
 from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import ConfigError, ModelOutputError
@@ -725,3 +733,181 @@ def test_stale_guard_ignores_merged_discarded_and_pending_skills(store):
                      merged_from=[_skill_id(0), _skill_id(1)]), "skills")
     handles = _handles(curator_script=[], answer_script=[], judge_script=[])
     assert _curate(store, handles) == bank
+
+
+# ---------------------------------------------------------------------------
+# Protocol v2 K5 marker checks: pre-check, post-check, prose tolerance,
+# and the reuse branch's no-re-validation rule.
+# ---------------------------------------------------------------------------
+
+PROCEDURE_CONTENT = "\n".join([
+    "[When to use] You need to restart a stuck service.",
+    "[Steps]",
+    "1. Check the service status.",
+    "2. Restart the service.",
+    "[Verify] The status command reports running.",
+    "[Do not use when] The service already reports running.",
+])
+
+FAILURE_REFERENCE_CONTENT = "\n".join([
+    "[Trigger] The service rejects connections after a config edit.",
+    "[Why it fails] The config edit was not followed by a restart.",
+    "[Do instead]",
+    "1. Re-check the config file for syntax errors.",
+    "2. Restart the service.",
+    "[Do not use when] The service never accepted connections.",
+])
+
+
+@pytest.mark.parametrize("other_content", [
+    FAILURE_REFERENCE_CONTENT,  # procedure mixed with failure reference
+    "Check the log file first.",  # marked mixed with unmarked prose
+])
+def test_mixed_kind_group_skips_the_merge_before_any_g8_call(
+        store, other_content):
+    _add_skill(store, 0, PROCEDURE_CONTENT)
+    _add_skill(store, 1, other_content)
+    for index in range(2):
+        _add_exam(store, index)
+    handles = _handles(
+        curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+                        _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[],
+        judge_script=[],
+    )
+
+    bank = _curate(store, handles)
+
+    # The pre-check fired with ZERO G8 calls; nothing was stored and both
+    # sources stay accepted bank members.
+    merge_calls = [call for call in handles["curator_handle"].client.calls
+                   if "MERGE MODE" in call["user"]]
+    assert merge_calls == []
+    assert "bank/merge/0000" not in store.ids("skills")
+    assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(1)]
+    log = _log_of(store)
+    assert log["merges"]["skipped"] == 1
+    record = log["merge_records"][0]
+    assert record["outcome"] == "skipped"
+    # The skip record carries the pre-check's own reason: G8 never ran.
+    assert "merge group mixes skill kinds" in record["reason"]
+    assert "G8 merge failed" not in record["reason"]
+    failures = _failures(store)
+    assert len(failures) == 1
+    assert failures[0]["error_class"] == "ModelOutputError"
+
+
+def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
+    _add_skill(store, 0, PROCEDURE_CONTENT)
+    _add_skill(store, 1, PROCEDURE_CONTENT)
+    for index in range(2):
+        _add_exam(store, index)
+    # A G8 output that dropped [Verify]: skill_markers no longer reads the
+    # sources' procedure set.
+    broken_output = "\n".join([
+        "[When to use] You need to restart a stuck service.",
+        "[Steps]",
+        "1. Check the service status.",
+        "2. Restart the service.",
+        "[Do not use when] The service already reports running.",
+    ])
+    handles = _handles(
+        curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+                        broken_output,
+                        _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[],
+        judge_script=[],
+    )
+
+    bank = _curate(store, handles)
+
+    # The G8 call DID happen (its output failed the post-check), but the
+    # merged skill never reached the store -- commit step 1 never ran.
+    merge_calls = [call for call in handles["curator_handle"].client.calls
+                   if "MERGE MODE" in call["user"]]
+    assert len(merge_calls) == 1
+    assert "bank/merge/0000" not in store.ids("skills")
+    assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(1)]
+    log = _log_of(store)
+    assert log["merges"]["skipped"] == 1
+    record = log["merge_records"][0]
+    assert record["outcome"] == "skipped"
+    # G8 ran and produced an unusable output: the existing G8-failure
+    # skip path and its reason prefix apply.
+    assert "G8 merge failed" in record["reason"]
+    assert "four bracket sections" in record["reason"]
+    assert len(_failures(store)) == 1
+
+
+def test_all_prose_group_skips_both_marker_checks(store):
+    # Prose sources (every pre-v2 fixture's shape, and the v1 TB bank
+    # under v2 code): both marker checks are skipped, so even a G8 output
+    # that carries a full section structure is kept -- no marker equality
+    # is ever asserted against all-unmarked sources.
+    _add_skill(store, 0, "Check the log file first.")
+    _add_skill(store, 1, "Look at the log file before anything else.")
+    for index in range(2):
+        _add_exam(store, index)
+    handles = _handles(
+        curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+                        PROCEDURE_CONTENT,
+                        _grouping({"bank/merge/0000": "error handling"})],
+        answer_script=["a", "b"],
+        judge_script=[_CORRECT(), _CORRECT()],
+    )
+
+    bank = _curate(store, handles)
+
+    assert [row["skill_id"] for row in bank] == ["bank/merge/0000"]
+    assert bank[0]["content"] == PROCEDURE_CONTENT
+    assert _log_of(store)["merges"]["kept"] == 1
+
+
+def test_resume_reuse_branch_does_not_revalidate_the_pending_merge(store):
+    for index in range(2):
+        _add_skill(store, index, PROCEDURE_CONTENT)
+        _add_exam(store, index)
+    # A crash after commit step 1 left a journaled in-flight merge whose
+    # content would FAIL the post-check. A pending merge was validated
+    # before it was ever saved, so the reuse branch takes it without any
+    # re-check; the regression exams and the keep decision proceed.
+    store.save(Skill(skill_id="bank/merge/0000",
+                     content="prose that lost its markers",
+                     subtask_id=_subtask(0), status="pending",
+                     merged_from=sorted([_skill_id(0), _skill_id(1)])),
+               "skills")
+    write_json(store.run_dir / LOG_DIR / LOG_NAME, {
+        "schema": LOG_SCHEMA,
+        "rounds_executed": 1,
+        "merges": {"attempted": 0, "kept": 0, "reverted": 0, "skipped": 0},
+        "merge_records": [],
+        "rounds": [{
+            "round": 1,
+            "similar_groups": [[_skill_id(0), _skill_id(1)]],
+            "conflicts": [],
+            "grouping": None,
+            "dispatch": [{"unit": 0, "mode": "dedup",
+                          "sources": sorted([_skill_id(0), _skill_id(1)]),
+                          "serial": 0}],
+            "done": False,
+            "stop": False,
+        }],
+        "final_member_ids": [],
+        "bank_tokens": 0,
+        "input_skill_ids": sorted([_skill_id(0), _skill_id(1)]),
+    })
+    handles = _handles(
+        curator_script=[_grouping({"bank/merge/0000": "misc"})],
+        answer_script=["a", "b"],
+        judge_script=[_CORRECT(), _CORRECT()],
+    )
+
+    bank = _curate(store, handles)
+
+    # No G8 call and no marker veto: the reused merge is kept as stored.
+    merge_calls = [call for call in handles["curator_handle"].client.calls
+                   if "MERGE MODE" in call["user"]]
+    assert merge_calls == []
+    assert [row["skill_id"] for row in bank] == ["bank/merge/0000"]
+    assert bank[0]["content"] == "prose that lost its markers"
+    assert _log_of(store)["merges"]["kept"] == 1

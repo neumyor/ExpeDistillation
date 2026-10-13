@@ -3,8 +3,13 @@
 Wiring is asserted exactly: the user message sent to the client must equal the
 named prompt template rendered with the expected variables, so a variable that
 is wired to the wrong field (e.g. context_summary leaking into distill mode)
-fails loudly. None of these tests touch tmp_path or run_dir: the blocks must
-not write anything anywhere.
+fails loudly. Protocol v2 (decision section 3.3) adds the structural
+contract: write_skill guards the mode/outcome precondition, parses the G2
+JSON contract, validates it with validate_skill_sections, and stores
+render_skill_content's marker text; skill_markers reads that text back; and
+rewrite_skill requires the rewrite to keep the original's marker set. None of
+these tests touch tmp_path or run_dir: the blocks must not write anything
+anywhere.
 """
 
 import pytest
@@ -16,14 +21,61 @@ from expedistill.core.ids import (
     make_task_id,
     make_trajectory_id,
 )
-from expedistill.core.models import Skill, Subtask
+from expedistill.core.models import (
+    FAILURE_REFERENCE_MARKERS,
+    PROCEDURE_MARKERS,
+    Skill,
+    Subtask,
+)
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts.registry import get as get_prompt
-from expedistill.blocks.author import gen_exam, rewrite_skill, write_skill
+from expedistill.blocks.author import (
+    gen_exam,
+    render_skill_content,
+    rewrite_skill,
+    skill_markers,
+    validate_skill_sections,
+    write_skill,
+)
 
 STEPS_VIEW = "step 0: read config\nstep 1: restart the service"
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
+
+DISTILL_SECTIONS = {
+    "when_to_use": "When the service rejects a login.",
+    "steps": ["Check the credentials in the config file.",
+              "Restart the service."],
+    "verify": "The service accepts the login.",
+    "not_applicable_when": "The subtask is not about logging in.",
+}
+
+DISTILL_CONTENT = "\n".join([
+    "[When to use] When the service rejects a login.",
+    "[Steps]",
+    "1. Check the credentials in the config file.",
+    "2. Restart the service.",
+    "[Verify] The service accepts the login.",
+    "[Do not use when] The subtask is not about logging in.",
+])
+
+DIAGNOSE_SECTIONS = {
+    "trigger": "You edit the config while the service is running.",
+    "why_it_fails": "The running service overwrites your edit on restart.",
+    "do_instead": ["Stop the service.", "Edit the config.",
+                   "Start the service."],
+    "not_applicable_when": "The subtask is not about the config.",
+}
+
+DIAGNOSE_CONTENT = "\n".join([
+    "[Trigger] You edit the config while the service is running.",
+    "[Why it fails] The running service overwrites your edit on restart.",
+    "[Do instead]",
+    "1. Stop the service.",
+    "2. Edit the config.",
+    "3. Start the service.",
+    "[Do not use when] The subtask is not about the config.",
+])
 
 
 def make_subtask(**overrides):
@@ -57,9 +109,20 @@ class RecordingUsage:
 
 
 def make_skill(subtask):
+    # Prose content: a stored v2 skill never looks like this; it exists to
+    # exercise rewrite_skill's marker-free tolerance branch.
     return Skill(
         skill_id=make_skill_id(subtask.subtask_id),
         content="Check the config exists before reading it.",
+        subtask_id=subtask.subtask_id,
+    )
+
+
+def make_marker_skill(subtask, content=DISTILL_CONTENT):
+    # What a stored v2 skill actually looks like: renderer-made marker text.
+    return Skill(
+        skill_id=make_skill_id(subtask.subtask_id),
+        content=content,
         subtask_id=subtask.subtask_id,
     )
 
@@ -70,7 +133,7 @@ def make_skill(subtask):
 
 def test_write_skill_distill_wiring_and_fields():
     subtask = make_subtask()
-    handle = make_fake_handle(script="  Do X when Y. Then do Z.  ")
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
 
     skill = write_skill(
         subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle,
@@ -78,24 +141,26 @@ def test_write_skill_distill_wiring_and_fields():
     )
 
     # Exactly one call, with the SKILL_DISTILL template rendered from the
-    # subtask fields (and no context_summary in distill mode).
+    # subtask fields (v2: no success variable, no context_summary).
     assert len(handle.client.calls) == 1
     expected = get_prompt("SKILL_DISTILL").format(
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
-        success="true",
         weak_profile=WEAK_PROFILE,
     )
     assert handle.client.calls[0]["user"] == expected
 
     assert skill.skill_id == make_skill_id(subtask.subtask_id)
     assert skill.subtask_id == subtask.subtask_id
-    assert skill.content == "Do X when Y. Then do Z."
+    # The stored content is the renderer's marker text, not the model's
+    # raw prose: injection, G7 and D8 all read this one representation.
+    assert skill.content == DISTILL_CONTENT
     assert skill.version == 1
     assert skill.status == "pending"
     assert skill.rewrite_history == []
     assert skill.merged_from == []
+    assert skill_markers(skill.content) == PROCEDURE_MARKERS
 
 
 def test_write_skill_diagnose_wiring_and_fields():
@@ -104,11 +169,9 @@ def test_write_skill_diagnose_wiring_and_fields():
         trajectory_success=False,
         success=False,
     )
-    handle = make_fake_handle(script="lesson text")
+    handle = make_fake_handle(script=json_script(DIAGNOSE_SECTIONS))
 
-    skill = write_skill(
-        subtask, STEPS_VIEW, WEAK_PROFILE, "diagnose", handle
-    )
+    skill = write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "diagnose", handle)
 
     assert len(handle.client.calls) == 1
     expected = get_prompt("SKILL_DIAGNOSE").format(
@@ -119,12 +182,13 @@ def test_write_skill_diagnose_wiring_and_fields():
         weak_profile=WEAK_PROFILE,
     )
     assert handle.client.calls[0]["user"] == expected
-    assert skill.content == "lesson text"
+    assert skill.content == DIAGNOSE_CONTENT
+    assert skill_markers(skill.content) == FAILURE_REFERENCE_MARKERS
 
 
 def test_write_skill_invalid_mode_raises_before_any_call():
     subtask = make_subtask()
-    handle = make_fake_handle(script="unused")
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
 
     with pytest.raises(ValueError, match="distill"):
         write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "bogus", handle)
@@ -132,16 +196,221 @@ def test_write_skill_invalid_mode_raises_before_any_call():
     assert handle.client.calls == []
 
 
+def test_write_skill_distill_guard_rejects_failed_subtask():
+    # Procedure material must be a succeeded subtask; an old v1 selection
+    # rule feeding failures into the v2 prompt is refused loudly, before
+    # any model call.
+    subtask = make_subtask(
+        source="strong",
+        trajectory_success=False,
+        success=False,
+    )
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
+
+    with pytest.raises(ValueError, match="requires subtask.success is True"):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+    assert handle.client.calls == []
+
+
+def test_write_skill_diagnose_guard_rejects_succeeded_subtask():
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(DIAGNOSE_SECTIONS))
+
+    with pytest.raises(ValueError, match="requires subtask.success is False"):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "diagnose", handle)
+
+    assert handle.client.calls == []
+
+
+def test_write_skill_non_object_json_raises():
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(["not", "an", "object"]))
+
+    with pytest.raises(ModelOutputError, match="JSON object"):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+
+def test_write_skill_missing_field_raises():
+    subtask = make_subtask()
+    payload = dict(DISTILL_SECTIONS)
+    del payload["verify"]
+    handle = make_fake_handle(script=json_script(payload))
+
+    with pytest.raises(ModelOutputError, match="verify"):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+
+def test_write_skill_empty_checklist_raises():
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script({
+        **DISTILL_SECTIONS, "steps": []}))
+
+    with pytest.raises(ModelOutputError, match="steps"):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+
+def test_write_skill_strips_self_numbered_checklist_items():
+    # The G2 prompts forbid self-numbering; a stray "1. " is stripped by the
+    # renderer, never double-numbered.
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script({
+        **DISTILL_SECTIONS,
+        "steps": ["1. Check the credentials in the config file.",
+                  "2) Restart the service."],
+    }))
+
+    skill = write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+    lines = skill.content.split("\n")
+    assert lines[2] == "1. Check the credentials in the config file."
+    assert lines[3] == "2. Restart the service."
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("when_to_use", ""),                       # empty string field
+        ("when_to_use", "   "),                    # whitespace-only field
+        ("verify", 7),                             # non-string field
+        ("steps", [""]),                           # empty checklist item
+        ("steps", ["1. "]),                        # self-numbering only
+        ("steps", ["   "]),                        # whitespace-only item
+        ("steps", [7]),                            # non-string item
+        ("steps", "not a list"),                   # checklist wrong type
+        ("when_to_use", "line one\nline two"),      # embedded newline
+        ("when_to_use", "[Trigger] forged"),       # forged section marker
+        ("steps", ["[Steps] do x"]),               # forged marker on an item
+    ],
+)
+def test_write_skill_bad_fields_raise(field, value):
+    # Field-level failures are terminal (gen_exam precedent): no in-block
+    # retry, the unit lands in the model_output_failed ledger.
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script({
+        **DISTILL_SECTIONS, field: value}))
+
+    with pytest.raises(ModelOutputError):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+
 def test_write_skill_passes_usage_through():
     subtask = make_subtask()
     usage = RecordingUsage()
-    handle = make_fake_handle(script="s")
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
 
     write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle, usage=usage)
 
     assert len(usage.records) == 1
     assert usage.records[0]["prompt"] == "SKILL_DISTILL"
     assert usage.records[0]["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# render_skill_content / validate_skill_sections / skill_markers
+# ---------------------------------------------------------------------------
+
+def test_render_skill_content_distill_is_exact_marker_text():
+    lines = render_skill_content("distill", DISTILL_SECTIONS).split("\n")
+    assert lines == [
+        "[When to use] When the service rejects a login.",
+        "[Steps]",
+        "1. Check the credentials in the config file.",
+        "2. Restart the service.",
+        "[Verify] The service accepts the login.",
+        "[Do not use when] The subtask is not about logging in.",
+    ]
+
+
+def test_render_skill_content_diagnose_is_exact_marker_text():
+    lines = render_skill_content("diagnose", DIAGNOSE_SECTIONS).split("\n")
+    assert lines == [
+        "[Trigger] You edit the config while the service is running.",
+        "[Why it fails] The running service overwrites your edit on restart.",
+        "[Do instead]",
+        "1. Stop the service.",
+        "2. Edit the config.",
+        "3. Start the service.",
+        "[Do not use when] The subtask is not about the config.",
+    ]
+
+
+def test_render_is_deterministic():
+    # Same sections in, byte-identical content out (decision section 4.2's
+    # stage-3 invariate).
+    for mode, sections in (("distill", DISTILL_SECTIONS),
+                           ("diagnose", DIAGNOSE_SECTIONS)):
+        assert (render_skill_content(mode, sections)
+                == render_skill_content(mode, sections))
+
+
+def test_validate_skill_sections_accepts_legal_payloads():
+    validate_skill_sections("distill", DISTILL_SECTIONS)
+    validate_skill_sections("diagnose", DIAGNOSE_SECTIONS)
+    # Extra keys are ignored (lenient read, gen_exam precedent)...
+    validate_skill_sections("distill", {**DISTILL_SECTIONS, "extra": "x"})
+    # ...but the checklist type check is never skipped.
+    with pytest.raises(ModelOutputError, match="steps"):
+        validate_skill_sections(
+            "distill", {**DISTILL_SECTIONS, "steps": "1. not a list"})
+
+
+def test_validate_skill_sections_non_dict_raises():
+    with pytest.raises(ModelOutputError, match="JSON object"):
+        validate_skill_sections("distill", ["not", "an", "object"])
+
+
+def test_render_and_validate_reject_unknown_mode():
+    with pytest.raises(ValueError, match="mode"):
+        render_skill_content("bogus", DISTILL_SECTIONS)
+    with pytest.raises(ValueError, match="mode"):
+        validate_skill_sections("bogus", DISTILL_SECTIONS)
+
+
+def test_skill_markers_reads_complete_sets():
+    assert skill_markers(DISTILL_CONTENT) == PROCEDURE_MARKERS
+    assert skill_markers(DIAGNOSE_CONTENT) == FAILURE_REFERENCE_MARKERS
+
+
+def test_skill_markers_partial_set_is_none():
+    partial = "\n".join(
+        line for line in DISTILL_CONTENT.split("\n")
+        if not line.startswith("[Verify]"))
+    assert "[Verify]" not in partial
+    assert skill_markers(partial) is None
+
+
+def test_skill_markers_mixed_sets_are_none():
+    # A failure-only marker forged into a procedure skill leaves the shared
+    # "[Do not use when]" unable to disambiguate: neither set is complete
+    # and clean, so the content reads as None.
+    mixed = DISTILL_CONTENT + "\n[Trigger] forged"
+    assert skill_markers(mixed) is None
+    both = DISTILL_CONTENT + "\n" + DIAGNOSE_CONTENT
+    assert skill_markers(both) is None
+
+
+def test_skill_markers_is_line_start_anchored():
+    # Every marker present but mid-line -- exactly what the single-line
+    # compressed injection block looks like: no set is read off it.
+    one_line = " ".join(DISTILL_CONTENT.split("\n"))
+    for marker in PROCEDURE_MARKERS:
+        assert marker in one_line
+    assert skill_markers(one_line) is None
+    # Indented markers do not anchor either: the marker must sit at
+    # column 0, so a bolded or indented variant reads as None.
+    indented = "\n".join("    " + line
+                         for line in DISTILL_CONTENT.split("\n"))
+    assert skill_markers(indented) is None
+
+
+def test_render_and_skill_markers_roundtrip():
+    assert skill_markers(
+        render_skill_content("distill", DISTILL_SECTIONS)) \
+        == PROCEDURE_MARKERS
+    assert skill_markers(
+        render_skill_content("diagnose", DIAGNOSE_SECTIONS)) \
+        == FAILURE_REFERENCE_MARKERS
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +513,76 @@ def test_rewrite_skill_wiring_and_result():
     assert skill.content == "Check the config exists before reading it."
     assert skill.version == 1
     assert skill.rewrite_history == []
+
+
+def test_rewrite_skill_keeps_the_marker_set():
+    subtask = make_subtask()
+    skill = make_marker_skill(subtask)
+    rewritten = render_skill_content("distill", {
+        **DISTILL_SECTIONS,
+        "steps": ["Check the credentials before every login."],
+        "verify": "The login succeeds on the first try.",
+    })
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "misread",
+        "skill_text": rewritten,
+        "rewrite_reason": "Simplified the trigger wording.",
+    }))
+
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+    assert result["content"] == rewritten
+    assert result["failure_category"] == "misread"
+    assert skill_markers(result["content"]) == PROCEDURE_MARKERS
+
+
+def test_rewrite_skill_dropping_the_markers_raises():
+    # The rewrite must keep the four sections, not collapse them into
+    # prose: prose in the bank would silently disarm every marker-based
+    # consumer (K5 isochrony check, retrieval routing).
+    subtask = make_subtask()
+    skill = make_marker_skill(subtask)
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "misread",
+        "skill_text": "Do X when Y, in plain prose.",
+        "rewrite_reason": "Collapsed the sections.",
+    }))
+
+    with pytest.raises(ModelOutputError, match="bracket sections"):
+        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+
+def test_rewrite_skill_switching_marker_kind_raises():
+    # Set equality, not substring containment: a rewrite that swaps the
+    # procedure sections for failure-reference sections is rejected even
+    # though it carries four markers.
+    subtask = make_subtask()
+    skill = make_marker_skill(subtask)
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "misread",
+        "skill_text": DIAGNOSE_CONTENT,
+        "rewrite_reason": "Rewrote it as a failure reference.",
+    }))
+
+    with pytest.raises(ModelOutputError, match="bracket sections"):
+        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+
+def test_rewrite_skill_unmarked_original_skips_the_marker_check():
+    # test/foreign-content tolerance (unreachable in a pure v2 run): an
+    # original without markers is rewritten without a marker check, prose
+    # in, prose out.
+    subtask = make_subtask()
+    skill = make_skill(subtask)
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "misread",
+        "skill_text": "Do X when Y, still plain prose.",
+        "rewrite_reason": "Simplified.",
+    }))
+
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+    assert result["content"] == "Do X when Y, still plain prose."
 
 
 @pytest.mark.parametrize("category", ["catastrophe", "", None, 3])

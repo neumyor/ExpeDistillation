@@ -115,6 +115,18 @@ def _all_valid_failed(metrics: dict, n_attempts: int) -> bool:
     )
 
 
+@TASK_SELECT.register("any_weak_failed")
+def _any_weak_failed(metrics: dict, n_attempts: int) -> bool:
+    """Stage-1 F-set rule, protocol v2: a task enters F when the weak model
+    has at least one failed VALID attempt (success < valid). A task whose
+    every valid attempt succeeded stays out (nothing to fix on it), and a
+    task with no valid attempt at all stays out too (infra is not a model
+    failure, README 1.3). A task with a partial sample (0 < valid <
+    n_attempts) and a real failure DOES enter F -- and is still listed in
+    infra_shortfalls; the two lists are no longer disjoint by construction."""
+    return metrics["valid"] > 0 and metrics["success"] < metrics["valid"]
+
+
 @SEGMENT_SELECT.register("strong_all_weak_failed")
 def _strong_all_weak_failed(subtask: Subtask) -> bool:
     """Stage-3 D6 rule (README D6).
@@ -125,6 +137,18 @@ def _strong_all_weak_failed(subtask: Subtask) -> bool:
     nothing to diagnose in a segment the weak model already handled.
     """
     return subtask.source == "strong" or subtask.success is False
+
+
+@SEGMENT_SELECT.register("strong_success_weak_failed")
+def _strong_success_weak_failed(subtask: Subtask) -> bool:
+    """Stage-3 D6 rule, protocol v2: keep a strong segment only when the
+    segment itself succeeded (procedure material), a weak segment only when
+    it failed (diagnosis material). The v1 rule strong_all_weak_failed stays
+    registered but is INCOMPATIBLE with the v2 G2 prompts (a failed strong
+    segment would hit write_skill's distill guard)."""
+    if subtask.source == "strong":
+        return subtask.success is True
+    return subtask.success is False
 
 
 @TRAJECTORY_SELECT.register("all")
@@ -150,11 +174,15 @@ def _strong2_weak2(
     so strong trajectories are ordered successes first (stable within the
     bucket by trajectory_id), then failures; the weak arm's failures are the
     diagnosis material by design (README D6 keeps only failed weak segments
-    anyway -- on F tasks every weak trajectory failed, so in practice the
-    weak quota takes the first two by trajectory_id), so weak trajectories
-    are ordered failures first, then successes. Fewer available than the
-    quota is fine: take what exists. ``infra_error`` trajectories are never
-    stored (K1), so "not the preferred status" covers them deterministically.
+    anyway), so weak trajectories are ordered failures first, then
+    successes. Under the v1 F rule every weak trajectory on an F task had
+    failed, so that failure-first order never actually had to choose; under
+    the protocol v2 rule ``any_weak_failed`` a mixed task (some weak
+    successes, some weak failures) enters F too, and for the first time the
+    failure-first ordering does real work -- the weak quota spends itself on
+    the failures before the successes. Fewer available than the quota is
+    fine: take what exists. ``infra_error`` trajectories are never stored
+    (K1), so "not the preferred status" covers them deterministically.
     """
     selected: List[Trajectory] = []
     # Materialize once: the two role passes must not re-consume the input
