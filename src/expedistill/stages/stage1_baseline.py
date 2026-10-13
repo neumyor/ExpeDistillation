@@ -138,10 +138,10 @@ def _workers(ctx: StageContext) -> int:
     return int(workers)
 
 
-def _infra_breaker(ctx: Any) -> int:
-    """K1's circuit-breaker run setting from the context (the pipeline sets
-    it), else K1's own default."""
-    return int(getattr(ctx, "infra_breaker", 5))
+def _k1_stagger(ctx: Any) -> float:
+    """K1's per-unit dispatch stagger run setting from the context (the
+    pipeline sets it), else K1's own default of no stagger."""
+    return float(getattr(ctx, "k1_stagger", 0.0))
 
 
 def _allow_infra_shortfall(ctx: StageContext) -> bool:
@@ -190,7 +190,7 @@ def _run_arm(ctx: StageContext, *, tasks: Sequence[Any], role: str,
         usage=ctx.usage,
         run_dir=ctx.run_dir,
         workers=_workers(ctx),
-        infra_breaker=_infra_breaker(ctx),
+        dispatch_stagger=_k1_stagger(ctx),
         skip_unit_ids=accepted,
     )
     trajectories = [traj for traj in trajectories

@@ -386,7 +386,7 @@ def test_resume_command_quotes_paths_and_keeps_infra_flags(
     assert float(argv[argv.index("--llm-infra-backoff") + 1]) == 2.0
 
 
-def test_run_passes_shortfall_and_breaker_settings(monkeypatch, tmp_path):
+def test_run_passes_shortfall_and_stagger_settings(monkeypatch, tmp_path):
     calls = {}
     monkeypatch.setattr(cli, "run_pipeline",
                         lambda **kwargs: calls.update(kwargs))
@@ -394,18 +394,18 @@ def test_run_passes_shortfall_and_breaker_settings(monkeypatch, tmp_path):
             "--run-dir", str(tmp_path / "run")]
     assert cli.main(base) == 0
     assert calls["allow_infra_shortfall"] is False
-    assert calls["infra_breaker"] == 5
+    assert calls["k1_stagger"] == 0.0
     assert cli.main(base + ["--allow-infra-shortfall",
-                            "--infra-breaker", "0"]) == 0
+                            "--k1-stagger", "1.5"]) == 0
     assert calls["allow_infra_shortfall"] is True
-    assert calls["infra_breaker"] == 0
+    assert calls["k1_stagger"] == 1.5
 
 
 @pytest.mark.parametrize("extra, shortfall", [
     pytest.param([], False, id="strict"),
     pytest.param(["--allow-infra-shortfall"], True, id="accepting"),
 ])
-def test_resume_command_keeps_shortfall_and_breaker(
+def test_resume_command_keeps_shortfall_and_stagger(
         monkeypatch, capsys, tmp_path, extra, shortfall):
     import shlex
 
@@ -415,15 +415,16 @@ def test_resume_command_keeps_shortfall_and_breaker(
     monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
     code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
                      "--run-dir", str(tmp_path / "r"),
-                     "--infra-breaker", "9", *extra])
+                     "--k1-stagger", "2.5", *extra])
     assert code == cli.EXIT_INFRA_RESUMABLE
     argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert argv[argv.index("--infra-breaker") + 1] == "9"
+    assert float(argv[argv.index("--k1-stagger") + 1]) == 2.5
     assert ("--allow-infra-shortfall" in argv) is shortfall
 
 
 @pytest.mark.parametrize("flag, value, setting", [
-    ("--infra-breaker", "-1", "infra_breaker"),
+    ("--k1-stagger", "-1", "k1_stagger"),
+    ("--k1-stagger", "nan", "k1_stagger"),
     ("--llm-infra-retries", "-2", "llm_infra_retries"),
     ("--llm-infra-backoff", "nan", "llm_infra_backoff_seconds"),
     ("--llm-timeout", "0", "llm_timeout_sec"),
@@ -467,15 +468,6 @@ def test_run_model_output_error_exits_one_with_resume_hint(
     assert "re-run the same command" in captured.err
     assert "expedistill run --config" in captured.err
     assert captured.out == ""
-
-
-def test_infra_breaker_help_counts_distinct_tasks():
-    parser = cli.build_parser()
-    run_parser = parser._subparsers._group_actions[0].choices["run"]
-    help_text = next(action.help for action in run_parser._actions
-                     if "--infra-breaker" in action.option_strings)
-    assert "distinct tasks" in help_text
-    assert "consecutive infra-exhausted execution units" not in help_text
 
 
 # ---------------------------------------------------------------------------

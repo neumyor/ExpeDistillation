@@ -681,7 +681,7 @@ def test_transient_infra_error_is_retried_and_run_completes(
 
 
 # ---------------------------------------------------------------------------
-# Infra holes, the shortfall escape hatch, and the K1 circuit breaker
+# Infra holes, the shortfall escape hatch, and the K1 dispatch stagger
 # ---------------------------------------------------------------------------
 
 class BareT2InfraPlugin(FakePipelinePlugin):
@@ -705,8 +705,35 @@ def infra_plugin(monkeypatch):
     _reset_registry()
 
 
+@pytest.fixture
+def k1_zero_backoff(monkeypatch):
+    """Pin K1's infra-retry knobs at the pre-resilience values for the
+    tests whose plugin burns real retries (t2 always infra-errors).
+
+    The stages have no run setting for K1's retry knobs, so the pin goes
+    through the call: a transparent wrapper around each stage's
+    ``batch_execute`` injects ``infra_retries=1`` and a zero backoff.
+    Without it the resilience defaults (2 retries, 15-45s random backoff)
+    would sleep for real between t2's attempts and slow these tests by
+    minutes; the pipeline's assertions are timing-agnostic either way.
+    """
+    from expedistill.stages import stage1_baseline, stage6_test
+
+    def injecting(real):
+        def wrapper(**kwargs):
+            kwargs.setdefault("infra_retries", 1)
+            kwargs.setdefault("infra_backoff", (0.0, 0.0))
+            return real(**kwargs)
+        return wrapper
+
+    monkeypatch.setattr(stage1_baseline, "batch_execute",
+                        injecting(stage1_baseline.batch_execute))
+    monkeypatch.setattr(stage6_test, "batch_execute",
+                        injecting(stage6_test.batch_execute))
+
+
 def test_stage1_infra_hole_stops_the_pipeline(
-        infra_plugin, config_path, tmp_path):
+        infra_plugin, k1_zero_backoff, config_path, tmp_path):
     from expedistill.infra.reliability import InfrastructureError
 
     run_dir = tmp_path / "run"
@@ -721,7 +748,7 @@ def test_stage1_infra_hole_stops_the_pipeline(
 
 
 def test_allowed_infra_shortfall_completes_and_ledger_says_so(
-        infra_plugin, config_path, tmp_path, capsys):
+        infra_plugin, k1_zero_backoff, config_path, tmp_path, capsys):
     run_dir = tmp_path / "run"
     result = run_pipeline(config_path=config_path, run_dir=run_dir,
                           make_client=ClientLog().make_client,
@@ -739,7 +766,7 @@ def test_allowed_infra_shortfall_completes_and_ledger_says_so(
     assert "infra shortfall" in err
 
 
-def test_infra_breaker_reaches_every_k1_call(
+def test_k1_stagger_reaches_every_k1_call(
         plugin, config_path, tmp_path, monkeypatch):
     from expedistill.stages import stage1_baseline, stage6_test
 
@@ -747,7 +774,7 @@ def test_infra_breaker_reaches_every_k1_call(
 
     def spy(real):
         def wrapper(**kwargs):
-            seen.append(kwargs.get("infra_breaker", "default"))
+            seen.append(kwargs.get("dispatch_stagger", "missing"))
             return real(**kwargs)
         return wrapper
 
@@ -758,11 +785,11 @@ def test_infra_breaker_reaches_every_k1_call(
     run_pipeline(config_path=config_path, run_dir=tmp_path / "a",
                  make_client=ClientLog().make_client)
     # Full mode: stage 1 strong + weak, stage 6 with-bank only.
-    assert seen == [5, 5, 5]
+    assert seen == [0.0, 0.0, 0.0]
     seen.clear()
     run_pipeline(config_path=config_path, run_dir=tmp_path / "b",
-                 make_client=ClientLog().make_client, infra_breaker=2)
-    assert seen == [2, 2, 2]
+                 make_client=ClientLog().make_client, k1_stagger=0.05)
+    assert seen == [0.05, 0.05, 0.05]
 
 
 # ---------------------------------------------------------------------------
@@ -783,7 +810,8 @@ def test_infra_breaker_reaches_every_k1_call(
     ("llm_timeout_sec", float("inf")),
     ("llm_timeout_sec", True),
     ("llm_timeout_sec", "300"),
-    ("infra_breaker", -1),
+    ("k1_stagger", -1),
+    ("k1_stagger", float("nan")),
     ("allow_infra_shortfall", "yes"),
     ("until_stage", -1),
     ("until_stage", 7),
@@ -805,7 +833,7 @@ def test_bad_run_setting_is_config_error_before_anything_runs(
 
 
 def test_accepted_shortfall_survives_resume_without_flag(
-        infra_plugin, config_path, tmp_path, monkeypatch):
+        infra_plugin, k1_zero_backoff, config_path, tmp_path, monkeypatch):
     run_dir = tmp_path / "run"
     first = run_pipeline(config_path=config_path, run_dir=run_dir,
                          make_client=ClientLog().make_client,

@@ -189,7 +189,7 @@ def _build_handles(
 
 def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
                         llm_infra_backoff_seconds: Any, llm_timeout_sec: Any,
-                        infra_breaker: Any,
+                        k1_stagger: Any,
                         allow_infra_shortfall: Any, until_stage: Any) -> None:
     """Reject bad run settings as ConfigError before anything runs.
 
@@ -216,9 +216,11 @@ def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
             or not math.isfinite(timeout) or timeout <= 0):
         problems.append("llm_timeout_sec must be a finite number > 0, "
                         f"got {timeout!r}")
-    if not is_int(infra_breaker) or infra_breaker < 0:
-        problems.append(f"infra_breaker must be an int >= 0 (0 disables), "
-                        f"got {infra_breaker!r}")
+    stagger = k1_stagger
+    if (isinstance(stagger, bool) or not isinstance(stagger, (int, float))
+            or not math.isfinite(stagger) or stagger < 0):
+        problems.append("k1_stagger must be a finite number >= 0, "
+                        f"got {stagger!r}")
     if not isinstance(allow_infra_shortfall, bool):
         problems.append("allow_infra_shortfall must be a bool, got "
                         f"{allow_infra_shortfall!r}")
@@ -259,7 +261,7 @@ def run_pipeline(
     llm_infra_backoff_seconds: float = 5.0,
     llm_timeout_sec: float = 300.0,
     allow_infra_shortfall: bool = False,
-    infra_breaker: int = 5,
+    k1_stagger: float = 0.0,
     until_stage: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run stages 0-6 over ``run_dir``; return the LAST EXECUTED stage's
@@ -304,11 +306,12 @@ def run_pipeline(
     infra, the stage summary records ``infra_shortfall_accepted: true``, its
     ledger line carries the same flag at top level, and a warning goes to
     stderr. The flag itself is not frozen: it only decides whether NEW holes
-    are accepted. ``infra_breaker``
-    is K1's circuit breaker, passed to every K1 call: once the current
-    streak of infra-exhausted units spans that many DISTINCT tasks, the rest
-    of the batch is skipped until resume (repeated failures of one task never
-    open it; 0 disables).
+    are accepted.
+
+    ``k1_stagger`` is the per-unit random startup jitter in seconds passed
+    to every K1 call (default 0): it spreads the ssh connections of parallel
+    unit dispatches, and it is operational like ``workers`` -- not frozen
+    into the manifest, so a resume may change it.
 
     The run lock is taken for the whole pipeline; a stale lock is taken over
     with its warning printed to stderr (RunLock names the dead holder). The
@@ -319,7 +322,7 @@ def run_pipeline(
         workers=workers, llm_infra_retries=llm_infra_retries,
         llm_infra_backoff_seconds=llm_infra_backoff_seconds,
         llm_timeout_sec=llm_timeout_sec,
-        infra_breaker=infra_breaker,
+        k1_stagger=k1_stagger,
         allow_infra_shortfall=allow_infra_shortfall,
         until_stage=until_stage)
     config_path = Path(config_path)
@@ -359,7 +362,7 @@ def run_pipeline(
         # carries no field for it yet.
         ctx.workers = workers
         ctx.allow_infra_shortfall = allow_infra_shortfall
-        ctx.infra_breaker = infra_breaker
+        ctx.k1_stagger = k1_stagger
 
         def record(name: str, summary: Dict[str, Any]) -> Dict[str, Any]:
             row: Dict[str, Any] = {"stage": name,

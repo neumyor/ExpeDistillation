@@ -91,6 +91,28 @@ def _outcome(task_id, status):
     )
 
 
+def _pin_k1_infra(monkeypatch):
+    """Run K1 at the pre-resilience retry settings (one infra retry, zero
+    backoff) in the tests whose t2 always infra-errors.
+
+    The stage has no run setting for K1's retry knobs, so the pin goes
+    through the call: a transparent wrapper around the stage's
+    ``batch_execute`` injects the values these tests were written against
+    (initial + one retry). Without it K1's resilience defaults (2 retries,
+    15-45s random backoff) would both change the plugin call counts and
+    sleep for real between t2's attempts, slowing the suite by minutes.
+    """
+    def injecting(real):
+        def wrapper(**kwargs):
+            kwargs.setdefault("infra_retries", 1)
+            kwargs.setdefault("infra_backoff", (0.0, 0.0))
+            return real(**kwargs)
+        return wrapper
+
+    monkeypatch.setattr(stage1_baseline, "batch_execute",
+                        injecting(stage1_baseline.batch_execute))
+
+
 def _install_plugin(monkeypatch, plugin):
     """Serve ``plugin``'s package through the real import machinery
     (same contract as tests/unit/blocks/test_execute.py)."""
@@ -226,6 +248,7 @@ _T2_WEAK_UNITS = [f"traj/{_prefixed('t2')}/weak/00",
 
 
 def test_infra_holes_write_summary_then_raise(monkeypatch, tmp_path):
+    _pin_k1_infra(monkeypatch)
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=_t2_weak_infra))
     ctx = make_ctx(tmp_path, make_config())
     tasks = list(TASK_IDS)
@@ -247,6 +270,7 @@ def test_infra_holes_write_summary_then_raise(monkeypatch, tmp_path):
 
 
 def test_accepted_infra_shortfall_counts_holes_as_infra(monkeypatch, tmp_path):
+    _pin_k1_infra(monkeypatch)
     _install_plugin(monkeypatch, StagePlugin(behavior=_t2_weak_infra))
     ctx = make_ctx(tmp_path, make_config())
     ctx.allow_infra_shortfall = True
@@ -274,6 +298,7 @@ def test_accepted_infra_shortfall_counts_holes_as_infra(monkeypatch, tmp_path):
 
 
 def test_resume_after_infra_holes_completes(monkeypatch, tmp_path):
+    _pin_k1_infra(monkeypatch)
     healthy = {"on": False}
 
     def behavior(record):
@@ -380,6 +405,7 @@ def test_task_select_read_from_config_rules(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_accepted_shortfall_is_durable_across_resume(monkeypatch, tmp_path):
+    _pin_k1_infra(monkeypatch)
     healthy = {"on": False}
 
     def behavior(record):
@@ -412,6 +438,7 @@ def test_accepted_shortfall_is_durable_across_resume(monkeypatch, tmp_path):
 
 
 def test_accepted_set_is_written_before_F_is_derived(monkeypatch, tmp_path):
+    _pin_k1_infra(monkeypatch)
     _install_plugin(monkeypatch, StagePlugin(behavior=_t2_weak_infra))
     ctx = make_ctx(tmp_path, make_config())
     ctx.allow_infra_shortfall = True
@@ -428,6 +455,7 @@ def test_accepted_set_is_written_before_F_is_derived(monkeypatch, tmp_path):
 
 
 def test_accepted_unit_stored_later_is_still_excluded(monkeypatch, tmp_path):
+    _pin_k1_infra(monkeypatch)
     # Belt and braces: even if some producer stores an accepted unit later,
     # the stage keeps scoring it as the accepted hole, so F cannot move.
     _install_plugin(monkeypatch, StagePlugin(behavior=_t2_weak_infra))

@@ -188,6 +188,29 @@ def _run_stage6(ctx, monkeypatch, plugin, tasks):
     return stage6_test.run(ctx, test_tasks=tasks)
 
 
+def _pin_k1_infra(monkeypatch):
+    """Run K1 at the pre-resilience retry settings (one infra retry, zero
+    backoff) in the tests whose with-bank t2 always infra-errors.
+
+    The stage has no run setting for K1's retry knobs, so the pin goes
+    through the call: a transparent wrapper around the stage's
+    ``batch_execute`` injects the values these tests were written against
+    (initial + one retry per attempt). Without it K1's resilience defaults
+    (2 retries, 15-45s random backoff) would both change the plugin call
+    counts and sleep for real between t2's attempts, slowing the suite by
+    minutes.
+    """
+    def injecting(real):
+        def wrapper(**kwargs):
+            kwargs.setdefault("infra_retries", 1)
+            kwargs.setdefault("infra_backoff", (0.0, 0.0))
+            return real(**kwargs)
+        return wrapper
+
+    monkeypatch.setattr(stage6_test, "batch_execute",
+                        injecting(stage6_test.batch_execute))
+
+
 def _summary_path(ctx):
     return (ctx.run_dir / stage6_test.TEST_DIR
             / stage6_test.SUMMARY_NAME)
@@ -380,6 +403,7 @@ def _units(task_id, n=2):
 
 
 def test_infra_holes_write_summary_then_raise(tmp_path, monkeypatch):
+    _pin_k1_infra(monkeypatch)
     # Real K1 path: the with-bank arm's t2 units come back as nothing.
     ctx = _make_ctx(tmp_path, "split")
     plugin = RecordingPlugin(_bank_t2_infra)
@@ -395,6 +419,7 @@ def test_infra_holes_write_summary_then_raise(tmp_path, monkeypatch):
 
 
 def test_accepted_shortfall_keeps_one_denominator(tmp_path, monkeypatch):
+    _pin_k1_infra(monkeypatch)
     # Reviewer probe: before the fix the with-bank arm silently had tasks=1
     # against the control's tasks=2, and a delta was reported anyway.
     ctx = _make_ctx(tmp_path, "split")
@@ -457,6 +482,7 @@ def test_delta_conservative_defined_when_conditional_is_none():
 
 
 def test_accepted_shortfall_is_durable_across_resume(tmp_path, monkeypatch):
+    _pin_k1_infra(monkeypatch)
     healthy = {"on": False}
 
     def outcome(task_id, token, armed):

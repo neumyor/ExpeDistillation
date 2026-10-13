@@ -125,10 +125,10 @@ def _workers(ctx: Any) -> int:
     return int(workers)
 
 
-def _infra_breaker(ctx: Any) -> int:
-    """K1's circuit-breaker run setting from the context (the pipeline sets
-    it), else K1's own default."""
-    return int(getattr(ctx, "infra_breaker", 5))
+def _k1_stagger(ctx: Any) -> float:
+    """K1's per-unit dispatch stagger run setting from the context (the
+    pipeline sets it), else K1's own default of no stagger."""
+    return float(getattr(ctx, "k1_stagger", 0.0))
 
 
 def _allow_infra_shortfall(ctx: Any) -> bool:
@@ -294,7 +294,7 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         usage=ctx.usage,
         run_dir=ctx.run_dir,
         workers=_workers(ctx),
-        infra_breaker=_infra_breaker(ctx),
+        dispatch_stagger=_k1_stagger(ctx),
         skip_unit_ids=frozenset(accepted["with_bank"]),
     )
 
@@ -321,7 +321,7 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
             usage=ctx.usage,
             run_dir=ctx.run_dir,
             workers=_workers(ctx),
-            infra_breaker=_infra_breaker(ctx),
+            dispatch_stagger=_k1_stagger(ctx),
             skip_unit_ids=frozenset(accepted["control"]),
         )
         control_source = "fresh_bare_run"

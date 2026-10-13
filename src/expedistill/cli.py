@@ -135,7 +135,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         llm_infra_backoff_seconds=args.llm_infra_backoff,
         llm_timeout_sec=args.llm_timeout,
         allow_infra_shortfall=args.allow_infra_shortfall,
-        infra_breaker=args.infra_breaker,
+        k1_stagger=args.k1_stagger,
         until_stage=args.until_stage,
     )
     return 0
@@ -152,7 +152,7 @@ def _resume_command(args: argparse.Namespace) -> str:
         "--llm-infra-retries", str(args.llm_infra_retries),
         "--llm-infra-backoff", str(args.llm_infra_backoff),
         "--llm-timeout", str(args.llm_timeout),
-        "--infra-breaker", str(args.infra_breaker),
+        "--k1-stagger", str(args.k1_stagger),
     ]
     if args.until_stage is not None:
         # Kept so re-running the hint stops at the same stage again; a run
@@ -246,11 +246,10 @@ def build_parser() -> argparse.ArgumentParser:
                           "legitimately take minutes, so lower it only when "
                           "the endpoint is unstable and hung requests would "
                           "otherwise burn the full timeout each")
-    run.add_argument("--infra-breaker", type=int, default=5,
-                     help="skip the rest of an execution batch until resume "
-                          "once the current streak of infra-exhausted units "
-                          "spans this many distinct tasks (one task failing "
-                          "repeatedly never trips it; 0 disables; default 5)")
+    run.add_argument("--k1-stagger", type=float, default=0.0,
+                     help="per-unit random startup jitter in seconds "
+                          "(default 0); spreads the ssh connections of "
+                          "parallel unit dispatches")
     run.add_argument("--until-stage", type=int, default=None, metavar="N",
                      help="run only stages 0 through N, inclusive (default: "
                           "all stages). Operational, not frozen: a stopped "

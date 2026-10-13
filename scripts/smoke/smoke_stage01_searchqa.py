@@ -124,7 +124,6 @@ def main() -> int:
         )
         ctx.workers = 1
         ctx.allow_infra_shortfall = False
-        ctx.infra_breaker = 5
 
         t0 = time.time()
         s0 = stage0_freeze.run(ctx)

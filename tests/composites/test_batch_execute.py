@@ -44,7 +44,7 @@ from expedistill.infra.reliability import (
     ProviderRefusalError,
     UnitFailureRecorder,
 )
-from expedistill.infra.store import Store
+from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import make_fake_handle
 from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink, trial_files
 
@@ -184,6 +184,54 @@ def _fingerprint(traj):
     )
 
 
+def _real_batch_module():
+    """The real batch_execute module object.
+
+    The composites package ``__init__`` rebinds the attribute
+    ``expedistill.composites.batch_execute`` to the FUNCTION, so a plain
+    ``import ... as`` yields the function; the module (whose globals hold
+    ``random``, ``time`` and ``_HEARTBEAT_SECONDS``) must come from
+    importlib.
+    """
+    return importlib.import_module("expedistill.composites.batch_execute")
+
+
+def _record_batch_sleeps(monkeypatch):
+    """Replace the real module's ``time`` with a recorder namespace: every
+    stagger sleep is recorded instead of slept, while the heartbeat's
+    monotonic clock and the audit timestamps keep the real functions."""
+    module = _real_batch_module()
+    real = module.time
+    sleeps = []
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(
+        sleep=sleeps.append, monotonic=real.monotonic, time=real.time))
+    return sleeps
+
+
+def _record_reliability_sleeps(monkeypatch):
+    """Same for with_retries' sleeper (infra backoff waits)."""
+    module = importlib.import_module("expedistill.infra.reliability")
+    real = module.time
+    waits = []
+    monkeypatch.setattr(module, "time", types.SimpleNamespace(
+        sleep=waits.append, time=real.time))
+    return waits
+
+
+#: K1's pre-resilience behaviour, for tests that exercise an infra-retry
+#: path: one retry and zero backoff, so the test is immune to default
+#: changes and never sleeps for real (the default backoff draws 15-45s).
+_PLAIN_KNOBS = {"infra_retries": 1, "infra_backoff": (0.0, 0.0)}
+
+#: Every timing knob on: per-unit dispatch stagger plus K1's resilience
+#: defaults (2 infra retries, 15-45s random backoff). The tests patch the
+#: sleep functions, so nothing actually waits.
+_FULL_KNOBS = {"dispatch_stagger": 0.5}
+
+#: The default backoff bounds (asserted by the all-on variants).
+_BACKOFF_BOUNDS = (15.0, 45.0)
+
+
 # ---------------------------------------------------------------------------
 # Resume
 # ---------------------------------------------------------------------------
@@ -210,8 +258,18 @@ def test_resume_skips_completed_units(monkeypatch, tmp_path):
     assert [_fingerprint(t) for t in second] == [_fingerprint(t) for t in first]
 
 
+@pytest.mark.parametrize("knobs", [
+    pytest.param(_PLAIN_KNOBS, id="plain"),
+    pytest.param(_FULL_KNOBS, id="stagger_and_backoff"),
+])
 def test_interrupted_run_completes_only_the_missing_unit(
-        monkeypatch, tmp_path):
+        monkeypatch, tmp_path, knobs):
+    # The all-on variant is the AGENTS.md 8 rule 2 obligation: with every
+    # timing knob live (stagger per unit, 2 retries, 15-45s random backoff)
+    # an interrupted run must still resume to exactly the same result.
+    sleeps = _record_batch_sleeps(monkeypatch)
+    waits = _record_reliability_sleeps(monkeypatch)
+
     def fail_on_t3(record):
         if record["task_id"] == "t3":
             raise RuntimeError("simulated crash mid-run")
@@ -220,7 +278,7 @@ def test_interrupted_run_completes_only_the_missing_unit(
     plugin = RecordingPlugin(behavior=fail_on_t3)
     tasks = _tasks("t1", "t2", "t3")
     with pytest.raises(ParallelError):
-        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
+        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
     # The two units that finished before the crash are safely stored.
     store = Store(tmp_path / "r1")
     assert store.ids("trajectories") == [_expected_id("t1", 0),
@@ -228,16 +286,27 @@ def test_interrupted_run_completes_only_the_missing_unit(
 
     plugin.calls.clear()
     plugin.behavior = None
-    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
+    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                         **knobs)
     # Only the missing unit was executed again.
     assert [c["task_id"] for c in plugin.calls] == ["t3"]
     assert len(resumed) == 3
 
     # Same final state as an uninterrupted run over the same unit set.
     plugin.calls.clear()
-    whole = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r2")
+    whole = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r2",
+                       **knobs)
     assert [_fingerprint(t) for t in resumed] == \
         [_fingerprint(t) for t in whole]
+    if "dispatch_stagger" in knobs:
+        # The knobs really were live and changed nothing: one stagger sleep
+        # per started unit (3 before the crash, 1 on the resume, 3 on the
+        # clean run), and the crash path (a code bug) never hit the backoff.
+        assert len(sleeps) == 7
+        assert all(0 <= delay <= 0.5 for delay in sleeps)
+        assert waits == []
+    else:
+        assert waits == []
 
 
 def test_empty_tasks_returns_empty_result(monkeypatch, tmp_path):
@@ -257,8 +326,11 @@ def test_infra_error_retried_then_success(monkeypatch, tmp_path):
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=infra_once)
+    # Explicit knobs: immune to default changes, and the zero backoff keeps
+    # the retry instant (the default backoff sleeps for real between the
+    # attempts).
     result = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"),
-                        name="r1")
+                        name="r1", infra_retries=1, infra_backoff=(0.0, 0.0))
     # The retry succeeded, so the unit is present and nothing was recorded.
     assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
     assert result[0].status == "success"
@@ -270,7 +342,75 @@ def test_infra_error_retried_then_success(monkeypatch, tmp_path):
     assert UnitFailureRecorder(tmp_path / "r1").list_failures() == []
 
 
-def test_infra_exhausted_recorded_absent_and_resumed(monkeypatch, tmp_path):
+def test_infra_gives_up_after_the_configured_retries(monkeypatch, tmp_path):
+    def t2_always_infra(record):
+        if record["task_id"] == "t2":
+            return RunOutcome(status="infra_error",
+                              meta={"error": "dead endpoint"})
+        return _success(record["task_id"])
+
+    plugin = RecordingPlugin(behavior=t2_always_infra)
+    tasks = _tasks("t1", "t2")
+    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                        infra_retries=2, infra_backoff=(0.0, 0.0))
+    # The healthy unit is stored; the dead one burned its three tokens
+    # (a00 plus two retries) and is absent from the result.
+    assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
+    assert [c["attempt_token"] for c in plugin.calls
+            if c["task_id"] == "t2"] == ["a00", "a00r1", "a00r2"]
+    # Exactly one ledger line for the unit, however many attempts it burned.
+    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
+    assert [f["unit_id"] for f in failures] == [_expected_id("t2", 0)]
+
+    # A resume retries the unit from the next unused token (a00r3).
+    plugin.calls.clear()
+    plugin.behavior = None
+    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                         infra_retries=2, infra_backoff=(0.0, 0.0))
+    assert [c["attempt_token"] for c in plugin.calls] == ["a00r3"]
+    assert [t.trajectory_id for t in resumed] == [
+        _expected_id("t1", 0), _expected_id("t2", 0)]
+
+
+def test_backoff_sleeps_one_uniform_draw_before_the_retry(
+        monkeypatch, tmp_path):
+    def infra_once(record):
+        if record["attempt_token"] == "a00":
+            return RunOutcome(status="infra_error", meta={"error": "blip"})
+        return _success(record["task_id"])
+
+    plugin = RecordingPlugin(behavior=infra_once)
+    module = _real_batch_module()
+    draws = []
+
+    def fake_uniform(low, high):
+        draws.append((low, high))
+        return (low + high) / 2
+
+    monkeypatch.setattr(module, "random",
+                        types.SimpleNamespace(uniform=fake_uniform))
+    waits = _record_reliability_sleeps(monkeypatch)
+    result = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
+                        infra_backoff=_BACKOFF_BOUNDS)
+    assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
+    # One draw of random.uniform(*infra_backoff), its value fed to exactly
+    # one sleep before the retry -- and the retry ran under the fresh token.
+    assert draws == [_BACKOFF_BOUNDS]
+    assert waits == [30.0]
+    assert 15.0 <= waits[0] <= 45.0
+    assert [c["attempt_token"] for c in plugin.calls] == ["a00", "a00r1"]
+
+
+@pytest.mark.parametrize("knobs, t2_tokens", [
+    pytest.param(_PLAIN_KNOBS, ["a00", "a00r1"], id="plain"),
+    pytest.param(_FULL_KNOBS, ["a00", "a00r1", "a00r2"],
+                 id="stagger_and_backoff"),
+])
+def test_infra_exhausted_recorded_absent_and_resumed(
+        monkeypatch, tmp_path, knobs, t2_tokens):
+    sleeps = _record_batch_sleeps(monkeypatch)
+    waits = _record_reliability_sleeps(monkeypatch)
+
     def t2_always_infra(record):
         if record["task_id"] == "t2":
             return RunOutcome(status="infra_error",
@@ -279,13 +419,13 @@ def test_infra_exhausted_recorded_absent_and_resumed(monkeypatch, tmp_path):
 
     plugin = RecordingPlugin(behavior=t2_always_infra)
     tasks = _tasks("t1", "t2")
-    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
+    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                        **knobs)
     # Only the healthy unit came back; the exhausted one is absent.
     assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
-    # Both of t2's executions ran (initial + one infra retry).
-    t2_tokens = [c["attempt_token"] for c in plugin.calls
-                 if c["task_id"] == "t2"]
-    assert t2_tokens == ["a00", "a00r1"]
+    # All of t2's attempts ran (initial + every configured retry).
+    assert [c["attempt_token"] for c in plugin.calls
+            if c["task_id"] == "t2"] == t2_tokens
     # The failure ledger names the unit by its trajectory id.
     failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
     assert [f["unit_id"] for f in failures] == [_expected_id("t2", 0)]
@@ -296,11 +436,23 @@ def test_infra_exhausted_recorded_absent_and_resumed(monkeypatch, tmp_path):
     # pending again and now completes.
     plugin.calls.clear()
     plugin.behavior = None
-    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
+    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                         **knobs)
     assert [c["task_id"] for c in plugin.calls] == ["t2"]
     assert [t.trajectory_id for t in resumed] == [
         _expected_id("t1", 0), _expected_id("t2", 0)]
     assert all(t.status == "success" for t in resumed)
+    if "dispatch_stagger" in knobs:
+        # The knobs really were live and the resume is unchanged: one
+        # backoff wait per retry (a real draw inside the default bounds) and
+        # one stagger sleep per started unit (t1 and t2, then t2 again).
+        assert len(waits) == len(t2_tokens) - 1
+        assert all(_BACKOFF_BOUNDS[0] <= w <= _BACKOFF_BOUNDS[1]
+                  for w in waits)
+        assert len(sleeps) == 3
+    else:
+        # Zero backoff keeps the old behaviour: no sleeper call at all.
+        assert waits == []
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +573,7 @@ def test_run_namespace_is_deterministic_and_shared_by_retries(
 
     plugin = RecordingPlugin(behavior=infra_on_first)
     _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2"), name="r1",
-               n_attempts=2)
+               n_attempts=2, infra_retries=1, infra_backoff=(0.0, 0.0))
     first = _namespaces(plugin)
     # One namespace for the whole unit set, retries included.
     assert len(first) == 1
@@ -476,26 +628,53 @@ def test_run_namespace_differs_per_arm(monkeypatch, tmp_path, change):
     assert {c["attempt_token"] for c in plugin.calls} == {"a00"}
 
 
-def test_resume_continues_the_retry_sequence(monkeypatch, tmp_path):
+@pytest.mark.parametrize("knobs, first_tokens, resume_token", [
+    pytest.param(_PLAIN_KNOBS, ["a00", "a00r1"], "a00r2", id="plain"),
+    pytest.param(_FULL_KNOBS, ["a00", "a00r1", "a00r2"], "a00r3",
+                 id="stagger_and_backoff"),
+])
+def test_resume_continues_the_retry_sequence(
+        monkeypatch, tmp_path, knobs, first_tokens, resume_token):
+    sleeps = _record_batch_sleeps(monkeypatch)
+    waits = _record_reliability_sleeps(monkeypatch)
+
     def always_infra(record):
         return RunOutcome(status="infra_error", meta={"error": "stale run"})
 
     plugin = RecordingPlugin(behavior=always_infra)
     tasks = _tasks("t1")
-    assert _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1") == []
-    assert [c["attempt_token"] for c in plugin.calls] == ["a00", "a00r1"]
+    assert _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                      **knobs) == []
+    assert [c["attempt_token"] for c in plugin.calls] == first_tokens
 
-    # The tokens a00 / a00r1 are spent (their remote run dirs may hold stale
-    # trials the TB plugin refuses to resubmit into), so a resume must use
-    # fresh ones instead of failing on the same two forever.
+    # The tokens are spent (their remote run dirs may hold stale trials the
+    # TB plugin refuses to resubmit into), so a resume must use fresh ones
+    # instead of failing on the same ones forever.
     plugin.calls.clear()
     plugin.behavior = None
-    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
-    assert [c["attempt_token"] for c in plugin.calls] == ["a00r2"]
+    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                         **knobs)
+    assert [c["attempt_token"] for c in plugin.calls] == [resume_token]
     assert [t.status for t in resumed] == ["success"]
+    if "dispatch_stagger" in knobs:
+        # One backoff wait per retry (a draw inside the default bounds) and
+        # one stagger sleep per started unit (the failed pass, the resume).
+        assert len(waits) == len(first_tokens) - 1
+        assert all(_BACKOFF_BOUNDS[0] <= w <= _BACKOFF_BOUNDS[1]
+                  for w in waits)
+        assert len(sleeps) == 2
+    else:
+        assert waits == []
 
 
-def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path):
+@pytest.mark.parametrize("knobs", [
+    pytest.param(_PLAIN_KNOBS, id="plain"),
+    pytest.param(_FULL_KNOBS, id="stagger_and_backoff"),
+])
+def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path, knobs):
+    sleeps = _record_batch_sleeps(monkeypatch)
+    waits = _record_reliability_sleeps(monkeypatch)
+
     def infra_then_crash(record):
         if record["attempt_token"] == "a00":
             return RunOutcome(status="infra_error", meta={"error": "blip"})
@@ -504,13 +683,22 @@ def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path):
     plugin = RecordingPlugin(behavior=infra_then_crash)
     tasks = _tasks("t1")
     with pytest.raises(ParallelError):
-        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
+        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
     # a00r1 was launched when the process died: the resume asks for the same
     # token again, so the TB plugin can rejoin (or reuse) that remote trial.
     plugin.calls.clear()
     plugin.behavior = None
-    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1")
+    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
     assert [c["attempt_token"] for c in plugin.calls] == ["a00r1"]
+    if "dispatch_stagger" in knobs:
+        # Exactly one backoff wait (a00 failed before the crash) inside the
+        # default bounds, and one stagger sleep per started unit.
+        assert len(waits) == 1
+        assert all(_BACKOFF_BOUNDS[0] <= w <= _BACKOFF_BOUNDS[1]
+                  for w in waits)
+        assert len(sleeps) == 2
+    else:
+        assert waits == []
 
 
 class _NamedTB:
@@ -643,6 +831,11 @@ def test_config_like_error_stops_scheduling_and_is_reraised(
     # t3 / t4 were never started; t1 (done before) is stored.
     assert [c["task_id"] for c in plugin.calls] == ["t1", "t2"]
     assert Store(tmp_path / "r1").ids("trajectories") == [_expected_id("t1", 0)]
+    # Every gated-off unit is audited exactly once, under the error gate.
+    audit = read_jsonl(tmp_path / "r1" / "skip_audit.jsonl")
+    assert [row["unit"] for row in audit] == [
+        _expected_id("t3", 0), _expected_id("t4", 0)]
+    assert {row["gate"] for row in audit} == {"error"}
 
 
 def test_code_bug_stops_scheduling_and_stays_a_parallel_error(
@@ -657,6 +850,10 @@ def test_code_bug_stops_scheduling_and_stays_a_parallel_error(
         _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2", "t3"),
                    name="r1")
     assert [c["task_id"] for c in plugin.calls] == ["t1"]
+    audit = read_jsonl(tmp_path / "r1" / "skip_audit.jsonl")
+    assert [row["unit"] for row in audit] == [
+        _expected_id("t2", 0), _expected_id("t3", 0)]
+    assert {row["gate"] for row in audit} == {"error"}
 
 
 def test_config_error_with_workers_stops_new_units(monkeypatch, tmp_path):
@@ -678,10 +875,14 @@ def test_config_error_with_workers_stops_new_units(monkeypatch, tmp_path):
                    _tasks("t1", "t2", "t3", "t4", "t5"), name="r1", workers=2)
     assert sorted(c["task_id"] for c in plugin.calls) == ["t1", "t2"]
     assert Store(tmp_path / "r1").ids("trajectories") == [_expected_id("t2", 0)]
+    audit = read_jsonl(tmp_path / "r1" / "skip_audit.jsonl")
+    assert sorted(row["unit"] for row in audit) == sorted(
+        _expected_id(t, 0) for t in ("t3", "t4", "t5"))
+    assert {row["gate"] for row in audit} == {"error"}
 
 
 # ---------------------------------------------------------------------------
-# Circuit breaker for a dead endpoint
+# A permanently broken task: give-up, never a gate on the others
 # ---------------------------------------------------------------------------
 
 def _infra_for(*task_ids):
@@ -693,50 +894,27 @@ def _infra_for(*task_ids):
     return behavior
 
 
-def test_breaker_opens_after_a_streak_of_distinct_tasks(monkeypatch, tmp_path):
-    plugin = RecordingPlugin(behavior=_infra_for("t1", "t2", "t3", "t4", "t5"))
-    result = _run_batch(plugin, monkeypatch, tmp_path,
-                        _tasks("t1", "t2", "t3", "t4", "t5"), name="r1",
-                        infra_breaker=2)
-    assert result == []
-    # Two units exhausted their retries (2 executions each); the rest were
-    # never attempted.
-    assert [c["task_id"] for c in plugin.calls] == ["t1", "t1", "t2", "t2"]
+def test_one_broken_task_does_not_stop_the_others(monkeypatch, tmp_path):
+    # Reviewer scenario: 4 tasks, N=5, t1 is permanently broken (an image
+    # that never builds). That is evidence about t1, not about the batch:
+    # every other task must still run all its attempts. With the circuit
+    # breaker gone this is the regression guard that a give-up never gates
+    # the rest of the unit set.
+    plugin = RecordingPlugin(behavior=_infra_for("t1"))
+    tasks = _tasks("t1", "t2", "t3", "t4")
+    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                        n_attempts=5, infra_retries=1,
+                        infra_backoff=(0.0, 0.0))
+    assert len(result) == 15
+    assert {t.task_id for t in result} == {
+        make_task_id(_FAKE, t) for t in ("t2", "t3", "t4")}
     failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert [f["unit_id"] for f in failures] == [
-        _expected_id(t, 0) for t in ("t1", "t2", "t3", "t4", "t5")]
-    assert all("circuit open" not in f["message"] for f in failures[:2])
-    assert all("circuit open" in f["message"] for f in failures[2:])
-
-    # The skipped units are pending, not done: a resume attempts them.
-    plugin.calls.clear()
-    plugin.behavior = None
-    resumed = _run_batch(plugin, monkeypatch, tmp_path,
-                         _tasks("t1", "t2", "t3", "t4", "t5"), name="r1",
-                         infra_breaker=2)
-    assert len(resumed) == 5
-
-
-def test_breaker_streak_is_reset_by_any_success(monkeypatch, tmp_path):
-    plugin = RecordingPlugin(behavior=_infra_for("t1", "t3", "t4", "t6"))
-    result = _run_batch(plugin, monkeypatch, tmp_path,
-                        _tasks("t1", "t2", "t3", "t4", "t5", "t6"),
-                        name="r1", infra_breaker=2)
-    # t1 fails, t2 succeeds (reset), t3 + t4 fail -> open; t5, t6 skipped.
-    assert [t.trajectory_id for t in result] == [_expected_id("t2", 0)]
-    assert [c["task_id"] for c in plugin.calls if c["task_id"] != "t2"] == [
-        "t1", "t1", "t3", "t3", "t4", "t4"]
-    assert "t5" not in {c["task_id"] for c in plugin.calls}
-
-
-def test_breaker_zero_disables(monkeypatch, tmp_path):
-    plugin = RecordingPlugin(behavior=_infra_for("t1", "t2", "t3"))
-    _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2", "t3"),
-               name="r1", infra_breaker=0)
-    assert len(plugin.calls) == 6
-    with pytest.raises(ValueError, match="infra_breaker"):
-        _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r2",
-                   infra_breaker=-1)
+    assert sorted(f["unit_id"] for f in failures) == sorted(
+        _expected_id("t1", a) for a in range(5))
+    assert all(f["error_class"] == "InfrastructureError" for f in failures)
+    assert all("endpoint timed out" in f["message"] for f in failures)
+    # Infra give-ups gate nothing: no unit was audited out of the batch.
+    assert not (tmp_path / "r1" / "skip_audit.jsonl").exists()
 
 
 def test_untrusted_remote_run_is_retried_under_a_fresh_token(
@@ -764,55 +942,12 @@ def test_untrusted_remote_run_is_retried_under_a_fresh_token(
 
     link._check = plant_then_check
     result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                        handle=handle)
+                        handle=handle,
+                        infra_retries=1, infra_backoff=(0.0, 0.0))
     assert [t.status for t in result] == ["failure"]
     assert planted[0].endswith("_a00")
     assert result[0].meta["run_id"] == planted[0] + "r1"
     assert len(link.launches) == 1
-
-
-def test_one_broken_task_never_trips_the_breaker(monkeypatch, tmp_path):
-    # Reviewer scenario: 4 tasks, N=5, t1 is permanently broken (an image
-    # that never builds). That is evidence about t1, not about the endpoint:
-    # every other task must still run all its attempts.
-    plugin = RecordingPlugin(behavior=_infra_for("t1"))
-    tasks = _tasks("t1", "t2", "t3", "t4")
-    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                        n_attempts=5, infra_breaker=5)
-    assert len(result) == 15
-    assert {t.task_id for t in result} == {
-        make_task_id(_FAKE, t) for t in ("t2", "t3", "t4")}
-    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert sorted(f["unit_id"] for f in failures) == sorted(
-        _expected_id("t1", a) for a in range(5))
-    assert not any("circuit open" in f["message"] for f in failures)
-
-
-def test_breaker_counts_distinct_tasks_only(monkeypatch, tmp_path):
-    # Even with a tiny breaker, the same task failing over and over is one
-    # task's worth of evidence -- and with a single pending task there can
-    # be no cross-task evidence at all, so the breaker stays off.
-    plugin = RecordingPlugin(behavior=_infra_for("t1"))
-    _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
-               n_attempts=5, infra_breaker=2)
-    assert len(plugin.calls) == 10  # 5 units x (1 + 1 infra retry)
-    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert not any("circuit open" in f["message"] for f in failures)
-
-
-def test_dead_endpoint_trips_after_distinct_tasks(monkeypatch, tmp_path):
-    ids_ = ("t1", "t2", "t3", "t4", "t5", "t6")
-    plugin = RecordingPlugin(behavior=_infra_for(*ids_))
-    result = _run_batch(plugin, monkeypatch, tmp_path, _tasks(*ids_),
-                        name="r1", n_attempts=2, infra_breaker=3)
-    assert result == []
-    # Attempt 0 of t1, t2, t3 exhaust their retries -> 3 distinct tasks ->
-    # open; the other 9 units are recorded, not attempted.
-    assert [c["task_id"] for c in plugin.calls] == [
-        "t1", "t1", "t2", "t2", "t3", "t3"]
-    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert len(failures) == 12
-    assert sum("circuit open" in f["message"] for f in failures) == 9
 
 
 # ---------------------------------------------------------------------------
@@ -837,26 +972,155 @@ def test_skip_unit_ids_are_neither_run_nor_retried(monkeypatch, tmp_path):
                    n_attempts=2, skip_unit_ids=_expected_id("t1", 1))
 
 
-def test_breaker_threshold_shrinks_to_small_task_sets(monkeypatch, tmp_path):
-    # A 3-task pilot on a dead endpoint: infra_breaker=5 could never be
-    # reached, so the effective threshold is the 3 distinct pending tasks.
-    ids_ = ("t1", "t2", "t3")
-    plugin = RecordingPlugin(behavior=_infra_for(*ids_))
-    result = _run_batch(plugin, monkeypatch, tmp_path, _tasks(*ids_),
-                        name="r1", n_attempts=2, infra_breaker=5)
-    assert result == []
-    assert [c["task_id"] for c in plugin.calls] == [
-        "t1", "t1", "t2", "t2", "t3", "t3"]
-    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert sum("circuit open" in f["message"] for f in failures) == 3
+# ---------------------------------------------------------------------------
+# Dispatch stagger: spread the units, change nothing
+# ---------------------------------------------------------------------------
+
+def test_stagger_does_not_change_the_result(monkeypatch, tmp_path):
+    sleeps = _record_batch_sleeps(monkeypatch)
+    plugin = RecordingPlugin()
+    tasks = _tasks("t1", "t2", "t3")
+    plain = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="plain",
+                       n_attempts=2)
+    n_calls = len(plugin.calls)
+    assert sleeps == []  # no stagger configured: nothing slept
+    plugin.calls.clear()
+    staggered = _run_batch(plugin, monkeypatch, tmp_path, tasks,
+                           name="staggered", n_attempts=2,
+                           dispatch_stagger=0.5)
+    # Same trajectories, and exactly one stagger sleep per executed unit,
+    # each a draw inside the configured bound.
+    assert [_fingerprint(t) for t in staggered] == \
+        [_fingerprint(t) for t in plain]
+    assert len(plugin.calls) == n_calls
+    assert len(sleeps) == n_calls
+    assert all(0 <= delay <= 0.5 for delay in sleeps)
 
 
-def test_small_task_set_with_one_broken_task_keeps_running(
-        monkeypatch, tmp_path):
-    plugin = RecordingPlugin(behavior=_infra_for("t1"))
+def test_gated_off_units_pay_no_stagger_sleep(monkeypatch, tmp_path):
+    sleeps = _record_batch_sleeps(monkeypatch)
+
+    def t1_raises(record):
+        if record["task_id"] == "t1":
+            raise RuntimeError("simulated crash")
+        return _success(record["task_id"])
+
+    plugin = RecordingPlugin(behavior=t1_raises)
+    tasks = _tasks("t1", "t2", "t3", "t4")
+    with pytest.raises(ParallelError):
+        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                   dispatch_stagger=0.5)
+    # The unit that raised slept once (it passed the gate before its
+    # stagger); the three gated-off units were audited without sleeping.
+    assert len(sleeps) == 1
+    audit = read_jsonl(tmp_path / "r1" / "skip_audit.jsonl")
+    assert [row["unit"] for row in audit] == [
+        _expected_id(t, 0) for t in ("t2", "t3", "t4")]
+    assert {row["gate"] for row in audit} == {"error"}
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat and dispatch observability
+# ---------------------------------------------------------------------------
+
+def test_heartbeat_snapshots_the_batch_from_disk(
+        monkeypatch, tmp_path, capfd):
+    module = _real_batch_module()
+    monkeypatch.setattr(module, "_HEARTBEAT_SECONDS", 0.03)
+    n_units = 40
+    disk_done = {}
+
+    def t01_hangs(record):
+        if record["task_id"] == "t01":
+            # Serial dispatch: exactly the units before this one are stored
+            # for the whole hang, and those are the numbers every heartbeat
+            # line printed during it must report.
+            disk_done["count"] = len(
+                Store(tmp_path / "r1").ids("trajectories"))
+            time.sleep(0.4)
+        return _success(record["task_id"])
+
+    plugin = RecordingPlugin(behavior=t01_hangs)
+    baseline_threads = threading.active_count()
     result = _run_batch(plugin, monkeypatch, tmp_path,
-                        _tasks("t1", "t2", "t3"), name="r1", n_attempts=3,
-                        infra_breaker=5)
-    assert len(result) == 6  # every attempt of t2 and t3
-    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert not any("circuit open" in f["message"] for f in failures)
+                        _tasks(*(f"t{i:02d}" for i in range(n_units))),
+                        name="r1")
+    assert len(result) == n_units
+    # The heartbeat thread is gone once the call returns.
+    for _ in range(400):
+        if threading.active_count() <= baseline_threads:
+            break
+        time.sleep(0.005)
+    assert threading.active_count() <= baseline_threads
+    err = capfd.readouterr().err
+    beats = [line for line in err.splitlines()
+             if line.startswith("K1 heartbeat[weak]:")]
+    assert len(beats) >= 2
+    # Periodic, not per-unit: a handful of lines for forty units.
+    assert len(beats) < n_units
+    parsed = []
+    for line in beats:
+        fields = dict(part.split("=", 1)
+                      for part in line.split(": ", 1)[1].split()
+                      if "=" in part)
+        parsed.append({key: int(fields[key])
+                       for key in ("done", "failed", "skipped", "in_flight")})
+    for row in parsed:
+        # A disk snapshot: the four dispositions cover the pending set...
+        assert sum(row.values()) == n_units
+        # ...and in this clean run nothing failed and nothing was gated.
+        assert row["failed"] == 0 and row["skipped"] == 0
+    # During the hang the snapshot matched the store: every unit before the
+    # hanging one done, the rest (the hanging unit included) in flight.
+    assert any(row["done"] == disk_done["count"]
+               and row["in_flight"] == n_units - disk_done["count"]
+               for row in parsed)
+    # And once the call is over the heartbeat stops printing.
+    time.sleep(0.12)
+    assert "K1 heartbeat[" not in capfd.readouterr().err
+
+
+def test_dispatch_line_reports_the_knobs(monkeypatch, tmp_path, capfd):
+    sleeps = _record_batch_sleeps(monkeypatch)
+    plugin = RecordingPlugin()
+    tasks = _tasks("t1", "t2")
+    knobs = dict(workers=3, dispatch_stagger=2.5,
+                 infra_retries=1, infra_backoff=(15.0, 45.0))
+    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
+    err = capfd.readouterr().err
+    assert ("K1 dispatch[weak]: 2 pending units "
+            "(0 skipped, 2 total), workers=3, stagger=2.5s, "
+            "backoff=15.0-45.0s") in err
+    assert "breaker" not in err
+    # A nothing-to-do resume still says so: 0 pending prints too.
+    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
+    assert ("K1 dispatch[weak]: 0 pending units "
+            "(0 skipped, 2 total)") in capfd.readouterr().err
+    # The skipped count is the real intersection with this call's units.
+    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs,
+               skip_unit_ids={_expected_id("t1", 0)})
+    assert ("K1 dispatch[weak]: 0 pending units "
+            "(1 skipped, 2 total)") in capfd.readouterr().err
+    assert len(sleeps) == 2  # only the first call had units to run
+
+
+# ---------------------------------------------------------------------------
+# Timing settings are validated up front
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("overrides", [
+    pytest.param({"infra_retries": -1}, id="negative_retries"),
+    pytest.param({"infra_backoff": (45.0, 15.0)}, id="backoff_inverted"),
+    pytest.param({"infra_backoff": (-1.0, 5.0)}, id="backoff_negative"),
+    pytest.param({"infra_backoff": (float("nan"), 5.0)}, id="backoff_nan"),
+    pytest.param({"dispatch_stagger": -0.1}, id="stagger_negative"),
+    pytest.param({"dispatch_stagger": float("nan")}, id="stagger_nan"),
+])
+def test_bad_timing_settings_are_rejected_up_front(
+        monkeypatch, tmp_path, overrides):
+    plugin = RecordingPlugin()
+    with pytest.raises(ValueError):
+        _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
+                   **overrides)
+    # Rejected before any unit ran.
+    assert plugin.calls == []

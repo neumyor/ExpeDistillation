@@ -34,11 +34,18 @@ Pinned design decisions (see the repo docs this was specified against):
   resubmitting; a run id that exists remotely with neither comes back as
   ``infra_error`` and is retried under the next token.
 - Infra retries: an ``infra_error`` outcome is retried up to ``infra_retries``
-  times per call (next attempt_token suffix per retry, same workdir); still
-  ``infra_error`` after that is recorded in the unit-failure ledger (unit id
-  = trajectory_id) and skipped -- never a valid Trajectory for metrics, and
-  never stored under its trajectory_id (a stored file means "done", so
-  storing it would make resume skip a unit that still needs a retry).
+  times per call (default 2 = 3 attempts; next attempt_token suffix per
+  retry, same workdir), sleeping ``random.uniform(*infra_backoff)`` seconds
+  between attempts -- the fix for the 2026-10-13 stage-6 driver meltdown,
+  where 32 workers' ssh submissions tripped sshd rate limiting at dispatch
+  and every worker's single zero-backoff retry burned out inside the same
+  5-second storm window: a 15-45s random wait carries a retry past the
+  storm, and the random draw keeps simultaneous retries from re-colliding
+  in one burst. Still ``infra_error`` after that is recorded in the
+  unit-failure ledger (unit id = trajectory_id) and skipped -- never a
+  valid Trajectory for metrics, and never stored under its trajectory_id
+  (a stored file means "done", so storing it would make resume skip a
+  unit that still needs a retry).
   The retry index continues across calls: ``<workdir>/k1_retry_cursor.json``
   holds the next unused index, advanced after every infra_error, so a
   resume starts from the token that was in flight when the process died
@@ -51,7 +58,9 @@ Pinned design decisions (see the repo docs this was specified against):
   unit and both values (a re-curated bank or a swapped model must go to a
   new run directory); stored files are never overwritten.
 - Stopping: once any unit raises (a non-infrastructure error), no further
-  unit is started; units already running finish and are stored. A
+  unit is started; units already running finish and are stored, and each
+  gated-off unit is appended to ``<run_dir>/skip_audit.jsonl`` (gate
+  "error") for the resume to re-offer. A
   ConfigError / ProviderRefusalError among the failures is re-raised
   unwrapped (the first by unit order, with a note of how many units
   failed) so the CLI reports it as a configuration problem; code bugs and
@@ -59,20 +68,21 @@ Pinned design decisions (see the repo docs this was specified against):
 - Dispatch order is attempt-major (every task's attempt 0, then every
   task's attempt 1, ...), so one task's attempts are never adjacent; the
   return value stays sorted by trajectory_id.
-- Circuit breaker: the endpoint/sandbox is presumed dead once the current
-  streak of infra-exhausted units (completion order; any success resets
-  it) spans T DISTINCT tasks, where T = min(``infra_breaker``, number of
-  distinct tasks among this call's pending units) -- so a small task set
-  (a 3-task pilot) still stops early on a dead endpoint. Repeated failures
-  of one task are evidence about that task (e.g. an image that never
-  builds), not about the endpoint, so they never open it by themselves.
-  With a single pending task there can be no cross-task evidence, so the
-  breaker stays off: a threshold of 1 would let one broken task skip its
-  own remaining attempts (and a resume would redo one attempt per call),
-  while a dead endpoint then costs at most that task's N units. Once open, the
-  remaining units are not attempted: each is recorded in the failure
-  ledger with a "circuit open" message, nothing is stored, and the call
-  returns normally (a later resume attempts them). 0 disables it.
+- Dispatch stagger: every unit sleeps ``random.uniform(0,
+  dispatch_stagger)`` seconds after its worker picks it up and before it
+  starts executing, spreading every wave of connections, not just the
+  batch opening -- TB units run for similar durations, so completions
+  re-clump and the next wave would collide all at once without it. The
+  serial path (workers=1) staggers the same way. Default 0 keeps the old
+  behaviour.
+- Heartbeat: while units are pending a daemon thread prints one stderr
+  line every ``_HEARTBEAT_SECONDS`` seconds (default 300) from a disk
+  snapshot -- done / failed / skipped / in_flight / elapsed.
+  ``in_flight`` is a difference (pending minus the three finished
+  dispositions), so units a raise left unfinalized still count as in
+  flight; next to the per-unit exception print that makes a stalled pass
+  locatable, which the 2026-10-13 stage-6 stalls were not (a normally
+  slow pass and a dead one looked the same from the logs).
 - ``skip_unit_ids``: trajectory ids the caller has declared terminal (an
   accepted infra shortfall). They are excluded from pending -- never
   executed, never recorded as failed-to-retry -- and, being unstored, are
@@ -86,14 +96,20 @@ sorted by trajectory_id, including trajectories a previous call stored.
 """
 
 import dataclasses
-import sys
 import hashlib
 import json
+import math
 import os
+import random
+import sys
 import threading
+import time
+import traceback
 import urllib.parse
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Optional, Sequence, Union
+from typing import (
+    Any, Collection, Dict, List, Optional, Sequence, Tuple, Union,
+)
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks.execute import make_task_id, run_one
@@ -108,7 +124,7 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
     with_retries,
 )
-from expedistill.infra.store import Store, read_json, write_json
+from expedistill.infra.store import Store, append_jsonl, read_json, write_json
 
 __all__ = ["batch_execute"]
 
@@ -124,6 +140,10 @@ _NAMESPACE_HEX = 10
 
 #: Per-unit record of the next unused infra-retry index (module docstring).
 _RETRY_CURSOR = "k1_retry_cursor.json"
+
+#: Seconds between heartbeat log lines while units are pending. A module
+#: constant the loop re-reads every round, so tests can monkeypatch it.
+_HEARTBEAT_SECONDS = 300.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -209,42 +229,19 @@ def _check_stored(traj: Trajectory, *, role: str, model_name: str,
             "directory.")
 
 
-class _BatchControl:
-    """Shared stop state of one batch_execute call (thread-safe).
+def _line_count(path: Path) -> int:
+    """Lines of an append-only ledger, 0 when it does not exist yet.
 
-    ``error``: some unit raised -> start nothing new. ``circuit``: the
-    current streak of infra-exhausted units covers ``breaker`` distinct
-    tasks (the effective threshold, already capped by the caller) -> the
-    endpoint is presumed dead, remaining units are recorded, not attempted.
+    Read in binary mode (never a decode error on a torn multibyte tail) and
+    a torn final line counts as one line, mirroring read_jsonl's tolerance
+    for an interrupted tail; the heartbeat only ever subtracts baselines
+    taken the same way, so the ambiguity cancels out.
     """
-
-    def __init__(self, breaker: int) -> None:
-        self._lock = threading.Lock()
-        self._breaker = breaker
-        self._streak_tasks: set = set()
-        self.error = False
-        self.circuit = False
-
-    def gate(self) -> Optional[str]:
-        with self._lock:
-            if self.error:
-                return "error"
-            if self.circuit:
-                return "circuit"
-            return None
-
-    def raised(self) -> None:
-        with self._lock:
-            self.error = True
-
-    def completed(self, task_id: str, exhausted: bool) -> None:
-        with self._lock:
-            if not exhausted:
-                self._streak_tasks.clear()
-                return
-            self._streak_tasks.add(task_id)
-            if self._breaker and len(self._streak_tasks) >= self._breaker:
-                self.circuit = True
+    try:
+        with path.open("rb") as stream:
+            return sum(1 for _ in stream)
+    except FileNotFoundError:
+        return 0
 
 
 def _reraise(error: ParallelError, pending: Sequence["_Unit"]) -> None:
@@ -279,12 +276,14 @@ def _execute_unit(
     handle: Any,
     recorder: UnitFailureRecorder,
     infra_retries: int,
+    infra_backoff: Tuple[float, float],
 ) -> Optional[Trajectory]:
     """Run one unit with B6 infra retries; save it or record its failure.
 
-    Returns the stored Trajectory, or None when the unit exhausted its infra
-    retries (recorded in the ledger; a later resume retries it because
-    nothing was stored under its trajectory_id).
+    Retries sleep ``random.uniform(*infra_backoff)`` seconds between
+    attempts. Returns the stored Trajectory, or None when the unit
+    exhausted its infra retries (recorded in the ledger; a later resume
+    retries it because nothing was stored under its trajectory_id).
     """
     workdir = workdir_root / urllib.parse.quote(unit.trajectory_id, safe="")
     workdir.mkdir(parents=True, exist_ok=True)
@@ -331,6 +330,10 @@ def _execute_unit(
             once,
             attempts=infra_retries + 1,
             retry_on=InfrastructureError,
+            # A random draw per retry: two workers retrying at once must
+            # not land on the same second (module docstring, infra
+            # retries). (0.0, 0.0) keeps the old zero-backoff behaviour.
+            backoff=lambda failures: random.uniform(*infra_backoff),
             on_give_up=lambda exc: recorder.record(
                 unit.trajectory_id, _FAILURE_STAGE, exc, str(exc)),
         )
@@ -355,8 +358,9 @@ def batch_execute(
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
-    infra_retries: int = 1,
-    infra_breaker: int = 5,
+    infra_retries: int = 2,
+    infra_backoff: Tuple[float, float] = (15.0, 45.0),
+    dispatch_stagger: float = 0.0,
     skip_unit_ids: Collection[str] = (),
 ) -> List[Trajectory]:
     """Execute every (task, attempt) unit, storing each Trajectory as it lands.
@@ -376,10 +380,14 @@ def batch_execute(
     unit raises, no new unit starts, and the error propagates after the
     running ones finish (ConfigError / ProviderRefusalError unwrapped, code
     bugs as ParallelError), leaving the units that finished safely stored.
-    Stored units are verified against the request (module docstring);
-    the circuit breaker opens once a streak of infra-exhausted units spans
-    min(``infra_breaker``, distinct pending tasks) distinct tasks (never
-    with a single pending task; 0 disables it).
+    Stored units are verified against the request (module docstring).
+    Infra retries sleep ``random.uniform(*infra_backoff)`` seconds between
+    attempts, and each worker sleeps ``random.uniform(0,
+    dispatch_stagger)`` seconds before starting a unit, so a burst of
+    units -- and their retries -- cannot collide on the same seconds;
+    while units are pending a heartbeat thread logs a progress line to
+    stderr every ``_HEARTBEAT_SECONDS`` (pinned decisions in the module
+    docstring).
 
     Returns every Trajectory of the unit set present in the store after this
     call (pre-existing ones included), sorted by trajectory_id. Units whose
@@ -388,8 +396,15 @@ def batch_execute(
     """
     if infra_retries < 0:
         raise ValueError(f"infra_retries must be >= 0, got {infra_retries}")
-    if infra_breaker < 0:
-        raise ValueError(f"infra_breaker must be >= 0, got {infra_breaker}")
+    backoff_lo, backoff_hi = infra_backoff
+    if not (math.isfinite(backoff_lo) and math.isfinite(backoff_hi)
+            and 0 <= backoff_lo <= backoff_hi):
+        raise ValueError(f"infra_backoff must be a (min, max) seconds pair "
+                         f"with 0 <= min <= max and finite bounds, got "
+                         f"{infra_backoff!r}")
+    if not (math.isfinite(dispatch_stagger) and dispatch_stagger >= 0):
+        raise ValueError(f"dispatch_stagger must be >= 0 (seconds) and "
+                         f"finite, got {dispatch_stagger!r}")
     if isinstance(skip_unit_ids, (str, bytes)):
         raise CodeBugError(
             "skip_unit_ids must be a collection of trajectory ids, got a "
@@ -416,28 +431,37 @@ def batch_execute(
     # Attempt-major dispatch (stable sort keeps task order within an
     # attempt): one broken task's attempts are spread across the batch.
     pending.sort(key=lambda u: u.attempt_index)
+    # Dispatch observability (from the 2026-10-13 stall diagnosis): the
+    # pool drains silently when the queue is gated shut, and without these
+    # numbers a pass looks identical whether 32 or 200 units were
+    # dispatched. The skipped count is the intersection with this call's
+    # units -- a declared id matching no unit here is not a skip.
+    skipped_actual = sum(1 for u in units if u.trajectory_id in skipped)
+    print(f"K1 dispatch[{role}]: {len(pending)} pending units "
+          f"({skipped_actual} skipped, {len(units)} total), "
+          f"workers={workers}, stagger={dispatch_stagger}s, "
+          f"backoff={backoff_lo}-{backoff_hi}s",
+          file=sys.stderr, flush=True)
     if pending:
         working_handle = dataclasses.replace(handle, usage=usage, run_dir=run_dir)
         recorder = UnitFailureRecorder(store.run_dir)
+        skip_audit_path = Path(store.run_dir) / "skip_audit.jsonl"
         namespace = _run_namespace(store.run_dir, role, model_name,
                                    skills_injected, skills_block)
-        n_tasks = len({u.task.task_id for u in pending})
-        # Effective threshold (module docstring): capped by the distinct
-        # pending tasks; off when only one task is pending.
-        threshold = min(infra_breaker, n_tasks) if n_tasks > 1 else 0
-        control = _BatchControl(threshold)
+        # Error stop (module docstring, Stopping): a plain Event, set the
+        # moment a unit raises; after that the gate below audits every
+        # queued unit instead of starting it.
+        stop = threading.Event()
 
         def run(unit: _Unit) -> Optional[Trajectory]:
-            gate = control.gate()
-            if gate == "error":
+            if stop.is_set():
+                append_jsonl(skip_audit_path, {
+                    "unit": unit.trajectory_id, "gate": "error",
+                    "time": time.time()})
                 return None
-            if gate == "circuit":
-                recorder.record(
-                    unit.trajectory_id, _FAILURE_STAGE, InfrastructureError,
-                    f"{unit.trajectory_id}: circuit open: {threshold} "
-                    "distinct tasks in a row exhausted their infra "
-                    "retries; not attempted")
-                return None
+            if dispatch_stagger:
+                # Stagger only past the gate: a gated-off unit pays no sleep.
+                time.sleep(random.uniform(0, dispatch_stagger))
             try:
                 traj = _execute_unit(
                     unit,
@@ -452,28 +476,62 @@ def batch_execute(
                     handle=working_handle,
                     recorder=recorder,
                     infra_retries=infra_retries,
+                    infra_backoff=infra_backoff,
                 )
             except Exception:
-                control.raised()
+                stop.set()
                 # The pool holds the exception until every future drains, which
                 # can be hours (remote pollers with 4.5h deadlines) -- during
                 # the 2026-10-13 stage-6 stalls each pass silently skipped the
                 # whole queue and the real error only surfaced (if ever) much
                 # later. Print it the moment it happens so the pass is
                 # diagnosable while it is still running.
-                import traceback
                 print(
                     "K1 unit raised (dispatch stops, pool draining): "
                     f"{unit.trajectory_id}\n{traceback.format_exc()}",
                     file=sys.stderr, flush=True)
                 raise
-            control.completed(unit.task.task_id, exhausted=traj is None)
             return traj
 
+        # Heartbeat (module docstring): a disk snapshot every
+        # _HEARTBEAT_SECONDS while the pass runs, with zero shared mutable
+        # state -- every number is recomputed from the files. The failed
+        # and skipped baselines make the deltas mean "this call"; done
+        # needs no baseline because pending already excluded every stored
+        # unit at dispatch time.
+        t0 = time.monotonic()
+        baseline_failed = _line_count(recorder.path)
+        baseline_skipped = _line_count(skip_audit_path)
+        heartbeat_stop = threading.Event()
+
+        def _heartbeat() -> None:
+            while not heartbeat_stop.wait(_HEARTBEAT_SECONDS):
+                try:
+                    done = sum(1 for u in pending
+                               if store.exists("trajectories",
+                                               u.trajectory_id))
+                    failed = _line_count(recorder.path) - baseline_failed
+                    skipped_now = (_line_count(skip_audit_path)
+                                  - baseline_skipped)
+                    in_flight = len(pending) - done - failed - skipped_now
+                    print(f"K1 heartbeat[{role}]: done={done} "
+                          f"failed={failed} skipped={skipped_now} "
+                          f"in_flight={in_flight} "
+                          f"of {len(pending)} pending, "
+                          f"elapsed={time.monotonic() - t0:.0f}s",
+                          file=sys.stderr, flush=True)
+                except Exception:  # noqa: BLE001 - observer never breaks the pass
+                    print("K1 heartbeat: degraded (snapshot failed)",
+                          file=sys.stderr, flush=True)
+
+        threading.Thread(target=_heartbeat, daemon=True,
+                         name="k1-heartbeat").start()
         try:
             run_parallel(run, pending, workers, thread=True)
         except ParallelError as error:
             _reraise(error, pending)
+        finally:
+            heartbeat_stop.set()
     return [store.load("trajectories", u.trajectory_id, Trajectory)
             for u in units
             if store.exists("trajectories", u.trajectory_id)]

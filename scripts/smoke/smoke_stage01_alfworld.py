@@ -230,7 +230,6 @@ def main() -> int:
         )
         ctx.workers = 1
         ctx.allow_infra_shortfall = False
-        ctx.infra_breaker = 5
 
         usage_before = len(read_jsonl(usage.path))
         leaks_before = len(adapter_pids())

@@ -184,9 +184,9 @@ def run_units(worker: Callable[[_UnitType], _OutcomeType],
     fatal error.
 
     The unit pool the stages share: one implementation of the stop/failure
-    semantics (K1 batch_execute's _BatchControl grew the stop part; the
-    surfacing rule below is run_units' own, every caller gets it
-    identically) instead of one per stage.
+    semantics (K1 batch_execute has its own stop flag now; the surfacing
+    rule below is run_units' own, every caller gets it identically)
+    instead of one per stage.
 
     - ``worker`` runs ONE unit and returns its outcome, whatever the caller
       wants collected. Expected-failure dispositions (ModelOutputError,
