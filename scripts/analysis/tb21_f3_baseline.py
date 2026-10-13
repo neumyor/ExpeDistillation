@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compute the TB21 full-campaign stage-1 baseline (F@3 numbers) offline.
 
-Reads the tb21 campaign archive manifests (local copies under tmp/tbval/)
+Reads the tb21 campaign archive manifests (local copies under configs/seed/)
 and writes docs/tb21_f3_baseline_20261011.md. No model calls, no remote
 access, no run directory needed: the whole point is to pre-compute, from the
 pre-registered seeding rule ("attempt 0..2 = archive rank 1..3 of each arm"),
@@ -10,7 +10,7 @@ output can be checked against an independent computation (outer AGENTS.md
 section 1: register the metric before looking at the pipeline's numbers).
 
 Integrity gate BEFORE any number is computed: every manifest row is joined
-against the campaign audit (tmp/tbval/audit_20261011.json). reward present
+against the campaign audit (configs/seed/audit_20261011.json). reward present
 must be a VALID trial with the same reward; reward "None" must be a KEEP_MODEL
 trial (the campaign's "model's own doing" failures -- tmux keystroke errors,
 AgentTimeoutError -- which count as failure, i.e. reward 0). Any mismatch
@@ -28,8 +28,8 @@ Usage (from the repo root):
         [--manifest-qwen PATH] [--manifest-dpsk PATH] [--audit PATH] \
         [--doc PATH] [--check-only]
 
-Inputs:  tmp/tbval/manifest_qwen.tsv, tmp/tbval/manifest_dpsk.tsv,
-         tmp/tbval/audit_20261011.json (defaults).
+Inputs:  configs/seed/manifest_qwen.tsv, configs/seed/manifest_dpsk.tsv,
+         configs/seed/audit_20261011.json (defaults).
 Output:  docs/tb21_f3_baseline_20261011.md (default) and a stdout table.
 Exit 0 on success, 1 on any integrity failure.
 """
@@ -53,7 +53,7 @@ from expedistill.core.models import Trajectory  # noqa: E402
 ARMS = (("weak", "qwen", "manifest_qwen.tsv"),
         ("strong", "dpsk", "manifest_dpsk.tsv"))
 
-DEFAULT_AUDIT = "tmp/tbval/audit_20261011.json"
+DEFAULT_AUDIT = "configs/seed/audit_20261011.json"
 DEFAULT_DOC = "docs/tb21_f3_baseline_20261011.md"
 
 SEED_ATTEMPTS = 3  # pre-registered: archive rank 1..3 -> attempt 0..2
@@ -64,9 +64,9 @@ _DOC_HEADER = """日期：{date}
 对应 log.md 条目：2026-10-11（TB21 全量实验：stage-1 归档播种与 F@3 基线对照）。
 
 计算脚本：`scripts/analysis/tb21_f3_baseline.py`（本文件由它生成，重跑可复现）。
-输入：`tmp/tbval/manifest_qwen.tsv`、`tmp/tbval/manifest_dpsk.tsv`（89 题 × 5 rank，
+输入：`configs/seed/manifest_qwen.tsv`、`configs/seed/manifest_dpsk.tsv`（89 题 × 5 rank，
 来自 node29 `/data2/niuyiming/e1_final_archive/` 的收官归档 manifest 本地副本）与
-`tmp/tbval/audit_20261011.json`（campaign 审计）。
+`configs/seed/audit_20261011.json`（campaign 审计）。
 """
 
 
@@ -161,9 +161,9 @@ def pipeline_stats(trajectories: list, n_attempts: int) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--manifest-qwen", type=Path,
-                        default=REPO / "tmp/tbval/manifest_qwen.tsv")
+                        default=REPO / "configs/seed/manifest_qwen.tsv")
     parser.add_argument("--manifest-dpsk", type=Path,
-                        default=REPO / "tmp/tbval/manifest_dpsk.tsv")
+                        default=REPO / "configs/seed/manifest_dpsk.tsv")
     parser.add_argument("--audit", type=Path, default=REPO / DEFAULT_AUDIT)
     parser.add_argument("--doc", type=Path, default=REPO / DEFAULT_DOC)
     parser.add_argument("--check-only", action="store_true",

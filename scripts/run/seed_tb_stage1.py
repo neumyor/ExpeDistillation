@@ -48,8 +48,8 @@ Usage (from the repo root; .env is loaded automatically if present):
         [--tasks-file FILE]      # one task name per line, # comments; default all
         [--cache-dir tmp/tb_seed_cache]
 
-Inputs : configs/experiments/<cfg>.yaml, tmp/tbval/manifest_{qwen,dpsk}.tsv,
-         tmp/tbval/audit_20261011.json, node29 e1_final_archive (read-only).
+Inputs : configs/experiments/<cfg>.yaml, configs/seed/manifest_{qwen,dpsk}.tsv,
+         configs/seed/audit_20261011.json, node29 e1_final_archive (read-only).
 Output : the frozen run dir with all stage-1 trajectories stored (+ stdout
          summary). Exit 0 on success; a non-zero exit leaves a resumable
          partial seeding.
@@ -98,7 +98,7 @@ SEED_ATTEMPTS = 3
 
 DEFAULT_CONFIG = "configs/experiments/tb21_full.yaml"
 DEFAULT_CACHE = "tmp/tb_seed_cache"
-DEFAULT_MANIFEST_DIR = "tmp/tbval"
+DEFAULT_MANIFEST_DIR = "configs/seed"
 AUDIT_NAME = "audit_20261011.json"
 
 _SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new")
