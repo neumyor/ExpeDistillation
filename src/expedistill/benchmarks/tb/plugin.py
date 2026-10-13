@@ -951,7 +951,21 @@ class TBPlugin(BenchmarkPlugin):
         }
         result_local = workdir / "result.json"
         link.get(result_remote, str(result_local), timeout=FETCH_TIMEOUT_SECONDS)
-        result_data = json.loads(result_local.read_text(encoding="utf-8"))
+        # The vendored Harbor writes result.json with a plain write_text, so a
+        # fetch racing the write (or a killed runner) can land a truncated or
+        # non-object file. That is transport-grade, not a code bug: every
+        # other parse site here treats it as infra, and without this guard
+        # the ValueError would stop the whole K1 pass (2026-10-13 review).
+        try:
+            result_data = json.loads(result_local.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise InfrastructureError(
+                f"TB trial {run_id}: unreadable result.json "
+                f"(refetches on retry): {exc}") from None
+        if not isinstance(result_data, dict):
+            raise InfrastructureError(
+                f"TB trial {run_id}: result.json is not a JSON object "
+                f"(got {type(result_data).__name__})")
 
         # Best effort: a reward without verifier evidence is a pseudo zero
         # either way, and a fetch failure here is an infra failure below.

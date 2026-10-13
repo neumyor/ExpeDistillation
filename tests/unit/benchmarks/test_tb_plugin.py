@@ -429,6 +429,35 @@ def test_run_pseudo_zero_is_infra_error_end_to_end(tmp_path):
     assert outcome.meta["verdict_reason"] == "pseudo_zero"
 
 
+def test_run_truncated_result_json_is_infra_error(tmp_path):
+    # A fetch racing Harbor's non-atomic result.json write lands a truncated
+    # file: transport-grade, so the unit refetches on retry instead of the
+    # ValueError stopping the whole K1 pass (2026-10-13 review).
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files={
+            f"{TRIAL}/result.json": '{"verifier_result": {"rewar',
+            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
+        })
+    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
+    assert outcome.status == "infra_error"
+    assert "unreadable result.json" in outcome.meta["error"]
+
+
+def test_run_non_object_result_json_is_infra_error(tmp_path):
+    # Valid JSON that is not an object (a truncated write can still parse)
+    # must be infra as well, not an AttributeError on the code-bug path.
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files={
+            f"{TRIAL}/result.json": "[1, 2, 3]",
+            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
+        })
+    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
+    assert outcome.status == "infra_error"
+    assert "not a JSON object" in outcome.meta["error"]
+
+
 def test_run_transport_failure_is_infra_error(tmp_path):
     class BrokenLink(FakeRemoteLink):
         def run(self, cmd, timeout=None):
