@@ -7,9 +7,11 @@ import pytest
 
 import expedistill.blocks
 from expedistill.blocks.rules import (
+    ACCEPTANCE_IMPROVE,
     SEGMENT_SELECT,
     TASK_SELECT,
     TRAJECTORY_SELECT,
+    get_acceptance_improve,
     get_segment_select,
     get_task_select,
     get_trajectory_select,
@@ -183,6 +185,61 @@ def test_strong2_weak2_is_deterministic_under_input_order():
     # A one-shot iterable is materialized once, not consumed by the first
     # role's pass (the second role would silently select nothing).
     assert rule(reversed(trajectories)) == first
+
+
+def test_acceptance_improve_strict_rate_gain_truth_table():
+    rule = get_acceptance_improve("strict_rate_gain")
+    # Rise at equal depths.
+    assert rule(_metrics(3, 1), _metrics(3, 2), 3) is True
+    # Flat: strict -- equality is not a gain...
+    assert rule(_metrics(3, 1), _metrics(3, 1), 3) is False
+    # ...at any depths (equal rates over different n).
+    assert rule(_metrics(2, 1), _metrics(4, 2), 4) is False
+    # Fall.
+    assert rule(_metrics(3, 1), _metrics(3, 0), 3) is False
+    # Unequal depths judge by RATE (integer cross-multiplication), not by
+    # counts: live 3/5 vs baseline 2/3 has MORE successes but a WORSE
+    # rate, so it is not better.
+    assert rule(_metrics(3, 2), _metrics(5, 3), 5) is False
+    # Mirrored: fewer successes, better rate.
+    assert rule(_metrics(5, 3), _metrics(3, 2), 3) is True
+    # Defensive (the live_run stage short-circuits both before judging):
+    # an all-infra live arm, and a baseline with no valid trial.
+    assert rule(_metrics(3, 1), _metrics(0, 0, infra=3), 3) is False
+    assert rule(_metrics(0, 0, infra=3), _metrics(3, 1), 3) is False
+    # An aux benchmark adds aux_success to the counts; a rule reads only
+    # the keys it needs, so the extra key must not break it.
+    live_aux = {**_metrics(3, 2), "aux_success": 2}
+    assert rule(_metrics(3, 1), live_aux, 3) is True
+
+
+def test_acceptance_improve_first_success_gain_truth_table():
+    rule = get_acceptance_improve("first_success_gain")
+    # 0 -> >= 1: the baseline never succeeded, the live arm did.
+    assert rule(_metrics(3, 0), _metrics(3, 1), 3) is True
+    assert rule(_metrics(3, 0), _metrics(3, 3), 3) is True
+    # 1 -> 1: the baseline already succeeded; pass@N measures nothing there.
+    assert rule(_metrics(3, 1), _metrics(3, 2), 3) is False
+    # 0 -> 0.
+    assert rule(_metrics(3, 0), _metrics(3, 0), 3) is False
+    # Defensive: no live evidence.
+    assert rule(_metrics(3, 0), _metrics(0, 0, infra=3), 3) is False
+    # aux_success tolerance, same as strict_rate_gain.
+    live_aux = {**_metrics(3, 1), "aux_success": 1}
+    assert rule(_metrics(3, 0), live_aux, 3) is True
+
+
+def test_unknown_acceptance_improve_name_raises_config_error():
+    with pytest.raises(ConfigError) as exc:
+        get_acceptance_improve("success_rate_gain")
+    assert "strict_rate_gain" in str(exc.value)
+
+
+def test_acceptance_improve_is_a_disjoint_namespace():
+    assert "strict_rate_gain" in ACCEPTANCE_IMPROVE
+    assert "first_success_gain" in ACCEPTANCE_IMPROVE
+    assert "strict_rate_gain" not in TASK_SELECT
+    assert "all" not in ACCEPTANCE_IMPROVE
 
 
 def test_unknown_names_raise_config_error_listing_known():

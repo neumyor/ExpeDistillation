@@ -12,6 +12,7 @@ from expedistill.core.ids import (
     parse_attempt_id,
     parse_subtask_id,
     parse_trajectory_id,
+    raw_task_id,
     task_id_of,
 )
 
@@ -74,6 +75,26 @@ def test_child_id_embeds_parent_id():
     for parent, child in [(traj, seg), (seg, skill), (seg, exam),
                           (exam, att)]:
         assert child.startswith(parent + "/")
+
+
+def test_raw_task_id_round_trip():
+    assert raw_task_id("tb:task-1", "tb") == "task-1"
+    assert raw_task_id(make_task_id("tb", "task-1"), "tb") == "task-1"
+    # A raw id may itself contain '/' (ALFWorld's are relative paths);
+    # only the colon is this scheme's separator.
+    assert raw_task_id("tb:json_2.1.1/valid/x", "tb") == "json_2.1.1/valid/x"
+
+
+@pytest.mark.parametrize("bad", [
+    "searchqa:q1",     # another benchmark's id
+    "task-1",          # never prefixed
+    "tb:",             # empty bare id
+    "tb:tb:task-1",    # double prefix: built from an already-prefixed id
+    "tb:searchqa:q1",  # double prefix across benchmarks
+])
+def test_raw_task_id_rejects_foreign_and_non_canonical(bad):
+    with pytest.raises(ValueError):
+        raw_task_id(bad, "tb")
 
 
 def test_parse_trajectory_id_round_trip():

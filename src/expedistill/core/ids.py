@@ -112,6 +112,28 @@ def make_merged_skill_id(serial: int) -> str:
 # Parse helpers (inverses)
 # ---------------------------------------------------------------------------
 
+def raw_task_id(task_id: str, benchmark: str) -> str:
+    """Return the bare task id a prefixed one carries (the inverse of
+    ``make_task_id`` for one known benchmark -- the prefix is the only
+    place an id records its benchmark, so the caller names it). Raises
+    ValueError on an id of another benchmark or without the prefix, and on
+    a non-canonical shape: an empty remainder, or one that still contains
+    a colon. The colon is this scheme's separator, so such a remainder
+    means the id was built from an already-prefixed id
+    (``make_task_id("tb", "tb:x")``); handing it on would only move the
+    failure to load_tasks, whose plugins reject colons in names (TB's
+    task-name regex), instead of naming it here at the call site.
+    """
+    prefix = f"{benchmark}:"
+    if not task_id.startswith(prefix):
+        raise ValueError(f"not a {benchmark!r} task id: {task_id!r}")
+    raw = task_id[len(prefix):]
+    if not raw or ":" in raw:
+        raise ValueError(
+            f"not a canonical {benchmark!r} task id: {task_id!r}")
+    return raw
+
+
 def parse_trajectory_id(trajectory_id: str) -> Tuple[str, str, int]:
     """Return (task_id, role, attempt)."""
     if not trajectory_id.startswith(_TRAJ_PREFIX):

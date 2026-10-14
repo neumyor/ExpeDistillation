@@ -1,10 +1,10 @@
-"""Named rules for D4 task selection, D6 segment selection and trajectory
-selection (layer 4).
+"""Named rules for D4 task selection, D6 segment selection, trajectory
+selection and stage-4 acceptance improvement (layer 4).
 
 README 1.1 rule 7: replaceable behaviour is selected by *name* -- the config
 names a rule, the manifest freezes the name, and changing a definition means
 registering a NEW name; a registered rule's behaviour never changes under it.
-The three registries live at module level so a config's rule names resolve
+The registries live at module level so a config's rule names resolve
 once against a single process-wide mapping.
 
 Rule signatures (fixed per namespace; a new rule in a namespace must accept
@@ -25,6 +25,18 @@ exactly this shape):
   a rule sees only informative samples. A rule must be deterministic and
   must not mutate its input; the stage fixes the processing order, not the
   rule.
+* acceptance improve: ``(baseline: Mapping[str, int], live:
+  Mapping[str, int], n_attempts: int) -> bool`` -- stage-4 live_run's verdict
+  rule: whether the live arm (the task's skill group injected, really
+  executed n times) beats the stage-1 weak-arm bare baseline on ONE task.
+  Both mappings are that task's ``compute_task_metrics`` counts
+  (``{attempts, valid, success, infra}``; a benchmark with an auxiliary
+  metric adds ``aux_success`` -- a rule reads only the keys it needs, so
+  there is no strict key-set check to break), and ``n_attempts`` is the
+  frozen live sampling depth, passed for rules that normalise by it (the
+  two registered rules do not). The improvement rule is pre-registered
+  like every named rule: the config names it, the manifest freezes it, and
+  swapping the criterion is a new experiment under a new name.
 
 Unknown names raise ConfigError (the experiment config named something that
 does not exist), listing every registered rule in that namespace.
@@ -32,7 +44,7 @@ does not exist), listing every registered rule in that namespace.
 
 from __future__ import annotations
 
-from typing import Callable, List, Sequence
+from typing import Callable, List, Mapping, Sequence
 
 from expedistill.core.models import Subtask, Trajectory
 from expedistill.core.registry import make_registry
@@ -42,17 +54,21 @@ __all__ = [
     "TASK_SELECT",
     "SEGMENT_SELECT",
     "TRAJECTORY_SELECT",
+    "ACCEPTANCE_IMPROVE",
     "register_task_select",
     "get_task_select",
     "register_segment_select",
     "get_segment_select",
     "register_trajectory_select",
     "get_trajectory_select",
+    "register_acceptance_improve",
+    "get_acceptance_improve",
 ]
 
 TASK_SELECT = make_registry("task_select rule")
 SEGMENT_SELECT = make_registry("segment_select rule")
 TRAJECTORY_SELECT = make_registry("trajectory_select rule")
+ACCEPTANCE_IMPROVE = make_registry("acceptance improve rule")
 
 
 def register_task_select(name: str) -> Callable[[Callable], Callable]:
@@ -94,6 +110,22 @@ def get_trajectory_select(name: str) -> Callable:
     try:
         return TRAJECTORY_SELECT.get(name)
     except KeyError as exc:
+        raise ConfigError(str(exc)) from None
+
+
+def register_acceptance_improve(
+    name: str,
+) -> Callable[[Callable], Callable]:
+    """Decorator filing an acceptance-improvement rule; duplicates raise."""
+    return ACCEPTANCE_IMPROVE.register(name)
+
+
+def get_acceptance_improve(name: str) -> Callable:
+    """Return the acceptance-improvement rule registered under ``name``."""
+    try:
+        return ACCEPTANCE_IMPROVE.get(name)
+    except KeyError as exc:
+        # The listing is already in the registry's KeyError message.
         raise ConfigError(str(exc)) from None
 
 
@@ -197,3 +229,50 @@ def _strong2_weak2(
         )
         selected.extend(of_role[:2])
     return selected
+
+
+@ACCEPTANCE_IMPROVE.register("strict_rate_gain")
+def _strict_rate_gain(
+    baseline: Mapping[str, int],
+    live: Mapping[str, int],
+    n_attempts: int,
+) -> bool:
+    """Stage-4 live_run improvement rule (decision doc 2026-10-14, ruling
+    A6): the live arm's success RATE strictly exceeds the baseline's.
+
+    Compared by integer cross-multiplication, never a float division: exact
+    in small integers, and the arms may have different valid denominators
+    (an accepted infra shortfall shrinks the live side; the stage-1 baseline
+    may itself be short). With equal depths counts and rates agree; where
+    they differ the rate is the only unbiased reading -- live 3/5 vs
+    baseline 2/3 has MORE successes but a WORSE rate, and "not better" is
+    the right verdict. Strict on purpose: equality is not a gain.
+
+    Both defensive branches are unreachable in the live_run stage as
+    designed -- it short-circuits an all-infra live arm (live_undetermined)
+    and rejects a valid==0 baseline as ConfigError before any rule runs --
+    but keep the rule total: no live evidence, and no baseline to compare
+    against, are both "not better", never a crash.
+    """
+    if live["valid"] == 0:
+        return False
+    if baseline["valid"] == 0:
+        return False
+    return (live["success"] * baseline["valid"]
+            > baseline["success"] * live["valid"])
+
+
+@ACCEPTANCE_IMPROVE.register("first_success_gain")
+def _first_success_gain(
+    baseline: Mapping[str, int],
+    live: Mapping[str, int],
+    n_attempts: int,
+) -> bool:
+    """Stage-4 live_run improvement rule, the ablation alternative
+    (decision doc 2026-10-14, ruling 1: registered, but the configs name
+    strict_rate_gain): pass@N semantics -- the baseline never succeeded and
+    the live arm succeeded at least once. Weaker than strict_rate_gain (it
+    accepts one lucky success among n attempts), which is exactly what
+    running the two rules against each other measures.
+    """
+    return live["success"] >= 1 and baseline["success"] == 0

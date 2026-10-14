@@ -27,6 +27,21 @@ the effective delivery the way it names the effective rule selections.
 ``max_categories``, ``min_score``) together; under ``whole_bank`` they are
 rejected rather than ignored.
 
+``acceptance`` (stage-4 redesign, decision doc 2026-10-14) selects the
+stage-4 acceptance protocol: ``None`` (the key absent), ``{}`` and
+``{mode: exam}`` all mean the frozen v1 skill text exam, so every existing
+config keeps its meaning; ``mode: live_run`` executes the task with its
+skill group injected and compares against the stage-1 weak-arm baseline.
+It requires ``n_attempts`` (int >= 2 -- with one attempt per arm the false
+pass rate of the comparison is the model's own success rate, a coin flip)
+and ``improvement`` (a pre-registered rule name resolving against
+ACCEPTANCE_IMPROVE in blocks/rules.py, no default: the criterion is part
+of the experiment's identity), plus an optional ``max_injection_tokens``
+(positive int or null = measure only). Only this field's ``None`` is
+dropped from ``to_dict`` (``_MANIFEST_OPTIONAL_FIELDS``), so an in-flight
+old run's frozen manifest stays byte-identical; every other value freezes
+verbatim.
+
 ``tasks`` names the experiment's task set: ``None`` (the plugin's full set;
 a plugin may reject it, TB does), a list of raw task ids, or a path to a
 task file whose format the plugin defines. ``load_config`` resolves a
@@ -96,6 +111,24 @@ _SKILL_DELIVERY_KEYS = ("mode", "top_k", "max_categories", "min_score")
 #: Retrieval-mode parameters: all three are required together under
 #: ``mode: retrieval`` and all three are meaningless under ``whole_bank``.
 _SKILL_DELIVERY_RETRIEVAL_PARAMS = ("top_k", "max_categories", "min_score")
+
+#: Stage-4 acceptance modes (decision doc 2026-10-14): ``exam`` is the
+#: frozen v1 behaviour (the skill text exam); ``live_run`` injects the
+#: task's skill group and really executes the task (K1), comparing against
+#: the stage-1 weak-arm baseline.
+ACCEPTANCE_MODES = ("exam", "live_run")
+
+#: Keys accepted inside ``acceptance``.
+_ACCEPTANCE_KEYS = ("mode", "n_attempts", "improvement",
+                    "max_injection_tokens")
+
+#: Fields ``to_dict`` omits when their value is None -- and only these: a
+#: missing manifest key is how a new OPTIONAL field keeps an in-flight old
+#: run's frozen config byte-identical (decision doc 2026-10-14, ruling A1).
+#: A whitelist on purpose: a generic "skip None" would also drop
+#: ``split``/``tasks``, whose null in full mode is a frozen, meaningful
+#: value, and the run would then refuse to resume on the changed key set.
+_MANIFEST_OPTIONAL_FIELDS = frozenset({"acceptance"})
 
 #: Key sets accepted in the ``split`` field with explicit task-id lists:
 #: exactly the two-key or the three-key form (``reserved`` is the frozen
@@ -260,6 +293,75 @@ def _validate_skill_delivery(delivery: Any) -> Dict[str, Any]:
     return dict(delivery)
 
 
+def _validate_acceptance(
+        acceptance: Any) -> Optional[Dict[str, Any]]:
+    """Validate ``acceptance``; returns the value to freeze: ``None`` and
+    ``{}`` pass through unchanged (both mean the v1 exam -- completion is
+    what skill_delivery does, but here a written key must stay visible in
+    the frozen config, and only a None is dropped by ``to_dict``), every
+    other mapping a copy, so the frozen value cannot change through a later
+    mutation of the caller's mapping (same contract as skill_delivery)."""
+    if acceptance is None:
+        return None
+    if not isinstance(acceptance, dict):
+        raise ConfigError(
+            f"acceptance must be a mapping, got {type(acceptance).__name__}")
+    unknown = set(acceptance) - set(_ACCEPTANCE_KEYS)
+    if unknown:
+        raise ConfigError(
+            f"acceptance has unknown keys {sorted(unknown, key=str)}, "
+            f"expected a subset of {list(_ACCEPTANCE_KEYS)}")
+    if not acceptance:
+        return {}
+    if "mode" not in acceptance:
+        raise ConfigError(
+            "acceptance names keys but no 'mode'; the default exam is "
+            "spelled by omitting the key (or giving {}), not by a modeless "
+            f"mapping -- give mode (one of {list(ACCEPTANCE_MODES)})")
+    mode = acceptance["mode"]
+    if mode not in ACCEPTANCE_MODES:
+        raise ConfigError(
+            f"acceptance.mode must be one of {ACCEPTANCE_MODES}, "
+            f"got {mode!r}")
+    if mode == "exam":
+        # Same fail-loud reasoning as whole_bank's stray keys: an
+        # ineffective live_run parameter under exam would mislead about
+        # what the run accepts.
+        stray = sorted(set(acceptance) - {"mode"}, key=str)
+        if stray:
+            raise ConfigError(
+                "acceptance carries live_run parameter(s) "
+                + ", ".join(stray) + " under mode 'exam'; they only apply "
+                "to mode 'live_run'")
+        return dict(acceptance)
+    # mode == "live_run": the verdict criterion is pre-registered, no
+    # defaults to fall back on.
+    missing = [key for key in ("n_attempts", "improvement")
+               if key not in acceptance]
+    if missing:
+        raise ConfigError(
+            "acceptance mode 'live_run' requires ['n_attempts', "
+            f"'improvement']; missing {missing}")
+    n_attempts = acceptance["n_attempts"]
+    # >= 2, not >= 1: one attempt per arm makes the comparison's false pass
+    # rate equal the model's own success rate (decision doc 2026-10-14,
+    # ruling A2).
+    if (not isinstance(n_attempts, int) or isinstance(n_attempts, bool)
+            or n_attempts < 2):
+        raise ConfigError(
+            f"acceptance.n_attempts must be an int >= 2, "
+            f"got {n_attempts!r}")
+    improvement = acceptance["improvement"]
+    if not isinstance(improvement, str) or not improvement:
+        raise ConfigError(
+            "acceptance.improvement must be a non-empty rule name "
+            f"(ACCEPTANCE_IMPROVE in blocks/rules.py), got {improvement!r}")
+    if "max_injection_tokens" in acceptance:
+        _validate_input_cap(acceptance["max_injection_tokens"],
+                            "acceptance.max_injection_tokens")
+    return dict(acceptance)
+
+
 def _is_positive_int(value: Any) -> bool:
     """True for a positive int; bool is an int subclass but never a budget."""
     return (isinstance(value, int) and not isinstance(value, bool)
@@ -382,6 +484,17 @@ class ExperimentConfig:
     #: mislead about what the run injects). Delivery changes what the test
     #: arm sees, so it is part of the experiment's frozen identity.
     skill_delivery: Dict[str, Any] = field(default_factory=dict)
+    #: Stage-4 acceptance protocol (decision doc 2026-10-14): ``None`` and
+    #: ``{}`` mean the frozen v1 skill text exam, as does an explicit
+    #: ``{mode: exam}``; ``{mode: live_run}`` injects the task's skill group
+    #: and really executes it, comparing against the stage-1 weak-arm
+    #: baseline. live_run requires ``n_attempts`` (int >= 2) and
+    #: ``improvement`` (a pre-registered rule name from ACCEPTANCE_IMPROVE,
+    #: no default -- the criterion is part of the experiment's identity) and
+    #: takes an optional ``max_injection_tokens`` (positive int or null =
+    #: measure only). ``None`` is the one value to_dict drops
+    #: (_MANIFEST_OPTIONAL_FIELDS); every other value freezes verbatim.
+    acceptance: Optional[Dict[str, Any]] = None
     #: Prompt name -> digest; filled by the prompt registry (B2) when the
     #: stages freeze the manifest, empty in the source config.
     prompts_digests: Dict[str, str] = field(default_factory=dict)
@@ -420,6 +533,10 @@ class ExperimentConfig:
         # always carries the effective mode), copied so a later mutation of
         # the caller's mapping cannot change the frozen value.
         self.skill_delivery = _validate_skill_delivery(self.skill_delivery)
+        # Acceptance protocol: None stays None (the one value to_dict drops)
+        # and {} stays {} -- both mean the exam; anything else is validated
+        # and copied like the mappings above.
+        self.acceptance = _validate_acceptance(self.acceptance)
         unknown_rules = set(self.rules) - set(RULE_KEYS)
         if unknown_rules:
             raise ValueError(
@@ -530,7 +647,18 @@ class ExperimentConfig:
         return self.token_budgets["default_max_output_tokens"]
 
     def to_dict(self) -> Dict[str, Any]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        payload: Dict[str, Any] = {}
+        for f in fields(self):
+            value = getattr(self, f.name)
+            # Dropping None is whitelisted per field
+            # (_MANIFEST_OPTIONAL_FIELDS), never a generic "skip None":
+            # every other field freezes even when null -- split/tasks in
+            # full mode are values, not absences, and a resumed old run
+            # must find its frozen key set unchanged.
+            if value is None and f.name in _MANIFEST_OPTIONAL_FIELDS:
+                continue
+            payload[f.name] = value
+        return payload
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExperimentConfig":
@@ -561,6 +689,19 @@ class ExperimentConfig:
         # The field filter stays: construction only ever receives dataclass
         # fields, whatever the checks above grow to allow.
         return cls(**{k: v for k, v in data.items() if k in known})
+
+
+def acceptance_mode(config: ExperimentConfig) -> str:
+    """The stage-4 acceptance protocol a config selects.
+
+    ``exam`` unless the config says otherwise: a missing key and ``{}``
+    both mean the frozen v1 skill text exam, so old configs and old frozen
+    manifests keep their meaning. A non-empty acceptance has passed
+    ``_validate_acceptance``, so its ``mode`` is one of ACCEPTANCE_MODES.
+    """
+    if not config.acceptance:
+        return "exam"
+    return config.acceptance["mode"]
 
 
 def load_config(path: str) -> ExperimentConfig:

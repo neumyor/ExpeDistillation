@@ -10,6 +10,7 @@ from expedistill.core.config import (
     RULE_KEYS,
     ConfigError,
     ExperimentConfig,
+    acceptance_mode,
     load_config,
     save_config,
 )
@@ -642,9 +643,20 @@ class TestTaskSet:
 
 class TestSerialisation:
     def test_to_dict_covers_every_field(self):
+        # Decision doc 2026-10-14, ruling A1: to_dict drops None ONLY for
+        # _MANIFEST_OPTIONAL_FIELDS (acceptance), so an old-style config's
+        # frozen manifest keeps its exact key set and an in-flight old run
+        # still resumes on this code. Every other field is always present
+        # -- split/tasks freeze as null in full mode, and a generic "skip
+        # None" would delete exactly those.
         from dataclasses import fields
         payload = make_config().to_dict()
-        assert set(payload) == {f.name for f in fields(ExperimentConfig)}
+        assert "acceptance" not in payload
+        assert set(payload) == ({f.name for f in fields(ExperimentConfig)}
+                                - {"acceptance"})
+        # A non-None acceptance is part of the frozen config like any field.
+        cfg = make_config(acceptance={"mode": "exam"})
+        assert set(cfg.to_dict()) == {f.name for f in fields(ExperimentConfig)}
 
     def test_from_dict_rejects_unknown_keys(self):
         # Unlike the data model's from_dict (lenient for stored records from
@@ -860,3 +872,257 @@ class TestSerialisation:
         cfg_file.write_text("- just\n- a\n- list\n", encoding="utf-8")
         with pytest.raises(ValueError, match="mapping"):
             load_config(str(cfg_file))
+
+
+#: Golden baselines for OLD-STYLE configs (no acceptance key), captured from
+#: ``to_dict`` before the acceptance field existed (decision doc
+#: 2026-10-14, ruling A1) and hardcoded as literals -- never regenerated at
+#: run time, or the test would bless whatever the new code produces. Key
+#: set, key order and every value must stay byte-identical: this is the
+#: frozen-manifest surface, and a resumed in-flight run compares against it.
+#: Two shapes, because the trap is shape-specific: in full mode split/tasks
+#: are None (a generic None filter would delete them and kill the resume);
+#: the split shape pins the explicit-list form.
+GOLDEN_TO_DICT_KEY_ORDER = [
+    "benchmark", "mode", "models", "weak_profile",
+    "n_attempts_strong", "n_attempts_weak", "K", "split", "tasks",
+    "segment_retry_limit", "retry_limit", "bank_token_budget",
+    "curation_rounds", "rules", "skill_delivery", "prompts_digests",
+    "model_options", "token_budgets", "schema_version",
+]
+
+GOLDEN_TO_DICT_FULL_FORM = {
+    "benchmark": "tb",
+    "mode": "full",
+    "models": {
+        "executor_strong": "model-s",
+        "executor_weak": "model-w",
+        "segmenter": "model-s",
+        "author": "model-s",
+        "examiner": "model-s",
+        "answerer": "model-w",
+        "judge": "model-s",
+        "rewriter": "model-s",
+        "curator": "model-s",
+        "auditor": "model-s",
+    },
+    "weak_profile": "",
+    "n_attempts_strong": 1,
+    "n_attempts_weak": 1,
+    "K": 5,
+    "split": None,
+    "tasks": None,
+    "segment_retry_limit": 2,
+    "retry_limit": 2,
+    "bank_token_budget": 4096,
+    "curation_rounds": 3,
+    "rules": {
+        "task_select": "any_weak_failed",
+        "segment_select": "strong_success_weak_failed",
+        "trajectory_select": "all",
+    },
+    "skill_delivery": {"mode": "whole_bank"},
+    "prompts_digests": {},
+    "model_options": {},
+    "token_budgets": {},
+    "schema_version": 2,
+}
+
+GOLDEN_TO_DICT_SPLIT_FORM = {
+    "benchmark": "tb",
+    "mode": "split",
+    "models": {
+        "executor_strong": "model-s",
+        "executor_weak": "model-w",
+        "segmenter": "model-s",
+        "author": "model-s",
+        "examiner": "model-s",
+        "answerer": "model-w",
+        "judge": "model-s",
+        "rewriter": "model-s",
+        "curator": "model-s",
+        "auditor": "model-s",
+    },
+    "weak_profile": "model-w is easily confused by multi-step operations.",
+    "n_attempts_strong": 3,
+    "n_attempts_weak": 5,
+    "K": 6,
+    "split": {"train": ["tb:1"], "test": ["tb:2"], "reserved": ["tb:3"]},
+    "tasks": ["tb:1", "tb:2", "tb:3"],
+    "segment_retry_limit": 2,
+    "retry_limit": 2,
+    "bank_token_budget": 4096,
+    "curation_rounds": 3,
+    "rules": {
+        "task_select": "custom",
+        "segment_select": "strong_success_weak_failed",
+        "trajectory_select": "all",
+    },
+    "skill_delivery": {"mode": "whole_bank"},
+    "prompts_digests": {},
+    "model_options": {},
+    "token_budgets": {"default_max_output_tokens": 65536},
+    "schema_version": 2,
+}
+
+
+class TestToDictGolden:
+    def test_full_form_freezes_byte_identically(self):
+        payload = make_config().to_dict()
+        assert payload == GOLDEN_TO_DICT_FULL_FORM
+        assert list(payload) == GOLDEN_TO_DICT_KEY_ORDER
+
+    def test_split_form_freezes_byte_identically(self):
+        cfg = make_config(
+            mode="split",
+            weak_profile="model-w is easily confused by multi-step "
+                         "operations.",
+            n_attempts_strong=3,
+            n_attempts_weak=5,
+            K=6,
+            split={"train": ["tb:1"], "test": ["tb:2"],
+                   "reserved": ["tb:3"]},
+            tasks=["tb:1", "tb:2", "tb:3"],
+            rules={"task_select": "custom"},
+            token_budgets={"default_max_output_tokens": 65536},
+        )
+        payload = cfg.to_dict()
+        assert payload == GOLDEN_TO_DICT_SPLIT_FORM
+        assert list(payload) == GOLDEN_TO_DICT_KEY_ORDER
+
+
+#: The pinned live_run acceptance shape (decision doc 2026-10-14 section
+#: 2.1); n_attempts 3 = the user-agreed TB depth (= n_attempts_weak). The
+#: improvement name is pre-registered in ACCEPTANCE_IMPROVE (blocks/rules.py);
+#: stage 0 is what resolves it against the registry.
+LIVE_RUN_ACCEPTANCE = {
+    "mode": "live_run", "n_attempts": 3,
+    "improvement": "strict_rate_gain",
+}
+
+
+class TestAcceptance:
+    def test_absent_none_and_empty_all_mean_exam(self):
+        assert make_config().acceptance is None
+        assert make_config(acceptance=None).acceptance is None
+        assert make_config(acceptance={}).acceptance == {}
+
+    def test_acceptance_mode_resolves_the_selected_protocol(self):
+        assert acceptance_mode(make_config()) == "exam"
+        assert acceptance_mode(make_config(acceptance={})) == "exam"
+        assert acceptance_mode(
+            make_config(acceptance={"mode": "exam"})) == "exam"
+        assert acceptance_mode(
+            make_config(acceptance=LIVE_RUN_ACCEPTANCE)) == "live_run"
+
+    def test_explicit_exam_mode_loads(self):
+        cfg = make_config(acceptance={"mode": "exam"})
+        assert cfg.acceptance == {"mode": "exam"}
+
+    def test_live_run_loads_and_freezes_verbatim(self):
+        cfg = make_config(acceptance=LIVE_RUN_ACCEPTANCE)
+        assert cfg.acceptance == LIVE_RUN_ACCEPTANCE
+        assert cfg.to_dict()["acceptance"] == LIVE_RUN_ACCEPTANCE
+
+    # None is NOT in this list: it is the default and means exam.
+    @pytest.mark.parametrize("bad", [[], "live_run", 5])
+    def test_must_be_a_mapping(self, bad):
+        with pytest.raises(ConfigError, match="mapping"):
+            make_config(acceptance=bad)
+
+    def test_unknown_keys_rejected(self):
+        with pytest.raises(ConfigError, match="unknown keys"):
+            make_config(acceptance={**LIVE_RUN_ACCEPTANCE, "max_rounds": 2})
+
+    def test_keys_without_mode_rejected(self):
+        with pytest.raises(ConfigError, match="mode"):
+            make_config(acceptance={"n_attempts": 3,
+                                    "improvement": "strict_rate_gain"})
+
+    def test_unknown_mode_rejected(self):
+        with pytest.raises(ConfigError, match="one of"):
+            make_config(acceptance={"mode": "retake"})
+
+    def test_exam_rejects_any_other_key(self):
+        for key, value in (("n_attempts", 3),
+                           ("improvement", "strict_rate_gain"),
+                           ("max_injection_tokens", None)):
+            with pytest.raises(ConfigError, match="exam"):
+                make_config(acceptance={"mode": "exam", key: value})
+
+    def test_live_run_missing_n_attempts_rejected(self):
+        with pytest.raises(ConfigError, match="n_attempts"):
+            make_config(acceptance={"mode": "live_run",
+                                    "improvement": "strict_rate_gain"})
+
+    def test_live_run_missing_improvement_rejected(self):
+        with pytest.raises(ConfigError, match="improvement"):
+            make_config(acceptance={"mode": "live_run", "n_attempts": 3})
+
+    @pytest.mark.parametrize("bad", [1, 0, -1, True, "3", 2.5, None])
+    def test_n_attempts_must_be_int_at_least_two(self, bad):
+        # 1 is rejected on purpose: one attempt per arm makes the
+        # comparison's false pass rate the model's own success rate.
+        with pytest.raises(ConfigError, match="n_attempts"):
+            make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
+                                    "n_attempts": bad})
+
+    @pytest.mark.parametrize("bad", ["", None, 3])
+    def test_improvement_must_be_nonempty_rule_name(self, bad):
+        with pytest.raises(ConfigError, match="improvement"):
+            make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
+                                    "improvement": bad})
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "1000", 1000.5])
+    def test_max_injection_tokens_positive_int_or_null(self, bad):
+        with pytest.raises(ConfigError, match="max_injection_tokens"):
+            make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
+                                    "max_injection_tokens": bad})
+
+    def test_max_injection_tokens_null_and_positive_int_load(self):
+        for value in (None, 4096):
+            cfg = make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
+                                          "max_injection_tokens": value})
+            assert cfg.acceptance["max_injection_tokens"] == value
+
+    def test_none_dropped_from_to_dict_everything_else_kept(self):
+        assert "acceptance" not in make_config().to_dict()
+        # Only None is dropped: a written {} or {mode: exam} freezes as is,
+        # so the manifest shows what the source config actually said.
+        assert make_config(acceptance={}).to_dict()["acceptance"] == {}
+        assert (make_config(acceptance={"mode": "exam"}).to_dict()
+                ["acceptance"] == {"mode": "exam"})
+        assert (make_config(acceptance=LIVE_RUN_ACCEPTANCE).to_dict()
+                ["acceptance"] == LIVE_RUN_ACCEPTANCE)
+
+    def test_not_shared_with_caller_mapping(self):
+        given = dict(LIVE_RUN_ACCEPTANCE)
+        cfg = make_config(acceptance=given)
+        given["n_attempts"] = 99
+        assert cfg.acceptance["n_attempts"] == 3
+
+    def test_from_dict_round_trip_exam(self):
+        cfg = make_config()
+        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_from_dict_round_trip_live_run(self):
+        cfg = make_config(acceptance=LIVE_RUN_ACCEPTANCE)
+        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_yaml_round_trip_live_run(self, tmp_path):
+        cfg_file = tmp_path / "exp.yaml"
+        cfg_file.write_text(
+            "benchmark: tb\nmode: full\n"
+            "models: {executor_strong: s, executor_weak: w}\n"
+            "acceptance:\n"
+            "  mode: live_run\n"
+            "  n_attempts: 3\n"
+            "  improvement: strict_rate_gain\n"
+            "  max_injection_tokens: null\n",
+            encoding="utf-8")
+        cfg = load_config(str(cfg_file))
+        assert cfg.acceptance == {**LIVE_RUN_ACCEPTANCE,
+                                  "max_injection_tokens": None}
+        out = tmp_path / "out.yaml"
+        save_config(cfg, str(out))
+        assert load_config(str(out)) == cfg
