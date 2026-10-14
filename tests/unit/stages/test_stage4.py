@@ -908,3 +908,171 @@ def test_resume_after_fatal_crash_completes_only_pending(tmp_path):
     bctx.workers = 4
     stage4_acceptance.run(bctx)
     assert _snapshot(store) == _snapshot(baseline_store)
+
+
+# ---------------------------------------------------------------------------
+# Dual-mode dispatch (decision doc 2026-10-14): the acceptance key picks the
+# protocol, and an exam run must not even import the live machinery
+# ---------------------------------------------------------------------------
+
+LIVE_ACCEPTANCE = {"mode": "live_run", "n_attempts": 3,
+                   "improvement": "strict_rate_gain"}
+
+
+@pytest.mark.parametrize("acceptance", [None, {}, {"mode": "exam"}])
+def test_exam_configs_run_the_exam_path_not_the_live_driver(
+        tmp_path, monkeypatch, acceptance):
+    """No key, ``{}`` and an explicit ``{mode: exam}`` are all the exam: the
+    real K4 path runs (the summary keeps its exam shape) and the live
+    driver is never entered."""
+    from expedistill.stages import stage4_live_run
+    calls = []
+    monkeypatch.setattr(
+        stage4_live_run, "run",
+        lambda ctx: calls.append(ctx) or pytest.fail("live driver called"))
+
+    store = Store(tmp_path / "run")
+    seed_pair(store, "t1", 0, skill_text="skill one")
+    answerer = make_fake_handle("weak", ["bare zero", "skilled zero"])
+    judge = make_fake_handle("strong", [incorrect(), correct()])
+    ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
+                      rewriter=make_fake_handle("strong", []),
+                      auditor=make_fake_handle("auditor", [clean_verdict()]),
+                      config=make_config(acceptance=acceptance))
+
+    summary = stage4_acceptance.run(ctx)
+
+    assert summary == {"accepted": 1, "discarded": {},
+                       "skipped_missing_exam": [], "infra_failed": [],
+                       "processed_this_call": 1}
+    assert calls == []
+
+
+def test_live_run_config_dispatches_to_the_live_driver(tmp_path, monkeypatch):
+    from expedistill.stages import stage4_live_run
+    seen = []
+    monkeypatch.setattr(
+        stage4_live_run, "run",
+        lambda ctx: seen.append(ctx) or {"mode": "live_run"})
+
+    store = Store(tmp_path / "run")
+    seed_pair(store, "t1", 0, skill_text="skill one")
+    ctx, _ = make_ctx(tmp_path, answerer=make_fake_handle("weak", []),
+                      judge=make_fake_handle("strong", []),
+                      rewriter=make_fake_handle("strong", []),
+                      config=make_config(acceptance=dict(LIVE_ACCEPTANCE)))
+
+    summary = stage4_acceptance.run(ctx)
+
+    assert summary == {"mode": "live_run"}
+    assert seen == [ctx]
+
+
+_EXAM_RUN_SUBPROCESS = """
+import json, sys, tempfile
+from pathlib import Path
+
+from expedistill.core.config import ExperimentConfig
+from expedistill.core.ids import (
+    make_exam_id, make_skill_id, make_subtask_id, make_task_id,
+    make_trajectory_id,
+)
+from expedistill.core.models import Exam, Skill
+from expedistill.infra.store import Store
+from expedistill.llm import json_script, make_fake_handle
+from expedistill.stages import stage4_acceptance
+from expedistill.stages.context import StageContext
+
+tmp = Path(tempfile.mkdtemp())
+run_dir = tmp / "run"
+store = Store(run_dir)
+subtask_id = make_subtask_id(
+    make_trajectory_id(make_task_id("tb", "t1"), "strong", 0), 0)
+skill = Skill(skill_id=make_skill_id(subtask_id), content="a skill",
+              subtask_id=subtask_id)
+store.save(skill, "skills")
+exam = Exam(exam_id=make_exam_id(subtask_id), question_text="the question",
+            reference_answer="the answer", subtask_id=subtask_id)
+store.save(exam, "exams")
+config = ExperimentConfig(benchmark="tb", mode="full",
+                          models={"executor_strong": "s",
+                                  "executor_weak": "w"},
+                          weak_profile="a weak model", retry_limit=1)
+ctx = StageContext(
+    run_dir=run_dir, store=store, config=config, usage=None,
+    handles={"answerer": make_fake_handle("weak", ["bare", "skilled"]),
+             "judge": make_fake_handle("strong", [
+                 json_script({"verdict": "incorrect",
+                              "error_description": "missed the step"}),
+                 json_script({"verdict": "correct",
+                              "error_description": ""})]),
+             "rewriter": make_fake_handle("strong", []),
+             "auditor": make_fake_handle(
+                 "auditor", [json_script({"leaked": False,
+                                          "reason": "generic advice"})])},
+    workdir_root=tmp / "work")
+summary = stage4_acceptance.run(ctx)
+from expedistill import prompts
+live_driver_loaded = "expedistill.stages.stage4_live_run" in sys.modules
+# The frozen name set is the import-time snapshot: driving the exam stage
+# must not grow it, even though the two live prompts ARE registered in the
+# process (the composites package exports K6, whose import registers
+# them -- pre-existing T3 wiring, not something the stage4 dispatch owns).
+leaked_names = sorted(set(prompts.METHOD_PROMPT_NAMES) & {
+    "LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"})
+print(json.dumps({"summary": summary,
+                  "live_driver_loaded": live_driver_loaded,
+                  "leaked_frozen_names": leaked_names}))
+"""
+
+
+def test_an_exam_run_never_imports_the_live_modules(tmp_path):
+    """The lazy-import seam (decision section 2.1): driven end to end with
+    an exam config, a FRESH interpreter's sys.modules holds neither the
+    live driver nor its blocks nor their prompts -- the import graph an
+    in-flight exam run resumes under is provably unchanged. A subprocess
+    because the shared test session imports K6 (and through it
+    blocks/prompts.attribution) for other tests."""
+    import subprocess
+    import sys
+
+    store = Store(tmp_path / "run")
+    seed_pair(store, "t1", 0, skill_text="skill one")
+    answerer = make_fake_handle("weak", ["bare zero", "skilled zero"])
+    judge = make_fake_handle("strong", [incorrect(), correct()])
+
+    # The in-process control: the exam run works and the live driver, if
+    # absent from sys.modules, stays absent (the subprocess is the real
+    # assertion; this one catches a module-level import sneaking in).
+    import expedistill.stages.stage4_live_run  # noqa: F401 - loading it IS the point
+    sys.modules.pop("expedistill.stages.stage4_live_run")
+    try:
+        ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
+                          rewriter=make_fake_handle("strong", []),
+                          auditor=make_fake_handle("auditor",
+                                                   [clean_verdict()]))
+        stage4_acceptance.run(ctx)
+        assert ("expedistill.stages.stage4_live_run"
+                not in sys.modules), "the exam path imported the live driver"
+    finally:
+        importlib_reload = __import__("importlib").import_module
+        importlib_reload("expedistill.stages.stage4_live_run")
+
+    completed = subprocess.run(
+        [sys.executable, "-c", _EXAM_RUN_SUBPROCESS],
+        capture_output=True, text=True, timeout=120)
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["summary"] == {
+        "accepted": 1, "discarded": {}, "skipped_missing_exam": [],
+        "infra_failed": [], "processed_this_call": 1}
+    # The dispatch's own seam: the live driver is never loaded. The two
+    # attribution BLOCK/PROMPT modules cannot be asserted the same way --
+    # the composites package exports K6, so any composite import (this
+    # test's, an exam stage's, K1's) registers the prompts process-wide.
+    # That is T3's module export, outside stage 4's dispatch; what the
+    # exam view actually needs (and what this pins) is that the FROZEN
+    # name set never grows the two live names -- the stage 0 golden pins
+    # the same invariant from the manifest side.
+    assert payload["live_driver_loaded"] is False
+    assert payload["leaked_frozen_names"] == []

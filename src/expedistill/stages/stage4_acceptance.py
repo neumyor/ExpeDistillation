@@ -1,5 +1,18 @@
 """Stage 4: acceptance of candidate skills (README section 3, stage 4).
 
+DUAL MODE (decision doc 2026-10-14): the config's ``acceptance`` key picks
+the protocol. ``exam`` -- the key absent, ``{}`` or ``{mode: exam}``, the
+overwhelming default and the frozen v1 behaviour -- is everything below:
+one skill at a time, a K3 text exam per (skill, exam) pair. ``live_run``
+accepts a task's whole skill group by real execution instead (K1 injects
+the group into the weak executor, two pinned rounds, G10/G11
+attribution/revision on a miss); its driver is ``stages/stage4_live_run.py``
+and the per-group phase functions are K6 (``composites.live_acceptance``).
+The dispatch at the top of :func:`run` is a LAZY import on purpose: an
+exam run must not even load the live modules (their import registers two
+extra prompts), so the exam path stays byte-for-byte the old one and the
+frozen-manifest surface cannot drift.
+
 Layer-6 wiring only: the K4 loop itself is ``composites.acceptance.accept_skill``
 (which also owns the per-skill disk IO and resume); this stage enumerates the
 stored pending stage-3 candidate skills (id == ``make_skill_id(subtask_id)``;
@@ -52,6 +65,7 @@ failed" building block:
 from typing import Any, Dict, List, Optional, Tuple
 
 from expedistill.composites.acceptance import accept_skill, discard_skill
+from expedistill.core.config import acceptance_mode
 from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import Exam, Skill
 from expedistill.infra.parallel import run_units
@@ -149,6 +163,11 @@ def run(ctx: Any) -> Dict[str, Any]:
     (default 1 = the old serial loop); outcomes arrive in input order, so
     the summary never depends on the dispatch interleaving.
     """
+    if acceptance_mode(ctx.config) == "live_run":
+        # Lazy on purpose (module docstring): an exam run never imports
+        # the live driver, its blocks or their prompts.
+        from expedistill.stages import stage4_live_run
+        return stage4_live_run.run(ctx)
     store = ctx.store
     recorder = UnitFailureRecorder(ctx.run_dir)
     # Skills that already have their model_output_error ledger row.

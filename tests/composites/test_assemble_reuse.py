@@ -1061,3 +1061,145 @@ def test_cli_assemble_reuse_baseline_end_to_end(capsys, tmp_path):
     assert (run_dir / "ASSEMBLED_FROM.md").is_file()
     assert not (run_dir / "manifest.json").exists()
     assert not (run_dir / "skill_bank.jsonl").exists()
+
+
+# ---------------------------------------------------------------------------
+# Acceptance-protocol combinations (decision doc 2026-10-14, ruling A15)
+# ---------------------------------------------------------------------------
+
+#: A live_run target block (the first TB live config's shape, section 2.1):
+#: the criterion is pre-registered by name, the depth is the user-agreed 3.
+_LIVE_ACCEPTANCE_YAML = """
+acceptance:
+  mode: live_run
+  n_attempts: 3
+  improvement: strict_rate_gain
+"""
+
+_EXPLICIT_EXAM_YAML = """
+acceptance:
+  mode: exam
+"""
+
+
+def build_live_source_run(tmp_path: Path) -> SourceRun:
+    """The exam fixture's full source run, re-frozen under a live_run
+    acceptance config: every object file is copied verbatim from the exam
+    source and only the manifest is frozen by the real stage 0 over the
+    live config (the identity walk reads the manifest; the copy keeps the
+    fixture a finished run, not a bare manifest)."""
+    import shutil
+
+    source = build_source_run(tmp_path)
+    run_dir = tmp_path / "live-source"
+    for item in source.run_dir.iterdir():
+        if item.is_dir():
+            shutil.copytree(item, run_dir / item.name)
+        elif item.name != "manifest.json":
+            shutil.copy2(item, run_dir / item.name)
+    config = dataclasses.replace(
+        make_source_config(),
+        acceptance={"mode": "live_run", "n_attempts": 3,
+                   "improvement": "strict_rate_gain"})
+    ctx = StageContext(
+        run_dir=run_dir,
+        store=Store(run_dir),
+        config=config,
+        usage=UsageRecorder(run_dir / "llm_requests" / "usage.jsonl"),
+        handles={},
+        workdir_root=run_dir / "work",
+    )
+    stage0_freeze.run(ctx)
+    return SourceRun(run_dir, source.ids)
+
+
+@pytest.mark.parametrize("acceptance_yaml", [
+    "",  # no acceptance key at all: the frozen v1 exam target
+    _LIVE_ACCEPTANCE_YAML,
+], ids=["exam", "live_run"])
+def test_baseline_level_allows_exam_and_live_targets(
+        tmp_path, acceptance_yaml):
+    """Stage-1-only reuse re-runs stages 2-6 fresh, so the acceptance
+    protocol (a stage-4 key) may differ from the source run in either
+    direction: the pinned minimum at this level never walks it."""
+    source = build_source_run(tmp_path)
+    config_path = write_reuse_config(
+        tmp_path, BASELINE_CONFIG_YAML + acceptance_yaml)
+    run_dir = tmp_path / "assembled"
+
+    summary = assemble_reuse(source.run_dir, config_path, run_dir,
+                             level="baseline")
+
+    assert summary["level"] == "baseline"
+    assert summary["counts"] == {
+        "trajectories": 2, "accepted_infra_shortfall_units": 1}
+
+
+def test_bank_level_refuses_an_exam_to_live_target(tmp_path):
+    """The bank's acceptance protocol identity cannot be swapped: the
+    copied skills/exams were accepted under the source run's exam, and a
+    live_run target would re-freeze a different stage-4 protocol over
+    them."""
+    source = build_source_run(tmp_path)
+    config_path = write_reuse_config(
+        tmp_path, REUSE_CONFIG_YAML + _LIVE_ACCEPTANCE_YAML)
+    run_dir = tmp_path / "assembled"
+    with pytest.raises(ConfigError, match=r"config\.acceptance"):
+        assemble_reuse(source.run_dir, config_path, run_dir)
+    assert not run_dir.exists()
+
+
+def test_bank_level_refuses_a_live_to_exam_target(tmp_path):
+    """The reverse direction is refused by the same identity walk: a
+    live-accepted bank cannot be re-frozen as an exam-accepted one."""
+    source = build_live_source_run(tmp_path)
+    config_path = write_reuse_config(tmp_path, REUSE_CONFIG_YAML)
+    run_dir = tmp_path / "assembled"
+    with pytest.raises(ConfigError, match=r"config\.acceptance"):
+        assemble_reuse(source.run_dir, config_path, run_dir)
+    assert not run_dir.exists()
+
+
+def test_bank_level_refuses_an_explicit_exam_acceptance_target(tmp_path):
+    """The conservative corner (ruling A15): the source ran the default
+    exam and the reuse config says the same thing explicitly -- same
+    protocol, but the frozen manifest's KEY SET differs (the source's
+    config carries no acceptance key, the target's carries {mode: exam}),
+    and the identity walk refuses on the key, never guessing at semantic
+    equivalence."""
+    source = build_source_run(tmp_path)
+    config_path = write_reuse_config(
+        tmp_path, REUSE_CONFIG_YAML + _EXPLICIT_EXAM_YAML)
+    run_dir = tmp_path / "assembled"
+    with pytest.raises(ConfigError, match=r"config\.acceptance"):
+        assemble_reuse(source.run_dir, config_path, run_dir)
+    assert not run_dir.exists()
+
+
+def test_bank_level_live_to_live_reuse_discloses_no_live_digest_drift(
+        tmp_path):
+    """Same-acceptance live->live reuse goes through, and the two G10/G11
+    prompt digests are on BOTH sides (assemble_reuse's digest-copy
+    syncs with stage 0's live branch), so the drift disclosure reports no
+    "prompt set" drift -- without the sync it would misreport the whole
+    live prompt pair as config drift."""
+    source = build_live_source_run(tmp_path)
+    config_path = write_reuse_config(
+        tmp_path, REUSE_CONFIG_YAML + _LIVE_ACCEPTANCE_YAML)
+    run_dir = tmp_path / "assembled"
+
+    summary = assemble_reuse(source.run_dir, config_path, run_dir)
+
+    assert summary["level"] == "bank"
+    assert "LIVE_RUN_ATTRIBUTION" not in summary["prompt_digest_drift"]
+    assert "LIVE_SKILL_REVISION" not in summary["prompt_digest_drift"]
+    assert summary["prompt_digest_drift"] == []
+    # The no-drift assertion is not vacuous: the source manifest really
+    # froze the two live digests (the live branch of the digest copy), so
+    # both sides of the comparison carried them.
+    source_manifest = read_json(source.run_dir / "manifest.json")
+    from expedistill import prompts
+    assert source_manifest["prompt_digests"][
+        "LIVE_RUN_ATTRIBUTION"] == prompts.digest("LIVE_RUN_ATTRIBUTION")
+    assert source_manifest["prompt_digests"][
+        "LIVE_SKILL_REVISION"] == prompts.digest("LIVE_SKILL_REVISION")

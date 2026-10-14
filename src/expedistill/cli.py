@@ -298,7 +298,8 @@ def build_parser() -> argparse.ArgumentParser:
                           "re-running with a higher --until-stage (or "
                           "without the flag)")
     run.add_argument("--allow-infra-shortfall", action="store_true",
-                     help="let stages 1 and 6 proceed over execution units "
+                     help="let stages 1 and 6 (and stage 4 in live_run "
+                          "mode, per round) proceed over execution units "
                           "that exhausted their infra retries (counted as "
                           "infra, flagged in the summaries) instead of "
                           "stopping for a resume; the accepted units are "

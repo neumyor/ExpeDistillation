@@ -1074,3 +1074,214 @@ def test_malformed_whole_bank_output_is_a_clean_cli_stop(
     # Stages 0-4 completed and stay on disk; stage 5 did not.
     stages = [row["stage"] for row in read_jsonl(ledger_path(run_dir))]
     assert stages == list(STAGE_NAMES[:5])
+
+
+# ---------------------------------------------------------------------------
+# live_run acceptance mode (decision doc 2026-10-14): the whole pipeline
+# over a plugin whose weak arm only succeeds on the REVISED skill block, so
+# every group walks round 0 (fail) -> G10/G11 -> round 1 (pass).
+# ---------------------------------------------------------------------------
+
+class _LivePipelinePlugin(FakePipelinePlugin):
+    """The stub benchmark with live-round semantics: strong always
+    succeeds; weak fails bare AND fails on the un-revised skill block, and
+    only succeeds once the block carries the G11 revision marker -- which
+    is what forces both rounds of every group."""
+
+    def run(self, task, handle, skills_block, workdir):
+        self.calls.append({
+            "task_id": task.task_id,
+            "role": handle.role,
+            "block": skills_block,
+        })
+        if handle.role == "executor_strong":
+            status = "success"
+        else:
+            status = ("success" if "REVISED-BY-G11" in skills_block
+                      else "failure")
+        return RunOutcome(
+            steps=[{"action": "run", "observation": "the environment state"}],
+            status=status,
+        )
+
+
+def _install_live_plugin(monkeypatch, plugin):
+    """Serve the live-semantics plugin under the same package name (the
+    config keeps naming benchmark 'fakebench')."""
+    from expedistill.benchmarks.registry import register_plugin
+    fullname = _MODULE
+
+    class Loader(importlib.abc.Loader):
+        def create_module(self, spec):
+            return types.ModuleType(spec.name)
+
+        def exec_module(self, module):
+            register_plugin(plugin)
+
+    class Finder:
+        def find_spec(self, name, path=None, target=None):
+            if name == fullname:
+                return importlib.machinery.ModuleSpec(name, Loader())
+            return None
+
+    sys.modules.pop(fullname, None)
+    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
+    return plugin
+
+
+def _live_script(system: str, user: str) -> str:
+    """The exam pipeline's script plus the two live prompts: G10 revises
+    every listed skill, G11 rewrites each one as its own text plus a
+    marker line (the marker set survives; the bytes change, which is what
+    makes round 1 a different injection)."""
+    if user.startswith("You are the attribution step"):
+        ids = [line.split("skill_id: ", 1)[1]
+               for line in user.splitlines()
+               if line.startswith("skill_id: ")]
+        assert ids, "the G10 prompt listed no skills"
+        return json_script({
+            "diagnosis": "the skill's trigger is too vague to recognize",
+            "skill_actions": [
+                {"skill_id": skill_id, "action": "revise",
+                 "problem": "the trigger condition is too vague to "
+                            "recognize during real execution"}
+                for skill_id in ids],
+        })
+    if user.startswith("A skill written for a weak model was injected"):
+        original = user.split("SKILL (current version):\n", 1)[1].split(
+            "\n\nATTRIBUTION REPORT", 1)[0]
+        return json_script({
+            "failure_category": "wrong_trigger",
+            "skill_text": original + "\nREVISED-BY-G11: name the concrete "
+                                     "state before acting.",
+            "revision_reason": "made the trigger condition concrete",
+        })
+    return _script(system, user)
+
+
+def _write_live_config(path: Path) -> Path:
+    """full mode, weak depth 2, acceptance live_run at the same depth (the
+    baseline units exist by id), strict_rate_gain as the criterion."""
+    config = ExperimentConfig(
+        benchmark=_FAKE,
+        mode="full",
+        models={"executor_strong": "strong-model",
+                "executor_weak": "weak-model"},
+        weak_profile="The weak model misses intermediate steps.",
+        n_attempts_strong=1,
+        n_attempts_weak=2,
+        K=1,
+        rules={"task_select": "any_weak_failed",
+               "segment_select": "strong_success_weak_failed",
+               "trajectory_select": "strong2_weak2"},
+        token_budgets={"default_max_output_tokens": 65536},
+        acceptance={"mode": "live_run", "n_attempts": 2,
+                    "improvement": "strict_rate_gain"},
+    )
+    save_config(config, str(path))
+    return path
+
+
+def test_pipeline_live_run_mode_walks_both_rounds_end_to_end(
+        monkeypatch, tmp_path):
+    from expedistill.benchmarks.registry import _reset_registry
+    from expedistill.core.models import Trajectory
+    from expedistill.infra.store import Store
+    from expedistill.prompts import PROMPTS, PromptSpec
+
+    # The live stage renders the task prompt into the G10 input, so the
+    # fake benchmark's task prompt must actually be registered.
+    monkeypatch.setitem(PROMPTS, "FAKE_TASK", PromptSpec(
+        name="FAKE_TASK",
+        template="Solve the task: {instruction}\n{skills_block}\n{history}",
+        description="live-run pipeline test task prompt"))
+    plugin = _install_live_plugin(monkeypatch, _LivePipelinePlugin())
+    config_path = _write_live_config(tmp_path / "live.yaml")
+    run_dir = tmp_path / "run"
+    try:
+        result = run_pipeline(
+            config_path=config_path, run_dir=run_dir,
+            make_client=lambda model_name: FakeClient(_live_script))
+    finally:
+        sys.modules.pop(_MODULE, None)
+        _reset_registry()
+
+    # -- stage 6 still measures, against the LIVE-accepted (revised) bank:
+    #    weak with the bank succeeds everywhere, the reused stage-1
+    #    control failed everywhere.
+    assert result["delta"]["avg_at_n"] == 1.0
+
+    # -- the manifest froze the live protocol and its two prompts
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["config"]["acceptance"] == {
+        "mode": "live_run", "n_attempts": 2,
+        "improvement": "strict_rate_gain"}
+    assert {"LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"} <= set(
+        manifest["prompt_digests"])
+
+    # -- the ledger: all seven stages, and stage 4's line is live
+    lines = read_jsonl(ledger_path(run_dir))
+    assert [row["stage"] for row in lines] == list(STAGE_NAMES)
+    assert "infra_shortfall_accepted" not in lines[4]
+    stage4 = lines[4]["summary"]
+    assert stage4["mode"] == "live_run"
+    assert stage4["improvement_rule"] == "strict_rate_gain"
+    assert stage4["accepted"] == 6      # 3 candidates per task, 2 tasks
+    assert stage4["discarded"] == {}
+    assert stage4["infra_shortfall_accepted"] is False
+    for task in ("t1", "t2"):
+        detail = stage4["group_details"][f"{_FAKE}:{task}"]
+        assert detail["round0"]["better"] is False
+        assert detail["round1"]["better"] is True
+        assert detail["outcome"] == "accepted"
+        assert detail["discard_reasons"] == {}
+
+    # -- both live rounds really executed: round 0 failed on the original
+    #    blocks, round 1 succeeded on the revised ones, and the two
+    #    rounds' frozen injections differ (the no-op guard had a say).
+    live = run_dir / "stage4_acceptance" / "live_run"
+    round00 = Store(live / "round00")
+    round01 = Store(live / "round01")
+    assert len(round00.ids("trajectories")) == 4
+    assert len(round01.ids("trajectories")) == 4
+    assert all(round00.load("trajectories", trajectory_id, Trajectory).status
+               == "failure" for trajectory_id in round00.ids("trajectories"))
+    assert all(round01.load("trajectories", trajectory_id, Trajectory).status
+               == "success" for trajectory_id in round01.ids("trajectories"))
+    audit0 = read_jsonl(live / "round00" / "injection_audit.jsonl")
+    audit1 = read_jsonl(live / "round01" / "injection_audit.jsonl")
+    assert {row["task_id"] for row in audit0} == {f"{_FAKE}:t1",
+                                                 f"{_FAKE}:t2"}
+    assert audit0[0]["injection_block_sha256"] != \
+        audit1[0]["injection_block_sha256"]
+
+    # -- the bank is the revised set: every member live-accepted at
+    #    version 2 with the revision marker in its content.
+    bank = read_jsonl(run_dir / "skill_bank.jsonl")
+    assert len(bank) == 6
+    assert all(row["version"] == 2 for row in bank)
+    assert all("REVISED-BY-G11" in row["content"] for row in bank)
+
+    # -- execution census: stage 1 (2 strong + 4 weak bare), live round 0
+    #    (4, un-revised blocks), live round 1 (4, revised), stage 6
+    #    with-bank (4, revised); the full-mode control reused stage 1.
+    assert len(plugin.calls) == 18
+    unrevised = [call for call in plugin.calls
+                 if call["block"] and "REVISED-BY-G11" not in call["block"]]
+    assert len(unrevised) == 4
+
+    # -- resume: a second full pass over the same run directory is a pure
+    #    replay -- zero executions, zero model calls (A10: the judged
+    #    groups never re-enter a dispatch set), same stage-6 numbers.
+    first_calls = len(plugin.calls)
+    log2 = ClientLog()
+    try:
+        second = run_pipeline(
+            config_path=config_path, run_dir=run_dir,
+            make_client=log2.make_client)
+    finally:
+        sys.modules.pop(_MODULE, None)
+        _reset_registry()
+    assert len(plugin.calls) == first_calls
+    assert log2.call_count == 0
+    assert second == result

@@ -60,7 +60,11 @@ Prompt digests are deterministic: the method prompts
 ``task_prompt_name``, never whatever other plugins a process happened to
 import. A task prompt that is not registered in B2 is frozen as ``None``;
 real plugins register theirs at import, so only test fakes hit that case
-(and a later registration still trips the comparison).
+(and a later registration still trips the comparison). A ``live_run``
+acceptance config adds exactly the two lazily-registered G10/G11 prompt
+names to that set (``_prompt_digests``); an exam config's name set is
+byte-identical to the pre-live one, which is what keeps in-flight exam
+runs resumable.
 
 Resume: the manifest is the unit of this stage, and B4's ``freeze`` IS the
 resume check -- a present manifest that matches is accepted (and nothing is
@@ -95,6 +99,7 @@ from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import rules as rules_block
 from expedistill.blocks import tasks as tasks_block
+from expedistill.core.config import acceptance_mode
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import write_json
@@ -258,15 +263,32 @@ def tasks_digest(tasks: Sequence[Task]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
+def _prompt_digests(benchmark: str,
+                    acceptance: str = "exam") -> Dict[str, Optional[str]]:
     """Method prompts plus exactly this benchmark's task prompt.
 
     Must run after D1 imported the plugin package (its prompt registers at
     import). An unregistered task prompt is frozen as None.
+
+    ``acceptance`` is the stage-4 protocol a config selects
+    (``core.config.acceptance_mode``). Under ``exam`` the name set is
+    byte-identical to the frozen v1 one -- an in-flight exam run's resume
+    compares this dict against its manifest, so a new name here is a
+    broken resume, which is why the two live prompts are deliberately NOT
+    in ``prompts/__init__`` (METHOD_PROMPT_NAMES is an import-time
+    snapshot). Under ``live_run`` only, the conditional import registers
+    the two G10/G11 prompts and adds their names (decision doc 2026-10-14,
+    section 2.1), so a live run's manifest freezes the digests of the
+    prompts its stage will actually call.
     """
     names = set(prompts.METHOD_PROMPT_NAMES)
     task_prompt = get_plugin(benchmark).task_prompt_name
     names.add(task_prompt)
+    if acceptance == "live_run":
+        # The import IS the registration (the prompts stay out of
+        # prompts/__init__ on purpose); without it digest() would raise.
+        import expedistill.prompts.attribution  # noqa: F401
+        names.update(("LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"))
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
@@ -283,6 +305,12 @@ def run(ctx: StageContext) -> Dict[str, Any]:
     """
     config = ctx.config
     _validate_rules(config.rules)
+    acceptance = acceptance_mode(config)
+    if acceptance == "live_run":
+        # Same fail-early contract as the three rule names above (a typo
+        # stops the run here, before any task is loaded or executed);
+        # core.config guarantees live_run carries an improvement name.
+        rules_block.get_acceptance_improve(config.acceptance["improvement"])
     tasks = tasks_block.load_tasks(config.benchmark, _tasks_spec(config))
     _check_unique_ids(tasks)
     _check_split_covers_task_set(config, tasks)
@@ -298,7 +326,7 @@ def run(ctx: StageContext) -> Dict[str, Any]:
     train_ids = [task.task_id for task in train_tasks]
     test_ids = [task.task_id for task in test_tasks]
     reserved_ids = [task.task_id for task in reserved_tasks]
-    prompt_digests = _prompt_digests(config.benchmark)
+    prompt_digests = _prompt_digests(config.benchmark, acceptance)
     # The config's frozen copy carries the digests too (core.config: the
     # field is "filled by the prompt registry when the stages freeze the
     # manifest"); a replace() copy keeps ctx.config itself untouched.

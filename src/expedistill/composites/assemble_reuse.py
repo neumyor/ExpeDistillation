@@ -100,7 +100,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import tasks as tasks_block
-from expedistill.core.config import ExperimentConfig, load_config
+from expedistill.core.config import ExperimentConfig, acceptance_mode, load_config
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import Attempt, Exam, Skill, Subtask, Trajectory
 from expedistill.infra.manifest import MANIFEST_NAME
@@ -287,16 +287,25 @@ def _load_spec(config: ExperimentConfig) -> Any:
     return _explicit_split_union(config)
 
 
-def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
+def _prompt_digests(benchmark: str,
+                    acceptance: str = "exam") -> Dict[str, Optional[str]]:
     """Method prompts plus exactly this benchmark's task prompt.
 
     Same derivation as stage0_freeze._prompt_digests (run after the
-    plugin import that load_tasks performs): the digests are part of the
-    identity check, because the reused skills/exams were produced under
-    the source run's prompts.
+    plugin import that load_tasks performs), including its acceptance-mode
+    branch: a live_run TARGET config adds the two lazily-registered
+    G10/G11 prompt names, an exam target keeps the frozen v1 name set
+    byte-identical. The digests are the DISCLOSED part of the identity
+    walk (the digest snapshot is never a refusal), so this only keeps the
+    bank-level drift disclosure honest: a live->live bank reuse without
+    the two names would report the whole "prompt set" as drifted config.
     """
     names = set(prompts.METHOD_PROMPT_NAMES)
     names.add(get_plugin(benchmark).task_prompt_name)
+    if acceptance == "live_run":
+        # The import IS the registration; without it digest() would raise.
+        import expedistill.prompts.attribution  # noqa: F401
+        names.update(("LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"))
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
@@ -1108,7 +1117,8 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
 
     # -- the bank level: the prospective manifest and the ruling-4
     #    whitelist diff -----------------------------------------------
-    prompt_digests = _prompt_digests(config.benchmark)
+    prompt_digests = _prompt_digests(config.benchmark,
+                                     acceptance_mode(config))
     frozen_config = dataclasses.replace(
         config, prompts_digests=prompt_digests).to_dict()
     prospective = {
