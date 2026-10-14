@@ -5,6 +5,7 @@ the deterministic iteration order, and the protocol-v2 precondition guards
 (a subtask outcome that contradicts its write_skill mode stops the batch
 fatally, before any model call for that unit)."""
 
+import json
 import re
 import threading
 import time
@@ -507,6 +508,58 @@ def test_g3_model_output_error_skips_only_that_unit(tmp_path):
 
     # The terminal record was written for the unit.
     assert [r["subtask_id"] for r in _failures_file(ctx)] == [target]
+
+
+# ---------------------------------------------------------------------------
+# The 2026-10-13 incident regression (docs/decisions/
+# g2_multiline_and_json_extraction_fix_20261014.md): both failure classes in
+# one end-to-end pass. A raw reply shaped like dump 0178 (unfenced JSON
+# object, heredoc steps, ``` code fences embedded in string values) used to
+# die as model_output_failed -- the fence-priority bug returned a top-level
+# list, and even when the object parsed, the newline rejection killed the
+# multi-line steps. It must generate the unit's pair like any other reply.
+# ---------------------------------------------------------------------------
+
+_INCIDENT_DISTILL_REPLY = json.dumps({
+    "when_to_use": "when a board image needs its piece masks extracted",
+    "steps": [
+        "Run `ls`; use the printed image file name as `<image-file>`.",
+        "Run this probe:\n"
+        "```\n"
+        "python3 - <<'PY'\n"
+        "from PIL import Image\n"
+        "img = Image.open('<image-file>')\n"
+        "cell = min(img.width, img.height) // 8\n"
+        "print(cell[0])\n"
+        "PY\n"
+        "```",
+        "Compare the printed `cell` with the expected board geometry.",
+    ],
+    "verify": "step 2 prints a `cell` greater than 0",
+    "not_applicable_when": "the input is already text (FEN or a board list)",
+}, ensure_ascii=False)
+
+
+def test_incident_shaped_raw_reply_generates_the_unit(tmp_path):
+    subtasks = seed_store(Store(tmp_path / "run"))
+    author = make_fake_handle("strong", [_INCIDENT_DISTILL_REPLY,
+                                         distill_script(DISTILL_SECTIONS_ALT),
+                                         diagnose_script()])
+    examiner = make_fake_handle("strong", [exam_script(0), exam_script(1),
+                                           exam_script(2)])
+    ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
+
+    summary = stage3_generation.run(ctx)
+
+    assert summary["model_output_failed"] == []
+    assert summary["generated"] == expected_ids(subtasks)
+    # The heredoc item survives verbatim: first line numbered by the
+    # renderer, continuation lines at column 0.
+    skill = ctx.store.load("skills", make_skill_id(subtasks[0].subtask_id),
+                           Skill)
+    assert "python3 - <<'PY'" in skill.content
+    assert "\nprint(cell[0])\n" in skill.content
+    assert skill_markers(skill.content) == PROCEDURE_MARKERS
 
 
 def test_infra_error_finishes_other_units_then_raises(monkeypatch, tmp_path):

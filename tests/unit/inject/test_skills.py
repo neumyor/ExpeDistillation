@@ -119,6 +119,30 @@ def test_section_markers_survive_single_line_compression():
         assert marker in block
 
 
+def test_multiline_heredoc_content_compresses_markers_survive():
+    # The 2026-10-13 incident payload class (docs/decisions/
+    # g2_multiline_and_json_extraction_fix_20261014.md): stored content
+    # whose steps item is a multi-line heredoc. The bullet must still be
+    # ONE line with every marker literal and the command text intact --
+    # one skill, one line, nothing silently truncated.
+    content = "\n".join([
+        "[When to use] when a service reports an unexpected state",
+        "[Steps]",
+        "1. run this exact block:",
+        "python3 - <<'PY'",
+        "print('ok')",
+        "PY",
+        "[Verify] the service reports the expected state",
+        "[Do not use when] no state was reported",
+    ])
+    block = format_skills_block([make_skill("s1", content)])
+    assert block.count("\n") == 1  # header + one single-line bullet
+    for marker in PROCEDURE_MARKERS:
+        assert marker in block
+    assert "python3 - <<'PY'" in block
+    assert "print('ok')" in block
+
+
 def test_dict_and_object_inputs_render_identically():
     skills = [
         make_skill("s1", "a", group="g"),

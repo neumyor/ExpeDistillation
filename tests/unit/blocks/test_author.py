@@ -7,9 +7,11 @@ fails loudly. Protocol v2 (decision section 3.3) adds the structural
 contract: write_skill guards the mode/outcome precondition, parses the G2
 JSON contract, validates it with validate_skill_sections, and stores
 render_skill_content's marker text; skill_markers reads that text back; and
-rewrite_skill requires the rewrite to keep the original's marker set. None of
-these tests touch tmp_path or run_dir: the blocks must not write anything
-anywhere.
+rewrite_skill requires the rewrite to keep the original's marker set. The
+2026-10-13 incident (docs/decisions/g2_multiline_and_json_extraction_
+fix_20261014.md) relaxed the contract to accept multi-line values while
+keeping the marker defense as a per-line check. None of these tests touch
+tmp_path or run_dir: the blocks must not write anything anywhere.
 """
 
 import pytest
@@ -75,6 +77,35 @@ DIAGNOSE_CONTENT = "\n".join([
     "2. Edit the config.",
     "3. Start the service.",
     "[Do not use when] The subtask is not about the config.",
+])
+
+#: A heredoc-shaped steps item (the 2026-10-13 incident payload class: the
+#: G2 prompts ask for the exact command form, and real commands span lines).
+#: The continuation lines sit at column 0, exactly as the model wrote them.
+HEREDOC_SECTIONS = {
+    "when_to_use": "When you must hash a file without extra tools.",
+    "steps": [
+        "Check the file exists with `ls <file>`.",
+        "Run this exact command:\npython3 - <<'PY'\nimport hashlib\n"
+        "print(hashlib.sha256(open('<file>', 'rb').read()).hexdigest())\nPY",
+        "Compare the printed digest with the expected value.",
+    ],
+    "verify": "The printed digest matches the expected value.",
+    "not_applicable_when": "The file is not readable.",
+}
+
+HEREDOC_CONTENT = "\n".join([
+    "[When to use] When you must hash a file without extra tools.",
+    "[Steps]",
+    "1. Check the file exists with `ls <file>`.",
+    "2. Run this exact command:",
+    "python3 - <<'PY'",
+    "import hashlib",
+    "print(hashlib.sha256(open('<file>', 'rb').read()).hexdigest())",
+    "PY",
+    "3. Compare the printed digest with the expected value.",
+    "[Verify] The printed digest matches the expected value.",
+    "[Do not use when] The file is not readable.",
 ])
 
 
@@ -278,20 +309,120 @@ def test_write_skill_strips_self_numbered_checklist_items():
         ("steps", ["   "]),                        # whitespace-only item
         ("steps", [7]),                            # non-string item
         ("steps", "not a list"),                   # checklist wrong type
-        ("when_to_use", "line one\nline two"),      # embedded newline
         ("when_to_use", "[Trigger] forged"),       # forged section marker
         ("steps", ["[Steps] do x"]),               # forged marker on an item
+        ("when_to_use", "line one\n[Trigger] forged"),  # forged on a LATER line
+        ("steps", ["do x\n[Verify] forged"]),      # forged line inside an item
     ],
 )
 def test_write_skill_bad_fields_raise(field, value):
     # Field-level failures are terminal (gen_exam precedent): no in-block
-    # retry, the unit lands in the model_output_failed ledger.
+    # retry, the unit lands in the model_output_failed ledger. Multi-line
+    # values are NOT on this list since the 2026-10-13 incident: the newline
+    # rejection killed legal heredoc-shaped commands. The marker defense
+    # moved to a per-line check, so a forged marker on ANY line still raises.
     subtask = make_subtask()
     handle = make_fake_handle(script=json_script({
         **DISTILL_SECTIONS, field: value}))
 
     with pytest.raises(ModelOutputError):
         write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("trigger", "line one\n[Steps] forged"),    # forged on a LATER line
+        ("do_instead", ["do x\n[Verify] forged"]),  # forged line inside item
+    ],
+)
+def test_write_skill_bad_fields_raise_diagnose(field, value):
+    # The same per-line marker defense for the diagnose mode's contract
+    # (the distill table above exercises one mode; both modes' fields are
+    # checked with the same rule).
+    subtask = make_subtask(
+        source="weak",
+        trajectory_success=False,
+        success=False,
+    )
+    handle = make_fake_handle(script=json_script({
+        **DIAGNOSE_SECTIONS, field: value}))
+
+    with pytest.raises(ModelOutputError):
+        write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "diagnose", handle)
+
+
+def test_write_skill_accepts_multiline_steps_verbatim():
+    # The 2026-10-13 incident regression: a heredoc-shaped steps item is
+    # legal payload. The renderer numbers the item's FIRST line and writes
+    # every continuation line at column 0, byte-for-byte as the model wrote
+    # it; the stored content still reads back as the procedure marker set.
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(HEREDOC_SECTIONS))
+
+    skill = write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+    assert skill.content == HEREDOC_CONTENT
+    lines = skill.content.split("\n")
+    assert lines[3] == "2. Run this exact command:"
+    assert lines[4] == "python3 - <<'PY'"     # continuation at column 0
+    assert lines[7] == "PY"                   # heredoc closer, column 0
+    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+    # Determinism: same sections in, byte-identical content out.
+    assert render_skill_content("distill", HEREDOC_SECTIONS) == skill.content
+    assert (render_skill_content("distill", HEREDOC_SECTIONS)
+            == render_skill_content("distill", HEREDOC_SECTIONS))
+
+
+def test_write_skill_accepts_multiline_scalar():
+    # A scalar field may span lines too; its continuation lines land at
+    # column 0 and the marker set stays readable.
+    subtask = make_subtask()
+    sections = {
+        **DISTILL_SECTIONS,
+        "verify": "The service log shows:\nLOGIN OK for user <user>\n"
+                  "and no retry line.",
+    }
+    handle = make_fake_handle(script=json_script(sections))
+
+    skill = write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
+
+    assert skill.content == "\n".join([
+        "[When to use] When the service rejects a login.",
+        "[Steps]",
+        "1. Check the credentials in the config file.",
+        "2. Restart the service.",
+        "[Verify] The service log shows:",
+        "LOGIN OK for user <user>",
+        "and no retry line.",
+        "[Do not use when] The subtask is not about logging in.",
+    ])
+    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+
+
+def test_crlf_and_lone_cr_are_normalized_everywhere():
+    # A copy-pasted CRLF (or a lone CR) must not survive into the stored
+    # content: validation and rendering share _normalize_newlines, so the
+    # checked bytes and the written bytes are the same.
+    sections = {
+        **DISTILL_SECTIONS,
+        "when_to_use": "When the service rejects a login.\r\nSecond line.",
+        "steps": ["Check the credentials.\rRestart the service."],
+    }
+    validate_skill_sections("distill", sections)
+    content = render_skill_content("distill", sections)
+
+    assert "\r" not in content
+    assert content.split("\n") == [
+        "[When to use] When the service rejects a login.",
+        "Second line.",
+        "[Steps]",
+        "1. Check the credentials.",
+        "Restart the service.",
+        "[Verify] The service accepts the login.",
+        "[Do not use when] The subtask is not about logging in.",
+    ]
+    assert skill_markers(content) == PROCEDURE_MARKERS
 
 
 def test_write_skill_passes_usage_through():
@@ -337,9 +468,17 @@ def test_render_skill_content_diagnose_is_exact_marker_text():
 
 def test_render_is_deterministic():
     # Same sections in, byte-identical content out (decision section 4.2's
-    # stage-3 invariate).
+    # stage-3 invariate), for single-line AND multi-line payloads alike
+    # (the 2026-10-14 fix extends the invariant to heredoc-shaped values).
+    multiline_diagnose = {
+        **DIAGNOSE_SECTIONS,
+        "do_instead": ["Stop the service.\nsystemctl stop <service>",
+                       "Edit the config."],
+    }
     for mode, sections in (("distill", DISTILL_SECTIONS),
-                           ("diagnose", DIAGNOSE_SECTIONS)):
+                           ("diagnose", DIAGNOSE_SECTIONS),
+                           ("distill", HEREDOC_SECTIONS),
+                           ("diagnose", multiline_diagnose)):
         assert (render_skill_content(mode, sections)
                 == render_skill_content(mode, sections))
 

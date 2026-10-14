@@ -20,6 +20,20 @@ D8 audit -- reads). ``write_skill`` refuses a subtask outcome that
 contradicts its mode before any model call, and ``rewrite_skill`` requires
 the rewrite to keep the original's marker set.
 
+2026-10-13 incident (run tb21_split_v2_20261013_2125, 67/315 stage-3 units
+killed): validate_skill_sections rejected ANY embedded newline in a field
+value, but the G2 prompts ask for "the exact command FORM", and the model
+legally answers with heredoc-shaped steps -- real multi-line commands. The
+over-strict check killed legal payloads as ModelOutputError terminal units.
+The fix (docs/decisions/g2_multiline_and_json_extraction_fix_20261014.md)
+keeps the skill_markers defense but moves its carrier: values may span lines,
+and the check runs PER LINE on the line-start markers (a forged marker would
+poison skill_markers' reading of the rendered content). Sections that pass
+validation render so that a section marker can appear at a line start only
+where the renderer itself wrote it: scalar values and checklist items are
+normalized and checked line by line before the renderer puts their
+continuation lines at column 0.
+
 G6 deliberately returns a plain dict instead of a new Skill and never mutates
 its argument: version bumps and ``rewrite_history`` appends are bookkeeping,
 which belongs to the composites (K4), not to this block. The rewrite-history
@@ -90,6 +104,18 @@ def _strip_self_numbering(item: str) -> str:
     return _SELF_NUMBERING_RE.sub("", item).strip()
 
 
+def _normalize_newlines(value: str) -> str:
+    """``value`` with CRLF and lone CR newlines normalized to ``\\n``.
+
+    A stray ``\\r`` (a copy-pasted CRLF heredoc) would otherwise survive
+    validation and be rendered byte-for-byte into the stored content, where
+    no consumer expects it. Validation and rendering BOTH pass through this
+    one function, so the bytes the renderer writes are exactly the bytes the
+    validator checked -- the contract the 2026-10-14 fix pins.
+    """
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def skill_markers(content: str) -> Optional[Tuple[str, ...]]:
     """The marker set a stored skill content carries, None when neither.
 
@@ -135,22 +161,33 @@ def render_skill_content(mode: str, sections: Dict[str, Any]) -> str:
     content out (the stage-3 determinism invariant, decision section 4.2).
     A stray self-numbering on an item is stripped here too, so it is never
     double-numbered.
+
+    Multi-line values are legal (the 2026-10-13 incident: heredoc-shaped
+    steps). A checklist item renders its FIRST line behind the renderer's
+    number ("2. ...") and every continuation line at column 0, verbatim;
+    a multi-line scalar likewise continues at column 0. Scalars and items
+    pass through the same ``_normalize_newlines`` as validation, and for
+    single-line input the output is byte-identical to the pre-2026-10-14
+    renderer -- the anchor the 243 stored pairs of the incident run pin
+    (rendering unchanged for everything that was already legal).
     """
     if mode not in SKILL_SECTION_FIELDS:
         raise ValueError(
             f'mode must be "distill" or "diagnose", got {mode!r}')
-    items = [f"{index}. {_strip_self_numbering(item)}"
+    items = [f"{index}. {_strip_self_numbering(_normalize_newlines(item))}"
              for index, item in enumerate(sections[_CHECKLIST_FIELDS[mode]], 1)]
     if mode == "distill":
         (when_to_use, _steps, verify, not_applicable) = SKILL_SECTION_FIELDS[mode]
         (use_marker, steps_marker, verify_marker, close_marker) = \
             PROCEDURE_MARKERS
         lines = [
-            f"{use_marker} {sections[when_to_use].strip()}",
+            f"{use_marker} "
+            f"{_normalize_newlines(sections[when_to_use]).strip()}",
             steps_marker,
             *items,
-            f"{verify_marker} {sections[verify].strip()}",
-            f"{close_marker} {sections[not_applicable].strip()}",
+            f"{verify_marker} {_normalize_newlines(sections[verify]).strip()}",
+            f"{close_marker} "
+            f"{_normalize_newlines(sections[not_applicable]).strip()}",
         ]
     else:
         (trigger, why_it_fails, _do_instead, not_applicable) = \
@@ -158,26 +195,37 @@ def render_skill_content(mode: str, sections: Dict[str, Any]) -> str:
         (trigger_marker, why_marker, instead_marker, close_marker) = \
             FAILURE_REFERENCE_MARKERS
         lines = [
-            f"{trigger_marker} {sections[trigger].strip()}",
-            f"{why_marker} {sections[why_it_fails].strip()}",
+            f"{trigger_marker} {_normalize_newlines(sections[trigger]).strip()}",
+            f"{why_marker} "
+            f"{_normalize_newlines(sections[why_it_fails]).strip()}",
             instead_marker,
             *items,
-            f"{close_marker} {sections[not_applicable].strip()}",
+            f"{close_marker} "
+            f"{_normalize_newlines(sections[not_applicable]).strip()}",
         ]
     return "\n".join(lines)
 
 
 def _reject_bad_text(mode: str, where: str, value: str) -> None:
-    """Reject an embedded newline or a forged leading section marker."""
-    if "\n" in value or "\r" in value:
-        raise ModelOutputError(
-            f"write_skill(mode={mode!r}): {where} must not contain embedded "
-            f"newlines: {value!r}")
-    for marker in _ALL_MARKERS:
-        if value.startswith(marker):
-            raise ModelOutputError(
-                f"write_skill(mode={mode!r}): {where} must not start with "
-                f"section marker {marker}: {value!r}")
+    """Reject a forged section marker at the start of ANY line of ``value``.
+
+    Embedded newlines are legal content (the 2026-10-13 incident: the G2
+    prompts ask for the exact command form, and heredoc-shaped steps carry
+    real newlines; the old any-newline rejection killed 67/315 stage-3
+    units). What stays forbidden is a line -- any line, not just the first
+    -- starting with one of the eight section markers: the renderer writes
+    a multi-line value's continuation lines at column 0 verbatim, and
+    skill_markers is line-start anchored, so a forged line-start marker in
+    a value would poison its reading of the rendered content exactly as a
+    forged first line used to.
+    """
+    for line_number, line in enumerate(value.split("\n"), 1):
+        for marker in _ALL_MARKERS:
+            if line.startswith(marker):
+                raise ModelOutputError(
+                    f"write_skill(mode={mode!r}): {where} must not carry "
+                    f"section marker {marker} at the start of line "
+                    f"{line_number}: {value!r}")
 
 
 def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
@@ -187,13 +235,16 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
     array); the mode's required keys (SKILL_SECTION_FIELDS) must be
     present; every string field must be a non-empty string; the checklist
     field (steps / do_instead) a non-empty list of strings, each stripped
-    of a leading self-numbering ("1. ", "12) ") and then non-empty. String
-    fields and checklist items must contain no embedded newlines and must
-    not START WITH any section marker: a forged marker at a line start
+    of a leading self-numbering ("1. ", "12) ") and then non-empty.
+    Values MAY span multiple lines (the 2026-10-13 incident: the newline
+    rejection was over-strict); what is checked instead is that NO line of
+    a normalized value STARTS WITH any section marker: the renderer emits
+    continuation lines at column 0, and a forged marker at a line start
     would make skill_markers read a legal skill as None and silently
-    disarm the rewrite/K5 marker checks. Extra keys are ignored (lenient
-    read, gen_exam precedent) but the checklist type check is never
-    skipped. Raises ModelOutputError otherwise.
+    disarm the rewrite/K5 marker checks. The checked bytes are the same
+    ``_normalize_newlines`` bytes the renderer will write. Extra keys are
+    ignored (lenient read, gen_exam precedent) but the checklist type
+    check is never skipped. Raises ModelOutputError otherwise.
     """
     if mode not in SKILL_SECTION_FIELDS:
         raise ValueError(
@@ -219,7 +270,7 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
                     raise ModelOutputError(
                         f"write_skill(mode={mode!r}): {key!r}[{index}] must "
                         f"be a string, got {item!r}")
-                stripped = _strip_self_numbering(item)
+                stripped = _strip_self_numbering(_normalize_newlines(item))
                 if not stripped:
                     raise ModelOutputError(
                         f"write_skill(mode={mode!r}): {key!r}[{index}] is "
@@ -227,11 +278,13 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
                         f"{item!r}")
                 _reject_bad_text(mode, f"{key!r}[{index}]", stripped)
         else:
-            if not isinstance(value, str) or not value.strip():
+            if (not isinstance(value, str)
+                    or not _normalize_newlines(value).strip()):
                 raise ModelOutputError(
                     f"write_skill(mode={mode!r}): field {key!r} must be a "
                     f"non-empty string, got {value!r}")
-            _reject_bad_text(mode, f"field {key!r}", value.strip())
+            _reject_bad_text(mode, f"field {key!r}",
+                             _normalize_newlines(value).strip())
 
 
 def write_skill(

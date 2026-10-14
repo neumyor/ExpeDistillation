@@ -217,6 +217,38 @@ def test_segment_array_extraction():
     assert out[0]["start"] == 0 and out[1]["end"] == 2
 
 
+def test_raw_object_with_embedded_code_fence_parses_first_try():
+    # The 2026-10-13 incident (dump 0363 shape, shortened): a raw UNFENCED
+    # JSON object whose string values embed ``` code blocks with `[]` /
+    # `[0]` fragments. The old fence-first candidate order parsed the
+    # fragment as a top-level array, the block refused it ("expected a JSON
+    # object, got list") and the unit burned its whole format budget on a
+    # reply that was valid all along. The object must parse on the first
+    # attempt with zero format retries.
+    reply = json.dumps({
+        "question_text": "How do you probe an unknown binary file?",
+        "reference_answer": "Run this first:\n"
+                           "```\n"
+                           "python3 - <<'PY'\n"
+                           "seen = []\n"
+                           "print(seen[0])\n"
+                           "PY\n"
+                           "```",
+    }, ensure_ascii=False)
+    handle = make_fake_handle(role="examiner", script=reply)
+
+    out = call_model(handle, "EXAM_GEN", {
+        "label": "probe the file",
+        "description": "identify the file format",
+        "steps_view": "step 0\naction: run file",
+    }, output_json=True)
+
+    assert isinstance(out, dict)
+    assert out["question_text"] == "How do you probe an unknown binary file?"
+    # Zero format retries: one request, one ok usage row.
+    assert len(handle.client.calls) == 1
+
+
 def test_format_retry_then_success():
     handle = make_fake_handle(
         script=["I cannot answer in JSON.", json_script({"verdict": "correct", "error_description": ""})]

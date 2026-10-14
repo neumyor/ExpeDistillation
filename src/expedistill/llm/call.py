@@ -155,20 +155,35 @@ def make_handle(role: str, model_name: str, client: Any, **kw: Any) -> ModelHand
 # - a successfully parsed candidate may be a dict OR a list;
 # - failure raises the B6 ModelOutputError instead of the old
 #   JsonExtractionError, so call_model's retry loop catches one taxonomy.
-# The quoted-string awareness, fenced-block preference, trailing-comma repair,
-# "json"-prefix stripping, and literal_eval last resort are kept as-is.
+# The quoted-string awareness, trailing-comma repair, "json"-prefix stripping,
+# and literal_eval last resort are kept as-is.
+#
+# 2026-10-13 incident (run tb21_split_v2_20261013_2125, 5/315 stage-3 units):
+# the source's unconditional fenced-block preference backfired on an UNFENCED
+# JSON object whose string values embed ``` code blocks (heredoc-shaped steps
+# again). Fence-first scanning dove into the embedded block, its balanced
+# scanner picked up a stray `[]` / `[0]` fragment, and the fragment parsed as
+# a top-level array before the enclosing object was ever tried -- the reply
+# arrived at the block as a list and died as "expected a JSON object, got
+# list". The fence preference is now span-relative (_json_candidates): a
+# fence that is not inside any top-level span keeps its priority; a fence
+# strictly inside one (a code block quoted in a string value) is demoted
+# behind the spans.
 # --------------------------------------------------------------------------
 
 
-def _balanced_json_spans(text: str) -> List[str]:
-    """Return complete JSON-like object or array spans, respecting quoted braces.
+def _balanced_json_span_ranges(text: str) -> List[Tuple[int, int]]:
+    """(start, end) offsets of complete JSON-like spans, respecting quoted braces.
 
-    ``find('{')``/``rfind('}')`` joins two objects together and makes an
-    otherwise recoverable response unparsable. The scanner deliberately does
-    not repair an unterminated span: accepting a truncated response would turn
-    a format error into data.
+    The position version of the scanner: _json_candidates must know whether a
+    ``` fence sits INSIDE one of these spans (a code block quoted in a string
+    value) or wraps / reasons around it. ``find('{')``/``rfind('}')`` joins
+    two objects together and makes an otherwise recoverable response
+    unparsable. The scanner deliberately does not repair an unterminated
+    span: accepting a truncated response would turn a format error into
+    data.
     """
-    spans: List[str] = []
+    spans: List[Tuple[int, int]] = []
     start = None
     depth = 0
     quoted = False
@@ -191,21 +206,50 @@ def _balanced_json_spans(text: str) -> List[str]:
         elif char in "}]" and depth:
             depth -= 1
             if depth == 0 and start is not None:
-                spans.append(text[start : index + 1])
+                spans.append((start, index + 1))
                 start = None
     return spans
 
 
+def _balanced_json_spans(text: str) -> List[str]:
+    """Return complete JSON-like object or array spans, respecting quoted braces.
+
+    The substring view of _balanced_json_span_ranges; see its docstring for
+    the scanner's contract (no repair of unterminated spans).
+    """
+    return [text[start:end] for start, end in _balanced_json_span_ranges(text)]
+
+
 def _json_candidates(text: str) -> List[str]:
     text = str(text or "").replace("\ufeff", "").strip()
-    candidates: List[str] = []
-    # Prefer fenced blocks, while still scanning the whole response below: the
-    # latter handles reasoning text before/after an unfenced answer.
-    for match in _FENCED_RE.finditer(text):
+    # (1) The whole response, first: an unfenced complete JSON value is the
+    # common good case, and when its string values embed ``` code blocks
+    # (the 2026-10-13 incident), letting fences jump the queue parses a
+    # stray fragment ahead of the object.
+    candidates: List[str] = [text]
+    spans = _balanced_json_span_ranges(text)
+    matches = list(_FENCED_RE.finditer(text))
+
+    def fence_candidates(match: Any) -> None:
         candidates.extend(_balanced_json_spans(match.group(1)))
         candidates.append(match.group(1).strip())
-    candidates.extend(_balanced_json_spans(text))
-    candidates.append(text)
+
+    # (2) A fence NOT inside any top-level span keeps the old priority: it is
+    # the classic "reasoning, then the fenced answer" wrapper shape.
+    # (4) A fence STRICTLY inside a top-level span is a code block quoted in
+    # one of its string values: its candidates are demoted to the last
+    # resort, not dropped (the whole text may still fail to parse -- trailing
+    # prose, truncation -- and the embedded block can then be all there is).
+    for match in matches:
+        if not any(start <= match.start() and match.end() <= end
+                   for start, end in spans):
+            fence_candidates(match)
+    # (3) Full-text top-level spans in order of appearance (first wins).
+    candidates.extend(text[start:end] for start, end in spans)
+    for match in matches:
+        if any(start <= match.start() and match.end() <= end
+               for start, end in spans):
+            fence_candidates(match)
     # Preserve order but avoid repeatedly parsing the same large response.
     return list(dict.fromkeys(item for item in candidates if item))
 

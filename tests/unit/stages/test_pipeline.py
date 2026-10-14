@@ -350,6 +350,55 @@ def test_pipeline_full_mode_end_to_end(plugin, config_path, tmp_path):
     assert log.call_count == 34
 
 
+def test_pipeline_multiline_steps_and_embedded_fences_end_to_end(
+        plugin, config_path, tmp_path):
+    # The 2026-10-13 incident classes in one end-to-end pass (docs/decisions/
+    # g2_multiline_and_json_extraction_fix_20261014.md): a raw UNFENCED JSON
+    # reply whose steps carry real newlines and whose values embed ``` code
+    # fences. The fence-priority bug used to hijack it to a top-level array
+    # and the newline rejection killed the multi-line steps; now the skill
+    # must land in the bank with the correct marker set, heredoc
+    # continuation lines at column 0.
+    multiline_steps = [
+        "inspect the reported state",
+        "run this exact block:\n"
+        "```\n"
+        "python3 - <<'PY'\n"
+        "print('ok')\n"
+        "PY\n"
+        "```",
+    ]
+    distill_sections = {**_DISTILL_SECTIONS, "steps": multiline_steps}
+
+    def script(system: str, user: str) -> str:
+        if "The subtask SUCCEEDED" in user:
+            # Raw reply, exactly the incident shape: an unfenced JSON object
+            # (no ```json wrapper) with code fences inside string values.
+            return json.dumps(distill_sections, ensure_ascii=False)
+        return _script(system, user)
+
+    run_dir = tmp_path / "run"
+    result = run_pipeline(
+        config_path=config_path, run_dir=run_dir,
+        make_client=lambda model_name: FakeClient(script))
+
+    assert result["delta"]["avg_at_n"] == 1.0
+    bank = read_jsonl(run_dir / "skill_bank.jsonl")
+    assert len(bank) == 4
+    marker_sets = [skill_markers(row["content"]) for row in bank]
+    assert marker_sets.count(PROCEDURE_MARKERS) == 2
+    assert marker_sets.count(FAILURE_REFERENCE_MARKERS) == 2
+    by_subtask = {row["subtask_id"]: row["content"] for row in bank}
+    strong = by_subtask["traj/fakebench:t1/strong/00/seg00"]
+    assert strong == render_skill_content("distill", distill_sections)
+    lines = strong.split("\n")
+    # The heredoc continuation lines sit at column 0, verbatim.
+    assert lines[3] == "2. run this exact block:"
+    assert lines[4] == "```"
+    assert lines[5] == "python3 - <<'PY'"
+    assert lines[8] == "```"
+
+
 def test_pipeline_rerun_makes_no_new_calls(plugin, config_path, tmp_path):
     run_dir = tmp_path / "run"
     first_log = ClientLog()
