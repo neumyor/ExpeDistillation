@@ -104,6 +104,8 @@ src/expedistill/
     author.py             G2 提炼 / 诊断、G6 改写
     exam.py               G3 出考题、G4 作答、G5 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
+    attribution.py        G10 live 归因、G11 live 修订（live_run 验收；不进 __init__
+                          的 import 清单——懒注册保 exam run 的冻结 prompt 名集不变）
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
   llm/                    第 2 层：B1 调用模型
     client.py             底层客户端（OpenAI 兼容接口）
@@ -128,15 +130,21 @@ src/expedistill/
     audit.py              D8 泄题审计
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
     retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
+    attribution.py        G10 live 归因、G11 live 修订（live_run 验收的模型积木；
+                          模块顶部防御性 import prompts/attribution 以完成注册）
   composites/             第 5 层：组合积木（负责落盘与续跑）
     batch_execute.py      K1
     segment_checked.py    K2
     exam_once.py          K3
     acceptance.py         K4
     curation.py           K5
+    live_acceptance.py    K6 live-run 验收（阶段 4 的 live_run 模式；逐组阶段函数库，
+                          轮序编排归 stages/stage4_live_run.py）
     assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run
   stages/                 第 6 层：阶段 0–6 的流程
     stage0_freeze.py … stage6_test.py
+    stage4_live_run.py    阶段 4 的 live_run 模式驱动（轮栅栏 + K1 大批 + summary；
+                          exam 分发在 stage4_acceptance.py 顶部懒 import）
     pipeline.py           按实验模式（split / full）串起各阶段
   cli.py                  第 7 层：命令行入口（唯一的方法入口）
 ```

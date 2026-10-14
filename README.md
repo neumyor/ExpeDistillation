@@ -136,14 +136,14 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 |---|---|---|---|
 | D1 | 任务加载 | （benchmark, 任务表）→ 任务列表 | 是 |
 | D2 | 划分 | （任务列表, 模式 split/full, 种子）→ train / test / reserved（reserved 不进任何阶段；显式划分只给两键时恒为空列表） | 否 |
-| D3 | 成绩统计 | （Trajectory 列表, 应有单元集合（可选）, 辅助打分器（可选，由 benchmark 插件声明））→ 每题有效次数 / 成功次数 / 基础设施异常次数（应有而缺失的单元计入基础设施异常），以及两种口径的 avg@N、pass@N；插件声明了辅助指标时，同一分母、同两种口径的辅助 avg@N（`aux` 一节，未声明为 null） | 否（辅助指标由插件声明，本积木只收打分器） |
+| D3 | 成绩统计 | （Trajectory 列表, 应有单元集合（可选）, 辅助打分器（可选，由 benchmark 插件声明））→ 每题有效次数 / 成功次数 / 基础设施异常次数（应有而缺失的单元计入基础设施异常），以及两种口径的 avg@N、pass@N；插件声明了辅助指标时，同一分母、同两种口径的辅助 avg@N（`aux` 一节，未声明为 null）。live_run 验收的判定同样消费它的单题计数形状（`{attempts, valid, success, infra}`，声明辅助指标时另有 `aux_success`） | 否（辅助指标由插件声明，本积木只收打分器） |
 | D4 | 挑题 | （每题成绩, 具名规则）→ 题目集合。阶段 1 由配置的 `task_select` 规则决定，v2 默认 `any_weak_failed`：任一有效尝试失败即入 F；部分 infra + 有失败的题既进 F、也在 shortfall 清单 | 否 |
-| D5 | 轨迹视图 | （Trajectory 或段内步骤, 视图配置）→ 给模型看的文本；超长观察按规则截断，截断处明确标注 | 是：截断规则按 benchmark 配置 |
+| D5 | 轨迹视图 | （Trajectory 或段内步骤, 视图配置）→ 给模型看的文本；超长观察按规则截断，截断处明确标注。live_run 验收的归因与修订输入（G10 的 `live_views`、G11 的 `failure_view`）同样经它渲染 | 是：截断规则按 benchmark 配置 |
 | D6 | 段筛选 | （Subtask 列表, 规则）→ 要生成 skill 的 Subtask。由配置的 `segment_select` 规则决定，v2 默认 `strong_success_weak_failed`：强模型段只取 `success = true`（做法材料），弱模型段只取 `success = false`（教训材料）。旧名 `strong_all_weak_failed` 为 v1，与 v2 的 G2 prompt 不兼容 | 否 |
 | D7 | 切段校验 | （Trajectory, Subtask 列表, K）→ 通过 / 错误清单 | 否 |
-| D8 | 泄题审计 | （Skill, Exam, 模型（auditor 角色，默认强模型））→ 泄露 / 不泄露 + 理由。LLM 判官：skill 包含、平凡改写或直接揭示参考答案及考题答案特有实体（名字、数值、文件名）即泄露；通用方法建议、协议词、动作名、环境反馈串不算泄露。理由永不复述参考答案 | 否 |
-| D9 | skill 注入 | （skill 列表, 分组信息（可选））→ 插入 prompt 的规则文本块 | 否 |
-| D10 | 库长度统计 | skill 列表 → 注入后的 token 数 | 否 |
+| D8 | 泄题审计 | （Skill, Exam, 模型（auditor 角色，默认强模型））→ 泄露 / 不泄露 + 理由。LLM 判官：skill 包含、平凡改写或直接揭示参考答案及考题答案特有实体（名字、数值、文件名）即泄露；通用方法建议、协议词、动作名、环境反馈串不算泄露。理由永不复述参考答案。**exam 模式专用**：live_run 验收没有"考题参考答案"这个保护物，不跑 D8，防退化的三层既有防线见阶段 4 | 否 |
+| D9 | skill 注入 | （skill 列表, 分组信息（可选））→ 插入 prompt 的规则文本块。live_run 验收两轮的组注入经同一函数渲染——注入字节与 injection_audit 冻结行的 sha256 逐字节一致由"同一份实现"保证 | 否 |
+| D10 | 库长度统计 | skill 列表 → 注入后的 token 数。live_run 验收的注入 token 估算用同一函数（记进 injection_audit 行；超过 `max_injection_tokens` 的组零执行丢弃） | 否 |
 | D11 | skill 检索 | （任务文本, skill 库, top_k / max_categories / min_score）→ 选中 skill 子集 + 审计记录（`selected`、`routed` 类别名、`scores` 逐条分数、`threshold_passed`）。词法两步检索纯函数：`derive_categories` 把 G9 细组确定性凝聚成粗类别，`select_skills` 先路由到至多 `max_categories` 个类别、再类内 TF-IDF 余弦取 top-`top_k`（检索文档 = skill 全文，标记节权重 ×3）；`min_score` 只门 top-1，低于阈值返回空集 | 否 |
 
 **模型类**（每块对应注册表里的一个或两个 prompt，模型由调用方传入）
@@ -159,6 +159,8 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | G7 | 找相似与冲突 | （skill 列表, 模型）→ 候选合并组、冲突对。先用字面相似度粗筛，再由模型确认 |
 | G8 | 合并 skill | （一组 skill 或一对冲突 skill, 模型）→ 合并后的 Skill（`merged_from` 记录来源） |
 | G9 | 分组 | （skill 列表, 模型）→ 每条 skill 的能力分组标签 |
+| G10 | live 归因 | （任务执行 prompt 的渲染产物, 基线逐次状态行摘要, 本轮**全部**尝试的轨迹视图（D5，成败都给）, skill 组列表, 弱模型画像, 模型（author 角色））→ 组级诊断 + 逐 skill 处置计划：`{"diagnosis", "skill_actions": [{"skill_id", "action": keep\|revise\|delete, "problem"}]}`，恰好覆盖组内每条 skill 一次，revise / delete 必带非空 problem。**live_run 验收专用**（阶段 4）：对照的是同一 task 的真实执行而非考题 |
+| G11 | live 修订 | （skill 现文本, 归因报告（组诊断 + 本 skill 的 problem）, 失败尝试视图摘录（D5）, 弱模型画像, 模型（rewriter 角色））→ 保节结构的新正文 + 错因归类 + 修订理由，输出契约与 G6 同构（复用 `FAILURE_CATEGORIES` 与四节纪律）。与 G6 的差别在输入：G11 修订的依据是真实执行失败，不是考题作答；修订纪律（不得抄本题具体数值/文件名/实体名）是硬约束，防归因修订把具体值塞回 skill |
 
 "弱模型画像"是配置里的一段文字（弱模型是谁、已知弱点），是 G2 / G6 的输入，
 换弱模型时只换这段配置。
@@ -170,8 +172,9 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | K1 | 批量执行 | E1 × 题目 × 采样次数，经 B5 并行 | 每完成一次执行就落盘一条 Trajectory，可续跑；`infra_error` 按 B6 重试，重试耗尽的单元不落盘、记入失败账本，续跑时再试 |
 | K2 | 切段（带校验） | D5 → G1 → D7；不通过就把错误清单交给 G1 重切 | 重切次数上限 `segment_retry_limit`；耗尽则跳过这条轨迹并记入审计日志，本 run 内不再重切 |
 | K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt | skill 列表为空即裸答；Attempt 记录用途（裸答 / 验收 / 回归）；先存作答、再判卷 |
-| K4 | 验收 | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写 |
+| K4 | 验收（exam 模式） | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写。文本考试协议，由配置 `acceptance` 缺省（exam）选中 |
 | K5 | 库整理（Curator） | G7 → G8 → K3 回归考试 → G9 → D10 | 回归考试覆盖合并所代表的全部原始 skill 的考题，任一不过就撤销该次合并；超出 `bank_token_budget` 时回到 G7/G8 继续合并，最多 `curation_rounds` 轮；仍超出则阶段 5 停下报告，不自动删 skill |
+| K6 | live-run 验收 | 逐组阶段函数库：基线加载、注入审计行构造（首写与续跑比对共用一个构造器）、轮判定（具名 `ACCEPTANCE_IMPROVE` 规则 × D3 计数）、G10 归因、G11 修订应用、no-op 守卫、幸存组推导、组终态提交；两轮钉死。轮序编排、K1 派发与重派发集、injection_audit 首写、shortfall 记录、摘要归 `stages/stage4_live_run.py`（裁决 A16 的分工） | live_run 模式的验收（阶段 4，配置 `acceptance` 选中）：验收单位 = 一个 train task 的 pending 候选组，经 K1 真实执行、与阶段 1 裸跑基线按预注册判据比对，两轮不过整组丢弃；状态全部从磁盘推导（verdicts / attributions / 两个失败账本 + injection_audit + skill 版本号），任意崩溃点续跑等价。**编号与阶段 6 无关**：这是组合积木的第 6 号，test 阶段仍由 K1 / D3 承担 |
 | — | 装配工具 | `composites/assemble_reuse.py`：从源 run 按 train 溯源过滤，装配出新 run 的阶段 0–5 产物与 skill 库 | 复用已完结 run 的蒸馏产物、只重跑 test 侧实验（如检索式分发对同一冻结库重测）的入口：allowlist 拷贝（未列即不拷）+ 负清单断言 + 与源 manifest 的白名单 diff（仅 `mode` / `split` / `tasks` / `skill_delivery` / `schema_version` 允许不同），库行与拷贝对象逐位一致、零 test / reserved 溯源，run 根写 `ASSEMBLED_FROM.md` 溯源，拒绝已含 manifest 的目录。**不给 K 号**：它是装配工具，不是把积木串成阶段动作的组合件，放 `composites/` 只因它负责落盘与校验。两档位：bank=过滤旧库零调用复用（消融用）；baseline=仅拷阶段 1 轨迹，阶段 2–6 按当前协议全新执行（修订三默认） |
 
 组合积木负责落盘和续跑：每一步的产物按确定 ID 存进 B3，再次运行时已完成的
@@ -242,6 +245,25 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
   不在原目录删掉库和日志重新整理——原地重整后阶段 6 已存的轨迹对应的是旧库，
   K1 会拒绝续跑，这条路走不通。
 
+**K6 live-run 验收**
+
+- **零新状态对象**：一个组处于流程的哪一步，全部从磁盘推导——轮 r 执行完 = 轮 store
+  （`live_run/round{NN}/`）里该组的应有单元（task × `n_attempts` 全量集）全部已存或在
+  skip 并集内；轮 r 已判定 = `verdicts.jsonl` 有该 (task, round) 行；已归因 =
+  `attributions.jsonl` 有该行（append-once、首判为准，G10 绝不重问）；某条修订已应用 =
+  该 skill 的版本号已越过归因行记录的版本（version == from_version → 施加，
+  == from_version+1 → 跳过，其余 → 代码 bug）；组终态 = 成员 status；
+- **重算一致性守卫**：续跑时判定作为纯函数重算（基线计数 × 轮 store 计数 × 具名规则），
+  与账本首行不一致 → 代码 bug 停机——store 被外部改动的防腐层；
+- **持久化顺序**：verdict 行先于任何 status 提交落盘（崩溃截断的提交由 finalization
+  sweep 幂等补完）；归因行先于任何修订动作原子追加；每条修订成功立即 store.save
+  （版本号即完成证明）；injection_audit 行由阶段在派发前首写冻结，此后一切读取
+  （no-op 守卫的 sha、verdict 行的 token 数）都回到冻结行，重派发前重推导的内容与
+  冻结行逐字节比对，不等 → 代码 bug；
+- **已知不等价点**：结果未落盘的模型调用会被重问（K3/K4 的既定豁免同款）——覆盖
+  G10 计划在调用与账本追加之间丢失、G11 修订在调用与 save 之间丢失、以及归因预算
+  耗尽行（蓄意写在组终态之后——discard 是事实，账本行是它的回执）三种崩溃窗口。
+
 ### 1.5 积木复用
 
 **阶段 → 积木组装**
@@ -252,7 +274,7 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | 1 双模型基线执行 | K1（强模型, 裸跑）、K1（弱模型, 裸跑）、D3、D4 |
 | 2 轨迹切段 | K2（对强、弱模型轨迹各调用） |
 | 3 skill 与考题生成 | D6、G2（提炼 / 诊断）、G3，G2 与 G3 互相独立可并行 |
-| 4 验收 | K4（内含 K3、G6、D8） |
+| 4 验收 | 由配置的 `acceptance.mode` 决定：exam（缺省）→ K4（内含 K3、G6、D8）；live_run → K6（内含 G10、G11，两轮经 K1 真实执行） |
 | 5 库整理 | K5（内含 G7、G8、K3、G9、D10） |
 | 6 test | K1（弱模型, 带库：whole_bank 整库注入，或 retrieval 模式先经 D11 逐任务检索、由 D9 的 `format_skills_block` 渲染选中子集）、K1（弱模型, 裸跑，仅 split 模式）、D3 |
 
@@ -293,6 +315,18 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | 合并 skill | G8 | 强模型（阶段 5） |
 | 分组 | G9 | 强模型（阶段 5） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | 强 / 弱模型（阶段 1、6） |
+| LIVE_RUN_ATTRIBUTION | G10 | author（阶段 4，仅 live_run 模式） |
+| LIVE_SKILL_REVISION | G11 | rewriter（阶段 4，仅 live_run 模式） |
+
+**两个 live prompt 是懒注册的**（`docs/decisions/acceptance_live_run_20261014.md`）：
+`prompts/__init__.py` 的 `METHOD_PROMPT_NAMES` 是 import 时的快照，任何新名字出现都会
+让在飞 exam run 的 manifest 比对拒绝续跑，所以 `LIVE_RUN_ATTRIBUTION` /
+`LIVE_SKILL_REVISION` **不进** `prompts/__init__.py` 的 import 清单，而在两处按需注册：
+stage 0 只在 `acceptance.mode == live_run` 时条件 import 它们并把两个 digest 并进
+manifest（exam run 的冻结 digest 集逐字节不变）；`blocks/attribution.py` 模块顶部防御性
+import 同一模块，绕过 stage 0 的调用方（单测、脚本）不会撞 PromptNotFoundError。
+后果：(a) 冻结的 prompt 名集随验收模式不同；(b) 两个 prompt 各有一份 golden 测试钉住
+digest——**prompt 文本演化时必须有意识地 bump 对应 golden**，漏 bump 即测试红。
 
 沿用 SkillExpand 的两条规定：
 
@@ -331,7 +365,9 @@ Skill
   skill_id, content(自然语言正文), subtask_id(→段),
   version(改写次数), status(pending/accepted/discarded/merged),
   discard_reason(weak_already_knows / retry_exhausted / leak_audit / model_output_error
-                 / regression_failed / regression_error / interrupted_merge),
+                 / regression_failed / regression_error / interrupted_merge
+                 / live_no_improvement / live_revision_deleted / live_undetermined
+                 / live_injection_overflow),
   group(能力分组，阶段 5 写入),
   rewrite_history[ 旧版正文、错因归类与改写原因 ], merged_from[ skill_id ...](仅库整理产物)
   （task_id / trajectory_id 经 subtask_id 查得，不重复存）
@@ -349,6 +385,19 @@ Attempt（作答记录）
 考题出题时不看 skill。每个参与生成的 Subtask 对应一个 skill 和一道考题（1:1:1）；
 改写重考不新建对象，skill 版本号 +1；每次作答（含裸答）另记一条 Attempt，
 用 `exam_id` + `skill_id/skill_version` 指向当时的考题和 skill 版本，重考全程可追溯。
+
+**discard_reason 的词汇与证据基础**（`docs/decisions/acceptance_live_run_20261014.md`
+裁决 A13）：字段本身是自由字符串（schema 不设闭合枚举），上面括号里的清单是系统实际
+会写入的词。live_run 验收新增四个词：`live_no_improvement`（两轮未更好 / no-op 守卫，
+双语义靠 verdicts 行的 round 字段区分）、`live_revision_deleted`（G10 判 delete）、
+`live_undetermined`（live 侧全单元皆为已接受空洞，无判定分母）、
+`live_injection_overflow`（注入块超过 `max_injection_tokens`，零执行终态）。两个跨模式
+复用词的**证据基础不同**：`weak_already_knows` 在 exam = 裸答即对，在 live = 阶段 1
+基线全成功（零执行推断）；`model_output_error` 在 exam = 作答/判卷/改写预算耗尽，
+在 live = G10 归因预算耗尽（整组）或 G11 修订预算耗尽（单 skill）。**零 schema 升版**：
+五个数据对象不加字段、不改字段含义，live 模式全部新词走自由字符串口子，
+`CONFIG_SCHEMA_VERSION` 不动（在飞 run 的续跑兼容性优先；升版清理登记为在飞 run
+完结后的一次性技术债，见 `docs/runbooks/live_run_acceptance_runbook.md` 的遗留事项）。
 
 落盘布局（每个 run 目录）：
 
@@ -382,6 +431,38 @@ Attempt（作答记录）
   stage4_acceptance/rewrite_failures.jsonl
                                  改写每失败一次一行，耗尽的那次标 exhausted；续跑据此推导轮次
   stage4_acceptance/stage4_summary.json
+  stage4_acceptance/live_run/      live_run 模式专有子树（exam run 没有它；三账本 + 两个
+                                 修复失败账本 + 按轮子目录都在这里）
+    verdicts.jsonl                逐（task, round）判定行，append-once、首判为准：
+                                 {schema, task_id, round, rule, baseline{valid,success},
+                                  live{valid,success}, better, injection_tokens,
+                                  judged_with_shortfall, aux}——aux 是裁决 11 的并列
+                                 辅助计数槽（未声明辅助指标为 null，不参与判据）；
+                                 零执行终态（weak_already_knows / live_injection_overflow /
+                                 live_undetermined）同样落行：计数与 better 记 null、
+                                 终态名进 verdict 字段（键的存在即行种类的自描述）
+    attributions.jsonl            G10 归因行，append-once、首判为准：
+                                 {schema, task_id, round, diagnosis, skill_actions[
+                                  {skill_id, version, action, problem}],
+                                  injection_block_sha256}——skill 版本由程序在追加时
+                                 从 store 读入补记，模型输出不可信
+    attribution_failures.jsonl   G10 每次修复重试失败一行，耗尽的那次标 exhausted；
+                                 预算跨崩溃持久（K4 rewrite_failures 先例）
+    revision_failures.jsonl      G11 逐 skill 的同款失败账本（该 skill 的预算独立）
+    round00/                      轮 0 的独立 store（内部同 stage1_baseline/trajectories/
+                                 布局；K1 的 failed_units.jsonl 也在这里），加两个轮内文件：
+                                   injection_audit.jsonl          每 task 一行（成员
+                                                                 [skill_id, version]
+                                                                 列表 + D9 块 sha256 +
+                                                                 D10 估算 token 数），
+                                                                 派发前首写冻结，
+                                                                 重派发前重推导逐字节比对
+                                   accepted_infra_shortfall.json  本轮已接受的空洞
+                                                                 （--allow-infra-shortfall，
+                                                                  按轮记录：轮 1 的远程
+                                                                  沙箱是新实例，轮 0 的
+                                                                  空洞不自动继承）
+    round01/                      轮 1 同构（仅幸存且注入块有变化的组）
   stage5_curation/curation_log.json
                                  库整理日志：输入集快照、每轮 G7 / G9 输出、每个合并的决定（续跑依据）
   stage5_curation/stage5_summary.json
@@ -397,7 +478,10 @@ Attempt（作答记录）
                                  覆盖式写出一次
   stage6_test/stage6_summary.json
                                  两臂成绩与 delta
-  work/                          执行单元的工作目录：work/stage1/、work/stage6_bank/、
+  work/                          执行单元的工作目录：work/stage1/、work/stage4_live/
+                                 round00/ 与 round01/（live_run 模式按轮分开——重试游标按
+                                 workdir × trajectory 存，两轮的 trajectory id 相同，共用
+                                 一棵树会让轮 1 继承轮 0 的游标）、work/stage6_bank/、
                                  work/stage6_bare/ 下每个单元一个子目录，内含
                                    k1_retry_cursor.json        K1 重试游标（下一个没用过的重试序号）
                                    tb_remote/<run_id>.json     TB 提交记录（启动条件摘要 + runner pid），
@@ -448,6 +532,17 @@ Attempt（作答记录）
   `trajectory_select = all`，所以冻结的是实际生效的名字。阶段 0 在加载任务、
   写任何文件之前就逐个核对规则名是否已登记，名字拼错在这里就停下，不会等到
   昂贵的阶段 1 跑完才报错；后面各阶段直接读 `config.rules`，不再各自带默认值。
+- **验收模式键 `acceptance`**（`docs/decisions/acceptance_live_run_20261014.md`）选择
+  阶段 4 的验收协议：整键不写、`{}`、`{mode: exam}` 都 ≡ exam（文本考试，与原行为
+  逐字节等价）；`{mode: live_run, n_attempts: <int≥2>, improvement: <规则名>,
+  max_injection_tokens: <上限|null>}` 切到 live_run（键的语义见阶段 4）。live_run 下
+  阶段 0 会：(a) 校验 `improvement` 规则名已登记进 `ACCEPTANCE_IMPROVE`（拼错在这里
+  停下）；(b) 条件 import 两个 live prompt 并把它们的 digest 并进 manifest——exam run
+  的冻结 digest 集逐字节不变。manifest 的配置快照里，`acceptance` 为 None 时**该键
+  缺席**（`to_dict` 的字段白名单式删键，且仅此一个字段走此通道——通用的"None 就删"
+  会把 full 模式冻结为 null 的 `split`/`tasks` 也删掉，旧 run 的续跑会被改动的键集
+  拒绝）。这一条与在飞 run 的兼容规则：新代码 + 旧（exam）配置 ⇒ manifest 逐字节不变，
+  在飞 run 照常续跑。
 - 冻结：benchmark、模式、显式的 train / test / reserved 列表、完整配置（任务集、划分、
   模型角色表、`model_options`（按模型名给出的额外 chat 调用参数，如
   `reasoning_effort`，随完整配置冻结——它改变模型产出，不是运行设置，见 B1）、
@@ -560,9 +655,15 @@ Attempt（作答记录）
   `stage3_generation/generation_failures.jsonl` 再继续，续跑不再重试这个段；
   基础设施错误则记入失败账本、继续其余段，阶段末停下待续跑，续跑会重做这些段。
 
-### 阶段 4：验收（K4）
+### 阶段 4：验收（exam → K4；live_run → K6）
 
-对每个候选 skill 及其 Subtask 的考题：
+阶段 4 有两种验收协议，由配置的 `acceptance` 键决定（缺省 exam，见阶段 0）。分发在
+`stage4_acceptance.run` 顶部以懒 import 完成：exam 进程不加载任何 live 模块
+（`blocks.attribution` / `prompts.attribution` / `stage4_live_run` 都不进 import 图），
+live 进程才加载它们。两种模式写同名摘要文件 `stage4_summary.json`，形状差异见本节末的
+对照表。
+
+**exam 模式（缺省，K4）**——对每个候选 skill 及其 Subtask 的考题：
 
 1. **裸答**（K3，skill 列表为空）：**裸答就做对 → 弱模型本来就会，这个 skill
    没用，直接丢弃**（`discard_reason = weak_already_knows`）。
@@ -607,6 +708,119 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
 - 基础设施错误 → skill 保持 pending、记入失败账本，继续其他 skill；全部处理完、
   摘要写下后以基础设施错误停下，流水线不会带着缺了 pending skill 的库进入阶段 5；
 - 摘要按磁盘上全部候选的状态累计，续跑或重跑不会把它覆盖成部分计数。
+
+**live_run 模式（K6 + `stages/stage4_live_run.py`）**——验收单位从"单 skill 的文本
+考试"改为"task 级 skill 组的真实执行比对"（`docs/decisions/acceptance_live_run_20261014.md`）：
+
+- **验收单位（组的定义）**：一个验收单元 = 一个 train task 的**组** = 该 task 的全部
+  **pending** stage-3 候选 skill。候选过滤沿用 exam 的语义（`skill_id ==
+  make_skill_id(subtask_id)`，因此 `bank/merge/NNNN` 天然排除——它们是 K5 的、已由回归
+  考试证明，永不回到验收），live 侧在新文件里就地重写该过滤、按 task 分组，不共享 exam
+  文件的 helper。分组键由 ID 链确定性推导：`skill_id → parse_subtask_id →
+  trajectory_id → parse_trajectory_id → task_id`；task 对象经 `raw_task_id` 反解析后由
+  D1 从冻结配置重建。组的宇宙从 store 现存 pending 候选推导（不假设候选覆盖全部
+  train task），无候选的 task 不构成单元。
+- **配置键**：`acceptance: {mode: live_run, n_attempts: <int≥2>,
+  improvement: <ACCEPTANCE_IMPROVE 规则名，必填无默认>, max_injection_tokens:
+  <上限|null>}`（`n_attempts` 建议 = `n_attempts_weak`；1v1 二值比较的 H0 假通过率
+  ≈ 真实成功率本身，故 ≥2 是硬约束）。`max_injection_tokens` 为 null 时只测量不执法。
+- **判据预注册**：判定规则是 `blocks/rules.py` 第四个具名注册表 `ACCEPTANCE_IMPROVE`
+  的成员，签名 `(baseline_counts, live_counts, n_attempts) -> bool`，名字进配置进
+  manifest，看结果前定死、换规则 = 新实验。当前两条：
+  - `strict_rate_gain`（裁决选名）：`live.success × baseline.valid >
+    baseline.success × live.valid`（整数交叉乘法，无浮点），且 `live.valid > 0`。
+    等深且 skip 对齐时与计数口径等价；live 侧接受空洞后样本变浅时，率口径是唯一
+    无偏推广（live 3/5 vs 基线 2/3：计数判"更好"、率判"未更好"——率是对的）。
+    **并列判负**（进归因修订），变差同样进归因（skill 可能有害，归因者应看到）；
+  - `first_success_gain`（消融备选，pass@N 语义）：基线全败 → live 至少一次成功。
+  - **噪声数字如实披露**：H0（skill 无效果、真实成功率 p）下单 task 假通过率 =
+    P(live 严格更好)。n=3 时 p=1/6 → ≈27%、p=0.5 → ≈34%——`strict_rate_gain` 是
+    弱证据的入门过滤器，不是统计检验；数字按 n 重算（n=1 时约 50%）。可辩护性：
+    验收是库的入门门而非最终主张，最终对照在阶段 6 test 集；逐组 baseline/live
+    计数全落盘，事后可用符号检验复核。
+  - **天花板守卫（strict 族限定）**：基线全成功（success == valid）且规则在率 1.0
+    基线下数学上不可能返回 True 时 → 全组 `weak_already_knows` 零执行终态。守卫
+    限定在 strict 族规则集内硬编码（当前两条均满足）；注册新规则必须有意识地复核
+    该集合，否则守卫会短路掉 pass@N 型规则本可执行的组。
+  - **无效基线**：基线 valid == 0 → ConfigError。该守卫的不可达性依赖两个已注册
+    task_select 规则都要求 valid > 0（这种 task 不入 F、无候选、无组）；换
+    task_select 规则时守卫从不可达变可达，fail-loud 而非静默跳过。
+- **两轮循环（轮数钉死为 2，用户裁决 8；无 `max_revision_rounds` 配置面）**：
+  轮栅栏（每轮一次 K1 大批，attempt-major 派发保持"同题采样不相邻"）——
+  1. **入口**：finalization sweep（幂等补完崩溃截断的提交）→ 逐组加载基线
+     （未接受缺失 → InfrastructureError 指路先续跑阶段 1；基线全成功 → 零执行终态）；
+  2. **轮 0**：派发前首写冻结 injection_audit 行（成员 + 注入块 sha256 + 估算
+     token；超 `max_injection_tokens` → `live_injection_overflow` 零执行终态，不进
+     K1）；K1 一次大批（store = `live_run/round00/`，弱模型，整组注入，`n_attempts`
+     次真实执行）→ 逐组判定 → better 则 verdicts 落盘、全员 accepted；
+  3. not better → verdicts 落盘 → **G10 归因**（author 角色，组级一次）→ 应用：
+     delete 立即 `live_revision_deleted`；revise 逐 skill **G11 修订**（rewriter
+     角色，保节结构，version+1 立即落盘）；
+  4. **no-op 守卫**：幸存组渲染块 sha == 轮 0 冻结行 → 全组 `live_no_improvement`，
+     不跑轮 1（防"重采样直到运气好"——两次 3v3 严格提升的假阳性近乎翻倍）；
+  5. **轮 1**（仅幸存且注入块有变化的组）：同构执行（store = `round01/`）→
+     better 则幸存成员 accepted，否则幸存成员 `live_no_improvement`。
+  归因/修订经 `run_units` 并行（单元 = 组/skill，各写各的账本行，append_jsonl 已
+  线程+flock 串行化）。
+- **归因与修订（G10 / G11）**：G10 的 `task_instruction` 取 `task_prompt(task)` 渲染
+  产物——学生实际看到的执行 prompt（TB 下 Task.instruction 只是任务名，指令经
+  live_views 首步上下文间接可见，这一限制如实记录在 prompt 设计说明里）；G10 输出
+  契约不含版本号——版本由 K6 在账本追加时从 store 读入补记（模型输出不可信）。
+  **修订纪律**（硬约束，写进两条 prompt）：修订必须是可迁移的 skill——通用模式与
+  命令族合法，逐字抄本题的具体数值/文件名/实体名禁止。决定性理由：retrieval 交付
+  会把库成员检索注入到**其他** task 上，任务局部化的 skill 对别的 task 是主动有害的；
+  在 G11 放水等于在 G2 已冻结的可迁移纪律上开后门、伤害外部化到阶段 6。该纪律与
+  "任务知识是被测处理"之间的张力（修订当然要用任务信息诊断问题）如实存在：纪律
+  只约束**写进 skill 正文的**内容，不约束诊断。
+- **D8 不适用**：live 验收没有考题参考答案这个保护物，不跑 D8 也不加替代判官。
+  防"skill 退化为任务答案复制粘贴"的三层既有防线：(1) 写作层——G2 v2 prompt 的
+  硬性纪律；(2) 修订层——G11 prompt 继承同一条纪律（见上）；(3) 测量层——split
+  模式的阶段 6 test 集与验收任务不相交，可迁移性由 test 集端到端回答。full 模式下
+  live 验收与阶段 6 同 task：任务定制 skill 同时抬高验收与 test——这是 full 模式的
+  **定义**（"直接看原来做不出来的题现在能不能做出来"），不是缺陷（见第四节已知风险）。
+- **expected 全量口径**：live 侧与基线侧都把**全量**应有单元集（task × n_attempts）
+  交给 D3——skip 的单元不执行、无轨迹，按 expected 口径自然计为 infra（不进 valid
+  分母）；两侧同减同一批单元，率比较的分子分母自动对齐。禁止给 D3 传"已减 skip"的
+  expected（那会让 skip 单元从计数中整体消失，verdict 行失去"哪些单元是空洞"的
+  自描述性）。
+- **失败处置**（照方案 §2.5）：
+
+  | 情形 | 处置 |
+  |---|---|
+  | G10 预算耗尽（含其契约校验失败计入） | 全组 discarded(`model_output_error`)，先终态后账本行 |
+  | G11 单 skill 预算耗尽（含 marker 保结构校验失败计入——结构校验 raise 必须落在修复预算作用域内，K5 教训） | 该 skill discarded(`model_output_error`)，组继续 |
+  | InfrastructureError（归因/修订/执行） | 组保持 pending、记账本、其余继续、阶段末 raise（退出码 3）、续跑重试 |
+  | live 单元 infra 耗尽 | 默认不接受（续跑补全）；`--allow-infra-shortfall` 时按轮写入 `round{NN}/accepted_infra_shortfall.json`，判定在剩余有效样本上按率进行，verdict 行带 `judged_with_shortfall`；**全单元皆空洞 → `live_undetermined` 终态（先于归因短路）** |
+  | 每轮 K1 的 skip_unit_ids | 阶段 1 已接受弱臂空洞（过滤 role==weak、限本 task）∪ 该轮自己的已接受空洞 |
+  | 基线全成功 | `weak_already_knows` 零执行（strict 族限定，见判据预注册） |
+  | 基线 valid==0 / 未接受缺失 | ConfigError / InfrastructureError（不可达守卫） |
+  | 归因全 delete / 幸存组空 | 不跑轮 1，组终态即各成员已落的 discarded |
+  | no-op（块 sha 不变） | 全组 `live_no_improvement`，不跑轮 1 |
+  | 注入超长 | audit 首写时估算；超限 → 该组 `live_injection_overflow`（不进 K1，零执行浪费；证据在 audit 行），不烧整 run 的停机 |
+
+- **shortfall 按轮语义与政策**：live 让阶段 4 首次成为执行阶段（与阶段 1、6 同故障
+  面），`--allow-infra-shortfall` 扩展到 stage4-live。接受记录**按轮**存（轮 1 的
+  远程 run id 因注入块变化而不同、沙箱是新实例，轮 0 坏 ≠ 轮 1 必坏；"轮 0 坏则
+  轮 1 同跳"若要作为政策须显式预注册，不得作为实现副作用）。**正式 run 默认不开**
+  该开关（预注册正本见 `docs/runbooks/live_run_acceptance_runbook.md`）：重试耗尽
+  当场同命令续跑，不靠开关兜底；仅当用户明示允许时，接受标准 = 单单元经一次续跑
+  补跑后仍 infra 耗尽（至少两轮完整重试）、且总量 > 15% 的组停下诊断、双轮同
+  policy、接受必须先落 durable 记录再判定。
+- **状态推导与续跑**：见 1.4 节 K6 的落盘规则；驱动（`stages/stage4_live_run.py`）
+  拥有轮序推进、重派发集判定（**非终态 ∧ 轮 store 不完整**的组——"非终态"限定不可
+  省，否则零执行终态组的空 store 会在每次续跑时被重派进 K1 白烧执行）、injection_audit
+  首写、shortfall 记录、摘要与阶段末 raise。
+
+**双模式 summary 形状差异**（同名文件 `stage4_acceptance/stage4_summary.json`）：
+
+| 字段 | exam | live_run |
+|---|---|---|
+| `accepted` / `discarded`（reason→count）/ `processed_this_call` | 有（按盘上候选累计） | 有（同语义；live 的"accepted"含阶段 5 已并入合并的成员） |
+| `infra_failed` | 有（元素是 **skill id**） | 有（元素是 **task id**——live 的单元是组不是 skill） |
+| `skipped_missing_exam` | 有 | **无** |
+| `mode` / `improvement_rule` | 无 | 有（`live_run` / 具名规则名） |
+| `group_details`（逐组双轮判定 + 注入 token + 逐成员终态与理由） | 无 | 有 |
+| `infra_missing`（按轮列出仍缺的单元）/ `infra_accepted`（按轮）/ `infra_shortfall_accepted` | 无 | 有（pipeline 的账本旗标链路依赖后两者） |
 
 ### 阶段 5：skill 库整理（K5，参照 AgentBrew Curator）
 
@@ -703,13 +917,16 @@ prompt 容量。做法参照 AgentBrew §2.3.3 Note Curator 与 §2.5 Lifelong M
 | 1、6 执行 | 单元不落盘、记入失败账本，其余单元照跑；有未接受的空洞，就写完摘要后停下（退出码 3）；可用 `--allow-infra-shortfall` 持久接受 | 本地执行中途模型给不出可用回复（如返回空内容）→ 这一局记为 `failure`（`termination = model_output_error`，已走的步骤保留），不重试：重试等于对被测模型反复重采样直到它答好 |
 | 2 切段 | 记入失败账本，继续其他轨迹；阶段末停下（退出码 3），续跑只重做这些轨迹 | 算一次切段尝试；重切耗尽 → 跳过并写审计日志，本 run 内终态 |
 | 3 生成 | 同上（单元是段） | 写 `generation_failures.jsonl`、跳过这个段，本 run 内终态 |
-| 4 验收 | 同上（单元是 skill，保持 pending） | 丢弃（`discard_reason = model_output_error`），本 run 内终态 |
+| 4 验收（exam） | 同上（单元是 skill，保持 pending） | 丢弃（`discard_reason = model_output_error`），本 run 内终态 |
+| 4 验收（live_run） | 组保持 pending、记入失败账本，其余组继续；摘要写下后以基础设施错误停下（退出码 3），续跑重试；`--allow-infra-shortfall` 时按轮接受空洞（语义与政策见阶段 4） | G10 预算耗尽 → 全组丢弃（`model_output_error`）；G11 预算耗尽 → 仅该 skill 丢弃，组继续；均本 run 内终态 |
 | 5 整理 | 记入失败账本后立即停下（退出码 3），续跑按日志接着做 | G8 → 跳过该合并；回归考试 → 撤销该合并；G7 / G9 → 停下整个阶段（退出码 1，已完成的单元都已落盘，重跑同一条命令会重试这次调用） |
 
-阶段 2–4 的基础设施空洞不能被接受，只能续跑补上。配置错误、服务方拒绝在任何
-阶段都立即停下（退出码 1）；代码 bug 立即停下并保留调用栈。"本 run 内终态"的意思
-是：一个 run 是一次冻结的实验，同一个 run 目录里不再重试；想换一次采样再试，就开
-新 run 目录。
+阶段 2、3 与阶段 4 的 exam 模式的 infrastructure 空洞不能被接受，只能续跑补上。
+阶段 4 的 live_run 模式与阶段 1、6 同故障面（真实执行、远程沙箱会永久坏），在
+`--allow-infra-shortfall` 下可按轮接受（语义、按轮记录与预注册政策见阶段 4）。
+配置错误、服务方拒绝在任何阶段都立即停下（退出码 1）；代码 bug 立即停下并保留
+调用栈。"本 run 内终态"的意思是：一个 run 是一次冻结的实验，同一个 run 目录里
+不再重试；想换一次采样再试，就开新 run 目录。
 
 **命令行**
 
@@ -733,7 +950,7 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
 | `--llm-infra-retries` | 3 | 单个模型请求遇到基础设施错误时的重发次数 |
 | `--llm-infra-backoff` | 5.0 | 重发的指数退避基数（秒），单次等待最多 60 秒 |
 | `--k1-stagger` | 0 | 每个单元启动前的随机抖动秒数上限，错开并行派发的 ssh 连接；TB 远程建议 20，本地执行 benchmark 用 0 |
-| `--allow-infra-shortfall` | 关 | 让阶段 1、6 带着空洞继续；空洞仍计为基础设施异常，阶段摘要和账本行都标出，并向 stderr 打警告 |
+| `--allow-infra-shortfall` | 关 | 让阶段 1、6 与阶段 4 的 live_run 模式（按轮）带着空洞继续；空洞仍计为基础设施异常，阶段摘要和账本行都标出，并向 stderr 打警告。live_run 的预注册政策：正式 run 默认不开（见阶段 4 与 runbook） |
 | `--until-stage` | 无（跑到阶段 6） | 跑完阶段 0..N（含 N，N 取 0–6）就停，冒烟与试跑用；属运行设置、不进 manifest，停下后用同一个 run 目录、更大的 N 重跑同一条命令即继续，已完成的阶段不再发模型调用 |
 
 - 运行设置续跑时可以改（例如端点不稳时调大重试次数）；在取锁、建客户端之前统一
@@ -767,7 +984,19 @@ supervisor 不能只凭退出码 1 判断"是配置问题"，要看 stderr）。
    裸答对照能筛掉"太简单"的考题，但筛不掉"太泛"的；判卷需要看到弱模型的
    完整作答过程，而不只是结论。
 3. **考题与任务的距离**：skill 过的是文本问答题，test 考的是真实执行。
-   "答得对"不等于"做得到"，这个差距只能在 test 成绩里看出来。
+   "答得对"不等于"做得到"，这个差距只能在 test 成绩里看出来。live_run 验收消掉了
+   验收环节的这一差距（判的就是真实执行），但 K5 的合并回归考试仍是文本考——
+   "live 通过 ≠ 做得到"在库整理环节仍然成立。
+4. **live 验收的统计功效（3v3 局限）**：`n_attempts = 3` 的二值比较在 H0（skill 无
+   效果）下单 task 假通过率 ≈ 27–34%（p=1/6 → ≈27%，p=0.5 → ≈34%；数字按 n 重算，
+   n=1 时约 50%，故 n ≥ 2 是硬约束）。验收是库的入门过滤器而非统计证明；库的总体
+   主张由阶段 6 test 集承载，逐组计数全落盘可事后复核。
+5. **live 通过 ≠ 迁移**：live 验收的组来自 train task，可迁移性看 split 模式的 test 集。
+   full 模式下 live 验收与阶段 6 同 task——任务定制 skill（具体命令带具体值）会同时
+   抬高验收与 test。**这不是缺陷而是 full 模式的定义**（"直接看原来做不出来的题现在
+   能不能做出来"）；主张可迁移性时请用 split 模式。
+6. **逐 skill 修订可能互相重叠**：G11 按归因计划逐条独立修订，同一组的两条 skill
+   可能被改成近义正文。重叠不在验收层去重，由阶段 5 的 G7/G8 相似度合并兜底。
 
 ## 五、代码来源（provenance）
 
