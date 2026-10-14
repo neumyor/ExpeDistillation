@@ -4,6 +4,10 @@ happens in composites/, and prompts/model calls come from the layers below."""
 # Redundant-alias re-exports (no shared __all__). New block names are
 # registered here centrally by the integrator when a block lands -- parallel
 # implementation agents never edit this file (protocol v2 integration rule).
+from expedistill.blocks.attribution import (
+    attribute_failure as attribute_failure,
+    revise_skill as revise_skill,
+)
 from expedistill.blocks.audit import (
     audit_leak as audit_leak,
 )
@@ -14,12 +18,15 @@ from expedistill.blocks.metrics import (
     summarize as summarize,
 )
 from expedistill.blocks.rules import (
+    ACCEPTANCE_IMPROVE as ACCEPTANCE_IMPROVE,
     SEGMENT_SELECT as SEGMENT_SELECT,
     TASK_SELECT as TASK_SELECT,
     TRAJECTORY_SELECT as TRAJECTORY_SELECT,
+    get_acceptance_improve as get_acceptance_improve,
     get_segment_select as get_segment_select,
     get_task_select as get_task_select,
     get_trajectory_select as get_trajectory_select,
+    register_acceptance_improve as register_acceptance_improve,
     register_segment_select as register_segment_select,
     register_task_select as register_task_select,
     register_trajectory_select as register_trajectory_select,
