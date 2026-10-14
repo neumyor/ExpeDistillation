@@ -8,9 +8,7 @@ from expedistill.composites.assemble_reuse import (
 from expedistill.composites.batch_execute import batch_execute as batch_execute
 from expedistill.composites.curation import curate_bank as curate_bank
 from expedistill.composites.exam_once import exam_once as exam_once
-from expedistill.composites.live_acceptance import (
-    live_acceptance as live_acceptance,
-)
+from expedistill.composites import live_acceptance as live_acceptance
 from expedistill.composites.segment_checked import (
     segment_checked as segment_checked,
 )
