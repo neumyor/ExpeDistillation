@@ -18,6 +18,7 @@ from expedistill.core.models import (
     Trajectory,
     merged_source_subtasks,
     migrate_skill_record,
+    migrate_skill_rows,
 )
 
 
@@ -332,7 +333,11 @@ class TestV1ToV2Migration:
     def test_from_dict_rejects_v1_merge_product_loudly(self):
         row = _v1_merge_row("bank/merge/0000",
                             [make_skill_id(_SUB_A), make_skill_id(_SUB_B)])
+        # Both pointers: the migration function to use instead, and the
+        # maintenance-branch rule (a v1 run never resumes on this code).
         with pytest.raises(ValueError, match="migrate_skill_record"):
+            Skill.from_dict(row)
+        with pytest.raises(ValueError, match="maintenance branch"):
             Skill.from_dict(row)
 
     def test_from_dict_rejects_v1_unknown_id_shape_loudly(self):
@@ -400,6 +405,36 @@ class TestV1ToV2Migration:
     def test_migrate_record_passes_v2_rows_through(self):
         row = make_skill().to_dict()
         assert migrate_skill_record(row, {}) is row
+
+    def test_migrate_rows_migrates_a_whole_run_in_order(self):
+        # The batch seam the full-store readers use: segment rows, a
+        # flat merge, a nested merge and a v2 row mixed, in store order.
+        rows = [
+            _v1_segment_row(_SUB_A),
+            _v1_segment_row(_SUB_B),
+            _v1_merge_row("bank/merge/0000",
+                          [make_skill_id(_SUB_A), make_skill_id(_SUB_B)]),
+            _v1_merge_row("bank/merge/0001",
+                          ["bank/merge/0000", make_skill_id(_SUB_C)]),
+            _v1_segment_row(_SUB_C),
+            make_skill().to_dict(),  # a v2 row passes through
+        ]
+        migrated = migrate_skill_rows(rows)
+        assert [row["skill_id"] for row in migrated] == [
+            make_skill_id(_SUB_A), make_skill_id(_SUB_B),
+            "bank/merge/0000", "bank/merge/0001",
+            make_skill_id(_SUB_C), rows[5]["skill_id"]]
+        assert all(row["schema_version"] == SKILL_SCHEMA_VERSION
+                   for row in migrated)
+        # The nested merge resolves its transitive sources through the
+        # map the wrapper built; the v2 row is the SAME object.
+        assert migrated[3]["source_subtasks"] == [_SUB_A, _SUB_B, _SUB_C]
+        assert migrated[5] is rows[5]
+
+    def test_migrate_rows_propagates_the_sibling_error(self):
+        rows = [_v1_merge_row("bank/merge/0000", [make_skill_id(_SUB_A)])]
+        with pytest.raises(ValueError, match="not among the sibling records"):
+            migrate_skill_rows(rows)
 
     def test_migrate_record_rejects_unknown_v1_shape(self):
         row = _v1_segment_row(_SUB_A)

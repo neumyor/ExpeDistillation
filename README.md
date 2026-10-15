@@ -402,7 +402,9 @@ Subtask 对应一个 skill 和一道考题（1:1:1）；
 走 `core/models.py` 的迁移纯函数 `migrate_skill_record(record, skills_by_id)`
 （沿 `merged_from` 递归取各来源并集）；v1 Exam 由 `exam_id` 换后缀推导
 `skill_id`。v2 记录缺新字段一律响亮失败。装配器对 v1 源 run 的对象与
-bank 行读取同走该迁移，bank 比对两侧同构（I1）。
+bank 行读取同走该迁移，且 skills / exams / bank 行**迁移为 v2 后落盘**
+（装配产物为 v2 原生 run，其余对象类逐字节拷贝，M1 验收裁决），bank
+比对两侧同构（I1）。
 
 **discard_reason 的词汇与证据基础**（`docs/decisions/acceptance_live_run_20261014.md`
 裁决 A13）：字段本身是自由字符串（schema 不设闭合枚举），上面括号里的清单是系统实际

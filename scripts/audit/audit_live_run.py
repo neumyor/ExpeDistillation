@@ -79,7 +79,11 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from expedistill.core import ids  # noqa: E402
-from expedistill.core.models import Skill, Trajectory  # noqa: E402
+from expedistill.core.models import (  # noqa: E402
+    Skill,
+    Trajectory,
+    migrate_skill_rows,
+)
 from expedistill.infra.store import Store, read_json, read_jsonl  # noqa: E402
 from expedistill.inject.skills import estimate_tokens, format_skills_block  # noqa: E402
 
@@ -149,15 +153,33 @@ def _expected_units(task_id: str, n_attempts: int) -> List[str]:
             for attempt in range(n_attempts)]
 
 
-def _candidate_groups(store: Store) -> Dict[str, List[Skill]]:
+def _load_skills(store: Store) -> Dict[str, Skill]:
+    """Every stored skill at the current schema, by id.
+
+    Full-store reads route through the v1->v2 migration (the M1
+    acceptance ruling): every formal run of today predates schema v2 and
+    its merge products cannot go through from_dict alone -- their
+    source_subtasks needs the sibling records -- so the audit, the
+    AGENTS 6.7 standard tool, must load them via migrate_skill_rows. A
+    v2 row passes through unchanged (the same object).
+    """
+    skill_ids = store.ids("skills")
+    rows = [read_json(store.path_for("skills", skill_id))
+            for skill_id in skill_ids]
+    return {skill_id: Skill.from_dict(row)
+            for skill_id, row in zip(skill_ids, migrate_skill_rows(rows))}
+
+
+def _candidate_groups(skills: Dict[str, Skill]) -> Dict[str, List[Skill]]:
     """The group universe: stage-3 candidates by task (pending + terminal).
 
     The same filter the live stage uses: a candidate's skill_id is the
     stage-3 id of its own subtask, so bank/merge products are excluded.
+    ``skills`` is the migration-aware full load (_load_skills), in
+    sorted-id order.
     """
     groups: Dict[str, List[Skill]] = {}
-    for skill_id in store.ids("skills"):
-        skill = store.load("skills", skill_id, Skill)
+    for skill in skills.values():
         if skill.skill_id != ids.make_skill_id(skill.subtask_id):
             continue
         try:
@@ -524,7 +546,7 @@ def _normalize_refs(value: Any) -> Any:
 
 
 def check_injection_audit(
-        audit: Audit, store: Store,
+        audit: Audit, store: Store, skills: Dict[str, Skill],
         audit_rows: Dict[Tuple[Any, ...], Dict[str, Any]]) -> None:
     for (task_id, round_), row in sorted(
             audit_rows.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
@@ -537,12 +559,15 @@ def check_injection_audit(
         for member in members:
             skill_id = member.get("skill_id")
             version = member.get("version")
-            if not store.exists("skills", skill_id):
+            # The migration-aware full load (_load_skills): a pre-v2 run's
+            # bank members include merge products that from_dict alone
+            # would reject.
+            skill = skills.get(str(skill_id))
+            if skill is None:
                 audit.add(ERROR, "injection-audit",
                           f"{task_id} round {round_}: audit row names "
                           f"unknown skill {skill_id!r}")
                 continue
-            skill = store.load("skills", skill_id, Skill)
             content = _content_at_version(skill, version)
             if content is None:
                 audit.add(
@@ -650,7 +675,8 @@ def audit_run(run_dir: Path, n_attempts: Optional[int] = None) -> Audit:
             return audit
 
     store = Store(run_dir)
-    groups = _candidate_groups(store)
+    skills = _load_skills(store)
+    groups = _candidate_groups(skills)
     stage1_holes = _read_shortfall(run_dir / STAGE1_SHORTFALL)
 
     verdict_rows = _first_row_per_key(
@@ -677,7 +703,7 @@ def audit_run(run_dir: Path, n_attempts: Optional[int] = None) -> Audit:
                        stage1_holes, n_attempts)
     check_ledgers(audit, live_dir, verdict_rows, attribution_rows)
     check_shortfall(audit, run_dir, groups, n_attempts)
-    check_injection_audit(audit, store, audit_rows)
+    check_injection_audit(audit, store, skills, audit_rows)
     return audit
 
 

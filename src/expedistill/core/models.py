@@ -358,7 +358,10 @@ def _migrate_v1_skill_row(data: Dict[str, Any]) -> Dict[str, Any]:
             "source_subtasks is the union of its sources' lists and "
             "cannot be derived from the record alone; migrate the run's "
             "records with expedistill.core.models.migrate_skill_record("
-            "record, skills_by_id) instead of from_dict")
+            "record, skills_by_id) instead of from_dict. Resuming a v1 "
+            "run directly on this code is not supported: a formal run "
+            "stays on the old code of its own maintenance branch "
+            "(AGENTS.md section 6 rule 1)")
     derived = _v1_segment_source_subtasks(data)
     if derived is None:
         raise ValueError(
@@ -417,6 +420,21 @@ def migrate_skill_record(
     raise there with a pointer to this function.
     """
     return _migrate_skill_record(record, skills_by_id, ())
+
+
+def migrate_skill_rows(
+        rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Migrate every stored skill row of one run to the current schema.
+
+    The batch seam for full-store readers (the reuse assembler, the audit
+    tool): a v1 merge product needs its sibling records, and a reader
+    that already holds the whole store should not have to build the map
+    itself, so this builds the id map once and migrates each row in input
+    order. A v2 row is returned unchanged (the same object). Raises
+    exactly what ``migrate_skill_record`` raises (a corrupted lineage).
+    """
+    skills_by_id = {str(row["skill_id"]): row for row in rows}
+    return [migrate_skill_record(row, skills_by_id) for row in rows]
 
 
 def _migrate_skill_record(

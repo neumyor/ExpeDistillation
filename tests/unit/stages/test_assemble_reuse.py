@@ -32,6 +32,8 @@ import pytest
 
 from expedistill.benchmarks.base import BenchmarkPlugin, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
+from expedistill.composites.curation import curate_bank
+from expedistill.composites.skill_status import stage3_candidates
 from expedistill.core.config import ExperimentConfig
 from expedistill.core.models import (
     Attempt,
@@ -40,6 +42,7 @@ from expedistill.core.models import (
     Subtask,
     Trajectory,
 )
+from expedistill.llm import make_fake_handle
 from expedistill.stages.assemble_reuse import (
     assemble_reuse,
     skill_lineage_tasks,
@@ -605,39 +608,204 @@ def _downgrade_source_records_to_v1(run_dir: Path) -> None:
                 for row in rows), encoding="utf-8")
 
 
+def _add_nested_and_reverted_merges(source: SourceRun) -> None:
+    """Extend a built source run with the curation shapes the flat-merge
+    fixture lacks (the M1 acceptance ruling's I1 extension): a kept
+    NESTED merge bank member (m_flat2 merges two fresh originals, then
+    m_nested merges m_flat2 with a third) and a REVERTED train-side merge
+    left on disk OUTSIDE the bank (regression_failed; its sources stay
+    accepted -- K5 marks sources merged only on a kept merge). These are
+    the records the v1 migration must resolve recursively, and the
+    reverted merge is the exact record a byte-copied v1 assembled run
+    crashed on in stage 5's _check_bank_not_stale."""
+    store = Store(source.run_dir)
+    fresh = {
+        "st1w3": _subtask("t1", "weak", 2),
+        "st1s4": _subtask("t1", "strong", 3),
+        "st1w4": _subtask("t1", "weak", 3),
+    }
+    originals = {
+        "s_f": _skill(fresh["st1w3"].subtask_id, "merged"),
+        "s_g": _skill(fresh["st1s4"].subtask_id, "merged"),
+        "s_h": _skill(fresh["st1w4"].subtask_id, "merged"),
+    }
+    for name, subtask in fresh.items():
+        store.save(subtask, "subtasks")
+        store.save(_exam(subtask.subtask_id), "exams")
+        source.ids["subtask"][name] = subtask.subtask_id
+    for name, skill in originals.items():
+        store.save(skill, "skills")
+        source.ids[name] = skill.skill_id
+    st1s = source.ids["subtask"]["st1s"]
+    # A reverted merge attempt on [s_a, s_f]: discarded on disk outside
+    # the bank; its sources stay accepted and banked.
+    m_revert = _merged_skill(
+        2, st1s, [source.ids["s_a"], originals["s_f"].skill_id],
+        status="discarded",
+        source_subtasks=[st1s, fresh["st1w3"].subtask_id])
+    m_revert.discard_reason = "regression_failed"
+    # The nested tree: m_flat2 (kept, then consumed) over [s_f, s_g];
+    # m_nested (kept, banked) over [m_flat2, s_h]. Anchors follow K5:
+    # the merge carries its first source's subtask_id.
+    m_flat2 = _merged_skill(
+        3, fresh["st1w3"].subtask_id,
+        [originals["s_f"].skill_id, originals["s_g"].skill_id],
+        status="merged",
+        source_subtasks=[fresh["st1w3"].subtask_id,
+                         fresh["st1s4"].subtask_id])
+    m_nested = _merged_skill(
+        4, fresh["st1w3"].subtask_id,
+        [m_flat2.skill_id, originals["s_h"].skill_id],
+        status="accepted",
+        source_subtasks=[fresh["st1w3"].subtask_id,
+                         fresh["st1s4"].subtask_id,
+                         fresh["st1w4"].subtask_id])
+    for merge in (m_revert, m_flat2, m_nested):
+        store.save(merge, "skills")
+    source.ids["m_revert"] = m_revert.skill_id
+    source.ids["m_flat2"] = m_flat2.skill_id
+    source.ids["m_nested"] = m_nested.skill_id
+    # The curated bank, stage-5 discipline: rows sorted by skill_id.
+    bank = sorted(store.bank() + [m_nested.to_dict()],
+                  key=lambda row: str(row["skill_id"]))
+    (source.run_dir / "skill_bank.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in bank), encoding="utf-8")
+
+
 def test_bank_level_assembly_of_a_v1_object_source_run(tmp_path):
-    """I1 regression: every formal source run predates schema v2, so a
-    v1-object source (records and bank rows at schema_version 1) must
-    assemble at the bank level exactly like a current one -- no false
-    "the source is corrupt" from the bank comparison, and the flat merge
-    (m0) still resolves its lineage through the migration function."""
+    """I1 regression (M1 acceptance ruling 1): every formal source run
+    predates schema v2, so a v1-object source (records and bank rows at
+    schema_version 1, bank members including a flat AND a nested merge)
+    must assemble at the bank level exactly like a current one -- no
+    false "the source is corrupt" from the bank comparison -- and the
+    product lands v2-NATIVE: skills, exams and bank rows all at
+    schema_version 2 with the new fields derived, so every consumer's
+    plain from_dict load works on the assembled run."""
     source = build_source_run(tmp_path)
+    _add_nested_and_reverted_merges(source)
     _downgrade_source_records_to_v1(source.run_dir)
     config_path = write_reuse_config(tmp_path)
     run_dir = tmp_path / "assembled"
 
     summary = assemble_reuse(source.run_dir, config_path, run_dir)
 
-    # Same keep sets as the v2 happy path: the copy is a pure byte copy,
-    # so the v1 decision (which records to keep) must not move at all.
+    # Same keep sets as the v2 happy path plus the extension's three
+    # originals and three merges: the v1 decision (which records to
+    # keep) must not move at all.
     counts = summary["counts"]
     assert counts["trajectories"] == 2
-    assert counts["subtasks"] == 5
-    assert counts["skills"] == 6
-    assert counts["exams"] == 5
+    assert counts["subtasks"] == 8
+    assert counts["skills"] == 12
+    assert counts["exams"] == 8
     assert counts["attempts"] == 4
-    assert counts["bank_rows"] == 2
+    assert counts["bank_rows"] == 3
     bank_ids = [row["skill_id"]
                 for row in read_jsonl(run_dir / "skill_bank.jsonl")]
-    assert bank_ids == [source.ids["m0"], source.ids["s_a"]]
-    # The copied rows stay in their own v1 form (byte copy, no upgrade on
-    # the write side); every consumer loads them through from_dict.
+    assert bank_ids == [source.ids["m0"], source.ids["m_nested"],
+                        source.ids["s_a"]]
+    # Every assembled object row is v2-native with the new field derived
+    # (the write-side migration), and each loads through the plain
+    # from_dict every consumer uses -- the product needs no migration.
     for row in read_jsonl(run_dir / "skill_bank.jsonl"):
-        assert row["schema_version"] == 1
-        assert "source_subtasks" not in row
+        assert row["schema_version"] == 2
+        assert row["source_subtasks"]
         path = (run_dir / "stage3_generation" / "skills"
                 / (urllib.parse.quote(row["skill_id"], safe="") + ".json"))
         assert read_json(path) == row
+        Skill.from_dict(row)
+    for path in (run_dir / "stage3_generation" / "skills").glob("*.json"):
+        row = read_json(path)
+        assert row["schema_version"] == 2
+        assert "source_subtasks" in row
+        Skill.from_dict(row)
+    for path in (run_dir / "stage3_generation" / "exams").glob("*.json"):
+        row = read_json(path)
+        assert row["schema_version"] == 2
+        assert "skill_id" in row
+        Exam.from_dict(row)
+    # The migration rebuilt the union values K5 would have written: the
+    # nested merge unions its transitive sources in first-seen order,
+    # and the reverted merge (stored, outside the bank) its own pair.
+    assembled = {row["skill_id"]: row
+                 for row in read_jsonl(run_dir / "skill_bank.jsonl")}
+    assert assembled[source.ids["m_nested"]]["source_subtasks"] == [
+        source.ids["subtask"]["st1w3"],
+        source.ids["subtask"]["st1s4"],
+        source.ids["subtask"]["st1w4"]]
+    reverted = read_json(
+        run_dir / "stage3_generation" / "skills"
+        / (urllib.parse.quote(source.ids["m_revert"], safe="") + ".json"))
+    assert reverted["schema_version"] == 2
+    assert reverted["source_subtasks"] == [
+        source.ids["subtask"]["st1s"],
+        source.ids["subtask"]["st1w3"]]
+
+
+def test_assembled_v1_run_feeds_stage4_enumeration_and_stage5_short_circuit(
+        tmp_path):
+    """The M1 acceptance ruling's end-to-end (reviewers A and C reproduced
+    the crash mechanically on this very fixture): a v1-object source run
+    whose bank holds flat AND nested merge members (plus a reverted merge
+    left outside the bank) must assemble into a run the pipeline can
+    actually consume. Stage 4's first enumeration (stage3_candidates
+    loads EVERY stored skill) and stage 5's non-empty-bank short-circuit
+    (_check_bank_not_stale loads every NON-bank stored skill, where the
+    reverted merge lives) both ran head-first into from_dict's v1-merge
+    rejection while the product was a byte copy; the v2-native product
+    passes through them with zero migration of its own."""
+    source = build_source_run(tmp_path)
+    _add_nested_and_reverted_merges(source)
+    _downgrade_source_records_to_v1(source.run_dir)
+    config_path = write_reuse_config(tmp_path)
+    run_dir = tmp_path / "assembled"
+
+    assemble_reuse(source.run_dir, config_path, run_dir)
+
+    # Stage 4's enumeration: every stored skill loads; the merge products
+    # are excluded from the candidate set by id shape, the originals are
+    # all there.
+    store = Store(run_dir)
+    candidates = stage3_candidates(store)
+    assert [skill.skill_id for skill in candidates] == sorted(
+        source.ids[name] for name in
+        ("s_a", "s_b", "s_c", "s_d", "s_e", "s_f", "s_g", "s_h"))
+    assert all(skill.schema_version == 2 for skill in candidates)
+
+    # Stage 5's non-empty-bank short-circuit: the bank comes back
+    # untouched with zero model calls (the idle handles refuse any call).
+    idle = {
+        "curator_handle": make_fake_handle("curator", []),
+        "answerer_handle": make_fake_handle("weak", []),
+        "judge_handle": make_fake_handle("judge", []),
+    }
+    bank = curate_bank(
+        store=store, weak_profile="a weak model",
+        bank_token_budget=100000, curation_rounds=3,
+        run_dir=store.run_dir, **idle)
+    assert [row["skill_id"] for row in bank] == [
+        source.ids["m0"], source.ids["m_nested"], source.ids["s_a"]]
+    assert all(row["schema_version"] == 2 for row in bank)
+    assert not any(handle.client.calls for handle in idle.values())
+
+
+def test_refuses_a_source_whose_v1_lineage_cannot_migrate(tmp_path):
+    """M1 acceptance ruling 5: a v1 row whose source_subtasks cannot be
+    derived is a corrupt source and must refuse as ConfigError -- the
+    family of every other source-integrity refusal -- not as the
+    models-layer ValueError the migration itself raises."""
+    source = build_source_run(tmp_path)
+    _downgrade_source_records_to_v1(source.run_dir)
+    # Corrupt the flat merge's lineage: a merged_from id nothing stores.
+    m0_path = (source.run_dir / "stage3_generation" / "skills"
+               / (urllib.parse.quote(source.ids["m0"], safe="") + ".json"))
+    row = read_json(m0_path)
+    row["merged_from"] = ["bank/merge/9999"]
+    write_json(m0_path, row, indent=2)
+    config_path = write_reuse_config(tmp_path)
+
+    with pytest.raises(ConfigError, match="cannot migrate"):
+        assemble_reuse(source.run_dir, config_path, tmp_path / "assembled")
 
 
 # ---------------------------------------------------------------------------

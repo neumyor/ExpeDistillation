@@ -453,7 +453,10 @@ def test_resume_before_bank_append_completes_without_model_calls(
 def _downgrade_run_to_v1(run_dir):
     """Rewrite the run's stored skill records and bank rows to the
     pre-v2 shape (schema_version 1, no source_subtasks): the state a run
-    written by pre-v2 code is in when resumed by current code."""
+    written by pre-v2 code is in on disk. Note this is a fixture shape,
+    not a supported resume scenario: per AGENTS.md 6.1 a formal v1 run
+    resumes on the old code of its own maintenance branch, never on this
+    checkout (R6)."""
     for obj_id in Store(run_dir).ids("skills"):
         path = Store(run_dir).path_for("skills", obj_id)
         row = read_json(path)
@@ -475,7 +478,11 @@ def test_resume_completes_a_v1_bank_prefix_in_the_v1_form(tmp_path):
     loop wrote" (I1): a v1-object run (records and bank rows written by
     pre-v2 code) resumed after a crash mid-append must gain rows in its
     own v1 form -- never the migrated v2 form (a mixed-version bank).
-    The no-merge scenario on purpose: a store holding v1 merge products
+    What this pins is that store-as-stored invariant, which serves v2
+    runs just as much; the v1-resume scenario itself is outside the
+    supported scope (AGENTS.md 6.1 / R6: a formal v1 run resumes on its
+    maintenance branch's old code, never on this checkout). The
+    no-merge scenario on purpose: a store holding v1 merge products
     outside the bank is the from_dict loud-error boundary (v1 merges
     cannot load without their sibling records), pinned separately in
     tests/unit/core/test_models.py."""

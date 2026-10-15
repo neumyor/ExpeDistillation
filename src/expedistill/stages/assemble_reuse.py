@@ -70,6 +70,15 @@ record; a validation-side "empty trajectory" row in it is not bank or
 store content and rules nothing), which ruling 5 exempts from the
 zero-test-lineage invariant.
 
+Copy discipline (M1 acceptance ruling 1, 2026-10-15): the skills and
+exams records and the bank rows land at the CURRENT object schema -- a
+pre-v2 source run's rows migrate on the copy (a v1 merge product derives
+its source_subtasks along merged_from, a v1 exam derives its skill_id),
+so the assembled run is v2-native and every consumer's plain from_dict
+load works on it. The other kinds stay byte-exact copies: their schema
+did not move. A row that cannot migrate is a corrupt source and raises
+ConfigError, the family of every other source-integrity refusal.
+
 The assembled run is NOT a finished run: stage 0 still freezes its own
 manifest on the first pipeline start (which is also the identity re-check
 of last resort -- B4 compares it field by field), stages 1-5 short-circuit
@@ -110,11 +119,12 @@ from expedistill.core.models import (
     Subtask,
     Trajectory,
     migrate_skill_record,
+    migrate_skill_rows,
 )
 from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
-from expedistill.infra.store import KIND_DIRS, read_json, read_jsonl
+from expedistill.infra.store import KIND_DIRS, read_json, read_jsonl, write_json
 
 __all__ = ["assemble_reuse", "skill_lineage_tasks"]
 
@@ -448,7 +458,11 @@ def _copy_kind(source_run: Path, run_dir: Path, kind: str,
                kept: Mapping[str, Any],
                counts: Dict[str, int],
                checksums: Dict[str, str]) -> None:
-    """Byte-exact copy of every kept object into its kind dir."""
+    """Byte-exact copy of every kept object into its kind dir.
+
+    Only for the kinds whose schema did not move (trajectories, subtasks,
+    attempts); skills and exams go through _write_migrated_kind instead
+    (M1 acceptance ruling 1)."""
     directory = run_dir / KIND_DIRS[kind]
     directory.mkdir(parents=True, exist_ok=True)
     pairs = []
@@ -458,6 +472,30 @@ def _copy_kind(source_run: Path, run_dir: Path, kind: str,
                           + ".json"))
         target_path = directory / source_path.name
         shutil.copy2(source_path, target_path)
+        pairs.append((obj_id, _file_sha256(target_path)))
+    counts[kind] = len(pairs)
+    checksums[kind] = _class_checksum(pairs)
+
+
+def _write_migrated_kind(run_dir: Path, kind: str,
+                         kept: Mapping[str, Any],
+                         counts: Dict[str, int],
+                         checksums: Dict[str, str]) -> None:
+    """Write every kept object's record at the CURRENT object schema.
+
+    The objects in ``kept`` are the ones the load step already migrated
+    (v2 rows pass through unchanged), and to_dict serializes exactly the
+    way the store writes a record, so the assembled skills/exams files
+    are what a v2-native run would hold and every consumer's plain
+    from_dict read works on them.
+    """
+    directory = run_dir / KIND_DIRS[kind]
+    directory.mkdir(parents=True, exist_ok=True)
+    pairs = []
+    for obj_id, obj in kept.items():
+        target_path = directory / (urllib.parse.quote(obj_id, safe="")
+                                   + ".json")
+        write_json(target_path, obj.to_dict(), indent=2)
         pairs.append((obj_id, _file_sha256(target_path)))
     counts[kind] = len(pairs)
     checksums[kind] = _class_checksum(pairs)
@@ -662,6 +700,11 @@ def _render_assembled_from(
         "逐 id 一致。")
     add("- segmentation_audit.jsonl 整文件拷贝（含 validation 侧的惰性"
         "审计记录，裁决 5 豁免，不属 store 五类对象与库行）。")
+    add("- 对象行已迁移为 schema v2：skills / exams 的存储记录与 "
+        "skill_bank 行经 core 迁移函数转 v2 后落盘（v1 源的合并产物沿 "
+        "merged_from 推导 source_subtasks、考题换后缀推导 skill_id，"
+        "v2 源恒等穿过），装配产物为 v2 原生 run；trajectories / "
+        "subtasks / attempts 仍逐字节拷贝。")
     add("")
     add("## 逐类计数与校验和")
     add("")
@@ -1149,14 +1192,22 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     # Skills load through the v1->v2 migration: a pre-v2 source run's
     # merge products cannot go through from_dict alone (their
     # source_subtasks needs the sibling records), so every raw row is
-    # migrated first -- v2 rows pass through unchanged.
+    # migrated first -- v2 rows pass through unchanged. The batch wrapper
+    # owns the sibling map; a row that cannot migrate is a corrupt source
+    # (ConfigError, the family of every other source-integrity refusal).
     skill_rows = _source_objects(source_run, "skills")
-    skills = {
-        obj_id: Skill.from_dict(migrate_skill_record(record, skill_rows))
-        for obj_id, record in skill_rows.items()}
-    exams = {
-        obj_id: Exam.from_dict(record) for obj_id, record
-        in _source_objects(source_run, "exams").items()}
+    try:
+        migrated_skill_rows = migrate_skill_rows(list(skill_rows.values()))
+        skills = {
+            obj_id: Skill.from_dict(row)
+            for obj_id, row in zip(skill_rows, migrated_skill_rows)}
+        exams = {
+            obj_id: Exam.from_dict(record) for obj_id, record
+            in _source_objects(source_run, "exams").items()}
+    except ValueError as exc:
+        raise ConfigError(
+            f"an object row of the source run {source_run} cannot "
+            f"migrate to schema v2: {exc}; the source is corrupt") from exc
     attempts = {
         obj_id: Attempt.from_dict(record) for obj_id, record
         in _source_objects(source_run, "attempts").items()}
@@ -1204,8 +1255,14 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
         # comparing the raw row against ``stored.to_dict()`` would flag
         # every v1 row as corrupt even when the run is consistent. The
         # load doubles as the bank row's can-load check.
-        row_obj = Skill.from_dict(
-            migrate_skill_record(row, skill_rows))
+        try:
+            row_obj = Skill.from_dict(
+                migrate_skill_record(row, skill_rows))
+        except ValueError as exc:
+            raise ConfigError(
+                f"bank row {row_skill_id!r} of the source run "
+                f"{source_run} cannot migrate to schema v2: {exc}; the "
+                "source is corrupt") from exc
         if row_obj.to_dict() != stored.to_dict():
             raise ConfigError(
                 f"bank row {row_skill_id!r} differs from the stored skill "
@@ -1222,7 +1279,10 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
                 f"{row_skill_id!r}; the source run's records are "
                 "inconsistent -- a human must look at this run")
         if row_keep:
-            kept_bank_rows.append(row)
+            # The migrated twin, not the raw source row: the assembled
+            # bank is v2-native (M1 acceptance ruling 1), so the kept row
+            # is bit-identical to the copied skill record.
+            kept_bank_rows.append(row_obj.to_dict())
     kept_bank_ids = {str(row["skill_id"]) for row in kept_bank_rows}
 
     # Integrity (ruling 5), checked against the SOURCE now so the failure
@@ -1289,10 +1349,15 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
                    kept_trajectories, counts, checksums)
         _copy_kind(source_run, run_dir, "subtasks",
                    kept_subtasks, counts, checksums)
-        _copy_kind(source_run, run_dir, "skills",
-                   kept_skills, counts, checksums)
-        _copy_kind(source_run, run_dir, "exams",
-                   kept_exams, counts, checksums)
+        # skills/exams land v2-native (M1 acceptance ruling 1): the
+        # migrated objects serialize as the store would write them, so
+        # the assembled run is consumable by the plain from_dict readers
+        # (stage 4's candidate enumeration, stage 5's early exit, the
+        # audit tool) without any migration of their own.
+        _write_migrated_kind(run_dir, "skills",
+                              kept_skills, counts, checksums)
+        _write_migrated_kind(run_dir, "exams",
+                              kept_exams, counts, checksums)
         _copy_kind(source_run, run_dir, "attempts",
                    kept_attempts, counts, checksums)
 
