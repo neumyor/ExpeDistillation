@@ -32,7 +32,7 @@ from expedistill.infra.runlock import RunLock
 from expedistill.infra.store import Store, append_jsonl
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.call import make_handle
-from expedistill.llm.client import OpenAICompatClient
+from expedistill.llm import providers
 from expedistill.stages import (
     stage0_freeze,
     stage1_baseline,
@@ -97,18 +97,20 @@ def ledger_path(run_dir: Path) -> Path:
 
 
 def _default_client(model_name: str,
-                    timeout_sec: float = 300.0) -> OpenAICompatClient:
-    """The real-endpoint builder: one OpenAICompatClient from the environment.
+                    timeout_sec: float = 300.0) -> Any:
+    """The real-endpoint builder: one client per unique model, from the
+    provider registry (``llm.providers``).
 
-    ``from_env`` takes no model name (the client passes the model id per
-    call), so this adapter gives it the ``make_client(model_name)`` shape.
-    Building one per unique model keeps the documented one-client-per-model
-    layout, so a later per-model endpoint needs no pipeline change.
-    ``timeout_sec`` is the run's per-request client timeout; _build_handles
-    threads it in as a partial so the ``make_client`` injection point keeps
-    its one-argument signature.
+    The provider NAME comes from ``EXPEDISTILL_LLM_PROVIDER`` (default
+    ``openai_compat``); the adapter gives the builder's client the
+    ``make_client(model_name)`` shape, and building one per unique model
+    keeps the documented one-client-per-model layout, so a later
+    per-model endpoint needs no pipeline change. ``timeout_sec`` is the
+    run's per-request client timeout; _build_handles threads it in as a
+    partial so the ``make_client`` injection point keeps its
+    one-argument signature.
     """
-    return OpenAICompatClient.from_env(timeout_sec=timeout_sec)
+    return providers.default_client(timeout_sec=timeout_sec)
 
 
 def _build_handles(

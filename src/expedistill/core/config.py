@@ -91,12 +91,15 @@ METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "delivery": {"name": "whole_bank"},
 }
 
-#: Job role -> the executor anchor it defaults to ("strong" or "weak").
-#: The answerer uses the weak model by design (the exam probes what the
-#: weak model can do); everything else answers with the strong one. A dict
-#: on purpose -- the defaults are data, and the old name (MODEL_ROLES, a
-#: plain tuple) was a permanent namesake of core.models' trajectory roles.
-ROLE_DEFAULTS: Dict[str, str] = {
+#: Job role -> the executor anchor it defaults to: "strong", "weak", or
+#: None -- None means the config MUST name the model explicitly (the
+#: pipeline's handle builder refuses a missing role; nothing here
+#: guesses). The answerer uses the weak model by design (the exam probes
+#: what the weak model can do); everything else answers with the strong
+#: one. A dict on purpose -- the defaults are data, and the old name
+#: (MODEL_ROLES, a plain tuple) was a permanent namesake of
+#: core.models' trajectory roles.
+ROLE_DEFAULTS: Dict[str, object] = {
     "executor_strong": "strong",
     "executor_weak": "weak",
     "segmenter": "strong",
@@ -402,9 +405,14 @@ class ExperimentConfig:
         if not strong or not weak:
             raise ValueError(
                 "models must define 'executor_strong' and 'executor_weak'")
-        # Fill the role table from the data defaults: the answerer uses the
-        # weak model by design, everything else answers with the strong one.
+        # Fill the role table from the data defaults: the answerer uses
+        # the weak model by design, everything else answers with the
+        # strong one; a None anchor stays absent -- the pipeline's
+        # handle builder refuses a missing role, so a must-configure
+        # role cannot silently fall back.
         for role, anchor in ROLE_DEFAULTS.items():
+            if anchor is None:
+                continue
             self.models.setdefault(role, weak if anchor == "weak" else strong)
         # Extra per-model chat-call parameters: keyed by model NAME, so they
         # are validated against the completed role table (any model a role

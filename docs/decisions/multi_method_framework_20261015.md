@@ -113,7 +113,7 @@ token_budgets: {...}
 | **P1a 按名分发** | 建 `methods/` 层与注册表；迁 acceptance、delivery 驱动；扩展 `test_layering` | **不变** | 测试全绿；golden 无 diff（manifest 不变由既有 manifest golden 测试守住） |
 | **P1b 唯一一次 schema 切换** | v3 配置形状 + Params/check（含 `n_attempts ≤ n_attempts_weak`，放这一步因为会让 `test_stage0.py:133/719/744` 夹具失败）；`authoring.exams: true` 写入形状；`ROLE_DEFAULTS`；全量 prompt 冻结 + 两条静态测试；删懒注册与 `_MANIFEST_OPTIONAL_FIELDS`；`upgrade_v2` 纯函数；一次性配置转换脚本（结果写新文件名）；stage0 旧 schema 提示；同步 scripts/ 与 runbook；审计脚本改为按 manifest 判断模式、live 子树缺失报 ERROR 而非 INFO（`audit_live_run.py:605-610`） | 切换 | 除 manifest 外产物与 golden 一致；`configs/experiments/` 全部 v2 配置升级后的 v3 manifest 人工审定一次；prompt 名集与 digest 等于 v2 golden |
 | **P4 新协议**（按需、预注册） | `curation` 槽位 + `none`；放开 `authoring.exams: false` + 集中冲突校验；authoring 第二写法（一出现就做） | 新实验 | 每个新方法自带续跑测试 |
-| **P5 按需** | 模型 provider 注册表、非 chat 调用（embedding）、插件提供真实"查询文本"、`ROLE_DEFAULTS` 的 None 档位 | — | — |
+| **P5 按需** | **已执行（2026-10-15，按用户指令完成，简洁化口径下取最小实现）**：① 模型 provider 注册表 = `llm/providers.py` 纯数据表（名字 → builder，`EXPEDISTILL_LLM_PROVIDER` 环境变量选择、缺省 openai_compat——端点选择是运维不是身份，符合"配置只存身份"纪律）；② `ROLE_DEFAULTS` 的 None 档 = None 锚位不补默认、由 pipeline 的缺角色检查响亮拒绝。**两项按简洁化裁决跳过（无消费者，建了就是投机抽象）**：③ 非 chat 调用（embedding）——唯一消费者是 embedding delivery 方法，尚无人提出；到时按 §8 清单加（provider 表已就位）。④ TB 插件真实"查询文本"——是 benchmark 插件层的方法实验决定（会改 tasks_digest = 实验身份），不属框架重构，留给实验层 | — | 测试全绿 |
 
 **`upgrade_v2`**（R3）：纯 stdlib 函数，只服务两处——`assemble_reuse` 读 v2 源 manifest 做身份比对（否则单侧缺键被算作差异，`assemble_reuse.py:360-372`），以及一次性配置转换。stage0/pipeline 永不加载 v2。v2 `acceptance` 的三种写法（缺键、`{}`、`{mode: exam}`）必须映射到同一个 v3 值；golden 测试覆盖全部 v2 配置。近期使用场景：用 v3 才有的新方法（如新 delivery）复用当前 TB v2 正式 run 的冻结库。
 

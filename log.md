@@ -595,3 +595,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：P4 完成。curation 槽位从"仅参数"升级为双方法驱动：agentbrew（K5 薄壳，composites.curation 一行未动，stage5 变成与 stage4 同形的"解析并调用"前端）与 none（消融：裸 accepted 集即库、零模型调用、无 curation_log；预算仍是硬阀——超限响亮停机；bank 文件原子整写而非追加，幂等由构造保证——初版用 append_bank 有续跑重复行 bug，自查发现改为整写并补幂等测试）；curation 缺省项须点名（双方法槽位），METHOD_DEFAULTS 与 upgrade_v2 同步加 name。authoring.exams 开关落地：stage3 按 resolve_params 的 exams 值跳过 gen_exam（单元完成判据同步），集中冲突校验放在 authoring 槽位的 check（exams:false × exam 验收 或 agentbrew 整理 = ConfigError，消融对 exams:false + curation:none + live_run 可解析）。金矩阵验证"仅 manifest 漂移"（curation 缺省加 name 属身份变化、行为等价）后同提交重生成。1921 测试全绿。
 
 工件：`src/expedistill/methods/curation/`（__init__ 双 Params、agentbrew.py、none.py）、`src/expedistill/stages/stage5_curation.py`（前端化）、`src/expedistill/stages/stage3_generation.py`（exams 门）、`src/expedistill/methods/authoring/__init__.py`（check_authoring）、`tests/unit/methods/test_curation_none.py`、`tests/unit/methods/test_params.py`（+3）、golden 重生成、AGENTS.md、README.md、本条对应 commit
+
+## 2026-10-15 21:55 — P5：provider 接缝与角色表 None 档；两项按简洁化跳过留档
+
+一段话摘要：P5 完成（用户指令明确要求做到 P5）。落地两个有当前价值的最小接缝：llm/providers.py 纯数据表（名字 → 客户端 builder，EXPEDISTILL_LLM_PROVIDER 环境变量选择、缺省 openai_compat，未知名字响亮列出已知——与 methods 注册表同形，无自动发现）；ROLE_DEFAULTS 的 None 档（None 锚位不补默认，pipeline 的缺角色检查负责响亮拒绝——"必须显式配置"的语义由现有检查免费承担，零新代码路径）。两项按用户"避免 over-engineered"裁决明确跳过并留档于方案 P5 行：非 chat 调用（embedding，唯一消费者 embedding delivery 尚无人提出，到时按 §8 清单加）；TB 插件真实查询文本（benchmark 插件层的方法实验决定，会改 tasks_digest 即实验身份，不属框架重构）。1924 测试全绿。
+
+工件：`src/expedistill/llm/providers.py`、`src/expedistill/core/config.py`（None 档）、`src/expedistill/stages/pipeline.py`（default_client 走注册表）、`tests/unit/methods/test_params.py`（+3 provider 测试）、AGENTS.md、方案 §7 P5 行、本条对应 commit
