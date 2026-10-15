@@ -56,7 +56,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from expedistill.composites.assemble_reuse import LEVELS, assemble_reuse
+from expedistill.stages.assemble_reuse import LEVELS, assemble_reuse
 from expedistill.infra.manifest import FrozenProtocolChanged
 from expedistill.infra.reliability import (
     ConfigError,

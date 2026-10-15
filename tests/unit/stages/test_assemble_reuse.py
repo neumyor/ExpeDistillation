@@ -40,7 +40,7 @@ from expedistill.core.models import (
     Subtask,
     Trajectory,
 )
-from expedistill.composites.assemble_reuse import (
+from expedistill.stages.assemble_reuse import (
     assemble_reuse,
     skill_lineage_tasks,
 )

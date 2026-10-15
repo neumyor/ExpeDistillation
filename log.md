@@ -553,3 +553,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：用户裁决"简洁、可扩展、避免 over-engineered"，撤销两条自设约束：golden"永不重生成/只在重构前代码上生成"改为普通快照纪律（有意改行为的步骤同提交更新、diff 进提交说明）；TB-dev 热修编排（cherry-pick 到基点 + provenance 换基点）整体删除，MM 想反映上游就 merge 后重生成。验收标准简化为：每提交测试全绿（golden 是套件成员，0.6 秒，无额外仪式），有意改行为的步骤（主要 P1b）列 golden diff 摘要 + manifest 人工审定。P0 前两个子步已完成并各自提交：P0.1 RunSettings 类型化进 frozen StageContext、删 7 个 _workers 死分支副本（commit f1b236a）；P0.2 resolve_plugin 统一插件解析（消 5 处重复）+ write_skill 接收可选 prompt 名（prompt 策略变体的零风险准备，commit 08c7985）。每步 1900 测试全绿、golden 无 diff。
 
 工件：`docs/decisions/multi_method_framework_20261015.md`（§0.5/§7 表/§7.1 修订）、`tests/golden/harness.py`、`tests/golden/generate.py`、`tests/golden/test_golden_matrix.py`（快照纪律改写）、commit f1b236a、commit 08c7985、回执 `/Users/yimingniu/Documents/Manager/state/replies/mm_simplify.md`
+
+## 2026-10-15 16:40 — P0.3/P0.4：共享件下沉与装配工具上移
+
+一段话摘要：P0 剩余两个子步完成。P0.3（commit 94eded0）：新建 composites/shortfall.py（接受空洞记录的读写，stage1/live 轮/装配工具三处副本合一）、composites/skill_status.py（discard_skill、stage-3 候选扫描、verdict 计数——两个验收驱动的逐字节重复，当初隔离只为保 exam 路径的冻结 prompt 名面，懒注册删除后理由消失）、benchmarks/aux.py（辅助指标接线，三个 stage 不再互相伸手）、blocks/tasks.py 收编 tasks_digest（stage0 与装配工具各一份副本）；core/ids 增加 is_stage3_candidate 谓词。P0.4：stage0 抽出纯函数 build_manifest（manifest 载荷只组装一次），assemble_reuse 整文件上移到 stages/（composites 不得 import 阶段层）、删除其 _prompt_digests 副本改用 build_manifest，AGENTS 目录树同步。每步 1900 测试全绿、golden 快照无 diff（行为不变的直接证据）。
+
+工件：`src/expedistill/composites/shortfall.py`、`src/expedistill/composites/skill_status.py`、`src/expedistill/benchmarks/aux.py`、`src/expedistill/stages/assemble_reuse.py`（自 composites 上移）、`src/expedistill/stages/stage0_freeze.py`（build_manifest）、`tests/unit/benchmarks/test_aux.py`、`tests/unit/stages/test_assemble_reuse.py`（随迁）、AGENTS.md、commit 94eded0、本条对应 commit

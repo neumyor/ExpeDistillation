@@ -243,6 +243,36 @@ def _prompt_digests(benchmark: str,
     }
 
 
+def build_manifest(config: Any, tasks: Sequence[Any], *,
+                   train_ids: Sequence[str], test_ids: Sequence[str],
+                   reserved_ids: Sequence[str]) -> Dict[str, Any]:
+    """The frozen manifest payload (B4 ``freeze``'s input), pure: the same
+    config, tasks and split ids give the same manifest bytes. Shared with
+    the reuse assembler, which builds the PROSPECTIVE run's manifest to
+    diff a source run against before assembling (ruling 4's whitelist
+    walk) -- one assembly, so the two can never drift apart.
+    """
+    prompt_digests = _prompt_digests(config.benchmark, acceptance_mode(config))
+    frozen_config = dataclasses.replace(
+        config, prompts_digests=prompt_digests)
+    return {
+        "benchmark": config.benchmark,
+        "mode": config.mode,
+        # All three keys, always (ruling 7): downstream readers never have
+        # to branch on which form the source config used.
+        "split": {"train": list(train_ids), "test": list(test_ids),
+                  "reserved": list(reserved_ids)},
+        "config": frozen_config.to_dict(),
+        "prompt_digests": prompt_digests,
+        "rules": config.rules,
+        "model_roles": config.models,
+        "tasks_digest": tasks_digest(tasks),
+        # The plugin-declared auxiliary metric's name (module docstring):
+        # pre-registered here, before any result exists.
+        "aux_metric": get_plugin(config.benchmark).aux_metric_name,
+    }
+
+
 def run(ctx: StageContext) -> Dict[str, Any]:
     """Validate rules, load and split the task set, freeze, write summary.
 
@@ -274,28 +304,9 @@ def run(ctx: StageContext) -> Dict[str, Any]:
     train_ids = [task.task_id for task in train_tasks]
     test_ids = [task.task_id for task in test_tasks]
     reserved_ids = [task.task_id for task in reserved_tasks]
-    prompt_digests = _prompt_digests(config.benchmark, acceptance)
-    # The config's frozen copy carries the digests too (core.config: the
-    # field is "filled by the prompt registry when the stages freeze the
-    # manifest"); a replace() copy keeps ctx.config itself untouched.
-    frozen_config = dataclasses.replace(
-        config, prompts_digests=prompt_digests)
-    freeze(ctx.run_dir, {
-        "benchmark": config.benchmark,
-        "mode": config.mode,
-        # All three keys, always (ruling 7): downstream readers never have
-        # to branch on which form the source config used.
-        "split": {"train": train_ids, "test": test_ids,
-                  "reserved": reserved_ids},
-        "config": frozen_config.to_dict(),
-        "prompt_digests": prompt_digests,
-        "rules": config.rules,
-        "model_roles": config.models,
-        "tasks_digest": tasks_digest(tasks),
-        # The plugin-declared auxiliary metric's name (module docstring):
-        # pre-registered here, before any result exists.
-        "aux_metric": get_plugin(config.benchmark).aux_metric_name,
-    })
+    freeze(ctx.run_dir, build_manifest(
+        config, tasks, train_ids=train_ids, test_ids=test_ids,
+        reserved_ids=reserved_ids))
 
     summary = {"tasks": len(tasks), "train": train_ids, "test": test_ids,
                "reserved": reserved_ids}

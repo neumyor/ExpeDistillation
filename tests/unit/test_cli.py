@@ -5,7 +5,7 @@ contract.
 a fabricated ledger, and ``assemble-reuse`` against both a monkeypatched
 assemble_reuse (wiring, printing, error contract) and one REAL end-to-end
 assembly over the synthetic source run of
-tests/composites/test_assemble_reuse.py. The pipeline's own behavior (real
+tests/unit/stages/test_assemble_reuse.py. The pipeline's own behavior (real
 stages, fake benchmark) is covered by tests/unit/stages/test_pipeline.py.
 """
 
@@ -601,9 +601,9 @@ def test_assemble_reuse_missing_args_is_usage_error(monkeypatch, tmp_path):
 
 def test_assemble_reuse_end_to_end_smoke(capsys, tmp_path):
     # The REAL assemble_reuse through the CLI: the synthetic source run of
-    # tests/composites/test_assemble_reuse.py (a stub benchmark registered
+    # tests/unit/stages/test_assemble_reuse.py (a stub benchmark registered
     # through the real import machinery), assembled into a fresh directory.
-    from tests.composites.test_assemble_reuse import (
+    from tests.unit.stages.test_assemble_reuse import (
         _MODULE,
         build_source_run,
         install_plugin,

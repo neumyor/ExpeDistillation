@@ -140,12 +140,14 @@ src/expedistill/
     curation.py           K5
     live_acceptance.py    K6 live-run 验收（阶段 4 的 live_run 模式；逐组阶段函数库，
                           轮序编排归 stages/stage4_live_run.py）
-    assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run
   stages/                 第 6 层：阶段 0–6 的流程
     stage0_freeze.py … stage6_test.py
     stage4_live_run.py    阶段 4 的 live_run 模式驱动（轮栅栏 + K1 大批 + summary；
                           exam 分发在 stage4_acceptance.py 顶部懒 import）
     pipeline.py           按实验模式（split / full）串起各阶段
+    assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run；
+                          上移到本层是为了复用 stage0 的 build_manifest（组合层
+                          不得 import 阶段层）
   cli.py                  第 7 层：命令行入口（唯一的方法入口）
 ```
 
