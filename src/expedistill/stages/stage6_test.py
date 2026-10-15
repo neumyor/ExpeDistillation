@@ -245,27 +245,6 @@ def _write_retrieval_audit(path: Path,
         raise
 
 
-def _workers(ctx: Any) -> int:
-    """Parallelism from the config/context if either carries it, else serial
-    (same lookup stage 1 uses)."""
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
-
-
-def _k1_stagger(ctx: Any) -> float:
-    """K1's per-unit dispatch stagger run setting from the context (the
-    pipeline sets it), else K1's own default of no stagger."""
-    return float(getattr(ctx, "k1_stagger", 0.0))
-
-
-def _allow_infra_shortfall(ctx: Any) -> bool:
-    """The run setting accepting infra holes (module docstring); the
-    pipeline sets it on the context, default False."""
-    return bool(getattr(ctx, "allow_infra_shortfall", False))
-
-
 def _expected_units(ctx: Any, test_tasks: Sequence[Task]) -> Dict[str, int]:
     """The arm-independent expected unit set: prefixed task id -> frozen
     ``n_attempts_weak``."""
@@ -428,8 +407,8 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         workdir_root=Path(ctx.workdir_root) / "stage6_bank",
         usage=ctx.usage,
         run_dir=ctx.run_dir,
-        workers=_workers(ctx),
-        dispatch_stagger=_k1_stagger(ctx),
+        workers=ctx.run_settings.workers,
+        dispatch_stagger=ctx.run_settings.k1_stagger,
         skip_unit_ids=frozenset(accepted["with_bank"]),
     )
     if ctx.config.skill_delivery.get("mode") == "retrieval":
@@ -467,8 +446,8 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
             workdir_root=Path(ctx.workdir_root) / "stage6_bare",
             usage=ctx.usage,
             run_dir=ctx.run_dir,
-            workers=_workers(ctx),
-            dispatch_stagger=_k1_stagger(ctx),
+            workers=ctx.run_settings.workers,
+            dispatch_stagger=ctx.run_settings.k1_stagger,
             skip_unit_ids=frozenset(accepted["control"]),
         )
         control_source = "fresh_bare_run"
@@ -482,7 +461,7 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
                "control": _missing_units(expected, control)}
     new_holes = {arm: [unit_id for unit_id in missing[arm]
                        if unit_id not in accepted[arm]] for arm in _ARMS}
-    if any(new_holes.values()) and _allow_infra_shortfall(ctx):
+    if any(new_holes.values()) and ctx.run_settings.allow_infra_shortfall:
         # Durable from here on, recorded BEFORE the summary. Full-mode
         # control holes never get here (the pre-check raised).
         for arm in _ARMS:

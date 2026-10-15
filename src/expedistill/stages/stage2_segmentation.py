@@ -102,15 +102,6 @@ class _UnitOutcome(NamedTuple):
     subtasks: int
 
 
-def _workers(ctx: StageContext) -> int:
-    """Parallelism from the config/context if either carries it, else serial
-    (same lookup stages 1/6 use: the pipeline sets ``ctx.workers``)."""
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
-
-
 def _plugin(benchmark: str) -> Any:
     """The benchmark plugin, imported so its registration has run.
 
@@ -246,7 +237,7 @@ def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
 
     # run_units returns only when no unit failed fatally (a fatal error
     # raises instead), so every outcome below is a real _UnitOutcome.
-    outcomes = run_units(segment_unit, selected, workers=_workers(ctx))
+    outcomes = run_units(segment_unit, selected, workers=ctx.run_settings.workers)
 
     segmented = 0
     skipped = 0

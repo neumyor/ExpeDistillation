@@ -782,7 +782,7 @@ def test_crash_between_dispatch_write_and_duplicate_records(tmp_path,
 def test_stage5_threads_workers_into_the_wave_pool(tmp_path):
     from expedistill.core.config import ExperimentConfig
     from expedistill.stages import stage5_curation
-    from expedistill.stages.context import StageContext
+    from expedistill.stages.context import RunSettings, StageContext
 
     summaries = {}
     for tag, workers in (("serial", 1), ("parallel", 8)):
@@ -804,8 +804,8 @@ def test_stage5_threads_workers_into_the_wave_pool(tmp_path):
                 "curator": _routed_handle("curator",
                                           overlap_world().curator_resolve),
             },
-            workdir_root=run_dir / "work")
-        ctx.workers = workers
+            workdir_root=run_dir / "work",
+            run_settings=RunSettings(workers=workers))
         seed(ctx.store, overlap_world())
         summaries[tag] = stage5_curation.run(ctx)
     assert summaries["serial"] == summaries["parallel"]

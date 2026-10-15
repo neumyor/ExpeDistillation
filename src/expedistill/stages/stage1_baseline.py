@@ -131,30 +131,6 @@ def write_accepted_infra_shortfall(run_dir: Path,
                {"unit_ids": sorted(set(unit_ids))}, indent=2)
 
 
-def _workers(ctx: StageContext) -> int:
-    """Parallelism from the config/context if either carries it, else serial.
-
-    Neither ExperimentConfig nor StageContext has a ``workers`` field today;
-    the lookup stays so a later addition needs no stage change.
-    """
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
-
-
-def _k1_stagger(ctx: Any) -> float:
-    """K1's per-unit dispatch stagger run setting from the context (the
-    pipeline sets it), else K1's own default of no stagger."""
-    return float(getattr(ctx, "k1_stagger", 0.0))
-
-
-def _allow_infra_shortfall(ctx: StageContext) -> bool:
-    """The run setting accepting infra holes (module docstring); the
-    pipeline sets it on the context, default False."""
-    return bool(getattr(ctx, "allow_infra_shortfall", False))
-
-
 def _train_task_objects(ctx: StageContext,
                         train_ids: Sequence[str]) -> Sequence[Any]:
     """Rebuild the train set's Task objects from the frozen id list (D1).
@@ -194,8 +170,8 @@ def _run_arm(ctx: StageContext, *, tasks: Sequence[Any], role: str,
         workdir_root=ctx.workdir_root / "stage1",
         usage=ctx.usage,
         run_dir=ctx.run_dir,
-        workers=_workers(ctx),
-        dispatch_stagger=_k1_stagger(ctx),
+        workers=ctx.run_settings.workers,
+        dispatch_stagger=ctx.run_settings.k1_stagger,
         skip_unit_ids=accepted,
     )
     trajectories = [traj for traj in trajectories
@@ -293,7 +269,7 @@ def run(ctx: StageContext, *, train_tasks: Sequence[str],
 
     missing = sorted(strong_missing + weak_missing)
     new_holes = [unit_id for unit_id in missing if unit_id not in accepted]
-    if new_holes and _allow_infra_shortfall(ctx):
+    if new_holes and ctx.run_settings.allow_infra_shortfall:
         # Durable from here on, and recorded BEFORE F is derived from it.
         accepted.update(new_holes)
         write_accepted_infra_shortfall(ctx.run_dir, accepted)

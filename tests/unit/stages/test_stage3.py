@@ -43,7 +43,8 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.llm.call import ModelHandle
 from expedistill.prompts import get as get_prompt
 from expedistill.stages import stage3_generation
-from expedistill.stages.context import StageContext
+from dataclasses import replace
+from expedistill.stages.context import RunSettings, StageContext
 
 BENCHMARK = "tb"
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
@@ -834,7 +835,7 @@ def test_crash_after_failure_record_resumes_identically(monkeypatch,
 
 
 # ---------------------------------------------------------------------------
-# Parallel dispatch: ctx.workers > 1 (B5 run_units) must match serial runs
+# Parallel dispatch: run_settings.workers > 1 (B5 run_units) must match serial runs
 # ---------------------------------------------------------------------------
 
 _LABEL_RE = re.compile(r"SUBTASK LABEL: (.+)")
@@ -929,7 +930,7 @@ def test_workers_4_run_matches_workers_1_run(tmp_path):
                           author=_pure_handle(_slow_author_responder),
                           examiner=_pure_handle(_exam_responder),
                           run_dir=run_dir)
-        ctx.workers = workers
+        ctx = replace(ctx, run_settings=RunSettings(workers=workers))
         summaries[workers] = stage3_generation.run(ctx)
 
     for field in ("selected", "generated", "model_output_failed",
@@ -965,7 +966,7 @@ def test_workers_4_generates_subtasks_concurrently(monkeypatch, tmp_path):
     author = _pure_handle(_author_responder)
     examiner = _pure_handle(_exam_responder)
     ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
 
     summary = stage3_generation.run(ctx)
 
@@ -982,7 +983,7 @@ def test_model_output_error_under_workers_4_is_isolated(monkeypatch, tmp_path):
     author = _pure_handle(_author_responder)
     examiner = _pure_handle(_exam_responder)
     ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
 
     summary = stage3_generation.run(ctx)  # terminal, not fatal: no raise
 
@@ -1011,7 +1012,7 @@ def test_infra_error_under_workers_4_completes_others_then_raises(
     author = _pure_handle(_author_responder)
     examiner = _pure_handle(_exam_responder)
     ctx, _ = make_ctx(tmp_path, author=author, examiner=examiner)
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
 
     with pytest.raises(InfrastructureError) as info:
         stage3_generation.run(ctx)
@@ -1033,7 +1034,7 @@ def test_infra_error_under_workers_4_completes_others_then_raises(
     author2 = _pure_handle(_author_responder)
     examiner2 = _pure_handle(_exam_responder)
     ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
-    ctx2.workers = 4
+    ctx2 = replace(ctx2, run_settings=RunSettings(workers=4))
     summary2 = stage3_generation.run(ctx2)
 
     assert summary2["generated"] == expected_ids(subtasks)
@@ -1048,7 +1049,7 @@ def test_resume_under_workers_4_regenerates_only_pending(tmp_path):
     subtasks = seed_store(Store(tmp_path / "run"))
     ctx, _ = make_ctx(tmp_path, author=_pure_handle(_author_responder),
                       examiner=_pure_handle(_exam_responder))
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
     first = stage3_generation.run(ctx)
 
     # A partially filled store: one pair lost in full, one halved, one
@@ -1061,7 +1062,7 @@ def test_resume_under_workers_4_regenerates_only_pending(tmp_path):
     author2 = _pure_handle(_author_responder)
     examiner2 = _pure_handle(_exam_responder)
     ctx2, _ = make_ctx(tmp_path, author=author2, examiner=examiner2)
-    ctx2.workers = 4
+    ctx2 = replace(ctx2, run_settings=RunSettings(workers=4))
     resumed = stage3_generation.run(ctx2)
 
     assert resumed == first

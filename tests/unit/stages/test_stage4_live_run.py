@@ -44,7 +44,8 @@ from expedistill.infra.store import write_json
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts import PROMPTS, PromptSpec
 from expedistill.stages import stage4_live_run
-from expedistill.stages.context import StageContext
+from dataclasses import replace
+from expedistill.stages.context import RunSettings, StageContext
 
 BENCHMARK = "livebench"
 TASK1 = make_task_id(BENCHMARK, "t1")
@@ -200,8 +201,9 @@ def make_ctx(tmp_path, *, author=None, rewriter=None, acceptance=None,
                  "author": author or make_fake_handle("author", []),
                  "rewriter": rewriter or make_fake_handle("rewriter", [])},
         workdir_root=tmp_path / "work",
+        run_settings=RunSettings(
+            allow_infra_shortfall=allow_infra_shortfall),
     )
-    ctx.allow_infra_shortfall = allow_infra_shortfall
     return ctx
 
 
@@ -782,7 +784,7 @@ def test_worker_counts_produce_identical_outcomes(tmp_path, monkeypatch):
         for task_id in (TASK1, TASK2):
             seed_baseline(ctx.store, ("failure", "failure"), task_id)
             seed_group(ctx.store, [MARKED, MARKED], task_id)
-        ctx.workers = workers
+        ctx = replace(ctx, run_settings=RunSettings(workers=workers))
         plugin.calls.clear()
         summary = stage4_live_run.run(ctx)
         skills = {skill_id: ctx.store.load("skills", skill_id, Skill)

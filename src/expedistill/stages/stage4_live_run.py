@@ -355,31 +355,6 @@ def _complete_no_op(store: Store, task_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Run-settings lookups (the shapes stages 1 and 6 use)
-# ---------------------------------------------------------------------------
-
-def _workers(ctx: Any) -> int:
-    """Parallelism from the config/context if either carries it, else
-    serial (same lookup stages 1 and 6 use)."""
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
-
-
-def _k1_stagger(ctx: Any) -> float:
-    """K1's per-unit dispatch stagger run setting from the context (the
-    pipeline sets it), else K1's own default of no stagger."""
-    return float(getattr(ctx, "k1_stagger", 0.0))
-
-
-def _allow_infra_shortfall(ctx: Any) -> bool:
-    """The run setting accepting infra holes (module docstring); the
-    pipeline sets it on the context, default False."""
-    return bool(getattr(ctx, "allow_infra_shortfall", False))
-
-
-# ---------------------------------------------------------------------------
 # Task objects and the rendered instruction
 # ---------------------------------------------------------------------------
 
@@ -663,7 +638,7 @@ def run(ctx: Any) -> Dict[str, Any]:
             return ("infra_failed", task_id)
 
     for kind, task_id in run_units(round0_unit, sorted(set(units0)),
-                                   _workers(ctx)):
+                                   ctx.run_settings.workers):
         if kind == "infra_failed":
             infra_failed.add(task_id)
 
@@ -751,7 +726,7 @@ def run(ctx: Any) -> Dict[str, Any]:
             recorder.record(task_id, la.FAILURE_STAGE, exc, exc)
             return ("infra_failed", task_id)
 
-    for kind, task_id in run_units(round1_unit, units1, _workers(ctx)):
+    for kind, task_id in run_units(round1_unit, units1, ctx.run_settings.workers):
         if kind == "infra_failed":
             infra_failed.add(task_id)
 
@@ -873,8 +848,8 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
         / f"round{round_:02d}",
         usage=ctx.usage,
         run_dir=ctx.run_dir,
-        workers=_workers(ctx),
-        dispatch_stagger=_k1_stagger(ctx),
+        workers=ctx.run_settings.workers,
+        dispatch_stagger=ctx.run_settings.k1_stagger,
         skip_unit_ids=skip_unit_ids,
     )
 
@@ -894,7 +869,7 @@ def _accept_shortfall(ctx: Any, store: Store, *, round_: int,
     accepted = set(_read_round_shortfall(store, round_))
     holes = _round_holes(store, task_ids, round_, n_attempts, stage1_holes,
                          sorted(accepted))
-    if holes and _allow_infra_shortfall(ctx):
+    if holes and ctx.run_settings.allow_infra_shortfall:
         accepted.update(holes)
         write_json(la.round_dir(store, round_) / SHORTFALL_NAME,
                    {"unit_ids": sorted(accepted)}, indent=2)

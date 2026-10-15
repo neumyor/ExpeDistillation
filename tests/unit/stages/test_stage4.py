@@ -29,7 +29,8 @@ from expedistill.infra.reliability import (
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.stages import stage4_acceptance
-from expedistill.stages.context import StageContext
+from dataclasses import replace
+from expedistill.stages.context import RunSettings, StageContext
 
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
 
@@ -692,7 +693,7 @@ def test_runs_at_any_worker_count_produce_identical_stores_and_summaries(
         ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
                           rewriter=rewriter, auditor=auditor,
                           run_dir=run_dir)
-        ctx.workers = worker_count
+        ctx = replace(ctx, run_settings=RunSettings(workers=worker_count))
         return ctx, store, stage4_acceptance.run(ctx)
 
     # The reference run is serial (workers=1, the old loop); every other
@@ -774,7 +775,7 @@ def test_workers4_runs_units_concurrently(tmp_path, monkeypatch):
     ctx, _ = make_ctx(tmp_path, answerer=make_fake_handle("weak", []),
                       judge=make_fake_handle("strong", []),
                       rewriter=make_fake_handle("strong", []))
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -805,7 +806,7 @@ def test_infra_failed_unit_leaves_the_rest_complete_with_workers4(tmp_path):
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
                       rewriter=make_fake_handle("strong", []),
                       auditor=make_fake_handle("auditor", _CLEAN_AUDIT))
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
 
     with pytest.raises(InfrastructureError) as excinfo:
         stage4_acceptance.run(ctx)
@@ -864,7 +865,7 @@ def test_resume_after_fatal_crash_completes_only_pending(tmp_path):
                       rewriter=_rewriter({}),
                       auditor=make_fake_handle("auditor", _CLEAN_AUDIT),
                       run_dir=run_dir)
-    ctx.workers = 4
+    ctx = replace(ctx, run_settings=RunSettings(workers=4))
 
     with pytest.raises(RuntimeError):
         stage4_acceptance.run(ctx)
@@ -886,7 +887,7 @@ def test_resume_after_fatal_crash_completes_only_pending(tmp_path):
                        judge=_judge(verdicts), rewriter=_rewriter({}),
                        auditor=make_fake_handle("auditor", _CLEAN_AUDIT),
                        run_dir=run_dir)
-    ctx2.workers = 4
+    ctx2 = replace(ctx2, run_settings=RunSettings(workers=4))
     summary = stage4_acceptance.run(ctx2)
 
     prompts = [call["user"]
@@ -905,7 +906,7 @@ def test_resume_after_fatal_crash_completes_only_pending(tmp_path):
                        judge=_judge(verdicts), rewriter=_rewriter({}),
                        auditor=make_fake_handle("auditor", _CLEAN_AUDIT),
                        run_dir=baseline_dir)
-    bctx.workers = 4
+    bctx = replace(bctx, run_settings=RunSettings(workers=4))
     stage4_acceptance.run(bctx)
     assert _snapshot(store) == _snapshot(baseline_store)
 
@@ -981,7 +982,8 @@ from expedistill.core.models import Exam, Skill
 from expedistill.infra.store import Store
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.stages import stage4_acceptance
-from expedistill.stages.context import StageContext
+from dataclasses import replace
+from expedistill.stages.context import RunSettings, StageContext
 
 tmp = Path(tempfile.mkdtemp())
 run_dir = tmp / "run"

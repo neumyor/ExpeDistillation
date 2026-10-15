@@ -36,7 +36,8 @@ from expedistill.infra.store import Store, read_json
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import make_fake_handle
 from expedistill.stages import stage0_freeze, stage1_baseline
-from expedistill.stages.context import StageContext
+from dataclasses import replace
+from expedistill.stages.context import RunSettings, StageContext
 
 _FAKE = "fakebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
@@ -283,7 +284,7 @@ def test_accepted_infra_shortfall_counts_holes_as_infra(monkeypatch, tmp_path):
     _pin_k1_infra(monkeypatch)
     _install_plugin(monkeypatch, StagePlugin(behavior=_t2_weak_infra))
     ctx = make_ctx(tmp_path, make_config())
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     tasks = list(TASK_IDS)
 
     result = stage1_baseline.run(ctx, train_tasks=tasks, test_tasks=tasks)
@@ -364,7 +365,7 @@ def test_partial_sample_with_real_failure_is_in_F_and_shortfalls(
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
     ctx = make_ctx(tmp_path, make_config())
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     tasks = list(TASK_IDS)
 
     result = stage1_baseline.run(ctx, train_tasks=tasks, test_tasks=tasks)
@@ -471,7 +472,7 @@ def test_accepted_shortfall_is_durable_across_resume(monkeypatch, tmp_path):
     config = make_config()
     tasks = list(TASK_IDS)
     ctx = make_ctx(tmp_path, config)
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     first = stage1_baseline.run(ctx, train_tasks=tasks, test_tasks=tasks)
     assert first["infra_accepted"] == _T2_WEAK_UNITS
     assert stage1_baseline.accepted_infra_shortfall(ctx.run_dir) == \
@@ -493,7 +494,7 @@ def test_accepted_set_is_written_before_F_is_derived(monkeypatch, tmp_path):
     _pin_k1_infra(monkeypatch)
     _install_plugin(monkeypatch, StagePlugin(behavior=_t2_weak_infra))
     ctx = make_ctx(tmp_path, make_config())
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
 
     def boom(*args, **kwargs):
         raise RuntimeError("crash while deriving F")
@@ -514,7 +515,7 @@ def test_accepted_unit_stored_later_is_still_excluded(monkeypatch, tmp_path):
     config = make_config()
     tasks = list(TASK_IDS)
     ctx = make_ctx(tmp_path, config)
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     first = stage1_baseline.run(ctx, train_tasks=tasks, test_tasks=tasks)
     for attempt in range(2):
         ctx.store.save(Trajectory(

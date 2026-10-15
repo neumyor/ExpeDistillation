@@ -105,15 +105,6 @@ _INFRA_FAILED = "infra_failed"
 _MISSING_EXAM = "missing_exam"
 
 
-def _workers(ctx: Any) -> int:
-    """Parallelism from the config/context if either carries it, else serial
-    (same lookup stages 1 and 6 use)."""
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
-
-
 def _candidates(store: Any) -> List[Skill]:
     """Stored stage-3 candidate skills, in skill_id order.
 
@@ -164,7 +155,7 @@ def run(ctx: Any) -> Dict[str, Any]:
     drove to a terminal status. Raises InfrastructureError after storing the
     summary when ``infra_failed`` is not empty (see module docstring).
 
-    The units run through B5 ``run_units`` on ``_workers(ctx)`` threads
+    The units run through B5 ``run_units`` on ``ctx.run_settings.workers`` threads
     (default 1 = the old serial loop); outcomes arrive in input order, so
     the summary never depends on the dispatch interleaving.
     """
@@ -249,7 +240,7 @@ def run(ctx: Any) -> Dict[str, Any]:
                 f"status {result.status!r}")
         return _PROCESSED, skill.skill_id
 
-    outcomes = run_units(accept_unit, units, _workers(ctx))
+    outcomes = run_units(accept_unit, units, ctx.run_settings.workers)
 
     # Outcomes are in input order, so the summary is deterministic however
     # the units interleaved.

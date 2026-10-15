@@ -42,7 +42,7 @@ from expedistill.stages import (
     stage5_curation,
     stage6_test,
 )
-from expedistill.stages.context import StageContext
+from expedistill.stages.context import RunSettings, StageContext
 
 __all__ = [
     "LOG_NAME",
@@ -356,13 +356,14 @@ def run_pipeline(
             usage=usage,
             handles=handles,
             workdir_root=run_dir / "work",
+            # The operational settings, typed on the frozen context (the
+            # stages read ctx.run_settings.<field> -- no more getattr
+            # chains pasted into every stage file).
+            run_settings=RunSettings(
+                workers=workers,
+                k1_stagger=k1_stagger,
+                allow_infra_shortfall=allow_infra_shortfall),
         )
-        # Parallelism reaches the stages through the context (they read it
-        # with getattr(ctx, "workers", 1)); StageContext itself is frozen and
-        # carries no field for it yet.
-        ctx.workers = workers
-        ctx.allow_infra_shortfall = allow_infra_shortfall
-        ctx.k1_stagger = k1_stagger
 
         def record(name: str, summary: Dict[str, Any]) -> Dict[str, Any]:
             row: Dict[str, Any] = {"stage": name,

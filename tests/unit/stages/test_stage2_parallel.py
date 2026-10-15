@@ -40,7 +40,7 @@ from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.call import ModelHandle
 from expedistill.llm.fake import json_script
 from expedistill.stages import stage2_segmentation
-from expedistill.stages.context import StageContext
+from expedistill.stages.context import RunSettings, StageContext
 
 from tests.unit.stages.test_stage2 import (
     _FAKE, StagePlugin, _install_plugin, make_config, seg,
@@ -108,11 +108,8 @@ def make_ctx(tmp_path, config, segmenter, *, run_name="run", workers=None):
         usage=UsageRecorder(run_dir / "llm_requests" / "usage.jsonl"),
         handles={"segmenter": segmenter},
         workdir_root=run_dir / "workdirs",
+        run_settings=RunSettings(workers=workers or 1),
     )
-    if workers is not None:
-        # The pipeline sets the run setting on the context (the stages
-        # read it with getattr); StageContext itself carries no field.
-        ctx.workers = workers
     return ctx
 
 

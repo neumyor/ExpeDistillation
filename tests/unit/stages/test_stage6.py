@@ -35,7 +35,8 @@ from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.inject import bank_reference
 from expedistill.llm.fake import make_fake_handle
 from expedistill.stages import stage6_test
-from expedistill.stages.context import StageContext
+from dataclasses import replace
+from expedistill.stages.context import RunSettings, StageContext
 
 _FAKE = "fakebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
@@ -571,7 +572,7 @@ def test_accepted_shortfall_keeps_one_denominator(tmp_path, monkeypatch):
     # Reviewer probe: before the fix the with-bank arm silently had tasks=1
     # against the control's tasks=2, and a delta was reported anyway.
     ctx = _make_ctx(tmp_path, "split")
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     summary = _run_stage6(ctx, monkeypatch, RecordingPlugin(_bank_t2_infra),
                           _tasks("t1", "t2"))
 
@@ -607,7 +608,7 @@ def test_full_mode_flag_alone_cannot_accept_a_stage1_hole(
     # it durably (otherwise a later stage-1 resume could fill it and move F
     # and the bank). The flag in stage 6 alone is not enough.
     ctx = _make_ctx(tmp_path, "full")
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     _seed_stage1_weak(ctx, {"t1": ["failure", "failure"],
                             "t2": ["success"]})
     plugin = RecordingPlugin()
@@ -639,7 +640,7 @@ def test_accepted_shortfall_is_durable_across_resume(tmp_path, monkeypatch):
         return _bank_t2_infra(task_id, token, armed)
 
     ctx = _make_ctx(tmp_path, "split")
-    ctx.allow_infra_shortfall = True
+    ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
     plugin = RecordingPlugin(outcome)
     first = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
     assert first["infra_accepted"] == {"with_bank": _units("t2"),
@@ -647,7 +648,8 @@ def test_accepted_shortfall_is_durable_across_resume(tmp_path, monkeypatch):
 
     healthy["on"] = True
     plugin.calls.clear()
-    ctx.allow_infra_shortfall = False  # the resume does not pass the flag
+    ctx = replace(ctx, run_settings=RunSettings(
+        allow_infra_shortfall=False))  # the resume does not pass the flag
     second = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
     assert plugin.calls == []
     assert second == first

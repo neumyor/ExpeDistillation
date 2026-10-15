@@ -23,7 +23,7 @@ while a ModelOutputError confined to one merge is logged by K5 as that merge
 skipped / reverted, and curation carries on.
 
 Parallelism is K5's wave pool, fed by the same run setting as stages 1-4
-and 6: ``_workers(ctx)`` threads per wave, serial by default, output
+and 6: ``ctx.run_settings.workers`` threads per wave, serial by default, output
 bit-identical to the serial run (K5's module docstring has the design and
 the equivalence argument).
 """
@@ -40,15 +40,6 @@ __all__ = ["run"]
 #: ``curation_log.json`` sits next to it; README section 2 layout).
 SUMMARY_DIR = "stage5_curation"
 SUMMARY_NAME = "stage5_summary.json"
-
-
-def _workers(ctx: Any) -> int:
-    """Parallelism from the config/context if either carries it, else serial
-    (same pattern as stages 1/2/3/4/6)."""
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
 
 
 def run(ctx: Any) -> Dict[str, Any]:
@@ -70,7 +61,7 @@ def run(ctx: Any) -> Dict[str, Any]:
         curation_rounds=ctx.config.curation_rounds,
         usage=ctx.usage,
         run_dir=ctx.run_dir,
-        workers=_workers(ctx),
+        workers=ctx.run_settings.workers,
     )
     members: List[str] = [str(row["skill_id"]) for row in bank]
     summary = {

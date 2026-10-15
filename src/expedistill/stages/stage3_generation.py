@@ -14,7 +14,8 @@ aggregated from the input-ordered unit outcomes, so it stays in that selection
 order whatever order the workers finished in.
 
 Parallel dispatch: the selected subtasks run through B5 ``run_units`` with
-``ctx.workers`` threads (default 1; stages 1/6 read the same attribute). The
+``ctx.run_settings.workers`` threads (default 1; stages 1/6 read the same
+field). The
 unit is one selected subtask, and every expected failure is dispositioned
 INSIDE the worker, per run_units' contract: anything escaping it is fatal and
 stops the batch (in-flight units run to completion, then the first failure by
@@ -189,15 +190,6 @@ def _terminal_failures(path: Any) -> Dict[str, Dict[str, Any]]:
     return rows
 
 
-def _workers(ctx: Any) -> int:
-    """Parallelism from the config/context if either carries it, else serial
-    (same lookup stages 1/6 use)."""
-    workers = getattr(ctx.config, "workers", None)
-    if workers is None:
-        workers = getattr(ctx, "workers", 1)
-    return int(workers)
-
-
 def run(ctx: Any) -> Dict[str, Any]:
     """Generate one candidate skill and one exam per selected subtask.
 
@@ -237,7 +229,7 @@ def run(ctx: Any) -> Dict[str, Any]:
         """One selected subtask -> its disposition (a _DISPOSITIONS tag).
 
         The whole per-unit body of the old loop, unchanged: with
-        ``ctx.workers > 1`` it runs on B5's pool, and every expected failure
+        ``ctx.run_settings.workers > 1`` it runs on B5's pool, and every expected failure
         is dispositioned here so anything escaping is fatal to the batch.
         The state shared with sibling workers (``terminal``, the ledger) is
         safe by construction -- one key per unit, appends locked in B3/B6.
@@ -310,7 +302,7 @@ def run(ctx: Any) -> Dict[str, Any]:
     # parallelize. A fatal escape raises out of run_units (no summary is
     # written, exactly as before), so a returned outcomes list holds one
     # disposition per unit.
-    outcomes = run_units(process, selected, _workers(ctx))
+    outcomes = run_units(process, selected, ctx.run_settings.workers)
 
     # Buckets keep the selection order: outcomes are input-ordered, never
     # completion-ordered, however the workers interleaved.
