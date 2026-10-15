@@ -5,9 +5,13 @@ The config's ``acceptance`` key names the protocol (decision doc
 frozen v1 default -- and ``live_run`` (two pinned rounds over real
 executions with G10/G11 attribution/revision). The drivers live in
 ``methods/acceptance/``; this module only resolves and calls (R1 of the
-multi-method plan): the registry table imports the driver on demand, so
-an exam process still never loads the live modules -- the frozen
-prompt-name surface stays the import-time snapshot, exactly as before.
+multi-method plan). The registry imports the driver on demand, so the
+DISPATCH never loads the live driver; the frozen prompt-name surface is
+the import-time snapshot (``METHOD_PROMPT_NAMES``) and stays
+byte-identical -- an exam process that imports ``composites`` as a
+package still pulls the live blocks in through ``composites/__init__``,
+exactly as it always has (the name set, not the module graph, is the
+guarded invariant).
 """
 
 from typing import Any, Dict

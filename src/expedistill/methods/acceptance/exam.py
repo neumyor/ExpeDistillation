@@ -61,13 +61,17 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import write_json
-from expedistill.methods.acceptance import STAGE4_DIR, STAGE_LABEL, SUMMARY_FILENAME
+from expedistill.methods.acceptance import STAGE4_DIR, SUMMARY_FILENAME
 
 __all__ = ["MODEL_OUTPUT_DISCARD", "run"]
 
 
 #: discard_reason of a skill whose K3 repair budget ran out.
 MODEL_OUTPUT_DISCARD = "model_output_error"
+
+#: Stage label of this driver's lines in the unit-failure ledger (the
+#: live driver writes under its own label).
+STAGE_LABEL = "stage4_acceptance"
 
 #: Outcome kinds a unit's worker returns; aggregated in input order into the
 #: summary (see run). A unit that reached a terminal status (accepted, or

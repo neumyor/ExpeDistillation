@@ -48,6 +48,8 @@ cli (8)
 def live_run(ctx: RunContext, params: LiveRunParams) -> dict: ...
 ```
 
+**P1a 实现注记（评审 A/B/C 一致裁决）**：注册表落成了纯数据表（(槽位, 名字) → 驱动模块路径，解析时才 import 驱动模块），而非上面的装饰器形式——装饰器要求模块已加载才能注册，会让 exam 进程加载 live 驱动、破坏行为等价；纯表是懒加载约束下唯一正确的实现。P1b 的 Params/check 挂在表项上扩展（(模块路径, Params, check) 元组），**不要**改回装饰器形式。
+
 - 注册复用 `core/registry.py`，每槽位一个注册表；注册表文档写明该槽位签名与**该槽位允许修改的共享字段**（如验收可改 Skill.status/version）。
 - `Params`：dataclass；框架通用校验只覆盖最小集合（未知键拒绝、int/float/str/bool/Optional 类型）+ `__post_init__` 方法内约束。
 - `check(params, experiment)`：可选，放**跨参数/跨槽位**约束（例：`n_attempts ≤ n_attempts_weak`；P4 起"exam 验收或 K5 回归 + `exams: false`"冲突）。
@@ -150,7 +152,9 @@ token_budgets: {...}
 
 needs/provides；`extends` 深合并；方法基类、`slot` 冗余字段、类型化 Summary；按方法声明 prompts/roles；`call_model` 运行时成员检查；任何新 hash/指纹/版本号/审计机制（审计留在 `scripts/audit/` 外挂）；工作目录迁移；搬 K4/K5/K6 本体；角色表开放（v3 内）；通用崩溃遍历测试框架；插件自动发现；DAG 引擎；DI 容器。docstring 瘦身（事故史移入 `docs/decisions/`）单独立项。
 
-## 10. 每步三路评审协议（用户裁决，2026-10-15）
+## 10. 每步三路评审协议（用户裁决，2026-10-15；同日两条修订已批）
+
+**已批修订（用户原话"均同意"，2026-10-15）**：① 评审范围限定——每路评审只审该步 diff + 验收证据，不做全库重审；② P0 与 P1a 合并为一轮评审（两者都是"行为不变"步骤，golden 必须无 diff），P1b 单独一轮重点审；P1b 之前只有 P0+P1a 这一轮。
 
 重构的每个步骤（P0、P1a、P1b、P4……）完成后，**必须**启动三个独立评审对本步骤的改动做审核，判断其是否偏移了本方案定下的约束，通过后才进入下一步：
 
