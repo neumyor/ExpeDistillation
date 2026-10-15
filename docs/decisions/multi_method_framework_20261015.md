@@ -10,7 +10,7 @@
 2. **比初版大幅做减法**：删掉通用依赖声明（needs/provides）、`extends` 配置继承、方法基类与类型化摘要、按方法声明 prompt/角色、工作目录迁移；不引入任何新 hash、版本号、审计机制。
 3. **可靠性只靠四样已有/极简的东西**：manifest 逐字段比对（已有）、"正式 run 固定在自己的维护分支续跑"运维规则、两条静态测试、只在测试侧的 golden 产物矩阵。
 4. **执行地点与隔离（致命风险对策）**：TB-dev 的 `.venv` 是可编辑安装、指向其 `src/`，在跑实验续跑或进入新阶段时会加载改后的代码。因此重构在**本仓库（ExpeDistillation-MM，独立 clone + 独立 venv）**进行：origin = TB-dev 本地路径，基点 `bcb3ffe`（feature/acceptance-live-run 顶点），分支 `feature/multi-method`，本仓库 `.venv`（Python 3.11.16）的 editable `.pth` 只指向 MM 自己的 `src/`。TB-dev 在正式实验期间的任何热修经 `git fetch origin` + cherry-pick 同步进来。
-5. **执行时点**：P-1 及之后的步骤在 TB 正式 run（runs/tb21_split_live_run_20261015_0045）完结后进行；golden 产物矩阵必须在"最终 v2 代码"的 tag 上生成，实验期间的热修会改变 tag 内容。**2026-10-15 更新（用户裁决："升级为多方法框架 不用等正式 run"）**：golden 矩阵部分已按 §7.1 提前完成（基点 dad6d28，src 与 bcb3ffe 逐字节相同），P0 即可开始；TB-dev 终态 tag 与维护分支归档仍推迟到 run 完结。
+5. **执行时点**：MM 只管自己的重构，不围绕 TB-dev 的状态编排任何等待或同步流程。**2026-10-15 用户裁决："升级为多方法框架 不用等正式 run"**——golden 矩阵已提前完成（§7.1），P0 随即开始；TB-dev 终态 tag 与维护分支归档是 TB-dev 侧的事，等它的 run 完结即可，与 MM 的重构互不阻塞。MM 想反映上游（含热修）时 merge origin 后重生成 golden 即可，无程序化要求。
 
 ## 1. 现状问题（经 A 事实核查修正后的版本）
 
@@ -107,8 +107,8 @@ token_budgets: {...}
 | 步骤 | 内容 | manifest | 验收 |
 |---|---|---|---|
 | **P-1 准备**（不改源码） | 当前 TB run 完结后：在 TB-dev 打 tag `schema-v2-final`；在飞/历史 run 建维护分支 + 独立 venv；在 tag 上生成 **golden 产物矩阵**：{exam, live_run} × {whole_bank, retrieval} × {full, split} + 崩溃续跑变体，假模型驱动，永不重新生成 | — | — |
-| **P0 纯重构** | frozen `RunContext`+`RunSettings`；S7 下沉、`build_manifest`、`assemble_reuse` 上移；`get_plugin` 统一导入；收窄版 `run_units_disposed`；`write_skill` 接收 prompt 名；只合并真正等价的重复（名字像但语义不同的不合并；K6/K4 刻意隔离的 helper 等 golden 建好后再合） | 不变 | 现有测试 + golden 矩阵（易变字段归一化只写在测试代码）；注意 7 个测试文件动态挂 workers、14 处直接构造上下文需同步改 |
-| **P1a 按名分发** | 建 `methods/` 层与注册表；迁 acceptance、delivery 驱动；扩展 `test_layering` | **不变** | 现有 manifest golden 原样绿 + 产物 golden |
+| **P0 纯重构** | frozen `RunContext`+`RunSettings`；S7 下沉、`build_manifest`、`assemble_reuse` 上移；`get_plugin` 统一导入；收窄版 `run_units_disposed`；`write_skill` 接收 prompt 名；只合并真正等价的重复（名字像但语义不同的不合并；K6/K4 刻意隔离的 helper 等 golden 建好后再合） | 不变 | 测试全绿（golden 快照为套件成员，无 diff） |
+| **P1a 按名分发** | 建 `methods/` 层与注册表；迁 acceptance、delivery 驱动；扩展 `test_layering` | **不变** | 测试全绿；golden 无 diff（manifest 不变由既有 manifest golden 测试守住） |
 | **P1b 唯一一次 schema 切换** | v3 配置形状 + Params/check（含 `n_attempts ≤ n_attempts_weak`，放这一步因为会让 `test_stage0.py:133/719/744` 夹具失败）；`authoring.exams: true` 写入形状；`ROLE_DEFAULTS`；全量 prompt 冻结 + 两条静态测试；删懒注册与 `_MANIFEST_OPTIONAL_FIELDS`；`upgrade_v2` 纯函数；一次性配置转换脚本（结果写新文件名）；stage0 旧 schema 提示；同步 scripts/ 与 runbook；审计脚本改为按 manifest 判断模式、live 子树缺失报 ERROR 而非 INFO（`audit_live_run.py:605-610`） | 切换 | 除 manifest 外产物与 golden 一致；`configs/experiments/` 全部 v2 配置升级后的 v3 manifest 人工审定一次；prompt 名集与 digest 等于 v2 golden |
 | **P4 新协议**（按需、预注册） | `curation` 槽位 + `none`；放开 `authoring.exams: false` + 集中冲突校验；authoring 第二写法（一出现就做） | 新实验 | 每个新方法自带续跑测试 |
 | **P5 按需** | 模型 provider 注册表、非 chat 调用（embedding）、插件提供真实"查询文本"、`ROLE_DEFAULTS` 的 None 档位 | — | — |
@@ -117,14 +117,22 @@ token_budgets: {...}
 
 **迁移纪律**：模块与其测试同一提交迁移，旧位置不留转发 shim（过时 patch 直接报错）；被改动 patch 目标的"断言没发生"类测试补一个正向前提（证明 patch 确实生效）。
 
-### 7.1 P-1 的提前执行（2026-10-15 用户裁决："升级为多方法框架 不用等正式 run"）
+### 7.1 P-1 的提前执行与验收标准（2026-10-15 用户裁决 ×2）
 
-P-1 拆成两半，golden 部分已提前完成（见 log.md 2026-10-15 13:10 一条）：
+用户裁决 ①"升级为多方法框架 不用等正式 run"：P-1 拆两半——golden 矩阵已提前完成，TB-dev 终态 tag 与维护分支归档仍等它的 run 完结（TB-dev 侧的事，MM 不为其编排任何流程）。
 
-- **已完成（P-1′）**：`tests/golden/` 采集器 + `tests/fixtures/golden/` 矩阵：8 组合（acceptance × delivery × mode 全积）× 假模型全流水线，每组合 3 个崩溃续跑变体（模型调用数 0.3/0.6/0.95 分位点）。基点 `dad6d28`（= bcb3ffe + 仅文档提交，src 逐字节相同），记录于 `provenance.json`；两次重生成逐字节一致。归一化刻意最小（时间/时长/请求 uuid/`processed_this_call`/run 目录路径/pipeline_log 末行视图；llm_requests 与 usage 以排序多重集快照）。崩溃续跑的等价准则做了精确化：**结果状态逐字节相同；调用史只容忍崩溃自身痕迹与"同内容重问"**（README 已知不等价点——未落盘的模型调用会被重问——的可执行形式），缺调用或新调用即失败。常驻验收测试随全套件跑（8 直线比对 + 2 崩溃续跑）。
-- **仍等 run 完结**：TB-dev 终态打 tag `schema-v2-final`、在飞/历史 run 维护分支 + 独立 venv 归档。
-- **纪律不变**：golden 只允许在"重构前 v2 代码"上生成（provenance 记录基点），从重构后代码重生成即仪器自我认证。P0 的三路评审同时审计采集器本身——它是 P0/P1a 验收标准的执行工具。
-- **风险与对策**：① TB-dev 实验期间热修（已知应急通道：`live_acceptance._LIVE_VIEWS_BUDGET_CHARS` 一行下调）会移动"最终 v2"——对策：热修 cherry-pick 到基点之上重生成矩阵（provenance 换新基点），重构分支上的同义翻译由该步三路评审覆盖；② 崩溃续跑在调用史层面天然不等价（见上，已精确化进准则）；③ golden 覆盖面限制——假模型、无远程 TB 链路、无真实端点，远程与端点路径由在跑正式 run 与 live 标记冒烟验证。
+用户裁决 ②"简洁、可扩展、避免 over-engineered；golden 从未要求过不重新生成；每步全量比对太死板"：撤销两条自设约束——
+
+- **"golden 永不重生成/只在重构前代码上生成"撤销**。golden 是普通快照回归测试：有意改行为的步骤在**同一提交**里更新它，diff 摘要写进提交说明，步骤评审读的就是这个 diff；不改行为的步骤不得碰它。
+- **"TB-dev 热修 → cherry-pick 到基点 + provenance 换基点"编排删除**。想反映上游变化就 merge origin 再重生成，无程序化要求。
+
+**简化后的验收标准**：
+
+1. 每个提交测试全绿。golden 快照测试只是套件成员（10 个测试约 0.6 秒），不构成额外仪式；行为不变的步骤它必须无 diff。
+2. 有意改行为的步骤（主要是 P1b）在提交说明里列 golden diff 摘要；P1b 另做一次性认真检查（每份 v2 配置升级后的 manifest 人工审定，见 §7 表）。
+3. 崩溃续跑等价是既有契约，在 golden 生成时验证一次；套件常驻 2 个组合的续跑测试。
+
+**采集器现状**：8 组合 × 假模型全流水线，每组合 3 个崩溃续跑变体在生成时全部等价；等价准则为"结果状态逐字节相同 + 请求史多重集只容忍崩溃痕迹与同内容重问"（README 已知续跑语义"未落盘的调用会被重问"的可执行形式）。基点 commit 记录在 `provenance.json`（信息记录，不是纪律）。覆盖面限制如实披露：假模型、无远程 TB 链路、无真实端点——远程与端点路径由在跑正式 run 与 live 冒烟验证。
 
 **测试体系**：golden 产物矩阵为主验收；每槽位只保留两条廉价参数化契约测试（假模型跑通、未知参数拒绝）；各方法现有专属续跑/不变量测试全部保留；不建通用"第 k 次写盘崩溃"遍历框架（等第一个新方法落地再评估）。
 

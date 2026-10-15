@@ -1,15 +1,14 @@
 """The P-1 prime acceptance gate (decision doc 2026-10-15 section 7).
 
-Every refactor step (P0, P1a, P1b) must keep a fresh run of every combo
-byte-identical to the checked-in golden matrix (after the harness's
-volatile-field normalisation), and a crash+resume of two representative
-combos must land on the same golden -- the standing, executable form of
-"行为不变" for the multi-method refactor.
+Every combo's fresh run must stay identical to the checked-in golden
+matrix (after the harness's volatile-field normalisation), and a
+crash+resume of two representative combos must land on the same golden
+-- ordinary snapshot tests, members of the standing suite.
 
-The matrix itself was generated from pre-refactor v2 code (see
-tests/fixtures/golden/provenance.json); if this file fails after a
-refactor step, the step changed behaviour -- fix it before proceeding,
-never regenerate the golden from refactored code.
+A failure after a refactor step means the step changed run artifacts:
+either accidentally (fix the step) or deliberately (regenerate the
+golden in the SAME commit and show the diff in its message -- that diff
+is what the step's review reads).
 """
 
 import json

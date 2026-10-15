@@ -18,11 +18,12 @@ resumed with the same command; the final artifacts must equal the
 straight run's snapshot. That is the crash-resume variant the decision
 doc requires, checked where it matters: on disk.
 
-Generation discipline. The matrix may ONLY be generated from pre-refactor
-v2 code (the recorded base commit in provenance.json); regenerating it
-from refactored code would make the instrument certify itself. Known
-limits, by design: fake models only (no remote TB link, no real endpoints)
--- those paths are validated by the live suite and the formal runs.
+Snapshot discipline (deliberate, not forbidden). The matrix is a
+regression snapshot like any other: a step that deliberately changes run
+artifacts regenerates it IN THE SAME COMMIT, and the diff is the review
+artifact; a step that changes nothing must not touch it. Known limits,
+by design: fake models only (no remote TB link, no real endpoints) --
+those paths are validated by the live suite and the formal runs.
 
 Normalisation is deliberately minimal and lives ONLY here (test code):
 epoch ``time`` / ``duration_ms`` / uuid ``request_id`` values are blanked;

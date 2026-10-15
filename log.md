@@ -547,3 +547,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：用户裁决"升级为多方法框架不用等正式 run"，P-1 拆两半执行：golden 矩阵部分提前完成，TB-dev 终态 tag 与维护分支归档仍等 run 完结（决策文档 §7.1）。新增 tests/golden 采集器：8 个组合（acceptance exam/live_run × delivery whole_bank/retrieval × mode full/split）假模型全流水线，每组合 3 个崩溃续跑变体（模型调用数 0.3/0.6/0.95 分位点）；快照为"结果状态逐字节 + 请求史排序多重集"，崩溃续跑的等价准则精确为"调用史只容忍崩溃痕迹与同内容重问"（README 已知不等价点"未落盘的调用会被重问"的可执行形式）。基点 dad6d28（src 与 bcb3ffe 逐字节相同），三次生成逐字节一致（确定性验证）。归一化刻意最小：时间/时长/请求 uuid/processed_this_call/run 目录路径/pipeline_log 末行视图。常驻验收测试 10 个（8 组合直线比对 + 2 组合崩溃续跑），全套件 1899 passed、ruff 干净。矩阵 876K 进 git。P0 即可开始；其三路评审将同时审计本采集器（验收标准的执行工具）。采集器开发中发现两处需要精确化的语义并已写进准则：call_model 对失败尝试也落一行用量（进程内模拟崩溃会留痕迹）；成对写入的单元（skill, exam）崩溃后续跑重做整个单元。
 
 工件：`tests/golden/harness.py`（采集器）、`tests/golden/generate.py`（生成入口）、`tests/golden/test_golden_matrix.py`（常驻验收）、`tests/fixtures/golden/`（8 组合快照 + provenance.json）、`docs/decisions/multi_method_framework_20261015.md`（§0.5/§7.1 更新）、commit
+
+## 2026-10-15 15:05 — 按用户"简洁化"裁决修订验收标准，P0.1/P0.2 完成
+
+一段话摘要：用户裁决"简洁、可扩展、避免 over-engineered"，撤销两条自设约束：golden"永不重生成/只在重构前代码上生成"改为普通快照纪律（有意改行为的步骤同提交更新、diff 进提交说明）；TB-dev 热修编排（cherry-pick 到基点 + provenance 换基点）整体删除，MM 想反映上游就 merge 后重生成。验收标准简化为：每提交测试全绿（golden 是套件成员，0.6 秒，无额外仪式），有意改行为的步骤（主要 P1b）列 golden diff 摘要 + manifest 人工审定。P0 前两个子步已完成并各自提交：P0.1 RunSettings 类型化进 frozen StageContext、删 7 个 _workers 死分支副本（commit f1b236a）；P0.2 resolve_plugin 统一插件解析（消 5 处重复）+ write_skill 接收可选 prompt 名（prompt 策略变体的零风险准备，commit 08c7985）。每步 1900 测试全绿、golden 无 diff。
+
+工件：`docs/decisions/multi_method_framework_20261015.md`（§0.5/§7 表/§7.1 修订）、`tests/golden/harness.py`、`tests/golden/generate.py`、`tests/golden/test_golden_matrix.py`（快照纪律改写）、commit f1b236a、commit 08c7985、回执 `/Users/yimingniu/Documents/Manager/state/replies/mm_simplify.md`

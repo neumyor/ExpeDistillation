@@ -12,9 +12,10 @@ variants whose final artifacts must equal the straight snapshot -- a
 resume-equivalence failure ABORTS generation loudly; the matrix never
 lands on a resume bug or an unnormalised volatile field.
 
-DISCIPLINE: run this only from pre-refactor v2 code (the commit recorded
-in provenance.json). Regenerating from refactored code would make the
-instrument certify itself.
+Regenerate whenever a step DELIBERATELY changes run artifacts (P1b's
+schema switch will) and land the diff in the same commit: that diff is
+what the step's reviewers read. A step that changes nothing must not
+touch the matrix.
 """
 
 import json
