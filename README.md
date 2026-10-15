@@ -173,7 +173,7 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | K2 | 切段（带校验） | D5 → G1 → D7；不通过就把错误清单交给 G1 重切 | 重切次数上限 `segment_retry_limit`；耗尽则跳过这条轨迹并记入审计日志，本 run 内不再重切 |
 | K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt | skill 列表为空即裸答；Attempt 记录用途（裸答 / 验收 / 回归）；先存作答、再判卷 |
 | K4 | 验收（exam 模式） | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写。文本考试协议，由配置 `methods.acceptance` 缺省（exam）选中 |
-| K5 | 库整理（Curator） | G7 → G8 → K3 回归考试 → G9 → D10 | 回归考试覆盖合并所代表的全部原始 skill 的考题，任一不过就撤销该次合并；超出 `bank_token_budget` 时回到 G7/G8 继续合并，最多 `curation_rounds` 轮；仍超出则阶段 5 停下报告，不自动删 skill |
+| K5 | 库整理（Curator，`methods.curation` 槽位的 agentbrew 方法） | G7 → G8 → K3 回归考试 → G9 → D10 | 回归考试覆盖合并所代表的全部原始 skill 的考题，任一不过就撤销该次合并；超出 `methods.curation.token_budget` 时回到 G7/G8 继续合并，最多 `rounds` 轮；仍超出则阶段 5 停下报告，不自动删 skill。**消融方法 `none`**：裸 accepted 集即库（零模型调用、无 curation_log），预算仍是硬阀——超限响亮停机（无合并环可缩，只能提预算或换方法）；bank 文件原子整写（幂等由构造保证） |
 | K6 | live-run 验收 | 逐组阶段函数库：基线加载、注入审计行构造（首写与续跑比对共用一个构造器）、轮判定（具名 `ACCEPTANCE_IMPROVE` 规则 × D3 计数）、G10 归因、G11 修订应用、no-op 守卫、幸存组推导、组终态提交；两轮钉死。轮序编排、K1 派发与重派发集、injection_audit 首写、shortfall 记录、摘要归 `methods/acceptance/live_run.py`（裁决 A16 的分工；P1a 起驱动在 methods 层） | live_run 模式的验收（阶段 4，配置 `methods.acceptance` 选中）：验收单位 = 一个 train task 的 pending 候选组，经 K1 真实执行、与阶段 1 裸跑基线按预注册判据比对，两轮不过整组丢弃；状态全部从磁盘推导（verdicts / attributions / 两个失败账本 + injection_audit + skill 版本号），任意崩溃点续跑等价。**编号与阶段 6 无关**：这是组合积木的第 6 号，test 阶段仍由 K1 / D3 承担 |
 | — | 装配工具 | `stages/assemble_reuse.py`：从源 run 按 train 溯源过滤，装配出新 run 的阶段 0–5 产物与 skill 库 | （P0.4 起在 stages/，复用 stage0 的 build_manifest。）复用已完结 run 的蒸馏产物、只重跑 test 侧实验（如检索式分发对同一冻结库重测）的入口：allowlist 拷贝（未列即不拷）+ 负清单断言 + 与源 manifest 的白名单 diff（仅 `mode` / `split` / `tasks` / `methods.delivery` 槽 / `schema_version` 允许不同），库行与拷贝对象逐位一致、零 test / reserved 溯源，run 根写 `ASSEMBLED_FROM.md` 溯源，拒绝已含 manifest 的目录。**不给 K 号**：它是装配工具，不是把积木串成阶段动作的组合件。两档位：bank=过滤旧库零调用复用（消融用）；baseline=仅拷阶段 1 轨迹，阶段 2–6 按当前协议全新执行（修订三默认） |
 
@@ -630,7 +630,7 @@ Attempt（作答记录）
   优先、弱臂失败优先——恰是 v2 的材料序，不足配额时用另一类补位；换策略
   只新增规则、不改流程。
 
-### 阶段 3：skill 与考题生成（D6、G2、G3）
+### 阶段 3：skill 与考题生成（D6、G2、G3；`methods.authoring.exams: false` 时跳过 G3——与 exam 验收、agentbrew 整理互斥，冲突在槽位 check 集中拒绝）
 
 - D6 筛段：由配置的 `segment_select` 规则决定（v2 默认
   `strong_success_weak_failed`）——强模型段只取 `success = true` 的段

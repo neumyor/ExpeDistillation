@@ -889,7 +889,8 @@ COMPLETED_METHODS = {
     "segmentation": {"K": 5, "retry_limit": 2},
     "authoring": {"exams": True},
     "acceptance": {"name": "exam", "retry_limit": 2},
-    "curation": {"token_budget": 4096, "rounds": 3},
+    "curation": {"name": "agentbrew", "token_budget": 4096,
+                "rounds": 3},
     "delivery": {"name": "whole_bank"},
 }
 
@@ -1056,7 +1057,7 @@ class TestUpgradeV2:
         })
         assert v3["methods"]["segmentation"] == {"K": 1, "retry_limit": 0}
         assert v3["methods"]["curation"] == {
-            "token_budget": 96000, "rounds": 4}
+            "name": "agentbrew", "token_budget": 96000, "rounds": 4}
         assert v3["methods"]["delivery"] == {
             "name": "retrieval", "top_k": 5,
             "max_categories": 3, "min_score": 0.02}

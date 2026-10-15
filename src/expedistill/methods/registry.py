@@ -44,7 +44,8 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
         _Entry(None, "expedistill.methods.segmentation",
                "SegmentationParams", None),
     ("authoring", "distill_diagnose"):
-        _Entry(None, "expedistill.methods.authoring", "AuthoringParams", None),
+        _Entry(None, "expedistill.methods.authoring", "AuthoringParams",
+               "check_authoring"),
     ("acceptance", "exam"):
         _Entry("expedistill.methods.acceptance.exam",
                "expedistill.methods.acceptance", "ExamParams", None),
@@ -53,7 +54,11 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
                "expedistill.methods.acceptance", "LiveRunParams",
                "check_live_run"),
     ("curation", "agentbrew"):
-        _Entry(None, "expedistill.methods.curation", "CurationParams", None),
+        _Entry("expedistill.methods.curation.agentbrew",
+               "expedistill.methods.curation", "AgentBrewParams", None),
+    ("curation", "none"):
+        _Entry("expedistill.methods.curation.none",
+               "expedistill.methods.curation", "NoneParams", None),
     ("delivery", "whole_bank"):
         _Entry("expedistill.methods.delivery.whole_bank",
                "expedistill.methods.delivery", "WholeBankParams", None),

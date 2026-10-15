@@ -17,6 +17,7 @@ from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import Store, read_json
 from expedistill.inject import bank_reference
 from expedistill.llm import json_script, make_fake_handle
+from expedistill.methods.curation import SUMMARY_DIR, SUMMARY_NAME
 from expedistill.stages import stage5_curation
 from expedistill.stages.context import StageContext
 
@@ -62,7 +63,8 @@ def _make_ctx(tmp_path, *, budget=10 ** 6, rounds=3, curator="",
         benchmark="tb", mode="split",
         models={"executor_strong": "strong-x", "executor_weak": "weak-7b"},
         weak_profile="a weak model that needs short sentences",
-        methods={"curation": {"token_budget": budget, "rounds": rounds}})
+        methods={"curation": {"name": "agentbrew",
+                             "token_budget": budget, "rounds": rounds}})
     ctx = StageContext(run_dir=run_dir, store=Store(run_dir), config=config,
                        usage=None, handles=handles,
                        workdir_root=run_dir / "work")
@@ -75,8 +77,7 @@ def _client_calls(ctx):
 
 
 def _summary_path(ctx):
-    return (ctx.run_dir / stage5_curation.SUMMARY_DIR
-            / stage5_curation.SUMMARY_NAME)
+    return ctx.run_dir / SUMMARY_DIR / SUMMARY_NAME
 
 
 def _similarity(groups=(), conflicts=()):

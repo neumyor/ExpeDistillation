@@ -86,7 +86,8 @@ METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "segmentation": {"K": 5, "retry_limit": 2},
     "authoring": {"exams": True},
     "acceptance": {"name": "exam", "retry_limit": 2},
-    "curation": {"token_budget": 4096, "rounds": 3},
+    "curation": {"name": "agentbrew", "token_budget": 4096,
+                "rounds": 3},
     "delivery": {"name": "whole_bank"},
 }
 
@@ -550,6 +551,7 @@ def upgrade_v2_config(data: Dict[str, Any]) -> Dict[str, Any]:
         },
         "authoring": {"exams": True},
         "curation": {
+            "name": "agentbrew",
             "token_budget": v2.pop("bank_token_budget", 4096),
             "rounds": v2.pop("curation_rounds", 3),
         },

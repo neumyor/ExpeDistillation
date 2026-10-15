@@ -188,11 +188,17 @@ class TestExamAndOtherSlots:
 
     def test_curation_params(self):
         params = resolve_params("curation", make_config(
-            methods={"curation": {"token_budget": 96000, "rounds": 3}}))
+            methods={"curation": {"name": "agentbrew",
+                                  "token_budget": 96000, "rounds": 3}}))
         assert (params.token_budget, params.rounds) == (96000, 3)
         with pytest.raises(ConfigError, match="token_budget"):
             resolve_params("curation", make_config(
-                methods={"curation": {"token_budget": 0}}))
+                methods={"curation": {"name": "agentbrew",
+                                      "token_budget": 0}}))
+        none = resolve_params("curation", make_config(
+            methods={"curation": {"name": "none",
+                                   "token_budget": 96000}}))
+        assert none.token_budget == 96000
 
     def test_defaults_satisfy_every_contract(self):
         # METHOD_DEFAULTS is what an absent slot completes to; if a
@@ -211,3 +217,36 @@ class TestExamAndOtherSlots:
 
         with pytest.raises(ConfigError, match="unsupported"):
             build_params(_Bad, {"tags": ["a"]}, "x", "y")
+
+
+class TestAuthoringExamsSwitch:
+    """P4: the exams-off ablation pair (curation: none + live_run) and the
+    centralized conflicts the slot's check refuses."""
+
+    def test_conflict_with_exam_acceptance(self):
+        with pytest.raises(ConfigError, match="acceptance method"):
+            resolve_params("authoring", make_config(
+                n_attempts_weak=3,
+                methods={"authoring": {"exams": False}}))
+
+    def test_conflict_with_agentbrew_curation(self):
+        # Acceptance must be live_run first, or the acceptance conflict
+        # fires before the curation one (checks refuse in order).
+        with pytest.raises(ConfigError, match="curation method"):
+            resolve_params("authoring", make_config(
+                n_attempts_weak=3,
+                methods={"authoring": {"exams": False},
+                         "acceptance": {"name": "live_run",
+                                        "n_attempts": 3,
+                                        "improvement": "strict_rate_gain"},
+                         "curation": {"name": "agentbrew",
+                                      "token_budget": 96000, "rounds": 3}}))
+
+    def test_the_ablation_pair_resolves(self):
+        params = resolve_params("authoring", make_config(
+            n_attempts_weak=3,
+            methods={"authoring": {"exams": False},
+                     "curation": {"name": "none", "token_budget": 96000},
+                     "acceptance": {"name": "live_run", "n_attempts": 3,
+                                    "improvement": "strict_rate_gain"}}))
+        assert params.exams is False

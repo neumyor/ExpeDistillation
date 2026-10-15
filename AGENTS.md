@@ -149,7 +149,8 @@ src/expedistill/
     authoring/            写 skill 槽位：AuthoringParams（exams 开关，P4 放开 false）
     acceptance/           验收驱动 exam.py、live_run.py + 两方法的 Params 与
                           check_live_run（跨约束：n_attempts ≤ n_attempts_weak）
-    curation/             库整理槽位：CurationParams（驱动 P4 包薄壳）
+    curation/             库整理驱动 agentbrew.py（K5 薄壳）、none.py（消融：裸
+                          accepted 集，预算仍是硬阀）+ 两方法的 Params
     delivery/             注入驱动 whole_bank.py、retrieval.py + 两方法的 Params
   stages/                 第 7 层：阶段 0–6 的流程（薄分发 + 写摘要/阶段末抛错）
     stage0_freeze.py … stage6_test.py

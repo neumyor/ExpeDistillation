@@ -83,6 +83,7 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import append_jsonl, read_jsonl, write_json
+from expedistill.methods import resolve_params
 
 __all__ = ["FAILURES_FILENAME", "STAGE3_DIR", "SUMMARY_FILENAME", "run"]
 
@@ -179,6 +180,11 @@ def run(ctx: Any) -> Dict[str, Any]:
     is non-empty.
     """
     store = ctx.store
+    # The authoring slot's exams switch (P4): false skips exam
+    # generation entirely -- the centralized conflict check in the slot's
+    # contract has already refused the combinations that would break
+    # (exam acceptance, agentbrew curation).
+    generate_exams = resolve_params("authoring", ctx.config).exams
     # config.rules always carries every rule key after ExperimentConfig
     # validation, and stage 0 checked the name: no local fallback here.
     rule_name = ctx.config.rules["segment_select"]
@@ -213,7 +219,8 @@ def run(ctx: Any) -> Dict[str, Any]:
         skill_id = make_skill_id(subtask_id)
         exam_id = make_exam_id(subtask_id)
         skill_stored = store.exists("skills", skill_id)
-        if skill_stored and store.exists("exams", exam_id):
+        if skill_stored and (not generate_exams
+                             or store.exists("exams", exam_id)):
             return _GENERATED
         if subtask_id in terminal:
             # Decided by an earlier call; restore a ledger row a crash
@@ -221,7 +228,7 @@ def run(ctx: Any) -> Dict[str, Any]:
             row = terminal[subtask_id]
             ledger.record_once(subtask_id, row["error_class"], row["message"])
             return _MODEL_OUTPUT_FAILED
-        if skill_stored and not _untouched_since_stage3(
+        if generate_exams and skill_stored and not _untouched_since_stage3(
                 store.load("skills", skill_id, Skill)):
             ledger.record_once(
                 subtask_id, "ExamMissingError",
@@ -252,7 +259,7 @@ def run(ctx: Any) -> Dict[str, Any]:
             skill = write_skill(
                 subtask, steps_view, ctx.config.weak_profile, mode, author,
                 usage=ctx.usage, run_dir=ctx.run_dir)
-            exam = gen_exam(
+            exam = None if not generate_exams else gen_exam(
                 subtask, steps_view, examiner,
                 usage=ctx.usage, run_dir=ctx.run_dir)
         except ModelOutputError as exc:
@@ -270,7 +277,8 @@ def run(ctx: Any) -> Dict[str, Any]:
             return _INFRA_FAILED
 
         store.save(skill, "skills")
-        store.save(exam, "exams")
+        if exam is not None:
+            store.save(exam, "exams")
         return _GENERATED
 
     # Selection stays serial and deterministic; only the per-subtask units

@@ -795,7 +795,9 @@ def test_stage5_threads_workers_into_the_wave_pool(tmp_path):
                         "executor_weak": "weak-model"},
                 weak_profile="weak",
                 methods={"acceptance": {"name": "exam", "retry_limit": 1},
-                         "curation": {"token_budget": 10 ** 6, "rounds": 3}}),
+                         "curation": {"name": "agentbrew",
+                                      "token_budget": 10 ** 6,
+                                      "rounds": 3}}),
             usage=None,
             handles={
                 "answerer": _routed_handle("weak",
