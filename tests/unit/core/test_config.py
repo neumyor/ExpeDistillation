@@ -12,7 +12,6 @@ from expedistill.core.config import (
     RULE_KEYS,
     ConfigError,
     ExperimentConfig,
-    acceptance_mode,
     load_config,
     save_config,
     upgrade_v2_config,
@@ -1003,17 +1002,17 @@ LIVE_RUN_ACCEPTANCE = {
 
 class TestAcceptanceSlot:
     def test_default_is_exam(self):
-        assert acceptance_mode(make_config()) == "exam"
-        assert (acceptance_mode(make_config(
-            methods={"acceptance": {}})) == "exam")
+        assert make_config().methods["acceptance"] == {
+            "name": "exam", "retry_limit": 2}
+        assert (make_config(methods={"acceptance": {}}).methods[
+            "acceptance"] == {"name": "exam", "retry_limit": 2})
 
     def test_names_read_from_the_slot(self):
-        assert acceptance_mode(make_config(
-            methods={"acceptance": {"name": "exam",
-                                    "retry_limit": 0}})) == "exam"
-        assert acceptance_mode(make_config(
-            methods={"acceptance": dict(LIVE_RUN_ACCEPTANCE),
-                     })) == "live_run"
+        cfg = make_config(methods={"acceptance": {"name": "exam",
+                                                  "retry_limit": 0}})
+        assert cfg.methods["acceptance"]["name"] == "exam"
+        cfg = make_config(methods={"acceptance": dict(LIVE_RUN_ACCEPTANCE)})
+        assert cfg.methods["acceptance"]["name"] == "live_run"
 
     def test_live_run_slot_freezes_verbatim(self):
         cfg = make_config(methods={"acceptance": dict(LIVE_RUN_ACCEPTANCE)})

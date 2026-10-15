@@ -25,15 +25,15 @@ skipped when absent). Stages 2-6 then run FRESH under the current
 protocol, so the identity check pins only what stage-1 reproducibility
 needs -- {benchmark, both executor model names, both attempt counts,
 train within the source task set} -- and every key that only acts
-downstream (rule names, prompt digests, skill_delivery, K, budgets,
+downstream (rule names, prompt digests, the delivery slot, K, budgets,
 weak_profile, ...) may differ from the source run; a pinned key that
 differs is still a loud ConfigError.
 
 Three load-bearing invariants (integration plan rulings 1/4/5):
 
 * Identity (ruling 4): the new config may differ from the source run's
-  frozen manifest ONLY in ``{mode, split, tasks, skill_delivery,
-  schema_version}``. Everything else -- benchmark, both executor models,
+  frozen manifest ONLY in ``{mode, split, tasks, the delivery slot
+  (config.methods.delivery), schema_version}``. Everything else -- benchmark, both executor models,
   both attempt counts, the three rule names, K, the retry family,
   token_budgets, model_options, weak_profile, the tasks digest -- must
   match, because the reused artifacts were produced under those exact
@@ -635,7 +635,7 @@ def _render_assembled_from(
     add("## 同一性校验（白名单 diff，裁决 4）")
     add("")
     add("- 对照源 manifest 逐键比对，仅允许 "
-        "{mode, split, tasks, skill_delivery, schema_version} 差异；"
+        "{mode, split, tasks, methods.delivery 槽, schema_version} 差异；"
         "benchmark、双 executor 模型、双 n_attempts、三条规则名、K、"
         "retry 族、token_budgets、model_options、weak_profile、"
         "tasks_digest 任一不一致即拒绝装配。")
@@ -755,7 +755,7 @@ def _baseline_identity_check(
 
     Baseline reuse re-runs every downstream stage under the CURRENT
     protocol, so the keys that only act downstream (rule names, prompt
-    digests, skill_delivery, K, token budgets, weak_profile, ...) may
+    digests, the delivery slot, K, token budgets, weak_profile, ...) may
     differ from the source run. What stage-1 reproducibility needs is
     the minimum set: both executor model names (the two arms whose
     trajectories are copied), both attempt counts (how many stage-1
@@ -851,7 +851,7 @@ def _render_assembled_from_baseline(
     add("")
     add("- baseline 档位仅钉 {benchmark、双 executor 模型名、双 "
         "n_attempts、train ⊆ 源任务集}——阶段 1 复现性所需的最小集；"
-        "规则名、prompt digest、skill_delivery、K、预算等允许不同"
+        "规则名、prompt digest、delivery 槽、K、预算等允许不同"
         "（它们只作用于全部新跑的下游），不一致的钉住键仍响亮拒绝。")
     add(f"- 逐项核对通过：benchmark {source_manifest['benchmark']!r}；"
         f"executor_strong {pinned['executor_strong']!r}、executor_weak "

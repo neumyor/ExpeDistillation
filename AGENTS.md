@@ -262,7 +262,11 @@ configs/
 ### runs/
 
 1. 本地 run 目录放 `runs/<实验名>_<YYYYMMDD_HHMM>/`，不进 git；远程 run 放
-   `/data2/niuyiming/expedistill/runs/` 下，同样的命名；
+   `/data2/niuyiming/expedistill/runs/` 下，同样的命名。**正式 run 固定在
+   它启动时的 checkout 上续跑**（多方法方案 §6，R6）：每个正式 run 一条
+   维护分支（命名惯例 `run/<run 目录名>`，热修 cherry-pick 到它上面）+
+   独立 venv（editable `.pth` 只指向该 venv 自己的 src）——schema 升版等
+   破坏续跑的改动在 stage 0 会被明确拒载并指向该规则；
 2. run 目录内部布局见 README 第二节；run 开始时写 manifest，之后每次启动都与
    manifest 逐字段比对，不一致直接拒绝（`infra/manifest.py`）；
 3. **逐单元落盘、可续跑**：一次执行、一次切段、一次作答都是一个单元，完成

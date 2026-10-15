@@ -38,11 +38,13 @@ ALFWorld 义务清单；供首个 live_run 实验（候选配置
      用 `--allow-infra-shortfall` 掩盖基线缺失，stage 1 的空洞只能在 stage 1 接受；
    - 基线全成功的组会被 `weak_already_knows` 零执行短路（这是特性不是 bug）；基线
      valid == 0 的组是 ConfigError（数据与冻结规则矛盾，须人工诊断）；
-3. **acceptance 配置校验**：`load_config` + stage 0 会校验 mode 词表、`n_attempts >= 2`、
-   `improvement` 规则名已注册、未知键拒绝。启动前手动复核配置里的 `improvement` 名字
+3. **acceptance 配置校验**：`load_config` + stage 0 会校验 `methods` 五槽位形状、
+   各方法参数契约（`n_attempts >= 2` 等）、`improvement` 规则名已注册、未知键拒绝。
+   启动前手动复核配置里的 `improvement` 名字
    与预注册文档一致（拼写错会在 stage 0 停下，但核对是免费的）；
-4. **在飞 run 兼容**：本机若还有 exam 模式在飞 run，新代码不动它们（manifest 键集
-   逐字节不变）；但**同一 run 目录不得在两版代码间混跑**——老 run 用老 checkout 续跑；
+4. **在飞 run 兼容**：同一 run 目录不得在两版代码间混跑——老 run 用它自己的
+   维护分支 + 独立 venv 续跑（AGENTS 六.1）；schema v2 的 run 目录在 v3 代码
+   的 stage 0 会被明确拒载（config.methods 形状不同）；
 5. **运行设置**：TB 远程沿用 K1 批弹性经验——`--k1-stagger 20`（≥20，配合随机退避
    `--llm-infra-backoff`）、workers 按 campaign 修复后口径可到 64（2026-10-14 更新：
    旧口径"16 安全、32 必爆"是退避机制修复**前**的实测；修复后 32→64 workers + stagger

@@ -26,7 +26,7 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple
 from expedistill.core.config import ConfigError
 from expedistill.methods.params import build_params
 
-__all__ = ["get_method", "resolve", "resolve_params"]
+__all__ = ["resolve", "resolve_params"]
 
 #: One table entry: the driver module (None until the slot gains one --
 #: the stage consumes those params directly), the light module holding
@@ -117,15 +117,3 @@ def resolve(slot: str, config: Any) -> Tuple[Any, Any]:
             f"methods.{slot} name {name!r} has no driver yet; the stage "
             "consumes its params directly")
     return importlib.import_module(entry.driver), params
-
-
-def get_method(slot: str, name: str) -> Any:
-    """The driver module registered under ``(slot, name)`` -- the raw
-    table lookup the stage fronts use when they already hold the name
-    (kept from P1a; the resolve pair above is the config-driven path)."""
-    entry = _ENTRIES.get((slot, name))
-    if entry is None or entry.driver is None:
-        known = [n for (s, n) in _ENTRIES if s == slot]
-        raise ConfigError(
-            f"unknown {slot} method {name!r}; known: {known}") from None
-    return importlib.import_module(entry.driver)

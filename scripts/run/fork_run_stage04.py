@@ -1,5 +1,11 @@
 """Fork a run directory at stage 5: new config, copied stage-0..4 products.
 
+HISTORICAL TOOL (the 2026-10-12 budget fork): written for the schema-v2
+era. Under schema v3 the old run's manifest compare refuses loudly by
+design -- reuse the v2-era checkout for v2-era runs, or use
+stages/assemble_reuse.py (which upgrades v2 source manifests) for a
+fresh v3 run from old products.
+
 Usage:
     set -a; . ./.env; set +a
     .venv/bin/python scripts/run/fork_run_stage04.py \

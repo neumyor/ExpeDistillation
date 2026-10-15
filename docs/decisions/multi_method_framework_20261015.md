@@ -90,7 +90,7 @@ methods:
 token_budgets: {...}
 ```
 
-- 冻结形式：补全默认值后的 `methods` 明文字典（现有 manifest 机制）。
+- 冻结形式：`methods` 明文字典（现有 manifest 机制）。**逐字冻结语义（评审 A 要求披露）**：缺省/空槽位补全为 `METHOD_DEFAULTS`；给定槽位按原文逐字冻结、不做按键合并（合并会把一个方法的默认参数串进另一个方法的槽位）；参数 dataclass 的缺省值因此**不物化**进 manifest——改 dataclass 默认值对已冻结 run 不可见，续跑比对只看字面。代价与取舍：v2 会物化，v3 不会；换来的是槽位语义完全归方法层所有。
 - **不做 `extends`**：消融矩阵用脚本生成完整 YAML。
 - **角色表不开放**（R5）：`core.config.MODEL_ROLES` 改为 `ROLE_DEFAULTS = {role: "strong"|"weak"}`（把写死的"answerer 用弱、其余用强"变成数据、消除与 `core/models.py:42` 重名）；角色名与预算校验不变。`None`（必须显式配置）档位等第一个使用者出现再加。
 - **考题依赖**（R2）：`authoring.exams` 缺省 true，所有现有配置语义逐字节不变；否决 `ensure_exam` 懒生成——它会改变候选集（G3 失败今天淘汰整段，`stage3_generation.py:284-300`），且破坏 K5 并行"同一波只读不可变考题"的前提（`curation.py:45`）。
@@ -140,11 +140,11 @@ token_budgets: {...}
 
 ## 8. 新增一种方法的清单（写入 AGENTS 第七节）
 
-1. 在 `methods/<slot>/<name>.py` 写驱动函数并用 `@method(slot, name, Params=..., check=...)` 注册；在 `methods/__init__.py` 显式 import。
+1. 槽位包（`methods/<slot>/__init__.py`）声明 Params dataclass 与可选 check；驱动文件放同包；注册 = `methods/registry.py` 表里加一行（(槽位, 名字) → (驱动, 参数类, check)）。**注意是纯数据表不是装饰器**（P1a 评审裁决：装饰器注册要求模块已加载，会破坏 exam 分发不加载 live 驱动的等价性）。
 2. 需要新 prompt：在 `prompts/` 新建模块并加进 `prompts/__init__` 的 import 清单（静态测试会检查）。
 3. 改已有方法的行为 = 注册新名字，不改旧名字的行为。
 4. 驱动只读自己的 Params 与实验级视图；落盘目录用常量声明在 `<stage_dir>/<method>/`。
-5. 写续跑测试 + 槽位契约测试自动覆盖。
+5. 写续跑测试；通用契约（未知键/缺键/类型）由 `build_params` 对新方法自动生效，方法特有约束（如 `n_attempts >= 2`）在 Params 的 `__post_init__`/check 里自写并用 `tests/unit/methods/test_params.py` 加 case。
 
 **思想实验（B）**：新 prompt 策略的 authoring（结构不变）只改 3 个文件；`curation: none` 完全隔离；embedding delivery 方法本身隔离，但需 P5 的一次性基础设施（非 chat 调用、新角色、TB 插件提供真实查询文本——今天 `Task.instruction` 只是任务名，`tb/plugin.py:450`）；新 provider 与方法框架正交。若新 authoring 改变 skill 结构或"一段一条"粒度，会触及跨槽位协议（ID、考题关联、live 分组、策展溯源），须走设计变更。
 

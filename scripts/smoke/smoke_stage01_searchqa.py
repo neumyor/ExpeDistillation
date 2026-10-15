@@ -27,7 +27,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from expedistill.core.config import MODEL_ROLES, ExperimentConfig
+from expedistill.core.config import ROLE_DEFAULTS, ExperimentConfig
 from expedistill.infra.runlock import RunLock
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
@@ -104,7 +104,7 @@ def main() -> int:
         # One handle per role (the config's role table is completed by
         # __post_init__), one shared client, max_tokens capped per the brief.
         handles = {}
-        for role in MODEL_ROLES:
+        for role in ROLE_DEFAULTS:
             model_name = config.models[role]
             handles[role] = make_handle(
                 role, model_name, client,

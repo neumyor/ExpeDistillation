@@ -761,3 +761,21 @@ def test_live_run_unknown_improve_rule_stops_stage0(monkeypatch, tmp_path):
     assert plugin.load_specs == []
     assert not (ctx.run_dir / "manifest.json").exists()
     assert not (ctx.run_dir / "stage0_summary.json").exists()
+
+
+def test_v2_run_directory_gets_the_maintenance_branch_hint(
+        monkeypatch, tmp_path):
+    """Schema v3 code cannot resume a v2-frozen run (the key sets differ
+    by design); the refusal points at the maintenance-branch rule instead
+    of burying the reason in the generic manifest diff (reviewer A)."""
+    plugin = _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config())
+    stage0_freeze.run(ctx)
+    manifest_path = ctx.run_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["config"]["schema_version"] = 2
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ConfigError, match="maintenance"):
+        stage0_freeze.run(ctx)
+    # Exactly the FIRST call's load: the refused resume loads nothing.
+    assert plugin.load_specs == [["t1", "t2", "t3"]]

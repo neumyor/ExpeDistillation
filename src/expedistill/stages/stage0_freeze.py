@@ -60,11 +60,13 @@ Prompt digests are deterministic: the method prompts
 ``task_prompt_name``, never whatever other plugins a process happened to
 import. A task prompt that is not registered in B2 is frozen as ``None``;
 real plugins register theirs at import, so only test fakes hit that case
-(and a later registration still trips the comparison). A ``live_run``
-acceptance config adds exactly the two lazily-registered G10/G11 prompt
-names to that set (``_prompt_digests``); an exam config's name set is
-byte-identical to the pre-live one, which is what keeps in-flight exam
-runs resumable.
+(and a later registration still trips the comparison). Since schema v3
+the freeze is FULL: every registered method prompt's digest is frozen on
+every run (the two G10/G11 prompts included -- they register at
+``prompts/__init__`` import like every other), so the name set is the
+same for every acceptance mode; a manifest listing digests this run never
+calls is noise, not risk. Two static tests (tests/unit/prompts/
+test_freeze.py) pin that nothing registers outside the frozen surface.
 
 Resume: the manifest is the unit of this stage, and B4's ``freeze`` IS the
 resume check -- a present manifest that matches is accepted (and nothing is

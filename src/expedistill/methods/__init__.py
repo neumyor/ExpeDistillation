@@ -12,12 +12,11 @@ graph: importing ``composites`` as a package has always pulled the live
 blocks in through ``composites/__init__`` -- the guarded invariant is
 the name set, not which modules happen to be loaded.)
 
-P1a keeps the table metadata-free: the config still speaks the v2 shape
-(core.config.acceptance_mode / skill_delivery), and the slots resolve
-the driver by that mode string. Params dataclasses and the check() hook
-arrive with the v3 schema switch (P1b).
+The config speaks the v3 methods slots (schema v3); resolving a slot
+validates its params (the slot's dataclass) and runs its check before
+any driver is imported.
 """
 
-from expedistill.methods.registry import get_method, resolve, resolve_params
+from expedistill.methods.registry import resolve, resolve_params
 
-__all__ = ["get_method", "resolve", "resolve_params"]
+__all__ = ["resolve", "resolve_params"]

@@ -1208,3 +1208,41 @@ def test_bank_level_live_to_live_reuse_discloses_no_live_digest_drift(
         "LIVE_RUN_ATTRIBUTION"] == prompts.digest("LIVE_RUN_ATTRIBUTION")
     assert source_manifest["prompt_digests"][
         "LIVE_SKILL_REVISION"] == prompts.digest("LIVE_SKILL_REVISION")
+
+
+def test_v2_source_manifest_is_upgraded_for_the_identity_walk(tmp_path):
+    """The assembler's v2-source branch (reviewer C's precondition 3): a
+    source run frozen under schema v2 -- the real TB runs are -- has its
+    manifest's config upgraded in place for the identity comparison, so a
+    matching v3 target assembles instead of drowning in key-set diffs.
+    The negative control: an UPGRADE-INCOMPATIBLE change (the model) is
+    still refused after the upgrade."""
+    source = build_source_run(tmp_path)
+    manifest_path = source.run_dir / "manifest.json"
+    manifest = read_json(manifest_path)
+    # Freeze the source as v2: revert the config to its v2 spelling.
+    v3_config = manifest["config"]
+    v2_config = dict(v3_config)
+    v2_config.pop("methods")
+    v2_config.update({
+        "K": 4, "segment_retry_limit": 2, "retry_limit": 2,
+        "bank_token_budget": 4096, "curation_rounds": 3,
+        "skill_delivery": {"mode": "whole_bank"},
+    })
+    v2_config["schema_version"] = 2
+    manifest["config"] = v2_config
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    config_path = write_reuse_config(tmp_path)
+    summary = assemble_reuse(
+        source.run_dir, config_path, tmp_path / "assembled")
+    assert summary["level"] == "bank"
+    # And the upgrade does not weaken the walk: a changed executor model
+    # on the SAME v2 source is still a refusal (one source, two
+    # assemblies -- build_source_run registers its plugin).
+    manifest["config"] = dict(
+        v2_config,
+        models=dict(v2_config["models"], executor_strong="other-strong"))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ConfigError, match="executor_strong"):
+        assemble_reuse(source.run_dir, config_path, tmp_path / "assembled2")

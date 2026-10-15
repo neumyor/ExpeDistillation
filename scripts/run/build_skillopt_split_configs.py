@@ -177,24 +177,24 @@ def extract_ids(skillopt_data: Path, benchmark: str) -> Dict[str, List[str]]:
     return out
 
 
-#: The skill_delivery section, identical in both generated configs (protocol
-#: v2 / retrieval split). min_score is a pre-registered PLACEHOLDER: it is
-#: frozen per campaign only after the calibration protocol runs on that
-#: campaign's own development slice (integration plan ruling 9), never
-#: inherited from another bank.
-SKILL_DELIVERY_LINES = [
-    "skill_delivery:",
-    "  # Retrieval-based delivery at test time (protocol v2). min_score",
+#: The delivery slot, identical in both generated configs (protocol v2 /
+#: retrieval split; schema v3 spelling). min_score is a pre-registered
+#: PLACEHOLDER: it is frozen per campaign only after the calibration
+#: protocol runs on that campaign's own development slice (integration
+#: plan ruling 9), never inherited from another bank.
+DELIVERY_LINES = [
+    "  # Retrieval-based delivery at test time. min_score",
     "  # 0.05 is a PLACEHOLDER, not frozen: before this campaign's full",
     "  # launch it must be calibrated on this benchmark's own development",
     "  # slice with the same protocol (integration plan, ruling 9 in",
     "  # docs/decisions/retrieval_delivery_tb_split_20261013.md) -- a",
     "  # value calibrated on another bank does not transfer (the IDF scale",
     "  # follows the bank).",
-    "  mode: retrieval",
-    "  top_k: 5",
-    "  max_categories: 3",
-    "  min_score: 0.05",
+    "  delivery:",
+    "    name: retrieval",
+    "    top_k: 5",
+    "    max_categories: 3",
+    "    min_score: 0.05",
 ]
 
 
@@ -241,15 +241,16 @@ def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
     lines.append("  executor_weak: qwen3.6-flash-distill")
     lines.append("n_attempts_strong: 3")
     lines.append("n_attempts_weak: 3")
-    lines.append("K: 5")
-    lines.append("segment_retry_limit: 2")
-    lines.append("retry_limit: 2")
+    lines.append("schema_version: 3")
+    lines.append("methods:")
+    lines.append("  segmentation: {K: 5, retry_limit: 2}")
+    lines.append("  acceptance: {name: exam, retry_limit: 2}")
     lines.append("# Pre-registered before this experiment started (2026-10-12): the budget is a")
     lines.append("# context-overflow safety valve, not a compression target; 4096 was a pilot")
     lines.append("# placeholder that a 100+ member bank mathematically cannot meet (merges")
     lines.append("# compress ~0.98). See docs/decisions/bank_token_budget_20261012.md.")
-    lines.append("bank_token_budget: 96000")
-    lines.append("curation_rounds: 3")
+    lines.append("  curation: {token_budget: 96000, rounds: 3}")
+    lines.extend(DELIVERY_LINES)
     lines.append("rules:")
     lines.append("  task_select: any_weak_failed")
     lines.append("  segment_select: strong_success_weak_failed")
@@ -259,7 +260,6 @@ def render_config(benchmark: str, ids: Dict[str, List[str]]) -> str:
     lines.append("  # registered under this name in blocks/rules.py (stage 0")
     lines.append("  # validates every rule name).")
     lines.append("  trajectory_select: strong2_weak2")
-    lines.extend(SKILL_DELIVERY_LINES)
     lines.append("model_options:")
     lines.append("  deepseek-v4-flash-0731--ali:")
     lines.append("    # Output budgets moved to token_budgets below (2026-10-12")

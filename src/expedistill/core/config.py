@@ -527,13 +527,6 @@ class ExperimentConfig:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def acceptance_mode(config: "ExperimentConfig") -> str:
-    """The stage-4 acceptance protocol a config selects: the acceptance
-    slot's method name (``exam`` unless the config names another). The
-    config loader completes the slot, so the name is always present."""
-    return config.methods["acceptance"].get("name", "exam")
-
-
 def upgrade_v2_config(data: Dict[str, Any]) -> Dict[str, Any]:
     """Map a schema-v2 CONFIG dict (a raw YAML mapping, or a frozen
     manifest's ``config`` entry) to the v3 shape. Pure stdlib, copy in /
