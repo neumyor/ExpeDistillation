@@ -1,6 +1,7 @@
 日期：2026-10-15
 一句话说明："执行—学习"闭环重构的整体方案（scope 级）：系统只有执行、学习两种阶段，阶段由模块组合而成，方法 = 阶段序列；取代 multi_method_framework_20261015.md 中"五槽位流水线"的组织方式。
 对应 log.md 条目：2026-10-15 执行—学习闭环重构方案（scope 级）。
+修订：2026-10-15 v2——第一轮三路评审（docs/reviews/execute_learn_plan_review_20261015_{A,B,C}.md，A 7 / B 4 / C 9 条偏移约束）后的修订版；裁决记录见 §10，字段与接口级细节见 docs/decisions/execute_learn_implementation_20261015.md。
 
 ---
 
@@ -12,7 +13,7 @@
 2. 阶段不是固定工序，而是**模块的组合**：执行 = 交付 + 执行方式 + 验收；学习 = 决策 + 找证据 + 写作 + 整理。
 3. **一种方法 = 一串阶段**。现有两种方法写作：exam = `D L A L A L A L C`，live_run = `D L B L B L C`（字母含义见 §4）。
 4. **验收只测量，不做决定**：它如实报告"哪些技能/任务有提升、证据是什么"；保留、修改、新增、删除全部由学习阶段的决策模块决定。
-5. 现有底层（core、infra、prompts、llm、benchmarks、blocks、组合积木 K1–K6 的大部分）基本不动；变化集中在"怎么把积木组织起来"这一层。
+5. 现有底层大部分不动：infra、prompts、llm、benchmarks、blocks、inject 与 K1/K2/K3/K5 的逻辑主体照旧；core 仅 models/ids 加字段（M1）；被重构的是组织层——K4/K6 拆成"测量/决策"、stages 换成相位序列驱动、methods 槽位换键集。
 
 ## 1. 为什么要改
 
@@ -47,10 +48,10 @@
 要点：
 
 - **模型是执行的参数**（强 / 弱），不是新的模块。
-- 交付和执行方式**正交**：任意组合都是合法的执行阶段（例如"检索 + 真做题做验收"无需新代码）。
-- **出题归伪执行**：考题是伪执行方式自己的私有产物，写作模块不再出题，`authoring.exams` 开关随之删除。
-- **泄题审计归伪执行**：它判断"这个技能版本对这道题是否泄题"，结果作为测量写进报告（泄题 = 本次不算数），不在验收里直接丢技能。
-- **只测变化的部分**：注入内容与上次测过时完全相同的单元，直接沿用上次的报告行，不重跑（按技能版本判断；与现有行为一致）。
+- 交付和执行方式**正交**：管件层面任意组合都是合法的执行阶段（例如"检索 + 真做题做验收"无需新代码）；新组合格子的**语义**可能需要新的具名测量或决策规则（如"打包 + 伪执行"的组级判卷），按具名规则流程加，不进框架。
+- **出题归伪执行**：考题是伪执行方式自己的私有产物，写作模块不再出题，`authoring.exams` 开关随之删除。出题**调用点**从学习单元挪到 A 发生在 M4（计入行为变化，进语义验收）；M2/M3 只搬函数不搬调用点，保证 golden 逐字节无 diff。
+- **泄题审计归伪执行**：它判断"这个技能版本对这道题是否泄题"，结果作为测量写进报告（泄题 = 该版作废、本轮算消耗），处置（最终轮泄题 → 删除；否则改写）归学习决策。
+- **不重跑已有测量**：跳过键**就是现行续跑键**，不是新的"版本判断"机制——裸答每道考题一次、泄题判定每 (技能, 版本) 一次、带技能作答每 (技能, 版本, 轮键) 一次、live 按轮仓完备性 + 冻结审计行字节等价（no-op guard 的现行判据）。
 
 ### 3.2 学习阶段 L：决策 + 找证据 + 写作 + 整理
 
@@ -78,9 +79,9 @@
 agentbrew 带一个参数 `merge_check`：
 
 - `exam`：合并后用来源技能的考题回归检验，不通过就撤销合并（exam 方法用；考题来自伪执行阶段 A）；
-- `none`：合并结果直接接受（live 方法用；live 全程不出题）。
+- `none`：合并结果直接接受（live 方法用；live 全程不出题）——注：该参数今天不存在（现状 K5 对两种方法一律跑回归考），是 M3 新造。
 
-两个版本都保留格式检查（技能类型不混合、合并后结构正确）与预算硬阀。配置加载时检查：`merge_check: exam` 但序列里没有伪执行阶段 → 直接报错。
+两个版本都保留格式检查（技能类型不混合、合并后结构正确）与预算硬阀。`merge_check: exam` 的回归考在合并产物诞生后、于学习阶段内部现场跑"弱模型答题 + 判卷"——这不是"学习调用执行"的违例：它共用伪执行的 K3 答题判卷原语，不跑 benchmark、不重复交付。配置加载时检查：`merge_check: exam` 但序列里没有伪执行阶段 → 直接报错。
 
 ## 4. 方法 = 阶段序列
 
@@ -99,18 +100,27 @@ agentbrew 带一个参数 `merge_check`：
 ### 4.2 配置写法（示意）
 
 ```yaml
-phases:
-  D:  {kind: execute, delivery: none,          execution: real,   models: [strong, weak], tasks: train}
-  A:  {kind: execute, delivery: per_skill,     execution: exam,   compare: bare_exam}
-  B:  {kind: execute, delivery: group_by_task, execution: real,   compare: D, improvement: strict_rate_gain, n_attempts: 3}
-  C:  {kind: execute, delivery: retrieval,     execution: real,   compare: D_test, tasks: test, top_k: 5}
-  L:  {kind: learn,   evidence: segment, author: distill_diagnose, curate: {name: agentbrew, merge_check: none}}
+# 示意；完整字段映射表（全局字段 vs 相位字段）以实施方案文档为准
 sequence: [D, L, B, L, B, L, C]
+phases:
+  D: {kind: execute, tasks: train, delivery: {name: none},
+      execution: {name: real, arms: [executor_strong, executor_weak]}}
+  A: {kind: execute, delivery: {name: per_skill},
+      execution: {name: exam}}                    # 内生对照：先裸答、再带技能答
+  B: {kind: execute, delivery: {name: group_by_task},
+      execution: {name: real, n_attempts: 3}, compare: {against: D, rule: strict_rate_gain}}
+  C: {kind: execute, tasks: test, delivery: {name: retrieval, top_k: 5},
+      execution: {name: real}, compare: {control: fresh_bare}}   # full 模式写 reuse_d_weak
+  L: {kind: learn, evidence: {name: segment, K: 5, retry_limit: 2},
+      author: {name: distill_diagnose}, curate: {name: agentbrew, merge_check: none}}
 ```
 
 - 阶段名是配置里的局部名字；模块名查纯数据注册表（沿用现有做法，按需加载）。
-- 序列与每个阶段的配置一起进 manifest 冻结——**序列就是实验身份**。
+- **模块参数一律嵌套**在模块名下（与 v3 methods 槽位同形，`build_params` 通用校验直接复用），不摊平到相位顶层。
+- 序列与每个阶段的配置一起进 manifest 冻结——**序列就是实验身份**（重命名局部名 = 新实验）。
+- `compare` 只引用序列中出现过的相位名；跨相位约束（如真执行 `n_attempts` ≤ 对照弱臂深度、`merge_check: exam` 需要序列含伪执行相位）进配置加载期检查。
 - `retry_limit` 之类的轮数参数由序列长度表达，不再是某个模块的私有参数。
+- 同一个局部名（如 L）在序列中出现多次时共用同一份配置；首个/中间/末尾的差异（要不要找证据、要不要整理）由驱动按输入与序列位置分支，不复制配置。
 
 ### 4.3 现有方法的映射
 
@@ -123,31 +133,54 @@ sequence: [D, L, B, L, B, L, C]
 2. **测量与决策分离**：验收只报告事实；所有改变技能库的动作只在学习阶段的决策模块里发生。
 3. **"给什么"与"怎么做"分离**：交付只决定注入内容，执行方式只决定怎么跑，二者正交。
 4. **一种学习，多种输入**：不为不同位置造不同的 L；差异全部来自输入和决策规则。
-5. **模块依赖只走接口**：学习模块不调用执行；合并检查需要的考题由序列里的伪执行阶段提供，配置加载时检查依赖是否满足。
-6. **技能身份与段解绑**：技能 ID 独立，"来源"字段记录它来自哪些轨迹 / 段；考题挂在技能上而非段上。这是数据对象变更，升 schema。
+5. **学习不发起真执行**：学习模块不跑 benchmark、不重复交付；`merge_check: exam` 需要的"答题 + 判卷"共用伪执行的 K3 原语（在合并产物诞生后现场跑）。考题由序列里的伪执行阶段提供，配置加载时检查依赖是否满足。
+6. **解绑落在 schema 层，ID 规则不变**：两种既有方法的技能 ID 派生规则不变（`make_skill_id` 照旧）；解绑通过新字段实现——Skill 加 `source_subtasks`（来源段列表，合并产物为来源的并集），Exam 加 `skill_id`（考题直接挂技能）。候选判定（`is_stage3_candidate`）仍按 ID 模式，不新增 kind 字段；未来"不切段"的方法按既有转型四步另立自己的 ID 方案。这是数据对象变更，升 schema。
 
 ## 6. 行为变化（有意的，需记录）
 
-- **exam 方法**：预期行为不变。出题失败时，原来在写作阶段整段作废，改为在 A 之后由决策删除该技能——最终技能库应相同，用 golden 按语义（最终库、测试指标、模型调用多重集）核对。
-- **live_run 方法**：两处有意变化——①不再因出题失败淘汰技能；②整理时不再因考题回归失败撤销合并。好处是少一批出题 / 答题 / 判卷调用。代价：新框架下的 live 结果与 TB-dev 正在跑的正式 run 不能逐一对上，比较时须注明。
+- **exam 方法**：预期行为不变（到协议层）。出题失败时，原来在写作阶段整段作废（技能不入库），改为技能先入库、A 出题失败后由决策删除——最终技能库相同；中间产物与模型调用**顺序**不同（出题调用挪到 A、逐技能串行循环变成按相位分批），逐字节 golden 必然变化，验收走预注册的语义准则（实施方案 §8）。"预期不变"只承诺到协议层——新旧框架的真实 run 不可能 run 级逐一对上。
+- **live_run 方法**：两处有意变化——①不再因出题失败淘汰技能；②整理时不再因考题回归失败撤销合并（merge_check: none）。好处是少一批出题 / 答题 / 判卷调用。代价：新框架下的 live 结果与 TB-dev 正在跑的正式 run 不能逐一对上，比较时须注明。
+- **行为保持（不是变化）的三项机制**，实现时必须落进决策/测量规则清单，不得丢失：no-op guard（改写后注入块与冻结审计行逐字节相同 → 不跑下一轮、直接淘汰）；weak_already_knows 零执行终态（基线全成功即短路）；空洞继承政策（live 轮 1 不继承轮 0 空洞；每轮 skip 含 D 弱臂空洞；full 模式 C 的对照臂空洞只能在 D 侧接受）。
 
 ## 7. 不变的部分
 
-- 底层各层（core、infra、prompts、llm、benchmarks、blocks）与执行原语 K1、切段 K2、判卷 K3、合并 K5 的主体不动，只改调用方。
-- 续跑契约（逐单元落盘、按确定 ID 跳过、manifest 逐字段比对、run 目录锁）不变；按阶段序列的序号组织子目录。
+- 底层各层（infra、prompts、llm、benchmarks、blocks、inject）不动；core 仅 models.py / ids.py 加字段与映射（M1）。K1 / K2 / K3 与 K5 的合并、分组、预算逻辑主体不动；**K4 与 K6 被拆成"测量 / 决策"两半——"主体不动"对它们不成立**（本就是本次重构的对象）。
+- 续跑契约（逐单元落盘、按确定 ID 跳过、manifest 逐字段比对、run 目录锁）不变；按相位序列的序号组织子目录。
+- 异常分类与处置（四类异常、修复预算、shortfall、阶段末抛错语义）不变。
 - 旧 run 继续在各自维护分支上续跑（AGENTS 六.1 规则）；新布局只用于新 run。
 
-## 8. 迁移路线（粗粒度）
+## 8. 迁移路线
 
 | 步骤 | 内容 | 验收 |
 |---|---|---|
-| M1 数据对象 | 技能与段解绑、考题挂技能、定义验收报告；schema 升版 | 测试全绿 |
-| M2 执行阶段 | 交付与 K1 合并为执行阶段；从 K4/K6 抽出"测量"部分作为验收模块；出题与泄题审计挪进伪执行 | 单阶段测试 + 续跑测试 |
-| M3 学习阶段 | 从 K4/K6 抽出"决策"；切段、归因、写作、改写、整理模块化；agentbrew 加 `merge_check` | 单阶段测试 + 续跑测试 |
-| M4 序列驱动 | 阶段序列驱动取代 stage0–6；配置新 schema 与转换脚本 | exam golden 语义一致；live 的两处变化逐项列出 |
+| **M0 决定与基线**（不改源码） | 方案修订版 + 实施方案（字段映射表、报告读取器规格、决策规则清单、失败处置表、标签映射、语义等价准则）落档；golden 基线即当前提交 | 实施方案三路评审通过 |
+| **M1 数据对象** | Skill 加 `source_subtasks`、Exam 加 `skill_id`、旧→新显式映射纯函数；对象 schema 升版；golden 同提交重生成 | 测试全绿 + golden diff 逐处披露（仅为新字段） |
+| **M2 执行相位抽取** | 交付驱动接 K1；从 K4 / K6 拆出测量核（**K6 去轮化**：轮序与 live 子目录布局归 live 方法的相位编排，测量核签名与轮数、目录无关）；出题 / 泄题函数搬进伪执行模块（**调用点不动**） | 测试全绿 + golden 逐字节无 diff |
+| **M3 学习相位抽取** | 决策规则、找证据、写作、merge_check 参数、报告读取器（对既有落盘工件的纯函数视图，不落盘不建新对象） | 测试全绿 + golden 逐字节无 diff |
+| **M4 序列驱动与 schema v4** | phases+sequence 配置、出题调用点挪进 A、相位序驱动取代 stage0–6、until_phase、标签映射、审计脚本 / 装配器（支持 v3 源）/ CLI / README / AGENTS / runbook / 拒载提示 / 转换器同步、golden 全量重生成 | 预注册语义准则 E1–E5 对归档 v3 基线全等；live 差异恰为披露的两项 |
 
-每步沿用三路评审协议（只审该步 diff 与验收证据）。
+每步沿用三路评审协议（只审该步 diff 与验收证据）；M2 / M3 是行为保持步骤，golden 必须逐字节无 diff。
 
 ## 9. 明确不做
 
-DAG / 依赖引擎；方法基类与类型化报告类层次；插件自动发现；新 hash / 审计机制；每轮整理（留给未来方法）；跨 run 的多轮闭环调度（序列可写长，但不做自动收敛判断）。
+DAG / 依赖引擎；方法基类与类型化报告类层次；插件自动发现；新 hash / 审计机制；决策规则注册表（决策是驱动内逻辑，只有用户可选的规则才具名，如 improvement）；每轮整理（留给未来方法）；跨 run 的多轮闭环调度（序列可写长，但不做自动收敛判断）。
+
+## 10. 第一轮三路评审的裁决记录（2026-10-15 v2）
+
+评审文档：docs/reviews/execute_learn_plan_review_20261015_{A,B,C}.md（A 7 / B 4 / C 9 条偏移约束）。裁决与落实位置：
+
+| # | 裁决 | 对应评审发现 |
+|---|---|---|
+| D1 | **ID 派生规则不变**（两种既有方法照旧），解绑只落 schema 层：Skill 加 `source_subtasks`、Exam 加 `skill_id`，消费方改读字段；候选判定仍按 ID 模式。理由：curate prompt 正文内嵌 skill_id、对象文件名、假模型回键全部随 ID 变，换 ID 使语义等价验证面爆炸；且"不切段"需求到时按转型四步另立 ID 方案即可 | C2 备选、B T-1/T-2、A6 |
+| D2 | **v4 装配器支持 v3 源**：upgrade_v3_config 纯函数 + 旧 KIND_DIRS 直读 + lineage 走 subtask_id 兜底（ID 未变，lineage 本就可用）。理由：跨版本复用冻结库是已成立的近期场景（tb21_split_reuse），拒绝旧源等于放弃该场景 | C7 选项 (a)、A5 |
+| D3 | **验收报告 = 对既有落盘工件的读取器**（纯函数聚合 attempts / 账本 / verdict 行 / 审计行 → 内存行），不落盘、不建新对象；续跑语义免费继承，不产生第二套真相 | B2、A 报告可导出性核查 |
+| D4 | **只有一张注册表**：沿用 methods/ 的纯数据表机制（(键) → (驱动, Params, check)，懒 import），键集从五槽位换成相位/模块；五槽位逐文件处置清单见实施方案 §3 | B1 |
+| D5 | **跳过语义 = 现行续跑键**（非新机制）；**K6 测量核去轮化**（轮序与 live 目录归相位编排） | A1/C3、B4 |
+| D6 | **迁移重切为 M0–M4**：M2/M3 golden 逐字节无 diff；M4 用语义准则对归档基线验收；golden 基线 = M0 时的提交 | C1/C8、A7 |
+| D7 | **标签从冻结序列派生**（pNN:名 形式，不再硬编码 STAGE_NAMES）；cli.summary 完备性检查改从 manifest 冻结序列推导；until_phase = 相位索引，每次启动仍从 p00 重放、逐单元跳过 | C9、A5 |
+| D8 | **原则 5 改为"学习不发起真执行"**：K3 答题判卷原语由伪执行与 merge_check 共用 | A2 |
+| D9 | **配置统一嵌套参数** + C 加 control 子句（fresh_bare / reuse_d_weak）+ 完整字段映射表（实施方案 §4）；跨相位约束进加载期检查 | B3/A3/A4/C6 |
+| D10 | **no-op guard / weak_already_knows / 空洞政策进规则清单**（行为保持，§6 第三条） | C4 |
+| D11 | **出题调用点挪进 A 发生在 M4**（M2/M3 只搬函数不搬调用点）；exam 的语义等价进 M4 验收 | C8 中间态选型 |
+
+琐细项（§0.5 与 §7 措辞、merge_check: none 为 M3 新造、C′ 与 whole_bank 同一实现、v4 转换器命名 `*_v4.yaml`、check_live_run 等校验在 v4 重新安家等）随实施方案与对应步骤落实。

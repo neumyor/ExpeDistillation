@@ -613,3 +613,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：用户指出五槽位流水线把"某一种做法的内部工序"当成了系统接口，并提出新组织方式：系统只有执行（技能库 + 任务 + 模型 → 新轨迹）与学习（旧库 + 验收结果 + 轨迹 → 新库）两种阶段，阶段由模块组合而成，方法 = 阶段序列（exam = D L A L A L A L C，live_run = D L B L B L C）。用户的两条设计决定：①验收只如实测量、不做决定，保留 / 修改 / 新增 / 删除的门在学习阶段内部；②agentbrew 分两个版本——靠考题回归决定是否合并（exam 用）与直接接受合并（live 用）。据此写成 scope 级方案：跨阶段只传技能库、轨迹集、验收报告；执行 = 交付 + 执行方式 + 验收，学习 = 决策 + 找证据 + 写作 + 整理且只有一种 L；出题与泄题审计归伪执行；技能身份与段解绑（升 schema）；exam 预期行为不变，live 有两处有意变化（不再因出题失败淘汰技能、不再因考题回归撤销合并）。尚未开始实现；本条对应 commit。
 
 工件：`docs/decisions/execute_learn_loop_20261015.md`（方案）
+
+## 2026-10-15 20:10 — 执行—学习方案第一轮三路评审、裁决与实施方案落档
+
+一段话摘要：scope 方案提交后启动三路独立评审（A 代码事实 7 条 / B 扩展性 4 条 / C 迁移 9 条偏移约束，全文 docs/reviews/execute_learn_plan_review_20261015_{A,B,C}.md）。三份高度交叉印证，关键裁决十一条（方案 §10）：D1 技能 ID 派生规则不变、解绑只落 schema 层（Skill.source_subtasks + Exam.skill_id，curate prompt 内嵌 skill_id 使换 ID 的等价验证面爆炸，且不切段需求可走转型四步另立 ID）；D2 v4 装配器支持 v3 源；D3 验收报告=对既有落盘工件的读取器（不落盘不建新对象）；D4 只保留一张注册表、五槽位逐文件处置；D5 跳过语义=现行续跑键、K6 测量核去轮化；D6 迁移重切 M0–M4（M2/M3 golden 逐字节无 diff，M4 语义验收）；D7 标签从冻结序列派生；D8 原则 5 改"学习不发起真执行"（K3 原语由伪执行与 merge_check 共用）；D9 配置统一嵌套 + C 加 control 子句 + 完整字段映射表；D10 no-op guard/weak_already_knows/空洞政策进规则清单（行为保持）；D11 出题调用点挪进 A 发生在 M4。据此修订方案 v2 并写出实施方案（字段表、注册表键集、配置 v4 全形状、报告读取器、决策规则清单、失败处置表、标签映射、预注册语义等价准则 E1–E5、M1–M4 逐步验收与多代理分工）。两项用户级裁决（ID 不变、装配器支持 v3 源）按自主决策授权选定并留痕，用户可推翻。尚未开始实现。
+
+工件：`docs/reviews/execute_learn_plan_review_20261015_{A,B,C}.md`（三份评审）、`docs/decisions/execute_learn_loop_20261015.md`（v2 修订）、`docs/decisions/execute_learn_implementation_20261015.md`（实施方案）、本条对应 commit
