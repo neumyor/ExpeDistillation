@@ -559,3 +559,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：P0 剩余两个子步完成。P0.3（commit 94eded0）：新建 composites/shortfall.py（接受空洞记录的读写，stage1/live 轮/装配工具三处副本合一）、composites/skill_status.py（discard_skill、stage-3 候选扫描、verdict 计数——两个验收驱动的逐字节重复，当初隔离只为保 exam 路径的冻结 prompt 名面，懒注册删除后理由消失）、benchmarks/aux.py（辅助指标接线，三个 stage 不再互相伸手）、blocks/tasks.py 收编 tasks_digest（stage0 与装配工具各一份副本）；core/ids 增加 is_stage3_candidate 谓词。P0.4：stage0 抽出纯函数 build_manifest（manifest 载荷只组装一次），assemble_reuse 整文件上移到 stages/（composites 不得 import 阶段层）、删除其 _prompt_digests 副本改用 build_manifest，AGENTS 目录树同步。每步 1900 测试全绿、golden 快照无 diff（行为不变的直接证据）。
 
 工件：`src/expedistill/composites/shortfall.py`、`src/expedistill/composites/skill_status.py`、`src/expedistill/benchmarks/aux.py`、`src/expedistill/stages/assemble_reuse.py`（自 composites 上移）、`src/expedistill/stages/stage0_freeze.py`（build_manifest）、`tests/unit/benchmarks/test_aux.py`、`tests/unit/stages/test_assemble_reuse.py`（随迁）、AGENTS.md、commit 94eded0、本条对应 commit
+
+## 2026-10-15 16:55 — P0 完成：run_units_disposed 取消，启动 P0 三评审
+
+一段话摘要：P0 最后一个计划项 run_units_disposed 按 2026-10-15 用户"简洁化"裁决重新评估后取消：三处（stage2/3/4-exam）各约 3 行 try/except、返回形状各异，抽象参数化成本高于重复收益，且 ModelOutputError 处置顺序本是各阶段续跑契约；取舍已写进决策文档 §2 与 §7 P0 行，并列入 P0 评审关注点（评审可推翻）。P0 至此完成：四个提交（f1b236a RunSettings、08c7985 resolve_plugin+write_skill prompt 名、94eded0 共享件下沉、edbe66e build_manifest+装配上移），每提交 1900 测试全绿、golden 快照零 diff。按协议 §10 启动三路独立评审（A 代码事实/行为等价、B 扩展性/反过度设计、C 迁移风险/可复现性）审 P0 全部 diff，意见留档 docs/reviews/multi_method_step_P0_review_20261015_{A,B,C}.md，通过后进 P1a。
+
+工件：`docs/decisions/multi_method_framework_20261015.md`（§2/§7 修订）、commit f1b236a、08c7985、94eded0、edbe66e、评审文件（见后）

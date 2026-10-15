@@ -38,7 +38,7 @@ cli (8)
 
 - **methods 只放驱动，不搬组合积木本体**（R1）：K4/K5/K6 留在 composites，崩溃注入测试的 patch 目标不变（避免"patch 打空、断言没发生的测试空转变绿"）。
 - 共享件下沉（S7）：shortfall 读写 → `composites/shortfall.py`；`discard_skill`/`_tally` → `composites/skill_status.py`；候选判定 → `core/ids`；aux 接线 → `benchmarks`；`tasks_digest` → `blocks/tasks`；`get_plugin` 统一负责导入插件包；stage0 冻结抽成纯函数 `build_manifest()`。`assemble_reuse` 上移到 stages 层复用它。
-- 失败处置共享原语（S8，收窄）：`run_units_disposed` 只做"infra 失败记账+收集、阶段末统一抛出、致命错误停派"；**ModelOutputError 的处置顺序本身是各方法的续跑契约**（stage3 先写终态行、exam 先丢弃 skill、live 先写组终态），由方法传回调，原语不替它决定。live_run 的组级/轮级处置不套此原语。
+- 失败处置共享原语（S8，收窄）——**2026-10-15 执行时按用户"简洁化"裁决取消**：三处（stage2/3/4-exam）各约 3 行 try/except、返回形状各异（字符串标签 vs 元组），抽象的参数化成本高于重复收益；ModelOutputError 的处置顺序本就是各阶段的续跑契约（stage3 先写终态行、exam 先丢弃 skill、live 先写组终态），保持各阶段本地。此取舍列入 P0 评审的关注点，评审可推翻。
 - `test_layering.py` 扩展：加入新层号；检查相对 import；方法驱动之间互不 import。
 
 ## 3. 方法接口（函数 + 注册元数据，不建基类）
@@ -107,7 +107,7 @@ token_budgets: {...}
 | 步骤 | 内容 | manifest | 验收 |
 |---|---|---|---|
 | **P-1 准备**（不改源码） | 当前 TB run 完结后：在 TB-dev 打 tag `schema-v2-final`；在飞/历史 run 建维护分支 + 独立 venv；在 tag 上生成 **golden 产物矩阵**：{exam, live_run} × {whole_bank, retrieval} × {full, split} + 崩溃续跑变体，假模型驱动，永不重新生成 | — | — |
-| **P0 纯重构** | frozen `RunContext`+`RunSettings`；S7 下沉、`build_manifest`、`assemble_reuse` 上移；`get_plugin` 统一导入；收窄版 `run_units_disposed`；`write_skill` 接收 prompt 名；只合并真正等价的重复（名字像但语义不同的不合并；K6/K4 刻意隔离的 helper 等 golden 建好后再合） | 不变 | 测试全绿（golden 快照为套件成员，无 diff） |
+| **P0 纯重构** | frozen `RunContext`+`RunSettings`；S7 下沉、`build_manifest`、`assemble_reuse` 上移；`get_plugin` 统一导入；`write_skill` 接收 prompt 名；只合并真正等价的重复（名字像但语义不同的不合并；K6/K4 刻意隔离的 helper 等 golden 建好后再合）。~~收窄版 `run_units_disposed`~~ 执行时取消（见 §2，简洁化裁决） | 不变 | 测试全绿（golden 快照为套件成员，无 diff） |
 | **P1a 按名分发** | 建 `methods/` 层与注册表；迁 acceptance、delivery 驱动；扩展 `test_layering` | **不变** | 测试全绿；golden 无 diff（manifest 不变由既有 manifest golden 测试守住） |
 | **P1b 唯一一次 schema 切换** | v3 配置形状 + Params/check（含 `n_attempts ≤ n_attempts_weak`，放这一步因为会让 `test_stage0.py:133/719/744` 夹具失败）；`authoring.exams: true` 写入形状；`ROLE_DEFAULTS`；全量 prompt 冻结 + 两条静态测试；删懒注册与 `_MANIFEST_OPTIONAL_FIELDS`；`upgrade_v2` 纯函数；一次性配置转换脚本（结果写新文件名）；stage0 旧 schema 提示；同步 scripts/ 与 runbook；审计脚本改为按 manifest 判断模式、live 子树缺失报 ERROR 而非 INFO（`audit_live_run.py:605-610`） | 切换 | 除 manifest 外产物与 golden 一致；`configs/experiments/` 全部 v2 配置升级后的 v3 manifest 人工审定一次；prompt 名集与 digest 等于 v2 golden |
 | **P4 新协议**（按需、预注册） | `curation` 槽位 + `none`；放开 `authoring.exams: false` + 集中冲突校验；authoring 第二写法（一出现就做） | 新实验 | 每个新方法自带续跑测试 |
