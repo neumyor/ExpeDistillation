@@ -191,7 +191,7 @@ def check_group_terminals(
         audit: Audit, store: Store, groups: Dict[str, List[Skill]],
         verdict_rows: Dict[Tuple[Any, ...], Dict[str, Any]],
         attribution_rows: Dict[Tuple[Any, ...], Dict[str, Any]],
-        attr_failures: Dict[Tuple[Any, ...], Dict[str, Any]],
+        exhausted_g10_keys: Set[Tuple[Any, ...]],
         rev_failures: List[Dict[str, Any]]) -> None:
     for task_id, members in sorted(groups.items()):
         stored = {m.skill_id: store.load("skills", m.skill_id, Skill)
@@ -217,9 +217,10 @@ def check_group_terminals(
 
         # An exhausted G10 budget terminalizes the whole group (the
         # discards land BEFORE the receipt line, so exhaustion plus a
-        # pending member means an interrupted exhaustion).
-        exhausted_g10 = attr_failures.get(
-            (task_id, 0), {}).get("exhausted")
+        # pending member means an interrupted exhaustion). The keys come
+        # from an any-across-lines read of the failure ledger: the flag
+        # rides the last line, never the first.
+        exhausted_g10 = (task_id, 0) in exhausted_g10_keys
 
         if decided is not None:
             direction, reason = decided
@@ -347,7 +348,8 @@ def check_round_stores(
                 # entry guard's zero-execution short-circuit); every other
                 # verdict needs its frozen evidence.
                 if (verdict is not None
-                        and verdict.get("verdict") != "weak_already_knows"):
+                        and verdict.get("verdict")
+                        not in ZERO_EXECUTION_VERDICTS):
                     audit.add(
                         ERROR, "round-stores",
                         f"{task_id} round {round_}: verdict row without a "
@@ -363,10 +365,17 @@ def check_round_stores(
                         ERROR, "round-stores",
                         f"{task_id} round {round_}: unexpected stored unit "
                         f"{unit}")
+            verdict = verdict_rows.get((task_id, round_))
+            zero_exec = (verdict is not None
+                         and verdict.get("verdict") in ZERO_EXECUTION_VERDICTS)
             missing = [u for u in expected
                        if u not in stored_units and u not in skip]
-            if missing:
-                verdict = verdict_rows.get((task_id, round_))
+            if missing and not zero_exec:
+                # A zero-execution terminal (weak_already_knows,
+                # live_injection_overflow, live_undetermined) judges
+                # without executing: an empty round store is its expected
+                # state, not drift (the three-reviewer round's fix -- the
+                # audit used to flag legal overflow groups as drifted).
                 audit.add(
                     INFO if verdict is None else ERROR, "round-stores",
                     f"{task_id} round {round_}: {len(missing)} unit(s) "
@@ -376,7 +385,7 @@ def check_round_stores(
                             "refuses incomplete rounds, so the store "
                             "drifted)"))
             stored_here = [u for u in expected if u in stored_units]
-            if len(stored_here) + len(skip) != len(expected):
+            if not zero_exec and len(stored_here) + len(skip) != len(expected):
                 audit.add(
                     ERROR, "round-stores",
                     f"{task_id} round {round_}: stored {len(stored_here)} + "
@@ -618,8 +627,14 @@ def audit_run(run_dir: Path, n_attempts: Optional[int] = None) -> Audit:
         read_jsonl(live_dir / VERDICTS), "task_id", "round")
     attribution_rows = _first_row_per_key(
         read_jsonl(live_dir / ATTRIBUTIONS), "task_id", "round")
-    attr_failures = _first_row_per_key(
-        read_jsonl(live_dir / ATTRIBUTION_FAILURES), "task_id", "round")
+    # The exhausted flag rides the LAST failure line of a (task, round)
+    # (the try-0 line lands first with exhausted=False), so exhaustion is
+    # an any-across-lines question -- a first-row read is always False and
+    # the whole exhausted-G10 branch below was dead code (reviewer A).
+    exhausted_g10_keys = {
+        (row.get("task_id"), row.get("round"))
+        for row in read_jsonl(live_dir / ATTRIBUTION_FAILURES)
+        if row.get("exhausted")}
     rev_failures = read_jsonl(live_dir / REVISION_FAILURES)
     audit_rows: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
     for round_ in (0, 1):
@@ -627,7 +642,7 @@ def audit_run(run_dir: Path, n_attempts: Optional[int] = None) -> Audit:
             audit_rows.setdefault((row.get("task_id"), round_), row)
 
     check_group_terminals(audit, store, groups, verdict_rows,
-                          attribution_rows, attr_failures, rev_failures)
+                          attribution_rows, exhausted_g10_keys, rev_failures)
     check_round_stores(audit, run_dir, groups, verdict_rows, audit_rows,
                        stage1_holes, n_attempts)
     check_ledgers(audit, live_dir, verdict_rows, attribution_rows)
@@ -801,6 +816,83 @@ def _build_fake_run(root: Path) -> Path:
     survivor.status = "discarded"
     survivor.discard_reason = "live_no_improvement"
     store.save(survivor, "skills")
+
+    # A second task whose round-0 injection overflowed the budget: a
+    # zero-execution terminal -- a verdict row carrying the verdict key,
+    # a frozen audit row, an EMPTY round store, and the member discarded
+    # live_injection_overflow. The audit must read the empty store as
+    # the expected state of this terminal, not as drift (the scenario
+    # the three-reviewer round added after the audit's false positive).
+    task2 = ids.make_task_id("tb", "t2")
+    for attempt in range(n_attempts):
+        store.save(_fake_trajectory(
+            ids.make_trajectory_id(task2, "weak", attempt), "failure"),
+            "trajectories")
+    member2 = _fake_group_skill(task2, 0)
+    store.save(member2, "skills")
+    row2 = _frozen_row(task2, 0,
+                       [{"skill_id": member2.skill_id, "version": 1}],
+                       [member2.content])
+    _append_jsonl_raw(_round_dir(run_dir, 0) / INJECTION_AUDIT, row2)
+    _append_jsonl_raw(run_dir / LIVE_SUBTREE / VERDICTS, {
+        "schema": "live-verdict-v1", "task_id": task2,
+        "round": 0, "rule": "strict_rate_gain",
+        "baseline": {"valid": 3, "success": 0},
+        "live": {"valid": None, "success": None}, "better": False,
+        "verdict": "live_injection_overflow",
+        "injection_tokens": row2["injection_tokens"],
+        "judged_with_shortfall": False, "aux": None,
+    })
+    overflowed = store.load("skills", member2.skill_id, Skill)
+    overflowed.status = "discarded"
+    overflowed.discard_reason = "live_injection_overflow"
+    store.save(overflowed, "skills")
+
+    # A third task whose G10 budget exhausted: the round-0 miss verdict
+    # landed, both repair tries failed (the exhausted flag rides the LAST
+    # failure line, never the first), and the group went terminal as
+    # model_output_error. The audit must take the exhausted branch (any-
+    # across-lines read of the flag) and stay silent -- before the fix
+    # the first-row read made the branch dead code and this legal terminal
+    # drew a "compare the ledgers by hand" WARN while a tampered member
+    # passed clean (reviewer A).
+    task3 = ids.make_task_id("tb", "t3")
+    for attempt in range(n_attempts):
+        store.save(_fake_trajectory(
+            ids.make_trajectory_id(task3, "weak", attempt), "failure"),
+            "trajectories")
+    member3 = _fake_group_skill(task3, 0)
+    store.save(member3, "skills")
+    row3 = _frozen_row(task3, 0,
+                       [{"skill_id": member3.skill_id, "version": 1}],
+                       [member3.content])
+    _append_jsonl_raw(_round_dir(run_dir, 0) / INJECTION_AUDIT, row3)
+    _append_jsonl_raw(run_dir / LIVE_SUBTREE / VERDICTS, {
+        "schema": "live-verdict-v1", "task_id": task3,
+        "round": 0, "rule": "strict_rate_gain",
+        "baseline": {"valid": 3, "success": 0},
+        "live": {"valid": 3, "success": 0}, "better": False,
+        "injection_tokens": row3["injection_tokens"],
+        "judged_with_shortfall": False, "aux": None,
+    })
+    for attempt in range(n_attempts):
+        Store(_round_dir(run_dir, 0)).save(_fake_trajectory(
+            ids.make_trajectory_id(task3, "weak", attempt), "failure",
+            [{"skill_id": member3.skill_id, "version": 1}]), "trajectories")
+    _append_jsonl_raw(run_dir / LIVE_SUBTREE / ATTRIBUTION_FAILURES, {
+        "schema": "live-repair-failure-v1", "task_id": task3, "round": 0,
+        "skill_id": None, "skill_version": None, "try_index": 0,
+        "exhausted": False, "message": "first try bad json",
+    })
+    _append_jsonl_raw(run_dir / LIVE_SUBTREE / ATTRIBUTION_FAILURES, {
+        "schema": "live-repair-failure-v1", "task_id": task3, "round": 0,
+        "skill_id": None, "skill_version": None, "try_index": 1,
+        "exhausted": True, "message": "second try bad json",
+    })
+    exhausted = store.load("skills", member3.skill_id, Skill)
+    exhausted.status = "discarded"
+    exhausted.discard_reason = "model_output_error"
+    store.save(exhausted, "skills")
     return run_dir
 
 
@@ -872,6 +964,25 @@ def self_test() -> int:
                   "not caught")
             return 1
         print("self-test: invented shortfall unit caught")
+
+        # Tamper 4: flip the exhausted-G10 group's member to accepted ->
+        # the exhausted branch must flag it (before the any-across-lines
+        # fix this whole branch was dead code and the tamper passed).
+        task3 = ids.make_task_id("tb", "t3")
+        exhausted_id = ids.make_skill_id(ids.make_subtask_id(
+            ids.make_trajectory_id(task3, "strong", 0), 0))
+        exhausted_skill = store.load("skills", exhausted_id, Skill)
+        exhausted_skill.status = "accepted"
+        exhausted_skill.discard_reason = None
+        store.save(exhausted_skill, "skills")
+        audit = audit_run(run_dir)
+        if not any(exhausted_id in f["message"]
+                   and "G10 budget exhausted" in f["message"]
+                   for f in audit.errors()):
+            print("SELF-TEST FAIL: tamper 4 (tampered exhausted-G10 "
+                  "member) not caught")
+            return 1
+        print("self-test: tampered exhausted-G10 member caught")
     print("self-test: all checks passed")
     return 0
 

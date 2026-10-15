@@ -177,6 +177,44 @@ _ROUNDS = (0, 1)
 _ALL_SUCCESS_SAFE_RULES = frozenset({"strict_rate_gain",
                                      "first_success_gain"})
 
+#: Hard char budgets on the G10 / G11 trajectory-view inputs (review fix
+#: 2026-10-14, three-reviewer round; re-anchored 2026-10-15 by reviewer C's
+#: envelope accounting). The views are otherwise unbounded: the pilot's
+#: real mteb group rendered 562k chars across three views (~140k
+#: est-tokens), and a context overflow comes back as 400/413 -- a
+#: permanent provider refusal that is neither a repair-budget item nor an
+#: InfrastructureError, so the first failed group with long trajectories
+#: would hard-stop the whole stage (and re-hit it on every resume).
+#: 140k chars targets the REQUEST ENVELOPE, not just the input: ~35k
+#: est-tokens, calibrated with the endpoint's measured low-estimate
+#: factor (~1.38) to ~48k real input tokens, plus the author/rewriter
+#: roles' max_tokens=65536 lands the whole request at ~120k tokens --
+#: within the largest request envelope this endpoint has ever accepted
+#: (~119k) whether or not it counts max_tokens against the window.
+#: Clipping keeps each view's head and tail (the tail is where terminal-
+#: benchmark failures actually show) and marks the elided middle. The
+#: values are pre-registered in the runbook and deliberately not
+#: config keys: they are a fender, not an experimental variable (same
+#: discipline as the ViewRules constants in the benchmark plugins).
+_LIVE_VIEWS_BUDGET_CHARS = 140_000
+_FAILURE_VIEW_BUDGET_CHARS = 80_000
+
+#: Marker inserted where a view was clipped (both budget constants feed
+#: _clip_view; the marker's own length is accounted for in the clip).
+_ELIDED_NOTE = "\n[... {n} chars elided to fit the attribution view budget ...]\n"
+
+
+def _clip_view(text: str, budget: int) -> str:
+    """Clip one rendered trajectory view to ``budget`` chars, keeping the
+    head (setup) and tail (where TB failures evidence themselves) and
+    marking the elided middle. A no-op under budget."""
+    if len(text) <= budget:
+        return text
+    head = max(1, int(budget * 0.6))
+    note = _ELIDED_NOTE.format(n=len(text) - budget)
+    tail = max(0, budget - head - len(note))
+    return text[:head] + note + text[len(text) - tail:]
+
 
 # ---------------------------------------------------------------------------
 # Paths and small readers
@@ -802,9 +840,12 @@ def attribute_group(
     baseline_summary = "\n".join(
         f"attempt {traj.attempt_index}: {traj.status}"
         for traj in baseline_trajectories)
+    round_trajs = _round_trajectories(store, task_id, round_)
+    per_view_budget = _LIVE_VIEWS_BUDGET_CHARS // max(1, len(round_trajs))
     live_views = "\n\n".join(
-        render_trajectory_view(traj, view_rules)
-        for traj in _round_trajectories(store, task_id, round_))
+        _clip_view(render_trajectory_view(traj, view_rules),
+                   per_view_budget)
+        for traj in round_trajs)
     audit = _require_audit_row(store, round_, task_id)
 
     for try_index in range(len(failures), _ATTRIBUTION_ATTEMPTS):
@@ -934,8 +975,11 @@ def apply_revisions(
             "attribute the group before applying its plan")
     failed = [traj for traj in _round_trajectories(store, task_id, round_)
               if traj.status == "failure"]
+    per_view_budget = _FAILURE_VIEW_BUDGET_CHARS // max(1, len(failed))
     failure_view = "\n\n".join(
-        render_trajectory_view(traj, view_rules) for traj in failed)
+        _clip_view(render_trajectory_view(traj, view_rules),
+                   per_view_budget)
+        for traj in failed)
     recorder = UnitFailureRecorder(
         Path(run_dir) if run_dir is not None else store.run_dir)
 

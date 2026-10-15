@@ -14,7 +14,12 @@ The module-top import below is a runtime guarantee, not style: the two
 prompt names are deliberately absent from ``prompts/__init__.py`` (lazy
 registration keeps the manifest's frozen prompt-name set stable for
 in-flight exam runs), so importing this module is what registers them --
-a caller that bypasses stage 0 cannot hit PromptNotFoundError.
+a caller that bypasses stage 0 cannot hit PromptNotFoundError. Note the
+exact claim: what stays intact for exam runs is the FROZEN NAME SET (the
+snapshot takes every prompt name at import time, before any live module
+loads, and stage 0's golden tests pin it) -- not the module graph, since
+importing the ``composites`` package does pull this module in through
+``composites/__init__``'s module export.
 
 Scope kept out of this module on purpose (decision section 2.3): the
 marker-preservation check on a revised skill (``skill_markers(new) ==

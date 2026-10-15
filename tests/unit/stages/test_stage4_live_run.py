@@ -402,6 +402,37 @@ def test_revision_then_round1_pass_accepts(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Mixed terminal: G10 deletes one member, the revision passes round 1 --
+# a finished group must not be reported as "pending"
+# ---------------------------------------------------------------------------
+
+def test_delete_plus_round1_pass_reports_mixed_outcome(
+        tmp_path, monkeypatch):
+    def behave(task, block):
+        return "success" if "Revised." in block else "failure"
+
+    ctx, store, plugin, skills = build_env(
+        tmp_path, monkeypatch, behave=behave,
+        author=author_plan(lambda skill_id: "delete"
+                           if skill_id == skills[0].skill_id
+                           else "revise"),
+        rewriter=rewriter_append(), contents=(MARKED, MARKED))
+
+    summary = stage4_live_run.run(ctx)
+
+    deleted = stored_skill(store, skills[0])
+    survivor = stored_skill(store, skills[1])
+    assert (deleted.status, deleted.discard_reason) == (
+        "discarded", "live_revision_deleted")
+    assert survivor.status == "accepted"
+    # The group is fully terminal with both fates: "pending" (the old
+    # report for this shape) would tell the operator work is still owed.
+    detail = summary["group_details"][TASK1]
+    assert detail["outcome"] == "mixed"
+    assert detail["discard_reasons"] == {"live_revision_deleted": 1}
+
+
+# ---------------------------------------------------------------------------
 # All keep: the no-op guard discards without a second sample
 # ---------------------------------------------------------------------------
 

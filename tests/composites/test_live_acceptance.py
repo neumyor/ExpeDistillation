@@ -761,6 +761,48 @@ def test_judge_aux_scorer_without_baseline_counts_is_code_bug(tmp_path):
 # attribute_group
 # ---------------------------------------------------------------------------
 
+def test_clip_view_keeps_head_and_tail_under_budget():
+    """The clip keeps the head and tail of an over-budget view (the tail
+    is where terminal-benchmark failure evidence lives), marks the
+    elided middle, and never exceeds the budget."""
+    text = "A" * 600 + "B" * 600 + "C" * 600
+    clipped = la._clip_view(text, 700)
+    assert len(clipped) <= 700
+    assert clipped.startswith("A")
+    assert clipped.endswith("C")
+    assert "chars elided to fit the attribution view budget" in clipped
+    assert la._clip_view("short view", 700) == "short view"   # no-op
+
+
+def test_attribution_views_are_clipped_to_budget(tmp_path, monkeypatch):
+    """Three long-trajectory views are clipped per-view against the
+    joined budget: the author's user prompt carries the elision marker
+    for every one, and the attribution row still lands normally. Without
+    the clip a context overflow comes back as a permanent 400/413 that
+    neither repair budget nor the stage catches, hard-stopping the run."""
+    store, skills = seeded_run(tmp_path)
+    rs = round_store(store, 0)
+    for attempt in range(N_ATTEMPTS):
+        traj = make_traj(attempt, "failure")
+        traj.steps = [Step(action=f"cmd {attempt}-{i}",
+                           observation="x" * 400)
+                      for i in range(40)]
+        rs.save(traj, "trajectories")
+    monkeypatch.setattr(la, "_LIVE_VIEWS_BUDGET_CHARS", 2_000)
+    author = make_fake_handle("author", [
+        plan_script([(s.skill_id, "keep", "") for s in skills])])
+
+    row = attribute_group(
+        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
+        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
+        author_handle=author, view_rules=None, run_dir=store.run_dir)
+
+    assert row is not None and row["schema"] == "live-attribution-v1"
+    prompt = author.client.calls[0]["user"]
+    assert (prompt.count("chars elided to fit the attribution view budget")
+            == N_ATTEMPTS)
+
+
 def attribution_run(tmp_path, author_script, *, plan_actions=None,
                     baseline=("failure",) * N_ATTEMPTS,
                     live=("failure",) * N_ATTEMPTS,
@@ -1037,6 +1079,42 @@ def test_apply_revise_prompt_carries_report_and_failure_views(tmp_path):
     assert "do x 0" in prompt                      # the failed attempt's view
     assert MARKED_A in prompt
     assert WEAK_PROFILE in prompt
+
+
+def test_apply_failure_view_is_clipped_to_budget(tmp_path, monkeypatch):
+    """The revision call's failure view obeys its own hard budget: the
+    rewriter's prompt carries the elision marker and the revision still
+    lands (the same permanent-400 overflow the G10 clip guards against)."""
+    skills_ids = group_skill_ids()
+    store, skills = seeded_run(tmp_path, contents=(MARKED_A,))
+    rs = round_store(store, 0)
+    for attempt in range(N_ATTEMPTS):
+        traj = make_traj(attempt, "failure")
+        traj.steps = [Step(action=f"cmd {attempt}-{i}",
+                           observation="y" * 400)
+                      for i in range(40)]
+        rs.save(traj, "trajectories")
+    append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
+                 / la.ATTRIBUTIONS_LEDGER,
+                 {"schema": "live-attribution-v1", "task_id": TASK_ID,
+                  "round": 0, "diagnosis": "the steps were skipped",
+                  "skill_actions": [
+                      {"skill_id": skills_ids[0], "version": 1,
+                       "action": "revise",
+                       "problem": "the verify step is missing"}],
+                  "injection_block_sha256": "frozen"})
+    monkeypatch.setattr(la, "_FAILURE_VIEW_BUDGET_CHARS", 700)
+    rewriter = make_fake_handle("rewriter",
+                                [revision_script(MARKED_A_REVISED)])
+
+    outcomes = apply_revisions(
+        store=store, task_id=TASK_ID, round_=0, rewriter_handle=rewriter,
+        weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
+
+    assert outcomes[0]["outcome"] == "revised"
+    prompt = rewriter.client.calls[0]["user"]
+    assert (prompt.count("chars elided to fit the attribution view budget")
+            == N_ATTEMPTS)
 
 
 def test_apply_marker_failure_rides_the_budget(tmp_path):

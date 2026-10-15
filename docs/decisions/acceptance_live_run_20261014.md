@@ -95,7 +95,7 @@ stage1 弱臂裸跑（主 store 只读；已接受弱臂空洞继承为 skip）
 - 基线加载：stage6 `_bare_stage1_trajectories` 同款形态直读主 store，绝不重跑。
 - 基线全成功守卫（`success == valid` → 零执行终态）限定：仅当注册规则在率 1.0 基线下数学上不可能返回 True 时触发（当前两条规则均满足）；README 注明仅 strict 族适用，防注册表扩展时守卫成为暗坑。
 - 归因/修订经 `run_units(ctx.workers)` 并行（单元 = 组/skill，各写各的账本行，`append_jsonl` 已线程+flock 串行化）。
-- summary：`stage4_summary.json` 同名，顶层保留 `accepted`/`discarded`(reason→count)/`infra_failed`/`processed_this_call`，新增 `mode`/`improvement_rule`/逐组明细（双轮计数 + verdict + injection_tokens）/**`infra_missing`/`infra_shortfall_accepted`**（pipeline.py:367-376 的 ledger 旗标链路依赖它们）。README 写明双模式形状差异（live 的 `infra_failed` 元素是 task id 而非 skill id；无 `skipped_missing_exam`）。
+- summary：`stage4_summary.json` 同名，顶层保留 `accepted`/`discarded`(reason→count)/`infra_failed`/`processed_this_call`，新增 `mode`/`improvement_rule`/逐组明细（双轮计数 + verdict + injection_tokens）/**`infra_missing`/`infra_accepted`/`infra_shortfall_accepted`**（前两个按轮分组；pipeline.py:367-376 的 ledger 旗标链路依赖它们）。README 写明双模式形状差异（live 的 `infra_failed` 元素是 task id 而非 skill id；无 `skipped_missing_exam`）。
 
 ### 2.3 归因（G10）与修订（G11）
 
@@ -120,7 +120,7 @@ stage1 弱臂裸跑（主 store 只读；已接受弱臂空洞继承为 skip）
 
 **账本行 schema**（审查 R1-P6/R2-P10/R3-M10 的显式化）：
 
-- `live_run/verdicts.jsonl` 行：`{schema, task_id, round, rule, baseline: {valid, success}, live: {valid, success}, better, injection_tokens, judged_with_shortfall, aux}`——`judged_with_shortfall` 标记该轮是否带已接受空洞判定（shortfall 判定的事后可辨识性）；`aux` = 该 task 的 aux 计数（**裁决 11 的落点**：声明了 aux_metric 的 benchmark 并列记录 aux_scorer 计数、不参与判据，未声明时缺省 null）。**零执行终态同样落 verdict 行**（weak_already_knows / live_injection_overflow / live_undetermined 以 verdict 字段承载，计数侧记 null）——审计的完整事实源；
+- `live_run/verdicts.jsonl` 行：`{schema, task_id, round, rule, baseline: {valid, success}, live: {valid, success}, better, injection_tokens, judged_with_shortfall, aux}`，**零执行终态行多一个 `verdict` 字段**（取 weak_already_knows / live_injection_overflow / live_undetermined，键的存在即行种类的判别式）——`judged_with_shortfall` 标记该轮是否带已接受空洞判定（shortfall 判定的事后可辨识性；含 stage1 继承的空洞与本轮自接受的空洞两种来源，行上不区分）；`aux` = 该 task 的 aux 计数（**裁决 11 的落点**：声明了 aux_metric 的 benchmark 并列记录 aux_scorer 计数、不参与判据，未声明时缺省 null）。**零执行终态同样落 verdict 行**（计数侧记 null）——审计的完整事实源；
 - `live_run/attributions.jsonl` 行：`{schema, task_id, round, diagnosis, skill_actions: [{skill_id, version, action, problem}], injection_block_sha}`——`version` 由 K6 append 时从 store 读入补记（模型不提供）；
 - `live_run/attribution_failures.jsonl` / `revision_failures.jsonl`：每次修复重试失败一行、耗尽标 exhausted，预算跨崩溃持久（K4 `rewrite_failures` 先例）。
 

@@ -775,6 +775,14 @@ def run(ctx: Any) -> Dict[str, Any]:
             outcome = "accepted"
         elif members and all(status == "discarded" for status in statuses):
             outcome = "discarded"
+        elif members and all(
+                status != "pending" for status in statuses):
+            # Fully terminal but mixed (e.g. one member deleted by the G10
+            # plan or exhausted in G11 while the survivors passed round 1):
+            # the group is done, it is not pending, and "accepted"/
+            # "discarded" would each hide half the truth (three-reviewer
+            # round fix -- this used to report "pending").
+            outcome = "mixed"
         else:
             outcome = "pending"
         reasons: Dict[str, int] = {}

@@ -8,10 +8,15 @@ accepts a task's whole skill group by real execution instead (K1 injects
 the group into the weak executor, two pinned rounds, G10/G11
 attribution/revision on a miss); its driver is ``stages/stage4_live_run.py``
 and the per-group phase functions are K6 (``composites.live_acceptance``).
-The dispatch at the top of :func:`run` is a LAZY import on purpose: an
-exam run must not even load the live modules (their import registers two
-extra prompts), so the exam path stays byte-for-byte the old one and the
-frozen-manifest surface cannot drift.
+The dispatch at the top of :func:`run` is a LAZY import: the exam DRIVER
+never loads the live modules, so its frozen-manifest surface cannot drift.
+(The hard guarantee is one layer down: the live prompt names are absent
+from ``METHOD_PROMPT_NAMES`` -- they register only when a live module is
+imported, and stage 0 freezes the name set before any live path loads.
+An exam process that imports ``composites`` as a package does pull the
+live modules in through ``composites/__init__``; the frozen name set --
+and the golden tests pinning it -- is what stays intact, not the module
+graph.)
 
 Layer-6 wiring only: the K4 loop itself is ``composites.acceptance.accept_skill``
 (which also owns the per-skill disk IO and resume); this stage enumerates the

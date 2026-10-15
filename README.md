@@ -438,7 +438,9 @@ Attempt（作答记录）
                                   live{valid,success}, better, injection_tokens,
                                   judged_with_shortfall, aux}——aux 是裁决 11 的并列
                                  辅助计数槽（未声明辅助指标为 null，不参与判据）；
-                                 零执行终态（weak_already_knows / live_injection_overflow /
+                                 judged_with_shortfall 的空洞两种来源（stage1 继承的
+                                 与本轮自接受的）在行上不区分；零执行终态
+                                 （weak_already_knows / live_injection_overflow /
                                  live_undetermined）同样落行：计数与 better 记 null、
                                  终态名进 verdict 字段（键的存在即行种类的自描述）
     attributions.jsonl            G10 归因行，append-once、首判为准：
@@ -450,7 +452,9 @@ Attempt（作答记录）
                                  预算跨崩溃持久（K4 rewrite_failures 先例）
     revision_failures.jsonl      G11 逐 skill 的同款失败账本（该 skill 的预算独立）
     round00/                      轮 0 的独立 store（内部同 stage1_baseline/trajectories/
-                                 布局；K1 的 failed_units.jsonl 也在这里），加两个轮内文件：
+                                 布局——注意该目录名只是 store 布局复用，**内容是本轮
+                                 带 skill 注入的 live 轨迹**，裸基线在主 store；
+                                 K1 的 failed_units.jsonl 也在这里），加两个轮内文件：
                                    injection_audit.jsonl          每 task 一行（成员
                                                                  [skill_id, version]
                                                                  列表 + D9 块 sha256 +
@@ -766,6 +770,12 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
   产物——学生实际看到的执行 prompt（TB 下 Task.instruction 只是任务名，指令经
   live_views 首步上下文间接可见，这一限制如实记录在 prompt 设计说明里）；G10 输出
   契约不含版本号——版本由 K6 在账本追加时从 store 读入补记（模型输出不可信）。
+  **视图输入预算（2026-10-14 三评审修复）**：`live_views`（组内全部轨迹视图拼接）
+  与 G11 的 `failure_view` 受 K6 的硬字符预算约束（`_LIVE_VIEWS_BUDGET_CHARS`/
+  `_FAILURE_VIEW_BUDGET_CHARS`，值预注册于 runbook）——超预算的单条视图保留头尾
+  （尾部是 TB 失败证据所在）、中间以省略标记折叠。没有预算时上下文超限返回
+  400/413（永久拒绝，不归修复预算也不归 infra），首个带长轨迹的失败组会把整个
+  阶段硬停且续跑原地再撞（pilot 实测一组三视图 ≈562k 字符 ≈14 万估算 token）。
   **修订纪律**（硬约束，写进两条 prompt）：修订必须是可迁移的 skill——通用模式与
   命令族合法，逐字抄本题的具体数值/文件名/实体名禁止。决定性理由：retrieval 交付
   会把库成员检索注入到**其他** task 上，任务局部化的 skill 对别的 task 是主动有害的；
