@@ -63,3 +63,19 @@ def test_crash_resume_matches_golden(label, tmp_path):
         run_crash_and_resume(config, tmp_path / "run", crash_at)
         resumed = snapshot(tmp_path / "run")
     assert_resume_equivalent(_golden(label), resumed)
+
+
+def test_ignore_keys_comparison_covers_only_the_named_keys():
+    # The pre-registered P1b criterion, on a real golden: a tampered
+    # manifest.json passes under ignore=("manifest.json",) and fails
+    # without it -- the helper can never hide drift elsewhere.
+    import pytest
+
+    from tests.golden.harness import assert_equal_ignoring
+
+    golden = _golden("exam-whole_bank-full")
+    tampered = json.loads(json.dumps(golden))
+    tampered["manifest.json"]["tasks"] = 999
+    assert_equal_ignoring(golden, tampered, ignore=("manifest.json",))
+    with pytest.raises(AssertionError):
+        assert_equal_ignoring(golden, tampered, ignore=())

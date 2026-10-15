@@ -502,6 +502,24 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def assert_equal_ignoring(golden: Dict[str, Any], fresh: Dict[str, Any],
+                           ignore: Tuple[str, ...]) -> None:
+    """Full snapshot equality except the named top-level keys.
+
+    The pre-registered criterion for steps that deliberately change the
+    frozen manifest (the P1b schema switch): every artifact EXCEPT the
+    ignored keys must stay byte-identical, so the step's reviewers can
+    read exactly what changed and trust that nothing else did. Keys are
+    snapshot paths (e.g. ``("manifest.json",)``); a missing key on
+    either side is a difference like any other.
+    """
+    for key in sorted(set(golden) | set(fresh)):
+        if key in ignore:
+            continue
+        if golden.get(key) != fresh.get(key):
+            raise AssertionError(f"artifact drift outside {ignore}: {key}")
+
+
 def _is_crash_row(record: Dict[str, Any]) -> bool:
     """True for the simulated crash's own bookkeeping rows (the harness's
     in-process crash gets recorded as a failed attempt; a real process
