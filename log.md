@@ -565,3 +565,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：P0 最后一个计划项 run_units_disposed 按 2026-10-15 用户"简洁化"裁决重新评估后取消：三处（stage2/3/4-exam）各约 3 行 try/except、返回形状各异，抽象参数化成本高于重复收益，且 ModelOutputError 处置顺序本是各阶段续跑契约；取舍已写进决策文档 §2 与 §7 P0 行，并列入 P0 评审关注点（评审可推翻）。P0 至此完成：四个提交（f1b236a RunSettings、08c7985 resolve_plugin+write_skill prompt 名、94eded0 共享件下沉、edbe66e build_manifest+装配上移），每提交 1900 测试全绿、golden 快照零 diff。按协议 §10 启动三路独立评审（A 代码事实/行为等价、B 扩展性/反过度设计、C 迁移风险/可复现性）审 P0 全部 diff，意见留档 docs/reviews/multi_method_step_P0_review_20261015_{A,B,C}.md，通过后进 P1a。
 
 工件：`docs/decisions/multi_method_framework_20261015.md`（§2/§7 修订）、commit f1b236a、08c7985、94eded0、edbe66e、评审文件（见后）
+
+## 2026-10-15 17:50 — P1a：方法驱动层落地，按名分发（manifest 不变）
+
+一段话摘要：P1a 完成。新增 methods/ 第 6 层（stages 升 7、cli 升 8）：注册表是纯数据表（(slot, name) → 驱动模块路径，解析时才 import 驱动——exam 进程依旧永不加载 live 模块，冻结 prompt 名面不变），acceptance 槽迁入 exam.py 与 live_run.py 两个驱动（stages/stage4_acceptance.py 变为"按名取驱动并调用"的薄前端，各留常量于 methods/acceptance 包），delivery 槽新建 whole_bank.py（整库标量注入，保住 skills_injected 的库指纹记账）与 retrieval.py（逐任务 top-k + 原子审计写）。live 驱动上移前先把 stage-1 空洞路径下沉 composites/shortfall.py（methods 不得 import stages）。test_layering 扩展：层表更新、相对 import 纳入检查、新增"方法驱动互不 import"。测试随驱动迁至 tests/unit/methods/acceptance/（无 shim，patch 目标同步迁移）。1901 测试全绿；golden 十测试全过 = 产物逐字节不变、manifest 不变（P1a 验收达成）。执行中发现并修复两处：注册表先返回函数后改返回驱动模块（retrieval 需要 resolve+write_audit 两个入口）；_selected_references 必须照原实现接受 Mapping 与 Skill 两种形态（我从大纲重写时丢了 Mapping 分支，测试当场抓住）。
+
+工件：`src/expedistill/methods/`（registry.py、acceptance/{__init__,exam,live_run}.py、delivery/{__init__,whole_bank,retrieval}.py）、`src/expedistill/stages/stage4_acceptance.py`（薄前端）、`src/expedistill/stages/stage6_test.py`（delivery 分发）、`src/expedistill/composites/shortfall.py`（stage-1 路径下沉）、`tests/test_layering.py`、`tests/unit/methods/acceptance/{test_exam,test_live_run}.py`（随迁）、AGENTS.md、README.md、本条对应 commit

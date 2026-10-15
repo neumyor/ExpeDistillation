@@ -1,6 +1,6 @@
 """Stage 4, live_run mode: accept a task's skill group by real execution.
 
-The live_run companion of stage4_acceptance (which dispatches here by the
+The live_run acceptance driver (stages/stage4_acceptance.py dispatches here by
 config's acceptance mode): instead of a text exam, one acceptance unit is one
 train task's GROUP of pending stage-3 candidates. The group universe comes
 from K6's ``pending_groups``; one round injects the whole group into the weak
@@ -135,8 +135,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store, append_jsonl, read_jsonl, write_json
 from expedistill.prompts import get as get_prompt
-from expedistill.stages import stage1_baseline
-from expedistill.stages.stage4_acceptance import STAGE4_DIR, SUMMARY_FILENAME
+from expedistill.methods.acceptance import STAGE4_DIR, SUMMARY_FILENAME
 
 __all__ = ["SHORTFALL_NAME", "run"]
 
@@ -438,7 +437,7 @@ def run(ctx: Any) -> Dict[str, Any]:
     _, aux_scorer = aux_wiring(config.benchmark)
     plugin = get_plugin(config.benchmark)
     view_rules = plugin.view_rules
-    stage1_holes = stage1_baseline.accepted_infra_shortfall(ctx.run_dir)
+    stage1_holes = shortfall.stage1_accepted_unit_ids(ctx.run_dir)
     recorder = UnitFailureRecorder(ctx.run_dir)
 
     # -- finalization sweep: finish any commit a crash left hanging -----
@@ -779,7 +778,7 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
     sharing one tree would make round 1 inherit round 0's cursor)."""
     config = ctx.config
     benchmark = config.benchmark
-    stage1_holes = stage1_baseline.accepted_infra_shortfall(ctx.run_dir)
+    stage1_holes = shortfall.stage1_accepted_unit_ids(ctx.run_dir)
     accepted = shortfall.read_unit_ids(la.round_dir(store, round_) / SHORTFALL_NAME)
     skip_unit_ids: Set[str] = set()
     for task_id in task_ids:

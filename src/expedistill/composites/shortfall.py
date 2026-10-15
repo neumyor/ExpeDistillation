@@ -22,6 +22,22 @@ __all__ = ["SHORTFALL_NAME", "read_unit_ids", "write_unit_ids"]
 #: The record's file name wherever it lives (stage 1 dir, round dir).
 SHORTFALL_NAME = "accepted_infra_shortfall.json"
 
+#: Stage 1's record lives beside its trajectories (the run layout's
+#: ``stage1_baseline/``); the path helpers keep that layout knowledge
+#: with the record, so the stage-4 live driver can read stage 1's holes
+#: without importing the stage-1 module (layers: methods < stages).
+STAGE1_DIR = "stage1_baseline"
+
+
+def stage1_shortfall_path(run_dir) -> Path:
+    """Where stage 1's accepted holes are recorded."""
+    return Path(run_dir) / STAGE1_DIR / SHORTFALL_NAME
+
+
+def stage1_accepted_unit_ids(run_dir) -> List[str]:
+    """Stage 1's accepted hole unit ids (sorted; empty when none)."""
+    return read_unit_ids(stage1_shortfall_path(run_dir))
+
 
 def read_unit_ids(path: Path) -> List[str]:
     """The record's accepted unit ids (sorted; empty when it never existed).

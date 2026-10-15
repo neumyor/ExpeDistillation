@@ -43,7 +43,9 @@ from expedistill.infra.store import Store, append_jsonl, read_json, read_jsonl
 from expedistill.infra.store import write_json
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts import PROMPTS, PromptSpec
-from expedistill.stages import stage4_live_run
+# The driver moved to methods/ (P1a); the alias keeps the test's
+# monkeypatch targets and call sites reading as before.
+from expedistill.methods.acceptance import live_run as stage4_live_run
 from dataclasses import replace
 from expedistill.stages.context import RunSettings, StageContext
 

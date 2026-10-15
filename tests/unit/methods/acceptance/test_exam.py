@@ -28,6 +28,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.llm import json_script, make_fake_handle
+from expedistill.methods.acceptance import exam as exam_driver
 from expedistill.stages import stage4_acceptance
 from dataclasses import replace
 from expedistill.stages.context import RunSettings, StageContext
@@ -771,7 +772,7 @@ def test_workers4_runs_units_concurrently(tmp_path, monkeypatch):
         store.save(skill, "skills")
         return skill
 
-    monkeypatch.setattr(stage4_acceptance, "accept_skill", stub_accept)
+    monkeypatch.setattr(exam_driver, "accept_skill", stub_accept)
     ctx, _ = make_ctx(tmp_path, answerer=make_fake_handle("weak", []),
                       judge=make_fake_handle("strong", []),
                       rewriter=make_fake_handle("strong", []))
@@ -926,7 +927,7 @@ def test_exam_configs_run_the_exam_path_not_the_live_driver(
     """No key, ``{}`` and an explicit ``{mode: exam}`` are all the exam: the
     real K4 path runs (the summary keeps its exam shape) and the live
     driver is never entered."""
-    from expedistill.stages import stage4_live_run
+    from expedistill.methods.acceptance import live_run as stage4_live_run
     calls = []
     monkeypatch.setattr(
         stage4_live_run, "run",
@@ -950,7 +951,7 @@ def test_exam_configs_run_the_exam_path_not_the_live_driver(
 
 
 def test_live_run_config_dispatches_to_the_live_driver(tmp_path, monkeypatch):
-    from expedistill.stages import stage4_live_run
+    from expedistill.methods.acceptance import live_run as stage4_live_run
     seen = []
     monkeypatch.setattr(
         stage4_live_run, "run",
@@ -981,6 +982,7 @@ from expedistill.core.ids import (
 from expedistill.core.models import Exam, Skill
 from expedistill.infra.store import Store
 from expedistill.llm import json_script, make_fake_handle
+from expedistill.methods.acceptance import exam as exam_driver
 from expedistill.stages import stage4_acceptance
 from dataclasses import replace
 from expedistill.stages.context import RunSettings, StageContext
@@ -1015,7 +1017,7 @@ ctx = StageContext(
     workdir_root=tmp / "work")
 summary = stage4_acceptance.run(ctx)
 from expedistill import prompts
-live_driver_loaded = "expedistill.stages.stage4_live_run" in sys.modules
+live_driver_loaded = "expedistill.methods.acceptance.live_run" in sys.modules
 # The frozen name set is the import-time snapshot: driving the exam stage
 # must not grow it, even though the two live prompts ARE registered in the
 # process (the composites package exports K6, whose import registers
@@ -1046,19 +1048,19 @@ def test_an_exam_run_never_imports_the_live_modules(tmp_path):
     # The in-process control: the exam run works and the live driver, if
     # absent from sys.modules, stays absent (the subprocess is the real
     # assertion; this one catches a module-level import sneaking in).
-    import expedistill.stages.stage4_live_run  # noqa: F401 - loading it IS the point
-    sys.modules.pop("expedistill.stages.stage4_live_run")
+    import expedistill.methods.acceptance.live_run  # noqa: F401 - loading it IS the point
+    sys.modules.pop("expedistill.methods.acceptance.live_run")
     try:
         ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
                           rewriter=make_fake_handle("strong", []),
                           auditor=make_fake_handle("auditor",
                                                    [clean_verdict()]))
         stage4_acceptance.run(ctx)
-        assert ("expedistill.stages.stage4_live_run"
+        assert ("expedistill.methods.acceptance.live_run"
                 not in sys.modules), "the exam path imported the live driver"
     finally:
         importlib_reload = __import__("importlib").import_module
-        importlib_reload("expedistill.stages.stage4_live_run")
+        importlib_reload("expedistill.methods.acceptance.live_run")
 
     completed = subprocess.run(
         [sys.executable, "-c", _EXAM_RUN_SUBPROCESS],

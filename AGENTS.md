@@ -139,16 +139,20 @@ src/expedistill/
     acceptance.py         K4
     curation.py           K5
     live_acceptance.py    K6 live-run 验收（阶段 4 的 live_run 模式；逐组阶段函数库，
-                          轮序编排归 stages/stage4_live_run.py）
-  stages/                 第 6 层：阶段 0–6 的流程
+                          轮序编排归 methods/acceptance/live_run.py）
+  methods/                第 6 层：方法驱动（按名注册，见 methods/registry.py）
+    acceptance/           阶段 4 的验收驱动：exam.py（K4 文本考试）、live_run.py
+                          （轮栅栏 + K1 大批 + summary；exam 进程永不加载 live 模块）
+    delivery/             阶段 6 的注入驱动：whole_bank.py（整库）、retrieval.py
+                          （逐任务 top-k + 检索审计）
+  stages/                 第 7 层：阶段 0–6 的流程（薄分发 + 写摘要/阶段末抛错）
     stage0_freeze.py … stage6_test.py
-    stage4_live_run.py    阶段 4 的 live_run 模式驱动（轮栅栏 + K1 大批 + summary；
-                          exam 分发在 stage4_acceptance.py 顶部懒 import）
+    stage4_acceptance.py  阶段 4 前端：按名取验收驱动并调用
     pipeline.py           按实验模式（split / full）串起各阶段
     assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run；
                           上移到本层是为了复用 stage0 的 build_manifest（组合层
                           不得 import 阶段层）
-  cli.py                  第 7 层：命令行入口（唯一的方法入口）
+  cli.py                  第 8 层：命令行入口（唯一的方法入口）
 ```
 
 积木编号与文件的对应以 README 第一节为准；新增积木时两处同时更新。
@@ -163,8 +167,9 @@ src/expedistill/
 | 3 | `benchmarks` | 第 0–2 层 |
 | 4 | `blocks` | 第 0–3 层 |
 | 5 | `composites` | 第 0–4 层 |
-| 6 | `stages` | 第 0–5 层 |
-| 7 | `cli` | 全部 |
+| 6 | `methods` | 第 0–5 层 |
+| 7 | `stages` | 第 0–6 层 |
+| 8 | `cli` | 全部 |
 
 1. **只能向下依赖**，函数内的 import 也算。`tests/test_layering.py` 静态检查，
    不通过不得提交（沿用 SkillExpand 的同名测试）。

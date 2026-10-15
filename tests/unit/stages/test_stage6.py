@@ -34,6 +34,7 @@ from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.inject import bank_reference
 from expedistill.llm.fake import make_fake_handle
+from expedistill.methods.delivery import retrieval
 from expedistill.stages import stage6_test
 from dataclasses import replace
 from expedistill.stages.context import RunSettings, StageContext
@@ -383,7 +384,7 @@ def test_retrieval_mode_selects_and_injects_per_task(tmp_path, monkeypatch):
 
     # The audit names the full resolution of every test task, one line each.
     audit = read_jsonl(ctx.run_dir / stage6_test.TEST_DIR
-                       / stage6_test.RETRIEVAL_AUDIT_NAME)
+                       / retrieval.RETRIEVAL_AUDIT_NAME)
     assert [row["task_id"] for row in audit] == ["t1", "t2"]
     t1_row, t2_row = audit
     assert t1_row["routed"] == ["debugging", _BANK_SKILL_B]
@@ -428,7 +429,7 @@ def test_retrieval_below_threshold_runs_bare(tmp_path, monkeypatch):
 
     # The audit kept the full ranking even though the gate failed.
     audit = read_jsonl(ctx.run_dir / stage6_test.TEST_DIR
-                       / stage6_test.RETRIEVAL_AUDIT_NAME)
+                       / retrieval.RETRIEVAL_AUDIT_NAME)
     assert len(audit) == 2
     assert all(row["selected"] == [] and row["threshold_passed"] is False
                and row["scores"] for row in audit)
@@ -439,7 +440,7 @@ def test_retrieval_audit_is_overwritten_not_appended(tmp_path, monkeypatch):
         "mode": "retrieval", "top_k": 1, "max_categories": 2,
         "min_score": 0.0})
     audit_path = (ctx.run_dir / stage6_test.TEST_DIR
-                  / stage6_test.RETRIEVAL_AUDIT_NAME)
+                  / retrieval.RETRIEVAL_AUDIT_NAME)
     # A stale row an earlier resolution left behind: dispatch replaces the
     # whole file, never appends under it.
     audit_path.parent.mkdir(parents=True, exist_ok=True)
@@ -466,7 +467,7 @@ def test_whole_bank_delivery_writes_no_retrieval_audit(tmp_path, monkeypatch):
     plugin = RecordingPlugin()
     summary = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
     assert not (ctx.run_dir / stage6_test.TEST_DIR
-                / stage6_test.RETRIEVAL_AUDIT_NAME).exists()
+                / retrieval.RETRIEVAL_AUDIT_NAME).exists()
     reference = bank_reference(_bank_rows())
     assert summary["bank_reference"] == reference
     bank_store = Store(ctx.run_dir / "stage6_test" / "bank")

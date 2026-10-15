@@ -86,25 +86,21 @@ change F and hence the bank, so with-bank runs made now could be measured
 against the wrong bank.
 """
 
-import json
-import os
-import tempfile
-from collections.abc import Mapping
 from pathlib import Path
 from typing import (
-    Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple,
+    Any, Collection, Dict, List, Optional, Sequence,
 )
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.base import Task
 from expedistill.blocks.metrics import compute_task_metrics, summarize
-from expedistill.blocks.retrieve import derive_categories, select_skills
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import Store, read_json, write_json
-from expedistill.inject import bank_reference, format_skills_block
+from expedistill.methods import get_method
+from expedistill.inject import bank_reference
 from expedistill.stages import stage1_baseline
 
 __all__ = ["run"]
@@ -112,9 +108,6 @@ __all__ = ["run"]
 #: Directory inside the run for everything stage 6 produces (README section 2).
 TEST_DIR = "stage6_test"
 SUMMARY_NAME = "stage6_summary.json"
-#: The per-task retrieval resolution audit (decision 15): one line per
-#: test task, overwritten in full before the with-bank dispatch.
-RETRIEVAL_AUDIT_NAME = "retrieval_audit.jsonl"
 #: The durable per-arm accepted-hole record (module docstring).
 ACCEPTED_SHORTFALL_NAME = "accepted_infra_shortfall.json"
 _ARMS = ("with_bank", "control")
@@ -146,104 +139,7 @@ def _arm_store(ctx: Any, arm: str) -> Store:
     return Store(Path(ctx.run_dir) / TEST_DIR / arm)
 
 
-def _selected_references(selected: Sequence[Any]) -> List[Dict[str, Any]]:
-    """The injection record of each selected skill: id and version.
 
-    The per-task ``skills_injected`` shape (decision 13: a NEW shape -- the
-    field is ``Any`` and carried the bank digest until now):
-    ``[{"skill_id": ..., "version": ...}, ...]``, in selection order. The
-    selected records are bank rows (mappings) or Skill objects; both are
-    accepted the way ``blocks.retrieve`` accepts them.
-    """
-    references: List[Dict[str, Any]] = []
-    for record in selected:
-        if isinstance(record, Mapping):
-            references.append(
-                {"skill_id": record["skill_id"],
-                 "version": record.get("version", 1)})
-        else:
-            references.append(
-                {"skill_id": record.skill_id, "version": record.version})
-    return references
-
-
-def _resolve_per_task_delivery(
-        ctx: Any, test_tasks: Sequence[Task], bank: Sequence[Any],
-) -> Tuple[Callable[[Task], Tuple[Any, str]], List[Dict[str, Any]]]:
-    """Resolve every test task's retrieval injection once (decision 3).
-
-    ``derive_categories`` runs once over the bank; ``select_skills`` runs
-    once per task instruction. The returned resolver only READS the
-    finished mapping, so K1's per-unit lookups (one per task and attempt)
-    never re-retrieve. Returns the resolver plus the audit rows (one per
-    task, task-id order): the routed categories, the full ``scores``
-    ranking (kept even when the gate fails -- decision 15), the selected
-    ``[{"skill_id", "version"}]`` manifest, ``threshold_passed`` and the
-    full ``categories`` mapping. A task below ``min_score`` resolves to
-    ``([], "")``: a bare run whose ``skills_injected`` is ``[]``, never
-    confused with the control's ``None``.
-    """
-    delivery = ctx.config.skill_delivery
-    categories = derive_categories(bank)
-    resolved: Dict[str, Tuple[Any, str]] = {}
-    rows: List[Dict[str, Any]] = []
-    for task in sorted(test_tasks, key=lambda t: t.task_id):
-        result = select_skills(
-            task.instruction, bank, categories,
-            top_k=delivery["top_k"],
-            max_categories=delivery["max_categories"],
-            min_score=delivery["min_score"])
-        selected = _selected_references(result["selected"])
-        resolved[task.task_id] = (
-            selected, format_skills_block(result["selected"]))
-        rows.append({
-            "task_id": task.task_id,
-            "routed": result["routed"],
-            "scores": result["scores"],
-            "selected": selected,
-            "threshold_passed": result["threshold_passed"],
-            "categories": categories,
-        })
-
-    def skills_for_task(task: Task) -> Tuple[Any, str]:
-        try:
-            return resolved[task.task_id]
-        except KeyError:
-            raise CodeBugError(
-                f"task {task.task_id!r} has no retrieval resolution: the "
-                "per-task mapping was built over a different task set"
-            ) from None
-
-    return skills_for_task, rows
-
-
-def _write_retrieval_audit(path: Path,
-                           rows: Sequence[Dict[str, Any]]) -> None:
-    """Overwrite the retrieval audit with one canonical JSON line per task.
-
-    A full rewrite on every call (decision 15): the file always mirrors the
-    current resolution and can never accumulate a stale row from an
-    earlier dispatch. Atomic (temp file + rename, B3's pattern) so a crash
-    mid-write leaves the previous file intact instead of a torn ledger.
-    """
-    payload = "".join(
-        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
-        for row in rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
-        raise
 
 
 def _expected_units(ctx: Any, test_tasks: Sequence[Task]) -> Dict[str, int]:
@@ -371,7 +267,8 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     the summary keys are the same in both delivery modes.
     """
     bank = ctx.store.bank()
-    skills_block = format_skills_block(bank)
+    # The summary's bank_reference names the WHOLE bank either way (the
+    # retrieval arm's per-task selection lives in the retrieval audit).
     reference = bank_reference(bank)
     model_name = ctx.config.models["executor_weak"]
     handle = ctx.handle("executor_weak")
@@ -412,17 +309,16 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         dispatch_stagger=ctx.run_settings.k1_stagger,
         skip_unit_ids=frozenset(accepted["with_bank"]),
     )
-    if ctx.config.skill_delivery.get("mode") == "retrieval":
-        resolver, audit_rows = _resolve_per_task_delivery(
-            ctx, test_tasks, bank)
-        # Before dispatch, overwritten in full (decision 15): the audit
-        # names the injection this dispatch is about to render.
-        _write_retrieval_audit(
-            Path(ctx.run_dir) / TEST_DIR / RETRIEVAL_AUDIT_NAME, audit_rows)
-        bank_kwargs["skills_for_task"] = resolver
-    else:
-        bank_kwargs["skills_injected"] = reference
-        bank_kwargs["skills_block"] = skills_block
+    # The delivery driver (methods/delivery/) builds the with-bank arm's
+    # injection: whole_bank keeps the scalar path (one injection for the
+    # whole arm), retrieval resolves per task and audits itself before
+    # dispatch (decision 15: the audit names the injection about to render).
+    delivery = get_method(
+        "delivery", ctx.config.skill_delivery.get("mode", "whole_bank"))
+    method_kwargs, audit_rows = delivery.resolve(ctx, bank, test_tasks)
+    if audit_rows is not None:
+        delivery.write_audit(ctx.run_dir, audit_rows)
+    bank_kwargs.update(method_kwargs)
     with_bank = batch_execute(**bank_kwargs)
 
     # -- control arm --------------------------------------------------------

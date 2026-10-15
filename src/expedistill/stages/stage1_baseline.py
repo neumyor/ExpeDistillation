@@ -95,19 +95,14 @@ __all__ = [
 
 _SUMMARY_NAME = "stage1_summary.json"
 
-#: The durable accepted-hole record (module docstring), beside B3's
-#: ``stage1_baseline/trajectories/``.
-ACCEPTED_SHORTFALL_PATH = ("stage1_baseline", "accepted_infra_shortfall.json")
-
-
 def accepted_shortfall_path(run_dir: Path) -> Path:
     """Where stage 1's accepted infra holes are recorded."""
-    return Path(run_dir).joinpath(*ACCEPTED_SHORTFALL_PATH)
+    return shortfall.stage1_shortfall_path(run_dir)
 
 
 def accepted_infra_shortfall(run_dir: Path) -> List[str]:
     """Stage 1's accepted hole unit ids (sorted; empty when none)."""
-    return shortfall.read_unit_ids(accepted_shortfall_path(run_dir))
+    return shortfall.stage1_accepted_unit_ids(run_dir)
 
 
 def write_accepted_infra_shortfall(run_dir: Path,
