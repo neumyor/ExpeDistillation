@@ -29,45 +29,18 @@ infrastructure failed". The L1 repair method itself is not migrated (it is
 that system's method, not this design's).
 """
 
-import importlib
 from pathlib import Path
 from typing import Any, Optional, Union
 
 from expedistill.benchmarks.base import RunOutcome, Task
-from expedistill.benchmarks.registry import get_plugin
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
-from expedistill.infra.reliability import CodeBugError, ConfigError
+from expedistill.infra.reliability import CodeBugError
 
 __all__ = ["run_one", "make_task_id"]
 
 #: Plugin packages live directly under this prefix; one benchmark = one
-#: package whose ``__init__`` registers the plugin (benchmarks/registry.py).
-_PLUGIN_PACKAGE_PREFIX = "expedistill.benchmarks."
-
-
-def _import_plugin_package(benchmark: str) -> None:
-    """Import ``expedistill.benchmarks.<benchmark>`` so registration runs.
-
-    Registration happens at import of the plugin package, so the import IS
-    the plugin resolution step. A package that cannot be imported means the
-    experiment config named a benchmark that is not installed (or whose
-    package is broken) -- a configuration problem, hence ConfigError naming
-    the plugin and the module path we expected to find.
-    """
-    module_path = _PLUGIN_PACKAGE_PREFIX + benchmark
-    try:
-        importlib.import_module(module_path)
-    except ImportError as exc:
-        # ModuleNotFoundError is an ImportError; both mean "no such plugin".
-        raise ConfigError(
-            f"benchmark plugin {benchmark!r} is not available: importing "
-            f"{module_path!r} failed ({type(exc).__name__}: {exc}). A plugin "
-            f"must be a package at {module_path!r} whose import registers it "
-            f"in expedistill.benchmarks.registry."
-        ) from exc
-
-
 def run_one(
     *,
     benchmark: str,
@@ -112,8 +85,7 @@ def run_one(
         # is a programming error, not a configuration problem.
         raise CodeBugError(
             f"benchmark must be a non-empty str, got {benchmark!r}")
-    _import_plugin_package(benchmark)
-    plugin = get_plugin(benchmark)
+    plugin = resolve_plugin(benchmark)
     outcome = plugin.run(task, handle, skills_block, workdir)
     if not isinstance(outcome, RunOutcome):
         raise CodeBugError(

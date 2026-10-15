@@ -16,15 +16,43 @@ experiment config named a benchmark that was never registered ->
 ConfigError), and the message always lists what is registered.
 """
 
+import importlib
 from typing import List
 
 from expedistill.core.registry import make_registry
 from expedistill.infra.reliability import CodeBugError, ConfigError
 from expedistill.benchmarks.base import BenchmarkPlugin
 
-__all__ = ["register_plugin", "get_plugin", "plugin_names", "_reset_registry"]
+__all__ = ["register_plugin", "get_plugin", "plugin_names",
+           "resolve_plugin", "_reset_registry"]
 
 _KIND = "benchmark plugin"
+
+#: Package whose ``__init__`` registers the plugin.
+_PLUGIN_PACKAGE_PREFIX = "expedistill.benchmarks."
+
+
+def resolve_plugin(name: str) -> BenchmarkPlugin:
+    """Import ``expedistill.benchmarks.<name>`` and return the plugin.
+
+    THE one resolution step (five call sites used to paste their own
+    import-then-get): a plugin registers itself at import of its package,
+    so the import IS the resolution. An unimportable package is a
+    configuration problem -- the config named a benchmark that is not
+    installed or whose dependencies are missing -- and an imported but
+    unregistered one is the same class of problem via get_plugin.
+    """
+    module_path = _PLUGIN_PACKAGE_PREFIX + name
+    try:
+        importlib.import_module(module_path)
+    except ImportError as exc:
+        raise ConfigError(
+            f"benchmark plugin {name!r} is not available: importing "
+            f"{module_path!r} failed ({type(exc).__name__}: {exc}). A "
+            f"plugin must be a package at {module_path!r} whose import "
+            f"registers it in expedistill.benchmarks.registry."
+        ) from exc
+    return get_plugin(name)
 
 _REGISTRY = make_registry(_KIND)
 

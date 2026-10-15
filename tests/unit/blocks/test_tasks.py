@@ -145,7 +145,7 @@ def test_load_tasks_unknown_plugin_is_config_error():
         load_tasks("no_such_plugin", None)
     message = str(exc.value)
     assert "no_such_plugin" in message
-    assert "not installed/importable" in message
+    assert "is not available: importing" in message
 
 
 def test_load_tasks_imported_but_unregistered_plugin_is_config_error(stub_plugin):

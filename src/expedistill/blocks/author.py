@@ -294,6 +294,7 @@ def write_skill(
     mode: str,
     handle: ModelHandle,
     *,
+    prompt_name: Optional[str] = None,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Skill:
@@ -309,6 +310,13 @@ def write_skill(
     with the v2 prompts from silent distortion into a loud refusal
     (run_units treats the ValueError as a fatal config error).
 
+    ``prompt_name`` overrides the mode's default prompt (SKILL_DISTILL /
+    SKILL_DIAGNOSE): a prompt-strategy variant registers its own prompt
+    under a new name and passes it here, keeping the mode's four-section
+    output contract (the validation and rendering below still key on
+    ``mode`` alone). None -- every current caller -- keeps the default,
+    so the parameter is invisible to the frozen runs.
+
     The named prompt returns JSON; the parsed dict is validated by
     validate_skill_sections and rendered by render_skill_content, whose
     marker text is what lands in ``Skill.content``. Field-level failures
@@ -317,7 +325,7 @@ def write_skill(
     never field content.
     """
     if mode == "distill":
-        prompt_name = "SKILL_DISTILL"
+        name = prompt_name or "SKILL_DISTILL"
         variables = {
             "label": subtask.label,
             "description": subtask.description,
@@ -325,7 +333,7 @@ def write_skill(
             "weak_profile": weak_profile,
         }
     elif mode == "diagnose":
-        prompt_name = "SKILL_DIAGNOSE"
+        name = prompt_name or "SKILL_DIAGNOSE"
         variables = {
             "label": subtask.label,
             "description": subtask.description,
@@ -349,12 +357,12 @@ def write_skill(
             f"{subtask.subtask_id}")
 
     parsed = call_model(
-        handle, prompt_name, variables,
+        handle, name, variables,
         output_json=True, usage=usage, run_dir=run_dir,
     )
     if not isinstance(parsed, dict):
         raise ModelOutputError(
-            f"{prompt_name}: expected a JSON object, got {type(parsed).__name__}")
+            f"{name}: expected a JSON object, got {type(parsed).__name__}")
     validate_skill_sections(mode, parsed)
     return Skill(
         skill_id=make_skill_id(subtask.subtask_id),

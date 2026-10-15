@@ -26,11 +26,10 @@ two-key spec means ``reserved`` is empty, never absent from the return.
 
 from __future__ import annotations
 
-import importlib
 from typing import List, Optional, Set, Tuple, Union
 
 from expedistill.benchmarks.base import Task
-from expedistill.benchmarks.registry import get_plugin
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.infra.reliability import ConfigError
 
 #: Key sets accepted in an explicit-list ``split_spec`` (contract 3): the
@@ -51,27 +50,15 @@ def load_tasks(
 ) -> List[Task]:
     """Load a benchmark's tasks via its plugin (D1).
 
-    Imports ``expedistill.benchmarks.<plugin_name>`` (which registers the
-    plugin), then delegates to the plugin's ``load_tasks`` for interpreting
+    Resolves the plugin through ``resolve_plugin`` (the one import-then-get
+    step) and delegates to the plugin's ``load_tasks`` for interpreting
     ``tasks_spec`` (None = all tasks, list = task ids, str = path). An
-    unimportable plugin is a ConfigError naming the plugin -- the config asked
-    for a benchmark whose package is not installed or whose dependencies are
-    missing.
+    unimportable or unregistered plugin is a ConfigError naming the plugin.
     """
     if not isinstance(plugin_name, str) or not plugin_name.strip():
         raise ConfigError(
             f"benchmark name must be a non-empty str, got {plugin_name!r}")
-    try:
-        importlib.import_module(
-            "expedistill.benchmarks." + plugin_name)
-    except ImportError as exc:
-        raise ConfigError(
-            f"benchmark plugin {plugin_name!r} is not installed/importable "
-            f"({exc})") from exc
-    # A package that imported cleanly but never registered under this name
-    # is the same class of problem; get_plugin's ConfigError says so.
-    plugin = get_plugin(plugin_name)
-    return plugin.load_tasks(tasks_spec)
+    return resolve_plugin(plugin_name).load_tasks(tasks_spec)
 
 
 def split_tasks(

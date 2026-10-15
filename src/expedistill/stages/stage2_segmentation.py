@@ -58,11 +58,10 @@ error writes no summary.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Sequence, Tuple
 
-from expedistill.benchmarks.registry import get_plugin
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.blocks.rules import get_trajectory_select
 from expedistill.composites.segment_checked import segment_checked
 from expedistill.core.ids import parse_trajectory_id
@@ -100,17 +99,6 @@ class _UnitOutcome(NamedTuple):
     trajectory_id: str
     kind: str
     subtasks: int
-
-
-def _plugin(benchmark: str) -> Any:
-    """The benchmark plugin, imported so its registration has run.
-
-    Same lazy-import contract as E1: a plugin registers at import of its
-    package, and a stage-2-only resume must not depend on stage 0 having
-    run in this process to have triggered it.
-    """
-    importlib.import_module("expedistill.benchmarks." + benchmark)
-    return get_plugin(benchmark)
 
 
 def _failed_trajectories_by_task(
@@ -190,7 +178,7 @@ def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
     reproduces it).
     """
     config = ctx.config
-    plugin = _plugin(config.benchmark)
+    plugin = resolve_plugin(config.benchmark)
     # config.rules always carries every rule key after ExperimentConfig
     # validation, and stage 0 checked the name: no local default here.
     select_trajectory = get_trajectory_select(config.rules["trajectory_select"])

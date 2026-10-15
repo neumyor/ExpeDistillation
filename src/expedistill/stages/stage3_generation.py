@@ -68,18 +68,16 @@ call's work: re-running a finished stage makes zero model calls and writes
 the same summary.
 """
 
-import importlib
 from typing import Any, Dict, List, Set, Tuple
 
 from expedistill.blocks.author import gen_exam, write_skill
 from expedistill.blocks.select import select_subtasks
 from expedistill.blocks.view import render_steps_view
-from expedistill.benchmarks.registry import get_plugin
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import Skill, Subtask, Trajectory
 from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
-    ConfigError,
     InfrastructureError,
     ModelOutputError,
     UnitFailureRecorder,
@@ -113,29 +111,6 @@ _DISPOSITIONS = (
 
 #: Same cap as the unit-failure ledger's message field.
 _MESSAGE_LIMIT = UnitFailureRecorder.MESSAGE_LIMIT
-
-#: Plugin packages register at import; one benchmark = one package
-#: (benchmarks/registry.py). Same pattern as blocks.execute.
-_PLUGIN_PACKAGE_PREFIX = "expedistill.benchmarks."
-
-
-def _resolve_plugin(benchmark: str) -> Any:
-    """Import the benchmark's plugin package, then return the plugin.
-
-    The import IS the resolution step (registration runs at import); a
-    package that cannot be imported means the config named a benchmark that
-    is not installed, hence ConfigError. Kept here instead of reaching into
-    ``blocks.execute``'s private helper.
-    """
-    module_path = _PLUGIN_PACKAGE_PREFIX + benchmark
-    try:
-        importlib.import_module(module_path)
-    except ImportError as exc:
-        raise ConfigError(
-            f"benchmark plugin {benchmark!r} is not available: importing "
-            f"{module_path!r} failed ({type(exc).__name__}: {exc})") from exc
-    return get_plugin(benchmark)
-
 
 def _untouched_since_stage3(skill: Skill) -> bool:
     """True if ``skill`` is exactly what G2 produced (safe to regenerate)."""
@@ -218,7 +193,7 @@ def run(ctx: Any) -> Dict[str, Any]:
         select_subtasks(subtasks, rule_name),
         key=lambda subtask: subtask.subtask_id)
 
-    view_rules = _resolve_plugin(ctx.config.benchmark).view_rules
+    view_rules = resolve_plugin(ctx.config.benchmark).view_rules
     author = ctx.handle("author")
     examiner = ctx.handle("examiner")
     ledger = _Ledger(ctx.run_dir)

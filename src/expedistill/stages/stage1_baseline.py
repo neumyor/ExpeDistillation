@@ -68,14 +68,13 @@ mode its control inherits these holes.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.blocks import metrics as metrics_block
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.rules import get_task_select
-from expedistill.benchmarks.registry import get_plugin
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
@@ -201,8 +200,7 @@ def aux_wiring(
     here (never silently a zero). Stage 6 reuses this wiring so both
     scoring stages read the auxiliary metric the same way.
     """
-    importlib.import_module("expedistill.benchmarks." + benchmark)
-    plugin = get_plugin(benchmark)
+    plugin = resolve_plugin(benchmark)
     name = plugin.aux_metric_name
     if name is None:
         return None, None

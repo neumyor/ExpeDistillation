@@ -194,6 +194,35 @@ def test_write_skill_distill_wiring_and_fields():
     assert skill_markers(skill.content) == PROCEDURE_MARKERS
 
 
+def test_write_skill_prompt_name_override_keeps_the_mode_contract(monkeypatch):
+    # A prompt-strategy variant passes its own registered prompt; the
+    # sections contract stays the mode's (validation and rendering key
+    # on mode alone), and None-less callers see no default change.
+    from expedistill.prompts import PROMPTS, PromptSpec
+
+    monkeypatch.setitem(PROMPTS, "SKILL_DISTILL_VARIANT", PromptSpec(
+        name="SKILL_DISTILL_VARIANT",
+        template="VARIANT PROMPT for {label}: {description}\n{steps_view}\n"
+                 "{weak_profile}",
+        description="test-only distill variant"))
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
+
+    skill = write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle,
+                        prompt_name="SKILL_DISTILL_VARIANT")
+
+    expected = get_prompt("SKILL_DISTILL_VARIANT").format(
+        label=subtask.label,
+        description=subtask.description,
+        steps_view=STEPS_VIEW,
+        weak_profile=WEAK_PROFILE,
+    )
+    assert handle.client.calls[0]["user"] == expected
+    # The mode's marker rendering, not the variant prompt's prose shape.
+    assert skill.content == DISTILL_CONTENT
+    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+
+
 def test_write_skill_diagnose_wiring_and_fields():
     subtask = make_subtask(
         source="weak",
