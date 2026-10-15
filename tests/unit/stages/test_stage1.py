@@ -153,7 +153,7 @@ def make_config(**overrides):
         weak_profile="a weak model",
         n_attempts_strong=1,
         n_attempts_weak=2,
-        K=4,
+        methods={"segmentation": {"K": 4}},
         rules={"task_select": "any_weak_failed", "trajectory_select": "all"},
     )
     defaults.update(overrides)

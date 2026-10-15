@@ -11,11 +11,12 @@ reference list and change the trajectory bookkeeping.
 from typing import Any, Dict, Tuple
 
 from expedistill.inject import bank_reference, format_skills_block
+from expedistill.methods.delivery import WholeBankParams
 
 __all__ = ["resolve"]
 
 
-def resolve(ctx: Any, bank: Any,
+def resolve(ctx: Any, params: WholeBankParams, bank: Any,
             test_tasks: Tuple[Any, ...]) -> Tuple[Dict[str, Any], None]:
     """(K1 with-bank kwargs, None): the whole bank, one fixed injection."""
     return {

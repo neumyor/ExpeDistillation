@@ -6,13 +6,16 @@ import pytest
 from expedistill.core.config import (
     CONFIG_SCHEMA_VERSION,
     DEFAULT_RULES,
-    MODEL_ROLES,
+    METHOD_DEFAULTS,
+    METHOD_SLOTS,
+    ROLE_DEFAULTS,
     RULE_KEYS,
     ConfigError,
     ExperimentConfig,
     acceptance_mode,
     load_config,
     save_config,
+    upgrade_v2_config,
 )
 
 MIN_YAML = """
@@ -24,7 +27,9 @@ models:
 weak_profile: "model-w is easily confused by multi-step file operations."
 n_attempts_strong: 3
 n_attempts_weak: 5
-K: 6
+schema_version: 3
+methods:
+  segmentation: {K: 6}
 split:
   ratio: 0.8
   seed: 7
@@ -48,13 +53,13 @@ def make_config(**overrides):
 class TestRoleTable:
     def test_roles_default_to_strong_except_answerer(self):
         cfg = make_config()
-        for role in MODEL_ROLES:
+        for role in ROLE_DEFAULTS:
             expected = "model-w" if role in ("executor_weak", "answerer") else "model-s"
             assert cfg.models[role] == expected, role
 
     def test_auditor_role_defaults_to_strong(self):
         cfg = make_config()
-        assert "auditor" in MODEL_ROLES
+        assert "auditor" in ROLE_DEFAULTS
         assert cfg.models["auditor"] == "model-s"
 
     def test_auditor_override_wins(self):
@@ -103,6 +108,7 @@ class TestValidation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "leak_threshold: 0.3\n",
             encoding="utf-8")
         with pytest.raises(ConfigError, match="leak_threshold"):
@@ -141,7 +147,7 @@ class TestValidation:
     def test_defaults(self):
         cfg = make_config()
         assert cfg.n_attempts_strong == 1
-        assert cfg.K == 5
+        assert cfg.methods == METHOD_DEFAULTS
         assert cfg.rules == DEFAULT_RULES
         assert cfg.prompts_digests == {}
         assert cfg.split is None
@@ -198,6 +204,7 @@ class TestModelOptions:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "model_options:\n"
             "  s:\n"
             "    reasoning_effort: max\n",
@@ -274,13 +281,13 @@ class TestTokenBudgets:
             "default_max_output_tokens": 65536,
             "roles": {"answerer": {"max_output_tokens": 5120}}})
         assert cfg.max_output_tokens_for("answerer") == 5120
-        for role in MODEL_ROLES:
+        for role in ROLE_DEFAULTS:
             if role != "answerer":
                 assert cfg.max_output_tokens_for(role) == 65536, role
 
     def test_default_only_budgets_cover_every_role(self):
         cfg = make_config(token_budgets={"default_max_output_tokens": 65536})
-        for role in MODEL_ROLES:
+        for role in ROLE_DEFAULTS:
             assert cfg.max_output_tokens_for(role) == 65536, role
 
     def test_yaml_pinned_shape_loads(self, tmp_path):
@@ -288,6 +295,7 @@ class TestTokenBudgets:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "token_budgets:\n"
             "  default_max_output_tokens: 65536\n"
             "  max_input_tokens: null\n"
@@ -299,7 +307,7 @@ class TestTokenBudgets:
         assert cfg.max_output_tokens_for("executor_strong") == 65536
         assert cfg.max_output_tokens_for("answerer") == 5120
         assert cfg.token_budgets["max_input_tokens"] is None
-        for role in MODEL_ROLES:
+        for role in ROLE_DEFAULTS:
             if role not in ("executor_strong", "answerer"):
                 assert cfg.max_output_tokens_for(role) == 65536, role
 
@@ -474,93 +482,66 @@ class TestRuleDefaults:
             make_config(rules={"segment_select": 3})
 
 
-#: The pinned retrieval-delivery shape (protocol v2 / retrieval split).
+#: A retrieval delivery slot, in the v3 spelling (its per-parameter
+#: validation lives in the methods layer now -- tests/unit/methods/
+#: test_params.py); here it is just an explicit slot payload.
 RETRIEVAL_DELIVERY = {
-    "mode": "retrieval", "top_k": 5,
+    "name": "retrieval", "top_k": 5,
     "max_categories": 3, "min_score": 0.05,
 }
 
 
-class TestSkillDelivery:
-    def test_absent_means_whole_bank_and_is_completed(self):
-        # The frozen config names the effective delivery like it names the
-        # effective rule selections: absent is completed, not left empty.
+class TestMethodSlots:
+    """Core owns the methods SHAPE only: five known slots, mapping values,
+    absent slots completed from METHOD_DEFAULTS. The per-parameter
+    contracts live in the methods layer and are exercised by stage 0's
+    resolution (tests/unit/methods/test_params.py)."""
+
+    def test_absent_slots_completed_from_defaults(self):
+        # The frozen config names the effective method identity like it
+        # names the effective rule selections: absent is completed.
         cfg = make_config()
-        assert cfg.skill_delivery == {"mode": "whole_bank"}
-        assert cfg.to_dict()["skill_delivery"] == {"mode": "whole_bank"}
-        assert make_config(skill_delivery={}).skill_delivery == \
-            {"mode": "whole_bank"}
+        assert cfg.methods == METHOD_DEFAULTS
+        assert cfg.to_dict()["methods"] == METHOD_DEFAULTS
 
-    def test_explicit_whole_bank_loads(self):
-        cfg = make_config(skill_delivery={"mode": "whole_bank"})
-        assert cfg.skill_delivery == {"mode": "whole_bank"}
+    def test_explicit_slots_kept_verbatim(self):
+        cfg = make_config(methods={
+            "segmentation": {"K": 1},
+            "delivery": RETRIEVAL_DELIVERY,
+        })
+        assert cfg.methods["segmentation"] == {"K": 1}
+        assert cfg.methods["delivery"] == RETRIEVAL_DELIVERY
+        # Untouched slots are completed, not dropped.
+        assert cfg.methods["acceptance"] == METHOD_DEFAULTS["acceptance"]
 
-    def test_retrieval_with_all_params_loads(self):
-        cfg = make_config(skill_delivery=RETRIEVAL_DELIVERY)
-        assert cfg.skill_delivery == RETRIEVAL_DELIVERY
-        # Part of the frozen manifest: to_dict carries it verbatim.
-        assert cfg.to_dict()["skill_delivery"] == RETRIEVAL_DELIVERY
+    def test_unknown_slot_rejected(self):
+        with pytest.raises(ConfigError, match="unknown slot"):
+            make_config(methods={"delivery": RETRIEVAL_DELIVERY,
+                                 "selection": {}})
 
-    def test_illegal_mode_rejected(self):
-        with pytest.raises(ConfigError, match="mode"):
-            make_config(skill_delivery={"mode": "top3"})
+    def test_none_slot_value_completes_to_the_default(self):
+        # The v2 precedent carried over: a written null is the
+        # absent slot (acceptance=None meant exam).
+        cfg = make_config(methods={"delivery": None})
+        assert cfg.methods["delivery"] == METHOD_DEFAULTS["delivery"]
 
-    @pytest.mark.parametrize("bad", [None, [], "retrieval", 5])
-    def test_must_be_a_mapping(self, bad):
+    @pytest.mark.parametrize("bad", [[], "retrieval", 5])
+    def test_slot_value_must_be_a_mapping(self, bad):
         with pytest.raises(ConfigError, match="mapping"):
-            make_config(skill_delivery=bad)
+            make_config(methods={"delivery": bad})
 
-    def test_unknown_keys_rejected(self):
-        with pytest.raises(ConfigError, match="unknown keys"):
-            make_config(skill_delivery={
-                **RETRIEVAL_DELIVERY, "temperature": 0})
-
-    def test_retrieval_requires_all_three_params(self):
-        for missing in ("top_k", "max_categories", "min_score"):
-            delivery = {key: value for key, value in RETRIEVAL_DELIVERY.items()
-                        if key != missing}
-            with pytest.raises(ConfigError, match=missing):
-                make_config(skill_delivery=delivery)
-
-    @pytest.mark.parametrize("key,bad", [
-        ("top_k", 0), ("top_k", -1), ("top_k", True), ("top_k", "5"),
-        ("top_k", 5.0), ("top_k", None),
-        ("max_categories", 0), ("max_categories", -2),
-        ("max_categories", True), ("max_categories", "3"),
-        ("max_categories", None),
-    ])
-    def test_retrieval_counts_must_be_ints_at_least_one(self, key, bad):
-        with pytest.raises(ConfigError, match=key):
-            make_config(skill_delivery={**RETRIEVAL_DELIVERY, key: bad})
-
-    @pytest.mark.parametrize("bad", [-0.1, 1.0, 1.5, True, "0.05", None])
-    def test_min_score_must_be_a_number_below_one(self, bad):
-        with pytest.raises(ConfigError, match="min_score"):
-            make_config(skill_delivery={**RETRIEVAL_DELIVERY,
-                                        "min_score": bad})
-
-    def test_min_score_bounds_are_inclusive_zero_exclusive_one(self):
-        # The interval is [0, 1): the grid's lower bound is legal here
-        # (the calibration protocol rejects 0 on its own grounds).
-        cfg = make_config(skill_delivery={**RETRIEVAL_DELIVERY, "min_score": 0})
-        assert cfg.skill_delivery["min_score"] == 0
-
-    def test_whole_bank_rejects_retrieval_params(self):
-        # An ineffective key under whole_bank would mislead about what the
-        # run injects; the config is the experiment's identity.
-        for key in ("top_k", "max_categories", "min_score"):
-            with pytest.raises(ConfigError, match="whole_bank"):
-                make_config(skill_delivery={"mode": "whole_bank",
-                                            key: RETRIEVAL_DELIVERY[key]})
+    def test_methods_must_be_a_mapping(self):
+        with pytest.raises(ConfigError, match="mapping"):
+            make_config(methods=[])
 
     def test_not_shared_with_caller_mapping(self):
-        given = dict(RETRIEVAL_DELIVERY)
-        cfg = make_config(skill_delivery=given)
-        given["top_k"] = 99
-        assert cfg.skill_delivery["top_k"] == 5
+        given = {"segmentation": {"K": 1}}
+        cfg = make_config(methods=given)
+        given["segmentation"]["K"] = 99
+        assert cfg.methods["segmentation"]["K"] == 1
 
     def test_from_dict_round_trip(self):
-        cfg = make_config(skill_delivery=RETRIEVAL_DELIVERY)
+        cfg = make_config(methods={"delivery": RETRIEVAL_DELIVERY})
         assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
 
     def test_yaml_round_trip(self, tmp_path):
@@ -568,14 +549,18 @@ class TestSkillDelivery:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
-            "skill_delivery:\n"
-            "  mode: retrieval\n"
-            "  top_k: 5\n"
-            "  max_categories: 3\n"
-            "  min_score: 0.05\n",
+            "schema_version: 3\n"
+            "methods:\n"
+            "  segmentation: {K: 2}\n"
+            "  delivery:\n"
+            "    name: retrieval\n"
+            "    top_k: 5\n"
+            "    max_categories: 3\n"
+            "    min_score: 0.05\n",
             encoding="utf-8")
         cfg = load_config(str(cfg_file))
-        assert cfg.skill_delivery == RETRIEVAL_DELIVERY
+        assert cfg.methods["segmentation"] == {"K": 2}
+        assert cfg.methods["delivery"] == RETRIEVAL_DELIVERY
         out = tmp_path / "out.yaml"
         save_config(cfg, str(out))
         assert load_config(str(out)) == cfg
@@ -643,20 +628,13 @@ class TestTaskSet:
 
 class TestSerialisation:
     def test_to_dict_covers_every_field(self):
-        # Decision doc 2026-10-14, ruling A1: to_dict drops None ONLY for
-        # _MANIFEST_OPTIONAL_FIELDS (acceptance), so an old-style config's
-        # frozen manifest keeps its exact key set and an in-flight old run
-        # still resumes on this code. Every other field is always present
-        # -- split/tasks freeze as null in full mode, and a generic "skip
-        # None" would delete exactly those.
+        # v3: every field freezes, always -- the v2 acceptance special case
+        # died with the slot it named, so there is no optional-field
+        # whitelist to keep an in-flight run's key set stable.
         from dataclasses import fields
         payload = make_config().to_dict()
-        assert "acceptance" not in payload
-        assert set(payload) == ({f.name for f in fields(ExperimentConfig)}
-                                - {"acceptance"})
-        # A non-None acceptance is part of the frozen config like any field.
-        cfg = make_config(acceptance={"mode": "exam"})
-        assert set(cfg.to_dict()) == {f.name for f in fields(ExperimentConfig)}
+        assert set(payload) == {f.name for f in fields(ExperimentConfig)}
+        assert payload["methods"] == METHOD_DEFAULTS
 
     def test_from_dict_rejects_unknown_keys(self):
         # Unlike the data model's from_dict (lenient for stored records from
@@ -668,10 +646,10 @@ class TestSerialisation:
         with pytest.raises(ConfigError, match="future_field"):
             ExperimentConfig.from_dict(payload)
 
-    def test_schema_version_is_two(self):
-        # v2: token_budgets added, model_options reserved keys, config files
-        # fail loud on unknown top-level keys.
-        assert CONFIG_SCHEMA_VERSION == 2
+    def test_schema_version_is_three(self):
+        # v3: every method parameter lives in the methods mapping, and the
+        # prompt freeze covers every registered method prompt.
+        assert CONFIG_SCHEMA_VERSION == 3
 
     def test_future_schema_version_rejected_by_load_config(self, tmp_path):
         cfg_file = tmp_path / "future.yaml"
@@ -690,7 +668,7 @@ class TestSerialisation:
             ExperimentConfig.from_dict(payload)
 
     def test_explicit_current_schema_version_loads(self, tmp_path):
-        cfg_file = tmp_path / "v2.yaml"
+        cfg_file = tmp_path / "v3.yaml"
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
@@ -698,22 +676,29 @@ class TestSerialisation:
             encoding="utf-8")
         assert load_config(str(cfg_file)).schema_version == CONFIG_SCHEMA_VERSION
 
-    def test_older_schema_version_still_loads(self, tmp_path):
-        # Only versions from the future are rejected; the current code knows
-        # how to read everything it has ever written.
-        cfg_file = tmp_path / "v1.yaml"
+    def test_v2_file_rejected_with_converter_pointer(self, tmp_path):
+        # v2 files are frozen experiment records; this code speaks v3 and
+        # refuses the old shape with the one-time converter's name instead
+        # of a wall of unknown-key errors.
+        cfg_file = tmp_path / "v2.yaml"
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
-            "schema_version: 1\n",
+            "K: 6\n",
             encoding="utf-8")
-        cfg = load_config(str(cfg_file))
-        assert cfg.schema_version == 1
-        assert cfg.token_budgets == {}
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(str(cfg_file))
+        assert "convert_v2_configs" in str(excinfo.value)
+
+    def test_v2_payload_rejected_by_from_dict(self):
+        payload = make_config().to_dict()
+        payload["schema_version"] = 2
+        with pytest.raises(ConfigError, match="convert"):
+            ExperimentConfig.from_dict(payload)
 
     def test_non_int_schema_version_rejected(self):
         payload = make_config().to_dict()
-        payload["schema_version"] = "2"
+        payload["schema_version"] = "3"
         with pytest.raises(ConfigError, match="schema_version"):
             ExperimentConfig.from_dict(payload)
 
@@ -726,6 +711,7 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "token_budget: {default_max_output_tokens: 65536}\n",
             encoding="utf-8")
         with pytest.raises(ConfigError) as excinfo:
@@ -744,6 +730,7 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "weak_profile_file: p.md\n"
             "token_budgets:\n"
             "  default_max_output_tokens: 65536\n",
@@ -759,6 +746,7 @@ class TestSerialisation:
         assert cfg.benchmark == "tb"
         assert cfg.mode == "split"
         assert cfg.split == {"ratio": 0.8, "seed": 7}
+        assert cfg.methods["segmentation"]["K"] == 6
         assert cfg.rules["task_select"] == "all_weak_fail"
         assert cfg.models["judge"] == "model-s"
         assert cfg.models["answerer"] == "model-w"
@@ -775,6 +763,7 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "weak_profile_file: profiles/weak.md\n",
             encoding="utf-8")
         cfg = load_config(str(cfg_file))
@@ -792,6 +781,7 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "tasks: tasks/tb_subset.txt\n",
             encoding="utf-8")
         # Load through a relative config path from an unrelated cwd: the
@@ -808,12 +798,14 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "tasks: /data/tb/tasks.txt\n",
             encoding="utf-8")
         assert load_config(str(cfg_file)).tasks == "/data/tb/tasks.txt"
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "tasks: [task-a, task-b]\n",
             encoding="utf-8")
         assert load_config(str(cfg_file)).tasks == ["task-a", "task-b"]
@@ -824,6 +816,7 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "tasks: t.txt\n",
             encoding="utf-8")
         cfg = load_config(str(cfg_file))
@@ -842,6 +835,7 @@ class TestSerialisation:
         real_cfg.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "tasks: tasks/t.txt\nweak_profile_file: weak.md\n",
             encoding="utf-8")
         # A decoy next to the symlink: it must NOT be picked up.
@@ -862,6 +856,7 @@ class TestSerialisation:
         cfg_file.write_text(
             "benchmark: tb\nmode: full\n"
             "models: {executor_strong: s, executor_weak: w}\n"
+            "schema_version: 3\n"
             "weak_profile: inline\nweak_profile_file: p.md\n",
             encoding="utf-8")
         with pytest.raises(ValueError, match="both"):
@@ -874,22 +869,30 @@ class TestSerialisation:
             load_config(str(cfg_file))
 
 
-#: Golden baselines for OLD-STYLE configs (no acceptance key), captured from
-#: ``to_dict`` before the acceptance field existed (decision doc
-#: 2026-10-14, ruling A1) and hardcoded as literals -- never regenerated at
-#: run time, or the test would bless whatever the new code produces. Key
-#: set, key order and every value must stay byte-identical: this is the
-#: frozen-manifest surface, and a resumed in-flight run compares against it.
-#: Two shapes, because the trap is shape-specific: in full mode split/tasks
-#: are None (a generic None filter would delete them and kill the resume);
-#: the split shape pins the explicit-list form.
+#: Golden baselines for the v3 to_dict payload, hardcoded as literals --
+#: never regenerated at run time, or the test would bless whatever the new
+#: code produces. Key set, key order and every value must stay
+#: byte-identical: this is the frozen-manifest surface, and a resumed
+#: in-flight run compares against it. Two shapes, because the trap is
+#: shape-specific: in full mode split/tasks are None (a generic None
+#: filter would delete them and kill the resume); the split shape pins the
+#: explicit-list form.
 GOLDEN_TO_DICT_KEY_ORDER = [
     "benchmark", "mode", "models", "weak_profile",
-    "n_attempts_strong", "n_attempts_weak", "K", "split", "tasks",
-    "segment_retry_limit", "retry_limit", "bank_token_budget",
-    "curation_rounds", "rules", "skill_delivery", "prompts_digests",
+    "n_attempts_strong", "n_attempts_weak", "split", "tasks",
+    "methods", "rules", "prompts_digests",
     "model_options", "token_budgets", "schema_version",
 ]
+
+#: The completed methods payload (METHOD_DEFAULTS is the v2 canon carried
+#: over key-for-key into its slots).
+COMPLETED_METHODS = {
+    "segmentation": {"K": 5, "retry_limit": 2},
+    "authoring": {"exams": True},
+    "acceptance": {"name": "exam", "retry_limit": 2},
+    "curation": {"token_budget": 4096, "rounds": 3},
+    "delivery": {"name": "whole_bank"},
+}
 
 GOLDEN_TO_DICT_FULL_FORM = {
     "benchmark": "tb",
@@ -909,23 +912,18 @@ GOLDEN_TO_DICT_FULL_FORM = {
     "weak_profile": "",
     "n_attempts_strong": 1,
     "n_attempts_weak": 1,
-    "K": 5,
     "split": None,
     "tasks": None,
-    "segment_retry_limit": 2,
-    "retry_limit": 2,
-    "bank_token_budget": 4096,
-    "curation_rounds": 3,
+    "methods": COMPLETED_METHODS,
     "rules": {
         "task_select": "any_weak_failed",
         "segment_select": "strong_success_weak_failed",
         "trajectory_select": "all",
     },
-    "skill_delivery": {"mode": "whole_bank"},
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {},
-    "schema_version": 2,
+    "schema_version": 3,
 }
 
 GOLDEN_TO_DICT_SPLIT_FORM = {
@@ -946,23 +944,25 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
     "weak_profile": "model-w is easily confused by multi-step operations.",
     "n_attempts_strong": 3,
     "n_attempts_weak": 5,
-    "K": 6,
     "split": {"train": ["tb:1"], "test": ["tb:2"], "reserved": ["tb:3"]},
     "tasks": ["tb:1", "tb:2", "tb:3"],
-    "segment_retry_limit": 2,
-    "retry_limit": 2,
-    "bank_token_budget": 4096,
-    "curation_rounds": 3,
+    "methods": {
+        **COMPLETED_METHODS,
+        # A GIVEN slot freezes verbatim -- no per-key merge with the
+        # defaults (a merge would smuggle one method's params into
+        # another); the params dataclass completes the semantics at
+        # resolution.
+        "segmentation": {"K": 6},
+    },
     "rules": {
         "task_select": "custom",
         "segment_select": "strong_success_weak_failed",
         "trajectory_select": "all",
     },
-    "skill_delivery": {"mode": "whole_bank"},
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {"default_max_output_tokens": 65536},
-    "schema_version": 2,
+    "schema_version": 3,
 }
 
 
@@ -979,7 +979,7 @@ class TestToDictGolden:
                          "operations.",
             n_attempts_strong=3,
             n_attempts_weak=5,
-            K=6,
+            methods={"segmentation": {"K": 6}},
             split={"train": ["tb:1"], "test": ["tb:2"],
                    "reserved": ["tb:3"]},
             tasks=["tb:1", "tb:2", "tb:3"],
@@ -991,138 +991,144 @@ class TestToDictGolden:
         assert list(payload) == GOLDEN_TO_DICT_KEY_ORDER
 
 
-#: The pinned live_run acceptance shape (decision doc 2026-10-14 section
+#: The pinned live_run acceptance slot (decision doc 2026-10-14 section
 #: 2.1); n_attempts 3 = the user-agreed TB depth (= n_attempts_weak). The
 #: improvement name is pre-registered in ACCEPTANCE_IMPROVE (blocks/rules.py);
-#: stage 0 is what resolves it against the registry.
+#: its registry check runs in the live method's check at resolution.
 LIVE_RUN_ACCEPTANCE = {
-    "mode": "live_run", "n_attempts": 3,
+    "name": "live_run", "n_attempts": 3,
     "improvement": "strict_rate_gain",
 }
 
 
-class TestAcceptance:
-    def test_absent_none_and_empty_all_mean_exam(self):
-        assert make_config().acceptance is None
-        assert make_config(acceptance=None).acceptance is None
-        assert make_config(acceptance={}).acceptance == {}
-
-    def test_acceptance_mode_resolves_the_selected_protocol(self):
+class TestAcceptanceSlot:
+    def test_default_is_exam(self):
         assert acceptance_mode(make_config()) == "exam"
-        assert acceptance_mode(make_config(acceptance={})) == "exam"
-        assert acceptance_mode(
-            make_config(acceptance={"mode": "exam"})) == "exam"
-        assert acceptance_mode(
-            make_config(acceptance=LIVE_RUN_ACCEPTANCE)) == "live_run"
+        assert (acceptance_mode(make_config(
+            methods={"acceptance": {}})) == "exam")
 
-    def test_explicit_exam_mode_loads(self):
-        cfg = make_config(acceptance={"mode": "exam"})
-        assert cfg.acceptance == {"mode": "exam"}
+    def test_names_read_from_the_slot(self):
+        assert acceptance_mode(make_config(
+            methods={"acceptance": {"name": "exam",
+                                    "retry_limit": 0}})) == "exam"
+        assert acceptance_mode(make_config(
+            methods={"acceptance": dict(LIVE_RUN_ACCEPTANCE),
+                     })) == "live_run"
 
-    def test_live_run_loads_and_freezes_verbatim(self):
-        cfg = make_config(acceptance=LIVE_RUN_ACCEPTANCE)
-        assert cfg.acceptance == LIVE_RUN_ACCEPTANCE
-        assert cfg.to_dict()["acceptance"] == LIVE_RUN_ACCEPTANCE
+    def test_live_run_slot_freezes_verbatim(self):
+        cfg = make_config(methods={"acceptance": dict(LIVE_RUN_ACCEPTANCE)})
+        assert cfg.methods["acceptance"] == LIVE_RUN_ACCEPTANCE
+        assert cfg.to_dict()["methods"]["acceptance"] == LIVE_RUN_ACCEPTANCE
 
-    # None is NOT in this list: it is the default and means exam.
-    @pytest.mark.parametrize("bad", [[], "live_run", 5])
-    def test_must_be_a_mapping(self, bad):
-        with pytest.raises(ConfigError, match="mapping"):
-            make_config(acceptance=bad)
 
-    def test_unknown_keys_rejected(self):
-        with pytest.raises(ConfigError, match="unknown keys"):
-            make_config(acceptance={**LIVE_RUN_ACCEPTANCE, "max_rounds": 2})
+class TestUpgradeV2:
+    """The one-time v2 -> v3 mapping (pure stdlib): the converter script and
+    the reuse assembler's v2-source identity walk both go through it, so the
+    mapping itself is pinned here."""
 
-    def test_keys_without_mode_rejected(self):
-        with pytest.raises(ConfigError, match="mode"):
-            make_config(acceptance={"n_attempts": 3,
-                                    "improvement": "strict_rate_gain"})
+    def test_three_exam_spellings_map_to_one_value(self):
+        # v2 spelled "exam" three ways (absent, {}, {mode: exam}); all map
+        # to the same v3 slot value.
+        for acceptance in (None, {}, {"mode": "exam"}):
+            v2 = {"K": 5, "retry_limit": 1}
+            if acceptance is not None:
+                v2["acceptance"] = acceptance
+            v3 = upgrade_v2_config(v2)
+            assert v3["methods"]["acceptance"] == {
+                "name": "exam", "retry_limit": 1}
 
-    def test_unknown_mode_rejected(self):
-        with pytest.raises(ConfigError, match="one of"):
-            make_config(acceptance={"mode": "retake"})
+    def test_live_run_mapping(self):
+        v3 = upgrade_v2_config({
+            "acceptance": {"mode": "live_run", "n_attempts": 3,
+                           "improvement": "strict_rate_gain"},
+            "retry_limit": 2,   # unused by live_run: dropped (disclosed)
+        })
+        assert v3["methods"]["acceptance"] == {
+            "name": "live_run", "n_attempts": 3,
+            "improvement": "strict_rate_gain"}
+        assert "retry_limit" not in v3
 
-    def test_exam_rejects_any_other_key(self):
-        for key, value in (("n_attempts", 3),
-                           ("improvement", "strict_rate_gain"),
-                           ("max_injection_tokens", None)):
-            with pytest.raises(ConfigError, match="exam"):
-                make_config(acceptance={"mode": "exam", key: value})
+    def test_every_moved_key_lands_in_its_slot(self):
+        v3 = upgrade_v2_config({
+            "K": 1, "segment_retry_limit": 0,
+            "bank_token_budget": 96000, "curation_rounds": 4,
+            "skill_delivery": {"mode": "retrieval", "top_k": 5,
+                               "max_categories": 3, "min_score": 0.02},
+        })
+        assert v3["methods"]["segmentation"] == {"K": 1, "retry_limit": 0}
+        assert v3["methods"]["curation"] == {
+            "token_budget": 96000, "rounds": 4}
+        assert v3["methods"]["delivery"] == {
+            "name": "retrieval", "top_k": 5,
+            "max_categories": 3, "min_score": 0.02}
+        assert v3["schema_version"] == 3
 
-    def test_live_run_missing_n_attempts_rejected(self):
-        with pytest.raises(ConfigError, match="n_attempts"):
-            make_config(acceptance={"mode": "live_run",
-                                    "improvement": "strict_rate_gain"})
+    def test_whole_bank_delivery_mapping(self):
+        v3 = upgrade_v2_config({"skill_delivery": {"mode": "whole_bank"}})
+        assert v3["methods"]["delivery"] == {"name": "whole_bank"}
 
-    def test_live_run_missing_improvement_rejected(self):
-        with pytest.raises(ConfigError, match="improvement"):
-            make_config(acceptance={"mode": "live_run", "n_attempts": 3})
+    def test_upgrade_result_loads_as_v3(self):
+        v2 = {
+            "benchmark": "tb", "mode": "split",
+            "models": {"executor_strong": "s", "executor_weak": "w"},
+            "n_attempts_strong": 3, "n_attempts_weak": 3,
+            "K": 5, "segment_retry_limit": 2, "retry_limit": 2,
+            "bank_token_budget": 96000, "curation_rounds": 3,
+            "acceptance": {"mode": "live_run", "n_attempts": 3,
+                           "improvement": "strict_rate_gain"},
+            "skill_delivery": {"mode": "retrieval", "top_k": 5,
+                               "max_categories": 3, "min_score": 0.02},
+            "token_budgets": {"default_max_output_tokens": 65536},
+        }
+        cfg = ExperimentConfig.from_dict(upgrade_v2_config(v2))
+        assert cfg.methods["acceptance"]["name"] == "live_run"
+        assert cfg.methods["curation"]["token_budget"] == 96000
 
-    @pytest.mark.parametrize("bad", [1, 0, -1, True, "3", 2.5, None])
-    def test_n_attempts_must_be_int_at_least_two(self, bad):
-        # 1 is rejected on purpose: one attempt per arm makes the
-        # comparison's false pass rate the model's own success rate.
-        with pytest.raises(ConfigError, match="n_attempts"):
-            make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
-                                    "n_attempts": bad})
+    def test_input_mapping_untouched(self):
+        v2 = {"K": 5, "token_budgets": {"default_max_output_tokens": 1},
+              "models": {"executor_strong": "s", "executor_weak": "w"}}
+        v3 = upgrade_v2_config(v2)
+        assert v3["token_budgets"] == v2["token_budgets"]
+        assert v3["models"] == v2["models"]
+        assert v2 == {"K": 5, "token_budgets": {"default_max_output_tokens": 1},
+                      "models": {"executor_strong": "s", "executor_weak": "w"}}
 
-    @pytest.mark.parametrize("bad", ["", None, 3])
-    def test_improvement_must_be_nonempty_rule_name(self, bad):
-        with pytest.raises(ConfigError, match="improvement"):
-            make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
-                                    "improvement": bad})
 
-    @pytest.mark.parametrize("bad", [0, -1, True, "1000", 1000.5])
-    def test_max_injection_tokens_positive_int_or_null(self, bad):
-        with pytest.raises(ConfigError, match="max_injection_tokens"):
-            make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
-                                    "max_injection_tokens": bad})
+class TestUpgradeCoversEveryV2Config:
+    """C's P1b precondition 3: upgrade_v2_config must handle every v2
+    config in the repository (they are frozen experiment records). The
+    three pre-schema pilots/tb21_full carry ``model_options.max_tokens``,
+    invalid under v2's OWN rules -- they refused the v2 loader too, so
+    the upgrade test checks their STRUCTURE and skips the load."""
 
-    def test_max_injection_tokens_null_and_positive_int_load(self):
-        for value in (None, 4096):
-            cfg = make_config(acceptance={**LIVE_RUN_ACCEPTANCE,
-                                          "max_injection_tokens": value})
-            assert cfg.acceptance["max_injection_tokens"] == value
+    #: Historical configs invalid under v2's own reserved-key rule.
+    PRE_V2_MODELS_OPTIONS = ("pilot_alfworld.yaml", "pilot_searchqa.yaml",
+                             "tb21_full.yaml")
 
-    def test_none_dropped_from_to_dict_everything_else_kept(self):
-        assert "acceptance" not in make_config().to_dict()
-        # Only None is dropped: a written {} or {mode: exam} freezes as is,
-        # so the manifest shows what the source config actually said.
-        assert make_config(acceptance={}).to_dict()["acceptance"] == {}
-        assert (make_config(acceptance={"mode": "exam"}).to_dict()
-                ["acceptance"] == {"mode": "exam"})
-        assert (make_config(acceptance=LIVE_RUN_ACCEPTANCE).to_dict()
-                ["acceptance"] == LIVE_RUN_ACCEPTANCE)
-
-    def test_not_shared_with_caller_mapping(self):
-        given = dict(LIVE_RUN_ACCEPTANCE)
-        cfg = make_config(acceptance=given)
-        given["n_attempts"] = 99
-        assert cfg.acceptance["n_attempts"] == 3
-
-    def test_from_dict_round_trip_exam(self):
-        cfg = make_config()
-        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
-
-    def test_from_dict_round_trip_live_run(self):
-        cfg = make_config(acceptance=LIVE_RUN_ACCEPTANCE)
-        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
-
-    def test_yaml_round_trip_live_run(self, tmp_path):
-        cfg_file = tmp_path / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\nmode: full\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            "acceptance:\n"
-            "  mode: live_run\n"
-            "  n_attempts: 3\n"
-            "  improvement: strict_rate_gain\n"
-            "  max_injection_tokens: null\n",
-            encoding="utf-8")
-        cfg = load_config(str(cfg_file))
-        assert cfg.acceptance == {**LIVE_RUN_ACCEPTANCE,
-                                  "max_injection_tokens": None}
-        out = tmp_path / "out.yaml"
-        save_config(cfg, str(out))
-        assert load_config(str(out)) == cfg
+    def test_every_v2_config_upgrades(self):
+        from pathlib import Path
+        experiments = (Path(__file__).resolve().parents[3]
+                       / "configs" / "experiments")
+        checked = 0
+        for path in sorted(experiments.glob("*.yaml")):
+            if path.stem.endswith("_v3"):
+                continue
+            import yaml
+            with open(path, encoding="utf-8") as fh:
+                raw = yaml.safe_load(fh)
+            if raw.get("schema_version", 2) >= 3:
+                continue  # an already-v3 file (or one produced later)
+            upgraded = upgrade_v2_config(raw)
+            # Every moved key landed in its slot (structure), and nothing
+            # v2-named survives at the top level.
+            for key in ("K", "segment_retry_limit", "bank_token_budget",
+                        "curation_rounds", "skill_delivery", "acceptance"):
+                assert key not in upgraded, (path.name, key)
+            assert upgraded["schema_version"] == 3
+            for slot in METHOD_SLOTS:
+                assert slot in upgraded["methods"], (path.name, slot)
+            if path.name not in self.PRE_V2_MODELS_OPTIONS:
+                # The config was valid under v2; the upgrade must load.
+                ExperimentConfig.from_dict(upgraded)
+            checked += 1
+        assert checked >= 8, f"expected the v2 record set, got {checked}"

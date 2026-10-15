@@ -19,6 +19,7 @@ from expedistill.blocks.retrieve import derive_categories, select_skills
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
 from expedistill.inject import format_skills_block
+from expedistill.methods.delivery import RetrievalParams
 
 __all__ = ["RETRIEVAL_AUDIT_NAME", "resolve"]
 
@@ -50,7 +51,7 @@ def _selected_references(selected: Sequence[Any]) -> List[Dict[str, Any]]:
     return references
 
 
-def resolve(ctx: Any, bank: Sequence[Skill],
+def resolve(ctx: Any, params: RetrievalParams, bank: Sequence[Skill],
             test_tasks: Sequence[Any]) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Resolve every test task's retrieval injection once (decision 3).
 
@@ -60,16 +61,15 @@ def resolve(ctx: Any, bank: Sequence[Skill],
     to ``([], "")``: a bare run whose ``skills_injected`` is ``[]``, never
     confused with the control's ``None``.
     """
-    delivery = ctx.config.skill_delivery
     categories = derive_categories(bank)
     resolved: Dict[str, Tuple[Any, str]] = {}
     rows: List[Dict[str, Any]] = []
     for task in sorted(test_tasks, key=lambda t: t.task_id):
         result = select_skills(
             task.instruction, bank, categories,
-            top_k=delivery["top_k"],
-            max_categories=delivery["max_categories"],
-            min_score=delivery["min_score"])
+            top_k=params.top_k,
+            max_categories=params.max_categories,
+            min_score=params.min_score)
         selected = _selected_references(result["selected"])
         resolved[task.task_id] = (
             selected, format_skills_block(result["selected"]))

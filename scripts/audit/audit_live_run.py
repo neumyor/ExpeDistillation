@@ -602,21 +602,51 @@ def check_injection_audit(
 def audit_run(run_dir: Path, n_attempts: Optional[int] = None) -> Audit:
     """Run every check over one run directory; return the findings."""
     audit = Audit(run_dir)
+    # The acceptance MODE comes from the frozen manifest, not from the
+    # directory tree: an exam run has no live subtree (exit 0, expected),
+    # but a LIVE run whose live subtree is missing is a broken run that
+    # must fail the audit, never pass silently.
+    manifest_path = run_dir / "manifest.json"
+    mode = None
+    try:
+        mode = read_json(manifest_path)["config"]["methods"]["acceptance"][
+            "name"]
+    except (FileNotFoundError, KeyError, TypeError, ValueError):
+        if manifest_path.exists():
+            audit.add(ERROR, "layout",
+                      f"cannot read the acceptance mode from {manifest_path} "
+                      "(config.methods.acceptance.name); a schema-v2 run "
+                      "must be audited on its own maintenance branch")
+            return audit
     live_dir = run_dir / LIVE_SUBTREE
     if not live_dir.exists():
+        if mode == "live_run":
+            audit.add(ERROR, "layout",
+                      "the manifest froze live_run but there is no "
+                      "stage4_acceptance/live_run/ subtree -- a live run "
+                      "without its ledgers and round stores")
+            return audit
         audit.add(INFO, "layout",
-                  "no stage4_acceptance/live_run/ subtree: exam-mode (or "
-                  "pre-stage-4) run -- nothing to audit here")
+                  "exam-mode (or pre-stage-4) run: no "
+                  "stage4_acceptance/live_run/ subtree -- nothing to audit "
+                  "here")
+        return audit
+    if mode == "exam":
+        audit.add(ERROR, "layout",
+                  "the manifest froze the exam mode but a live_run subtree "
+                  "exists -- the run directory does not match its frozen "
+                  "identity")
         return audit
     if n_attempts is None:
-        manifest_path = run_dir / "manifest.json"
         try:
-            acceptance = read_json(manifest_path)["config"]["acceptance"]
+            acceptance = read_json(manifest_path)["config"]["methods"][
+                "acceptance"]
             n_attempts = int(acceptance["n_attempts"])
         except (FileNotFoundError, KeyError, TypeError, ValueError):
             audit.add(ERROR, "layout",
                       f"cannot read n_attempts from {manifest_path} "
-                      "(config.acceptance.n_attempts); pass --n-attempts")
+                      "(config.methods.acceptance.n_attempts); pass "
+                      "--n-attempts")
             return audit
 
     store = Store(run_dir)
@@ -730,12 +760,14 @@ def _build_fake_run(root: Path) -> Path:
     task_id = ids.make_task_id("tb", "t1")
     n_attempts = 3
 
-    # A minimal manifest: the audit only consumes config.acceptance.
+    # A minimal manifest: the audit consumes the acceptance slot's name
+    # and n_attempts (schema v3 paths).
     (run_dir / "manifest.json").write_text(json.dumps({
-        "config": {"acceptance": {"mode": "live_run",
-                                  "n_attempts": n_attempts,
-                                  "improvement": "strict_rate_gain",
-                                  "max_injection_tokens": None}},
+        "config": {"methods": {"acceptance": {
+            "name": "live_run",
+            "n_attempts": n_attempts,
+            "improvement": "strict_rate_gain",
+            "max_injection_tokens": None}}},
     }, indent=2), encoding="utf-8")
 
     # Stage-1 weak baseline: 0/3 success.
@@ -999,7 +1031,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          help="the run directory to audit (read-only)")
     parser.add_argument("--n-attempts", type=int, default=None,
                          help="override n_attempts (default: the frozen "
-                              "manifest's config.acceptance.n_attempts)")
+                              "manifest's config.methods.acceptance."
+                              "n_attempts)")
     parser.add_argument("--out", type=Path, default=None,
                          help="write the machine-readable report (JSON) to "
                               "this path (must live OUTSIDE the run dir)")

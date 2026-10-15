@@ -31,6 +31,7 @@ the equivalence argument).
 from typing import Any, Dict, List
 
 from expedistill.composites.curation import curate_bank
+from expedistill.methods import resolve_params
 from expedistill.infra.store import write_json
 from expedistill.inject import bank_reference
 
@@ -51,14 +52,15 @@ def run(ctx: Any) -> Dict[str, Any]:
     ConfigError (from K5) when the bank is still over budget after
     ``curation_rounds`` rounds; nothing is written in that case.
     """
+    curation = resolve_params("curation", ctx.config)
     bank = curate_bank(
         store=ctx.store,
         weak_profile=ctx.config.weak_profile,
         answerer_handle=ctx.handle("answerer"),
         judge_handle=ctx.handle("judge"),
         curator_handle=ctx.handle("curator"),
-        bank_token_budget=ctx.config.bank_token_budget,
-        curation_rounds=ctx.config.curation_rounds,
+        bank_token_budget=curation.token_budget,
+        curation_rounds=curation.rounds,
         usage=ctx.usage,
         run_dir=ctx.run_dir,
         workers=ctx.run_settings.workers,

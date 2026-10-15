@@ -132,7 +132,7 @@ def make_config(**overrides):
         weak_profile="a weak model",
         n_attempts_strong=1,
         n_attempts_weak=2,
-        K=4,
+        methods={"segmentation": {"K": 4}},
         split={"train": ["t1", "t2"], "test": ["t3"]},
         rules={"task_select": "all_valid_failed", "trajectory_select": "all"},
     )
@@ -185,7 +185,8 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert manifest["prompt_digests"]["SEGMENT"]
     # The frozen config copy carries the digests (core.config contract).
     assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
-    assert manifest["config"]["K"] == config.K
+    assert (manifest["config"]["methods"]["segmentation"]["K"]
+            == config.methods["segmentation"]["K"])
     # Explicit-list configs load exactly the union of the lists (reserved
     # included -- held-back tasks are still loaded).
     assert plugin.load_specs == [["t1", "t2", "t3"]]
@@ -304,8 +305,9 @@ def test_changed_config_on_frozen_run_raises(monkeypatch, tmp_path):
     ctx = make_ctx(tmp_path, make_config())
     stage0_freeze.run(ctx)
 
-    changed = make_ctx(tmp_path, make_config(K=9))
-    with pytest.raises(FrozenProtocolChanged, match="config.K"):
+    changed = make_ctx(tmp_path, make_config(
+        methods={"segmentation": {"K": 9}}))
+    with pytest.raises(FrozenProtocolChanged, match="config.methods.segmentation.K"):
         stage0_freeze.run(changed)
 
 
@@ -624,6 +626,11 @@ _GOLDEN_PROMPT_DIGESTS = {
     "SIMILARITY": "fd5ff69610c2c1047d3eee012a503002d12cc2e859707b4d6bc88536cdd4e610",
     "SKILL_DIAGNOSE": "b1559a1e72ea959d42d8954f32f49f6895f325f3a4d628fa4453f85583c79050",
     "SKILL_DISTILL": "5c959806cc3751508acbe9ed14eff248eee20c9a8f10bbb2be3370d19926826c",
+    # v3 full freeze: the two live prompts register at prompts/__init__
+    # import like every method prompt, so their digests are frozen on
+    # every run -- exam runs included.
+    "LIVE_RUN_ATTRIBUTION": prompts.digest("LIVE_RUN_ATTRIBUTION"),
+    "LIVE_SKILL_REVISION": prompts.digest("LIVE_SKILL_REVISION"),
 }
 
 _GOLDEN_MODEL_ROLES = {
@@ -654,19 +661,20 @@ def _golden_config(split):
         "weak_profile": "a weak model",
         "n_attempts_strong": 1,
         "n_attempts_weak": 2,
-        "K": 4,
         "split": split,
         "tasks": None,
-        "segment_retry_limit": 2,
-        "retry_limit": 2,
-        "bank_token_budget": 4096,
-        "curation_rounds": 3,
+        "methods": {
+            "segmentation": {"K": 4},
+            "authoring": {"exams": True},
+            "acceptance": {"name": "exam", "retry_limit": 2},
+            "curation": {"token_budget": 4096, "rounds": 3},
+            "delivery": {"name": "whole_bank"},
+        },
         "rules": dict(_GOLDEN_RULES),
-        "skill_delivery": {"mode": "whole_bank"},
         "prompts_digests": dict(_GOLDEN_PROMPT_DIGESTS),
         "model_options": {},
         "token_budgets": {},
-        "schema_version": 2,
+        "schema_version": 3,
     }
 
 
@@ -687,10 +695,10 @@ def _golden_manifest(split, train, test):
 @pytest.mark.parametrize("shape", ["full", "split"])
 def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
         monkeypatch, tmp_path, shape):
-    """The exam view is byte-identical to the pre-acceptance code: the
-    acceptance key is absent from the frozen config (the to_dict
-    whitelist), the prompt_digests KEY SET is exactly the v1 one (no
-    LIVE_* name leaks in), and every other field matches the literal."""
+    """The frozen manifest matches the pinned v3 literal: the completed
+    methods slots, and the prompt_digests KEY SET of every registered
+    method prompt (the v3 full freeze -- the two live names included by
+    design, their digests never called by an exam run)."""
     _install_plugin(monkeypatch, StagePlugin())
     if shape == "full":
         config = make_config(mode="full", split=None)
@@ -705,31 +713,33 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
     stage0_freeze.run(ctx)
 
     assert load_manifest(ctx.run_dir) == expected
-    # The pinned name set, spelled out: the two live prompts are never
-    # part of an exam manifest even though they are registered in the
-    # process (the test session imports them elsewhere).
+    # The pinned name set, spelled out: the two live prompts ARE part of
+    # every manifest now (the full freeze), with their real digests.
     frozen = load_manifest(ctx.run_dir)["prompt_digests"]
-    assert "LIVE_RUN_ATTRIBUTION" not in frozen
-    assert "LIVE_SKILL_REVISION" not in frozen
-    assert "acceptance" not in load_manifest(ctx.run_dir)["config"]
+    assert frozen["LIVE_RUN_ATTRIBUTION"] == prompts.digest(
+        "LIVE_RUN_ATTRIBUTION")
+    assert frozen["LIVE_SKILL_REVISION"] == prompts.digest(
+        "LIVE_SKILL_REVISION")
+    # The completed acceptance slot freezes like every slot.
+    assert (load_manifest(ctx.run_dir)["config"]["methods"]["acceptance"]
+            == {"name": "exam", "retry_limit": 2})
 
 
 def test_live_run_config_freezes_acceptance_and_both_live_digests(
         monkeypatch, tmp_path):
     _install_plugin(monkeypatch, StagePlugin())
-    acceptance = {"mode": "live_run", "n_attempts": 3,
+    acceptance = {"name": "live_run", "n_attempts": 2,
                   "improvement": "strict_rate_gain"}
-    ctx = make_ctx(tmp_path, make_config(acceptance=acceptance))
+    ctx = make_ctx(tmp_path, make_config(
+        methods={"acceptance": acceptance}))
 
     stage0_freeze.run(ctx)
 
     manifest = load_manifest(ctx.run_dir)
-    # The acceptance block freezes verbatim (only None is dropped).
-    assert manifest["config"]["acceptance"] == acceptance
+    # The slot freezes verbatim.
+    assert manifest["config"]["methods"]["acceptance"] == acceptance
     frozen = manifest["prompt_digests"]
-    assert set(frozen) == (set(prompts.METHOD_PROMPT_NAMES)
-                           | {"FAKE_TASK", "LIVE_RUN_ATTRIBUTION",
-                              "LIVE_SKILL_REVISION"})
+    assert set(frozen) == set(prompts.METHOD_PROMPT_NAMES) | {"FAKE_TASK"}
     assert frozen["LIVE_RUN_ATTRIBUTION"] == prompts.digest(
         "LIVE_RUN_ATTRIBUTION")
     assert frozen["LIVE_SKILL_REVISION"] == prompts.digest(
@@ -742,8 +752,9 @@ def test_live_run_unknown_improve_rule_stops_stage0(monkeypatch, tmp_path):
     improvement rule name is a ConfigError before anything is loaded or
     frozen, exactly like the three task/segment/trajectory rule names."""
     plugin = _install_plugin(monkeypatch, StagePlugin())
-    config = make_config(acceptance={"mode": "live_run", "n_attempts": 3,
-                                     "improvement": "no_such_rule"})
+    config = make_config(methods={
+        "acceptance": {"name": "live_run", "n_attempts": 2,
+                       "improvement": "no_such_rule"}})
     ctx = make_ctx(tmp_path, config)
     with pytest.raises(ConfigError, match="no_such_rule"):
         stage0_freeze.run(ctx)

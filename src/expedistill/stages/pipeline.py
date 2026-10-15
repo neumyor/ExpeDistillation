@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 from expedistill.blocks import tasks as tasks_block
-from expedistill.core.config import MODEL_ROLES, load_config
+from expedistill.core.config import ROLE_DEFAULTS, load_config
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
 from expedistill.infra.store import Store, append_jsonl
@@ -148,7 +148,7 @@ def _build_handles(
     not just that one is). The check runs before any client is built so a bad
     config fails without touching the endpoint.
     """
-    for role in MODEL_ROLES:
+    for role in ROLE_DEFAULTS:
         if not cfg.models.get(role):
             raise ConfigError(
                 f"model role {role!r} is missing from the role table of "
@@ -184,7 +184,7 @@ def _build_handles(
             infra_backoff_seconds=infra_backoff_seconds,
         )
 
-    return {role: handle_for(role) for role in MODEL_ROLES}
+    return {role: handle_for(role) for role in ROLE_DEFAULTS}
 
 
 def _check_run_settings(*, workers: Any, llm_infra_retries: Any,

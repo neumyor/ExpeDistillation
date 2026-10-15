@@ -65,7 +65,9 @@ models:
 weak_profile: |
 {"".join("  " + line + chr(10) for line in WEAK_PROFILE.splitlines())}n_attempts_strong: 1
 n_attempts_weak: 1
-K: 5
+schema_version: 3
+methods:
+  segmentation: {{K: 5}}
 tasks: [{TASK}]
 model_options:
   {STRONG_MODEL}:

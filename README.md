@@ -172,10 +172,10 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | K1 | 批量执行 | E1 × 题目 × 采样次数，经 B5 并行 | 每完成一次执行就落盘一条 Trajectory，可续跑；`infra_error` 按 B6 重试，重试耗尽的单元不落盘、记入失败账本，续跑时再试 |
 | K2 | 切段（带校验） | D5 → G1 → D7；不通过就把错误清单交给 G1 重切 | 重切次数上限 `segment_retry_limit`；耗尽则跳过这条轨迹并记入审计日志，本 run 内不再重切 |
 | K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt | skill 列表为空即裸答；Attempt 记录用途（裸答 / 验收 / 回归）；先存作答、再判卷 |
-| K4 | 验收（exam 模式） | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写。文本考试协议，由配置 `acceptance` 缺省（exam）选中 |
+| K4 | 验收（exam 模式） | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写。文本考试协议，由配置 `methods.acceptance` 缺省（exam）选中 |
 | K5 | 库整理（Curator） | G7 → G8 → K3 回归考试 → G9 → D10 | 回归考试覆盖合并所代表的全部原始 skill 的考题，任一不过就撤销该次合并；超出 `bank_token_budget` 时回到 G7/G8 继续合并，最多 `curation_rounds` 轮；仍超出则阶段 5 停下报告，不自动删 skill |
-| K6 | live-run 验收 | 逐组阶段函数库：基线加载、注入审计行构造（首写与续跑比对共用一个构造器）、轮判定（具名 `ACCEPTANCE_IMPROVE` 规则 × D3 计数）、G10 归因、G11 修订应用、no-op 守卫、幸存组推导、组终态提交；两轮钉死。轮序编排、K1 派发与重派发集、injection_audit 首写、shortfall 记录、摘要归 `methods/acceptance/live_run.py`（裁决 A16 的分工；P1a 起驱动在 methods 层） | live_run 模式的验收（阶段 4，配置 `acceptance` 选中）：验收单位 = 一个 train task 的 pending 候选组，经 K1 真实执行、与阶段 1 裸跑基线按预注册判据比对，两轮不过整组丢弃；状态全部从磁盘推导（verdicts / attributions / 两个失败账本 + injection_audit + skill 版本号），任意崩溃点续跑等价。**编号与阶段 6 无关**：这是组合积木的第 6 号，test 阶段仍由 K1 / D3 承担 |
-| — | 装配工具 | `composites/assemble_reuse.py`：从源 run 按 train 溯源过滤，装配出新 run 的阶段 0–5 产物与 skill 库 | 复用已完结 run 的蒸馏产物、只重跑 test 侧实验（如检索式分发对同一冻结库重测）的入口：allowlist 拷贝（未列即不拷）+ 负清单断言 + 与源 manifest 的白名单 diff（仅 `mode` / `split` / `tasks` / `skill_delivery` / `schema_version` 允许不同），库行与拷贝对象逐位一致、零 test / reserved 溯源，run 根写 `ASSEMBLED_FROM.md` 溯源，拒绝已含 manifest 的目录。**不给 K 号**：它是装配工具，不是把积木串成阶段动作的组合件，放 `composites/` 只因它负责落盘与校验。两档位：bank=过滤旧库零调用复用（消融用）；baseline=仅拷阶段 1 轨迹，阶段 2–6 按当前协议全新执行（修订三默认） |
+| K6 | live-run 验收 | 逐组阶段函数库：基线加载、注入审计行构造（首写与续跑比对共用一个构造器）、轮判定（具名 `ACCEPTANCE_IMPROVE` 规则 × D3 计数）、G10 归因、G11 修订应用、no-op 守卫、幸存组推导、组终态提交；两轮钉死。轮序编排、K1 派发与重派发集、injection_audit 首写、shortfall 记录、摘要归 `methods/acceptance/live_run.py`（裁决 A16 的分工；P1a 起驱动在 methods 层） | live_run 模式的验收（阶段 4，配置 `methods.acceptance` 选中）：验收单位 = 一个 train task 的 pending 候选组，经 K1 真实执行、与阶段 1 裸跑基线按预注册判据比对，两轮不过整组丢弃；状态全部从磁盘推导（verdicts / attributions / 两个失败账本 + injection_audit + skill 版本号），任意崩溃点续跑等价。**编号与阶段 6 无关**：这是组合积木的第 6 号，test 阶段仍由 K1 / D3 承担 |
+| — | 装配工具 | `stages/assemble_reuse.py`：从源 run 按 train 溯源过滤，装配出新 run 的阶段 0–5 产物与 skill 库 | （P0.4 起在 stages/，复用 stage0 的 build_manifest。）复用已完结 run 的蒸馏产物、只重跑 test 侧实验（如检索式分发对同一冻结库重测）的入口：allowlist 拷贝（未列即不拷）+ 负清单断言 + 与源 manifest 的白名单 diff（仅 `mode` / `split` / `tasks` / `methods.delivery` 槽 / `schema_version` 允许不同），库行与拷贝对象逐位一致、零 test / reserved 溯源，run 根写 `ASSEMBLED_FROM.md` 溯源，拒绝已含 manifest 的目录。**不给 K 号**：它是装配工具，不是把积木串成阶段动作的组合件。两档位：bank=过滤旧库零调用复用（消融用）；baseline=仅拷阶段 1 轨迹，阶段 2–6 按当前协议全新执行（修订三默认） |
 
 组合积木负责落盘和续跑：每一步的产物按确定 ID 存进 B3，再次运行时已完成的
 单元直接读盘跳过。功能积木本身不读写磁盘。总的要求是：**在任何一处崩溃后续跑，
@@ -318,15 +318,15 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 | LIVE_RUN_ATTRIBUTION | G10 | author（阶段 4，仅 live_run 模式） |
 | LIVE_SKILL_REVISION | G11 | rewriter（阶段 4，仅 live_run 模式） |
 
-**两个 live prompt 是懒注册的**（`docs/decisions/acceptance_live_run_20261014.md`）：
-`prompts/__init__.py` 的 `METHOD_PROMPT_NAMES` 是 import 时的快照，任何新名字出现都会
-让在飞 exam run 的 manifest 比对拒绝续跑，所以 `LIVE_RUN_ATTRIBUTION` /
-`LIVE_SKILL_REVISION` **不进** `prompts/__init__.py` 的 import 清单，而在两处按需注册：
-stage 0 只在 `acceptance.mode == live_run` 时条件 import 它们并把两个 digest 并进
-manifest（exam run 的冻结 digest 集逐字节不变）；`blocks/attribution.py` 模块顶部防御性
-import 同一模块，绕过 stage 0 的调用方（单测、脚本）不会撞 PromptNotFoundError。
-后果：(a) 冻结的 prompt 名集随验收模式不同；(b) 两个 prompt 各有一份 golden 测试钉住
-digest——**prompt 文本演化时必须有意识地 bump 对应 golden**，漏 bump 即测试红。
+**v3 起全部方法 prompt 全量冻结**（多方法方案 §5，schema v3 切换）：
+`LIVE_RUN_ATTRIBUTION` / `LIVE_SKILL_REVISION` 与其他方法 prompt 一样在
+`prompts/__init__.py` 的 import 清单里注册，`METHOD_PROMPT_NAMES` 快照永远包含它们，
+**每个 run 的 manifest 都冻结全部已注册方法 prompt 的 digest**（外加本 benchmark 的
+任务 prompt）——不再按验收模式区分名集，exam run 的多出两个 digest 只是噪声。
+配套两条静态测试守住冻结面的完整性：`prompts/*.py` 每个模块必须进 `__init__` 的
+import 清单；prompt 注册只允许出现在 `prompts/` 与 `benchmarks/<名字>/`（每插件至多
+一个 = 它的任务 prompt）。v2 时代的懒注册与"名集随模式不同"的设计随 schema 升版退役
+（历史记录见 `docs/decisions/acceptance_live_run_20261014.md`）。
 
 沿用 SkillExpand 的两条规定：
 
@@ -477,7 +477,7 @@ Attempt（作答记录）
   stage6_test/accepted_infra_shortfall.json
                                  阶段 6 接受的空洞，按臂（with_bank / control）记录
   stage6_test/retrieval_audit.jsonl
-                                 skill_delivery = retrieval 时的逐任务检索审计（选中的
+                                 methods.delivery = retrieval 时的逐任务检索审计（选中的
                                  skill、路由类别、逐条分数、阈值判定），dispatch 前
                                  覆盖式写出一次
   stage6_test/stage6_summary.json
@@ -873,10 +873,10 @@ prompt 容量。做法参照 AgentBrew §2.3.3 Note Curator 与 §2.5 Lifelong M
   它们的模型输出失败停下整个阶段（退出码 1，先看一眼落盘的响应再重跑）。跳过和
   撤销的合并续跑时不重试。
 
-### 阶段 6：test（K1、D3；skill_delivery = retrieval 时另有 D11）
+### 阶段 6：test（K1、D3；methods.delivery = retrieval 时另有 D11）
 
 - 强模型完全退出。
-- **skill 交付由配置 `skill_delivery` 决定**，两种模式：
+- **skill 交付由配置 `methods.delivery` 槽决定**（schema v3；v2 的 `skill_delivery` 已并入），两种模式：
   - `whole_bank`（缺省）：整库注入——K1（弱模型, skill = 整个
     `skill_bank.jsonl`）；
   - `retrieval`：逐任务两步检索（D11）。开局对全库 `derive_categories`

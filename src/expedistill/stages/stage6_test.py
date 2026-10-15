@@ -99,7 +99,7 @@ from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import Store, read_json, write_json
-from expedistill.methods import get_method
+from expedistill.methods import resolve
 from expedistill.inject import bank_reference
 from expedistill.stages import stage1_baseline
 
@@ -313,9 +313,9 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     # injection: whole_bank keeps the scalar path (one injection for the
     # whole arm), retrieval resolves per task and audits itself before
     # dispatch (decision 15: the audit names the injection about to render).
-    delivery = get_method(
-        "delivery", ctx.config.skill_delivery.get("mode", "whole_bank"))
-    method_kwargs, audit_rows = delivery.resolve(ctx, bank, test_tasks)
+    delivery, delivery_params = resolve("delivery", ctx.config)
+    method_kwargs, audit_rows = delivery.resolve(
+        ctx, delivery_params, bank, test_tasks)
     if audit_rows is not None:
         delivery.write_audit(ctx.run_dir, audit_rows)
     bank_kwargs.update(method_kwargs)

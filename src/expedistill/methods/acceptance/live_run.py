@@ -135,7 +135,8 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store, append_jsonl, read_jsonl, write_json
 from expedistill.prompts import get as get_prompt
-from expedistill.methods.acceptance import STAGE4_DIR, SUMMARY_FILENAME
+from expedistill.methods.acceptance import (LiveRunParams, STAGE4_DIR,
+                                         SUMMARY_FILENAME)
 
 __all__ = ["SHORTFALL_NAME", "run"]
 
@@ -412,7 +413,7 @@ def _round_detail(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 # The driver
 # ---------------------------------------------------------------------------
 
-def run(ctx: Any) -> Dict[str, Any]:
+def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
     """Drive both live rounds over every group that still owes work.
 
     Returns and stores the stage-4 summary (module docstring); raises
@@ -423,10 +424,9 @@ def run(ctx: Any) -> Dict[str, Any]:
     """
     config = ctx.config
     store = ctx.store
-    acceptance = config.acceptance
-    n_attempts = acceptance["n_attempts"]
-    rule_name = acceptance["improvement"]
-    max_injection_tokens = acceptance.get("max_injection_tokens")
+    n_attempts = params.n_attempts
+    rule_name = params.improvement
+    max_injection_tokens = params.max_injection_tokens
     # Stage 0 validated the name against the registry; resolving it again
     # keeps a direct call honest for the same one-line cost.
     get_acceptance_improve(rule_name)

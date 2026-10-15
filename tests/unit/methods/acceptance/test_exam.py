@@ -48,7 +48,7 @@ def make_config(**overrides):
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
         weak_profile=WEAK_PROFILE,
-        retry_limit=1,
+        methods={"acceptance": {"name": "exam", "retry_limit": 1}},
     )
     defaults.update(overrides)
     return ExperimentConfig(**defaults)
@@ -151,7 +151,9 @@ def test_tallies_discards_by_reason(tmp_path):
                               incorrect(), incorrect()])
     rewriter = make_fake_handle("strong", [])
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
-                      rewriter=rewriter, config=make_config(retry_limit=0),
+                      rewriter=rewriter,
+                      config=make_config(methods={
+                          "acceptance": {"name": "exam", "retry_limit": 0}}),
                       auditor=make_fake_handle("auditor",
                                                [clean_verdict()] * 2))
 
@@ -917,21 +919,23 @@ def test_resume_after_fatal_crash_completes_only_pending(tmp_path):
 # protocol, and an exam run must not even import the live machinery
 # ---------------------------------------------------------------------------
 
-LIVE_ACCEPTANCE = {"mode": "live_run", "n_attempts": 3,
+LIVE_ACCEPTANCE = {"name": "live_run", "n_attempts": 3,
                    "improvement": "strict_rate_gain"}
 
 
-@pytest.mark.parametrize("acceptance", [None, {}, {"mode": "exam"}])
+@pytest.mark.parametrize("acceptance", [
+    None, {}, {"name": "exam", "retry_limit": 2}])
 def test_exam_configs_run_the_exam_path_not_the_live_driver(
         tmp_path, monkeypatch, acceptance):
-    """No key, ``{}`` and an explicit ``{mode: exam}`` are all the exam: the
-    real K4 path runs (the summary keeps its exam shape) and the live
+    """No slot, an empty slot and an explicit exam slot are all the exam:
+    the real K4 path runs (the summary keeps its exam shape) and the live
     driver is never entered."""
     from expedistill.methods.acceptance import live_run as stage4_live_run
     calls = []
     monkeypatch.setattr(
         stage4_live_run, "run",
-        lambda ctx: calls.append(ctx) or pytest.fail("live driver called"))
+        lambda ctx, params: calls.append(ctx)
+        or pytest.fail("live driver called"))
 
     store = Store(tmp_path / "run")
     seed_pair(store, "t1", 0, skill_text="skill one")
@@ -940,7 +944,9 @@ def test_exam_configs_run_the_exam_path_not_the_live_driver(
     ctx, _ = make_ctx(tmp_path, answerer=answerer, judge=judge,
                       rewriter=make_fake_handle("strong", []),
                       auditor=make_fake_handle("auditor", [clean_verdict()]),
-                      config=make_config(acceptance=acceptance))
+                      config=make_config(**(
+                          {"methods": {"acceptance": acceptance}}
+                          if acceptance is not None else {})))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -955,14 +961,16 @@ def test_live_run_config_dispatches_to_the_live_driver(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(
         stage4_live_run, "run",
-        lambda ctx: seen.append(ctx) or {"mode": "live_run"})
+        lambda ctx, params: seen.append(ctx) or {"mode": "live_run"})
 
     store = Store(tmp_path / "run")
     seed_pair(store, "t1", 0, skill_text="skill one")
     ctx, _ = make_ctx(tmp_path, answerer=make_fake_handle("weak", []),
                       judge=make_fake_handle("strong", []),
                       rewriter=make_fake_handle("strong", []),
-                      config=make_config(acceptance=dict(LIVE_ACCEPTANCE)))
+                      config=make_config(
+                          n_attempts_weak=3,
+                          methods={"acceptance": dict(LIVE_ACCEPTANCE)}))
 
     summary = stage4_acceptance.run(ctx)
 
@@ -1001,7 +1009,9 @@ store.save(exam, "exams")
 config = ExperimentConfig(benchmark="tb", mode="full",
                           models={"executor_strong": "s",
                                   "executor_weak": "w"},
-                          weak_profile="a weak model", retry_limit=1)
+                          weak_profile="a weak model",
+                          methods={"acceptance": {"name": "exam",
+                                                  "retry_limit": 1}})
 ctx = StageContext(
     run_dir=run_dir, store=store, config=config, usage=None,
     handles={"answerer": make_fake_handle("weak", ["bare", "skilled"]),
@@ -1016,17 +1026,9 @@ ctx = StageContext(
                                           "reason": "generic advice"})])},
     workdir_root=tmp / "work")
 summary = stage4_acceptance.run(ctx)
-from expedistill import prompts
 live_driver_loaded = "expedistill.methods.acceptance.live_run" in sys.modules
-# The frozen name set is the import-time snapshot: driving the exam stage
-# must not grow it, even though the two live prompts ARE registered in the
-# process (the composites package exports K6, whose import registers
-# them -- pre-existing T3 wiring, not something the stage4 dispatch owns).
-leaked_names = sorted(set(prompts.METHOD_PROMPT_NAMES) & {
-    "LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"})
 print(json.dumps({"summary": summary,
-                  "live_driver_loaded": live_driver_loaded,
-                  "leaked_frozen_names": leaked_names}))
+                  "live_driver_loaded": live_driver_loaded}))
 """
 
 
@@ -1070,13 +1072,9 @@ def test_an_exam_run_never_imports_the_live_modules(tmp_path):
     assert payload["summary"] == {
         "accepted": 1, "discarded": {}, "skipped_missing_exam": [],
         "infra_failed": [], "processed_this_call": 1}
-    # The dispatch's own seam: the live driver is never loaded. The two
-    # attribution BLOCK/PROMPT modules cannot be asserted the same way --
-    # the composites package exports K6, so any composite import (this
-    # test's, an exam stage's, K1's) registers the prompts process-wide.
-    # That is T3's module export, outside stage 4's dispatch; what the
-    # exam view actually needs (and what this pins) is that the FROZEN
-    # name set never grows the two live names -- the stage 0 golden pins
-    # the same invariant from the manifest side.
+    # The dispatch's own seam: the live driver is never loaded, end to
+    # end, in a fresh interpreter. (The v3 full freeze deliberately puts
+    # the two live prompt names in the frozen set -- they register at
+    # prompts/__init__ import like every method prompt; the stage 0
+    # golden pins that set from the manifest side.)
     assert payload["live_driver_loaded"] is False
-    assert payload["leaked_frozen_names"] == []

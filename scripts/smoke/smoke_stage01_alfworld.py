@@ -74,6 +74,7 @@ def config_yaml() -> str:
     return f"""\
 benchmark: alfworld
 mode: full
+schema_version: 3
 models:
   executor_strong: {STRONG}
   executor_weak: {WEAK}

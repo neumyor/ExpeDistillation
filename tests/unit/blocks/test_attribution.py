@@ -511,20 +511,17 @@ def test_revise_skill_passes_usage_through():
 # Registration and the shared vocabulary
 # ---------------------------------------------------------------------------
 
-def test_defensive_import_registers_the_live_prompts():
-    # The two names never enter prompts/__init__ (lazy registration keeps
-    # the manifest's frozen METHOD_PROMPT_NAMES stable for in-flight exam
-    # runs); importing the block is what registers them, so any caller that
-    # bypasses stage 0 finds them instead of hitting PromptNotFoundError.
-    import expedistill.blocks.attribution  # noqa: F401
+def test_live_prompts_are_in_the_frozen_name_set():
+    # v3 full freeze: the two live prompts register at import of
+    # prompts/__init__ like every method prompt, so they are in the frozen
+    # METHOD_PROMPT_NAMES snapshot -- the lazy registration (and its
+    # defensive import in the block) died with the v2 schema.
+    import expedistill.prompts  # noqa: F401
 
     assert "LIVE_RUN_ATTRIBUTION" in PROMPTS
     assert "LIVE_SKILL_REVISION" in PROMPTS
-    # The frozen method-name snapshot stays free of them: adding either to
-    # prompts/__init__ would change every in-flight run's manifest
-    # comparison and break resume.
-    assert "LIVE_RUN_ATTRIBUTION" not in METHOD_PROMPT_NAMES
-    assert "LIVE_SKILL_REVISION" not in METHOD_PROMPT_NAMES
+    assert "LIVE_RUN_ATTRIBUTION" in METHOD_PROMPT_NAMES
+    assert "LIVE_SKILL_REVISION" in METHOD_PROMPT_NAMES
 
 
 def test_failure_categories_match_author_vocabulary():

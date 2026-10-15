@@ -664,10 +664,26 @@
     "aux_metric": null,
     "benchmark": "fakebench",
     "config": {
-      "K": 1,
-      "bank_token_budget": 4096,
       "benchmark": "fakebench",
-      "curation_rounds": 3,
+      "methods": {
+        "acceptance": {
+          "name": "exam",
+          "retry_limit": 2
+        },
+        "authoring": {
+          "exams": true
+        },
+        "curation": {
+          "rounds": 3,
+          "token_budget": 4096
+        },
+        "delivery": {
+          "name": "whole_bank"
+        },
+        "segmentation": {
+          "K": 1
+        }
+      },
       "mode": "split",
       "model_options": {},
       "models": {
@@ -692,6 +708,8 @@
         "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
         "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
         "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
+        "LIVE_RUN_ATTRIBUTION": "9ff5b74d43afbf36bb841d3b112bebf4966268492a6be7d1788dc3e1da6c33ec",
+        "LIVE_SKILL_REVISION": "2a20ea8bf8499f9bc513e4fdc60774713d737a6eb99a9e9579731cb96bee0dc5",
         "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
         "REWRITE": "a16ea16efa74bc67183ecc7d0a3c534f9c8e0e8caa44a20c3e7cec45b82b1895",
@@ -700,17 +718,12 @@
         "SKILL_DIAGNOSE": "b1559a1e72ea959d42d8954f32f49f6895f325f3a4d628fa4453f85583c79050",
         "SKILL_DISTILL": "5c959806cc3751508acbe9ed14eff248eee20c9a8f10bbb2be3370d19926826c"
       },
-      "retry_limit": 2,
       "rules": {
         "segment_select": "strong_success_weak_failed",
         "task_select": "any_weak_failed",
         "trajectory_select": "strong2_weak2"
       },
-      "schema_version": 2,
-      "segment_retry_limit": 2,
-      "skill_delivery": {
-        "mode": "whole_bank"
-      },
+      "schema_version": 3,
       "split": {
         "test": [
           "t2"
@@ -746,6 +759,8 @@
       "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
       "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
       "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
+      "LIVE_RUN_ATTRIBUTION": "9ff5b74d43afbf36bb841d3b112bebf4966268492a6be7d1788dc3e1da6c33ec",
+      "LIVE_SKILL_REVISION": "2a20ea8bf8499f9bc513e4fdc60774713d737a6eb99a9e9579731cb96bee0dc5",
       "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
       "REWRITE": "a16ea16efa74bc67183ecc7d0a3c534f9c8e0e8caa44a20c3e7cec45b82b1895",

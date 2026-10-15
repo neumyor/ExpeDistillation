@@ -61,7 +61,11 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import write_json
-from expedistill.methods.acceptance import STAGE4_DIR, SUMMARY_FILENAME
+from expedistill.methods.acceptance import (
+    ExamParams,
+    STAGE4_DIR,
+    SUMMARY_FILENAME,
+)
 
 __all__ = ["MODEL_OUTPUT_DISCARD", "run"]
 
@@ -81,7 +85,7 @@ _INFRA_FAILED = "infra_failed"
 _MISSING_EXAM = "missing_exam"
 
 
-def run(ctx: Any) -> Dict[str, Any]:
+def run(ctx: Any, params: ExamParams) -> Dict[str, Any]:
     """Drive the K4 acceptance loop for every stored pending candidate.
 
     Returns and stores ``{"accepted", "discarded", "skipped_missing_exam",
@@ -153,7 +157,7 @@ def run(ctx: Any) -> Dict[str, Any]:
                 judge_handle=ctx.handle("judge"),
                 rewriter_handle=ctx.handle("rewriter"),
                 auditor_handle=ctx.handle("auditor"),
-                retry_limit=ctx.config.retry_limit,
+                retry_limit=params.retry_limit,
                 usage=ctx.usage,
                 run_dir=ctx.run_dir,
             )

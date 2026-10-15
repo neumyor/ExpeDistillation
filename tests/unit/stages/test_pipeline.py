@@ -35,7 +35,7 @@ from expedistill.benchmarks.base import (
 )
 from expedistill.benchmarks.registry import _reset_registry
 from expedistill.blocks.author import render_skill_content, skill_markers
-from expedistill.core.config import MODEL_ROLES, ExperimentConfig, save_config
+from expedistill.core.config import ROLE_DEFAULTS, ExperimentConfig, save_config
 from expedistill.core.models import FAILURE_REFERENCE_MARKERS, PROCEDURE_MARKERS
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLockedError
@@ -80,7 +80,7 @@ class FakePipelinePlugin(BenchmarkPlugin):
             "with_skills": bool(skills_block),
         })
         # The pipeline wires executor handles under their full role names
-        # (MODEL_ROLES: "executor_strong" / "executor_weak" -- the same
+        # (ROLE_DEFAULTS anchors: "executor_strong" / "executor_weak" -- the same
         # convention BareT2InfraPlugin below already keys on). The strong
         # arm really must succeed: protocol v2's SEGMENT fake keys the
         # strong-arm segments on the trajectory's "final status: success"
@@ -274,7 +274,7 @@ def _write_config(path: Path, **overrides) -> Path:
         weak_profile="The weak model misses intermediate steps.",
         n_attempts_strong=1,
         n_attempts_weak=1,
-        K=1,
+        methods={"segmentation": {"K": 1}},
         # Protocol v2 rule names (any_weak_failed /
         # strong_success_weak_failed; strong2_weak2 keeps the v2 material
         # order for trajectory selection).
@@ -445,6 +445,7 @@ def test_missing_role_is_config_error_naming_role_and_config(
     config_path = tmp_path / "broken.yaml"
     config_path.write_text(
         "benchmark: fakebench\n"
+        "schema_version: 3\n"
         "mode: full\n"
         "models:\n"
         "  executor_strong: strong-model\n"
@@ -508,10 +509,10 @@ def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
     handles = pipeline._build_handles(
         config, tmp_path / "experiment.yaml", log.make_client,
         infra_retries=1, infra_backoff_seconds=0.0)
-    assert set(handles) == set(MODEL_ROLES)
+    assert set(handles) == set(ROLE_DEFAULTS)
     # Options follow the MODEL NAME: every role on the strong model carries
     # the strong model's extras, an explicitly overridden role its own.
-    for role in MODEL_ROLES:
+    for role in ROLE_DEFAULTS:
         expected = {"strong-model": {"reasoning_effort": "max"},
                    "judge-model": {"top_p": 0.9},
                    "weak-model": {}}[config.models[role]]
@@ -564,8 +565,8 @@ def test_build_handles_wires_output_budget_per_role(plugin, tmp_path):
     handles = pipeline._build_handles(
         config, tmp_path / "experiment.yaml", ClientLog().make_client,
         infra_retries=0, infra_backoff_seconds=0.0)
-    assert set(handles) == set(MODEL_ROLES)
-    for role in MODEL_ROLES:
+    assert set(handles) == set(ROLE_DEFAULTS)
+    for role in ROLE_DEFAULTS:
         expected = {"judge": 1024, "segmenter": 2048}.get(role, 65536)
         assert handles[role].max_tokens == expected, role
 
@@ -592,6 +593,7 @@ def test_config_without_token_budgets_stops_before_any_stage(
     config_path = tmp_path / "no_budgets.yaml"
     config_path.write_text(
         "benchmark: fakebench\n"
+        "schema_version: 3\n"
         "mode: full\n"
         "models:\n"
         "  executor_strong: strong-model\n"
@@ -730,7 +732,7 @@ def test_default_handles_carry_infra_retry_defaults(
     run_pipeline(config_path=config_path, run_dir=tmp_path / "run",
                  make_client=ClientLog().make_client)
     (handles,) = captured_handles
-    assert set(handles) == set(MODEL_ROLES)
+    assert set(handles) == set(ROLE_DEFAULTS)
     for role, handle in handles.items():
         assert handle.infra_retries == 3, role
         assert handle.infra_backoff_seconds == 5.0, role
@@ -1170,13 +1172,15 @@ def _write_live_config(path: Path) -> Path:
         weak_profile="The weak model misses intermediate steps.",
         n_attempts_strong=1,
         n_attempts_weak=2,
-        K=1,
+        methods={
+            "segmentation": {"K": 1},
+            "acceptance": {"name": "live_run", "n_attempts": 2,
+                           "improvement": "strict_rate_gain"},
+        },
         rules={"task_select": "any_weak_failed",
                "segment_select": "strong_success_weak_failed",
                "trajectory_select": "strong2_weak2"},
         token_budgets={"default_max_output_tokens": 65536},
-        acceptance={"mode": "live_run", "n_attempts": 2,
-                    "improvement": "strict_rate_gain"},
     )
     save_config(config, str(path))
     return path
@@ -1213,8 +1217,8 @@ def test_pipeline_live_run_mode_walks_both_rounds_end_to_end(
 
     # -- the manifest froze the live protocol and its two prompts
     manifest = json.loads((run_dir / "manifest.json").read_text())
-    assert manifest["config"]["acceptance"] == {
-        "mode": "live_run", "n_attempts": 2,
+    assert manifest["config"]["methods"]["acceptance"] == {
+        "name": "live_run", "n_attempts": 2,
         "improvement": "strict_rate_gain"}
     assert {"LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"} <= set(
         manifest["prompt_digests"])

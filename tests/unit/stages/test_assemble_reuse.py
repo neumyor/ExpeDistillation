@@ -206,7 +206,7 @@ def make_source_config():
         weak_profile="a weak model",
         n_attempts_strong=1,
         n_attempts_weak=1,
-        K=4,
+        methods={"segmentation": {"K": 4, "retry_limit": 2}},
         rules={"task_select": "all_valid_failed",
                "segment_select": "strong_all_weak_failed",
                "trajectory_select": "strong2_weak2"},
@@ -226,18 +226,19 @@ models:
 weak_profile: a weak model
 n_attempts_strong: 1
 n_attempts_weak: 1
-K: 4
-segment_retry_limit: 2
-retry_limit: 2
+schema_version: 3
+methods:
+  segmentation: {{K: 4, retry_limit: 2}}
+  acceptance: {{name: exam, retry_limit: 2}}
+  delivery:
+    name: retrieval
+    top_k: 2
+    max_categories: 2
+    min_score: 0.02
 rules:
   task_select: all_valid_failed
   segment_select: strong_all_weak_failed
   trajectory_select: strong2_weak2
-skill_delivery:
-  mode: retrieval
-  top_k: 2
-  max_categories: 2
-  min_score: 0.02
 """
 
 # The baseline-level config (revision 3): stage-1-only reuse, so it
@@ -260,20 +261,20 @@ models:
 weak_profile: a completely different profile
 n_attempts_strong: 1
 n_attempts_weak: 1
-K: 9
-segment_retry_limit: 5
-retry_limit: 7
-bank_token_budget: 12345
-curation_rounds: 1
+schema_version: 3
+methods:
+  segmentation: {{K: 9, retry_limit: 5}}
+  acceptance: {{name: exam, retry_limit: 7}}
+  curation: {{token_budget: 12345, rounds: 1}}
+  delivery:
+    name: retrieval
+    top_k: 3
+    max_categories: 2
+    min_score: 0.05
 rules:
   task_select: any_weak_failed
   segment_select: strong_success_weak_failed
   trajectory_select: strong2_weak2
-skill_delivery:
-  mode: retrieval
-  top_k: 3
-  max_categories: 2
-  min_score: 0.05
 """
 
 
@@ -573,7 +574,7 @@ def test_assembled_from_records_provenance_and_merged_groups(tmp_path):
     assert summary["assembled_from"] == "ASSEMBLED_FROM.md"
     # The identity diff: exactly the allowed keys moved (section level).
     assert summary["allowed_identity_diffs"] == [
-        "config.mode", "config.skill_delivery", "config.split",
+        "config.methods.delivery", "config.mode", "config.split",
         "mode", "split"]
 
 
@@ -590,7 +591,7 @@ def _assemble_with_config(tmp_path, config_text):
 def test_identity_diff_rejects_a_changed_method_key(tmp_path):
     source, config_path, run_dir = _assemble_with_config(
         tmp_path, REUSE_CONFIG_YAML.replace("K: 4", "K: 9"))
-    with pytest.raises(ConfigError, match="config.K"):
+    with pytest.raises(ConfigError, match="config.methods.segmentation.K"):
         assemble_reuse(source.run_dir, config_path, run_dir)
     assert not run_dir.exists()  # refused before anything was written
 
@@ -630,18 +631,18 @@ def test_identity_diff_allows_only_the_whitelisted_keys(tmp_path):
     # tasks/skill_delivery/mode/split diffs are allowed; a drift on any
     # other key is not. The allowed diff list is asserted in the happy
     # path; here the reverse: dropping the tasks key (the source ran with
-    # tasks=None, so no diff arises) is fine too, and the mixed-run
-    # manifest without a skill_delivery key (a source frozen by pre-v2
-    # code, like the real TB run) still assembles.
+    # tasks=None, so no diff arises) is fine too, and a source manifest
+    # without a delivery slot (the upgrade completes it to whole_bank,
+    # exactly what a pre-slot source froze) still assembles.
     source = build_source_run(tmp_path)
     manifest_path = source.run_dir / "manifest.json"
     manifest = read_json(manifest_path)
-    del manifest["config"]["skill_delivery"]
+    del manifest["config"]["methods"]["delivery"]
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     config_path = write_reuse_config(tmp_path)
     summary = assemble_reuse(
         source.run_dir, config_path, tmp_path / "assembled")
-    assert "config.skill_delivery" in summary["allowed_identity_diffs"]
+    assert "config.methods.delivery" in summary["allowed_identity_diffs"]
 
 
 def test_prompt_digest_drift_is_disclosed_not_refused(tmp_path):
@@ -1069,17 +1070,12 @@ def test_cli_assemble_reuse_baseline_end_to_end(capsys, tmp_path):
 
 #: A live_run target block (the first TB live config's shape, section 2.1):
 #: the criterion is pre-registered by name, the depth is the user-agreed 3.
-_LIVE_ACCEPTANCE_YAML = """
-acceptance:
-  mode: live_run
-  n_attempts: 3
-  improvement: strict_rate_gain
-"""
-
-_EXPLICIT_EXAM_YAML = """
-acceptance:
-  mode: exam
-"""
+# The live target swaps the methods.acceptance slot's exam line for the
+# live protocol line (YAML has no duplicate keys, so the swap is a
+# replace on the block's exam line, not an appended block).
+_EXAM_ACCEPTANCE_LINE = "  acceptance: {name: exam, retry_limit: 2}"
+_LIVE_ACCEPTANCE_LINE = ("  acceptance: {name: live_run, n_attempts: 3,\n"
+                         "    improvement: strict_rate_gain}")
 
 
 def build_live_source_run(tmp_path: Path) -> SourceRun:
@@ -1099,8 +1095,12 @@ def build_live_source_run(tmp_path: Path) -> SourceRun:
             shutil.copy2(item, run_dir / item.name)
     config = dataclasses.replace(
         make_source_config(),
-        acceptance={"mode": "live_run", "n_attempts": 3,
-                   "improvement": "strict_rate_gain"})
+        n_attempts_weak=3,
+        methods={
+            **make_source_config().methods,
+            "acceptance": {"name": "live_run", "n_attempts": 3,
+                           "improvement": "strict_rate_gain"},
+        })
     ctx = StageContext(
         run_dir=run_dir,
         store=Store(run_dir),
@@ -1113,18 +1113,21 @@ def build_live_source_run(tmp_path: Path) -> SourceRun:
     return SourceRun(run_dir, source.ids)
 
 
-@pytest.mark.parametrize("acceptance_yaml", [
-    "",  # no acceptance key at all: the frozen v1 exam target
-    _LIVE_ACCEPTANCE_YAML,
+@pytest.mark.parametrize("acceptance_line", [
+    _EXAM_ACCEPTANCE_LINE,  # the default exam target
+    _LIVE_ACCEPTANCE_LINE,
 ], ids=["exam", "live_run"])
 def test_baseline_level_allows_exam_and_live_targets(
-        tmp_path, acceptance_yaml):
+        tmp_path, acceptance_line):
     """Stage-1-only reuse re-runs stages 2-6 fresh, so the acceptance
     protocol (a stage-4 key) may differ from the source run in either
     direction: the pinned minimum at this level never walks it."""
     source = build_source_run(tmp_path)
     config_path = write_reuse_config(
-        tmp_path, BASELINE_CONFIG_YAML + acceptance_yaml)
+        tmp_path,
+        BASELINE_CONFIG_YAML.replace(
+            "  acceptance: {{name: exam, retry_limit: 7}}",
+            acceptance_line))
     run_dir = tmp_path / "assembled"
 
     summary = assemble_reuse(source.run_dir, config_path, run_dir,
@@ -1142,9 +1145,10 @@ def test_bank_level_refuses_an_exam_to_live_target(tmp_path):
     them."""
     source = build_source_run(tmp_path)
     config_path = write_reuse_config(
-        tmp_path, REUSE_CONFIG_YAML + _LIVE_ACCEPTANCE_YAML)
+        tmp_path, REUSE_CONFIG_YAML.replace(
+            _EXAM_ACCEPTANCE_LINE, _LIVE_ACCEPTANCE_LINE))
     run_dir = tmp_path / "assembled"
-    with pytest.raises(ConfigError, match=r"config\.acceptance"):
+    with pytest.raises(ConfigError, match=r"config\.methods\.acceptance"):
         assemble_reuse(source.run_dir, config_path, run_dir)
     assert not run_dir.exists()
 
@@ -1155,25 +1159,24 @@ def test_bank_level_refuses_a_live_to_exam_target(tmp_path):
     source = build_live_source_run(tmp_path)
     config_path = write_reuse_config(tmp_path, REUSE_CONFIG_YAML)
     run_dir = tmp_path / "assembled"
-    with pytest.raises(ConfigError, match=r"config\.acceptance"):
+    with pytest.raises(ConfigError, match=r"config\.methods\.acceptance"):
         assemble_reuse(source.run_dir, config_path, run_dir)
     assert not run_dir.exists()
 
 
-def test_bank_level_refuses_an_explicit_exam_acceptance_target(tmp_path):
-    """The conservative corner (ruling A15): the source ran the default
-    exam and the reuse config says the same thing explicitly -- same
-    protocol, but the frozen manifest's KEY SET differs (the source's
-    config carries no acceptance key, the target's carries {mode: exam}),
-    and the identity walk refuses on the key, never guessing at semantic
-    equivalence."""
+def test_bank_level_explicit_exam_target_assembles(tmp_path):
+    """The v2 conservative corner (ruling A15) disappears under v3: the
+    source ran the default exam and the reuse config spells the exam slot
+    explicitly -- completion canonicalises both to the same slot value,
+    so the identity walk sees no key-set diff and the assembly goes
+    through. (The v2 refusal existed because the source's config carried
+    NO acceptance key while the target's carried one; v3 configs always
+    carry the completed slot.)"""
     source = build_source_run(tmp_path)
-    config_path = write_reuse_config(
-        tmp_path, REUSE_CONFIG_YAML + _EXPLICIT_EXAM_YAML)
+    config_path = write_reuse_config(tmp_path, REUSE_CONFIG_YAML)
     run_dir = tmp_path / "assembled"
-    with pytest.raises(ConfigError, match=r"config\.acceptance"):
-        assemble_reuse(source.run_dir, config_path, run_dir)
-    assert not run_dir.exists()
+    summary = assemble_reuse(source.run_dir, config_path, run_dir)
+    assert summary["level"] == "bank"
 
 
 def test_bank_level_live_to_live_reuse_discloses_no_live_digest_drift(
@@ -1185,7 +1188,9 @@ def test_bank_level_live_to_live_reuse_discloses_no_live_digest_drift(
     live prompt pair as config drift."""
     source = build_live_source_run(tmp_path)
     config_path = write_reuse_config(
-        tmp_path, REUSE_CONFIG_YAML + _LIVE_ACCEPTANCE_YAML)
+        tmp_path, REUSE_CONFIG_YAML.replace(
+            _EXAM_ACCEPTANCE_LINE, _LIVE_ACCEPTANCE_LINE).replace(
+            "n_attempts_weak: 1", "n_attempts_weak: 3"))
     run_dir = tmp_path / "assembled"
 
     summary = assemble_reuse(source.run_dir, config_path, run_dir)

@@ -35,7 +35,8 @@ def _stage4_ctx(store):
         benchmark="tb", mode="full",
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
-        weak_profile="weak", retry_limit=1)
+        weak_profile="weak",
+        methods={"acceptance": {"name": "exam", "retry_limit": 1}})
     # Scripted so that a stage 4 which DID drive the merged skill would
     # accept it on the first try (bare answer wrong, with-skill right).
     handles = {

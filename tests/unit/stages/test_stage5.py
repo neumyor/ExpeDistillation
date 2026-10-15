@@ -62,7 +62,7 @@ def _make_ctx(tmp_path, *, budget=10 ** 6, rounds=3, curator="",
         benchmark="tb", mode="split",
         models={"executor_strong": "strong-x", "executor_weak": "weak-7b"},
         weak_profile="a weak model that needs short sentences",
-        bank_token_budget=budget, curation_rounds=rounds)
+        methods={"curation": {"token_budget": budget, "rounds": rounds}})
     ctx = StageContext(run_dir=run_dir, store=Store(run_dir), config=config,
                        usage=None, handles=handles,
                        workdir_root=run_dir / "work")

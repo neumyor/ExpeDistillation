@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Sequence, Tuple
 
 from expedistill.benchmarks.registry import resolve_plugin
+from expedistill.methods import resolve_params
 from expedistill.blocks.rules import get_trajectory_select
 from expedistill.composites.segment_checked import segment_checked
 from expedistill.core.ids import parse_trajectory_id
@@ -179,6 +180,9 @@ def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
     """
     config = ctx.config
     plugin = resolve_plugin(config.benchmark)
+    # The segmentation slot's params (methods layer) -- validated at
+    # stage 0, resolved here for the stage's own consumption.
+    segmentation = resolve_params("segmentation", config)
     # config.rules always carries every rule key after ExperimentConfig
     # validation, and stage 0 checked the name: no local default here.
     select_trajectory = get_trajectory_select(config.rules["trajectory_select"])
@@ -207,10 +211,10 @@ def run(ctx: StageContext, *, failed_task_ids: Sequence[str]) -> Dict[str, Any]:
             subtasks = segment_checked(
                 store=ctx.store,
                 trajectory=trajectory,
-                K=config.K,
+                K=segmentation.K,
                 view_rules=plugin.view_rules,
                 handle=ctx.handle("segmenter"),
-                segment_retry_limit=config.segment_retry_limit,
+                segment_retry_limit=segmentation.retry_limit,
                 usage=ctx.usage,
                 run_dir=ctx.run_dir,
             )

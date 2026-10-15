@@ -168,7 +168,7 @@ def _bank_rows():
     ]
 
 
-def _make_ctx(tmp_path, mode, *, n_attempts=2, skill_delivery=None):
+def _make_ctx(tmp_path, mode, *, n_attempts=2, delivery=None):
     run_dir = tmp_path / "run"
     handles = {
         "executor_strong": make_fake_handle("strong"),
@@ -181,7 +181,8 @@ def _make_ctx(tmp_path, mode, *, n_attempts=2, skill_delivery=None):
         benchmark=_FAKE, mode=mode,
         models={"executor_strong": "strong-x", "executor_weak": "weak-7b"},
         n_attempts_weak=n_attempts,
-        skill_delivery=skill_delivery if skill_delivery is not None else {})
+        methods={"delivery":
+                  delivery if delivery is not None else {}})
     ctx = StageContext(run_dir=run_dir, store=Store(run_dir), config=config,
                        usage=None, handles=handles,
                        workdir_root=run_dir / "work")
@@ -356,8 +357,8 @@ _EXPECTED_T2_BLOCK = "## Skill rules\n- Restart only after the config check."
 
 
 def test_retrieval_mode_selects_and_injects_per_task(tmp_path, monkeypatch):
-    ctx = _make_ctx(tmp_path, "split", skill_delivery={
-        "mode": "retrieval", "top_k": 1, "max_categories": 2,
+    ctx = _make_ctx(tmp_path, "split", delivery={
+        "name": "retrieval", "top_k": 1, "max_categories": 2,
         "min_score": 0.0})
     plugin = RecordingPlugin()
     summary = _run_stage6(ctx, monkeypatch, plugin, _retrieval_tasks())
@@ -410,8 +411,8 @@ def test_retrieval_mode_selects_and_injects_per_task(tmp_path, monkeypatch):
 def test_retrieval_below_threshold_runs_bare(tmp_path, monkeypatch):
     # No task can clear a 0.99 gate: the with-bank arm is a bare run whose
     # skills_injected is [] -- distinguishable from the control's None.
-    ctx = _make_ctx(tmp_path, "split", skill_delivery={
-        "mode": "retrieval", "top_k": 2, "max_categories": 2,
+    ctx = _make_ctx(tmp_path, "split", delivery={
+        "name": "retrieval", "top_k": 2, "max_categories": 2,
         "min_score": 0.99})
     plugin = RecordingPlugin()
     _run_stage6(ctx, monkeypatch, plugin, _retrieval_tasks())
@@ -436,8 +437,8 @@ def test_retrieval_below_threshold_runs_bare(tmp_path, monkeypatch):
 
 
 def test_retrieval_audit_is_overwritten_not_appended(tmp_path, monkeypatch):
-    ctx = _make_ctx(tmp_path, "split", skill_delivery={
-        "mode": "retrieval", "top_k": 1, "max_categories": 2,
+    ctx = _make_ctx(tmp_path, "split", delivery={
+        "name": "retrieval", "top_k": 1, "max_categories": 2,
         "min_score": 0.0})
     audit_path = (ctx.run_dir / stage6_test.TEST_DIR
                   / retrieval.RETRIEVAL_AUDIT_NAME)

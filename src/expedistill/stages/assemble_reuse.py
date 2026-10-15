@@ -101,7 +101,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 from expedistill.composites import shortfall
 from expedistill.blocks import tasks as tasks_block
 from expedistill.stages.stage0_freeze import build_manifest
-from expedistill.core.config import ExperimentConfig, load_config
+from expedistill.core.config import ExperimentConfig, upgrade_v2_config, load_config
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import Attempt, Exam, Skill, Subtask, Trajectory
 from expedistill.infra.manifest import MANIFEST_NAME
@@ -115,8 +115,16 @@ __all__ = ["assemble_reuse", "skill_lineage_tasks"]
 #: first component of a diff path (or the second, under ``config.``) must
 #: be one of these; anything else means the reused artifacts were produced
 #: under different inputs and the assembly refuses.
-_ALLOWED_DIFF_KEYS = frozenset(
-    {"mode", "split", "tasks", "skill_delivery", "schema_version"})
+#: Ruling 4's whitelist, in v3 spelling: the top-level mode/split/tasks/
+#: schema_version, and the delivery SLOT (the only method slot a reuse
+#: target may re-choose -- everything else produced the bank it reuses).
+_ALLOWED_DIFF_PREFIXES = (
+    "mode", "config.mode",
+    "split", "config.split",
+    "tasks", "config.tasks",
+    "schema_version", "config.schema_version",
+    "config.methods.delivery",
+)
 
 #: The prompt-digest snapshots (top-level ``prompt_digests`` and the
 #: frozen config's ``prompts_digests``) are the DECLARED mixed part of the
@@ -344,12 +352,10 @@ def _diff_paths(stored: Any, incoming: Any, prefix: str = "") -> List[str]:
 
 def _path_allowed(path: str) -> bool:
     """True for a diff path covered by the ruling-4 whitelist: a top-level
-    ``mode``/``split``/``tasks``/``skill_delivery``/``schema_version``, or
-    any leaf under the same key inside the frozen ``config``."""
-    parts = path.split(".")
-    if parts[0] == "config":
-        return len(parts) >= 2 and parts[1] in _ALLOWED_DIFF_KEYS
-    return parts[0] in _ALLOWED_DIFF_KEYS
+    ``mode``/``split``/``tasks``/``schema_version``, or the delivery slot
+    (``config.methods.delivery`` and any leaf under it)."""
+    return any(path == prefix or path.startswith(prefix + ".")
+               for prefix in _ALLOWED_DIFF_PREFIXES)
 
 
 def _identity_view(manifest: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1023,6 +1029,15 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
             f"run_dir must differ from the source run (both are "
             f"{run_dir})")
     source_manifest = read_json(source_manifest_path)
+    if source_manifest.get("config", {}).get("schema_version", 3) == 2:
+        # A v2 source run's identity is walked in its upgraded v3 shape
+        # (the slot that owns each key is where the comparison lives now);
+        # upgrade_v2_config is the one pure mapping, shared with the
+        # one-time config converter.
+        source_manifest = {
+            **source_manifest,
+            "config": upgrade_v2_config(source_manifest["config"]),
+        }
 
     # -- the reuse config and the manifest the new run WOULD freeze ------
     try:
@@ -1090,16 +1105,23 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     # Collapsed to the section level for the summary/ASSEMBLED_FROM (the
     # leaf paths under a whitelisted key are noise there); the REFUSAL
     # below still names every offending leaf.
-    allowed_diffs = sorted({
-        ("config." + path.split(".")[1]
-         if path.split(".")[0] == "config" else path.split(".")[0])
-        for path in diff_paths if _path_allowed(path)})
+    def _section(path: str) -> str:
+        # The delivery slot keeps its slot-level name (config.methods
+        # alone would not say WHICH slot drifted); everything else
+        # collapses to its first key under config, or its top key.
+        if path.startswith("config.methods.delivery"):
+            return "config.methods.delivery"
+        parts = path.split(".")
+        return "config." + parts[1] if parts[0] == "config" else parts[0]
+
+    allowed_diffs = sorted(
+        {_section(path) for path in diff_paths if _path_allowed(path)})
     unexpected = [path for path in diff_paths if not _path_allowed(path)]
     if unexpected:
         raise ConfigError(
             f"the reuse config {config_path} differs from the source run "
             f"{source_run} beyond the allowed keys "
-            f"{sorted(_ALLOWED_DIFF_KEYS)}: {unexpected}; the reused "
+            f"{list(_ALLOWED_DIFF_PREFIXES)}: {unexpected}; the reused "
             "artifacts were produced under the source run's frozen inputs, "
             "so align the config with the source run (or use a fresh "
             "source) instead of mixing protocols")

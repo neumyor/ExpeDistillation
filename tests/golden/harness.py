@@ -360,7 +360,14 @@ def write_config(path: Path, combo: Dict[str, str]) -> Path:
     """Write the combo's experiment config (protocol v2 rule names,
     live_run at weak depth 2 / exam at depth 1, retrieval's top-1 gate)."""
     acceptance = combo["acceptance"]
-    kwargs: Dict[str, Any] = dict(
+    methods: Dict[str, Dict[str, Any]] = {"segmentation": {"K": 1}}
+    if acceptance == "live_run":
+        methods["acceptance"] = {"name": "live_run", "n_attempts": 2,
+                                 "improvement": "strict_rate_gain"}
+    if combo["delivery"] == "retrieval":
+        methods["delivery"] = {"name": "retrieval", "top_k": 1,
+                              "max_categories": 1, "min_score": 0.02}
+    config = ExperimentConfig(
         benchmark=FAKE_BENCH,
         mode=combo["mode"],
         models={"executor_strong": "strong-model",
@@ -368,21 +375,15 @@ def write_config(path: Path, combo: Dict[str, str]) -> Path:
         weak_profile="The weak model misses intermediate steps.",
         n_attempts_strong=1,
         n_attempts_weak=2 if acceptance == "live_run" else 1,
-        K=1,
+        methods=methods,
         rules={"task_select": "any_weak_failed",
                "segment_select": "strong_success_weak_failed",
                "trajectory_select": "strong2_weak2"},
         token_budgets={"default_max_output_tokens": 65536},
+        split={"train": ["t1"], "test": ["t2"]} if combo["mode"] == "split"
+        else None,
     )
-    if acceptance == "live_run":
-        kwargs["acceptance"] = {"mode": "live_run", "n_attempts": 2,
-                                "improvement": "strict_rate_gain"}
-    if combo["delivery"] == "retrieval":
-        kwargs["skill_delivery"] = {"mode": "retrieval", "top_k": 1,
-                                    "max_categories": 1, "min_score": 0.02}
-    if combo["mode"] == "split":
-        kwargs["split"] = {"train": ["t1"], "test": ["t2"]}
-    save_config(ExperimentConfig(**kwargs), str(path))
+    save_config(config, str(path))
     return path
 
 

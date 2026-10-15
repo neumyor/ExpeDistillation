@@ -18,6 +18,6 @@ the driver by that mode string. Params dataclasses and the check() hook
 arrive with the v3 schema switch (P1b).
 """
 
-from expedistill.methods.registry import get_method
+from expedistill.methods.registry import get_method, resolve, resolve_params
 
-__all__ = ["get_method"]
+__all__ = ["get_method", "resolve", "resolve_params"]

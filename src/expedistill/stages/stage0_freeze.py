@@ -87,7 +87,9 @@ from __future__ import annotations
 
 import dataclasses
 import random
+import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from expedistill import prompts
@@ -96,7 +98,8 @@ from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import rules as rules_block
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.tasks import tasks_digest
-from expedistill.core.config import acceptance_mode
+from expedistill.core.config import METHOD_SLOTS
+from expedistill.methods import resolve_params
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import write_json
@@ -211,32 +214,20 @@ def _check_split_covers_task_set(config: Any, tasks: Sequence[Task]) -> None:
             f"not listed: {unlisted}")
 
 
-def _prompt_digests(benchmark: str,
-                    acceptance: str = "exam") -> Dict[str, Optional[str]]:
-    """Method prompts plus exactly this benchmark's task prompt.
+def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
+    """EVERY registered method prompt plus exactly this benchmark's task
+    prompt -- the v3 full freeze (the plan's section 5).
 
     Must run after D1 imported the plugin package (its prompt registers at
-    import). An unregistered task prompt is frozen as None.
-
-    ``acceptance`` is the stage-4 protocol a config selects
-    (``core.config.acceptance_mode``). Under ``exam`` the name set is
-    byte-identical to the frozen v1 one -- an in-flight exam run's resume
-    compares this dict against its manifest, so a new name here is a
-    broken resume, which is why the two live prompts are deliberately NOT
-    in ``prompts/__init__`` (METHOD_PROMPT_NAMES is an import-time
-    snapshot). Under ``live_run`` only, the conditional import registers
-    the two G10/G11 prompts and adds their names (decision doc 2026-10-14,
-    section 2.1), so a live run's manifest freezes the digests of the
-    prompts its stage will actually call.
+    import). An unregistered task prompt is frozen as None. The two live
+    prompts are always in the set now: they register at import of
+    ``prompts/__init__`` like every other method prompt, and the static
+    tests pin that every prompts/*.py module is in that import list --
+    so the frozen surface can never miss a registered prompt. The cost is
+    noise, not risk: a manifest lists digests this run may never call.
     """
     names = set(prompts.METHOD_PROMPT_NAMES)
-    task_prompt = get_plugin(benchmark).task_prompt_name
-    names.add(task_prompt)
-    if acceptance == "live_run":
-        # The import IS the registration (the prompts stay out of
-        # prompts/__init__ on purpose); without it digest() would raise.
-        import expedistill.prompts.attribution  # noqa: F401
-        names.update(("LIVE_RUN_ATTRIBUTION", "LIVE_SKILL_REVISION"))
+    names.add(get_plugin(benchmark).task_prompt_name)
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
@@ -252,7 +243,7 @@ def build_manifest(config: Any, tasks: Sequence[Any], *,
     diff a source run against before assembling (ruling 4's whitelist
     walk) -- one assembly, so the two can never drift apart.
     """
-    prompt_digests = _prompt_digests(config.benchmark, acceptance_mode(config))
+    prompt_digests = _prompt_digests(config.benchmark)
     frozen_config = dataclasses.replace(
         config, prompts_digests=prompt_digests)
     return {
@@ -283,12 +274,30 @@ def run(ctx: StageContext) -> Dict[str, Any]:
     """
     config = ctx.config
     _validate_rules(config.rules)
-    acceptance = acceptance_mode(config)
-    if acceptance == "live_run":
-        # Same fail-early contract as the three rule names above (a typo
-        # stops the run here, before any task is loaded or executed);
-        # core.config guarantees live_run carries an improvement name.
-        rules_block.get_acceptance_improve(config.acceptance["improvement"])
+    # Every method slot resolves here, fail-early: a bad parameter or an
+    # unregistered method name stops the run before any task is loaded or
+    # executed (the live method's check also re-validates its improvement
+    # rule name -- the v2 spot check moved into its owning method).
+    for slot in METHOD_SLOTS:
+        resolve_params(slot, config)
+    # A run frozen under schema v2 can never resume under v3 code: the
+    # frozen key sets differ by design. Point the operator at the
+    # maintenance branch instead of letting the generic manifest-diff
+    # refusal bury the reason.
+    manifest_path = Path(ctx.run_dir) / "manifest.json"
+    if manifest_path.exists():
+        try:
+            frozen_version = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            ).get("config", {}).get("schema_version")
+        except (OSError, ValueError):
+            frozen_version = None
+        if frozen_version == 2:
+            raise ConfigError(
+                "this run was frozen under config schema v2; schema v3 "
+                "code cannot resume it -- continue it on its maintenance "
+                "branch (the run's own checkout, AGENTS section 6), or "
+                "assemble a new run from it")
     tasks = tasks_block.load_tasks(config.benchmark, _tasks_spec(config))
     _check_unique_ids(tasks)
     _check_split_covers_task_set(config, tasks)

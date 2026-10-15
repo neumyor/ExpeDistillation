@@ -1,5 +1,5 @@
 {
-  "base_commit": "dad6d28c4aa7b97af03340544c0a87cd2bcb926a",
+  "base_commit": "00971f27d7fd4c6de804d95bf5f832f3b0b9893f",
   "combos": {
     "exam-retrieval-full": {
       "crash_points": [

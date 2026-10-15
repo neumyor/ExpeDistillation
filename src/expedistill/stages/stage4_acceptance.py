@@ -16,13 +16,12 @@ guarded invariant).
 
 from typing import Any, Dict
 
-from expedistill.core.config import acceptance_mode
-from expedistill.methods import get_method
+from expedistill.methods import resolve
 
 __all__ = ["run"]
 
 
 def run(ctx: Any) -> Dict[str, Any]:
     """Dispatch to the configured acceptance driver and return its summary."""
-    return get_method(
-        "acceptance", acceptance_mode(ctx.config)).run(ctx)
+    driver, params = resolve("acceptance", ctx.config)
+    return driver.run(ctx, params)

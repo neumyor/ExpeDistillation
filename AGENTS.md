@@ -104,8 +104,9 @@ src/expedistill/
     author.py             G2 提炼 / 诊断、G6 改写
     exam.py               G3 出考题、G4 作答、G5 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
-    attribution.py        G10 live 归因、G11 live 修订（live_run 验收；不进 __init__
-                          的 import 清单——懒注册保 exam run 的冻结 prompt 名集不变）
+    attribution.py        G10 live 归因、G11 live 修订（live_run 验收；v3 起进
+                          __init__ 的 import 清单——全量冻结，manifest 冻结全部
+                          已注册方法 prompt 的 digest）
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
   llm/                    第 2 层：B1 调用模型
     client.py             底层客户端（OpenAI 兼容接口）
@@ -131,7 +132,7 @@ src/expedistill/
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
     retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
     attribution.py        G10 live 归因、G11 live 修订（live_run 验收的模型积木；
-                          模块顶部防御性 import prompts/attribution 以完成注册）
+                          prompt 注册由 prompts/__init__ 全量负责，无需防御性 import）
   composites/             第 5 层：组合积木（负责落盘与续跑）
     batch_execute.py      K1
     segment_checked.py    K2
@@ -140,11 +141,16 @@ src/expedistill/
     curation.py           K5
     live_acceptance.py    K6 live-run 验收（阶段 4 的 live_run 模式；逐组阶段函数库，
                           轮序编排归 methods/acceptance/live_run.py）
-  methods/                第 6 层：方法驱动（按名注册，见 methods/registry.py）
-    acceptance/           阶段 4 的验收驱动：exam.py（K4 文本考试）、live_run.py
-                          （轮栅栏 + K1 大批 + summary；exam 进程永不加载 live 模块）
-    delivery/             阶段 6 的注入驱动：whole_bank.py（整库）、retrieval.py
-                          （逐任务 top-k + 检索审计）
+  methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
+                          见 methods/registry.py；解析按需 import 驱动）
+    params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
+    registry.py           (槽位, 名字) → (驱动, 参数类, check) 的纯数据表
+    segmentation/         切段槽位：SegmentationParams（驱动待第二实现出现）
+    authoring/            写 skill 槽位：AuthoringParams（exams 开关，P4 放开 false）
+    acceptance/           验收驱动 exam.py、live_run.py + 两方法的 Params 与
+                          check_live_run（跨约束：n_attempts ≤ n_attempts_weak）
+    curation/             库整理槽位：CurationParams（驱动 P4 包薄壳）
+    delivery/             注入驱动 whole_bank.py、retrieval.py + 两方法的 Params
   stages/                 第 7 层：阶段 0–6 的流程（薄分发 + 写摘要/阶段末抛错）
     stage0_freeze.py … stage6_test.py
     stage4_acceptance.py  阶段 4 前端：按名取验收驱动并调用
@@ -215,6 +221,8 @@ scripts/
   run/        启动实验：按配置调用 cli，例如 run_experiment.sh <配置名>
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
               freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
+              convert_v2_configs.py：一次性 schema v2→v3 配置转换（写新文件名）
+              launch_tb21_live_run.py：正式实验的 detached 启动器
   remote/     远程（node29）相关：部署代码、同步产物、查看进度、停止任务
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
   audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节
@@ -240,7 +248,9 @@ scripts/
 ```
 configs/
   experiments/   每个实验一份配置：benchmark、模式（split / full）、模型角色表、
-                 采样次数、K、retry_limit 等全部方法参数、具名规则的名字
+                 采样次数、methods 五槽位的全部方法参数、具名规则的名字；
+                 schema_version 3（v2 文件是冻结的历史记录，转换走
+                 scripts/run/convert_v2_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
 ```
 

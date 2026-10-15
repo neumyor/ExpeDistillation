@@ -46,6 +46,13 @@ from expedistill.prompts import PROMPTS, PromptSpec
 # The driver moved to methods/ (P1a); the alias keeps the test's
 # monkeypatch targets and call sites reading as before.
 from expedistill.methods.acceptance import live_run as stage4_live_run
+from expedistill.methods import resolve_params
+
+
+def run_live(ctx):
+    """The driver takes (ctx, params); the tests always resolve the
+    config's acceptance slot."""
+    return stage4_live_run.run(ctx, resolve_params("acceptance", ctx.config))
 from dataclasses import replace
 from expedistill.stages.context import RunSettings, StageContext
 
@@ -55,7 +62,7 @@ TASK2 = make_task_id(BENCHMARK, "t2")
 N_ATTEMPTS = 2
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
 
-LIVE_ACCEPTANCE = {"mode": "live_run", "n_attempts": N_ATTEMPTS,
+LIVE_ACCEPTANCE = {"name": "live_run", "n_attempts": N_ATTEMPTS,
                    "improvement": "strict_rate_gain"}
 
 # Protocol-v2 contents: four bracket sections at line starts, so
@@ -195,8 +202,8 @@ def make_ctx(tmp_path, *, author=None, rewriter=None, acceptance=None,
             models={"executor_strong": "strong-model",
                     "executor_weak": "weak-model"},
             weak_profile=WEAK_PROFILE,
-            retry_limit=1,
-            acceptance=dict(acceptance or LIVE_ACCEPTANCE),
+            n_attempts_weak=3,
+            methods={"acceptance": dict(acceptance or LIVE_ACCEPTANCE)},
         ),
         usage=None,
         handles={"executor_weak": make_fake_handle("executor_weak", []),
@@ -302,7 +309,7 @@ def test_round0_pass_accepts_with_zero_attribution_calls(tmp_path, monkeypatch):
         behave=lambda task, block: "success",
         author=author_plan(lambda skill_id: "revise"))
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     assert summary["accepted"] == 1
     assert summary["discarded"] == {}
@@ -329,7 +336,7 @@ def test_two_failed_rounds_discard_the_group(tmp_path, monkeypatch):
         author=author_plan(lambda skill_id: "revise"),
         rewriter=rewriter_append())
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     assert summary["accepted"] == 0
     assert summary["discarded"] == {"live_no_improvement": 1}
@@ -357,7 +364,7 @@ def test_revision_then_round1_pass_accepts(tmp_path, monkeypatch):
         author=author_plan(lambda skill_id: "revise"),
         rewriter=rewriter_append())
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     skill = stored_skill(store, skills[0])
     assert skill.status == "accepted"
@@ -422,7 +429,7 @@ def test_delete_plus_round1_pass_reports_mixed_outcome(
                            else "revise"),
         rewriter=rewriter_append(), contents=(MARKED, MARKED))
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     deleted = stored_skill(store, skills[0])
     survivor = stored_skill(store, skills[1])
@@ -447,7 +454,7 @@ def test_all_keep_fires_the_noop_guard_and_never_runs_round1(
         behave=lambda task, block: "failure",
         author=author_plan(lambda skill_id: "keep"))
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     assert summary["discarded"] == {"live_no_improvement": 1}
     assert stored_skill(store, skills[0]).discard_reason == \
@@ -474,7 +481,7 @@ def test_zero_execution_terminals_are_never_dispatched_or_redispatched(
     seed_baseline(ctx.store, ("failure", "failure"), TASK2)
     seed_group(ctx.store, [MARKED], TASK2)
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     assert [call["task_id"] for call in plugin.calls] == ["t2", "t2"]
     for skill_id in ctx.store.ids("skills"):
@@ -493,7 +500,7 @@ def test_zero_execution_terminals_are_never_dispatched_or_redispatched(
     plugin.calls.clear()
     author = make_fake_handle("author", [])
     ctx2 = make_ctx(tmp_path, author=author, run_dir=ctx.run_dir)
-    summary2 = stage4_live_run.run(ctx2)
+    summary2 = run_live(ctx2)
 
     assert plugin.calls == []
     assert author.client.calls == []
@@ -509,7 +516,7 @@ def test_injection_overflow_terminalizes_before_any_execution(
         tmp_path, monkeypatch, behave=lambda task, block: "success",
         acceptance=acceptance)
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     assert plugin.calls == []          # the overflow never reaches K1
     skill = stored_skill(store, skills[0])
@@ -523,7 +530,7 @@ def test_injection_overflow_terminalizes_before_any_execution(
     # Resume: the terminal group is never re-derived into a dispatch set.
     plugin.calls.clear()
     ctx2 = make_ctx(tmp_path, run_dir=ctx.run_dir)
-    stage4_live_run.run(ctx2)
+    run_live(ctx2)
     assert plugin.calls == []
     assert len(verdicts(store)) == 1   # append-once across the resume
 
@@ -548,7 +555,7 @@ def test_infra_holes_raise_at_stage_end_and_a_resume_completes(
         author=author_plan(lambda skill_id: "revise"))
 
     with pytest.raises(InfrastructureError, match="resume"):
-        stage4_live_run.run(ctx)
+        run_live(ctx)
 
     # The group is untouched and pending; the summary names the hole and
     # the stage wrote it before raising (exit-3 semantics).
@@ -562,7 +569,7 @@ def test_infra_holes_raise_at_stage_end_and_a_resume_completes(
     # The resume: the sandbox heals, the hole executes, the round judges.
     broken["a00"] = False
     plugin.calls.clear()
-    summary2 = stage4_live_run.run(ctx)
+    summary2 = run_live(ctx)
 
     assert [call["token"] for call in plugin.calls] == ["a00r3"]
     assert summary2["accepted"] == 1
@@ -590,7 +597,7 @@ def test_shortfall_acceptance_judges_holes_and_undetermines_all_hole_groups(
         seed_baseline(ctx.store, ("failure", "failure"), task_id)
         seed_group(ctx.store, [MARKED], task_id)
 
-    summary = stage4_live_run.run(ctx)    # no raise under the flag
+    summary = run_live(ctx)    # no raise under the flag
 
     # t1: nothing was executed, so there is no live denominator.
     t1_verdict = verdict_of(ctx.store, TASK1, 0)
@@ -636,7 +643,7 @@ def test_a_previously_accepted_hole_is_skipped_and_judges_with_shortfall(
     append_jsonl(live_dir(store) / "round00" / la.INJECTION_AUDIT_NAME,
                  la.audit_row(store, TASK1, 0))
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     # Nothing was executed: the stored unit completed the round together
     # with the accepted hole, so the group never entered a dispatch set.
@@ -685,7 +692,7 @@ def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
     })
     discard_skill(store, skills[1], la.LIVE_NO_IMPROVEMENT)
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     assert plugin.calls == []          # round 1 never ran
     for skill in skills:
@@ -710,7 +717,7 @@ def test_a_missing_baseline_unit_stops_the_stage_before_any_execution(
     seed_group(ctx.store, [MARKED], TASK1)
 
     with pytest.raises(InfrastructureError, match="stage 1"):
-        stage4_live_run.run(ctx)
+        run_live(ctx)
 
     assert plugin.calls == []
 
@@ -724,7 +731,7 @@ def test_an_all_invalid_baseline_is_a_config_error(tmp_path, monkeypatch):
     seed_group(ctx.store, [MARKED], TASK1)
 
     with pytest.raises(Exception, match="no valid attempt"):
-        stage4_live_run.run(ctx)
+        run_live(ctx)
 
     assert plugin.calls == []
 
@@ -751,7 +758,7 @@ def test_stage1_weak_arm_holes_are_inherited_as_round_skips(
                    unit(TASK2, 0),
                ])}, indent=2)
 
-    summary = stage4_live_run.run(ctx)
+    summary = run_live(ctx)
 
     # The inherited hole was never executed; the other unit was.
     assert [call["token"] for call in plugin.calls] == ["a01"]
@@ -788,7 +795,7 @@ def test_worker_counts_produce_identical_outcomes(tmp_path, monkeypatch):
             seed_group(ctx.store, [MARKED, MARKED], task_id)
         ctx = replace(ctx, run_settings=RunSettings(workers=workers))
         plugin.calls.clear()
-        summary = stage4_live_run.run(ctx)
+        summary = run_live(ctx)
         skills = {skill_id: ctx.store.load("skills", skill_id, Skill)
                   for skill_id in ctx.store.ids("skills")}
         return (summary, skills,

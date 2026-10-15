@@ -602,15 +602,27 @@
     "aux_metric": null,
     "benchmark": "fakebench",
     "config": {
-      "K": 1,
-      "acceptance": {
-        "improvement": "strict_rate_gain",
-        "mode": "live_run",
-        "n_attempts": 2
-      },
-      "bank_token_budget": 4096,
       "benchmark": "fakebench",
-      "curation_rounds": 3,
+      "methods": {
+        "acceptance": {
+          "improvement": "strict_rate_gain",
+          "n_attempts": 2,
+          "name": "live_run"
+        },
+        "authoring": {
+          "exams": true
+        },
+        "curation": {
+          "rounds": 3,
+          "token_budget": 4096
+        },
+        "delivery": {
+          "name": "whole_bank"
+        },
+        "segmentation": {
+          "K": 1
+        }
+      },
       "mode": "split",
       "model_options": {},
       "models": {
@@ -645,17 +657,12 @@
         "SKILL_DIAGNOSE": "b1559a1e72ea959d42d8954f32f49f6895f325f3a4d628fa4453f85583c79050",
         "SKILL_DISTILL": "5c959806cc3751508acbe9ed14eff248eee20c9a8f10bbb2be3370d19926826c"
       },
-      "retry_limit": 2,
       "rules": {
         "segment_select": "strong_success_weak_failed",
         "task_select": "any_weak_failed",
         "trajectory_select": "strong2_weak2"
       },
-      "schema_version": 2,
-      "segment_retry_limit": 2,
-      "skill_delivery": {
-        "mode": "whole_bank"
-      },
+      "schema_version": 3,
       "split": {
         "test": [
           "t2"

@@ -10,16 +10,9 @@ excerpts of the failed attempts. Blocks stay pure (AGENTS.md block rules):
 the model is a parameter, nothing touches disk, and every call goes
 through ``llm.call.call_model`` with a named prompt.
 
-The module-top import below is a runtime guarantee, not style: the two
-prompt names are deliberately absent from ``prompts/__init__.py`` (lazy
-registration keeps the manifest's frozen prompt-name set stable for
-in-flight exam runs), so importing this module is what registers them --
-a caller that bypasses stage 0 cannot hit PromptNotFoundError. Note the
-exact claim: what stays intact for exam runs is the FROZEN NAME SET (the
-snapshot takes every prompt name at import time, before any live module
-loads, and stage 0's golden tests pin it) -- not the module graph, since
-importing the ``composites`` package does pull this module in through
-``composites/__init__``'s module export.
+The two prompts register at import of ``prompts/__init__`` (the v3
+full freeze): no defensive import is needed here, and a caller that
+bypasses stage 0 still finds the names registered.
 
 Scope kept out of this module on purpose (decision section 2.3): the
 marker-preservation check on a revised skill (``skill_markers(new) ==
@@ -41,11 +34,6 @@ touch both prompts, which is a new experiment either way.
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-
-# Defensive registration (decision section 2.3): the prompts are absent from
-# prompts/__init__.py on purpose, so this import is what puts their names in
-# the registry for any caller that did not go through stage 0.
-import expedistill.prompts.attribution  # noqa: F401
 
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import ModelOutputError
