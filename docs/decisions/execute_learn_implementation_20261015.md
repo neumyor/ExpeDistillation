@@ -24,7 +24,15 @@
 
 - v1 Skill：段生（`<subtask>/skill`）从 ID 后缀推导 `source_subtasks`；**嵌套合并产物沿 `merged_from` 推导需要兄弟记录，`from_dict` 做不了——from_dict 对这类记录响亮报错**；装配器走**带 skills_by_id 的迁移纯函数**（core 层，输入 v1 行字典 + 同源技能字典，输出 v2 行）。
 - v1 Exam：`skill_id` 由 `exam_id` 换后缀推导（`<subtask>/exam` → `<subtask>/skill`）。
-- **装配器完整性比对同构化（I1，M1 必做）**：`assemble_reuse.py:1189` 的 `row != stored.to_dict()` 改为 `Skill.from_dict(row).to_dict() != stored.to_dict()`（两侧同构；否则 M1 后对**任何** v1 对象源 run 的每行 bank 误报"the source is corrupt"——今天全部正式 run 都是 v1）；`curation.py:945` 的补账比对同 helper 修。
+- **装配器完整性比对同构化（I1，M1 必做）**：`assemble_reuse.py:1189` 的 `row != stored.to_dict()` 改为 `Skill.from_dict(row).to_dict() != stored.to_dict()`（两侧同构；否则 M1 后对**任何** v1 对象源 run 的每行 bank 误报"the source is corrupt"——今天全部正式 run 都是 v1）；`curation.py:945` 的补账按存储记录原样落盘（M1 实测：该处是补账写入而非比较，v1 前缀 + v1 补行自洽）。
+
+**M1 验收裁决（2026-10-15，A 的 P-A1 与 C 的 P-C1/P-C2 同根因——"只有契约点名的两处接了迁移，全量加载型消费方全部没接"）**：
+
+1. **装配产物 = v2 原生**（采评审 A 修法）：装配器对 skills/exams/bank 行**迁移后落盘**（其余 KIND 字节复制不变）；ASSEMBLED_FROM 披露对象行已迁移；消费方零改动。装配出的 run 端到端可用（阶段 4 枚举、阶段 5 短路、审计工具）。
+2. **审计工具读 v1 run 经迁移**：`scripts/audit/` 是 AGENTS 六.7 标准流程工具，读取点单一；core 加批量包装 `migrate_skill_rows(rows)`（内部建 map、逐行 migrate，v2 恒等穿过）作共享缝。
+3. **直接在 v1 run 上用新代码续跑不在支持范围**（AGENTS 六.1/R6：正式 run 固定在维护分支的旧代码上续跑）。对象升版有意不动 CONFIG_SCHEMA_VERSION——stage0 不拒载，**from_dict 对 v1 合并产物的响亮报错就是"走错 checkout"的发现机制**，报错信息同时指向 migrate_skill_record 与 R6 维护分支规则。不建 run 级迁移工具（无消费者，P5 教训；场景真出现时平凡可写）。
+4. M1 的 v1 前缀补账测试保留（钉"按存储原样落盘"不变量，该不变量同样服务 v2 run），docstring 注明 v1 续跑场景本身属 R6 范围外。
+5. 装配器迁移失败抛 ConfigError（与同处损坏源错误族一致，A/C 琐细）。
 
 不改的判定：`is_stage3_candidate` 仍按 ID 模式；`make_skill_id` / `make_exam_id` / `make_merged_skill_id` / `make_trajectory_id` 不变；live 的多来源（合并产物）分组依据 = 候选 ID 判定本就排除 bank/merge 产物（`live_acceptance.py:400-426`），一句话写进 §3。
 
