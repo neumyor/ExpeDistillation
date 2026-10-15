@@ -146,6 +146,7 @@ def make_skill(subtask):
         skill_id=make_skill_id(subtask.subtask_id),
         content="Check the config exists before reading it.",
         subtask_id=subtask.subtask_id,
+        source_subtasks=[subtask.subtask_id],
     )
 
 
@@ -155,6 +156,7 @@ def make_marker_skill(subtask, content=DISTILL_CONTENT):
         skill_id=make_skill_id(subtask.subtask_id),
         content=content,
         subtask_id=subtask.subtask_id,
+        source_subtasks=[subtask.subtask_id],
     )
 
 
@@ -184,6 +186,7 @@ def test_write_skill_distill_wiring_and_fields():
 
     assert skill.skill_id == make_skill_id(subtask.subtask_id)
     assert skill.subtask_id == subtask.subtask_id
+    assert skill.source_subtasks == [subtask.subtask_id]
     # The stored content is the renderer's marker text, not the model's
     # raw prose: injection, G7 and D8 all read this one representation.
     assert skill.content == DISTILL_CONTENT
@@ -604,6 +607,7 @@ def test_gen_exam_wiring_and_fields():
 
     assert exam.exam_id == make_exam_id(subtask.subtask_id)
     assert exam.subtask_id == subtask.subtask_id
+    assert exam.skill_id == make_skill_id(subtask.subtask_id)
     assert exam.question_text == "A service rejects your login. What do you check first?"
     assert exam.reference_answer == "Whether the credentials in the config are valid."
 

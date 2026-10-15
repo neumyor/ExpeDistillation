@@ -8,7 +8,8 @@ from expedistill.infra import Store
 
 def _exam(i):
     return Exam(exam_id=f"t/x/seg0{i}/exam", question_text="q",
-                reference_answer="a", subtask_id="t/x/seg01")
+                reference_answer="a", subtask_id="t/x/seg01",
+                skill_id=f"t/x/seg0{i}/skill")
 
 
 def test_exam_stored_by_exam_id(tmp_path):
@@ -34,7 +35,8 @@ def test_skill_and_subtask_ids_resolve_via_kind(tmp_path):
                   step_range=[0, 3], label="l", description="d",
                   success=False, context_summary="")
     sk = Skill(skill_id="t/x/seg01/skill", subtask_id="t/x/seg01",
-               content="c", version=1, status="pending")
+               source_subtasks=["t/x/seg01"], content="c", version=1,
+               status="pending")
     at = Attempt(attempt_id="t/x/seg01/exam/att00",
                  exam_id="t/x/seg01/exam", skill_id=None,
                  skill_version=None, purpose="bare", weak_answer="a",

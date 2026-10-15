@@ -28,7 +28,8 @@ def _ctx(tmp_path, budget=BIG):
 
 def _skill(store, subtask_id, content="skill text", status="accepted"):
     skill = Skill(skill_id=ids.make_skill_id(subtask_id),
-                  content=content, subtask_id=subtask_id)
+                  content=content, subtask_id=subtask_id,
+                  source_subtasks=[subtask_id])
     skill.status = status
     store.save(skill, "skills")
     return skill

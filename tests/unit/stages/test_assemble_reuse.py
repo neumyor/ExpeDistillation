@@ -46,7 +46,7 @@ from expedistill.stages.assemble_reuse import (
 )
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
-from expedistill.infra.store import Store, read_json, read_jsonl
+from expedistill.infra.store import Store, read_json, read_jsonl, write_json
 from expedistill.infra.usage import UsageRecorder
 from expedistill.stages import stage0_freeze
 from expedistill.stages.context import StageContext
@@ -159,16 +159,19 @@ def _skill(subtask_id, status, merged_from=(), content=None):
         skill_id=f"{subtask_id}/skill",
         content=content or f"content of {subtask_id}",
         subtask_id=subtask_id,
+        source_subtasks=[subtask_id],
         status=status,
         merged_from=list(merged_from),
     )
 
 
-def _merged_skill(serial, anchor_subtask, sources, status="accepted"):
+def _merged_skill(serial, anchor_subtask, sources, status="accepted",
+                  source_subtasks=None):
     return Skill(
         skill_id=f"bank/merge/{serial:04d}",
         content=f"merged content {serial}",
         subtask_id=anchor_subtask,
+        source_subtasks=source_subtasks or [anchor_subtask],
         status=status,
         merged_from=list(sources),
     )
@@ -180,6 +183,7 @@ def _exam(subtask_id):
         question_text=f"question for {subtask_id}",
         reference_answer="the answer",
         subtask_id=subtask_id,
+        skill_id=f"{subtask_id}/skill",
     )
 
 
@@ -578,6 +582,64 @@ def test_assembled_from_records_provenance_and_merged_groups(tmp_path):
         "mode", "split"]
 
 
+def _downgrade_source_records_to_v1(run_dir: Path) -> None:
+    """Rewrite a freshly built source run's Skill/Exam records and bank
+    rows to the pre-v2 shape (schema_version 1; no source_subtasks, no
+    exam skill_id): a source run written by pre-M1 code."""
+    for path in (run_dir / "stage3_generation" / "skills").glob("*.json"):
+        row = read_json(path)
+        del row["source_subtasks"]
+        row["schema_version"] = 1
+        write_json(path, row, indent=2)
+    for path in (run_dir / "stage3_generation" / "exams").glob("*.json"):
+        row = read_json(path)
+        del row["skill_id"]
+        row["schema_version"] = 1
+        write_json(path, row, indent=2)
+    rows = read_jsonl(run_dir / "skill_bank.jsonl")
+    for row in rows:
+        del row["source_subtasks"]
+        row["schema_version"] = 1
+    (run_dir / "skill_bank.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in rows), encoding="utf-8")
+
+
+def test_bank_level_assembly_of_a_v1_object_source_run(tmp_path):
+    """I1 regression: every formal source run predates schema v2, so a
+    v1-object source (records and bank rows at schema_version 1) must
+    assemble at the bank level exactly like a current one -- no false
+    "the source is corrupt" from the bank comparison, and the flat merge
+    (m0) still resolves its lineage through the migration function."""
+    source = build_source_run(tmp_path)
+    _downgrade_source_records_to_v1(source.run_dir)
+    config_path = write_reuse_config(tmp_path)
+    run_dir = tmp_path / "assembled"
+
+    summary = assemble_reuse(source.run_dir, config_path, run_dir)
+
+    # Same keep sets as the v2 happy path: the copy is a pure byte copy,
+    # so the v1 decision (which records to keep) must not move at all.
+    counts = summary["counts"]
+    assert counts["trajectories"] == 2
+    assert counts["subtasks"] == 5
+    assert counts["skills"] == 6
+    assert counts["exams"] == 5
+    assert counts["attempts"] == 4
+    assert counts["bank_rows"] == 2
+    bank_ids = [row["skill_id"]
+                for row in read_jsonl(run_dir / "skill_bank.jsonl")]
+    assert bank_ids == [source.ids["m0"], source.ids["s_a"]]
+    # The copied rows stay in their own v1 form (byte copy, no upgrade on
+    # the write side); every consumer loads them through from_dict.
+    for row in read_jsonl(run_dir / "skill_bank.jsonl"):
+        assert row["schema_version"] == 1
+        assert "source_subtasks" not in row
+        path = (run_dir / "stage3_generation" / "skills"
+                / (urllib.parse.quote(row["skill_id"], safe="") + ".json"))
+        assert read_json(path) == row
+
+
 # ---------------------------------------------------------------------------
 # Identity whitelist diff (ruling 4)
 # ---------------------------------------------------------------------------
@@ -813,11 +875,15 @@ def _lineage_fixture():
                     description="d", success=True),
     }
     original_t1 = Skill(skill_id="traj/b:t1/strong/00/seg00/skill",
-                        content="c", subtask_id="traj/b:t1/strong/00/seg00")
+                        content="c", subtask_id="traj/b:t1/strong/00/seg00",
+                        source_subtasks=["traj/b:t1/strong/00/seg00"])
     original_t2 = Skill(skill_id="traj/b:t2/weak/00/seg00/skill",
-                        content="c", subtask_id="traj/b:t2/weak/00/seg00")
+                        content="c", subtask_id="traj/b:t2/weak/00/seg00",
+                        source_subtasks=["traj/b:t2/weak/00/seg00"])
     merge = Skill(skill_id="bank/merge/0000", content="c",
                   subtask_id="traj/b:t1/strong/00/seg00",
+                  source_subtasks=["traj/b:t1/strong/00/seg00",
+                                   "traj/b:t2/weak/00/seg00"],
                   merged_from=[original_t1.skill_id, original_t2.skill_id])
     return subtasks, original_t1, original_t2, merge
 
@@ -839,6 +905,8 @@ def test_lineage_resolves_nested_merges_through_skills_by_id():
     subtasks, original_t1, original_t2, merge = _lineage_fixture()
     nested = Skill(skill_id="bank/merge/0001", content="c",
                    subtask_id="traj/b:t1/strong/00/seg00",
+                   source_subtasks=["traj/b:t1/strong/00/seg00",
+                                    "traj/b:t2/weak/00/seg00"],
                    merged_from=[merge.skill_id])
     skills = {merge.skill_id: merge, original_t1.skill_id: original_t1,
               original_t2.skill_id: original_t2}
@@ -854,7 +922,8 @@ def test_lineage_resolves_nested_merges_through_skills_by_id():
 def test_lineage_of_a_skill_with_a_missing_anchor_is_refused():
     subtasks, _, _, _ = _lineage_fixture()
     orphan = Skill(skill_id="traj/b:t9/strong/00/seg00/skill",
-                   content="c", subtask_id="traj/b:t9/strong/00/seg00")
+                   content="c", subtask_id="traj/b:t9/strong/00/seg00",
+                   source_subtasks=["traj/b:t9/strong/00/seg00"])
     with pytest.raises(ConfigError, match="anchor subtask"):
         skill_lineage_tasks(orphan, subtasks)
 
@@ -863,6 +932,7 @@ def test_lineage_of_a_merge_naming_a_missing_original_is_refused():
     subtasks, _, _, _ = _lineage_fixture()
     broken = Skill(skill_id="bank/merge/0002", content="c",
                    subtask_id="traj/b:t1/strong/00/seg00",
+                   source_subtasks=["traj/b:t1/strong/00/seg00"],
                    merged_from=["traj/b:t1/strong/00/seg09/skill"])
     with pytest.raises(ConfigError, match="does not store"):
         skill_lineage_tasks(broken, subtasks)

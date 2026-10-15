@@ -113,7 +113,7 @@ def make_group_skill(segment, content):
     subtask_id = make_subtask_id(make_trajectory_id(TASK_ID, "strong", 0),
                                 segment)
     return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id)
+                 subtask_id=subtask_id, source_subtasks=[subtask_id])
 
 
 A_ID = make_group_skill(0, MARKED_A).skill_id

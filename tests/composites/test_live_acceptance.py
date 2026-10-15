@@ -109,7 +109,8 @@ def make_group_skill(task_id, segment, content, version=1):
     subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0),
                                  segment)
     return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, version=version)
+                 subtask_id=subtask_id, source_subtasks=[subtask_id],
+                 version=version)
 
 
 def store_group(store, contents, task_id=TASK_ID):
@@ -332,7 +333,8 @@ def test_pending_groups_derives_the_universe(tmp_path):
     gone.discard_reason = la.LIVE_REVISION_DELETED
     other = make_group_skill(OTHER_TASK_ID, 0, MARKED_A)
     merged = Skill(skill_id=make_merged_skill_id(0), content=MARKED_A,
-                   subtask_id=keep.subtask_id)
+                   subtask_id=keep.subtask_id,
+                   source_subtasks=[keep.subtask_id])
     for skill in (keep, gone, other, merged):
         store.save(skill, "skills")
 
@@ -375,7 +377,8 @@ def test_audit_row_excludes_terminal_merged_and_other_tasks(tmp_path):
     gone.discard_reason = la.LIVE_REVISION_DELETED
     elsewhere = make_group_skill(OTHER_TASK_ID, 0, MARKED_A)
     merged = Skill(skill_id=make_merged_skill_id(0), content=MARKED_A,
-                   subtask_id=keep.subtask_id)
+                   subtask_id=keep.subtask_id,
+                   source_subtasks=[keep.subtask_id])
     for skill in (keep, gone, elsewhere, merged):
         store.save(skill, "skills")
 

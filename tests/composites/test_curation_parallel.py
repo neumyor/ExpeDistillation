@@ -171,12 +171,15 @@ def merge_id(serial):
 def seed(store, world):
     for index, content in world.skill_contents.items():
         store.save(Skill(skill_id=skill_id(index), content=content,
-                         subtask_id=subtask_id(index), status="accepted"),
+                         subtask_id=subtask_id(index),
+                         source_subtasks=[subtask_id(index)],
+                         status="accepted"),
                   "skills")
         store.save(Exam(exam_id=exam_id(index),
                         question_text=f"question {index}",
                         reference_answer=f"reference {index}",
-                        subtask_id=subtask_id(index)), "exams")
+                        subtask_id=subtask_id(index),
+                        skill_id=skill_id(index)), "exams")
 
 
 def run(store, world, workers=1, budget=600, rounds=3):
@@ -739,7 +742,9 @@ def test_foreign_pending_merge_is_rolled_back_by_the_map(tmp_path,
     monkeypatch.undo()
     assert read_json(log_path(store))["merge_records"] == []
     store.save(Skill(skill_id=merge_id(9), content="foreign merge",
-                     subtask_id=subtask_id(0), status="pending",
+                     subtask_id=subtask_id(0),
+                     source_subtasks=[subtask_id(0), subtask_id(1)],
+                     status="pending",
                      merged_from=[skill_id(0), skill_id(1)]), "skills")
 
     bank, _ = run(store, world, workers=8, budget=10 ** 6)
@@ -841,7 +846,9 @@ def test_journal_less_pending_merge_is_reused_by_merged_from(tmp_path):
         world = make_world()
         seed(store, world)
         store.save(Skill(skill_id=merge_id(0), content="mergeA" + "y" * 1194,
-                         subtask_id=subtask_id(0), status="pending",
+                         subtask_id=subtask_id(0),
+                         source_subtasks=[subtask_id(0), subtask_id(1)],
+                         status="pending",
                          merged_from=[skill_id(0), skill_id(1)]), "skills")
 
         bank, handles = run(store, world, workers=workers, budget=10 ** 6)

@@ -368,6 +368,7 @@ def write_skill(
         skill_id=make_skill_id(subtask.subtask_id),
         content=render_skill_content(mode, parsed),
         subtask_id=subtask.subtask_id,
+        source_subtasks=[subtask.subtask_id],
         version=1,
         status="pending",
         rewrite_history=[],
@@ -418,6 +419,7 @@ def gen_exam(
         question_text=question_text.strip(),
         reference_answer=reference_answer.strip(),
         subtask_id=subtask.subtask_id,
+        skill_id=make_skill_id(subtask.subtask_id),
     )
 
 

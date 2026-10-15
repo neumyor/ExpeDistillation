@@ -148,9 +148,10 @@ def make_pair(content, question, reference):
     subtask_id = make_subtask_id(
         make_trajectory_id(make_task_id("tb", "t1"), "strong", 0), 1)
     skill = Skill(skill_id=make_skill_id(subtask_id), content=content,
-                  subtask_id=subtask_id)
+                  subtask_id=subtask_id, source_subtasks=[subtask_id])
     exam = Exam(exam_id=make_exam_id(subtask_id), question_text=question,
-                reference_answer=reference, subtask_id=subtask_id)
+                reference_answer=reference, subtask_id=subtask_id,
+                skill_id=make_skill_id(subtask_id))
     return skill, exam
 
 

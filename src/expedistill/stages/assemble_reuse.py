@@ -103,7 +103,14 @@ from expedistill.blocks import tasks as tasks_block
 from expedistill.stages.stage0_freeze import build_manifest
 from expedistill.core.config import ExperimentConfig, upgrade_v2_config, load_config
 from expedistill.core.ids import make_task_id, parse_trajectory_id
-from expedistill.core.models import Attempt, Exam, Skill, Subtask, Trajectory
+from expedistill.core.models import (
+    Attempt,
+    Exam,
+    Skill,
+    Subtask,
+    Trajectory,
+    migrate_skill_record,
+)
 from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
@@ -1139,9 +1146,14 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     subtasks = {
         obj_id: Subtask.from_dict(record) for obj_id, record
         in _source_objects(source_run, "subtasks").items()}
+    # Skills load through the v1->v2 migration: a pre-v2 source run's
+    # merge products cannot go through from_dict alone (their
+    # source_subtasks needs the sibling records), so every raw row is
+    # migrated first -- v2 rows pass through unchanged.
+    skill_rows = _source_objects(source_run, "skills")
     skills = {
-        obj_id: Skill.from_dict(record) for obj_id, record
-        in _source_objects(source_run, "skills").items()}
+        obj_id: Skill.from_dict(migrate_skill_record(record, skill_rows))
+        for obj_id, record in skill_rows.items()}
     exams = {
         obj_id: Exam.from_dict(record) for obj_id, record
         in _source_objects(source_run, "exams").items()}
@@ -1186,12 +1198,20 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
             raise ConfigError(
                 f"bank row {row_skill_id!r} names a skill the source run "
                 "does not store; the source is corrupt")
-        if row != stored.to_dict():
+        # Both sides through the object roundtrip (isomorphic forms): a
+        # raw v1 row of an older source run migrates on load exactly like
+        # the stored record did, so a consistent source compares equal --
+        # comparing the raw row against ``stored.to_dict()`` would flag
+        # every v1 row as corrupt even when the run is consistent. The
+        # load doubles as the bank row's can-load check.
+        row_obj = Skill.from_dict(
+            migrate_skill_record(row, skill_rows))
+        if row_obj.to_dict() != stored.to_dict():
             raise ConfigError(
                 f"bank row {row_skill_id!r} differs from the stored skill "
                 "of the same id; the source is corrupt")
         row_lineage = skill_lineage_tasks(
-            Skill.from_dict(row), subtasks, skills_by_id=skills)
+            row_obj, subtasks, skills_by_id=skills)
         row_keep = row_lineage <= train_ids
         if row_keep != (row_skill_id in kept_skills):
             # Both call sites went through skill_lineage_tasks with the

@@ -78,11 +78,13 @@ def seed_pair(store, task, seg_index, *, skill_text="a skill",
     subtask_id = make_subtask_id(
         make_trajectory_id(make_task_id("tb", task), "strong", 0), seg_index)
     skill = Skill(skill_id=make_skill_id(subtask_id), content=skill_text,
-                  subtask_id=subtask_id, status=status)
+                  subtask_id=subtask_id, source_subtasks=[subtask_id],
+                  status=status)
     store.save(skill, "skills")
     if with_exam:
         exam = Exam(exam_id=make_exam_id(subtask_id), question_text=question,
-                    reference_answer=reference, subtask_id=subtask_id)
+                    reference_answer=reference, subtask_id=subtask_id,
+                    skill_id=make_skill_id(subtask_id))
         store.save(exam, "exams")
     return skill
 
@@ -388,7 +390,8 @@ def test_pending_merged_skill_of_stage5_is_not_accepted(tmp_path):
     anchor = seed_pair(store, "t1", 0, skill_text="skill zero",
                        status="merged")
     merged = Skill(skill_id=make_merged_skill_id(0), content="merged text",
-                   subtask_id=anchor.subtask_id, status="pending",
+                   subtask_id=anchor.subtask_id,
+                   source_subtasks=[anchor.subtask_id], status="pending",
                    merged_from=[anchor.skill_id])
     store.save(merged, "skills")
     answerer = make_fake_handle("weak", ["bare", "skilled"])
@@ -1001,10 +1004,11 @@ store = Store(run_dir)
 subtask_id = make_subtask_id(
     make_trajectory_id(make_task_id("tb", "t1"), "strong", 0), 0)
 skill = Skill(skill_id=make_skill_id(subtask_id), content="a skill",
-              subtask_id=subtask_id)
+              subtask_id=subtask_id, source_subtasks=[subtask_id])
 store.save(skill, "skills")
 exam = Exam(exam_id=make_exam_id(subtask_id), question_text="the question",
-            reference_answer="the answer", subtask_id=subtask_id)
+            reference_answer="the answer", subtask_id=subtask_id,
+            skill_id=make_skill_id(subtask_id))
 store.save(exam, "exams")
 config = ExperimentConfig(benchmark="tb", mode="full",
                           models={"executor_strong": "s",

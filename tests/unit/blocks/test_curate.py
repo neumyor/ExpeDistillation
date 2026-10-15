@@ -29,7 +29,8 @@ class RecordingUsage:
 
 def make_skill(skill_id, content):
     return Skill(skill_id=skill_id, content=content,
-                 subtask_id=f"traj/tb:t/{skill_id}")
+                 subtask_id=f"traj/tb:t/{skill_id}",
+                 source_subtasks=[f"traj/tb:t/{skill_id}"])
 
 
 SKILLS = [
@@ -272,11 +273,14 @@ def test_find_similar_normalizes_missing_skill_suffix():
     from expedistill.blocks.curate import find_similar
 
     s1 = Skill(skill_id="traj/tb:t1/strong/00/seg00/skill", content="alpha",
-               subtask_id="traj/tb:t1/strong/00/seg00")
+               subtask_id="traj/tb:t1/strong/00/seg00",
+               source_subtasks=["traj/tb:t1/strong/00/seg00"])
     s2 = Skill(skill_id="traj/tb:t1/strong/00/seg01/skill", content="beta",
-               subtask_id="traj/tb:t1/strong/00/seg01")
+               subtask_id="traj/tb:t1/strong/00/seg01",
+               source_subtasks=["traj/tb:t1/strong/00/seg01"])
     m1 = Skill(skill_id="bank/merge/0000", content="merged", version=1,
                status="accepted", subtask_id="traj/tb:t1/strong/00/seg00",
+               source_subtasks=["traj/tb:t1/strong/00/seg00"],
                merged_from=["traj/tb:t1/strong/00/seg00/skill"])
     script = [
         json_script({
@@ -302,7 +306,8 @@ def test_find_similar_rejects_ambiguous_suffix_free_ids():
     from expedistill.blocks.curate import find_similar
 
     s1 = Skill(skill_id="traj/tb:t1/strong/00/seg00/skill", content="alpha",
-               subtask_id="traj/tb:t1/strong/00/seg00")
+               subtask_id="traj/tb:t1/strong/00/seg00",
+               source_subtasks=["traj/tb:t1/strong/00/seg00"])
     script = [json_script({
         "similar_groups": [["traj/tb:t1/strong/00/seg00", "traj/tb:t9/nope"]],
         "conflicts": [],

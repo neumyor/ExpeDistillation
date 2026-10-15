@@ -10,7 +10,12 @@ policies:
   schema version (extra fields) still load, dropping only the extras. Unknown
   keys are ignored so a schema bump never bricks older runs outright;
   per AGENTS.md section "修改数据对象", missing or wrong-typed *known* fields
-  still fail loudly instead of silently becoming defaults.
+  still fail loudly instead of silently becoming defaults. Records written
+  by an OLDER schema version migrate explicitly when the derivation is
+  local to the record (a v1 Skill segment row derives ``source_subtasks``
+  from its id, a v1 Exam row derives ``skill_id``); a v1 Skill merge
+  product needs its sibling records and raises with a pointer to
+  ``migrate_skill_record`` -- never a silent default either way.
 
 IDs are not generated here: they follow the deterministic rules in
 ``expedistill.core.ids`` and are assigned by the caller. Objects reference each
@@ -24,14 +29,14 @@ This module depends on the standard library only (layer 0).
 """
 
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 # Per-object schema versions. Bump the affected object's constant whenever a
 # field is added or its meaning changes (README section 2 is the contract).
 TRAJECTORY_SCHEMA_VERSION = 1
 SUBTASK_SCHEMA_VERSION = 1
-SKILL_SCHEMA_VERSION = 1
-EXAM_SCHEMA_VERSION = 1
+SKILL_SCHEMA_VERSION = 2
+EXAM_SCHEMA_VERSION = 2
 ATTEMPT_SCHEMA_VERSION = 1
 
 # ---------------------------------------------------------------------------
@@ -216,11 +221,18 @@ class Skill(_Record):
     Rewrites (G6) do not create a new object: they bump ``version`` and append
     to ``rewrite_history``. ``merged_from`` is only set on curation products
     (G8), whose IDs come from ``ids.make_merged_skill_id``.
+
+    ``source_subtasks`` (schema v2) names the subtasks the skill's material
+    came from: ``[own subtask_id]`` for a stage-3 skill, the union of its
+    sources' lists for a merge product. It is computed once at write time
+    (K5 for merges); readers never re-derive it.
     """
 
     skill_id: str
     content: str
     subtask_id: str
+    #: Which subtasks this skill distills; see the class docstring.
+    source_subtasks: List[str]
     version: int = 1
     status: str = "pending"
     #: e.g. "weak_already_knows" / "retry_exhausted" / "leak_audit"; free-form
@@ -240,6 +252,8 @@ class Skill(_Record):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Skill":
+        if data.get("schema_version") == 1:
+            data = _migrate_v1_skill_row(data)
         return cls(**_known_kwargs(cls, data))
 
 
@@ -251,18 +265,24 @@ class Skill(_Record):
 class Exam(_Record):
     """One text exam question for a Subtask's capability (G3 output).
 
-    Deliberately carries no skill reference: questions are written without
-    seeing the skill, and both are linked only through ``subtask_id``.
+    ``skill_id`` (schema v2) names the skill this exam tests. Questions
+    are still written without seeing the skill; the link used to live
+    only implicitly in the shared ``subtask_id`` and is now stored
+    explicitly so consumers read the field instead of re-deriving it.
     """
 
     exam_id: str
     question_text: str
     reference_answer: str
     subtask_id: str
+    #: The tested skill (ids.make_skill_id(subtask_id)).
+    skill_id: str
     schema_version: int = EXAM_SCHEMA_VERSION
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Exam":
+        if data.get("schema_version") == 1:
+            data = _migrate_v1_exam_row(data)
         return cls(**_known_kwargs(cls, data))
 
 
@@ -296,3 +316,148 @@ class Attempt(_Record):
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Attempt":
         return cls(**_known_kwargs(cls, data))
+
+
+# ---------------------------------------------------------------------------
+# v1 -> v2 migration (schema bump 2026-10-15; AGENTS "修改数据对象" rule 3:
+# explicit migration or a loud error, never a silent default)
+# ---------------------------------------------------------------------------
+
+#: The stage-3 skill id suffix, mirroring ``ids.make_skill_id`` (models must
+#: not import ids: ids imports models). The migration unit tests pin the
+#: equivalence, so the mirror cannot drift unnoticed.
+_SKILL_ID_SUFFIX = "/skill"
+
+#: The exam id suffix, mirroring ``ids.make_exam_id`` (same mirroring rule).
+_EXAM_ID_SUFFIX = "/exam"
+
+
+def _v1_segment_source_subtasks(
+        record: Mapping[str, Any]) -> Optional[List[str]]:
+    """``[own subtask_id]`` when the v1 row's id is its subtask's skill id
+    (the stage-3 shape), else None."""
+    subtask_id = record.get("subtask_id")
+    if record.get("skill_id") == f"{subtask_id}{_SKILL_ID_SUFFIX}":
+        return [subtask_id]
+    return None
+
+
+def _migrate_v1_skill_row(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive ``source_subtasks`` for one schema-v1 skill row (v2 row out).
+
+    Segment-born rows -- every skill a pre-v2 run's stage 3 wrote -- carry
+    exactly one source, their own subtask. A v1 merge product cannot be
+    migrated from the row alone: its ``source_subtasks`` is the union of
+    its sources' lists and the sources are separate records, so it raises
+    with a pointer to ``migrate_skill_record`` instead.
+    """
+    skill_id = data.get("skill_id")
+    if data.get("merged_from"):
+        raise ValueError(
+            f"skill {skill_id!r} is a schema-v1 merge product: its "
+            "source_subtasks is the union of its sources' lists and "
+            "cannot be derived from the record alone; migrate the run's "
+            "records with expedistill.core.models.migrate_skill_record("
+            "record, skills_by_id) instead of from_dict")
+    derived = _v1_segment_source_subtasks(data)
+    if derived is None:
+        raise ValueError(
+            f"skill {skill_id!r} is a schema-v1 record whose id is not its "
+            f"subtask's skill id (subtask {data.get('subtask_id')!r}); "
+            "source_subtasks cannot be derived -- a human must look at "
+            "this run")
+    return {**data, "source_subtasks": derived,
+            "schema_version": SKILL_SCHEMA_VERSION}
+
+
+def _migrate_v1_exam_row(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive ``skill_id`` for one schema-v1 exam row (v2 row out)."""
+    exam_id = data.get("exam_id")
+    subtask_id = data.get("subtask_id")
+    if exam_id != f"{subtask_id}{_EXAM_ID_SUFFIX}":
+        raise ValueError(
+            f"exam {exam_id!r} is a schema-v1 record whose id is not its "
+            f"subtask's exam id (subtask {subtask_id!r}); skill_id cannot "
+            "be derived -- a human must look at this run")
+    return {**data, "skill_id": f"{subtask_id}{_SKILL_ID_SUFFIX}",
+            "schema_version": EXAM_SCHEMA_VERSION}
+
+
+def merged_source_subtasks(
+        source_lists: Iterable[Iterable[str]]) -> List[str]:
+    """The union of the given ``source_subtasks`` lists, first-seen order.
+
+    The value a merge product stores (schema v2): computed once at merge
+    time by K5 from its sources' lists, so no reader ever re-derives it.
+    The v1 migration is the one deliberate exception -- a v1 record
+    predates the field, so ``migrate_skill_record`` rebuilds its value
+    with this same function.
+    """
+    union: Dict[str, None] = {}
+    for one in source_lists:
+        for subtask_id in one:
+            union.setdefault(subtask_id, None)
+    return list(union)
+
+
+def migrate_skill_record(
+        record: Dict[str, Any],
+        skills_by_id: Mapping[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Migrate one stored skill row to the current schema; v2 row out.
+
+    ``skills_by_id`` maps skill_id to the SAME run's stored rows (raw
+    dicts, not objects). A v1 merge product resolves its source_subtasks
+    recursively along ``merged_from`` -- nested merges included -- by
+    unioning the sources' lists; a v1 segment row derives its single
+    source from its id. A v2 row is returned unchanged. Raises ValueError
+    when the lineage cannot be derived: an unknown v1 id shape, a
+    merged_from id missing from ``skills_by_id``, or a merged_from cycle
+    (each names a corrupted run). ``Skill.from_dict`` cannot do this job
+    -- it sees one record at a time -- which is why v1 merge products
+    raise there with a pointer to this function.
+    """
+    return _migrate_skill_record(record, skills_by_id, ())
+
+
+def _migrate_skill_record(
+        record: Dict[str, Any],
+        skills_by_id: Mapping[str, Dict[str, Any]],
+        seen: Tuple[str, ...]) -> Dict[str, Any]:
+    if record.get("schema_version") != 1:
+        return record  # current (or newer) schema: nothing to derive
+    skill_id = record.get("skill_id")
+    if skill_id in seen:
+        raise ValueError(
+            f"skill {skill_id!r} appears twice in one merged_from chain; "
+            "a corrupted run -- a human must look at it")
+    merged_from = record.get("merged_from") or []
+    if merged_from:
+        source_lists: List[List[str]] = []
+        for source_id in merged_from:
+            source = skills_by_id.get(source_id)
+            if source is None:
+                raise ValueError(
+                    f"skill {skill_id!r} merges from {source_id!r}, which "
+                    "is not among the sibling records passed in "
+                    "(skills_by_id); the run's stored skills and its merge "
+                    "records disagree -- a human must look at this run")
+            migrated = _migrate_skill_record(
+                source, skills_by_id, seen + (skill_id,))
+            source_subtasks = migrated.get("source_subtasks")
+            if source_subtasks is None:
+                raise ValueError(
+                    f"skill {source_id!r} (a merge source of {skill_id!r}) "
+                    "carries no source_subtasks; only a corrupt record can")
+            source_lists.append(source_subtasks)
+        return {**record,
+                "source_subtasks": merged_source_subtasks(source_lists),
+                "schema_version": SKILL_SCHEMA_VERSION}
+    derived = _v1_segment_source_subtasks(record)
+    if derived is None:
+        raise ValueError(
+            f"skill {skill_id!r} is a schema-v1 record whose id is neither "
+            "its subtask's skill id nor a merge with sources; "
+            "source_subtasks cannot be derived -- a human must look at "
+            "this run")
+    return {**record, "source_subtasks": derived,
+            "schema_version": SKILL_SCHEMA_VERSION}

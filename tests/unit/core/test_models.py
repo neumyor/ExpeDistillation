@@ -1,10 +1,13 @@
 """Unit tests for the five data-model objects."""
 import pytest
 
+from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import (
     ATTEMPT_PURPOSES,
+    EXAM_SCHEMA_VERSION,
     FAILURE_REFERENCE_MARKERS,
     PROCEDURE_MARKERS,
+    SKILL_SCHEMA_VERSION,
     SKILL_STATUSES,
     TRAJECTORY_STATUSES,
     Attempt,
@@ -13,6 +16,8 @@ from expedistill.core.models import (
     Step,
     Subtask,
     Trajectory,
+    merged_source_subtasks,
+    migrate_skill_record,
 )
 
 
@@ -55,6 +60,7 @@ def make_skill(**overrides):
         skill_id="traj/tb:task-1/strong/00/seg00/skill",
         content="Always run ls before editing.",
         subtask_id="traj/tb:task-1/strong/00/seg00",
+        source_subtasks=["traj/tb:task-1/strong/00/seg00"],
     )
     base.update(overrides)
     return Skill(**base)
@@ -165,6 +171,14 @@ class TestSkill:
         assert skill.rewrite_history == []
         assert skill.merged_from == []
 
+    def test_source_subtasks_is_required(self):
+        # No default on purpose: every construction site names its sources
+        # (AGENTS "修改数据对象" rule 3), so a forgotten one fails here
+        # instead of silently storing an empty list.
+        with pytest.raises(TypeError, match="source_subtasks"):
+            Skill(skill_id="traj/tb:t/strong/00/seg00/skill",
+                  content="c", subtask_id="traj/tb:t/strong/00/seg00")
+
     def test_invalid_status_raises(self):
         with pytest.raises(ValueError, match="status"):
             make_skill(status="promoted")
@@ -172,6 +186,12 @@ class TestSkill:
     def test_from_dict_ignores_unknown_keys(self):
         payload = {**make_skill().to_dict(), "future_field": None}
         assert Skill.from_dict(payload) == make_skill()
+
+    def test_v2_record_missing_source_subtasks_raises(self):
+        payload = make_skill().to_dict()
+        del payload["source_subtasks"]
+        with pytest.raises(TypeError, match="source_subtasks"):
+            Skill.from_dict(payload)
 
 
 class TestExam:
@@ -181,16 +201,25 @@ class TestExam:
             question_text="The output of ls is empty; what next?",
             reference_answer="Check the working directory with pwd.",
             subtask_id="traj/tb:task-1/strong/00/seg00",
+            skill_id="traj/tb:task-1/strong/00/seg00/skill",
         )
         assert Exam.from_dict(exam.to_dict()) == exam
 
-    def test_no_skill_reference_field(self):
-        # The exam must not carry a skill pointer: exams are written without
-        # seeing the skill, and any such field would invite leaking it.
+    def test_skill_id_is_required(self):
+        with pytest.raises(TypeError, match="skill_id"):
+            Exam(exam_id="traj/tb:t/strong/00/seg00/exam",
+                 question_text="q", reference_answer="a",
+                 subtask_id="traj/tb:t/strong/00/seg00")
+
+    def test_v2_record_missing_skill_id_raises(self):
         payload = Exam(
-            exam_id="e", question_text="q", reference_answer="a",
-            subtask_id="s").to_dict()
-        assert "skill" not in payload
+            exam_id="traj/tb:task-1/strong/00/seg00/exam",
+            question_text="q?", reference_answer="a.",
+            subtask_id="traj/tb:task-1/strong/00/seg00",
+            skill_id="traj/tb:task-1/strong/00/seg00/skill").to_dict()
+        del payload["skill_id"]
+        with pytest.raises(TypeError, match="skill_id"):
+            Exam.from_dict(payload)
 
 
 class TestAttempt:
@@ -255,3 +284,145 @@ class TestSkillSectionMarkers:
         assert FAILURE_REFERENCE_MARKERS[-1] == "[Do not use when]"
         assert (set(PROCEDURE_MARKERS) & set(FAILURE_REFERENCE_MARKERS)
                 == {"[Do not use when]"})
+
+
+# ---------------------------------------------------------------------------
+# v1 -> v2 migration (schema bump 2026-10-15)
+# ---------------------------------------------------------------------------
+
+_SUB_A = "traj/tb:t1/strong/00/seg00"
+_SUB_B = "traj/tb:t1/strong/00/seg01"
+_SUB_C = "traj/tb:t1/weak/00/seg00"
+
+
+def _v1_segment_row(subtask_id, content="c"):
+    """A stored v1 skill row exactly as write_skill wrote it before v2."""
+    return {
+        "skill_id": make_skill_id(subtask_id),
+        "content": content,
+        "subtask_id": subtask_id,
+        "version": 1,
+        "status": "accepted",
+        "discard_reason": None,
+        "group": None,
+        "rewrite_history": [],
+        "merged_from": [],
+        "schema_version": 1,
+    }
+
+
+def _v1_merge_row(merge_id, merged_from, subtask_id=_SUB_A):
+    """A stored v1 merge-product row (K5 wrote merged_from, never a
+    source_subtasks)."""
+    return {**_v1_segment_row(subtask_id), "skill_id": merge_id,
+            "merged_from": list(merged_from)}
+
+
+class TestV1ToV2Migration:
+    def test_from_dict_derives_segment_source_subtasks(self):
+        row = _v1_segment_row(_SUB_A, content="check first")
+        skill = Skill.from_dict(row)
+        assert skill.source_subtasks == [_SUB_A]
+        assert skill.schema_version == SKILL_SCHEMA_VERSION
+        # Everything else survives the migration untouched.
+        assert skill.skill_id == make_skill_id(_SUB_A)
+        assert skill.content == "check first"
+        assert skill.status == "accepted"
+
+    def test_from_dict_rejects_v1_merge_product_loudly(self):
+        row = _v1_merge_row("bank/merge/0000",
+                            [make_skill_id(_SUB_A), make_skill_id(_SUB_B)])
+        with pytest.raises(ValueError, match="migrate_skill_record"):
+            Skill.from_dict(row)
+
+    def test_from_dict_rejects_v1_unknown_id_shape_loudly(self):
+        row = _v1_segment_row(_SUB_A)
+        row["skill_id"] = "bank/somewhere/else"
+        with pytest.raises(ValueError, match="cannot be derived"):
+            Skill.from_dict(row)
+
+    def test_from_dict_derives_exam_skill_id(self):
+        row = {
+            "exam_id": make_exam_id(_SUB_A),
+            "question_text": "q?",
+            "reference_answer": "a.",
+            "subtask_id": _SUB_A,
+            "schema_version": 1,
+        }
+        exam = Exam.from_dict(row)
+        assert exam.skill_id == make_skill_id(_SUB_A)
+        assert exam.schema_version == EXAM_SCHEMA_VERSION
+
+    def test_from_dict_rejects_v1_exam_of_unknown_shape(self):
+        row = {
+            "exam_id": "somewhere/else",
+            "question_text": "q?",
+            "reference_answer": "a.",
+            "subtask_id": _SUB_A,
+            "schema_version": 1,
+        }
+        with pytest.raises(ValueError, match="cannot be derived"):
+            Exam.from_dict(row)
+
+    def test_migrate_record_derives_a_segment_row(self):
+        row = _v1_segment_row(_SUB_A)
+        migrated = migrate_skill_record(row, {})
+        assert Skill.from_dict(migrated).source_subtasks == [_SUB_A]
+
+    def test_migrate_record_unions_a_flat_merge(self):
+        rows = {
+            make_skill_id(_SUB_A): _v1_segment_row(_SUB_A),
+            make_skill_id(_SUB_B): _v1_segment_row(_SUB_B),
+        }
+        merge = _v1_merge_row("bank/merge/0000",
+                             [make_skill_id(_SUB_A), make_skill_id(_SUB_B)])
+        migrated = migrate_skill_record(merge, rows)
+        assert migrated["source_subtasks"] == [_SUB_A, _SUB_B]
+        assert migrated["schema_version"] == SKILL_SCHEMA_VERSION
+        assert Skill.from_dict(migrated).skill_id == "bank/merge/0000"
+
+    def test_migrate_record_recurses_into_a_nested_merge(self):
+        rows = {
+            make_skill_id(_SUB_A): _v1_segment_row(_SUB_A),
+            make_skill_id(_SUB_B): _v1_segment_row(_SUB_B),
+            "bank/merge/0000": _v1_merge_row(
+                "bank/merge/0000",
+                [make_skill_id(_SUB_A), make_skill_id(_SUB_B)]),
+            make_skill_id(_SUB_C): _v1_segment_row(_SUB_C),
+            # The nested case: one source is itself a merge product.
+            "bank/merge/0001": _v1_merge_row(
+                "bank/merge/0001", ["bank/merge/0000",
+                                    make_skill_id(_SUB_C)]),
+        }
+        migrated = migrate_skill_record(rows["bank/merge/0001"], rows)
+        assert migrated["source_subtasks"] == [_SUB_A, _SUB_B, _SUB_C]
+
+    def test_migrate_record_passes_v2_rows_through(self):
+        row = make_skill().to_dict()
+        assert migrate_skill_record(row, {}) is row
+
+    def test_migrate_record_rejects_unknown_v1_shape(self):
+        row = _v1_segment_row(_SUB_A)
+        row["skill_id"] = "bank/somewhere/else"
+        with pytest.raises(ValueError, match="cannot be derived"):
+            migrate_skill_record(row, {})
+
+    def test_migrate_record_rejects_missing_sibling(self):
+        merge = _v1_merge_row("bank/merge/0000", [make_skill_id(_SUB_A)])
+        with pytest.raises(ValueError, match="not among the sibling records"):
+            migrate_skill_record(merge, {})
+
+    def test_migrate_record_rejects_merged_from_cycle(self):
+        rows = {
+            "bank/merge/0000": _v1_merge_row("bank/merge/0000",
+                                              ["bank/merge/0001"]),
+            "bank/merge/0001": _v1_merge_row("bank/merge/0001",
+                                              ["bank/merge/0000"]),
+        }
+        with pytest.raises(ValueError, match="twice in one merged_from"):
+            migrate_skill_record(rows["bank/merge/0000"], rows)
+
+    def test_merged_source_subtasks_unions_first_seen_order(self):
+        assert merged_source_subtasks([["b", "a"], ["a", "c"]]) \
+            == ["b", "a", "c"]
+        assert merged_source_subtasks([]) == []

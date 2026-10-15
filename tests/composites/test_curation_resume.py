@@ -19,6 +19,8 @@ Scenario (budget 600 tokens, four 1600-char skills s0..s3):
            G9 over {0002, s3}; within budget -> bank written
 """
 
+import json
+
 import pytest
 
 from expedistill.composites import curation
@@ -26,7 +28,12 @@ from expedistill.composites.curation import LOG_DIR, LOG_NAME, curate_bank
 from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import ConfigError, InfrastructureError
-from expedistill.infra.store import Store, read_json, read_jsonl
+from expedistill.infra.store import (
+    Store,
+    read_json,
+    read_jsonl,
+    write_json,
+)
 from expedistill.llm import json_script, make_fake_handle
 
 
@@ -128,12 +135,15 @@ class GuardStore(Store):
 def _seed(store):
     for index in range(4):
         store.save(Skill(skill_id=_sid(index), content=chr(97 + index) * 1600,
-                         subtask_id=_subtask(index), status="accepted"),
+                         subtask_id=_subtask(index),
+                         source_subtasks=[_subtask(index)],
+                         status="accepted"),
                    "skills")
         store.save(Exam(exam_id=ids.make_exam_id(_subtask(index)),
                         question_text=f"question {index}",
                         reference_answer=f"reference {index}",
-                        subtask_id=_subtask(index)), "exams")
+                        subtask_id=_subtask(index),
+                        skill_id=_sid(index)), "exams")
 
 
 def _handles(scripts):
@@ -440,12 +450,77 @@ def test_resume_before_bank_append_completes_without_model_calls(
     assert _snapshot(store) == reference
 
 
+def _downgrade_run_to_v1(run_dir):
+    """Rewrite the run's stored skill records and bank rows to the
+    pre-v2 shape (schema_version 1, no source_subtasks): the state a run
+    written by pre-v2 code is in when resumed by current code."""
+    for obj_id in Store(run_dir).ids("skills"):
+        path = Store(run_dir).path_for("skills", obj_id)
+        row = read_json(path)
+        del row["source_subtasks"]
+        row["schema_version"] = 1
+        write_json(path, row, indent=2)
+    bank_path = run_dir / "skill_bank.jsonl"
+    rows = read_jsonl(bank_path)
+    for row in rows:
+        del row["source_subtasks"]
+        row["schema_version"] = 1
+    bank_path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in rows), encoding="utf-8")
+
+
+def test_resume_completes_a_v1_bank_prefix_in_the_v1_form(tmp_path):
+    """The completion's promise is "the same dicts the interrupted append
+    loop wrote" (I1): a v1-object run (records and bank rows written by
+    pre-v2 code) resumed after a crash mid-append must gain rows in its
+    own v1 form -- never the migrated v2 form (a mixed-version bank).
+    The no-merge scenario on purpose: a store holding v1 merge products
+    outside the bank is the from_dict loud-error boundary (v1 merges
+    cannot load without their sibling records), pinned separately in
+    tests/unit/core/test_models.py."""
+    class SecondAppendCrashStore(GuardStore):
+        # Crashes once the first bank row is on disk: the ledger holds a
+        # prefix and the log already carries final_member_ids.
+        appends = 0
+
+        def append_bank(self, skill_dict):
+            self.appends += 1
+            if self.appends == 2:
+                raise Crash("crash on the second bank append")
+            return super().append_bank(skill_dict)
+
+    store = SecondAppendCrashStore(tmp_path / "run")
+    _seed_two(store)
+    with pytest.raises(Crash):
+        _run(store, _handles(_no_merge_scripts()))
+    assert len(store.bank()) == 1
+    _downgrade_run_to_v1(store.run_dir)
+    bank_prefix = store.bank()
+
+    resumed = GuardStore(tmp_path / "run")
+    idle = _idle()
+    _run(resumed, idle)
+
+    assert not any(h.client.calls for h in idle.values())
+    bank = resumed.bank()
+    assert len(bank) == 2
+    assert bank[0] == bank_prefix[0]
+    completed = bank[1]
+    assert completed["schema_version"] == 1
+    assert "source_subtasks" not in completed
+    # The completed row is the stored record in its own on-disk form.
+    assert completed == read_json(
+        resumed.path_for("skills", completed["skill_id"]))
+
+
 def test_new_accepted_skill_before_bank_append_is_stale(tmp_path):
     """Reviewer repro: rounds all done, bank not yet appended, and a resumed
     stage 3/4 accepts a NEW skill -- it must not be appended uncurated."""
     store = _crash_before_bank(tmp_path)
     late = Skill(skill_id=_sid(9), content="accepted late",
-                 subtask_id=_subtask(9), status="accepted")
+                 subtask_id=_subtask(9), source_subtasks=[_subtask(9)],
+                 status="accepted")
     store.save(late, "skills")
     idle = _idle()
 
@@ -467,7 +542,9 @@ def test_new_accepted_skill_mid_curation_is_stale(tmp_path):
     with pytest.raises(Crash):
         _run(store, _handles(scripts))
     store.save(Skill(skill_id=_sid(9), content="accepted late",
-                     subtask_id=_subtask(9), status="accepted"), "skills")
+                     subtask_id=_subtask(9),
+                     source_subtasks=[_subtask(9)], status="accepted"),
+               "skills")
     with pytest.raises(ConfigError, match=_sid(9)):
         _run(GuardStore(tmp_path / "run"), _idle())
 
@@ -547,7 +624,9 @@ def _seed_two(store):
     for index in range(2):
         store.save(Skill(skill_id=_sid(index),
                          content=f"skill {index} advice",
-                         subtask_id=_subtask(index), status="accepted"),
+                         subtask_id=_subtask(index),
+                         source_subtasks=[_subtask(index)],
+                         status="accepted"),
                    "skills")
 
 

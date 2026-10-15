@@ -214,6 +214,7 @@ from expedistill.core.models import (
     Attempt,
     Exam,
     Skill,
+    merged_source_subtasks,
 )
 from expedistill.infra.parallel import UnitSkipped, run_units
 from expedistill.infra.reliability import (
@@ -941,9 +942,15 @@ def curate_bank(
             for skill_id in (i for i in final_ids if i not in have):
                 # Crash inside the final append loop: the ledger holds a
                 # prefix of the deterministic rows. Complete it from the
-                # stored skills (same dicts, same order, no model call).
+                # stored records in their OWN on-disk form (same dicts,
+                # same order, no model call): the prefix rows were written
+                # from these same records, so the raw record is the only
+                # form guaranteed to match them across schema versions --
+                # the from_dict roundtrip would migrate a v1 record to v2
+                # (a mixed-version bank) and cannot load a v1 merge
+                # product at all (from_dict lacks the sibling records).
                 store.append_bank(
-                    store.load("skills", skill_id, Skill).to_dict())
+                    read_json(store.path_for("skills", skill_id)))
         bank = store.bank()
         _check_bank_not_stale(store, bank)
         return bank
@@ -1178,6 +1185,12 @@ def curate_bank(
                         # is only a stable reference -- its regression exams
                         # come from merged_from, resolved transitively.
                         subtask_id=sources[0].subtask_id,
+                        # The union of the sources' own sources, computed
+                        # once here (schema v2): readers never re-derive
+                        # it, and a v1 record migrated later rebuilds the
+                        # same value (models.migrate_skill_record).
+                        source_subtasks=merged_source_subtasks(
+                            source.source_subtasks for source in sources),
                         version=1,
                         status="pending",
                         merged_from=source_ids,

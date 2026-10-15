@@ -114,6 +114,7 @@ def make_skill(ordinal: int, content: str) -> Skill:
         skill_id=make_skill_id(subtask_id),
         content=content,
         subtask_id=subtask_id,
+        source_subtasks=[subtask_id],
     )
 
 

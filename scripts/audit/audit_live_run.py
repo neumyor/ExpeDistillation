@@ -726,7 +726,8 @@ def _fake_group_skill(task_id: str, segment: int) -> Skill:
     return Skill(skill_id=ids.make_skill_id(subtask_id),
                  content="[When to use] x\n[Steps]\n1. do\n"
                          "[Verify] y\n[Do not use when] z",
-                 subtask_id=subtask_id, version=1)
+                 subtask_id=subtask_id, source_subtasks=[subtask_id],
+                 version=1)
 
 
 def _append_jsonl_raw(path: Path, row: Dict[str, Any]) -> None:

@@ -363,6 +363,9 @@ Subtask（段）
 
 Skill
   skill_id, content(自然语言正文), subtask_id(→段),
+  source_subtasks[ subtask_id ... ](素材来源段。段生 skill = [自己的 subtask_id]；
+                 合并产物 = 各来源 source_subtasks 的并集，K5 合并时算好一次写入，
+                 读取方不递归推导。schema v2 新增，v1 记录的读取迁移见下),
   version(改写次数), status(pending/accepted/discarded/merged),
   discard_reason(weak_already_knows / retry_exhausted / leak_audit / model_output_error
                  / regression_failed / regression_error / interrupted_merge
@@ -373,7 +376,9 @@ Skill
   （task_id / trajectory_id 经 subtask_id 查得，不重复存）
 
 Exam（考题）
-  exam_id, question_text, reference_answer(判卷参考), subtask_id(→段)
+  exam_id, question_text, reference_answer(判卷参考), subtask_id(→段),
+  skill_id(该考题考的 skill，= ids.make_skill_id(subtask_id)。schema v2 新增，
+            v1 记录读取时由 exam_id 换后缀推导)
 
 Attempt（作答记录）
   attempt_id, exam_id, skill_id + skill_version(都为 null = 裸答),
@@ -381,10 +386,23 @@ Attempt（作答记录）
   judge_verdict(null = 已作答、尚未判卷), judge_reason, retry_round
 ```
 
-**关系**：Skill 和 Exam 都只挂在 Subtask 上（`subtask_id`），两者互不引用——
-考题出题时不看 skill。每个参与生成的 Subtask 对应一个 skill 和一道考题（1:1:1）；
+**关系**：Skill 和 Exam 都挂在 Subtask 上（`subtask_id`）；考题出题时仍然不看
+skill，但 v2 起 Exam 用 `skill_id` 显式指向同段的 skill（此前只靠共同的
+`subtask_id` 隐式关联，消费方各自换后缀推导），Skill 用 `source_subtasks`
+显式记录素材来源段（此前要沿 `merged_from` 递归推导）。每个参与生成的
+Subtask 对应一个 skill 和一道考题（1:1:1）；
 改写重考不新建对象，skill 版本号 +1；每次作答（含裸答）另记一条 Attempt，
 用 `exam_id` + `skill_id/skill_version` 指向当时的考题和 skill 版本，重考全程可追溯。
+
+**对象 schema v1→v2（2026-10-15，执行—学习闭环重构 M1）**：Skill 升
+`source_subtasks`、Exam 升 `skill_id`，`SKILL_SCHEMA_VERSION` /
+`EXAM_SCHEMA_VERSION` 1→2，其余三个对象不动。旧读新写规则（显式迁移，
+不静默默认）：v1 Skill 段生记录由 `from_dict` 按 ID 后缀推导
+`source_subtasks`；v1 合并产物在 `from_dict` 响亮报错（推导需要兄弟记录），
+走 `core/models.py` 的迁移纯函数 `migrate_skill_record(record, skills_by_id)`
+（沿 `merged_from` 递归取各来源并集）；v1 Exam 由 `exam_id` 换后缀推导
+`skill_id`。v2 记录缺新字段一律响亮失败。装配器对 v1 源 run 的对象与
+bank 行读取同走该迁移，bank 比对两侧同构（I1）。
 
 **discard_reason 的词汇与证据基础**（`docs/decisions/acceptance_live_run_20261014.md`
 裁决 A13）：字段本身是自由字符串（schema 不设闭合枚举），上面括号里的清单是系统实际
@@ -398,6 +416,8 @@ Attempt（作答记录）
 五个数据对象不加字段、不改字段含义，live 模式全部新词走自由字符串口子，
 `CONFIG_SCHEMA_VERSION` 不动（在飞 run 的续跑兼容性优先；升版清理登记为在飞 run
 完结后的一次性技术债，见 `docs/runbooks/live_run_acceptance_runbook.md` 的遗留事项）。
+该技术债已于 2026-10-15 执行—学习闭环重构 M1 偿还：Skill/Exam 升对象
+schema v2（见上节"对象 schema v1→v2"），`CONFIG_SCHEMA_VERSION` 仍不动。
 
 落盘布局（每个 run 目录）：
 

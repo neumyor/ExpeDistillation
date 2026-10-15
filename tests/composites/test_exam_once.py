@@ -48,6 +48,7 @@ def make_exam(exam_id: str = EXAM_ID) -> Exam:
         question_text=QUESTION,
         reference_answer=REFERENCE,
         subtask_id=SUBTASK_ID,
+        skill_id=ids.make_skill_id(SUBTASK_ID),
     )
 
 

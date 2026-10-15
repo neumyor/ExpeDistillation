@@ -36,7 +36,8 @@ def _skill_id(index: int) -> str:
 
 def _add_skill(store, index, content, status="accepted"):
     skill = Skill(skill_id=_skill_id(index), content=content,
-                  subtask_id=_subtask(index), status=status)
+                  subtask_id=_subtask(index),
+                  source_subtasks=[_subtask(index)], status=status)
     store.save(skill, "skills")
     return skill
 
@@ -45,7 +46,8 @@ def _add_exam(store, index):
     exam = Exam(exam_id=ids.make_exam_id(_subtask(index)),
                 question_text=f"question {index}",
                 reference_answer=f"reference {index}",
-                subtask_id=_subtask(index))
+                subtask_id=_subtask(index),
+                skill_id=_skill_id(index))
     store.save(exam, "exams")
     return exam
 

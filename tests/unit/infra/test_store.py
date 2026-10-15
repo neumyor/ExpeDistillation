@@ -37,12 +37,13 @@ def a_subtask(trajectory="traj/tb:task-1/strong/00", index=1):
 
 def a_skill(subtask="traj/tb:task-1/strong/00/seg01"):
     return Skill(skill_id=make_skill_id(subtask), content="do the thing",
-                 subtask_id=subtask)
+                 subtask_id=subtask, source_subtasks=[subtask])
 
 
 def an_exam(subtask="traj/tb:task-1/strong/00/seg01"):
     return Exam(exam_id=make_exam_id(subtask), question_text="q?",
-                reference_answer="a", subtask_id=subtask)
+                reference_answer="a", subtask_id=subtask,
+                skill_id=make_skill_id(subtask))
 
 
 def an_attempt(exam="traj/tb:task-1/strong/00/seg01/exam"):

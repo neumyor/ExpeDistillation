@@ -14,6 +14,7 @@ def make_skill(skill_id, content, version=1, group=None):
         skill_id=skill_id,
         content=content,
         subtask_id=f"subtask-of-{skill_id}",
+        source_subtasks=[f"subtask-of-{skill_id}"],
         version=version,
         group=group,
     )

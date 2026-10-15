@@ -86,9 +86,10 @@ def make_pair(content=SKILL_V1, question=QUESTION, reference=REFERENCE):
     subtask_id = make_subtask_id(
         make_trajectory_id(make_task_id("tb", "t1"), "strong", 0), 1)
     skill = Skill(skill_id=make_skill_id(subtask_id), content=content,
-                  subtask_id=subtask_id)
+                  subtask_id=subtask_id, source_subtasks=[subtask_id])
     exam = Exam(exam_id=make_exam_id(subtask_id), question_text=question,
-                reference_answer=reference, subtask_id=subtask_id)
+                reference_answer=reference, subtask_id=subtask_id,
+                skill_id=make_skill_id(subtask_id))
     return skill, exam
 
 
@@ -643,7 +644,9 @@ def test_discard_skill_discards_the_stored_version(tmp_path):
 def test_refuses_a_skill_that_is_not_a_stage3_candidate(tmp_path):
     skill, exam = make_pair()
     merged = Skill(skill_id=make_merged_skill_id(0), content=SKILL_V1,
-                   subtask_id=skill.subtask_id, merged_from=[skill.skill_id])
+                   subtask_id=skill.subtask_id,
+                   source_subtasks=[skill.subtask_id],
+                   merged_from=[skill.skill_id])
     store = Store(tmp_path / "run")
     answerer = make_fake_handle("weak", [])
     judge = make_fake_handle("judge", [])

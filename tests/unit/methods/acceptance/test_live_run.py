@@ -184,7 +184,8 @@ def seed_group(store, contents, task_id=TASK1):
     for segment, content in enumerate(contents):
         subtask_id = make_subtask_id(trajectory_id, segment)
         skill = Skill(skill_id=make_skill_id(subtask_id), content=content,
-                      subtask_id=subtask_id)
+                      subtask_id=subtask_id,
+                      source_subtasks=[subtask_id])
         store.save(skill, "skills")
         skills.append(skill)
     return skills

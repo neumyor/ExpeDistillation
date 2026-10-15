@@ -26,7 +26,8 @@ from expedistill.core.models import Skill
 
 def make_skill(skill_id, content, group=None):
     return Skill(skill_id=skill_id, content=content,
-                 subtask_id="traj/tb:fixture/00/seg00", group=group)
+                 subtask_id="traj/tb:fixture/00/seg00",
+                 source_subtasks=["traj/tb:fixture/00/seg00"], group=group)
 
 
 def bank_29():

@@ -1514,8 +1514,11 @@
           "reason": "made the trigger condition concrete"
         }
       ],
-      "schema_version": 1,
+      "schema_version": 2,
       "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t1/strong/00/seg00"
+      ],
       "status": "accepted",
       "subtask_id": "traj/fakebench:t1/strong/00/seg00",
       "version": 2
@@ -1532,8 +1535,11 @@
           "reason": "made the trigger condition concrete"
         }
       ],
-      "schema_version": 1,
+      "schema_version": 2,
       "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t1/weak/00/seg00"
+      ],
       "status": "accepted",
       "subtask_id": "traj/fakebench:t1/weak/00/seg00",
       "version": 2
@@ -1550,8 +1556,11 @@
           "reason": "made the trigger condition concrete"
         }
       ],
-      "schema_version": 1,
+      "schema_version": 2,
       "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t1/weak/01/seg00"
+      ],
       "status": "accepted",
       "subtask_id": "traj/fakebench:t1/weak/01/seg00",
       "version": 2
@@ -1568,8 +1577,11 @@
           "reason": "made the trigger condition concrete"
         }
       ],
-      "schema_version": 1,
+      "schema_version": 2,
       "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t2/strong/00/seg00"
+      ],
       "status": "accepted",
       "subtask_id": "traj/fakebench:t2/strong/00/seg00",
       "version": 2
@@ -1586,8 +1598,11 @@
           "reason": "made the trigger condition concrete"
         }
       ],
-      "schema_version": 1,
+      "schema_version": 2,
       "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t2/weak/00/seg00"
+      ],
       "status": "accepted",
       "subtask_id": "traj/fakebench:t2/weak/00/seg00",
       "version": 2
@@ -1604,8 +1619,11 @@
           "reason": "made the trigger condition concrete"
         }
       ],
-      "schema_version": 1,
+      "schema_version": 2,
       "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t2/weak/01/seg00"
+      ],
       "status": "accepted",
       "subtask_id": "traj/fakebench:t2/weak/01/seg00",
       "version": 2
@@ -1924,42 +1942,48 @@
     "exam_id": "traj/fakebench:t1/strong/00/seg00/exam",
     "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
     "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 1,
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
     "subtask_id": "traj/fakebench:t1/strong/00/seg00"
   },
   "stage3_generation/exams/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fexam.json": {
     "exam_id": "traj/fakebench:t1/weak/00/seg00/exam",
     "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
     "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 1,
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
     "subtask_id": "traj/fakebench:t1/weak/00/seg00"
   },
   "stage3_generation/exams/traj%2Ffakebench%3At1%2Fweak%2F01%2Fseg00%2Fexam.json": {
     "exam_id": "traj/fakebench:t1/weak/01/seg00/exam",
     "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
     "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 1,
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
     "subtask_id": "traj/fakebench:t1/weak/01/seg00"
   },
   "stage3_generation/exams/traj%2Ffakebench%3At2%2Fstrong%2F00%2Fseg00%2Fexam.json": {
     "exam_id": "traj/fakebench:t2/strong/00/seg00/exam",
     "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
     "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 1,
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
     "subtask_id": "traj/fakebench:t2/strong/00/seg00"
   },
   "stage3_generation/exams/traj%2Ffakebench%3At2%2Fweak%2F00%2Fseg00%2Fexam.json": {
     "exam_id": "traj/fakebench:t2/weak/00/seg00/exam",
     "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
     "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 1,
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
     "subtask_id": "traj/fakebench:t2/weak/00/seg00"
   },
   "stage3_generation/exams/traj%2Ffakebench%3At2%2Fweak%2F01%2Fseg00%2Fexam.json": {
     "exam_id": "traj/fakebench:t2/weak/01/seg00/exam",
     "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
     "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 1,
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
     "subtask_id": "traj/fakebench:t2/weak/01/seg00"
   },
   "stage3_generation/skills/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fskill.json": {
@@ -1974,8 +1998,11 @@
         "reason": "made the trigger condition concrete"
       }
     ],
-    "schema_version": 1,
+    "schema_version": 2,
     "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t1/strong/00/seg00"
+    ],
     "status": "accepted",
     "subtask_id": "traj/fakebench:t1/strong/00/seg00",
     "version": 2
@@ -1992,8 +2019,11 @@
         "reason": "made the trigger condition concrete"
       }
     ],
-    "schema_version": 1,
+    "schema_version": 2,
     "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t1/weak/00/seg00"
+    ],
     "status": "accepted",
     "subtask_id": "traj/fakebench:t1/weak/00/seg00",
     "version": 2
@@ -2010,8 +2040,11 @@
         "reason": "made the trigger condition concrete"
       }
     ],
-    "schema_version": 1,
+    "schema_version": 2,
     "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t1/weak/01/seg00"
+    ],
     "status": "accepted",
     "subtask_id": "traj/fakebench:t1/weak/01/seg00",
     "version": 2
@@ -2028,8 +2061,11 @@
         "reason": "made the trigger condition concrete"
       }
     ],
-    "schema_version": 1,
+    "schema_version": 2,
     "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t2/strong/00/seg00"
+    ],
     "status": "accepted",
     "subtask_id": "traj/fakebench:t2/strong/00/seg00",
     "version": 2
@@ -2046,8 +2082,11 @@
         "reason": "made the trigger condition concrete"
       }
     ],
-    "schema_version": 1,
+    "schema_version": 2,
     "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t2/weak/00/seg00"
+    ],
     "status": "accepted",
     "subtask_id": "traj/fakebench:t2/weak/00/seg00",
     "version": 2
@@ -2064,8 +2103,11 @@
         "reason": "made the trigger condition concrete"
       }
     ],
-    "schema_version": 1,
+    "schema_version": 2,
     "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t2/weak/01/seg00"
+    ],
     "status": "accepted",
     "subtask_id": "traj/fakebench:t2/weak/01/seg00",
     "version": 2

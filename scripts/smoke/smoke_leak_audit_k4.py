@@ -124,9 +124,11 @@ def main() -> int:
             exam = Exam(exam_id=ids.make_exam_id(subtask_id),
                         question_text=QUESTION,
                         reference_answer=REFERENCE,
-                        subtask_id=subtask_id)
+                        subtask_id=subtask_id,
+                        skill_id=ids.make_skill_id(subtask_id))
             skill = Skill(skill_id=ids.make_skill_id(subtask_id),
-                          content=content, subtask_id=subtask_id)
+                          content=content, subtask_id=subtask_id,
+                          source_subtasks=[subtask_id])
             result = accept_skill(
                 store=store, skill=skill, exam=exam,
                 weak_profile=WEAK_PROFILE,

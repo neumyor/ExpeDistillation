@@ -41,7 +41,8 @@ def _skill_id(index: int) -> str:
 def _add_skill(store: Store, index: int, content: str,
                status: str = "accepted") -> Skill:
     skill = Skill(skill_id=_skill_id(index), content=content,
-                  subtask_id=_subtask(index), status=status)
+                  subtask_id=_subtask(index),
+                  source_subtasks=[_subtask(index)], status=status)
     store.save(skill, "skills")
     return skill
 
@@ -50,7 +51,8 @@ def _add_exam(store: Store, index: int) -> Exam:
     exam = Exam(exam_id=ids.make_exam_id(_subtask(index)),
                 question_text=f"question {index}",
                 reference_answer=f"reference {index}",
-                subtask_id=_subtask(index))
+                subtask_id=_subtask(index),
+                skill_id=_skill_id(index))
     store.save(exam, "exams")
     return exam
 
@@ -496,7 +498,11 @@ def test_merge_of_merge_of_merge_resolves_sources_transitively(store):
                             (1, ["bank/merge/0000", _skill_id(2)])):
         store.save(Skill(skill_id=f"bank/merge/{serial:04d}",
                          content=f"merged {serial}",
-                         subtask_id=_subtask(0), status="accepted",
+                         subtask_id=_subtask(0),
+                         source_subtasks=[_subtask(0), _subtask(1)]
+                         if serial == 0
+                         else [_subtask(0), _subtask(1), _subtask(2)],
+                         status="accepted",
                          merged_from=sources), "skills")
         for source in sources:
             skill = store.load("skills", source, Skill)
@@ -635,7 +641,9 @@ def test_orphaned_pending_merge_is_rolled_back_and_its_serial_not_reused(
         _add_skill(store, index, f"skill {index}")
         _add_exam(store, index)
     orphan = Skill(skill_id="bank/merge/0000", content="orphan text",
-                   subtask_id=_subtask(0), status="pending",
+                   subtask_id=_subtask(0),
+                   source_subtasks=[_subtask(0), _subtask(1)],
+                   status="pending",
                    merged_from=[_skill_id(0), _skill_id(1)])
     store.save(orphan, "skills")
     handles = _handles(
@@ -665,7 +673,9 @@ def test_pending_merge_with_merged_sources_is_rolled_forward(store):
     _add_skill(store, 0, "skill 0", status="merged")
     _add_skill(store, 1, "skill 1")
     store.save(Skill(skill_id="bank/merge/0000", content="merged",
-                     subtask_id=_subtask(0), status="pending",
+                     subtask_id=_subtask(0),
+                     source_subtasks=[_subtask(0), _subtask(1)],
+                     status="pending",
                      merged_from=[_skill_id(0), _skill_id(1)]), "skills")
     handles = _handles(curator_script=[_similarity()], answer_script=[],
                        judge_script=[])
@@ -729,7 +739,9 @@ def test_stale_guard_ignores_merged_discarded_and_pending_skills(store):
     _add_skill(store, 5, "still being accepted", status="pending")
     _add_skill(store, 6, "rejected", status="discarded")
     store.save(Skill(skill_id="bank/merge/0009", content="in flight",
-                     subtask_id=_subtask(0), status="pending",
+                     subtask_id=_subtask(0),
+                     source_subtasks=[_subtask(0), _subtask(1)],
+                     status="pending",
                      merged_from=[_skill_id(0), _skill_id(1)]), "skills")
     handles = _handles(curator_script=[], answer_script=[], judge_script=[])
     assert _curate(store, handles) == bank
@@ -873,7 +885,9 @@ def test_resume_reuse_branch_does_not_revalidate_the_pending_merge(store):
     # re-check; the regression exams and the keep decision proceed.
     store.save(Skill(skill_id="bank/merge/0000",
                      content="prose that lost its markers",
-                     subtask_id=_subtask(0), status="pending",
+                     subtask_id=_subtask(0),
+                     source_subtasks=[_subtask(0), _subtask(1)],
+                     status="pending",
                      merged_from=sorted([_skill_id(0), _skill_id(1)])),
                "skills")
     write_json(store.run_dir / LOG_DIR / LOG_NAME, {
