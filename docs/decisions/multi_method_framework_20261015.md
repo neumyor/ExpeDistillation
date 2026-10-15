@@ -10,7 +10,7 @@
 2. **比初版大幅做减法**：删掉通用依赖声明（needs/provides）、`extends` 配置继承、方法基类与类型化摘要、按方法声明 prompt/角色、工作目录迁移；不引入任何新 hash、版本号、审计机制。
 3. **可靠性只靠四样已有/极简的东西**：manifest 逐字段比对（已有）、"正式 run 固定在自己的维护分支续跑"运维规则、两条静态测试、只在测试侧的 golden 产物矩阵。
 4. **执行地点与隔离（致命风险对策）**：TB-dev 的 `.venv` 是可编辑安装、指向其 `src/`，在跑实验续跑或进入新阶段时会加载改后的代码。因此重构在**本仓库（ExpeDistillation-MM，独立 clone + 独立 venv）**进行：origin = TB-dev 本地路径，基点 `bcb3ffe`（feature/acceptance-live-run 顶点），分支 `feature/multi-method`，本仓库 `.venv`（Python 3.11.16）的 editable `.pth` 只指向 MM 自己的 `src/`。TB-dev 在正式实验期间的任何热修经 `git fetch origin` + cherry-pick 同步进来。
-5. **执行时点**：P-1 及之后的步骤在 TB 正式 run（runs/tb21_split_live_run_20261015_0045）完结后进行；golden 产物矩阵必须在"最终 v2 代码"的 tag 上生成，实验期间的热修会改变 tag 内容。
+5. **执行时点**：P-1 及之后的步骤在 TB 正式 run（runs/tb21_split_live_run_20261015_0045）完结后进行；golden 产物矩阵必须在"最终 v2 代码"的 tag 上生成，实验期间的热修会改变 tag 内容。**2026-10-15 更新（用户裁决："升级为多方法框架 不用等正式 run"）**：golden 矩阵部分已按 §7.1 提前完成（基点 dad6d28，src 与 bcb3ffe 逐字节相同），P0 即可开始；TB-dev 终态 tag 与维护分支归档仍推迟到 run 完结。
 
 ## 1. 现状问题（经 A 事实核查修正后的版本）
 
@@ -116,6 +116,15 @@ token_budgets: {...}
 **`upgrade_v2`**（R3）：纯 stdlib 函数，只服务两处——`assemble_reuse` 读 v2 源 manifest 做身份比对（否则单侧缺键被算作差异，`assemble_reuse.py:360-372`），以及一次性配置转换。stage0/pipeline 永不加载 v2。v2 `acceptance` 的三种写法（缺键、`{}`、`{mode: exam}`）必须映射到同一个 v3 值；golden 测试覆盖全部 v2 配置。近期使用场景：用 v3 才有的新方法（如新 delivery）复用当前 TB v2 正式 run 的冻结库。
 
 **迁移纪律**：模块与其测试同一提交迁移，旧位置不留转发 shim（过时 patch 直接报错）；被改动 patch 目标的"断言没发生"类测试补一个正向前提（证明 patch 确实生效）。
+
+### 7.1 P-1 的提前执行（2026-10-15 用户裁决："升级为多方法框架 不用等正式 run"）
+
+P-1 拆成两半，golden 部分已提前完成（见 log.md 2026-10-15 13:10 一条）：
+
+- **已完成（P-1′）**：`tests/golden/` 采集器 + `tests/fixtures/golden/` 矩阵：8 组合（acceptance × delivery × mode 全积）× 假模型全流水线，每组合 3 个崩溃续跑变体（模型调用数 0.3/0.6/0.95 分位点）。基点 `dad6d28`（= bcb3ffe + 仅文档提交，src 逐字节相同），记录于 `provenance.json`；两次重生成逐字节一致。归一化刻意最小（时间/时长/请求 uuid/`processed_this_call`/run 目录路径/pipeline_log 末行视图；llm_requests 与 usage 以排序多重集快照）。崩溃续跑的等价准则做了精确化：**结果状态逐字节相同；调用史只容忍崩溃自身痕迹与"同内容重问"**（README 已知不等价点——未落盘的模型调用会被重问——的可执行形式），缺调用或新调用即失败。常驻验收测试随全套件跑（8 直线比对 + 2 崩溃续跑）。
+- **仍等 run 完结**：TB-dev 终态打 tag `schema-v2-final`、在飞/历史 run 维护分支 + 独立 venv 归档。
+- **纪律不变**：golden 只允许在"重构前 v2 代码"上生成（provenance 记录基点），从重构后代码重生成即仪器自我认证。P0 的三路评审同时审计采集器本身——它是 P0/P1a 验收标准的执行工具。
+- **风险与对策**：① TB-dev 实验期间热修（已知应急通道：`live_acceptance._LIVE_VIEWS_BUDGET_CHARS` 一行下调）会移动"最终 v2"——对策：热修 cherry-pick 到基点之上重生成矩阵（provenance 换新基点），重构分支上的同义翻译由该步三路评审覆盖；② 崩溃续跑在调用史层面天然不等价（见上，已精确化进准则）；③ golden 覆盖面限制——假模型、无远程 TB 链路、无真实端点，远程与端点路径由在跑正式 run 与 live 标记冒烟验证。
 
 **测试体系**：golden 产物矩阵为主验收；每槽位只保留两条廉价参数化契约测试（假模型跑通、未知参数拒绝）；各方法现有专属续跑/不变量测试全部保留；不建通用"第 k 次写盘崩溃"遍历框架（等第一个新方法落地再评估）。
 

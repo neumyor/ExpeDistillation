@@ -1,0 +1,1339 @@
+{
+  "llm_requests/dumps": [
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": [
+        {
+          "description": "do the whole task",
+          "end": 1,
+          "label": "whole",
+          "start": 0,
+          "success": false
+        }
+      ],
+      "prompt_name": "SEGMENT",
+      "request_id": "<request_id>",
+      "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+      "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": false}]\n```",
+      "role": "segmenter",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": [
+        {
+          "description": "do the whole task",
+          "end": 1,
+          "label": "whole",
+          "start": 0,
+          "success": true
+        }
+      ],
+      "prompt_name": "SEGMENT",
+      "request_id": "<request_id>",
+      "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: success)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+      "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": true}]\n```",
+      "role": "segmenter",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "conflicts": [],
+        "similar_groups": []
+      },
+      "prompt_name": "SIMILARITY",
+      "request_id": "<request_id>",
+      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the listing below. Each entry\nstarts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n- traj/fakebench:t1/weak/00/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected\n\n- similar_groups: groups of skills that teach the same thing (same advice, same\n  trigger conditions). Group only skills that could be merged into one skill;\n  every group has at least two skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n\nOnly group or pair skills of the same kind: procedure skills (whose content\ncontains the '[When to use]' section header) with procedure skills, failure\nreferences (whose content contains the '[Trigger]' section header) with\nfailure references -- in similar_groups AND in conflicts.\n\nJudge by literal meaning, not surface wording: skills about the same behavior\nwith different examples still belong to one group. Do not force anything:\nreturn empty lists when there is nothing to merge and no conflicts.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...]}\n",
+      "response_text": "```json\n{\"similar_groups\": [], \"conflicts\": []}\n```",
+      "role": "curator",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "do_instead": [
+          "inspect the reported state",
+          "run the command that matches the state"
+        ],
+        "not_applicable_when": "the state was already inspected",
+        "trigger": "acting on a report without inspecting it first",
+        "why_it_fails": "the action does not match the actual state."
+      },
+      "prompt_name": "SKILL_DIAGNOSE",
+      "request_id": "<request_id>",
+      "request_text": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it went wrong. The weak model will\nread it to recognize the same kind of mistake and avoid it.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING (context summary):\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in three passes:\n1. Diagnose: find where the weak model started going wrong -- which step or\n   decision, and what kind of mistake it made there (a wrong command, a\n   skipped check, a misread observation, a repeated failing action, ...).\n   Name the missing capability at the weak model's level, not a vague\n   \"logical error\".\n2. Adapt: read the weak model profile. It is the capability boundary of your\n   reader: every corrective step must be an action this exact model can carry\n   out as written -- vocabulary it knows, tool syntax it handles, one action\n   per step. Where the profile names a weakness that caused or worsened this\n   failure, the fix must guard against it.\n3. Write the reference in four sections:\n   - trigger: the failure signature -- what the weak model is doing when this\n     mistake is happening. Concrete and observable, phrased so the model can\n     recognize it in its own behavior.\n   - why_it_fails: one or two sentences: what goes wrong and why.\n   - do_instead: an ordered checklist of concrete actions, the correct\n     procedure for this kind of subtask. One action per item, imperative\n     voice, WITHOUT its own numbering; the exact command FORM with generic\n     placeholders where the subtask shows one.\n   - not_applicable_when: when this reference does NOT apply.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the reference must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"trigger\": \"<one or two sentences>\",\n  \"why_it_fails\": \"<one or two sentences>\",\n  \"do_instead\": [\"<one action>\", \"<one action>\", ...],\n  \"not_applicable_when\": \"<one sentence>\"}\n",
+      "response_text": "```json\n{\"trigger\": \"acting on a report without inspecting it first\", \"why_it_fails\": \"the action does not match the actual state.\", \"do_instead\": [\"inspect the reported state\", \"run the command that matches the state\"], \"not_applicable_when\": \"the state was already inspected\"}\n```",
+      "role": "author",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "error_description": "",
+        "verdict": "correct"
+      },
+      "prompt_name": "JUDGE",
+      "request_id": "<request_id>",
+      "request_text": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (grading standard; never shown to the examined model):\nInspect the reported state first, then take the matching corrective action.\n\nANSWER TO GRADE:\nThe skill applies. Inspect the state first, then act. Final answer: inspect the state first.\n\nThe answer to grade is correct when it states the right action for the situation\nand a sound reason for it, even if worded differently from the reference answer.\n\nIf it is incorrect, the error description must say only WHAT is wrong with the\nanswer: describe the defect itself (for example, a wrong action is named, the\nreason is missing, or the situation is misread). Do not state or imply how to\nfix it: never describe the correct approach, a step to add or remove, or what\nthe answer should have said instead. Never restate, quote, or paraphrase the\ncorrect answer in the error description.\n\nOutput ONLY JSON with exactly these fields:\n{\"verdict\": \"<correct|incorrect>\",\n  \"error_description\": \"<empty string when correct; otherwise only what is wrong\n  with the answer, never the correct answer and never how to fix it>\"}\n",
+      "response_text": "```json\n{\"verdict\": \"correct\", \"error_description\": \"\"}\n```",
+      "role": "judge",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "error_description": "",
+        "verdict": "correct"
+      },
+      "prompt_name": "JUDGE",
+      "request_id": "<request_id>",
+      "request_text": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (grading standard; never shown to the examined model):\nInspect the reported state first, then take the matching corrective action.\n\nANSWER TO GRADE:\nThe skill applies. Inspect the state first, then act. Final answer: inspect the state first.\n\nThe answer to grade is correct when it states the right action for the situation\nand a sound reason for it, even if worded differently from the reference answer.\n\nIf it is incorrect, the error description must say only WHAT is wrong with the\nanswer: describe the defect itself (for example, a wrong action is named, the\nreason is missing, or the situation is misread). Do not state or imply how to\nfix it: never describe the correct approach, a step to add or remove, or what\nthe answer should have said instead. Never restate, quote, or paraphrase the\ncorrect answer in the error description.\n\nOutput ONLY JSON with exactly these fields:\n{\"verdict\": \"<correct|incorrect>\",\n  \"error_description\": \"<empty string when correct; otherwise only what is wrong\n  with the answer, never the correct answer and never how to fix it>\"}\n",
+      "response_text": "```json\n{\"verdict\": \"correct\", \"error_description\": \"\"}\n```",
+      "role": "judge",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "error_description": "No action is stated.",
+        "verdict": "incorrect"
+      },
+      "prompt_name": "JUDGE",
+      "request_id": "<request_id>",
+      "request_text": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (grading standard; never shown to the examined model):\nInspect the reported state first, then take the matching corrective action.\n\nANSWER TO GRADE:\nI have no idea what should be done here.\n\nThe answer to grade is correct when it states the right action for the situation\nand a sound reason for it, even if worded differently from the reference answer.\n\nIf it is incorrect, the error description must say only WHAT is wrong with the\nanswer: describe the defect itself (for example, a wrong action is named, the\nreason is missing, or the situation is misread). Do not state or imply how to\nfix it: never describe the correct approach, a step to add or remove, or what\nthe answer should have said instead. Never restate, quote, or paraphrase the\ncorrect answer in the error description.\n\nOutput ONLY JSON with exactly these fields:\n{\"verdict\": \"<correct|incorrect>\",\n  \"error_description\": \"<empty string when correct; otherwise only what is wrong\n  with the answer, never the correct answer and never how to fix it>\"}\n",
+      "response_text": "```json\n{\"verdict\": \"incorrect\", \"error_description\": \"No action is stated.\"}\n```",
+      "role": "judge",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "error_description": "No action is stated.",
+        "verdict": "incorrect"
+      },
+      "prompt_name": "JUDGE",
+      "request_id": "<request_id>",
+      "request_text": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (grading standard; never shown to the examined model):\nInspect the reported state first, then take the matching corrective action.\n\nANSWER TO GRADE:\nI have no idea what should be done here.\n\nThe answer to grade is correct when it states the right action for the situation\nand a sound reason for it, even if worded differently from the reference answer.\n\nIf it is incorrect, the error description must say only WHAT is wrong with the\nanswer: describe the defect itself (for example, a wrong action is named, the\nreason is missing, or the situation is misread). Do not state or imply how to\nfix it: never describe the correct approach, a step to add or remove, or what\nthe answer should have said instead. Never restate, quote, or paraphrase the\ncorrect answer in the error description.\n\nOutput ONLY JSON with exactly these fields:\n{\"verdict\": \"<correct|incorrect>\",\n  \"error_description\": \"<empty string when correct; otherwise only what is wrong\n  with the answer, never the correct answer and never how to fix it>\"}\n",
+      "response_text": "```json\n{\"verdict\": \"incorrect\", \"error_description\": \"No action is stated.\"}\n```",
+      "role": "judge",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "groups": {
+          "traj/fakebench:t1/strong/00/seg00/skill": "state inspection",
+          "traj/fakebench:t1/weak/00/seg00/skill": "state inspection"
+        }
+      },
+      "prompt_name": "GROUP",
+      "request_id": "<request_id>",
+      "request_text": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n- traj/fakebench:t1/weak/00/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected\n\nGroup by WHAT KIND of ability the skill teaches, not by where it came from. Use\nshort, consistent group names (two to four words, for example \"file inspection\"\nor \"error recovery\"), and reuse the same name for skills of the same capability.\nEvery skill id in the listing must appear exactly once.\n\nOutput ONLY JSON with exactly these fields:\n{\"groups\": {\"skill_id\": \"<group_name>\", ...}}\n",
+      "response_text": "```json\n{\"groups\": {\"traj/fakebench:t1/strong/00/seg00/skill\": \"state inspection\", \"traj/fakebench:t1/weak/00/seg00/skill\": \"state inspection\"}}\n```",
+      "role": "curator",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "leaked": false,
+        "reason": "generic advice"
+      },
+      "prompt_name": "LEAK_AUDIT_JUDGE",
+      "request_id": "<request_id>",
+      "request_text": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (protected material; the skill's reader never sees it):\nInspect the reported state first, then take the matching corrective action.\n\nSKILL:\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nThe skill LEAKS when it contains, trivially rephrases, or directly reveals the\nprotected answer material: the reference answer itself, or the exam's concrete\nanswer-specific entities -- names, values, file names -- that would let a reader\nanswer this exam by lookup instead of ability.\n\nThe skill does NOT leak when it only gives generic method advice that would\nhelp on ANY similar task, even when that advice also fits this exam.\nProtocol words, action names, and environment feedback strings are never\nleaks, even when the same words appear in the question or the reference\nanswer.\n\nJudge the skill text only; do not judge the exam or its answer.\n\nThe reason must NEVER restate, quote, or paraphrase the reference answer or its\nconcrete entities: the reason is reused as rewrite context whose reader must\nnot see the answer. Name the KIND of leaked material instead (for example \"a\nconcrete value from the exam situation\"), never the material itself.\n\nOutput ONLY JSON with exactly these fields:\n{\"leaked\": <true|false>,\n  \"reason\": \"<one to three sentences; never the protected material>\"}\n",
+      "response_text": "```json\n{\"leaked\": false, \"reason\": \"generic advice\"}\n```",
+      "role": "auditor",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "leaked": false,
+        "reason": "generic advice"
+      },
+      "prompt_name": "LEAK_AUDIT_JUDGE",
+      "request_id": "<request_id>",
+      "request_text": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (protected material; the skill's reader never sees it):\nInspect the reported state first, then take the matching corrective action.\n\nSKILL:\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nThe skill LEAKS when it contains, trivially rephrases, or directly reveals the\nprotected answer material: the reference answer itself, or the exam's concrete\nanswer-specific entities -- names, values, file names -- that would let a reader\nanswer this exam by lookup instead of ability.\n\nThe skill does NOT leak when it only gives generic method advice that would\nhelp on ANY similar task, even when that advice also fits this exam.\nProtocol words, action names, and environment feedback strings are never\nleaks, even when the same words appear in the question or the reference\nanswer.\n\nJudge the skill text only; do not judge the exam or its answer.\n\nThe reason must NEVER restate, quote, or paraphrase the reference answer or its\nconcrete entities: the reason is reused as rewrite context whose reader must\nnot see the answer. Name the KIND of leaked material instead (for example \"a\nconcrete value from the exam situation\"), never the material itself.\n\nOutput ONLY JSON with exactly these fields:\n{\"leaked\": <true|false>,\n  \"reason\": \"<one to three sentences; never the protected material>\"}\n",
+      "response_text": "```json\n{\"leaked\": false, \"reason\": \"generic advice\"}\n```",
+      "role": "auditor",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "not_applicable_when": "no state was reported",
+        "steps": [
+          "inspect the reported state",
+          "run the command that matches the state"
+        ],
+        "verify": "the service reports the expected state",
+        "when_to_use": "when a service reports an unexpected state"
+      },
+      "prompt_name": "SKILL_DISTILL",
+      "request_id": "<request_id>",
+      "request_text": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCEEDED: the skill is the executable\nprocedure the weak model should follow when it faces the same kind of subtask.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every step you write must be an action this exact model can carry out\nas written -- vocabulary it knows, tool syntax it handles, one action per\nstep. Where the profile names a weakness, add an explicit guard step against\nit; where it says the model cannot do something, never assume it can.\n\nWrite the skill in four sections:\n- when_to_use: the concrete, observable trigger -- \"when you need to\n  <goal>\". Surface features the weak model can recognize mid-task, never\n  abstract categories.\n- steps: an ordered checklist of concrete actions. One action per item,\n  imperative voice, WITHOUT its own numbering (the numbering is added\n  downstream). Write the exact command FORM to run, with generic\n  placeholders (for example <config-file>, <port>) where the subtask used\n  a concrete value -- the discipline below forbids copying that value.\n- verify: the observable sign that the subtask worked. State what to do\n  when the sign is absent (redo the previous step, or report the failure);\n  never \"keep retrying\".\n- not_applicable_when: when this skill does NOT apply, so it is not forced\n  onto unrelated subtasks.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the skill must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<one or two sentences>\",\n  \"steps\": [\"<one action>\", \"<one action>\", ...],\n  \"verify\": \"<one or two sentences>\",\n  \"not_applicable_when\": \"<one sentence>\"}\n",
+      "response_text": "```json\n{\"when_to_use\": \"when a service reports an unexpected state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the service reports the expected state\", \"not_applicable_when\": \"no state was reported\"}\n```",
+      "role": "author",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
+        "reference_answer": "Inspect the reported state first, then take the matching corrective action."
+      },
+      "prompt_name": "EXAM_GEN",
+      "request_id": "<request_id>",
+      "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
+      "response_text": "```json\n{\"question_text\": \"A service reports an unexpected state and stops. What should be done before anything else, and why?\", \"reference_answer\": \"Inspect the reported state first, then take the matching corrective action.\"}\n```",
+      "role": "examiner",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "strong-model",
+      "out_tokens": null,
+      "parsed": {
+        "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
+        "reference_answer": "Inspect the reported state first, then take the matching corrective action."
+      },
+      "prompt_name": "EXAM_GEN",
+      "request_id": "<request_id>",
+      "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
+      "response_text": "```json\n{\"question_text\": \"A service reports an unexpected state and stops. What should be done before anything else, and why?\", \"reference_answer\": \"Inspect the reported state first, then take the matching corrective action.\"}\n```",
+      "role": "examiner",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "weak-model",
+      "out_tokens": null,
+      "parsed": null,
+      "prompt_name": "ANSWER",
+      "request_id": "<request_id>",
+      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n## Skill rules\n- [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
+      "response_text": "The skill applies. Inspect the state first, then act. Final answer: inspect the state first.",
+      "role": "answerer",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "weak-model",
+      "out_tokens": null,
+      "parsed": null,
+      "prompt_name": "ANSWER",
+      "request_id": "<request_id>",
+      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
+      "response_text": "The skill applies. Inspect the state first, then act. Final answer: inspect the state first.",
+      "role": "answerer",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "weak-model",
+      "out_tokens": null,
+      "parsed": null,
+      "prompt_name": "ANSWER",
+      "request_id": "<request_id>",
+      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
+      "response_text": "I have no idea what should be done here.",
+      "role": "answerer",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    },
+    {
+      "attempt": 0,
+      "duration_ms": "<duration_ms>",
+      "finish_reason": null,
+      "in_tokens": null,
+      "infra_attempt": 0,
+      "model": "weak-model",
+      "out_tokens": null,
+      "parsed": null,
+      "prompt_name": "ANSWER",
+      "request_id": "<request_id>",
+      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
+      "response_text": "I have no idea what should be done here.",
+      "role": "answerer",
+      "status": "ok",
+      "system": "You are a helpful assistant. Follow the instructions exactly."
+    }
+  ],
+  "llm_requests/usage.jsonl": [
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 138,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 138,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 199,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 205,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 291,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "GROUP",
+      "request_id": "<request_id>",
+      "role": "curator",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 307,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "JUDGE",
+      "request_id": "<request_id>",
+      "role": "judge",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 307,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "JUDGE",
+      "request_id": "<request_id>",
+      "role": "judge",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 313,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "EXAM_GEN",
+      "request_id": "<request_id>",
+      "role": "examiner",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 313,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "EXAM_GEN",
+      "request_id": "<request_id>",
+      "role": "examiner",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 320,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "JUDGE",
+      "request_id": "<request_id>",
+      "role": "judge",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 320,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "JUDGE",
+      "request_id": "<request_id>",
+      "role": "judge",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 388,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 388,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 431,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "LEAK_AUDIT_JUDGE",
+      "request_id": "<request_id>",
+      "role": "auditor",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 437,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "LEAK_AUDIT_JUDGE",
+      "request_id": "<request_id>",
+      "role": "auditor",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 446,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SIMILARITY",
+      "request_id": "<request_id>",
+      "role": "curator",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 601,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_DISTILL",
+      "request_id": "<request_id>",
+      "role": "author",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 646,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_DIAGNOSE",
+      "request_id": "<request_id>",
+      "role": "author",
+      "status": "ok",
+      "time": "<time>"
+    }
+  ],
+  "llm_requests/usage.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "manifest.json": {
+    "aux_metric": null,
+    "benchmark": "fakebench",
+    "config": {
+      "K": 1,
+      "bank_token_budget": 4096,
+      "benchmark": "fakebench",
+      "curation_rounds": 3,
+      "mode": "split",
+      "model_options": {},
+      "models": {
+        "answerer": "weak-model",
+        "auditor": "strong-model",
+        "author": "strong-model",
+        "curator": "strong-model",
+        "examiner": "strong-model",
+        "executor_strong": "strong-model",
+        "executor_weak": "weak-model",
+        "judge": "strong-model",
+        "rewriter": "strong-model",
+        "segmenter": "strong-model"
+      },
+      "n_attempts_strong": 1,
+      "n_attempts_weak": 1,
+      "prompts_digests": {
+        "ANSWER": "35bc0de88ed2152f1605c01da693cddf976733995950f10919dd146bc6113f42",
+        "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
+        "EXAM_GEN": "54e6f98deed982d76bd652c23170ca73a9f090a22790c703f297294b331aa3b6",
+        "FAKE_TASK": "72c29397193f7275ea9356dcadd3d2cef2b4bd6e135af7ffe032d908a9396d98",
+        "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
+        "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
+        "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
+        "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
+        "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
+        "REWRITE": "a16ea16efa74bc67183ecc7d0a3c534f9c8e0e8caa44a20c3e7cec45b82b1895",
+        "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
+        "SIMILARITY": "fd5ff69610c2c1047d3eee012a503002d12cc2e859707b4d6bc88536cdd4e610",
+        "SKILL_DIAGNOSE": "b1559a1e72ea959d42d8954f32f49f6895f325f3a4d628fa4453f85583c79050",
+        "SKILL_DISTILL": "5c959806cc3751508acbe9ed14eff248eee20c9a8f10bbb2be3370d19926826c"
+      },
+      "retry_limit": 2,
+      "rules": {
+        "segment_select": "strong_success_weak_failed",
+        "task_select": "any_weak_failed",
+        "trajectory_select": "strong2_weak2"
+      },
+      "schema_version": 2,
+      "segment_retry_limit": 2,
+      "skill_delivery": {
+        "mode": "whole_bank"
+      },
+      "split": {
+        "test": [
+          "t2"
+        ],
+        "train": [
+          "t1"
+        ]
+      },
+      "tasks": null,
+      "token_budgets": {
+        "default_max_output_tokens": 65536
+      },
+      "weak_profile": "The weak model misses intermediate steps."
+    },
+    "mode": "split",
+    "model_roles": {
+      "answerer": "weak-model",
+      "auditor": "strong-model",
+      "author": "strong-model",
+      "curator": "strong-model",
+      "examiner": "strong-model",
+      "executor_strong": "strong-model",
+      "executor_weak": "weak-model",
+      "judge": "strong-model",
+      "rewriter": "strong-model",
+      "segmenter": "strong-model"
+    },
+    "prompt_digests": {
+      "ANSWER": "35bc0de88ed2152f1605c01da693cddf976733995950f10919dd146bc6113f42",
+      "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
+      "EXAM_GEN": "54e6f98deed982d76bd652c23170ca73a9f090a22790c703f297294b331aa3b6",
+      "FAKE_TASK": "72c29397193f7275ea9356dcadd3d2cef2b4bd6e135af7ffe032d908a9396d98",
+      "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
+      "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
+      "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
+      "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
+      "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
+      "REWRITE": "a16ea16efa74bc67183ecc7d0a3c534f9c8e0e8caa44a20c3e7cec45b82b1895",
+      "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
+      "SIMILARITY": "fd5ff69610c2c1047d3eee012a503002d12cc2e859707b4d6bc88536cdd4e610",
+      "SKILL_DIAGNOSE": "b1559a1e72ea959d42d8954f32f49f6895f325f3a4d628fa4453f85583c79050",
+      "SKILL_DISTILL": "5c959806cc3751508acbe9ed14eff248eee20c9a8f10bbb2be3370d19926826c"
+    },
+    "rules": {
+      "segment_select": "strong_success_weak_failed",
+      "task_select": "any_weak_failed",
+      "trajectory_select": "strong2_weak2"
+    },
+    "split": {
+      "reserved": [],
+      "test": [
+        "t2"
+      ],
+      "train": [
+        "t1"
+      ]
+    },
+    "tasks_digest": "acc365b23957040e3bcf2982fdd1e0ee48767f5f65259e071af281aca036fec3"
+  },
+  "pipeline_log.jsonl": [
+    {
+      "stage": "stage0_freeze",
+      "summary": {
+        "reserved": [],
+        "tasks": 2,
+        "test": [
+          "t2"
+        ],
+        "train": [
+          "t1"
+        ]
+      }
+    },
+    {
+      "stage": "stage1_baseline",
+      "summary": {
+        "F": [
+          "fakebench:t1"
+        ],
+        "complete": true,
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "infra_shortfalls": [],
+        "strong": {
+          "metrics": {
+            "fakebench:t1": {
+              "attempts": 1,
+              "infra": 0,
+              "success": 1,
+              "valid": 1
+            }
+          },
+          "summary": {
+            "aux": null,
+            "avg_at_n": 1.0,
+            "avg_at_n_conservative": 1.0,
+            "infra_tasks": [],
+            "pass_at_n": 1.0,
+            "tasks": 1
+          }
+        },
+        "weak": {
+          "metrics": {
+            "fakebench:t1": {
+              "attempts": 1,
+              "infra": 0,
+              "success": 0,
+              "valid": 1
+            }
+          },
+          "summary": {
+            "aux": null,
+            "avg_at_n": 0.0,
+            "avg_at_n_conservative": 0.0,
+            "infra_tasks": [],
+            "pass_at_n": 0.0,
+            "tasks": 1
+          }
+        }
+      }
+    },
+    {
+      "stage": "stage2_segmentation",
+      "summary": {
+        "empty_skipped": [],
+        "infra_failed": [],
+        "segmented": 2,
+        "skipped": 0,
+        "total_subtasks": 2
+      }
+    },
+    {
+      "stage": "stage3_generation",
+      "summary": {
+        "exam_missing_advanced": [],
+        "generated": [
+          "traj/fakebench:t1/strong/00/seg00",
+          "traj/fakebench:t1/weak/00/seg00"
+        ],
+        "infra_failed": [],
+        "model_output_failed": [],
+        "selected": [
+          "traj/fakebench:t1/strong/00/seg00",
+          "traj/fakebench:t1/weak/00/seg00"
+        ]
+      }
+    },
+    {
+      "stage": "stage4_acceptance",
+      "summary": {
+        "accepted": 2,
+        "discarded": {},
+        "infra_failed": [],
+        "processed_this_call": "<processed_this_call>",
+        "skipped_missing_exam": []
+      }
+    },
+    {
+      "stage": "stage5_curation",
+      "summary": {
+        "bank_reference": "bank:6b0570c0284c",
+        "members": [
+          "traj/fakebench:t1/strong/00/seg00/skill",
+          "traj/fakebench:t1/weak/00/seg00/skill"
+        ],
+        "size": 2
+      }
+    },
+    {
+      "stage": "stage6_test",
+      "summary": {
+        "bank_reference": "bank:6b0570c0284c",
+        "complete": true,
+        "control": {
+          "aux": null,
+          "avg_at_n": 0.0,
+          "avg_at_n_conservative": 0.0,
+          "infra_tasks": [],
+          "pass_at_n": 0.0,
+          "tasks": 1
+        },
+        "control_source": "fresh_bare_run",
+        "delta": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "pass_at_n": 1.0
+        },
+        "infra_accepted": {
+          "control": [],
+          "with_bank": []
+        },
+        "infra_missing": {
+          "control": [],
+          "with_bank": []
+        },
+        "infra_shortfall_accepted": false,
+        "mode": "split",
+        "with_bank": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "infra_tasks": [],
+          "pass_at_n": 1.0,
+          "tasks": 1
+        }
+      }
+    }
+  ],
+  "pipeline_log.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "skill_bank.jsonl": [
+    {
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+      "discard_reason": null,
+      "group": "state inspection",
+      "merged_from": [],
+      "rewrite_history": [],
+      "schema_version": 1,
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "status": "accepted",
+      "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+      "version": 1
+    },
+    {
+      "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+      "discard_reason": null,
+      "group": "state inspection",
+      "merged_from": [],
+      "rewrite_history": [],
+      "schema_version": 1,
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "status": "accepted",
+      "subtask_id": "traj/fakebench:t1/weak/00/seg00",
+      "version": 1
+    }
+  ],
+  "skill_bank.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stage0_summary.json": {
+    "reserved": [],
+    "tasks": 2,
+    "test": [
+      "t2"
+    ],
+    "train": [
+      "t1"
+    ]
+  },
+  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fstrong%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "meta": {
+      "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fstrong%2F00"
+    },
+    "model_name": "strong-model",
+    "model_role": "strong",
+    "schema_version": 1,
+    "skills_injected": null,
+    "status": "success",
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "success": true,
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/strong/00"
+  },
+  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "meta": {
+      "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 1,
+    "skills_injected": null,
+    "status": "failure",
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "success": false,
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/00"
+  },
+  "stage1_summary.json": {
+    "F": [
+      "fakebench:t1"
+    ],
+    "complete": true,
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "infra_shortfalls": [],
+    "strong": {
+      "metrics": {
+        "fakebench:t1": {
+          "attempts": 1,
+          "infra": 0,
+          "success": 1,
+          "valid": 1
+        }
+      },
+      "summary": {
+        "aux": null,
+        "avg_at_n": 1.0,
+        "avg_at_n_conservative": 1.0,
+        "infra_tasks": [],
+        "pass_at_n": 1.0,
+        "tasks": 1
+      }
+    },
+    "weak": {
+      "metrics": {
+        "fakebench:t1": {
+          "attempts": 1,
+          "infra": 0,
+          "success": 0,
+          "valid": 1
+        }
+      },
+      "summary": {
+        "aux": null,
+        "avg_at_n": 0.0,
+        "avg_at_n_conservative": 0.0,
+        "infra_tasks": [],
+        "pass_at_n": 0.0,
+        "tasks": 1
+      }
+    }
+  },
+  "stage2_segments/subtasks/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00.json": {
+    "context_summary": "",
+    "description": "do the whole task",
+    "label": "whole",
+    "schema_version": 1,
+    "segment_index": 0,
+    "source": "strong",
+    "step_range": [
+      0,
+      1
+    ],
+    "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+    "success": true,
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/strong/00",
+    "trajectory_success": true
+  },
+  "stage2_segments/subtasks/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00.json": {
+    "context_summary": "",
+    "description": "do the whole task",
+    "label": "whole",
+    "schema_version": 1,
+    "segment_index": 0,
+    "source": "weak",
+    "step_range": [
+      0,
+      1
+    ],
+    "subtask_id": "traj/fakebench:t1/weak/00/seg00",
+    "success": false,
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/00",
+    "trajectory_success": false
+  },
+  "stage2_summary.json": {
+    "empty_skipped": [],
+    "infra_failed": [],
+    "segmented": 2,
+    "skipped": 0,
+    "total_subtasks": 2
+  },
+  "stage3_generation/exams/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fexam.json": {
+    "exam_id": "traj/fakebench:t1/strong/00/seg00/exam",
+    "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
+    "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
+    "schema_version": 1,
+    "subtask_id": "traj/fakebench:t1/strong/00/seg00"
+  },
+  "stage3_generation/exams/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fexam.json": {
+    "exam_id": "traj/fakebench:t1/weak/00/seg00/exam",
+    "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
+    "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
+    "schema_version": 1,
+    "subtask_id": "traj/fakebench:t1/weak/00/seg00"
+  },
+  "stage3_generation/skills/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fskill.json": {
+    "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+    "discard_reason": null,
+    "group": "state inspection",
+    "merged_from": [],
+    "rewrite_history": [],
+    "schema_version": 1,
+    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+    "status": "accepted",
+    "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+    "version": 1
+  },
+  "stage3_generation/skills/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fskill.json": {
+    "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+    "discard_reason": null,
+    "group": "state inspection",
+    "merged_from": [],
+    "rewrite_history": [],
+    "schema_version": 1,
+    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+    "status": "accepted",
+    "subtask_id": "traj/fakebench:t1/weak/00/seg00",
+    "version": 1
+  },
+  "stage3_generation/stage3_summary.json": {
+    "exam_missing_advanced": [],
+    "generated": [
+      "traj/fakebench:t1/strong/00/seg00",
+      "traj/fakebench:t1/weak/00/seg00"
+    ],
+    "infra_failed": [],
+    "model_output_failed": [],
+    "selected": [
+      "traj/fakebench:t1/strong/00/seg00",
+      "traj/fakebench:t1/weak/00/seg00"
+    ]
+  },
+  "stage4_acceptance/attempts/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fexam%2Fatt00.json": {
+    "attempt_id": "traj/fakebench:t1/strong/00/seg00/exam/att00",
+    "exam_id": "traj/fakebench:t1/strong/00/seg00/exam",
+    "judge_reason": "No action is stated.",
+    "judge_verdict": false,
+    "purpose": "bare",
+    "retry_round": 0,
+    "schema_version": 1,
+    "skill_id": null,
+    "skill_version": null,
+    "weak_answer": "I have no idea what should be done here."
+  },
+  "stage4_acceptance/attempts/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fexam%2Fatt01.json": {
+    "attempt_id": "traj/fakebench:t1/strong/00/seg00/exam/att01",
+    "exam_id": "traj/fakebench:t1/strong/00/seg00/exam",
+    "judge_reason": "",
+    "judge_verdict": true,
+    "purpose": "acceptance",
+    "retry_round": 0,
+    "schema_version": 1,
+    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+    "skill_version": 1,
+    "weak_answer": "The skill applies. Inspect the state first, then act. Final answer: inspect the state first."
+  },
+  "stage4_acceptance/attempts/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fexam%2Fatt00.json": {
+    "attempt_id": "traj/fakebench:t1/weak/00/seg00/exam/att00",
+    "exam_id": "traj/fakebench:t1/weak/00/seg00/exam",
+    "judge_reason": "No action is stated.",
+    "judge_verdict": false,
+    "purpose": "bare",
+    "retry_round": 0,
+    "schema_version": 1,
+    "skill_id": null,
+    "skill_version": null,
+    "weak_answer": "I have no idea what should be done here."
+  },
+  "stage4_acceptance/attempts/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fexam%2Fatt01.json": {
+    "attempt_id": "traj/fakebench:t1/weak/00/seg00/exam/att01",
+    "exam_id": "traj/fakebench:t1/weak/00/seg00/exam",
+    "judge_reason": "",
+    "judge_verdict": true,
+    "purpose": "acceptance",
+    "retry_round": 0,
+    "schema_version": 1,
+    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+    "skill_version": 1,
+    "weak_answer": "The skill applies. Inspect the state first, then act. Final answer: inspect the state first."
+  },
+  "stage4_acceptance/leak_verdicts.jsonl": [
+    {
+      "leaked": false,
+      "reason": "generic advice",
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "skill_version": 1
+    },
+    {
+      "leaked": false,
+      "reason": "generic advice",
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "skill_version": 1
+    }
+  ],
+  "stage4_acceptance/leak_verdicts.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stage4_acceptance/stage4_summary.json": {
+    "accepted": 2,
+    "discarded": {},
+    "infra_failed": [],
+    "processed_this_call": "<processed_this_call>",
+    "skipped_missing_exam": []
+  },
+  "stage5_curation/curation_log.json": {
+    "bank_tokens": 128,
+    "final_member_ids": [
+      "traj/fakebench:t1/strong/00/seg00/skill",
+      "traj/fakebench:t1/weak/00/seg00/skill"
+    ],
+    "input_skill_ids": [
+      "traj/fakebench:t1/strong/00/seg00/skill",
+      "traj/fakebench:t1/weak/00/seg00/skill"
+    ],
+    "merge_records": [],
+    "merges": {
+      "attempted": 0,
+      "kept": 0,
+      "reverted": 0,
+      "skipped": 0
+    },
+    "rounds": [
+      {
+        "conflicts": [],
+        "dispatch": [],
+        "done": true,
+        "grouping": {
+          "traj/fakebench:t1/strong/00/seg00/skill": "state inspection",
+          "traj/fakebench:t1/weak/00/seg00/skill": "state inspection"
+        },
+        "round": 1,
+        "similar_groups": [],
+        "stop": true
+      }
+    ],
+    "rounds_executed": 1,
+    "schema": "curation-log-v3"
+  },
+  "stage5_curation/stage5_summary.json": {
+    "bank_reference": "bank:6b0570c0284c",
+    "members": [
+      "traj/fakebench:t1/strong/00/seg00/skill",
+      "traj/fakebench:t1/weak/00/seg00/skill"
+    ],
+    "size": 2
+  },
+  "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "meta": {
+      "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At2%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 1,
+    "skills_injected": "bank:6b0570c0284c",
+    "status": "success",
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "success": true,
+    "task_id": "fakebench:t2",
+    "trajectory_id": "traj/fakebench:t2/weak/00"
+  },
+  "stage6_test/bare/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "meta": {
+      "workdir": "<RUN_DIR>/work/stage6_bare/traj%2Ffakebench%3At2%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 1,
+    "skills_injected": null,
+    "status": "failure",
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "success": false,
+    "task_id": "fakebench:t2",
+    "trajectory_id": "traj/fakebench:t2/weak/00"
+  },
+  "stage6_test/stage6_summary.json": {
+    "bank_reference": "bank:6b0570c0284c",
+    "complete": true,
+    "control": {
+      "aux": null,
+      "avg_at_n": 0.0,
+      "avg_at_n_conservative": 0.0,
+      "infra_tasks": [],
+      "pass_at_n": 0.0,
+      "tasks": 1
+    },
+    "control_source": "fresh_bare_run",
+    "delta": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "pass_at_n": 1.0
+    },
+    "infra_accepted": {
+      "control": [],
+      "with_bank": []
+    },
+    "infra_missing": {
+      "control": [],
+      "with_bank": []
+    },
+    "infra_shortfall_accepted": false,
+    "mode": "split",
+    "with_bank": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "infra_tasks": [],
+      "pass_at_n": 1.0,
+      "tasks": 1
+    }
+  }
+}
