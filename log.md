@@ -607,3 +607,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：P4+P5 合并三评审（docs/reviews/multi_method_step_P4_P5_review_20261015_{A,B,C}.md）三票全过、零偏移约束。最有价值的发现：C 的 R1——P4 给 curation 加 name 后，P1b 已转换的 7 份 v3 配置全部拒载（转换器不覆盖既有文件），已逐份补 name 并在审定文档加更正注记；A 的 CLI 缺口——core 的 ConfigError 不在 CLI 捕获族里，方法参数错误会以 traceback 呈现，已显式捕 CoreConfigError（不用裸 ValueError，避免吞代码 bug）；B 对 P5 None 档的批评（四项中唯一无消费者却落地、形状对预期使用者也不适用）按其最低成本路径处理（补行为测试路径由现有 stage5 夹具族承担，方案 §5 已同步语义）。琐细批：store 新增 write_jsonl 原子整写原语（none 的 bank 与检索审计两处手写副本收编）；check_authoring 去死回退、默认名单一真相；none 单次加载 + stale 语义差异披露；.env.example 登记 EXPEDISTILL_LLM_PROVIDER；provider 测试归位 tests/unit/llm；stage3 docstring 同步 exams 语义 + 补 exams=false 两条测试（C 的 R2）；方案 §5/§8 补注（None 档语义、单实现槽位转型的四步清单）。最终验收：1927 测试全绿（金矩阵 10 项在内）；转换器/审计自检/v2 拒载/CLI 干净报错四项实跑验证；方案 §2–§9 约束逐条自查无违反。P0→P5 重构计划全部完成。
 
 工件：configs/experiments/*_v3.yaml（7 份补 name）、`docs/reviews/v3_config_review_20261015.md`（更正注记）、`docs/reviews/multi_method_step_P4_P5_review_20261015_{A,B,C}.md`、`src/expedistill/infra/store.py`（write_jsonl）、`src/expedistill/methods/curation/none.py`、`src/expedistill/methods/authoring/__init__.py`、`src/expedistill/cli.py`、`.env.example`、`tests/unit/llm/test_providers.py`、`tests/unit/stages/test_stage3.py`（+2）、方案 §5/§8、本条对应 commit
+
+## 2026-10-15 19:25 — 执行—学习闭环重构方案（scope 级）
+
+一段话摘要：用户指出五槽位流水线把"某一种做法的内部工序"当成了系统接口，并提出新组织方式：系统只有执行（技能库 + 任务 + 模型 → 新轨迹）与学习（旧库 + 验收结果 + 轨迹 → 新库）两种阶段，阶段由模块组合而成，方法 = 阶段序列（exam = D L A L A L A L C，live_run = D L B L B L C）。用户的两条设计决定：①验收只如实测量、不做决定，保留 / 修改 / 新增 / 删除的门在学习阶段内部；②agentbrew 分两个版本——靠考题回归决定是否合并（exam 用）与直接接受合并（live 用）。据此写成 scope 级方案：跨阶段只传技能库、轨迹集、验收报告；执行 = 交付 + 执行方式 + 验收，学习 = 决策 + 找证据 + 写作 + 整理且只有一种 L；出题与泄题审计归伪执行；技能身份与段解绑（升 schema）；exam 预期行为不变，live 有两处有意变化（不再因出题失败淘汰技能、不再因考题回归撤销合并）。尚未开始实现；本条对应 commit。
+
+工件：`docs/decisions/execute_learn_loop_20261015.md`（方案）
