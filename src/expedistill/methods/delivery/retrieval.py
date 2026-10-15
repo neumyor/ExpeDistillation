@@ -102,26 +102,6 @@ def write_audit(run_dir: Path, rows: Sequence[Dict[str, Any]]) -> None:
     earlier dispatch. Atomic (temp file + rename, B3's pattern) so a crash
     mid-write leaves the previous file intact instead of a torn ledger.
     """
-    import json
-    import os
-    import tempfile
+    from expedistill.infra.store import write_jsonl
 
-    path = Path(run_dir) / _STAGE6_DIR / RETRIEVAL_AUDIT_NAME
-    payload = "".join(
-        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
-        for row in rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(
-        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except OSError:
-            pass
-        raise
+    write_jsonl(Path(run_dir) / _STAGE6_DIR / RETRIEVAL_AUDIT_NAME, rows)

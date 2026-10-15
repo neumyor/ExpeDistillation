@@ -28,8 +28,13 @@ per-path lock or store.save's distinct atomic file. With workers > 1 the
 order of ledger lines on disk varies run to run; nothing here reads it back
 in order.
 
-Resume: a subtask whose (skill, exam) pair is already stored is skipped
-without a model call. A pair missing either half (a crash between the two
+Under ``methods.authoring.exams: false`` (P4's ablation switch -- the
+slot's check has already refused the conflicting consumers) no exam is
+generated or stored: a unit is the skill alone, complete when the skill
+is stored, and the examiner is never consulted.
+
+Resume: a subtask whose (skill, exam) pair -- or, with exams off, its
+skill alone -- is already stored is skipped without a model call. A pair missing either half (a crash between the two
 saves) is regenerated in full: the skill and the exam are both functions of
 the stored subtask alone, so the regeneration is idempotent under the
 deterministic ids, and a skill whose exam never existed cannot have entered

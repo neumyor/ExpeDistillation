@@ -10,7 +10,7 @@ acceptance protocol, and the agentbrew curator's regression exams).
 
 from dataclasses import dataclass
 
-from expedistill.core.config import ConfigError
+from expedistill.core.config import METHOD_DEFAULTS, ConfigError
 
 __all__ = ["AuthoringParams", "check_authoring"]
 
@@ -29,15 +29,15 @@ def check_authoring(params: AuthoringParams, experiment) -> None:
     of exams is configured."""
     if params.exams:
         return
-    acceptance = experiment.methods["acceptance"].get("name", "exam")
-    if acceptance == "exam":
+    acceptance = experiment.methods["acceptance"]["name"]
+    if acceptance == METHOD_DEFAULTS["acceptance"]["name"]:
         raise ConfigError(
             "methods.authoring.exams is false but the acceptance method "
             "is 'exam' -- the text-exam protocol judges skills on the "
             "exams this switch turns off; use live_run acceptance or "
             "generate exams")
-    curation = experiment.methods["curation"].get("name", "agentbrew")
-    if curation == "agentbrew":
+    curation = experiment.methods["curation"]["name"]
+    if curation == METHOD_DEFAULTS["curation"]["name"]:
         raise ConfigError(
             "methods.authoring.exams is false but the curation method "
             "is 'agentbrew' -- K5 proves every merge on regression "

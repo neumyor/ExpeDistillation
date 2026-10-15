@@ -92,7 +92,7 @@ token_budgets: {...}
 
 - 冻结形式：`methods` 明文字典（现有 manifest 机制）。**逐字冻结语义（评审 A 要求披露）**：缺省/空槽位补全为 `METHOD_DEFAULTS`；给定槽位按原文逐字冻结、不做按键合并（合并会把一个方法的默认参数串进另一个方法的槽位）；参数 dataclass 的缺省值因此**不物化**进 manifest——改 dataclass 默认值对已冻结 run 不可见，续跑比对只看字面。代价与取舍：v2 会物化，v3 不会；换来的是槽位语义完全归方法层所有。
 - **不做 `extends`**：消融矩阵用脚本生成完整 YAML。
-- **角色表不开放**（R5）：`core.config.MODEL_ROLES` 改为 `ROLE_DEFAULTS = {role: "strong"|"weak"}`（把写死的"answerer 用弱、其余用强"变成数据、消除与 `core/models.py:42` 重名）；角色名与预算校验不变。`None`（必须显式配置）档位等第一个使用者出现再加。
+- **角色表**（R5）：`ROLE_DEFAULTS = {role: "strong"|"weak"|None}`（None = 必须显式配置，P5 已落地——None 锚位不补默认、由 pipeline 缺角色检查响亮拒绝）（把写死的"answerer 用弱、其余用强"变成数据、消除与 `core/models.py:42` 重名）；角色名与预算校验不变。`None`（必须显式配置）档位等第一个使用者出现再加。
 - **考题依赖**（R2）：`authoring.exams` 缺省 true，所有现有配置语义逐字节不变；否决 `ensure_exam` 懒生成——它会改变候选集（G3 失败今天淘汰整段，`stage3_generation.py:284-300`），且破坏 K5 并行"同一波只读不可变考题"的前提（`curation.py:45`）。
 - **prompt 冻结**（D2）：冻结集 = `prompts/` 包注册的全部 prompt + 本配置插件的任务 prompt（即今天 exam run 的公式）。live 两个 prompt 改为在 `prompts/__init__` 正常 import；删除懒注册与 `_MANIFEST_OPTIONAL_FIELDS`。代价只是噪声：新增/修改任何 prompt 会改变之后所有新 run 的 manifest（旧 run 在维护分支续跑不受影响），manifest 会列出本 run 用不到的 digest。
 - **两条静态测试**（R4，取代运行时成员检查）：(1) `prompts/` 下每个模块都必须被 `prompts/__init__` import；(2) prompt 只能在 `prompts/` 与 `benchmarks/<name>/` 中注册，且每个插件最多注册一个、就是它的任务 prompt。
@@ -145,6 +145,7 @@ token_budgets: {...}
 3. 改已有方法的行为 = 注册新名字，不改旧名字的行为。
 4. 驱动只读自己的 Params 与实验级视图；落盘目录用常量声明在 `<stage_dir>/<method>/`。
 5. 写续跑测试；通用契约（未知键/缺键/类型）由 `build_params` 对新方法自动生效，方法特有约束（如 `n_attempts >= 2`）在 Params 的 `__post_init__`/check 里自写并用 `tests/unit/methods/test_params.py` 加 case。
+6. **给"单实现"槽位加第二个方法**（评审 B 的补记，curation 转型实测多出的四步）：① 前置把消费该槽位的 stage 改成"解析并调用"前端（驱动从 stage 迁入槽位包）；② `METHOD_DEFAULTS` 给该槽位补缺省 `name`（不加则第二方法注册瞬间所有缺省配置爆 needs-a-name）；③ `upgrade_v2_config` 同步加 name；④ golden 的 manifest 快照同提交重生成。这四步做完才是第 1 条的正常流程。
 
 **思想实验（B）**：新 prompt 策略的 authoring（结构不变）只改 3 个文件；`curation: none` 完全隔离；embedding delivery 方法本身隔离，但需 P5 的一次性基础设施（非 chat 调用、新角色、TB 插件提供真实查询文本——今天 `Task.instruction` 只是任务名，`tb/plugin.py:450`）；新 provider 与方法框架正交。若新 authoring 改变 skill 结构或"一段一条"粒度，会触及跨槽位协议（ID、考题关联、live 分组、策展溯源），须走设计变更。
 

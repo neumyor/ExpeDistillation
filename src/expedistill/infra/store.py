@@ -21,7 +21,7 @@ import threading
 import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Sequence, Any, Dict, Iterator, List, Optional
 
 from expedistill.core.models import Attempt, Exam, Skill, Subtask, Trajectory
 
@@ -212,6 +212,37 @@ def _is_complete_record(fragment: bytes) -> bool:
         return isinstance(json.loads(fragment), dict)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return False
+
+
+def write_jsonl(path: Path, rows: Sequence[Any]) -> None:
+    """Replace ``path`` with exactly ``rows``, one canonical JSON line each.
+
+    Whole-file and atomic (temp + fsync + rename): the content is the
+    unit, so a crash either leaves the previous file intact or the new
+    one complete -- never a torn ledger or doubled rows. This is the
+    right writer when the rows are a pure function of an input set (the
+    curation=none bank, a resolution audit overwritten in full);
+    ``append_jsonl`` remains the writer for resumable mid-loop appends.
+    """
+    payload = "".join(
+        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+        for row in rows)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
 
 
 def append_jsonl(path: Path, record: Dict[str, Any]) -> None:

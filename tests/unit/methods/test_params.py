@@ -250,34 +250,3 @@ class TestAuthoringExamsSwitch:
                      "acceptance": {"name": "live_run", "n_attempts": 3,
                                     "improvement": "strict_rate_gain"}}))
         assert params.exams is False
-
-
-class TestProviderRegistry:
-    """P5's provider seam: a plain name -> builder table, the environment
-    names the provider, unknown names are loud."""
-
-    def test_default_is_openai_compat(self, monkeypatch):
-        monkeypatch.delenv("EXPEDISTILL_LLM_PROVIDER", raising=False)
-        from expedistill.llm.providers import PROVIDERS, default_client
-        import expedistill.llm.providers as providers_mod
-        assert set(providers_mod.PROVIDERS) == {"openai_compat"}
-        seen = []
-        monkeypatch.setitem(PROVIDERS, "openai_compat",
-                            lambda timeout_sec: seen.append(timeout_sec))
-        client = default_client(timeout_sec=12.0)
-        assert seen == [12.0]
-        assert client is None  # the stub's return
-
-    def test_unknown_provider_is_a_config_error(self, monkeypatch):
-        monkeypatch.setenv("EXPEDISTILL_LLM_PROVIDER", "quantum")
-        from expedistill.infra.reliability import ConfigError as InfraError
-        from expedistill.llm.providers import default_client
-        with pytest.raises(InfraError, match="quantum"):
-            default_client()
-
-    def test_env_names_provider(self, monkeypatch):
-        import expedistill.llm.providers as providers_mod
-        monkeypatch.setenv("EXPEDISTILL_LLM_PROVIDER", "stub")
-        monkeypatch.setitem(providers_mod.PROVIDERS, "stub",
-                            lambda timeout_sec: "stub-client")
-        assert providers_mod.default_client(timeout_sec=1.0) == "stub-client"

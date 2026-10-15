@@ -58,6 +58,7 @@ from typing import Dict, List, Optional
 
 from expedistill.stages.assemble_reuse import LEVELS, assemble_reuse
 from expedistill.infra.manifest import FrozenProtocolChanged
+from expedistill.core.config import ConfigError as CoreConfigError
 from expedistill.infra.reliability import (
     ConfigError,
     InfrastructureError,
@@ -346,7 +347,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (FrozenProtocolChanged, RunLockedError, ConfigError) as exc:
+    except (FrozenProtocolChanged, RunLockedError, ConfigError,
+            CoreConfigError) as exc:
+        # CoreConfigError (core.config) is what the methods layer's
+        # param contracts raise: a bad method parameter is a clean stop,
+        # never a traceback. Anything else that leaks a bare ValueError
+        # stays a traceback -- masking code bugs is worse than the noise.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except ProviderRefusalError as exc:

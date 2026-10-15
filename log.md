@@ -601,3 +601,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：P5 完成（用户指令明确要求做到 P5）。落地两个有当前价值的最小接缝：llm/providers.py 纯数据表（名字 → 客户端 builder，EXPEDISTILL_LLM_PROVIDER 环境变量选择、缺省 openai_compat，未知名字响亮列出已知——与 methods 注册表同形，无自动发现）；ROLE_DEFAULTS 的 None 档（None 锚位不补默认，pipeline 的缺角色检查负责响亮拒绝——"必须显式配置"的语义由现有检查免费承担，零新代码路径）。两项按用户"避免 over-engineered"裁决明确跳过并留档于方案 P5 行：非 chat 调用（embedding，唯一消费者 embedding delivery 尚无人提出，到时按 §8 清单加）；TB 插件真实查询文本（benchmark 插件层的方法实验决定，会改 tasks_digest 即实验身份，不属框架重构）。1924 测试全绿。
 
 工件：`src/expedistill/llm/providers.py`、`src/expedistill/core/config.py`（None 档）、`src/expedistill/stages/pipeline.py`（default_client 走注册表）、`tests/unit/methods/test_params.py`（+3 provider 测试）、AGENTS.md、方案 §7 P5 行、本条对应 commit
+
+## 2026-10-15 22:50 — P4+P5 三评审全过，修复批落地，最终验收通过
+
+一段话摘要：P4+P5 合并三评审（docs/reviews/multi_method_step_P4_P5_review_20261015_{A,B,C}.md）三票全过、零偏移约束。最有价值的发现：C 的 R1——P4 给 curation 加 name 后，P1b 已转换的 7 份 v3 配置全部拒载（转换器不覆盖既有文件），已逐份补 name 并在审定文档加更正注记；A 的 CLI 缺口——core 的 ConfigError 不在 CLI 捕获族里，方法参数错误会以 traceback 呈现，已显式捕 CoreConfigError（不用裸 ValueError，避免吞代码 bug）；B 对 P5 None 档的批评（四项中唯一无消费者却落地、形状对预期使用者也不适用）按其最低成本路径处理（补行为测试路径由现有 stage5 夹具族承担，方案 §5 已同步语义）。琐细批：store 新增 write_jsonl 原子整写原语（none 的 bank 与检索审计两处手写副本收编）；check_authoring 去死回退、默认名单一真相；none 单次加载 + stale 语义差异披露；.env.example 登记 EXPEDISTILL_LLM_PROVIDER；provider 测试归位 tests/unit/llm；stage3 docstring 同步 exams 语义 + 补 exams=false 两条测试（C 的 R2）；方案 §5/§8 补注（None 档语义、单实现槽位转型的四步清单）。最终验收：1927 测试全绿（金矩阵 10 项在内）；转换器/审计自检/v2 拒载/CLI 干净报错四项实跑验证；方案 §2–§9 约束逐条自查无违反。P0→P5 重构计划全部完成。
+
+工件：configs/experiments/*_v3.yaml（7 份补 name）、`docs/reviews/v3_config_review_20261015.md`（更正注记）、`docs/reviews/multi_method_step_P4_P5_review_20261015_{A,B,C}.md`、`src/expedistill/infra/store.py`（write_jsonl）、`src/expedistill/methods/curation/none.py`、`src/expedistill/methods/authoring/__init__.py`、`src/expedistill/cli.py`、`.env.example`、`tests/unit/llm/test_providers.py`、`tests/unit/stages/test_stage3.py`（+2）、方案 §5/§8、本条对应 commit

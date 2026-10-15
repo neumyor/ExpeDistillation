@@ -1079,3 +1079,56 @@ def test_resume_under_workers_4_regenerates_only_pending(tmp_path):
         "distill", _sections_for("distill", subtasks[1].label))
     assert skill_markers(skill.content) == PROCEDURE_MARKERS
     assert exam.question_text == f"question {subtasks[1].label}"
+
+
+class TestExamsSwitchOff:
+    """P4's exams=false ablation path (reviewer C's R2): the skills land,
+    no exam is asked or stored, and a re-run is a zero-call no-op."""
+
+    def _ctx(self, tmp_path, author):
+        config = ExperimentConfig(
+            benchmark=BENCHMARK, mode="full",
+            models={"executor_strong": "strong-model",
+                    "executor_weak": "weak-model"},
+            weak_profile=WEAK_PROFILE,
+            methods={
+                "authoring": {"exams": False},
+                "acceptance": {"name": "live_run", "n_attempts": 2,
+                               "improvement": "strict_rate_gain"},
+                "curation": {"name": "none", "token_budget": 10 ** 6},
+            },
+            rules={"segment_select": "strong_success_weak_failed"},
+        )
+        seed_store(Store(tmp_path / "run"))
+        return make_ctx(tmp_path, author=author,
+                        examiner=make_fake_handle("strong", []),
+                        config=config)
+
+    def test_skills_stored_no_exams_examiner_never_called(self, tmp_path):
+        author = make_fake_handle("strong",
+                                  [distill_script(),
+                                   distill_script(DISTILL_SECTIONS_ALT),
+                                   diagnose_script()])
+        ctx, store = self._ctx(tmp_path, author)
+        summary = stage3_generation.run(ctx)
+        # The same three subtasks the exam path selects; all three skills.
+        assert len(summary["generated"]) == 3
+        assert len(store.ids("skills")) == 3
+        assert store.ids("exams") == []
+        assert len(author.client.calls) == 3
+        # The examiner handle is never consulted (empty script would fail).
+        assert ctx.handle("examiner").client.calls == []
+
+    def test_rerun_is_a_zero_call_no_op(self, tmp_path):
+        author = make_fake_handle("strong",
+                                  [distill_script(),
+                                   distill_script(DISTILL_SECTIONS_ALT),
+                                   diagnose_script()])
+        ctx, store = self._ctx(tmp_path, author)
+        first = stage3_generation.run(ctx)
+        calls_after_first = len(author.client.calls)
+        second = stage3_generation.run(ctx)
+        assert second == first
+        assert len(author.client.calls) == calls_after_first
+        assert len(store.ids("skills")) == 3
+        assert store.ids("exams") == []

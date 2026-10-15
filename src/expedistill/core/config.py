@@ -99,7 +99,7 @@ METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
 #: one. A dict on purpose -- the defaults are data, and the old name
 #: (MODEL_ROLES, a plain tuple) was a permanent namesake of
 #: core.models' trajectory roles.
-ROLE_DEFAULTS: Dict[str, object] = {
+ROLE_DEFAULTS: Dict[str, Optional[str]] = {
     "executor_strong": "strong",
     "executor_weak": "weak",
     "segmenter": "strong",

@@ -6,6 +6,7 @@ methods:
   authoring:
     exams: true
   curation:
+    name: agentbrew
     rounds: 3
     token_budget: 96000
   delivery:

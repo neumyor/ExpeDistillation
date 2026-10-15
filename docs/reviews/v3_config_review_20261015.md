@@ -25,3 +25,8 @@ pilot_alfworld / pilot_searchqa / tb21_full 三份 v1 时代配置携带 `model_
 ## 审定结论
 
 7/7 忠实，0 处发现。`*_v3.yaml` 可以作为后续实验的起点（每份仍应在启动前按 runbook 核对头部注释的实验身份声明）。
+
+
+## 更正（2026-10-15 22:20）
+
+P4 给 curation 槽位加了第二个方法（none），upgrade_v2 的 curation 映射随之补了 `name: agentbrew`——但本审定覆盖的 7 份 `*_v3.yaml` 是 P4 之前生成的，其 curation 槽带参数而无 name，在 P4 代码上全部拒载（响亮失败，不产错误数据）。已逐份补上 `name: agentbrew` 并重新验证 7/7 可加载（P4+P5 评审 C 的 R1）。“可作为后续实验起点”的结论在补丁后重新成立。
