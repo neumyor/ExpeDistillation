@@ -37,7 +37,7 @@ matching nothing in the store.
 """
 
 import re
-from typing import Tuple
+from typing import Any, Tuple
 
 from expedistill.core.models import MODEL_ROLES
 
@@ -106,6 +106,15 @@ def make_merged_skill_id(serial: int) -> str:
     if serial < 0:
         raise ValueError(f"merge serial must be >= 0, got {serial}")
     return f"bank/merge/{serial:04d}"
+
+
+def is_stage3_candidate(skill: Any) -> bool:
+    """True when ``skill`` is a stage-3 candidate: its id is exactly the
+    stage-3 skill id of its own subtask. Merged skills (``bank/merge/NNNN``,
+    stage 5) fail by construction -- their id is the merge's, not the
+    anchor subtask's. Duck-typed on purpose (``.skill_id`` /
+    ``.subtask_id``), so core stays free of model imports."""
+    return skill.skill_id == make_skill_id(skill.subtask_id)
 
 
 # ---------------------------------------------------------------------------

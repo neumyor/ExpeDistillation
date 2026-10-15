@@ -30,6 +30,7 @@ from expedistill.infra.manifest import FrozenProtocolChanged, load as load_manif
 from expedistill.infra.store import Store, read_json
 from expedistill.infra.usage import UsageRecorder
 from expedistill.prompts import PromptSpec
+from expedistill.blocks.tasks import tasks_digest
 from expedistill.stages import stage0_freeze
 from expedistill.stages.context import StageContext
 
@@ -339,11 +340,11 @@ def test_tasks_digest_ignores_load_order_and_handles_non_json_meta(tmp_path):
                            "raw": b"\x00"})
                 for i in order]
 
-    forward = stage0_freeze.tasks_digest(tasks(["t1", "t2"], "/x/g.tw"))
-    backward = stage0_freeze.tasks_digest(tasks(["t2", "t1"], "/x/g.tw"))
+    forward = tasks_digest(tasks(["t1", "t2"], "/x/g.tw"))
+    backward = tasks_digest(tasks(["t2", "t1"], "/x/g.tw"))
     assert forward == backward
     assert len(forward) == 64
-    assert stage0_freeze.tasks_digest(tasks(["t1", "t2"], "/x/h.tw")) \
+    assert tasks_digest(tasks(["t1", "t2"], "/x/h.tw")) \
         != forward
 
 
@@ -352,7 +353,7 @@ def test_object_repr_fallback_is_deterministic():
         pass
 
     def digest():
-        return stage0_freeze.tasks_digest(
+        return tasks_digest(
             [Task(task_id="t1", instruction="x", meta={"o": Opaque()})])
 
     # Default reprs embed a memory address; two fresh objects must still
@@ -365,7 +366,7 @@ def test_manifest_freezes_tasks_digest(monkeypatch, tmp_path):
     ctx = make_ctx(tmp_path, make_config())
     stage0_freeze.run(ctx)
     manifest = load_manifest(ctx.run_dir)
-    expected = stage0_freeze.tasks_digest(
+    expected = tasks_digest(
         [Task(task_id=i, instruction=f"do {i}") for i in TASK_IDS])
     assert manifest["tasks_digest"] == expected
 

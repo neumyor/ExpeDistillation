@@ -26,7 +26,13 @@ two-key spec means ``reserved`` is empty, never absent from the return.
 
 from __future__ import annotations
 
-from typing import List, Optional, Set, Tuple, Union
+import dataclasses
+import enum
+import hashlib
+import json
+import re
+from pathlib import PurePath
+from typing import Any, List, Optional, Sequence, Set, Tuple, Union
 
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import resolve_plugin
@@ -41,7 +47,7 @@ _TWO_KEY_SET = frozenset({"train", "test"})
 _THREE_KEY_SET = frozenset({"train", "test", "reserved"})
 _LIST_KEY_ORDER = ("train", "test", "reserved")
 
-__all__ = ["load_tasks", "split_tasks"]
+__all__ = ["load_tasks", "split_tasks", "tasks_digest"]
 
 
 def load_tasks(
@@ -133,3 +139,62 @@ def split_tasks(
         [task for task in tasks if task.task_id in memberships[name]]
         for name in _LIST_KEY_ORDER)
     return split[0], split[1], split[2]
+
+
+# ---------------------------------------------------------------------------
+# The frozen manifest's task fingerprint (moved from stage 0; the reuse
+# assembler carried a third copy)
+# ---------------------------------------------------------------------------
+
+#: Memory addresses inside repr fallbacks are stripped -- a digest must
+#: never depend on where an object sits.
+_ADDRESS_RE = re.compile(r" at 0x[0-9a-fA-F]+")
+
+
+def _canonical(value: Any) -> Any:
+    """``value`` as plain JSON data, deterministically.
+
+    Dict keys become strings, tuples lists, sets sorted lists; paths, bytes,
+    enums and dataclasses map to their natural JSON form. Anything else
+    falls back to its type name plus ``repr`` with memory addresses
+    stripped -- deterministic, though an opaque object's own state is then
+    only as visible as its repr makes it.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _canonical(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonical(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        items = [_canonical(item) for item in value]
+        return sorted(items, key=lambda item: json.dumps(
+            item, sort_keys=True, ensure_ascii=False))
+    if isinstance(value, PurePath):
+        return value.as_posix()
+    if isinstance(value, (bytes, bytearray)):
+        return {"__bytes__": bytes(value).hex()}
+    if isinstance(value, enum.Enum):
+        return _canonical(value.value)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _canonical(dataclasses.asdict(value))
+    kind = f"{type(value).__module__}.{type(value).__qualname__}"
+    return {"__repr__": kind + ":" + _ADDRESS_RE.sub("", repr(value))}
+
+
+def tasks_digest(tasks: Sequence[Task]) -> str:
+    """sha256 over the tasks' id, instruction and meta, sorted by id.
+
+    Load order does not matter; any change to an instruction or a meta value
+    does. Serialised with sorted keys and no incidental whitespace (the
+    old repo's ``schema._canonical_json`` discipline), after ``_canonical``
+    has turned non-JSON values into deterministic JSON data.
+    """
+    payload = [
+        {"task_id": task.task_id, "instruction": task.instruction,
+         "meta": _canonical(task.meta)}
+        for task in sorted(tasks, key=lambda task: task.task_id)
+    ]
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

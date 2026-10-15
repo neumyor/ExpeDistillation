@@ -16,7 +16,7 @@ import json
 import pytest
 
 from expedistill.composites import live_acceptance as la
-from expedistill.composites.acceptance import discard_skill
+from expedistill.composites.skill_status import discard_skill
 from expedistill.composites.live_acceptance import (
     apply_revisions,
     attribute_group,

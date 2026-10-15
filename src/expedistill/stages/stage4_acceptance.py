@@ -69,9 +69,14 @@ failed" building block:
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from expedistill.composites.acceptance import accept_skill, discard_skill
+from expedistill.composites.acceptance import accept_skill
+from expedistill.composites.skill_status import (
+    discard_skill,
+    stage3_candidates,
+    tally_verdicts,
+)
 from expedistill.core.config import acceptance_mode
-from expedistill.core.ids import make_exam_id, make_skill_id
+from expedistill.core.ids import make_exam_id
 from expedistill.core.models import Exam, Skill
 from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
@@ -103,43 +108,6 @@ MODEL_OUTPUT_DISCARD = "model_output_error"
 _PROCESSED = "processed"
 _INFRA_FAILED = "infra_failed"
 _MISSING_EXAM = "missing_exam"
-
-
-def _candidates(store: Any) -> List[Skill]:
-    """Stored stage-3 candidate skills, in skill_id order.
-
-    A candidate's id is the stage-3 id of its own subtask. Merged skills
-    (``bank/merge/NNNN``, stage 5) fail this test: K5 stores an in-flight
-    merge as pending before its regression exam, and a re-run stage 4 must
-    leave it to K5 instead of accepting it on the anchor's exam alone.
-    """
-    candidates = []
-    # store.ids is sorted, so the iteration order is deterministic.
-    for skill_id in store.ids("skills"):
-        skill = store.load("skills", skill_id, Skill)
-        if skill.skill_id == make_skill_id(skill.subtask_id):
-            candidates.append(skill)
-    return candidates
-
-
-def _tally(store: Any, candidates: List[Skill]) -> Dict[str, Any]:
-    """Cumulative verdicts of every candidate, read back from the store.
-
-    "accepted" counts every candidate that passed acceptance, including the
-    ones stage 5 has since folded into a merge (status "merged").
-    """
-    accepted = 0
-    discarded: Dict[str, int] = {}
-    for candidate in candidates:
-        skill = store.load("skills", candidate.skill_id, Skill)
-        if skill.status in ("accepted", "merged"):
-            accepted += 1
-        elif skill.status == "discarded":
-            # discard_reason is free-form by design (models.py); a missing
-            # reason is tallied instead of guessed at.
-            reason = skill.discard_reason or "unspecified"
-            discarded[reason] = discarded.get(reason, 0) + 1
-    return {"accepted": accepted, "discarded": discarded}
 
 
 def run(ctx: Any) -> Dict[str, Any]:
@@ -182,7 +150,7 @@ def run(ctx: Any) -> Dict[str, Any]:
     # and its worker only reports the skip. A terminal candidate is never a
     # unit, but a model_output_error discard whose ledger row a crash lost
     # gets the row completed here (the discard is the truth).
-    candidates = _candidates(store)
+    candidates = stage3_candidates(store)
     units: List[Tuple[Skill, Optional[Exam]]] = []
     for skill in candidates:
         if skill.status != "pending":
@@ -255,7 +223,7 @@ def run(ctx: Any) -> Dict[str, Any]:
         else:
             processed += 1
 
-    summary = _tally(store, candidates)
+    summary = tally_verdicts(store, candidates)
     summary.update({
         "skipped_missing_exam": skipped_missing_exam,
         "infra_failed": infra_failed,

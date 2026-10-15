@@ -113,11 +113,17 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set
 
+from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.rules import get_acceptance_improve
 from expedistill.composites import live_acceptance as la
-from expedistill.composites.acceptance import discard_skill
+from expedistill.composites import shortfall
+from expedistill.composites.skill_status import (
+    discard_skill,
+    stage3_candidates,
+    tally_verdicts,
+)
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core import ids
 from expedistill.core.models import Skill
@@ -127,7 +133,7 @@ from expedistill.infra.reliability import (
     InfrastructureError,
     UnitFailureRecorder,
 )
-from expedistill.infra.store import Store, append_jsonl, read_json, read_jsonl, write_json
+from expedistill.infra.store import Store, append_jsonl, read_jsonl, write_json
 from expedistill.prompts import get as get_prompt
 from expedistill.stages import stage1_baseline
 from expedistill.stages.stage4_acceptance import STAGE4_DIR, SUMMARY_FILENAME
@@ -137,7 +143,7 @@ __all__ = ["SHORTFALL_NAME", "run"]
 #: The per-round accepted-hole record (decision section 2.5), inside the
 #: round directory: same name and shape as stage 1's record, scoped to one
 #: round because round 1's remote sandbox is a fresh instance.
-SHORTFALL_NAME = "accepted_infra_shortfall.json"
+SHORTFALL_NAME = shortfall.SHORTFALL_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -189,29 +195,12 @@ def _canonical_line(row: Dict[str, Any]) -> str:
     return json.dumps(row, ensure_ascii=False, sort_keys=True)
 
 
-def _candidates(store: Store) -> List[Skill]:
-    """Every stored stage-3 candidate skill, in skill_id order.
-
-    The candidate filter rewritten locally on purpose (decision section
-    2.2: the live side shares no helper with the exam stage's file). A
-    candidate's id is the stage-3 id of its own subtask, so
-    ``bank/merge/NNNN`` products are excluded -- they are K5's, proven by
-    regression exams, never re-accepted here.
-    """
-    candidates = []
-    for skill_id in store.ids("skills"):
-        skill = store.load("skills", skill_id, Skill)
-        if skill.skill_id == ids.make_skill_id(skill.subtask_id):
-            candidates.append(skill)
-    return candidates
-
-
 def _group_members(store: Store, task_id: str) -> List[Skill]:
     """Every candidate of one task, terminal members included (the tally
     and the no-op crash completion read the whole group, pending-only
     derivations go through K6's ``pending_groups``)."""
     members = []
-    for skill in _candidates(store):
+    for skill in stage3_candidates(store):
         try:
             trajectory_id, _ = ids.parse_subtask_id(skill.subtask_id)
             if ids.parse_trajectory_id(trajectory_id)[0] == task_id:
@@ -250,22 +239,6 @@ def _round_complete(store: Store, task_id: str, round_: int, n_attempts: int,
     return all(unit in stored or unit in skipped
                for unit in _expected_units(task_id, n_attempts))
 
-
-def _read_round_shortfall(store: Store, round_: int) -> List[str]:
-    """The round's durably accepted hole ids (empty when none were ever
-    accepted). Same fail-loud contract as stage 1's reader."""
-    path = la.round_dir(store, round_) / SHORTFALL_NAME
-    if not path.exists():
-        return []
-    try:
-        unit_ids = read_json(path)["unit_ids"]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CodeBugError(
-            f"unreadable accepted-shortfall record {path}: {exc}") from None
-    if not isinstance(unit_ids, list) or not all(
-            isinstance(unit_id, str) for unit_id in unit_ids):
-        raise CodeBugError(f"invalid accepted-shortfall record {path}")
-    return sorted(unit_ids)
 
 
 def _round_holes(store: Store, task_ids: Sequence[str], round_: int,
@@ -419,29 +392,6 @@ def _injection_resolver(store: Store, benchmark: str) -> Any:
     return skills_for_task
 
 
-# ---------------------------------------------------------------------------
-# The tally (the exam stage's cumulative accounting, over the same universe)
-# ---------------------------------------------------------------------------
-
-def _tally(store: Store, candidates: List[Skill]) -> Dict[str, Any]:
-    """Cumulative verdicts of every candidate, read back from the store --
-    a resumed or repeated call reports the run's verdicts, not just its
-    own. "accepted" includes the skills stage 5 has since folded into a
-    merge."""
-    accepted = 0
-    discarded: Dict[str, int] = {}
-    for candidate in candidates:
-        skill = store.load("skills", candidate.skill_id, Skill)
-        if skill.status in ("accepted", "merged"):
-            accepted += 1
-        elif skill.status == "discarded":
-            # discard_reason is free-form by design (models.py); a missing
-            # reason is tallied instead of guessed at.
-            reason = skill.discard_reason or "unspecified"
-            discarded[reason] = discarded.get(reason, 0) + 1
-    return {"accepted": accepted, "discarded": discarded}
-
-
 def _round_detail(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """One round's verdict as the summary reports it (the verdicts ledger
     stays the audit's complete fact source; the summary carries the
@@ -485,7 +435,7 @@ def run(ctx: Any) -> Dict[str, Any]:
     # The auxiliary metric's NAME is frozen in the manifest (stage 0); its
     # COUNTS ride the verdict rows' aux slot (user ruling 11), which the
     # summary's per-group detail reports verbatim.
-    _, aux_scorer = stage1_baseline.aux_wiring(config.benchmark)
+    _, aux_scorer = aux_wiring(config.benchmark)
     plugin = get_plugin(config.benchmark)
     view_rules = plugin.view_rules
     stage1_holes = stage1_baseline.accepted_infra_shortfall(ctx.run_dir)
@@ -522,7 +472,7 @@ def run(ctx: Any) -> Dict[str, Any]:
     groups0 = sorted(la.pending_groups(store))
     unjudged0 = [task_id for task_id in groups0
                  if 0 not in _verdict_rows(store, task_id)]
-    accepted0 = _read_round_shortfall(store, 0)
+    accepted0 = shortfall.read_unit_ids(la.round_dir(store, 0) / SHORTFALL_NAME)
 
     def skip0_for(task_id: str) -> List[str]:
         return la.skip_ids_for(stage1_holes, accepted0, task_id)
@@ -655,7 +605,7 @@ def run(ctx: Any) -> Dict[str, Any]:
             continue
         candidates1.append(task_id)
 
-    accepted1 = _read_round_shortfall(store, 1)
+    accepted1 = shortfall.read_unit_ids(la.round_dir(store, 1) / SHORTFALL_NAME)
 
     def skip1_for(task_id: str) -> List[str]:
         return la.skip_ids_for(stage1_holes, accepted1, task_id)
@@ -731,8 +681,8 @@ def run(ctx: Any) -> Dict[str, Any]:
             infra_failed.add(task_id)
 
     # ======================= summary ==================================
-    candidates = _candidates(store)
-    summary = _tally(store, candidates)
+    candidates = stage3_candidates(store)
+    summary = tally_verdicts(store, candidates)
     pending_now = la.pending_groups(store)
     processed = sum(1 for task_id in universe if not pending_now.get(task_id))
 
@@ -830,7 +780,7 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
     config = ctx.config
     benchmark = config.benchmark
     stage1_holes = stage1_baseline.accepted_infra_shortfall(ctx.run_dir)
-    accepted = _read_round_shortfall(store, round_)
+    accepted = shortfall.read_unit_ids(la.round_dir(store, round_) / SHORTFALL_NAME)
     skip_unit_ids: Set[str] = set()
     for task_id in task_ids:
         skip_unit_ids.update(
@@ -866,11 +816,11 @@ def _accept_shortfall(ctx: Any, store: Store, *, round_: int,
     Acceptance is a per-run decision recorded per round (module
     docstring) -- a later call honours it with or without the flag because
     every skip set and completeness test reads this record from disk."""
-    accepted = set(_read_round_shortfall(store, round_))
+    accepted = set(shortfall.read_unit_ids(la.round_dir(store, round_) / SHORTFALL_NAME))
     holes = _round_holes(store, task_ids, round_, n_attempts, stage1_holes,
                          sorted(accepted))
     if holes and ctx.run_settings.allow_infra_shortfall:
         accepted.update(holes)
-        write_json(la.round_dir(store, round_) / SHORTFALL_NAME,
-                   {"unit_ids": sorted(accepted)}, indent=2)
+        shortfall.write_unit_ids(
+            la.round_dir(store, round_) / SHORTFALL_NAME, accepted)
     return sorted(accepted)

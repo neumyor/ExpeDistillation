@@ -99,14 +99,16 @@ from pathlib import Path, PurePath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
 from expedistill.benchmarks.registry import get_plugin
+from expedistill.composites import shortfall
 from expedistill.blocks import tasks as tasks_block
+from expedistill.blocks.tasks import tasks_digest
 from expedistill.core.config import ExperimentConfig, acceptance_mode, load_config
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import Attempt, Exam, Skill, Subtask, Trajectory
 from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
-from expedistill.infra.store import KIND_DIRS, read_json, read_jsonl, write_json
+from expedistill.infra.store import KIND_DIRS, read_json, read_jsonl
 from expedistill import prompts
 
 __all__ = ["assemble_reuse", "skill_lineage_tasks"]
@@ -345,18 +347,6 @@ def _canonical(value: Any) -> Any:
                                             repr(value))}
 
 
-def _tasks_digest(tasks: Sequence[Any]) -> str:
-    """sha256 over id, instruction and meta, sorted by id (stage0's rule)."""
-    payload = [
-        {"task_id": task.task_id, "instruction": task.instruction,
-         "meta": _canonical(task.meta)}
-        for task in sorted(tasks, key=lambda task: task.task_id)
-    ]
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def _diff_paths(stored: Any, incoming: Any, prefix: str = "") -> List[str]:
     """Dotted key paths where ``stored`` and ``incoming`` disagree.
 
@@ -522,8 +512,7 @@ def _write_shortfall(run_dir: Path, shortfall_units: Sequence[str],
     if shortfall_units:
         target_shortfall = (run_dir / "stage1_baseline"
                             / "accepted_infra_shortfall.json")
-        write_json(target_shortfall,
-                   {"unit_ids": sorted(set(shortfall_units))}, indent=2)
+        shortfall.write_unit_ids(target_shortfall, shortfall_units)
     counts["accepted_infra_shortfall_units"] = len(shortfall_units)
     checksums["accepted_infra_shortfall"] = (
         _file_sha256(run_dir / "stage1_baseline"
@@ -1133,7 +1122,7 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
         "prompt_digests": prompt_digests,
         "rules": config.rules,
         "model_roles": config.models,
-        "tasks_digest": _tasks_digest(tasks),
+        "tasks_digest": tasks_digest(tasks),
         "aux_metric": get_plugin(config.benchmark).aux_metric_name,
     }
 

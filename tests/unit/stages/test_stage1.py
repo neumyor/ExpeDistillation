@@ -608,17 +608,3 @@ def test_declared_name_with_undeclared_scorer_is_a_code_bug(
     with pytest.raises(CodeBugError, match="fake_aux"):
         stage1_baseline.run(ctx, train_tasks=list(TASK_IDS),
                            test_tasks=list(TASK_IDS))
-
-
-def test_aux_wiring_imports_the_plugin_package(monkeypatch):
-    # The wiring must not depend on an execution having imported the plugin
-    # (a pure-resume re-aggregation calls no model, but still summarizes).
-    _install_plugin(monkeypatch, AuxPlugin())
-    name, scorer = stage1_baseline.aux_wiring(_FAKE)
-    assert name == "fake_aux"
-    assert callable(scorer)
-
-
-def test_aux_wiring_without_a_declaration_is_none_none(monkeypatch):
-    _install_plugin(monkeypatch, StagePlugin())
-    assert stage1_baseline.aux_wiring(_FAKE) == (None, None)

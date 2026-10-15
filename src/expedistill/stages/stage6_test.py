@@ -29,7 +29,7 @@ Auxiliary metric. When the benchmark plugin declares one (stage 0 froze
 its name as manifest ``aux_metric``), both arms additionally report it and
 ``delta`` gains the same two aux deltas -- same expected-unit denominator,
 same avg@N disciplines, same None-when-unmeasured rule as the primary
-(``stage1_baseline.aux_wiring`` is the shared wiring). The primary metric
+(``benchmarks.aux.aux_wiring`` is the shared wiring). The primary metric
 is never swapped for it; without a declaration every aux field is null.
 
 Storage layout (the stage's own call, AGENTS.md section 4 rule 3):
@@ -95,6 +95,7 @@ from typing import (
     Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple,
 )
 
+from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.base import Task
 from expedistill.blocks.metrics import compute_task_metrics, summarize
 from expedistill.blocks.retrieve import derive_categories, select_skills
@@ -476,7 +477,7 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     # The plugin-declared auxiliary metric (module docstring): the same
     # wiring stage 1 uses, so both scoring stages read it identically. A
     # benchmark without one yields (None, None) and no scorer ever runs.
-    aux_metric, aux_scorer = stage1_baseline.aux_wiring(ctx.config.benchmark)
+    aux_metric, aux_scorer = aux_wiring(ctx.config.benchmark)
 
     with_bank_metrics = compute_task_metrics(with_bank, expected=expected,
                                              aux_scorer=aux_scorer)

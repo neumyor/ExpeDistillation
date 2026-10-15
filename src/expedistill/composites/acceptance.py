@@ -73,7 +73,7 @@ the wired blocks raise after their own repair budget (ModelOutputError,
 InfrastructureError -- from K3, G6 after ``_REWRITE_ATTEMPTS``, or the D8
 judge after call_model's budget) propagate unchanged; deciding what a failed
 unit means for the stage is the caller's job (stage 4 records it, see
-``discard_skill``).
+``composites.skill_status.discard_skill``).
 """
 
 from pathlib import Path
@@ -89,8 +89,7 @@ from expedistill.infra.store import Store, append_jsonl, read_jsonl
 from expedistill.inject.skills import format_skills_block
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["LEAK_VERDICTS_LEDGER", "REWRITE_FAILURE_LEDGER", "accept_skill",
-           "discard_skill"]
+__all__ = ["LEAK_VERDICTS_LEDGER", "REWRITE_FAILURE_LEDGER", "accept_skill"]
 
 #: Ledger of leak-audit verdicts, written into stage4_acceptance/ next to
 #: the attempts: one row per (skill, version), the first verdict the judge
@@ -283,21 +282,6 @@ def _next_round(store: Store, skill: Skill) -> int:
                      store, REWRITE_FAILURE_LEDGER, skill.skill_id)
                  if record.get("exhausted")]
     return (skill.version - 1) + len(exhausted)
-
-
-def discard_skill(store: Store, skill: Skill, reason: str) -> Skill:
-    """Store the LATEST version of ``skill`` as discarded with ``reason``.
-
-    For callers that give up on a skill outside the loop (stage 4 after a
-    unit failure): the stored skill may be newer than the object they hold,
-    so the stored one is what gets the terminal status.
-    """
-    if store.exists("skills", skill.skill_id):
-        skill = store.load("skills", skill.skill_id, Skill)
-    skill.status = "discarded"
-    skill.discard_reason = reason
-    store.save(skill, "skills")
-    return skill
 
 
 def accept_skill(

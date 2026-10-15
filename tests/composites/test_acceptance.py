@@ -16,8 +16,8 @@ from expedistill.composites.acceptance import (
     LEAK_VERDICTS_LEDGER,
     REWRITE_FAILURE_LEDGER,
     accept_skill,
-    discard_skill,
 )
+from expedistill.composites.skill_status import discard_skill
 from expedistill.composites import acceptance as acceptance_mod
 from expedistill.core.ids import (
     make_attempt_id,

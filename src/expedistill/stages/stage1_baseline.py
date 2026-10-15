@@ -73,23 +73,22 @@ from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Tu
 
 from expedistill.blocks import metrics as metrics_block
 from expedistill.blocks import tasks as tasks_block
+from expedistill.benchmarks.aux import aux_wiring
 from expedistill.blocks.rules import get_task_select
-from expedistill.benchmarks.registry import resolve_plugin
+from expedistill.composites import shortfall
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import (
-    CodeBugError,
     ConfigError,
     InfrastructureError,
 )
-from expedistill.infra.store import read_json, write_json
+from expedistill.infra.store import write_json
 from expedistill.stages.context import StageContext
 
 __all__ = [
     "accepted_infra_shortfall",
     "accepted_shortfall_path",
-    "aux_wiring",
     "run",
     "write_accepted_infra_shortfall",
 ]
@@ -108,26 +107,13 @@ def accepted_shortfall_path(run_dir: Path) -> Path:
 
 def accepted_infra_shortfall(run_dir: Path) -> List[str]:
     """Stage 1's accepted hole unit ids (sorted; empty when none)."""
-    path = accepted_shortfall_path(run_dir)
-    if not path.exists():
-        return []
-    try:
-        unit_ids = read_json(path)["unit_ids"]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CodeBugError(
-            f"unreadable accepted-shortfall record {path}: {exc}") from None
-    if not isinstance(unit_ids, list) or not all(
-            isinstance(unit_id, str) for unit_id in unit_ids):
-        raise CodeBugError(
-            f"invalid accepted-shortfall record {path}: {unit_ids!r}")
-    return sorted(unit_ids)
+    return shortfall.read_unit_ids(accepted_shortfall_path(run_dir))
 
 
 def write_accepted_infra_shortfall(run_dir: Path,
                                    unit_ids: Collection[str]) -> None:
     """Persist the accepted hole set (atomic write, sorted)."""
-    write_json(accepted_shortfall_path(run_dir),
-               {"unit_ids": sorted(set(unit_ids))}, indent=2)
+    shortfall.write_unit_ids(accepted_shortfall_path(run_dir), unit_ids)
 
 
 def _train_task_objects(ctx: StageContext,
@@ -184,38 +170,6 @@ def _run_arm(ctx: StageContext, *, tasks: Sequence[Any], role: str,
                if make_trajectory_id(task_id, role, attempt) not in stored]
     return trajectories, expected, missing
 
-
-def aux_wiring(
-    benchmark: str,
-) -> Tuple[Optional[str], Optional[Callable[[Trajectory], bool]]]:
-    """(aux metric name, strict scorer) the benchmark's plugin declares.
-
-    Imports the plugin package first (registration at import, D1's
-    discipline), so a pure-resume re-aggregation that executes nothing
-    still resolves the plugin. A plugin that declares no auxiliary metric
-    yields ``(None, None)`` -- the summary's ``aux`` is null and no scorer
-    ever runs. A plugin that declares a name must answer True / False for
-    every valid trajectory; the default method's None leaking through a
-    declared name is a plugin contract violation and raises CodeBugError
-    here (never silently a zero). Stage 6 reuses this wiring so both
-    scoring stages read the auxiliary metric the same way.
-    """
-    plugin = resolve_plugin(benchmark)
-    name = plugin.aux_metric_name
-    if name is None:
-        return None, None
-
-    def scorer(traj: Trajectory) -> bool:
-        value = plugin.aux_success(traj)
-        if not isinstance(value, bool):
-            raise CodeBugError(
-                f"benchmark {benchmark!r} declares auxiliary metric "
-                f"{name!r} but aux_success answered {value!r} for "
-                f"{traj.trajectory_id}; a declared scorer must answer "
-                "True/False for every valid trajectory")
-        return value
-
-    return name, scorer
 
 
 def _arm_summary(trajectories: List[Any], expected: Dict[str, int],

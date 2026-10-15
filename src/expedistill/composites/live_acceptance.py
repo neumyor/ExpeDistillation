@@ -74,7 +74,7 @@ from expedistill.blocks.author import skill_markers
 from expedistill.blocks.metrics import compute_task_metrics
 from expedistill.blocks.rules import get_acceptance_improve
 from expedistill.blocks.view import render_trajectory_view
-from expedistill.composites.acceptance import discard_skill
+from expedistill.composites.skill_status import discard_skill
 from expedistill.core import ids
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import (
@@ -415,7 +415,7 @@ def pending_groups(store: Store) -> Dict[str, List[Skill]]:
     groups: Dict[str, List[Skill]] = {}
     for skill_id in store.ids("skills"):
         skill = store.load("skills", skill_id, Skill)
-        if skill.skill_id != ids.make_skill_id(skill.subtask_id):
+        if not ids.is_stage3_candidate(skill):
             continue
         if skill.status != "pending":
             continue
