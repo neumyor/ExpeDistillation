@@ -619,3 +619,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：scope 方案提交后启动三路独立评审（A 代码事实 7 条 / B 扩展性 4 条 / C 迁移 9 条偏移约束，全文 docs/reviews/execute_learn_plan_review_20261015_{A,B,C}.md）。三份高度交叉印证，关键裁决十一条（方案 §10）：D1 技能 ID 派生规则不变、解绑只落 schema 层（Skill.source_subtasks + Exam.skill_id，curate prompt 内嵌 skill_id 使换 ID 的等价验证面爆炸，且不切段需求可走转型四步另立 ID）；D2 v4 装配器支持 v3 源；D3 验收报告=对既有落盘工件的读取器（不落盘不建新对象）；D4 只保留一张注册表、五槽位逐文件处置；D5 跳过语义=现行续跑键、K6 测量核去轮化；D6 迁移重切 M0–M4（M2/M3 golden 逐字节无 diff，M4 语义验收）；D7 标签从冻结序列派生；D8 原则 5 改"学习不发起真执行"（K3 原语由伪执行与 merge_check 共用）；D9 配置统一嵌套 + C 加 control 子句 + 完整字段映射表；D10 no-op guard/weak_already_knows/空洞政策进规则清单（行为保持）；D11 出题调用点挪进 A 发生在 M4。据此修订方案 v2 并写出实施方案（字段表、注册表键集、配置 v4 全形状、报告读取器、决策规则清单、失败处置表、标签映射、预注册语义等价准则 E1–E5、M1–M4 逐步验收与多代理分工）。两项用户级裁决（ID 不变、装配器支持 v3 源）按自主决策授权选定并留痕，用户可推翻。尚未开始实现。
 
 工件：`docs/reviews/execute_learn_plan_review_20261015_{A,B,C}.md`（三份评审）、`docs/decisions/execute_learn_loop_20261015.md`（v2 修订）、`docs/decisions/execute_learn_implementation_20261015.md`（实施方案）、本条对应 commit
+
+## 2026-10-15 21:40 — 实施方案第二轮三路评审、22 条偏移约束裁决、v2 定稿
+
+一段话摘要：实施方案（bb0935f）交三路评审：A 正确性 7 条（P1 后续验证轮数错对象、P2 漏收 G10/G11 耗尽、P3 D 双臂 n_attempts 缺省错、P4 对象仓布局空白、P5 M2 验收门自相矛盾、P6 E2 在 golden 上空验证、P7 读取器两处行规格误导）；B 简洁性 6 条（B2-1 learn 注册键死数据改五内容族、B2-2 compare 的 control 是 mode 复写、B2-3 n_attempts 检查比错对象、B2-4 泄题账本跨 A 单真相、B2-5 对象布局未裁决、B2-6 scripts 跟随者漏四个活工具）；C 迁移 9 条（I1 装配器对全部 v1 源 run 当场破裂、I2/I3 分层红灯、I4/I5 验收仪器缺口、I6 live 白名单矩阵不可观测、I7 装配器五点、I8 与 P1 同、I9 M4 原子核）。全部裁决并入实施方案 v2（§12）：对象仓布局 P4 与 B2-5 正面冲突，采 P4（续跑语义证据胜出：exam_once 序号按仓计数、跨相位 attempt 检索、首判为准）；注册表五内容族、compare 统一 against 形、M2 薄壳中间态、M4 拆 M4.1 仪器先行–M4.6 文档子序列、E1–E6 六准则（新增 E6 比对 live 测量账本）。scope 方案两处措辞同步修正（出题积木留 blocks 只挪调用点；验收轮数与切段修复预算分开表述）。v2 定稿，进入 M1 实施。
+
+工件：`docs/reviews/execute_learn_impl_review_20261015_{A,B,C}.md`（三份）、`docs/decisions/execute_learn_implementation_20261015.md`（v2）、`docs/decisions/execute_learn_loop_20261015.md`（措辞修正）、本条对应 commit
