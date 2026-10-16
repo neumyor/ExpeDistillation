@@ -67,18 +67,29 @@ Run ids and remote resume (docs/decisions/tb_run_namespace_20261011.md):
   ``source="unknown"`` when those fields are missing -- never the fetch
   time.
 
-Verdict rules (pre-registered, from the tb21 campaign's audit_trials.py --
-fixed before looking at data, outer AGENTS.md section 2):
+Fact reporting (R2, docs/decisions/execute_learn_repair_plan_20261016.md:
+execution records facts, acceptance judges -- boundaries doc sections 2.2
+and 2.3):
 
-- reward present AND the verifier log shows pytest ran (``collected N
-  items``) -> success (reward > 0) / failure (reward == 0);
-- reward present but the verifier log is missing or pytest never collected
-  -> ``infra_error`` (the campaign's "pseudo zero": a broken verifier
-  download misread as a model failure);
-- reward absent + exception of the model's own making (AgentTimeoutError,
-  context/output length, RuntimeError tmux keystroke errors) -> ``failure``;
-- reward absent + anything else (sandbox/setup/verifier infra, transport
-  errors, no exception at all) -> ``infra_error``.
+- a ``result.json`` carrying a verifier reward is the benchmark scorer's
+  verdict and passes through verbatim (reward > 0 -> success, reward == 0
+  -> failure), whatever the verifier log looks like. The campaign's
+  "pseudo zero" (a reward claimed without pytest ever collecting
+  anything) is no longer execution's call to invalidate: the plugin
+  records the raw fact ``verifier_ran`` beside the verdict, and what a
+  pseudo zero means is acceptance's named-rule decision;
+- a trial with no reward carries no scorer verdict, so execution claims
+  nothing about the model: it reports ``infra_error`` (the frozen
+  status vocabulary's "no measurement" bucket, mechanically retried by
+  K1) with the trial's exception_type / exception_message as raw facts.
+  The old model-vs-infra exception reclassification (AgentTimeoutError
+  et al. -> failure) is gone from this path; judging those trials is
+  acceptance's job too.
+
+``classify_result`` below keeps the pre-R2 classification ONLY as the
+archive validator's historical lens (scripts/analysis/
+tb_archive_validate.py re-derives the status archived trials were
+produced under); ``run`` never calls it.
 
 Token accounting: Harbor's ``final_metrics`` totals are recorded through the
 B7 UsageRecorder (one line per rollout, run_id as request_id); missing
@@ -116,7 +127,13 @@ from expedistill.infra.reliability import (
 from expedistill.infra.store import write_json
 from expedistill.prompts.registry import PromptSpec, register
 
-__all__ = ["TBPlugin", "TB_TASK_PROMPT", "classify_result", "runner_env"]
+__all__ = [
+    "TBPlugin",
+    "TB_TASK_PROMPT",
+    "classify_result",
+    "result_facts",
+    "runner_env",
+]
 
 # --------------------------------------------------------------------------
 # B2: the TB task execution prompt.
@@ -209,35 +226,77 @@ _RECORD_DIR = "tb_remote"
 #: Remote twin of the submit record, next to the run's jobs dir.
 _REMOTE_META_SUFFIX = ".ed_meta.json"
 
-#: Verdict vocabulary fixed from the tb21 campaign audit (audit_trials.py):
-#: exceptions that are the model's own doing vs. infrastructure. An unknown
-#: exception with no reward is infrastructure, matching the campaign's
-#: "unrecognized -> rerun as infra" rule.
+#: Verdict vocabulary fixed from the tb21 campaign audit (audit_trials.py),
+#: used ONLY by :func:`classify_result` (the archive validator's historical
+#: lens): exceptions that were counted as the model's own doing vs.
+#: infrastructure. An unknown exception with no reward was infrastructure,
+#: matching the campaign's "unrecognized -> rerun as infra" rule.
 _MODEL_EXCEPTIONS = frozenset({
     "AgentTimeoutError",
     "ContextLengthExceededError",
     "OutputLengthExceededError",
 })
-#: The campaign's tmux rule (audit_trials.py classify_exception): the exception
-#: must BE a RuntimeError whose message shows a broken tmux/send-keys -- an
-#: infra exception that merely mentions tmux stays infra.
+#: The campaign's tmux rule (audit_trials.py classify_exception), also
+#: classify_result-only: the exception must BE a RuntimeError whose message
+#: shows a broken tmux/send-keys -- an infra exception that merely mentions
+#: tmux stayed infra.
 _TMUX_ERROR_RE = re.compile(r"tmux|send.{0,20}keys", re.IGNORECASE)
 _TMUX_ERROR_TYPE = "RuntimeError"
 
-#: The campaign's pseudo-zero guard: every TB2.1 verifier is pytest, so a
-#: reward claimed without pytest having collected anything is a broken
-#: verifier run, not a model failure.
+#: The pseudo-zero EVIDENCE, still a live fact on the execution path: every
+#: TB2.1 verifier is pytest, so whether the verifier log shows pytest
+#: collecting anything says whether a verification actually ran. R2 records
+#: that as the raw fact ``verifier_ran``; invalidating the run on it is
+#: acceptance's named-rule decision, not the plugin's.
 _PYTEST_COLLECTED_RE = re.compile(r"collected [0-9]+ item")
 
 _REMOTE_VERIFIER_LOG = "verifier/test-stdout.txt"
 _REMOTE_TRAJECTORY = "agent/trajectory.json"
 
 
+def result_facts(result: Dict[str, Any],
+                 verifier_log: Optional[str]) -> Dict[str, Any]:
+    """Read one Harbor trial's raw facts (R2: the plugin reports, it does
+    not judge). Pure.
+
+    Returns the fact dict for ``RunOutcome.meta``: the verifier reward as
+    parsed (``None`` when absent or not a number), ``verifier_ran`` (True /
+    False when the verifier log shows pytest did / did not collect,
+    ``None`` when the log could not be fetched), and the trial's exception
+    type and shortened message. No status, no verdict: what a fact pattern
+    means for a run's validity is acceptance's named-rule decision.
+    """
+    reward: Optional[float] = None
+    verifier_result = result.get("verifier_result") or {}
+    raw_reward = (verifier_result.get("rewards") or {}).get("reward")
+    try:
+        reward = float(raw_reward)
+    except (TypeError, ValueError):
+        reward = None
+    exception = result.get("exception_info") or {}
+    verifier_ran: Optional[bool]
+    if verifier_log is None:
+        verifier_ran = None
+    else:
+        verifier_ran = bool(_PYTEST_COLLECTED_RE.search(verifier_log))
+    return {
+        "reward": reward,
+        "verifier_ran": verifier_ran,
+        "exception_type": exception.get("exception_type"),
+        "exception_message": _short(exception.get("exception_message")),
+    }
+
+
 def classify_result(result: Dict[str, Any],
                     verifier_log: Optional[str]) -> Tuple[str, Optional[float], Dict[str, Any]]:
-    """Map a Harbor trial ``result.json`` (+ verifier log) to a RunOutcome
-    status. Returns (status, reward, info) where ``info`` carries the
-    exception fields for meta. Pure.
+    """The pre-R2 verdict classification, kept ONLY as the archive
+    validator's historical lens: scripts/analysis/tb_archive_validate.py
+    re-derives the status an archived trial was produced under and checks
+    it against the campaign audit. ``run`` no longer calls this -- the
+    execution path passes the scorer's verdict through and reports raw
+    facts (:func:`result_facts`); validity judgments (pseudo zero,
+    model-vs-infra exceptions) live with acceptance's named rules now.
+    Returns (status, reward, info). Pure.
     """
     reward: Optional[float] = None
     verifier_result = result.get("verifier_result") or {}
@@ -979,9 +1038,9 @@ class TBPlugin(BenchmarkPlugin):
         except (InfrastructureError, OSError):
             verifier_log = None
 
-        status, reward, info = classify_result(result_data, verifier_log)
-        meta.update(info)
-        meta["reward"] = reward
+        facts = result_facts(result_data, verifier_log)
+        meta.update(facts)
+        reward = facts["reward"]
 
         steps, usage_pair = self._fetch_steps(link, workdir, meta)
 
@@ -1002,15 +1061,31 @@ class TBPlugin(BenchmarkPlugin):
             "trajectory": str(workdir / "trajectory.json"),
             "workdir": str(workdir),
         }
-        self._record_usage(handle, run_id, task_name, usage_pair,
-                           "ok" if status != "infra_error" else "infra_error")
 
-        if status == "infra_error":
-            reason = info.get("verdict_reason") or info.get("exception_type")
+        if reward is None:
+            # No scorer verdict came back, so execution claims nothing
+            # about the model (R2, module docstring). The frozen status
+            # vocabulary has no "correctness unknown" value yet -- that is
+            # R2b's ``correctness=None`` -- so the run lands in the one
+            # bucket that is not a model judgment ("no measurement",
+            # mechanically retried by K1), with the trial's exception
+            # facts riding in meta for acceptance's named rules.
+            detail = facts["exception_type"] or "no exception recorded"
             outcome = RunOutcome.infra_error(
-                steps, InfrastructureError(f"TB trial {run_id}: {reason}"))
+                steps, InfrastructureError(
+                    f"TB trial {run_id}: the verifier produced no reward "
+                    f"({detail})"))
+            usage_status = "infra_error"
         else:
-            outcome = RunOutcome(steps=steps, status=status)
+            # The benchmark scorer's verdict, passed through verbatim: no
+            # pseudo-zero override, no exception reclassification. The
+            # ``verifier_ran`` fact is recorded beside it for acceptance.
+            outcome = RunOutcome(
+                steps=steps,
+                status="success" if reward > 0.0 else "failure")
+            usage_status = "ok"
+        self._record_usage(handle, run_id, task_name, usage_pair,
+                           usage_status)
         outcome.meta.update(meta)
         return outcome
 

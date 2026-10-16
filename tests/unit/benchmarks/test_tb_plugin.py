@@ -1,6 +1,7 @@
 """Tests for benchmarks/tb: RemoteLink env validation, the TBPlugin end to end
 against a FakeRemoteLink (scripted poll sequence + recorded fixtures),
-load_tasks, verdict classification, and the task prompt contract.
+load_tasks, result fact reporting (R2), the archive validator's historical
+classification, and the task prompt contract.
 
 No network, no ssh: every remote interaction goes through the fake. The one
 ``live``-marked smoke documents (and, when run explicitly with ``-m live``,
@@ -17,7 +18,7 @@ import pytest
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import _reset_registry, get_plugin
 from expedistill.benchmarks.tb import TBPlugin
-from expedistill.benchmarks.tb.plugin import classify_result
+from expedistill.benchmarks.tb.plugin import classify_result, result_facts
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
 from expedistill.infra.reliability import ConfigError, InfrastructureError
 from expedistill.infra.usage import UsageRecorder
@@ -168,7 +169,61 @@ def test_load_tasks_none_or_empty_is_config_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Verdict classification (pure)
+# Result facts (pure): the R2 fact-reporting contract
+# ---------------------------------------------------------------------------
+
+def _facts(result_name, verifier_log_name):
+    result = json.loads(_fixture_text(result_name))
+    log = _fixture_text(verifier_log_name) if verifier_log_name else None
+    return result_facts(result, log)
+
+
+def test_result_facts_report_reward_verifier_and_exception():
+    # A scored trial: the reward, whether pytest actually collected, and
+    # the (absent) exception travel as raw facts. No verdict is derived
+    # here -- that is the point of R2.
+    facts = _facts("result_success.json", "verifier_collected.txt")
+    assert facts["reward"] == 1.0
+    assert facts["verifier_ran"] is True
+    assert facts["exception_type"] is None
+    facts = _facts("result_failure.json", "verifier_collected.txt")
+    assert facts["reward"] == 0.0
+    assert facts["verifier_ran"] is True
+
+
+def test_result_facts_report_pseudo_zero_evidence_without_invalidating():
+    # Reward present but pytest never collected anything: the campaign's
+    # "fake zero" evidence is REPORTED (verifier_ran is False), not acted
+    # on -- execution no longer decides that this run does not count.
+    facts = _facts("result_failure.json", "verifier_not_collected.txt")
+    assert facts["reward"] == 0.0
+    assert facts["verifier_ran"] is False
+    # An unfetchable verifier log is the None fact, not a hidden verdict.
+    facts = _facts("result_failure.json", None)
+    assert facts["reward"] == 0.0
+    assert facts["verifier_ran"] is None
+
+
+def test_result_facts_report_exception_verbatim():
+    # A trial that ended in an exception: the exception travels verbatim,
+    # with no model-vs-infra reclassification attached.
+    facts = _facts("result_model_fail.json", None)
+    assert facts["reward"] is None
+    assert facts["exception_type"] == "AgentTimeoutError"
+    assert facts["exception_message"]
+    facts = _facts("result_infra.json", None)
+    assert facts["reward"] is None
+    assert facts["exception_type"] == "AgentSetupTimeoutError"
+    # No reward and no exception at all: the facts simply say so.
+    facts = result_facts({"verifier_result": None, "exception_info": None},
+                         None)
+    assert facts["reward"] is None
+    assert facts["exception_type"] is None
+    assert facts["verifier_ran"] is None
+
+
+# ---------------------------------------------------------------------------
+# classify_result (pure): the archive validator's historical lens
 # ---------------------------------------------------------------------------
 
 def _classify(result_name, verifier_log_name):
@@ -177,37 +232,33 @@ def _classify(result_name, verifier_log_name):
     return classify_result(result, log)
 
 
-def test_classify_success_and_failure_with_pytest_evidence():
-    status, reward, info = _classify("result_success.json",
-                                     "verifier_collected.txt")
+def test_classify_is_only_the_archive_validators_historical_lens():
+    # R2: run() no longer calls classify_result. It stays importable for
+    # scripts/analysis/tb_archive_validate.py, which re-derives the status
+    # PRE-R2 archived trials were produced under; these assertions pin that
+    # historical classification, not any execution behaviour.
+    status, reward, _ = _classify("result_success.json",
+                                  "verifier_collected.txt")
     assert (status, reward) == ("success", 1.0)
     status, reward, _ = _classify("result_failure.json",
                                   "verifier_collected.txt")
     assert (status, reward) == ("failure", 0.0)
-
-
-def test_classify_pseudo_zero_is_infra_not_model_failure():
-    # Reward present but pytest never collected anything: the campaign's
-    # "fake zero" (broken verifier download), never the model's failure.
     status, _, info = _classify("result_failure.json",
-                                "verifier_not_collected.txt")
+                               "verifier_not_collected.txt")
     assert status == "infra_error"
     assert info["verdict_reason"] == "pseudo_zero"
-    # Missing verifier log entirely: same verdict.
     status, _, info = _classify("result_failure.json", None)
     assert status == "infra_error"
+    assert info["verdict_reason"] == "pseudo_zero"
 
 
 def test_classify_exceptions_split_model_vs_infra():
     status, _, info = _classify("result_infra.json", None)
     assert status == "infra_error"
     assert info["exception_type"] == "AgentSetupTimeoutError"
-    # The model's own timeout is a genuine failure (scored 0), per the
-    # campaign's audit rule.
     status, _, info = _classify("result_model_fail.json", None)
     assert status == "failure"
     assert info["exception_type"] == "AgentTimeoutError"
-    # No reward and no exception at all: infra by default.
     status, _, info = classify_result(
         {"verifier_result": None, "exception_info": None}, None)
     assert status == "infra_error"
@@ -215,9 +266,6 @@ def test_classify_exceptions_split_model_vs_infra():
 
 
 def test_classify_tmux_rule_matches_only_runtime_error():
-    # The campaign's audit rule (audit_trials.py): a broken tmux session is
-    # the model's own doing ONLY when the exception is a RuntimeError; an
-    # infra exception that merely mentions tmux stays infra.
     def _result(etype, message):
         return {"verifier_result": None,
                 "exception_info": {"exception_type": etype,
@@ -407,7 +455,12 @@ def test_run_infra_exception_result_is_infra_error(tmp_path):
     assert len(outcome.steps) == 2
 
 
-def test_run_model_timeout_result_is_failure(tmp_path):
+def test_run_model_timeout_result_is_no_scorer_verdict(tmp_path):
+    # R2: the model-vs-infra exception reclassification is gone from the
+    # execution path. A timed-out agent produced no scorer verdict, so the
+    # plugin claims nothing about the model: the run lands in the frozen
+    # vocabulary's "no measurement" bucket with the exception as a raw
+    # fact (acceptance's named rules judge it from there).
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
@@ -415,18 +468,27 @@ def test_run_model_timeout_result_is_failure(tmp_path):
             f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
     outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "failure"
+    assert outcome.status == "infra_error"
     assert outcome.meta["exception_type"] == "AgentTimeoutError"
+    assert outcome.meta["reward"] is None
 
 
-def test_run_pseudo_zero_is_infra_error_end_to_end(tmp_path):
+def test_run_pseudo_zero_keeps_the_scorer_verdict_and_reports_the_fact(
+        tmp_path):
+    # R2: a reward claimed without pytest ever collecting anything (the
+    # campaign's "fake zero") is no longer invalidated by the plugin. The
+    # scorer's verdict passes through and the pseudo-zero EVIDENCE rides
+    # along as the ``verifier_ran`` fact; whether the run counts is
+    # acceptance's named-rule decision.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files(result="result_failure.json",
                                             verifier_log="verifier_not_collected.txt"))
     outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert outcome.meta["verdict_reason"] == "pseudo_zero"
+    assert outcome.status == "failure"
+    assert outcome.meta["reward"] == 0.0
+    assert outcome.meta["verifier_ran"] is False
+    assert "verdict_reason" not in outcome.meta
 
 
 def test_run_truncated_result_json_is_infra_error(tmp_path):
