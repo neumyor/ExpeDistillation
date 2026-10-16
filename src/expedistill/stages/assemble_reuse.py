@@ -4,11 +4,31 @@ The TB frozen-split reuse experiment (docs/decisions/
 retrieval_delivery_tb_split_20261013.md, section 1) re-runs the pipeline
 over a NEW frozen split (AgentBrew evolve/test/validation = train/test/
 reserved) while reusing, with ZERO model calls, everything the source run
-already produced for the train side: stage 1's trajectories, the stage 2-4
-objects, and the curated bank. This module is the assembly step: an
-allowlist copy from the source run into a fresh run directory, guarded by
-an identity check, negative-list and integrity assertions, and an
-ASSEMBLED_FROM.md provenance record.
+already produced for the train side: the D-phase trajectories, the
+segmentation/authoring/acceptance objects, and the curated bank. This
+module is the assembly step: an allowlist copy from the source run into a
+fresh run directory, guarded by an identity check, negative-list and
+integrity assertions, and an ASSEMBLED_FROM.md provenance record.
+
+Schema worlds (R10): the SOURCE run may be a v3 stage-world run (the
+frozen config carries the five ``methods`` slots; the bank lives at the
+run root as ``skill_bank.jsonl``) or a v4 phase-world run (the config
+carries ``sequence``/``phases``; the bank is the last learn phase's
+artifact under ``phases/<label>/``). Both read through the same object
+store layout (the five kind directories never moved); the v3 source's
+config is upgraded for the identity walk through the pure core mappings
+(``upgrade_v2_config`` chaining into ``upgrade_v3_config``), and both
+sides of the walk are normalised through ``ExperimentConfig.from_dict``
+-> ``to_dict`` so an upgraded slot-completed v3 config and a hand-written
+v4 config compare isomorphically (the M1 lesson: compare canonical
+forms, never raw rows). The ASSEMBLED run is always v4: the filtered
+bank lands both at the run root (the frozen run-level currency, read by
+the audit tooling and the pre-learn bank fallback) and pre-seeded as
+the LAST learn phase's bank artifact, so the phase pipeline's curation
+short-circuits on it (K5's non-empty-dest-bank resume path returns
+without any model call) instead of re-curating already-curated
+material. The only other phases/ entry the assembly may ever create is
+that one artifact file -- a hard assertion pins the tree.
 
 Why a composite and not a script: it owns disk IO, locking and resume
 bookkeeping by construction (the layer-5 contract), and it must live in
@@ -19,42 +39,48 @@ whitelist drifted from the real one on the first try.
 Two levels (revision 3 of the integration plan, the 2026-10-13 user
 ruling): ``bank`` (the default) is the assembly described below -- the
 full train-lineage reuse with the filtered bank, zero model calls.
-``baseline`` reuses stage 1 ONLY: the train-side two-arm trajectories
-plus the source run's accepted stage-1 infra shortfall (train side,
-skipped when absent). Stages 2-6 then run FRESH under the current
-protocol, so the identity check pins only what stage-1 reproducibility
-needs -- {benchmark, both executor model names, both attempt counts,
-train within the source task set} -- and every key that only acts
-downstream (rule names, prompt digests, the delivery slot, K, budgets,
-weak_profile, ...) may differ from the source run; a pinned key that
-differs is still a loud ConfigError.
+``baseline`` reuses the D phase's trajectories ONLY: the train-side
+two-arm trajectories plus the source run's accepted stage-1 infra
+shortfall (train side, skipped when absent). Every downstream phase then
+runs FRESH under the current protocol, so the identity check pins only
+what the trajectories' reproducibility needs -- {benchmark, both executor
+model names, both attempt counts, train within the source task set} --
+and every key that only acts downstream (rule names, prompt digests, the
+phase definitions, budgets, weak_profile, ...) may differ from the
+source run; a pinned key that differs is still a loud ConfigError.
 
 Three load-bearing invariants (integration plan rulings 1/4/5):
 
 * Identity (ruling 4): the new config may differ from the source run's
-  frozen manifest ONLY in ``{mode, split, tasks, the delivery slot
-  (config.methods.delivery), schema_version}``. Everything else -- benchmark, both executor models,
-  both attempt counts, the three rule names, K, the retry family,
-  token_budgets, model_options, weak_profile, the tasks digest -- must
-  match, because the reused artifacts were produced under those exact
-  inputs. The prompt-digest snapshots are the exception the protocol
-  itself declares (the mixed-protocol statement): the new run freezes the
-  CURRENT registry's digests without ever calling them, so their drift
-  against the source run is disclosed in ASSEMBLED_FROM.md and the
-  summary rather than refused -- a byte-identical digest requirement
-  would make every reuse after a prompt change impossible, and the
-  assembly only exists because prompts changed (ruling 14). The check
-  compares the source manifest against the prospective manifest the new
-  run's stage 0 WOULD freeze (same derivation, duplicated here because
-  composites may not import stages).
+  frozen manifest ONLY in ``{mode, split, tasks, schema_version, the
+  final-test phase's delivery and compare}``. The last two are the v4
+  image of the v3 delivery slot: the knobs that act only at the final
+  test, where the mode also decides the control arm (a full-mode C
+  compares against D's weak arm, a split-mode C runs fresh_bare). Every
+  other key -- benchmark, both executor models, both attempt counts, the
+  three rule names, the whole sequence and every phase definition, the
+  redispatch budget, token_budgets, model_options, weak_profile, the
+  tasks digest -- must match, because the reused artifacts were produced
+  under those exact inputs. The prompt-digest snapshots are the
+  exception the protocol itself declares (the mixed-protocol statement):
+  the new run freezes the CURRENT registry's digests without ever
+  calling them, so their drift against the source run is disclosed in
+  ASSEMBLED_FROM.md and the summary rather than refused -- a
+  byte-identical digest requirement would make every reuse after a
+  prompt change impossible, and the assembly only exists because prompts
+  changed (ruling 14). The check compares the source manifest against
+  the prospective manifest the new run's stage 0 WOULD freeze (same
+  derivation, duplicated here because composites may not import
+  stages).
 * Allowlist copy, "not listed means not copied" (ruling 5): only the
   entries in the module's copy list are brought over; the negative-list
   assertion then verifies the assembled directory contains none of the
-  forbidden files (manifest, ledgers, stage summaries, stage 4's leak /
-  rewrite ledgers, stage 5's curation log, stage 6's stores, work/, ...).
-  Copying e.g. curation_log.json would make stage 5 resume a journal whose
-  merge serials do not exist in the new store; copying stage6_test/ would
-  leak the source run's measurement into the new one.
+  forbidden files (manifest, ledgers, stage summaries, the leak /
+  rewrite ledgers, the curation journal, the final-test stores, work/,
+  any phase record the source wrote, ...). Copying e.g. a curation log
+  would make curation resume a journal whose merge serials do not exist
+  in the new store; copying a measurement store would leak the source
+  run's numbers into the new one.
 * One lineage function (ruling 1 / contract 10): a skill is train-side
   iff the FULL chain -- its own subtask plus every original reached
   through ``merged_from`` -- is train (the anchor-only view would let a
@@ -63,12 +89,14 @@ Three load-bearing invariants (integration plan rulings 1/4/5):
   checks they agree.
 
 Integrity invariants (ruling 5): every kept bank row is bit-identical to
-the same-named skill in the new store; the new store's accepted set equals
-the kept bank row ids; no copied object carries test/reserved lineage.
-The segmentation audit is copied WHOLE on purpose (it is a lazy audit
-record; a validation-side "empty trajectory" row in it is not bank or
-store content and rules nothing), which ruling 5 exempts from the
-zero-test-lineage invariant.
+the same-named skill in the new store; the new store's accepted set
+equals the kept bank's ACCEPTED row ids (a v4 source's final artifact
+may also carry pending members -- unfinished material the assembled
+run's A/B phases will measure, disclosed by count); no copied object
+carries test/reserved lineage. The segmentation audit is copied WHOLE on
+purpose (it is a lazy audit record; a validation-side "empty trajectory"
+row in it is not bank or store content and rules nothing), which ruling
+5 exempts from the zero-test-lineage invariant.
 
 Copy discipline (M1 acceptance ruling 1, 2026-10-15): the skills and
 exams records and the bank rows land at the CURRENT object schema -- a
@@ -79,17 +107,27 @@ load works on it. The other kinds stay byte-exact copies: their schema
 did not move. A row that cannot migrate is a corrupt source and raises
 ConfigError, the family of every other source-integrity refusal.
 
+One v3 concept has NO v4 image and is disclosed instead of copied: the
+stage-3 generation-failure ledger (subtasks whose skill generation
+terminally failed). The v4 learn phase treats a failed add as retryable
+(ModelOutputError is recorded and the next learn phase re-offers it), so
+the train-side rows are counted in the summary and ASSEMBLED_FROM.md as
+units the assembled run's first learn phase will re-offer -- never
+silently dropped, never terminalised by a ledger nothing reads.
+
 The assembled run is NOT a finished run: stage 0 still freezes its own
 manifest on the first pipeline start (which is also the identity re-check
-of last resort -- B4 compares it field by field), stages 1-5 short-circuit
-on the stored units, and stage 6 runs fresh. ASSEMBLED_FROM.md at the run
-root records the provenance a reader needs before trusting the numbers.
+of last resort -- B4 compares it field by field), the D phase skips the
+stored trajectories, the learn phases re-derive their decisions over the
+copied records and short-circuit their curation on the pre-seeded
+artifact, and the C phase runs fresh. ASSEMBLED_FROM.md at the run root
+records the provenance a reader needs before trusting the numbers.
 
 Locking: the run directory is exclusively locked (B7) for the assembly.
 A failed assembly can leave partial files behind; re-running the command
-is safe -- object files are overwritten and the ledgers (bank,
-generation failures, accepted shortfall) are written atomically in full,
-never appended, so a re-assembly cannot duplicate rows.
+is safe -- object files are overwritten and the ledgers (bank, phase
+artifact, accepted shortfall) are written atomically in full, never
+appended, so a re-assembly cannot duplicate rows.
 """
 
 from __future__ import annotations
@@ -108,9 +146,19 @@ from pathlib import Path, PurePath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set
 
 from expedistill.composites import shortfall
+from expedistill.composites.phase_bank import BANK_NAME, load_phase_bank, phase_bank_dir
 from expedistill.blocks import tasks as tasks_block
 from expedistill.stages.stage0_freeze import build_manifest
-from expedistill.core.config import ExperimentConfig, upgrade_v2_config, load_config
+from expedistill.core.config import (
+    ExecutePhaseSpec,
+    LearnPhaseSpec,
+    PHASE_ROLE_TEST,
+    ExperimentConfig,
+    load_config,
+    phase_label,
+    upgrade_v2_config,
+    upgrade_v3_config,
+)
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import (
     Attempt,
@@ -128,19 +176,17 @@ from expedistill.infra.store import KIND_DIRS, read_json, read_jsonl, write_json
 
 __all__ = ["assemble_reuse", "skill_lineage_tasks"]
 
-#: Ruling 4: the only manifest/config keys a reuse config may change. The
-#: first component of a diff path (or the second, under ``config.``) must
-#: be one of these; anything else means the reused artifacts were produced
-#: under different inputs and the assembly refuses.
-#: Ruling 4's whitelist, in v3 spelling: the top-level mode/split/tasks/
-#: schema_version, and the delivery SLOT (the only method slot a reuse
-#: target may re-choose -- everything else produced the bank it reuses).
-_ALLOWED_DIFF_PREFIXES = (
+#: Ruling 4, in v4 spelling: the manifest/config keys a reuse config may
+#: change regardless of shape -- the mode, the split, the task set and
+#: the schema version. The final-test phase's delivery/compare (the v4
+#: image of the v3 delivery slot) is added per target config by
+#: :func:`_allowed_diff_prefixes`, because the test phase's LOCAL NAME is
+#: the config's own choice.
+_BASE_ALLOWED_DIFF_PREFIXES = (
     "mode", "config.mode",
     "split", "config.split",
     "tasks", "config.tasks",
     "schema_version", "config.schema_version",
-    "config.methods.delivery",
 )
 
 #: The prompt-digest snapshots (top-level ``prompt_digests`` and the
@@ -158,10 +204,16 @@ _EXCLUDED_DIFF_KEYS = frozenset({"prompt_digests"})
 _EXCLUDED_CONFIG_KEYS = frozenset({"prompts_digests"})
 
 #: Ruling 5: none of these may exist in the assembled run directory. Each
-#: is either a measurement of the SOURCE run (stage 6 stores, ledgers) or
-#: a resume journal whose serials do not survive the train-side filter
-#: (curation log, stage 4 leak/rewrite ledgers); copying any of them would
-#: corrupt or fake the new run's own records.
+#: is either a measurement of the SOURCE run (the final-test stores,
+#: ledgers) or a resume journal whose serials do not survive the
+#: train-side filter (the curation journal, the leak/rewrite ledgers);
+#: copying any of them would corrupt or fake the new run's own records.
+#: The paths are the historical stage names -- the phase world kept the
+#: store layout (infra.store.KIND_DIRS) and never wrote new files at the
+#: run root, so the v3 spellings are still exactly the ones to forbid.
+#: The phases/ tree has its own exact-shape assertion instead (a v4
+#: source writes phase records there, and the assembled run may carry
+#: ONLY the pre-seeded bank artifact).
 _FORBIDDEN_PATHS = (
     MANIFEST_NAME,
     "pipeline_log.jsonl",
@@ -182,10 +234,10 @@ _FORBIDDEN_PATHS = (
 _FORBIDDEN_DIRS = ("llm_requests", "stage6_test", "work")
 
 #: The two reuse levels (revision 3). ``bank`` is the original assembly:
-#: stages 1-5 train-lineage artifacts + the filtered bank, zero model
-#: calls. ``baseline`` is stage-1-only: trajectories (+ the source's
-#: accepted stage-1 infra shortfall, train side), with stages 2-6
-#: running fresh under the current protocol.
+#: the train-lineage artifacts + the filtered bank, zero model calls.
+#: ``baseline`` is the D phase's trajectories only (+ the source's
+#: accepted stage-1 infra shortfall, train side), with every downstream
+#: phase running fresh under the current protocol.
 LEVELS = ("bank", "baseline")
 
 #: Baseline-only forbidden paths (revision 3): stage-1-only reuse copies
@@ -367,12 +419,117 @@ def _diff_paths(stored: Any, incoming: Any, prefix: str = "") -> List[str]:
     return differing
 
 
-def _path_allowed(path: str) -> bool:
-    """True for a diff path covered by the ruling-4 whitelist: a top-level
-    ``mode``/``split``/``tasks``/``schema_version``, or the delivery slot
-    (``config.methods.delivery`` and any leaf under it)."""
+def _allowed_diff_prefixes(config: ExperimentConfig) -> tuple:
+    """Ruling 4's whitelist for one target config: the shape-independent
+    keys plus the final-test phase's delivery and compare mappings (the
+    v4 image of the v3 delivery slot -- the knobs that act only at the C
+    phase, where the mode also decides the control arm). The phase's
+    LOCAL NAME is whatever the target config calls it, so the prefixes
+    are derived, never hardcoded."""
+    prefixes = list(_BASE_ALLOWED_DIFF_PREFIXES)
+    for name in config.sequence:
+        spec = config.phases[name]
+        if isinstance(spec, ExecutePhaseSpec) and spec.role == PHASE_ROLE_TEST:
+            prefixes.append(f"config.phases.{name}.delivery")
+            prefixes.append(f"config.phases.{name}.compare")
+    return tuple(prefixes)
+
+
+def _path_allowed(path: str, prefixes: Sequence[str]) -> bool:
+    """True for a diff path covered by the ruling-4 whitelist: a
+    shape-independent key, or a leaf under the target's final-test phase
+    delivery/compare prefixes."""
     return any(path == prefix or path.startswith(prefix + ".")
-               for prefix in _ALLOWED_DIFF_PREFIXES)
+               for prefix in prefixes)
+
+
+def _section(path: str, prefixes: Sequence[str]) -> str:
+    """Collapse one diff path for the summary/ASSEMBLED_FROM: the
+    final-test delivery/compare keep their mapping-level name (the phase
+    name is load-bearing -- ``config.phases`` alone would not say WHICH
+    knob drifted); everything else collapses to its first key under
+    config, or its top key."""
+    for prefix in prefixes:
+        if path == prefix or path.startswith(prefix + "."):
+            if prefix.startswith("config.phases."):
+                return prefix
+    parts = path.split(".")
+    return "config." + parts[1] if parts[0] == "config" else parts[0]
+
+
+def _last_learn_label(config: ExperimentConfig) -> Optional[str]:
+    """The label of the target sequence's LAST learn phase (where the
+    assembly pre-seeds the bank artifact so the curation short-circuits),
+    or None when the sequence has no learn phase (the run-level bank is
+    then the only currency and nothing is pre-seeded)."""
+    positions = [index for index, name in enumerate(config.sequence)
+                 if isinstance(config.phases[name], LearnPhaseSpec)]
+    if not positions:
+        return None
+    return phase_label(positions[-1], config.sequence[positions[-1]])
+
+
+def _source_config(source_manifest: Mapping[str, Any],
+                   source_run: Path) -> "tuple[ExperimentConfig, int]":
+    """The source run's frozen config as a parsed v4 ExperimentConfig,
+    upgraded through the pure core mappings when the source was frozen
+    under an older schema, plus the ORIGINAL schema version (the summary
+    discloses which world the source came from).
+
+    Both sides of the identity walk go through from_dict -> to_dict, so
+    an upgrade-completed v3 config and a hand-written v4 config compare
+    isomorphically: the parsed shape is the one canonical form (the M1
+    lesson applied to configs -- comparing raw rows would flag every
+    v3 source as drifting on key sets its own loader completed).
+    """
+    raw = source_manifest.get("config")
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"the source run {source_run} has a manifest without a "
+            "frozen config; only a run frozen by stage 0 can be reused")
+    version = raw.get("schema_version", 3)
+    if not isinstance(version, int) or isinstance(version, bool) \
+            or version not in (2, 3, 4):
+        raise ConfigError(
+            f"the source run {source_run} froze config schema v{version!r}; "
+            "only schema v2, v3 and v4 source runs can be reused (v2 "
+            "chains through upgrade_v2_config, v3 through "
+            "upgrade_v3_config)")
+    try:
+        if version == 2:
+            raw = upgrade_v2_config(raw)
+        if version in (2, 3):
+            raw = upgrade_v3_config(raw)
+        return ExperimentConfig.from_dict(raw), version
+    except ValueError as exc:
+        raise ConfigError(
+            f"the source run {source_run} has a config that cannot be "
+            f"upgraded to schema v4 for the identity walk: {exc}; the "
+            "source is corrupt or of an unsupported shape") from exc
+
+
+def _source_bank_rows(source_run: Path, source_config: ExperimentConfig,
+                      source_version: int) -> List[Dict[str, Any]]:
+    """The source run's curated bank rows (the one artifact whose
+    location moved between the worlds): a v4 source keeps its bank as
+    the last learn phase's artifact under phases/, a v3 source at the
+    run root. A missing bank is a loud refusal, never an empty read --
+    the bank IS what bank-level reuse reuses."""
+    if source_version == 4:
+        label = _last_learn_label(source_config)
+        if label is None:
+            raise ConfigError(
+                f"the source run {source_run} has no learn phase, so it "
+                "never produced a bank artifact; bank-level reuse has "
+                "nothing to reuse")
+        return load_phase_bank(source_run, label)
+    path = source_run / "skill_bank.jsonl"
+    if not path.is_file():
+        raise ConfigError(
+            f"the source run {source_run} has no run-level "
+            "skill_bank.jsonl; only a finished v3 run can be reused at "
+            "the bank level")
+    return read_jsonl(path)
 
 
 def _identity_view(manifest: Mapping[str, Any]) -> Dict[str, Any]:
@@ -589,6 +746,43 @@ def _assert_negative_list(run_dir: Path, *, baseline: bool) -> None:
             "human must look at this directory")
 
 
+def _assert_phase_tree(run_dir: Path,
+                       preseed_label: Optional[str]) -> None:
+    """The phases/ tree of an assembled run holds EXACTLY the pre-seeded
+    bank artifact (one file), or nothing at all.
+
+    A v4 source run writes its phase records, units, reports, ledgers and
+    summaries under phases/ -- every one of them is a measurement or
+    resume journal of the SOURCE and must not leak into the new run (the
+    phase-world twin of the v3 negative list; the only sanctioned entry
+    is the bank artifact the curation short-circuit needs). A stray
+    phases/ entry means the run_dir was not fresh or the copy went out
+    of its allowlist.
+    """
+    phases_dir = run_dir / "phases"
+    if preseed_label is None:
+        if phases_dir.exists():
+            raise ConfigError(
+                f"the assembled run contains a phases/ tree the assembly "
+                f"must never create (the target sequence has no learn "
+                f"phase, so nothing is pre-seeded): "
+                f"{sorted(p.as_posix() for p in phases_dir.rglob('*'))}; "
+                "the run_dir was not fresh -- a human must look at this "
+                "directory")
+        return
+    expected = phase_bank_dir(run_dir, preseed_label) / BANK_NAME
+    expected_rel = expected.relative_to(run_dir).as_posix()
+    actual = sorted(
+        path.relative_to(run_dir).as_posix()
+        for path in phases_dir.rglob("*") if path.is_file())
+    if actual != [expected_rel]:
+        raise ConfigError(
+            f"the assembled run's phases/ tree must hold exactly "
+            f"{[expected_rel]}, found {actual}; either the run_dir was "
+            "not fresh or the assembly copied a source phase record -- "
+            "a human must look at this directory")
+
+
 # ---------------------------------------------------------------------------
 # ASSEMBLED_FROM.md
 # ---------------------------------------------------------------------------
@@ -652,6 +846,8 @@ def _render_assembled_from(
         checksums: Mapping[str, str],
         merged: Mapping[str, Any],
         campaign_seeded: Mapping[str, Any],
+        source_version: int,
+        preseed_label: Optional[str],
 ) -> str:
     """ASSEMBLED_FROM.md text (Chinese: a documentation artifact)."""
     lines: List[str] = []
@@ -660,11 +856,12 @@ def _render_assembled_from(
     add("")
     add(f"- 源 run：`{source_run}`（benchmark {source_manifest['benchmark']!r}，"
         f"mode {source_manifest['mode']!r}，"
-        f"tasks_digest {str(source_manifest.get('tasks_digest'))[:12]}…）")
+        f"tasks_digest {str(source_manifest.get('tasks_digest'))[:12]}…，"
+        f"配置 schema v{source_version}）")
     add(f"- 复用配置：`{config_path}`（mode split；train/test/reserved = "
         f"{split_sizes['train']}/{split_sizes['test']}/"
         f"{split_sizes['reserved']}）")
-    add(f"- 装配目标：`{run_dir}`")
+    add(f"- 装配目标：`{run_dir}`（v4 相位世界 run）")
     add("")
     add("## 划分 provenance")
     add("")
@@ -681,17 +878,47 @@ def _render_assembled_from(
     add("")
     add("## 同一性校验（白名单 diff，裁决 4）")
     add("")
-    add("- 对照源 manifest 逐键比对，仅允许 "
-        "{mode, split, tasks, methods.delivery 槽, schema_version} 差异；"
-        "benchmark、双 executor 模型、双 n_attempts、三条规则名、K、"
-        "retry 族、token_budgets、model_options、weak_profile、"
-        "tasks_digest 任一不一致即拒绝装配。")
+    add("- 源 manifest 的配置先经纯映射升到 v4 形状（v2 源经 "
+        "upgrade_v2_config 链 upgrade_v3_config，v3 源经 upgrade_v3_config，"
+        "v4 源原样），两侧再经 from_dict → to_dict 规整为同一规范形状后"
+        "逐键比对；仅允许 {mode, split, tasks, schema_version, 终测相位的 "
+        "delivery 与 compare} 差异（后两项是 v3 delivery 槽的 v4 对应物，"
+        "mode 同时决定终测对照臂的取法）。benchmark、双 executor 模型、"
+        "双 n_attempts、三条规则名、整个 sequence 与全部相位定义、"
+        "invalid_redispatch_limit、token_budgets、model_options、"
+        "weak_profile、tasks_digest 任一不一致即拒绝装配。")
     add(f"- 本次实际发生的允许差异：{', '.join(allowed_diffs) or '（无）'}。")
     add("- 混装声明（协议 v2）：prompt digest 不在同一性校验内——新 run "
         "按当前 prompt 注册表冻结 v2 digest，但复用链零模型调用、这些 "
         "prompt 永不被执行；被拷贝的产物由源 run 在其冻结的旧 prompt 下"
         "产生。与源 run 相比发生 digest 漂移的 prompt："
         f"{', '.join(digest_drift) or '（无）'}。")
+    add("")
+    add("## v4 装配产物与续跑行为")
+    add("")
+    if preseed_label is not None:
+        add(f"- 过滤后的库同时落在 run 根（skill_bank.jsonl）与末个 learn "
+            f"相位的产物（`phases/{preseed_label.replace(':', '_')}/"
+            "skill_bank.jsonl，装配预置）：末个 learn 相位的整理在非空"
+            "产物上短路返回，零模型调用，不重理已理过的库；phases/ 树"
+            "此外一个文件都没有（硬断言）。")
+    else:
+        add("- 目标 sequence 不含 learn 相位，库只落在 run 根"
+            "（skill_bank.jsonl），无相位产物预置。")
+    add("- 首次管线启动：p00 冻结 manifest（即同一性终检），D 相位按"
+        "存储轨迹跳过执行，learn 相位在拷贝记录上重推决策、整理短路，"
+        "C 相位全新执行。")
+    if counts.get("generation_failure_rows"):
+        add(f"- 披露：源 run 的 v3 阶段-3 generation_failures 有 "
+            f"{counts['generation_failure_rows']} 条 train 溯源行，"
+            "v4 没有可承载它的账本（学习相位对失败新增的口径是重试"
+            "而非终态），这些单元将由新 run 首个 learn 相位重新尝试"
+            "（真实模型调用），不拷贝、不静默。")
+    if counts.get("pending_bank_rows"):
+        add(f"- 披露：源 run 的末相位库产物携带 "
+            f"{counts['pending_bank_rows']} 条 train 溯源的待定成员"
+            "（源 run 未完成检验的材料），随库与 store 原样带入，"
+            "新 run 的 A/B 相位将真实测量它们。")
     add("")
     add("## 全链口径（契约 10）")
     add("")
@@ -716,9 +943,11 @@ def _render_assembled_from(
         add(f"| {name} | {counts[name]} | `{checksums[name]}` |")
     add(f"| skill_bank 行 | {counts['bank_rows']} | "
         f"`{checksums['skill_bank']}` |")
-    add(f"| generation_failures 行（train 溯源） | "
-        f"{counts['generation_failure_rows']} | "
-        f"`{checksums['generation_failures']}` |")
+    if "phase_bank" in checksums:
+        add(f"| 相位库产物（预置） | {counts['bank_rows']} | "
+            f"`{checksums['phase_bank']}` |")
+    add(f"| v3 generation_failures 行（train 溯源，不拷贝） | "
+        f"{counts['generation_failure_rows']} | — |")
     add(f"| segmentation_audit 行 | {counts['segmentation_audit_rows']} | "
         f"`{checksums['segmentation_audit']}` |")
     add(f"| accepted_infra_shortfall 单元 | "
@@ -738,7 +967,7 @@ def _render_assembled_from(
         for skill_id in merged["dangling"]:
             add(f"  - `{skill_id}`")
     add("")
-    add("## 阶段 1 播种溯源")
+    add("## D 相位播种溯源")
     add("")
     seeded = campaign_seeded["count"]
     total = counts["trajectories"]
@@ -749,7 +978,7 @@ def _render_assembled_from(
             "1..3）；拷贝逐字节保留各轨迹 meta 的 campaign_* 字段。")
     else:
         add(f"- 拷贝的 {total} 条 train 双臂轨迹均无 campaign 播种溯源 "
-            "meta（源 run 阶段 1 为直接执行，非归档播种）。")
+            "meta（源 run 的 D 相位为直接执行，非归档播种）。")
     origins = campaign_seeded.get("origin_runs") or {}
     if origins:
         add("- 溯源 origin run 分布：" + "、".join(
@@ -762,8 +991,10 @@ def _render_assembled_from(
         "核对不存在）：manifest.json、pipeline_log.jsonl、llm_requests/、"
         "failed_units.jsonl、skip_audit.jsonl、各 stage summary、"
         "stage5_curation/curation_log.json、stage6_test/、work/、"
-        "stage4 的 leak_verdicts.jsonl 与 rewrite_failures.jsonl。"
-        "新 run 的 manifest 由首次管线启动时阶段 0 自行冻结。")
+        "stage4 的 leak_verdicts.jsonl 与 rewrite_failures.jsonl；"
+        "v4 源的 phases/ 树（相位记录、units、报告、账本、摘要）整体"
+        "不拷——唯一例外是上面预置的相位库产物。"
+        "新 run 的 manifest 由首次管线启动时 p00 自行冻结。")
     return "\n".join(lines) + "\n"
 
 
@@ -896,15 +1127,15 @@ def _render_assembled_from_baseline(
         f"{split_sizes['reserved']}）")
     add(f"- 装配目标：`{run_dir}`")
     add("- 方案：`docs/decisions/retrieval_delivery_tb_split_20261013.md`"
-        " 修订三（2026-10-13 用户裁决：TB 复跑 = 阶段 1 轨迹复用 + "
-        "阶段 2–6 v2 全新蒸馏）。")
+        " 修订三（2026-10-13 用户裁决：TB 复跑 = D 相位轨迹复用 + "
+        "下游相位全新蒸馏）。")
     add("")
     add("## 同一性校验与 train ⊆ 源任务集证明（修订三）")
     add("")
     add("- baseline 档位仅钉 {benchmark、双 executor 模型名、双 "
-        "n_attempts、train ⊆ 源任务集}——阶段 1 复现性所需的最小集；"
-        "规则名、prompt digest、delivery 槽、K、预算等允许不同"
-        "（它们只作用于全部新跑的下游），不一致的钉住键仍响亮拒绝。")
+        "n_attempts、train ⊆ 源任务集}——D 相位轨迹复现性所需的最小集；"
+        "规则名、prompt digest、相位定义、K、预算等允许不同"
+        "（它们只作用于全部新跑的下游相位），不一致的钉住键仍响亮拒绝。")
     add(f"- 逐项核对通过：benchmark {source_manifest['benchmark']!r}；"
         f"executor_strong {pinned['executor_strong']!r}、executor_weak "
         f"{pinned['executor_weak']!r}；n_attempts_strong/weak = "
@@ -939,20 +1170,21 @@ def _render_assembled_from_baseline(
             f"{name}（{count} 条）" for name, count
             in sorted(origins.items())) + "。")
     add("")
-    add("## 未拷贝清单（stage-1-only）")
+    add("## 未拷贝清单（D 相位轨迹之外零复用）")
     add("")
-    add("- 不拷贝任何阶段 2–6 下游产物：subtask / skill / exam / "
+    add("- 不拷贝任何下游产物：subtask / skill / exam / "
         "attempt、过滤库 skill_bank.jsonl、"
         "stage2_segments/segmentation_audit.jsonl、"
-        "stage3_generation/generation_failures.jsonl，以及负清单全部"
+        "stage3_generation/generation_failures.jsonl、v4 源的整棵 "
+        "phases/ 树，以及负清单全部"
         "条目（manifest.json、pipeline_log.jsonl、llm_requests/、"
         "failed_units.jsonl、skip_audit.jsonl、各 stage summary、"
         "curation_log.json、stage6_test/、work/、leak_verdicts.jsonl、"
         "rewrite_failures.jsonl）。")
-    add("- **阶段 2–6 将按当前协议全新执行**：切段、生成、验收、整理与"
-        "阶段 6 全部按本配置的规则与当前 prompt 注册表真实调用，本 run "
-        "不复用源 run 的任何下游产物；新 run 的 manifest 由首次管线启动"
-        "时阶段 0 自行冻结。")
+    add("- **D 相位之外的全部相位将按当前协议全新执行**：切段、写作、"
+        "验收、整理与终测全部按本配置的相位定义与当前 prompt 注册表"
+        "真实调用，本 run 不复用源 run 的任何下游产物；新 run 的 "
+        "manifest 由首次管线启动时 p00 自行冻结。")
     return "\n".join(lines) + "\n"
 
 
@@ -1007,6 +1239,9 @@ def _assemble_baseline(*,
                    kept_trajectories, counts, checksums)
         _write_shortfall(run_dir, shortfall_units, counts, checksums)
         _assert_negative_list(run_dir, baseline=True)
+        # Stage-1-only reuse pre-seeds nothing under phases/ either: the
+        # whole downstream runs fresh, so even the bank artifact is absent.
+        _assert_phase_tree(run_dir, None)
         campaign_seeded = _campaign_seeded(kept_trajectories)
         assembled_from_path = run_dir / _ASSEMBLED_FROM_NAME
         assembled_from_path.write_text(_render_assembled_from_baseline(
@@ -1081,15 +1316,6 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
             f"run_dir must differ from the source run (both are "
             f"{run_dir})")
     source_manifest = read_json(source_manifest_path)
-    if source_manifest.get("config", {}).get("schema_version", 3) == 2:
-        # A v2 source run's identity is walked in its upgraded v3 shape
-        # (the slot that owns each key is where the comparison lives now);
-        # upgrade_v2_config is the one pure mapping, shared with the
-        # one-time config converter.
-        source_manifest = {
-            **source_manifest,
-            "config": upgrade_v2_config(source_manifest["config"]),
-        }
 
     # -- the reuse config and the manifest the new run WOULD freeze ------
     try:
@@ -1146,6 +1372,14 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
 
     # -- the bank level: the prospective manifest and the ruling-4
     #    whitelist diff -----------------------------------------------
+    source_config, source_version = _source_config(
+        source_manifest, source_run)
+    # Both sides of the walk in the parsed canonical form (see
+    # _source_config): the upgraded v3 source and the v4 target compare
+    # isomorphically, never on raw slot-completed key sets.
+    canonical_source = {**source_manifest,
+                        "config": source_config.to_dict()}
+    allowed_prefixes = _allowed_diff_prefixes(config)
     prospective = build_manifest(
         config, tasks, train_ids=[task.task_id for task in train_tasks],
         test_ids=[task.task_id for task in test_tasks],
@@ -1153,27 +1387,20 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     prompt_digests = prospective["prompt_digests"]
 
     diff_paths = _diff_paths(
-        _identity_view(source_manifest), _identity_view(prospective))
+        _identity_view(canonical_source), _identity_view(prospective))
     # Collapsed to the section level for the summary/ASSEMBLED_FROM (the
     # leaf paths under a whitelisted key are noise there); the REFUSAL
     # below still names every offending leaf.
-    def _section(path: str) -> str:
-        # The delivery slot keeps its slot-level name (config.methods
-        # alone would not say WHICH slot drifted); everything else
-        # collapses to its first key under config, or its top key.
-        if path.startswith("config.methods.delivery"):
-            return "config.methods.delivery"
-        parts = path.split(".")
-        return "config." + parts[1] if parts[0] == "config" else parts[0]
-
     allowed_diffs = sorted(
-        {_section(path) for path in diff_paths if _path_allowed(path)})
-    unexpected = [path for path in diff_paths if not _path_allowed(path)]
+        {_section(path, allowed_prefixes) for path in diff_paths
+         if _path_allowed(path, allowed_prefixes)})
+    unexpected = [path for path in diff_paths
+                  if not _path_allowed(path, allowed_prefixes)]
     if unexpected:
         raise ConfigError(
             f"the reuse config {config_path} differs from the source run "
             f"{source_run} beyond the allowed keys "
-            f"{list(_ALLOWED_DIFF_PREFIXES)}: {unexpected}; the reused "
+            f"{list(allowed_prefixes)}: {unexpected}; the reused "
             "artifacts were produced under the source run's frozen inputs, "
             "so align the config with the source run (or use a fresh "
             "source) instead of mixing protocols")
@@ -1213,7 +1440,7 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     attempts = {
         obj_id: Attempt.from_dict(record) for obj_id, record
         in _source_objects(source_run, "attempts").items()}
-    bank_rows = read_jsonl(source_run / "skill_bank.jsonl")
+    bank_rows = _source_bank_rows(source_run, source_config, source_version)
 
     # -- keep sets (pure computation; every refusal below happens BEFORE
     #    anything is written into run_dir) ------------------------------
@@ -1286,37 +1513,46 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
             # is bit-identical to the copied skill record.
             kept_bank_rows.append(row_obj.to_dict())
     kept_bank_ids = {str(row["skill_id"]) for row in kept_bank_rows}
+    kept_accepted_bank_ids = {str(row["skill_id"]) for row in kept_bank_rows
+                              if row.get("status") == "accepted"}
 
     # Integrity (ruling 5), checked against the SOURCE now so the failure
     # is named before any copying: the new store's accepted set must equal
-    # the kept bank row ids.
+    # the kept bank's ACCEPTED row ids (a v4 source's final artifact may
+    # also carry pending members -- unfinished material the assembled
+    # run's A/B phases measure -- which ride along, disclosed by count).
     new_accepted = {obj_id for obj_id, skill in kept_skills.items()
                     if skill.status == "accepted"}
-    if new_accepted != kept_bank_ids:
-        missing = sorted(new_accepted - kept_bank_ids)
-        extra = sorted(kept_bank_ids - new_accepted)
+    if new_accepted != kept_accepted_bank_ids:
+        missing = sorted(new_accepted - kept_accepted_bank_ids)
+        extra = sorted(kept_accepted_bank_ids - new_accepted)
         raise ConfigError(
             "the assembled store's accepted skills would not equal the "
-            f"filtered bank rows (accepted-but-uncopied: {missing}; "
-            f"bank-but-not-accepted: {extra}); the source run's accepted "
-            "set and bank disagree -- a human must look at this run")
+            f"filtered bank's accepted rows (accepted-but-uncopied: "
+            f"{missing}; bank-but-not-accepted: {extra}); the source run's "
+            "accepted set and bank disagree -- a human must look at this "
+            "run")
 
-    # Train-side rows of the generation-failure ledger (a unit whose row
-    # is dropped here would be REGENERATED on resume -- that must be a
-    # loud stop, never a silent model call).
-    failure_rows = read_jsonl(
-        source_run / "stage3_generation" / "generation_failures.jsonl")
+    # Train-side rows of the v3 stage-3 generation-failure ledger. The v4
+    # learn phase treats a failed add as retryable, so there is no v4
+    # ledger to copy these into: they are COUNTED (summary and
+    # ASSEMBLED_FROM) as units the assembled run's first learn phase will
+    # re-offer, never silently dropped. A v4 source has no such ledger
+    # (its exam phases keep per-phase ledgers of their own, which no
+    # consumer of the assembled run reads).
     kept_failure_rows = []
-    for row in failure_rows:
-        subtask_id = str(row.get("subtask_id"))
-        subtask = subtasks.get(subtask_id)
-        if subtask is None:
-            raise ConfigError(
-                f"generation_failures row names subtask {subtask_id!r}, "
-                "which the source run does not store; the source is "
-                "corrupt")
-        if subtask.task_id in train_ids:
-            kept_failure_rows.append(row)
+    if source_version == 3:
+        for row in read_jsonl(source_run / "stage3_generation"
+                             / "generation_failures.jsonl"):
+            subtask_id = str(row.get("subtask_id"))
+            subtask = subtasks.get(subtask_id)
+            if subtask is None:
+                raise ConfigError(
+                    f"generation_failures row names subtask {subtask_id!r}, "
+                    "which the source run does not store; the source is "
+                    "corrupt")
+            if subtask.task_id in train_ids:
+                kept_failure_rows.append(row)
 
     # Stage 1's accepted infra holes (train side only: a hole on a task
     # the new run never dispatches is inert, and copying it would smuggle
@@ -1363,18 +1599,32 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
         _copy_kind(source_run, run_dir, "attempts",
                    kept_attempts, counts, checksums)
 
-        # The filtered bank: one atomic full-file write, in the source
-        # bank's order (sorted by skill_id, the stage-5 discipline).
+        # The filtered bank, twice over the same rows: the run-level
+        # skill_bank.jsonl (the frozen run-level currency -- the audit
+        # tooling and the pre-learn fallback read it) and, when the
+        # target sequence has a learn phase, the LAST learn phase's
+        # artifact. The artifact is what makes the assembled run
+        # v4-resumable with zero curation calls: K5's dest-mode resume
+        # path returns a non-empty bank without any model call, so the
+        # phase reuses the source's curation instead of re-curating it.
+        # One atomic full-file write each, in the source bank's order.
         bank_path = run_dir / "skill_bank.jsonl"
         _write_jsonl_atomic(bank_path, kept_bank_rows)
         counts["bank_rows"] = len(kept_bank_rows)
+        counts["pending_bank_rows"] = len(kept_bank_rows) - len(
+            kept_accepted_bank_ids)
         checksums["skill_bank"] = _file_sha256(bank_path)
+        phase_label_target = _last_learn_label(config)
+        if phase_label_target is not None:
+            artifact_dir = phase_bank_dir(run_dir, phase_label_target)
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = artifact_dir / BANK_NAME
+            _write_jsonl_atomic(artifact_path, kept_bank_rows)
+            checksums["phase_bank"] = _file_sha256(artifact_path)
 
-        failures_path = (run_dir / "stage3_generation"
-                         / "generation_failures.jsonl")
-        _write_jsonl_atomic(failures_path, kept_failure_rows)
+        # The v3 stage-3 generation-failure ledger is NOT copied (no v4
+        # consumer; the learn phase re-offers the units -- disclosed).
         counts["generation_failure_rows"] = len(kept_failure_rows)
-        checksums["generation_failures"] = _file_sha256(failures_path)
 
         # The segmentation audit, whole file (ruling 5's lazy-audit
         # exemption; the only allowlist entry whose test/reserved rows are
@@ -1393,6 +1643,7 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
 
         # -- negative-list assertion (ruling 5) -------------------------
         _assert_negative_list(run_dir, baseline=False)
+        _assert_phase_tree(run_dir, phase_label_target)
 
         # -- integrity invariants over the ASSEMBLED run ---------------
         for row in kept_bank_rows:
@@ -1411,11 +1662,12 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
         for obj_id, skill in kept_skills.items():
             if skill.status == "accepted":
                 assembled_accepted.add(obj_id)
-        if assembled_accepted != kept_bank_ids:
+        if assembled_accepted != kept_accepted_bank_ids:
             raise ConfigError(
-                "assembled accepted set does not equal the kept bank rows "
+                "assembled accepted set does not equal the kept bank's "
+                "accepted rows "
                 f"(accepted: {sorted(assembled_accepted)}, bank: "
-                f"{sorted(kept_bank_ids)})")
+                f"{sorted(kept_accepted_bank_ids)})")
         # Zero test/reserved lineage among the copied objects (the five
         # kinds and the bank rows; the segmentation audit is exempt by
         # ruling 5).
@@ -1461,7 +1713,9 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
             counts=counts,
             checksums=checksums,
             merged=merged,
-            campaign_seeded=campaign_seeded), encoding="utf-8")
+            campaign_seeded=campaign_seeded,
+            source_version=source_version,
+            preseed_label=phase_label_target), encoding="utf-8")
     finally:
         lock.release()
 
@@ -1470,6 +1724,8 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
         "config": str(config_path),
         "run_dir": str(run_dir),
         "level": "bank",
+        "source_schema": source_version,
+        "preseeded_phase_bank": phase_label_target,
         "split_sizes": {"train": len(train_tasks),
                         "test": len(test_tasks),
                         "reserved": len(reserved_tasks)},
