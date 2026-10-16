@@ -35,10 +35,9 @@ ALFWorld 义务清单；供首个 live_run 实验（候选配置
 **已过时的节**：§1 第 3 条的"methods 五槽位校验"（v4 起是逐相位的加载期
 检查清单）、§4 的进度查看命令里的 `stage4_summary.json` 路径（改读
 `phases/` 下各相位目录的摘要文件）、§7 的"升 v3"遗留事项（已于 2026-10-16
-随 v4 完成并超越）。**待同步**：`scripts/audit/audit_live_run.py` 目前仍读
-阶段世界的账本布局（`attributions.jsonl` 等），相位世界的对账（学习相位的
-`outcomes.jsonl`、相位目录）随修复项 R10 的审计脚本迁移更新，迁移完成前
-对相位世界的 run 跑它以 verdicts / 轮仓部分的结果为准。
+随 v4 完成并超越）。`scripts/audit/audit_live_run.py` 已随修复项 R10 迁移：
+读取路径按冻结 manifest 的 schema 版本分派（阶段世界的旧 run 走原路径，
+v4 相位世界走相位目录与学习相位账本），`--self-test` 覆盖两种形状。
 
 ---
 
