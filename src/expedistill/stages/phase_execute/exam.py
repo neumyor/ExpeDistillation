@@ -7,6 +7,19 @@ exam-anchored and never collide across phases); the invalid-redispatch
 loop does not apply here -- an answer run is either judged, or the
 pipeline's own repair budget died (the terminal
 ``exam_generation_failed`` cause).
+
+Replay protection (the phase's own resume rule, scoped to THIS phase
+instance: a later A phase is a fresh measurement round, not a replay): a
+unit this same phase already planned in an earlier pass (phase_disk's
+pre-overwrite units.jsonl is the marker -- unit ids carry the phase
+label) whose bare or with-skill answer for the same key is already
+JUDGED reuses that stored attempt and makes no model call for it
+(composites.acceptance_skill_status.find_judged_attempt -- K3 is not
+idempotent, so re-answering would replace the measurement); an UNjudged
+attempt is in-flight work the exam_once call itself completes through
+its pending-attempt lookup; the exam generation and the leak audit
+reuse their own stored facts (the exams store and the leak-verdict
+ledger).
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -22,6 +35,7 @@ from expedistill.composites.acceptance_leak import (
 from expedistill.composites.acceptance_skill_status import (
     exam_attempts,
     find_bare,
+    find_judged_attempt,
 )
 from expedistill.composites.exam_grading import judge_budget_exhausted
 from expedistill.composites.exam_once import exam_once
@@ -48,6 +62,7 @@ from expedistill.stages.phase_execute.phase_disk import (
     GENERATION_FAILURES_NAME,
     SUMMARY_NAME,
     _bank_skills,
+    _earlier_pass_unit_ids,
     _phase_dir,
     _rebased_row,
     _reused_rows,
@@ -90,7 +105,14 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     are exam-anchored and never collide across phases). The invalid
     redispatch loop does not apply to the exam role: an answer run is
     either judged, or the pipeline's own repair budget died -- the
-    terminal ``exam_generation_failed`` cause, never a re-dispatch."""
+    terminal ``exam_generation_failed`` cause, never a re-dispatch.
+
+    Replay protection (the module docstring): before each exam_once call
+    the driver looks the key's latest JUDGED attempt up -- for the units
+    this same phase already planned in an earlier pass -- and reuses it,
+    so an interrupted-and-resumed phase never re-answers an exam whose
+    measurement already happened; a later A phase (a new measurement
+    round) is untouched by the guard and re-measures as before."""
     _execution_params(spec)  # the exam execution has no knobs; loud check
     rule_name = spec.acceptance or verdicts.default_verdict_rule("exam")
     if rule_name != "exam_judge":
@@ -106,6 +128,10 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     plans = _plan_units(rows, None, phase_label=phase.label,
                         benchmark=ctx.config.benchmark, role="weak",
                         n_attempts=1)
+    # This phase's earlier-pass marker, read before _write_units replaces
+    # the file (phase_disk): the unit ids an earlier pass of THIS phase
+    # already planned -- the scope of the replay protection below.
+    replayable = _earlier_pass_unit_ids(ctx, phase)
     _write_units(ctx, phase, [plan.unit for plan in plans])
     reused = _reused_rows(ctx, phase, [plan.unit for plan in plans])
     plugin = resolve_plugin(ctx.config.benchmark)
@@ -128,17 +154,25 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
                                      terminal_generation)
             if exam is None:
                 return "generation_failed", exam_id
-            # -- the control first: the bare answer, judged ---------------
-            bare = exam_once(
-                store=ctx.store, exam=exam,
-                answerer_handle=ctx.handle("answerer"),
-                judge_handle=ctx.handle("judge"), skills_block="",
-                purpose="bare", usage=ctx.usage, run_dir=ctx.run_dir)
+            # -- the control first: the bare answer, judged. A judged
+            # bare attempt of this key is a FINISHED measurement from an
+            # earlier pass of this phase (a crash-resume replay, the
+            # module docstring): reuse it, never re-answer. ------------
+            bare = (find_judged_attempt(
+                        ctx.store, exam_id, "bare", None, None, 0)
+                    if plan.unit.unit_id in replayable else None)
+            if bare is None:
+                bare = exam_once(
+                    store=ctx.store, exam=exam,
+                    answerer_handle=ctx.handle("answerer"),
+                    judge_handle=ctx.handle("judge"), skills_block="",
+                    purpose="bare", usage=ctx.usage, run_dir=ctx.run_dir)
             if decision.control_perfect_skips_run(
                     compare_rule=compare_rule, control_valid=1,
                     control_success=1 if bare.judge_verdict else 0):
                 return "control_perfect", exam_id
-            # -- the D8 leak audit BEFORE the with-skill call (C1) -------
+            # -- the D8 leak audit BEFORE the with-skill call (C1); the
+            # first-verdict ledger makes its own replay a lookup -------
             verdict = leak_verdict_for(
                 store=ctx.store, skill_id=skill.skill_id,
                 skill_version=skill.version, skill_content=skill.content,
@@ -146,7 +180,13 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
                 usage=ctx.usage, run_dir=ctx.run_dir)
             if verdict["leaked"]:
                 return "leaked", exam_id
-            # -- the with-skill answer, judged --------------------------
+            # -- the with-skill answer, judged; same replay rule as the
+            # bare control above (the judged attempt IS the unit's
+            # measurement, verdict included -- no judge call either) ---
+            if plan.unit.unit_id in replayable and find_judged_attempt(
+                    ctx.store, exam_id, "acceptance", skill.skill_id,
+                    skill.version, 0) is not None:
+                return "measured", exam_id
             exam_once(
                 store=ctx.store, exam=exam,
                 answerer_handle=ctx.handle("answerer"),

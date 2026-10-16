@@ -7,11 +7,13 @@ the stage-4 ledger paths and the record readers that derive a skill's
 current state purely from disk -- the attempts of an exam (serial order)
 and the resumes each lookup supports (a judged bare answer, a passing
 acceptance attempt ON this version, the judged with-skill attempt of one
-round, the most recent judged with-skill attempt before a round, and the
-next round's number). Read-only; the consumers are the acceptance report reader
-(composites/reports.py), the exam phase driver (stages/phase_execute.py)
-and the exam evidence collector (methods/evidence/exam_sheet.py), and
-the leak verdicts are composites/acceptance_leak.py.
+round, the most recent judged with-skill attempt before a round, the
+next round's number, and the latest judged attempt of one full key --
+the exam phase driver's replay guard). Read-only; the consumers are the
+acceptance report reader (composites/reports.py), the exam phase driver
+(stages/phase_execute.py) and the exam evidence collector
+(methods/evidence/exam_sheet.py), and the leak verdicts are
+composites/acceptance_leak.py.
 """
 
 from pathlib import Path
@@ -64,6 +66,40 @@ def find_bare(attempts: List[Attempt]) -> Optional[Attempt]:
                 and attempt.judge_verdict is not None):
             return attempt
     return None
+
+
+def find_judged_attempt(store: Store, exam_id: str, purpose: str,
+                        skill_id: Optional[str],
+                        skill_version: Optional[int],
+                        retry_round: int) -> Optional[Attempt]:
+    """The latest (by serial) judged attempt of this exam with this key,
+    if any.
+
+    The judged twin of exam_answering's ``_pending_attempt`` (the latest
+    UNjudged attempt of the same key): together the two lookups decide
+    what a replayed caller owes for one (exam, purpose, skill_id,
+    skill_version, retry_round) key. A judged attempt is a FINISHED
+    measurement -- its verdict is already on the stored row, so the exam
+    phase driver reuses it as the unit's answer instead of calling
+    exam_once again (K3 is not idempotent: every call is a fresh
+    attempt, and re-answering would replace the measured record under a
+    new serial). An unjudged attempt is in-flight work that only
+    exam_once itself sees, through its own pending lookup, and is never
+    returned here.
+    """
+    latest: Optional[Attempt] = None
+    latest_serial = -1
+    for attempt in exam_attempts(store, exam_id):
+        if (attempt.judge_verdict is None
+                or attempt.purpose != purpose
+                or attempt.skill_id != skill_id
+                or attempt.skill_version != skill_version
+                or attempt.retry_round != retry_round):
+            continue
+        serial = _serial(attempt)
+        if serial > latest_serial:
+            latest, latest_serial = attempt, serial
+    return latest
 
 
 def _find_accepted(attempts: List[Attempt], skill_id: str,

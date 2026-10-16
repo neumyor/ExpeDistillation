@@ -100,7 +100,11 @@ learn-phase half is phase_bank's):
                                   run-level store holds ONLY bare runs,
                                   so no id ever collides.
         units.jsonl               the resolved delivery rows, full
-                                  frozen unit ids attached
+                                  frozen unit ids attached (rewritten at
+                                  the start of every pass of the phase;
+                                  the exam role reads its pre-overwrite
+                                  content as the same-phase replay
+                                  marker)
         acceptance_report.jsonl   the phase's report rows (not the C
                                   phase: its numbers go to the summary
                                   alone, the boundaries doc's rule that
@@ -112,9 +116,12 @@ learn-phase half is phase_bank's):
         phase_summary.json        the summary also returned as PhaseResult
 
 Resume is disk-only, as everywhere: K1 skips stored units, exam
-answering reuses its unjudged pending attempt, judge_round re-derives
-and byte-compares its stored row, and the redispatch and accepted-hole
-records are read before anything dispatches.
+answering reuses its unjudged pending attempt (and a REPLAYED exam
+phase -- same phase instance, an earlier pass already planned the unit --
+skips an answer whose attempt is already judged: a finished measurement
+is never re-answered), judge_round re-derives and byte-compares its
+stored row, and the redispatch and accepted-hole records are read
+before anything dispatches.
 
 The package's split (the plan's 400-line rule; the Wave 2 review's
 blocking finding):

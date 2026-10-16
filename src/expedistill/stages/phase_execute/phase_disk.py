@@ -130,6 +130,27 @@ def _write_report(ctx: StageContext, phase: PhaseInstance,
                 [asdict(row) for row in rows])
 
 
+def _earlier_pass_unit_ids(ctx: StageContext, phase: PhaseInstance
+                           ) -> set:
+    """The unit ids THIS phase instance resolved in an earlier pass.
+
+    The replay marker of the phase's own resume rules (the exam role's
+    judged-answer reuse): ``units.jsonl`` is rewritten at the start of
+    every pass, so its pre-overwrite content is the only durable record
+    that this phase already planned these units -- and since a unit id
+    carries the phase label, no other phase can have written them. The
+    caller must read this BEFORE :func:`_write_units` replaces the file.
+
+    The marker scopes a LOOKUP, never skips work: a marked unit whose
+    measurement is not on disk yet (the earlier pass crashed before it)
+    runs exactly like an unmarked one.
+    """
+    path = _phase_dir(ctx, phase) / UNITS_NAME
+    if not path.exists():
+        return set()
+    return {row["unit_id"] for row in read_jsonl(path)}
+
+
 def _reused_rows(ctx: StageContext, phase: PhaseInstance,
                  new_units: Sequence[ExecutionUnitRow]
                  ) -> Dict[str, AcceptanceReportRow]:
