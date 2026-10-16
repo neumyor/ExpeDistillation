@@ -535,7 +535,7 @@ def main() -> int:
             attempt_index=attempt,
             skills_injected=None,
             steps=[Step(**step) for step in steps],
-            status="success" if row["reward"] == "1.0" else "failure",
+            correctness=row["reward"] == "1.0",
             meta=meta,
         )
         store.save(trajectory, "trajectories")
@@ -564,7 +564,7 @@ def main() -> int:
         stored = store.load("trajectories", trajectory_id, Trajectory)
         stored_steps += len(stored.steps)
         marks = statuses[role].setdefault(task, ["-"] * attempts[role])
-        marks[attempt] = "S" if stored.status == "success" else "F"
+        marks[attempt] = "S" if stored.correctness is True else "F"
     if complete:
         print(f"all {len(units)} expected units are in the store "
               f"({stored_steps} interaction steps)")

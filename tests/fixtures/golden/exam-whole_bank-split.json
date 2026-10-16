@@ -988,42 +988,40 @@
   "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fstrong%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fstrong%2F00"
     },
     "model_name": "strong-model",
     "model_role": "strong",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/strong/00"
   },
   "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/00"
   },
@@ -1290,42 +1288,40 @@
   "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": "bank:6b0570c0284c",
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },
   "stage6_test/bare/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage6_bare/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },

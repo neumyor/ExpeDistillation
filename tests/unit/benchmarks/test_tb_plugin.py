@@ -334,7 +334,7 @@ def test_run_success_end_to_end(tmp_path):
     plugin = _make_plugin(link, recorder)
     outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert len(outcome.steps) == 2
     meta = outcome.meta
     assert meta["run_id"] == "ed_train-fasttext_tok"
@@ -370,7 +370,7 @@ def test_run_reports_categorized_skip_counts_in_meta(tmp_path):
     plugin = _make_plugin(link)
     outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     # The fixture's two unmapped steps both carry tool_calls, so they land
     # in "other" (see test_skip_counts_of_fixture_malformed_steps_are_other).
     assert outcome.meta["skipped_steps"] == 2
@@ -387,7 +387,7 @@ def test_run_with_skills_uploads_skill_md(tmp_path):
     skills_block = "## Skill rules\n- check pip mirrors before installing"
     outcome = plugin.run(TASK, HANDLE, skills_block, tmp_path / "work")
 
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta["eval_mode"] == "skills"
     assert outcome.meta["skills_injected"] is True
     assert outcome.meta["remote_skill_file"] == (
@@ -408,23 +408,22 @@ def test_run_with_skills_uploads_skill_md(tmp_path):
             in submit)
 
 
-def test_run_dead_runner_is_infra_error_with_partial_evidence(tmp_path):
+def test_run_dead_runner_raises_with_partial_evidence(tmp_path):
     link = FakeRemoteLink(
         polls=["PENDING\n", "DEAD\n"],
         remote_files={"__log__": _fixture_text("runner_log.txt")})
     plugin = _make_plugin(link)
-    outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
-
-    assert outcome.status == "infra_error"
-    assert "exited without producing result.json" in outcome.meta["error"]
-    assert "run_id" in outcome.meta
-    assert "ConfigValidationError" in outcome.meta["runner_log_tail"]
+    with pytest.raises(InfrastructureError) as raised:
+        plugin.run(TASK, HANDLE, "", tmp_path / "work")
+    message = str(raised.value)
+    assert "exited without producing result.json" in message
+    assert "ConfigValidationError" in message  # the runner log tail rides in
     # A failure ledger row would be K1's business; usage here is null, not 0.
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
     plugin = _make_plugin(FakeRemoteLink(
         polls=["DEAD\n"], remote_files={}), recorder)
-    outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work2")
-    assert outcome.status == "infra_error"
+    with pytest.raises(InfrastructureError):
+        plugin.run(TASK, HANDLE, "", tmp_path / "work2")
     rows = recorder.totals()
     assert rows["overall"]["request_count"] == 1
     assert rows["overall"]["in"] == 0  # null contributes nothing
@@ -432,15 +431,17 @@ def test_run_dead_runner_is_infra_error_with_partial_evidence(tmp_path):
     assert json.loads(lines[0])["in_tokens"] is None
 
 
-def test_run_deadline_is_infra_error(tmp_path):
+def test_run_deadline_raises(tmp_path):
     link = FakeRemoteLink(polls=["PENDING\n"])
     plugin = TBPlugin(link=link, poll_seconds=0.0, deadline_seconds=0.0)
-    outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert "deadline" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError, match="deadline"):
+        plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
 
-def test_run_infra_exception_result_is_infra_error(tmp_path):
+def test_run_infra_exception_result_is_unscored_not_retried(tmp_path):
+    # R2b: a trial that came back without a scorer verdict is a STORED
+    # correctness=None run with the exception as a raw fact -- no
+    # mechanical retry; acceptance's named rule judges it.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
@@ -448,19 +449,18 @@ def test_run_infra_exception_result_is_infra_error(tmp_path):
             f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
     outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert "AgentSetupTimeoutError" in outcome.meta["error"]
+    assert outcome.correctness is None
     assert outcome.meta["exception_type"] == "AgentSetupTimeoutError"
     # The stepwise view is still rebuilt and kept.
     assert len(outcome.steps) == 2
 
 
-def test_run_model_timeout_result_is_no_scorer_verdict(tmp_path):
-    # R2: the model-vs-infra exception reclassification is gone from the
-    # execution path. A timed-out agent produced no scorer verdict, so the
-    # plugin claims nothing about the model: the run lands in the frozen
-    # vocabulary's "no measurement" bucket with the exception as a raw
-    # fact (acceptance's named rules judge it from there).
+def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
+    # R2/R2b: the model-vs-infra exception reclassification is gone from the
+    # execution path and so is the mechanical retry. A timed-out agent
+    # produced no scorer verdict, so the run is stored with
+    # correctness=None and the exception as a raw fact (acceptance's named
+    # rules judge it from there).
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
@@ -468,24 +468,24 @@ def test_run_model_timeout_result_is_no_scorer_verdict(tmp_path):
             f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
     outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
+    assert outcome.correctness is None
     assert outcome.meta["exception_type"] == "AgentTimeoutError"
     assert outcome.meta["reward"] is None
 
 
-def test_run_pseudo_zero_keeps_the_scorer_verdict_and_reports_the_fact(
-        tmp_path):
-    # R2: a reward claimed without pytest ever collecting anything (the
-    # campaign's "fake zero") is no longer invalidated by the plugin. The
-    # scorer's verdict passes through and the pseudo-zero EVIDENCE rides
-    # along as the ``verifier_ran`` fact; whether the run counts is
-    # acceptance's named-rule decision.
+def test_run_pseudo_zero_carries_no_scorer_verdict(tmp_path):
+    # R2b: a reward claimed without pytest ever collecting anything (the
+    # campaign's "fake zero") carries no scorer verdict, in either reward
+    # direction -- the plugin stores correctness=None with the raw facts
+    # (reward, verifier_ran) beside it; whether the run counts is
+    # acceptance's named-rule decision, and it is never mechanically
+    # retried.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files(result="result_failure.json",
                                             verifier_log="verifier_not_collected.txt"))
     outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "failure"
+    assert outcome.correctness is None
     assert outcome.meta["reward"] == 0.0
     assert outcome.meta["verifier_ran"] is False
     assert "verdict_reason" not in outcome.meta
@@ -501,9 +501,8 @@ def test_run_truncated_result_json_is_infra_error(tmp_path):
             f"{TRIAL}/result.json": '{"verifier_result": {"rewar',
             f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert "unreadable result.json" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError, match="unreadable result.json"):
+        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
 
 
 def test_run_non_object_result_json_is_infra_error(tmp_path):
@@ -515,19 +514,17 @@ def test_run_non_object_result_json_is_infra_error(tmp_path):
             f"{TRIAL}/result.json": "[1, 2, 3]",
             f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert "not a JSON object" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError, match="not a JSON object"):
+        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
 
 
-def test_run_transport_failure_is_infra_error(tmp_path):
+def test_run_transport_failure_propagates(tmp_path):
     class BrokenLink(FakeRemoteLink):
         def run(self, cmd, timeout=None):
             raise InfrastructureError("ssh to user@node29 timed out")
 
-    outcome = _make_plugin(BrokenLink()).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert "timed out" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError, match="timed out"):
+        _make_plugin(BrokenLink()).run(TASK, HANDLE, "", tmp_path / "work")
 
 
 def test_run_rejects_invalid_task_name(tmp_path):
@@ -560,7 +557,7 @@ def test_run_id_carries_the_namespace(tmp_path):
     link = JobsRemoteLink()
     outcome = _make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
                                      "", tmp_path / "work")
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta["run_id"] == "ed_train-fasttext_0123abcdef_a00"
     assert "RUN_ID=ed_train-fasttext_0123abcdef_a00" in link.submits()[0]
 
@@ -586,7 +583,7 @@ def test_weak_arm_never_reads_the_strong_arms_result(tmp_path):
     assert weak.meta["run_id"] == "ed_train-fasttext_eaeaeaeaea_a00"
     assert weak.meta["run_id"] != strong_id
     assert len(link.submits()) == 1
-    assert weak.status == "failure"
+    assert weak.correctness is False
     assert weak.meta["remote"]["result"].startswith(
         f"{ROOT}/jobs/ed_train-fasttext_eaeaeaeaea_a00/")
     assert not any(strong_id in cmd for cmd in link.commands)
@@ -624,7 +621,7 @@ def test_crashed_unit_reuses_its_finished_result_without_submit(tmp_path):
     plugin = _make_plugin(link, recorder)
     outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, skills,
                          workdir)
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta["resumed"] == "result"
     assert len(link.submits()) == 1
     # Nothing re-uploaded; the provenance is still recorded.
@@ -664,13 +661,11 @@ def test_remote_result_without_local_submit_record_is_never_reused(tmp_path):
     files = trial_files(NS_TASK_RUN_ID, "train-fasttext")
     link = JobsRemoteLink(files=files)
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    outcome = _make_plugin(link, recorder).run(
-        _task(namespace="0123abcdef"), HANDLE, "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert outcome.meta["resumed"] == "stale"
-    assert "no local submit record" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError) as raised:
+        _make_plugin(link, recorder).run(
+            _task(namespace="0123abcdef"), HANDLE, "", tmp_path / "work")
+    assert "no local submit record" in str(raised.value)
     assert link.submits() == []
-    assert outcome.meta.get("reward") is None
     # No rollout happened, so no usage row either.
     assert recorder.totals()["overall"]["request_count"] == 0
 
@@ -693,11 +688,9 @@ def test_submit_conditions_mismatch_is_stale(tmp_path, monkeypatch, tamper):
         meta = json.loads(link.files[meta_path])
         meta["env_sha256"] = "0" * 64
         link.files[meta_path] = json.dumps(meta)
-    outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, skills,
-                         workdir)
-    assert outcome.status == "infra_error"
-    assert outcome.meta["resumed"] == "stale"
-    assert "refusing to" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError) as raised:
+        plugin.run(_task(namespace="0123abcdef"), HANDLE, skills, workdir)
+    assert "refusing to" in str(raised.value)
     assert len(link.submits()) == 1
 
 
@@ -728,11 +721,10 @@ def test_existing_run_dir_with_dead_pid_is_infra_error_without_submit(
     pid = _crashed_launch(link, plugin, workdir)
     link.alive.discard(pid)  # the runner died without a result
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    outcome = _make_plugin(link, recorder).run(
-        _task(namespace="0123abcdef"), HANDLE, "", workdir)
-    assert outcome.status == "infra_error"
-    assert outcome.meta["resumed"] == "stale"
-    assert f"recorded pid {pid} is not alive" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError) as raised:
+        _make_plugin(link, recorder).run(
+            _task(namespace="0123abcdef"), HANDLE, "", workdir)
+    assert f"recorded pid {pid} is not alive" in str(raised.value)
     assert len(link.submits()) == 1
     assert any(f"/proc/{pid}/environ" in cmd for cmd in link.commands
                if "ABSENT" in cmd)
@@ -745,10 +737,9 @@ def test_existing_run_dir_without_pid_file_is_infra_error_without_submit(
     # remote launch and the local write): the runner log exists, so the run
     # id is taken; resubmitting could start a second runner into it.
     link = JobsRemoteLink(files={f"{ROOT}/logs/{NS_TASK_RUN_ID}.log": ""})
-    outcome = _make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
-                                     "", tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert outcome.meta["resumed"] == "stale"
+    with pytest.raises(InfrastructureError, match="already exists remotely"):
+        _make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
+                               "", tmp_path / "work")
     assert link.submits() == []
 
 
@@ -770,7 +761,7 @@ def test_existing_run_dir_with_alive_pid_polls_without_submit(tmp_path):
 
     link._check = check_then_finish
     outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, "", workdir)
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta["resumed"] == "alive"
     assert outcome.meta["remote_pid"] == pid
     assert outcome.meta["timing"]["source"] == "result.json"
@@ -778,19 +769,28 @@ def test_existing_run_dir_with_alive_pid_polls_without_submit(tmp_path):
     assert polls["n"] == 2
 
 
+def _kill_record(message):
+    """The deadline_kill JSON embedded in a deadline failure message."""
+    marker = "deadline_kill: "
+    start = message.index(marker) + len(marker)
+    return json.loads(message[start:message.index("}", start) + 1])
+
+
 def test_deadline_kills_only_the_recorded_pid(tmp_path):
     link = _running_link(alive={1234})  # somebody else's live process
     plugin = TBPlugin(link=link, poll_seconds=0.0, deadline_seconds=0.0)
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
     plugin.usage_recorder = recorder
-    outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, "",
-                         tmp_path / "work")
-    assert outcome.status == "infra_error"
-    assert "deadline" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError) as raised:
+        plugin.run(_task(namespace="0123abcdef"), HANDLE, "",
+                   tmp_path / "work")
+    message = str(raised.value)
+    assert "deadline" in message
     pid = link.launches[0]["pid"]
     assert link.kills == [pid]
     assert pid not in link.alive and 1234 in link.alive
-    assert outcome.meta["deadline_kill"] == {
+    # The kill record rides in the failure message (K1 ledgeres it).
+    assert _kill_record(message) == {
         "pid": pid, "verified": True, "signalled": True, "rc": 0}
     # The launched rollout did happen: one (null) usage row.
     assert recorder.totals()["overall"]["request_count"] == 1
@@ -804,9 +804,8 @@ def test_reused_pid_of_a_foreign_process_is_not_rejoined(tmp_path):
     workdir = tmp_path / "work"
     pid = _crashed_launch(link, plugin, workdir)
     link.owner.pop(pid)  # same pid, somebody else's process now
-    outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, "", workdir)
-    assert outcome.status == "infra_error"
-    assert outcome.meta["resumed"] == "stale"
+    with pytest.raises(InfrastructureError, match="refusing to reuse"):
+        plugin.run(_task(namespace="0123abcdef"), HANDLE, "", workdir)
     assert pid in link.alive
     assert len(link.submits()) == 1
 
@@ -825,13 +824,14 @@ def test_deadline_never_kills_a_process_that_reused_the_pid(tmp_path):
 
     link._check = runner_dies_and_pid_is_reused
     plugin = TBPlugin(link=link, poll_seconds=0.0, deadline_seconds=0.0)
-    outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, "",
-                         tmp_path / "work")
+    with pytest.raises(InfrastructureError) as raised:
+        plugin.run(_task(namespace="0123abcdef"), HANDLE, "",
+                   tmp_path / "work")
     pid = link.launches[0]["pid"]
-    assert outcome.status == "infra_error"
+    message = str(raised.value)
     assert link.kills == []
     assert pid in link.alive
-    assert outcome.meta["deadline_kill"] == {
+    assert _kill_record(message) == {
         "pid": pid, "verified": False, "signalled": False}
 
 

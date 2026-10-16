@@ -33,11 +33,25 @@ from typing import Iterable, List, Optional, Union
 from expedistill.benchmarks.base import ViewRules
 from expedistill.core.models import Step, Trajectory
 
-__all__ = ["render_steps_view", "render_trajectory_view"]
+__all__ = ["final_status_word", "render_steps_view",
+           "render_trajectory_view"]
 
 #: Accept both Step objects and {action, observation} mappings: runners and
 #: stored records hand over either shape.
 _StepLike = Union[Step, dict]
+
+
+def final_status_word(correctness: Optional[bool]) -> str:
+    """The header/evidence word for one run's scorer verdict.
+
+    A pure display label, not a data vocabulary: ``correctness`` True /
+    False / None render as ``success`` / ``failure`` / ``unknown``. The
+    True/False words are byte-identical to the pre-R2b header on purpose --
+    they feed the G1 segmentation prompt and the G10 evidence lines, both
+    pinned call for call by the semantic instrument's E4 -- so this mapping
+    is frozen the same way a prompt is (changing it is a new experiment).
+    """
+    return {True: "success", False: "failure"}.get(correctness, "unknown")
 
 
 def _step_fields(step: _StepLike, position: int) -> tuple:
@@ -72,7 +86,8 @@ def render_steps_view(steps: Iterable[_StepLike],
 def render_trajectory_view(traj: Trajectory,
                            view_rules: Optional[ViewRules] = None) -> str:
     """Render a whole Trajectory: status header, then the steps view."""
-    header = f"task: {traj.task_id} (final status: {traj.status})"
+    header = (f"task: {traj.task_id} "
+              f"(final status: {final_status_word(traj.correctness)})")
     steps_view = render_steps_view(traj.steps, view_rules)
     if not steps_view:
         return header

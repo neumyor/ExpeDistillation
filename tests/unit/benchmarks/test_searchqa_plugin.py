@@ -262,7 +262,7 @@ def test_roundtrip_search_then_finish_is_success(
         "Finish[red cent]",
     ])
     outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta["termination"] == "terminated"
     assert outcome.meta["steps_used"] == 2
     assert len(outcome.steps) == 2
@@ -276,7 +276,7 @@ def test_roundtrip_wrong_answer_is_failure(stub_eval_repo, tmp_path):
     task = _task_for(_fixture_items()[0])
     handle = make_fake_handle(role="test", script=["Finish[a nickel]"])
     outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.status == "failure"
+    assert outcome.correctness is False
     assert outcome.meta["termination"] == "terminated"
     assert outcome.meta["searchqa"]["em"] == 0.0
 
@@ -287,7 +287,7 @@ def test_roundtrip_step_budget_exhaustion_is_failure(
     task = _task_for(_fixture_items()[0])
     handle = make_fake_handle(role="test", script=["Search[penny]"] * 10)
     outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.status == "failure"
+    assert outcome.correctness is False
     assert outcome.meta["termination"] == "step_budget"
     assert outcome.meta["steps_used"] == 6  # SEARCHQA_MAX_STEPS
 
@@ -319,7 +319,7 @@ def test_roundtrip_invalid_actions_stay_in_episode(stub_eval_repo, tmp_path):
         "Finish[red cent]",
     ])
     outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.steps[0]["observation"] == searchqa_env.INVALID_ACTION_MESSAGE
 
 
@@ -337,7 +337,7 @@ def test_requests_are_dumped_under_the_handle_run_dir(stub_eval_repo, tmp_path):
         "Finish[red cent]",
     ], run_dir=run_dir)
     outcome = plugin.run(task, handle, skills_block="", workdir=workdir)
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert len(list((run_dir / "llm_requests").glob("*.json"))) == 2
     assert not (workdir / "llm_requests").exists()
 
@@ -371,7 +371,7 @@ def test_live_one_task_against_eval_repo(tmp_path):
         f"Finish[{task.meta['answers'][0]}]",
     ])
     outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.status == "success", outcome.meta
+    assert outcome.correctness is True, outcome.meta
     assert outcome.meta["termination"] == "terminated"
     assert outcome.meta["searchqa"]["em"] == 1.0
 
@@ -380,12 +380,12 @@ def test_live_one_task_against_eval_repo(tmp_path):
 # Pre-registered auxiliary metric: sub_EM (README D3 / stage 1 / stage 6)
 # ----------------------------------------------------------------------
 
-def _aux_traj(status, meta):
+def _aux_traj(correctness, meta):
     from expedistill.core.models import Trajectory
     return Trajectory(
         trajectory_id="traj/searchqa:q1/weak/00", task_id="searchqa:q1",
         benchmark="searchqa", model_role="weak", model_name="m",
-        attempt_index=0, status=status, meta=meta)
+        attempt_index=0, correctness=correctness, meta=meta)
 
 
 def test_aux_metric_name_is_declared():
@@ -396,22 +396,24 @@ def test_aux_metric_name_is_declared():
 
 def test_aux_success_reads_sub_em_from_the_eval_meta():
     plugin = SearchQAPlugin()
-    assert plugin.aux_success(_aux_traj("failure", {
+    assert plugin.aux_success(_aux_traj(False, {
         "termination": "terminated",
         "searchqa": {"em": 0.0, "f1": 0.5, "sub_em": 1.0}})) is True
-    assert plugin.aux_success(_aux_traj("failure", {
+    assert plugin.aux_success(_aux_traj(False, {
         "termination": "terminated",
         "searchqa": {"em": 0.0, "f1": 0.0, "sub_em": 0.0}})) is False
 
 
 def test_aux_success_without_a_submitted_answer_is_false():
-    # A step-budget exhaustion (or a model output error) never reached
-    # Finish, so no answer exists to be a substring of gold: sub_EM is 0.
+    # A step-budget exhaustion never reached Finish, so no answer exists to
+    # be a substring of gold: sub_EM is 0. (An unscored run -- the
+    # model-output-error episode, correctness None -- never reaches the
+    # scorer at all: D3 shows the scorer only scored trajectories.)
     plugin = SearchQAPlugin()
     assert plugin.aux_success(_aux_traj(
-        "failure", {"termination": "step_budget"})) is False
-    assert plugin.aux_success(_aux_traj(
-        "failure", {"termination": "model_output_error"})) is False
+        False, {"termination": "step_budget"})) is False
+    assert plugin.aux_success(_aux_traj(None, {"termination": "step_budget"})) \
+        is False
 
 
 def test_aux_success_missing_meta_where_a_score_must_exist_is_a_bug():
@@ -421,6 +423,6 @@ def test_aux_success_missing_meta_where_a_score_must_exist_is_a_bug():
     from expedistill.infra.reliability import CodeBugError
     plugin = SearchQAPlugin()
     with pytest.raises(CodeBugError, match="searchqa"):
-        plugin.aux_success(_aux_traj("success", {"termination": "terminated"}))
+        plugin.aux_success(_aux_traj(True, {"termination": "terminated"}))
     with pytest.raises(CodeBugError, match="searchqa"):
-        plugin.aux_success(_aux_traj("failure", {"termination": "terminated"}))
+        plugin.aux_success(_aux_traj(False, {"termination": "terminated"}))

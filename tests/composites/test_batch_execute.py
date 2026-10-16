@@ -41,6 +41,7 @@ from expedistill.infra.parallel import ParallelError
 from expedistill.infra.reliability import (
     CodeBugError,
     ConfigError as ReliabilityConfigError,
+    InfrastructureError,
     ProviderRefusalError,
     UnitFailureRecorder,
 )
@@ -152,7 +153,7 @@ def _success(task_id):
     """The default outcome: a canned success derived from the task id."""
     return RunOutcome(
         steps=[{"action": f"exec {task_id}", "observation": "ok"}],
-        status="success",
+        correctness=True,
     )
 
 
@@ -178,7 +179,7 @@ def _fingerprint(traj):
     """Everything that must match across stores; meta.workdir is run-local."""
     return (
         traj.trajectory_id,
-        traj.status,
+        traj.correctness,
         [(s.action, s.observation) for s in traj.steps],
         traj.meta.get("attempt_token"),
     )
@@ -319,10 +320,10 @@ def test_empty_tasks_returns_empty_result(monkeypatch, tmp_path):
 # Infra retries (B6 policy)
 # ---------------------------------------------------------------------------
 
-def test_infra_error_retried_then_success(monkeypatch, tmp_path):
+def test_infra_failure_retried_then_success(monkeypatch, tmp_path):
     def infra_once(record):
         if record["attempt_token"] == "a00":
-            return RunOutcome(status="infra_error", meta={"error": "sandbox down"})
+            raise InfrastructureError("sandbox down")
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=infra_once)
@@ -333,7 +334,7 @@ def test_infra_error_retried_then_success(monkeypatch, tmp_path):
                         name="r1", infra_retries=1, infra_backoff=(0.0, 0.0))
     # The retry succeeded, so the unit is present and nothing was recorded.
     assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
-    assert result[0].status == "success"
+    assert result[0].correctness is True
     assert [c["attempt_token"] for c in plugin.calls] == ["a00", "a00r1"]
     # Both executions of the unit used the same per-unit workdir.
     assert {str(c["workdir"]) for c in plugin.calls} == {
@@ -345,8 +346,7 @@ def test_infra_error_retried_then_success(monkeypatch, tmp_path):
 def test_infra_gives_up_after_the_configured_retries(monkeypatch, tmp_path):
     def t2_always_infra(record):
         if record["task_id"] == "t2":
-            return RunOutcome(status="infra_error",
-                              meta={"error": "dead endpoint"})
+            raise InfrastructureError("dead endpoint")
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=t2_always_infra)
@@ -376,7 +376,7 @@ def test_backoff_sleeps_one_uniform_draw_before_the_retry(
         monkeypatch, tmp_path):
     def infra_once(record):
         if record["attempt_token"] == "a00":
-            return RunOutcome(status="infra_error", meta={"error": "blip"})
+            raise InfrastructureError("blip")
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=infra_once)
@@ -413,8 +413,7 @@ def test_infra_exhausted_recorded_absent_and_resumed(
 
     def t2_always_infra(record):
         if record["task_id"] == "t2":
-            return RunOutcome(status="infra_error",
-                               meta={"error": "sandbox down"})
+            raise InfrastructureError("sandbox down")
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=t2_always_infra)
@@ -441,7 +440,7 @@ def test_infra_exhausted_recorded_absent_and_resumed(
     assert [c["task_id"] for c in plugin.calls] == ["t2"]
     assert [t.trajectory_id for t in resumed] == [
         _expected_id("t1", 0), _expected_id("t2", 0)]
-    assert all(t.status == "success" for t in resumed)
+    assert all(t.correctness is True for t in resumed)
     if "dispatch_stagger" in knobs:
         # The knobs really were live and the resume is unchanged: one
         # backoff wait per retry (a real draw inside the default bounds) and
@@ -563,7 +562,7 @@ def test_run_namespace_is_per_task_under_skills_for_task(
         monkeypatch, tmp_path):
     def infra_on_first(record):
         if record["attempt_token"] == "a00":
-            return RunOutcome(status="infra_error", meta={"error": "blip"})
+            raise InfrastructureError("blip")
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=infra_on_first)
@@ -699,7 +698,7 @@ def test_run_namespace_is_deterministic_and_shared_by_retries(
         monkeypatch, tmp_path):
     def infra_on_first(record):
         if record["attempt_token"] == "a00":
-            return RunOutcome(status="infra_error", meta={"error": "blip"})
+            raise InfrastructureError("blip")
         return _success(record["task_id"])
 
     plugin = RecordingPlugin(behavior=infra_on_first)
@@ -770,7 +769,7 @@ def test_resume_continues_the_retry_sequence(
     waits = _record_reliability_sleeps(monkeypatch)
 
     def always_infra(record):
-        return RunOutcome(status="infra_error", meta={"error": "stale run"})
+        raise InfrastructureError("stale run")
 
     plugin = RecordingPlugin(behavior=always_infra)
     tasks = _tasks("t1")
@@ -786,7 +785,7 @@ def test_resume_continues_the_retry_sequence(
     resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
                          **knobs)
     assert [c["attempt_token"] for c in plugin.calls] == [resume_token]
-    assert [t.status for t in resumed] == ["success"]
+    assert [t.correctness for t in resumed] == [True]
     if "dispatch_stagger" in knobs:
         # One backoff wait per retry (a draw inside the default bounds) and
         # one stagger sleep per started unit (the failed pass, the resume).
@@ -808,7 +807,7 @@ def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path, knobs):
 
     def infra_then_crash(record):
         if record["attempt_token"] == "a00":
-            return RunOutcome(status="infra_error", meta={"error": "blip"})
+            raise InfrastructureError("blip")
         raise RuntimeError("simulated crash while a00r1 was running")
 
     plugin = RecordingPlugin(behavior=infra_then_crash)
@@ -871,8 +870,8 @@ def test_strong_and_weak_arms_never_share_a_remote_result(
     weak = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
                       role="weak", model_name="weak-7b",
                       handle=make_fake_handle("weak", name="weak-7b"))
-    assert [t.status for t in strong] == ["success"]
-    assert [t.status for t in weak] == ["failure"]
+    assert [t.correctness for t in strong] == [True]
+    assert [t.correctness for t in weak] == [False]
     assert strong[0].meta["run_id"] != weak[0].meta["run_id"]
     assert [launch["model"] for launch in link.launches] == [
         "strong-70b", "weak-7b"]
@@ -1019,8 +1018,7 @@ def test_config_error_with_workers_stops_new_units(monkeypatch, tmp_path):
 def _infra_for(*task_ids):
     def behavior(record):
         if record["task_id"] in task_ids:
-            return RunOutcome(status="infra_error",
-                              meta={"error": "endpoint timed out"})
+            raise InfrastructureError("endpoint timed out")
         return _success(record["task_id"])
     return behavior
 
@@ -1075,7 +1073,7 @@ def test_untrusted_remote_run_is_retried_under_a_fresh_token(
     result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
                         handle=handle,
                         infra_retries=1, infra_backoff=(0.0, 0.0))
-    assert [t.status for t in result] == ["failure"]
+    assert [t.correctness for t in result] == [False]
     assert planted[0].endswith("_a00")
     assert result[0].meta["run_id"] == planted[0] + "r1"
     assert len(link.launches) == 1

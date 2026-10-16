@@ -110,12 +110,12 @@ class GoldenExamPlugin(BenchmarkPlugin):
         return [task for task in tasks if task.task_id in wanted]
 
     def run(self, task, handle, skills_block, workdir):
-        status = ("success" if handle.role == "executor_strong"
-                  else ("success" if skills_block else "failure"))
+        correctness = (True if handle.role == "executor_strong"
+                      else (True if skills_block else False))
         return RunOutcome(
             steps=[{"action": "run",
                     "observation": "the environment state"}],
-            status=status,
+            correctness=correctness,
         )
 
     @property
@@ -135,14 +135,14 @@ class GoldenLivePlugin(GoldenExamPlugin):
 
     def run(self, task, handle, skills_block, workdir):
         if handle.role == "executor_strong":
-            status = "success"
+            correctness = True
         else:
-            status = ("success" if G11_REVISION_MARKER in skills_block
-                      else "failure")
+            correctness = (True if G11_REVISION_MARKER in skills_block
+                           else False)
         return RunOutcome(
             steps=[{"action": "run",
                     "observation": "the environment state"}],
-            status=status,
+            correctness=correctness,
         )
 
 

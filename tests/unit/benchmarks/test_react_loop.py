@@ -1,6 +1,8 @@
 """Tests for benchmarks/react_loop.py: success path, step-budget exhaustion,
-infra failures mid-run, history truncation, and the bare-vs-skills prompt
-rule. Uses FakeClient + toy BaseEnv; no real benchmark, no network."""
+infra failures mid-run (raised, K1's to retry), the unscored
+model-output-error episode, history truncation, and the bare-vs-skills
+prompt rule. Uses FakeClient + toy BaseEnv; no real benchmark, no
+network."""
 
 import pytest
 
@@ -97,9 +99,9 @@ def _run(env, script, **kwargs):
 # Success and step flow
 # ---------------------------------------------------------------------------
 
-def test_success_path_records_steps_and_status():
+def test_success_path_records_steps_and_verdict():
     outcome, handle = _run(_ToyEnv(), ["finish"])
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta == {"termination": "terminated", "steps_used": 1}
     assert outcome.steps == [
         {"action": "finish", "observation": "Task is SOLVED."}]
@@ -110,7 +112,7 @@ def test_success_path_records_steps_and_status():
 
 def test_history_accumulates_action_observation_pairs():
     outcome, handle = _run(_ToyEnv(), ["look", "finish"])
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.steps[0]["action"] == "look"
     first_user = handle.client.calls[0]["user"]
     second_user = handle.client.calls[1]["user"]
@@ -119,26 +121,26 @@ def test_history_accumulates_action_observation_pairs():
     assert "action: look\nobservation: you did: look" in second_user
 
 
-def test_terminated_with_wrong_answer_is_failure():
+def test_terminated_with_wrong_answer_scores_false():
     env = _ToyEnv(fail_on_step=2)
     outcome, _ = _run(env, ["search", "finish"])
-    assert outcome.status == "failure"
+    assert outcome.correctness is False
     assert outcome.meta["termination"] == "terminated"
     assert outcome.steps[-1]["observation"] == "Answer is INCORRECT."
 
 
-def test_truncated_env_is_failure_not_success():
+def test_truncated_env_scores_false_not_true():
     env = _ToyEnv(truncate_after=2)
     outcome, _ = _run(env, ["a", "b"])
-    assert outcome.status == "failure"
+    assert outcome.correctness is False
     assert outcome.meta["termination"] == "truncated"
     assert len(outcome.steps) == 2
 
 
-def test_max_steps_exhaustion_is_failure():
+def test_max_steps_exhaustion_scores_false():
     env = _ToyEnv()
     outcome, _ = _run(env, ["a", "b", "c"], max_steps=3)
-    assert outcome.status == "failure"
+    assert outcome.correctness is False
     assert outcome.meta == {"termination": "step_budget", "steps_used": 3}
     assert [step["action"] for step in outcome.steps] == ["a", "b", "c"]
 
@@ -147,24 +149,20 @@ def test_max_steps_exhaustion_is_failure():
 # Infra failures
 # ---------------------------------------------------------------------------
 
-def test_env_infra_error_mid_run_keeps_partial_steps():
+def test_env_infra_error_mid_run_propagates():
+    # R2b: infrastructure failures travel as exceptions (K1 retries the
+    # unit); nothing is stored for the failed attempt.
     env = _ToyEnv(raise_on_step=2)
-    outcome, _ = _run(env, ["ok", "boom"])
-    assert outcome.status == "infra_error"
-    assert [step["action"] for step in outcome.steps] == ["ok"]
-    assert outcome.meta["stage"] == "env_step"
-    assert "sandbox died at step 2" in outcome.meta["error"]
+    with pytest.raises(InfrastructureError, match="sandbox died at step 2"):
+        _run(env, ["ok", "boom"])
 
 
-def test_model_call_infra_error_is_infra_outcome():
-    outcome, _ = _run(_ToyEnv(), [InfrastructureError("endpoint down")])
-    assert outcome.status == "infra_error"
-    assert outcome.steps == []
-    assert outcome.meta["stage"] == "model_call"
-    assert "endpoint down" in outcome.meta["error"]
+def test_model_call_infra_error_propagates():
+    with pytest.raises(InfrastructureError, match="endpoint down"):
+        _run(_ToyEnv(), [InfrastructureError("endpoint down")])
 
 
-def test_env_reset_infra_error_is_infra_outcome():
+def test_env_reset_infra_error_propagates():
     class _BrokenReset(_ToyEnv):
         def __init__(self):
             pass  # skip the constructor reset; reset() itself is broken
@@ -172,10 +170,8 @@ def test_env_reset_infra_error_is_infra_outcome():
         def reset(self):
             raise InfrastructureError("sandbox never started")
 
-    outcome, _ = _run(_BrokenReset(), ["finish"])
-    assert outcome.status == "infra_error"
-    assert outcome.steps == []
-    assert outcome.meta["stage"] == "reset"
+    with pytest.raises(InfrastructureError, match="sandbox never started"):
+        _run(_BrokenReset(), ["finish"])
 
 
 def test_code_bugs_still_raise():
@@ -188,17 +184,19 @@ def test_code_bugs_still_raise():
 
 
 # ---------------------------------------------------------------------------
-# Model output errors: the model's failure, not infra, not a bug
+# Model output errors: an unscored episode, not infra, not a bug
 # ---------------------------------------------------------------------------
 
-def test_model_output_error_mid_episode_is_failure_with_partial_steps():
+def test_model_output_error_mid_episode_is_unscored_with_partial_steps():
     # OpenAICompatClient raises ModelOutputError for an empty reply, and
     # call_model does not retry it; it used to escape run_react and stop the
-    # whole pipeline as a code bug.
+    # whole pipeline as a code bug. R2b: execution no longer reclassifies it
+    # as the model's failure -- the episode ends with no scorer verdict
+    # (correctness None) and acceptance judges the run.
     outcome, handle = _run(
         _ToyEnv(),
         ["look", "search", ModelOutputError("model m returned no content")])
-    assert outcome.status == "failure"
+    assert outcome.correctness is None
     assert [step["action"] for step in outcome.steps] == ["look", "search"]
     assert outcome.meta["termination"] == "model_output_error"
     assert outcome.meta["steps_used"] == 2
@@ -207,9 +205,9 @@ def test_model_output_error_mid_episode_is_failure_with_partial_steps():
     assert len(handle.client.calls) == 3
 
 
-def test_model_output_error_on_first_step_is_failure_with_no_steps():
+def test_model_output_error_on_first_step_is_unscored_with_no_steps():
     outcome, _ = _run(_ToyEnv(), [ModelOutputError("no content")])
-    assert outcome.status == "failure"
+    assert outcome.correctness is None
     assert outcome.steps == []
     assert outcome.meta["termination"] == "model_output_error"
 
@@ -221,8 +219,7 @@ def test_provider_refusal_still_propagates():
         _run(_ToyEnv(), ["look", ProviderRefusalError("status=401")])
 
 
-def test_k1_stores_model_output_error_unit_as_failure_and_continues(
-        monkeypatch, tmp_path):
+def test_k1_stores_the_unscored_unit_and_continues(monkeypatch, tmp_path):
     import importlib.abc
     import importlib.machinery
     import sys
@@ -288,13 +285,13 @@ def test_k1_stores_model_output_error_unit_as_failure_and_continues(
     finally:
         _reset_registry()
     by_task = {t.task_id.rsplit(":", 1)[-1]: t for t in trajectories}
-    assert by_task["empty"].status == "failure"
+    assert by_task["empty"].correctness is None
     assert by_task["empty"].meta["termination"] == "model_output_error"
     assert [s.action for s in by_task["empty"].steps] == ["look"]
-    assert by_task["fine"].status == "success"
+    assert by_task["fine"].correctness is True
     for traj in trajectories:
         stored = store.load("trajectories", traj.trajectory_id, Trajectory)
-        assert stored.status == traj.status
+        assert stored.correctness == traj.correctness
 
 
 # ---------------------------------------------------------------------------
@@ -308,8 +305,8 @@ def test_skills_block_bare_and_with_use_same_template():
     outcome_bare, handle_bare = _run(env_bare, ["finish"], skills_block="")
     outcome_skills, handle_skills = _run(env_skills, ["finish"],
                                          skills_block=skills_block)
-    assert outcome_bare.status == "success"
-    assert outcome_skills.status == "success"
+    assert outcome_bare.correctness is True
+    assert outcome_skills.correctness is True
     bare_user = handle_bare.client.calls[0]["user"]
     skills_user = handle_skills.client.calls[0]["user"]
     # The bare run is exactly the template with an empty skills slot; the

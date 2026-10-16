@@ -2,7 +2,8 @@
 
 Pins the vocabulary (per-run verdicts, unit statuses, the fixed cause
 set), the unit-id rule frozen with acceptance, the named per-run verdict
-rules, the R2b bridges from today's concluded objects, and
+rules, the stored-object entry (``verdict_from_run`` -- R2b deleted the
+``verdict_from_trajectory`` / ``verdict_from_attempt`` bridges), and
 ``summarize_unit``'s status/cause invariants -- plus R4's acceptance
 side: the verdict core and the report reader never touch the skill bank.
 """
@@ -150,15 +151,19 @@ def test_scorer_rule_follows_the_benchmark_scorer():
         "failure", "scorer: the benchmark's own scorer")
 
 
-def test_scorer_rule_refuses_an_unscored_run():
-    with pytest.raises(CodeBugError, match="did not score"):
-        verdicts.verdict_from_run(_record(), rule_name="scorer")
+def test_scorer_rule_judges_an_unscored_run_invalid():
+    # R2b: a run whose scorer verdict never came back (pseudo zero, a
+    # trial that died before its verifier ran) is judged invalid -- no
+    # measurement, excluded from every denominator -- never a failure and
+    # never a wiring bug.
+    assert verdicts.verdict_from_run(_record(), rule_name="scorer") == (
+        "invalid", "scorer: no scorer verdict came back for this run")
 
 
-def test_exam_judge_rule_reads_the_judges_verdict():
-    record = _record(aux={"judge_verdict": True})
+def test_exam_judge_rule_reads_the_judges_verdict_and_reason():
+    record = _record(aux={"judge_verdict": True, "judge_reason": "matches"})
     assert verdicts.verdict_from_run(record, rule_name="exam_judge") == (
-        "success", "exam_judge: the G5 model judge")
+        "success", "exam_judge: matches")
     record = _record(aux={"judge_verdict": False})
     assert verdicts.verdict_from_run(record, rule_name="exam_judge") == (
         "failure", "exam_judge: the G5 model judge")
@@ -186,26 +191,17 @@ def test_a_duplicate_rule_name_is_rejected():
 
 
 # ---------------------------------------------------------------------------
-# R2b bridges: today's concluded objects
+# The stored-object entry (the R2b bridges' replacement)
 # ---------------------------------------------------------------------------
 
-def _traj(status, meta=None):
+def _traj(correctness, meta=None):
     task_id = make_task_id(BENCHMARK, "t1")
     return Trajectory(
         trajectory_id=make_trajectory_id(task_id, "weak", 0),
         task_id=task_id, benchmark=BENCHMARK, model_role="weak",
         model_name="m", attempt_index=0,
         steps=[Step(action="do", observation="obs")],
-        status=status, meta=meta or {})
-
-
-def test_verdict_from_trajectory_maps_the_three_statuses():
-    assert verdicts.verdict_from_trajectory(_traj("success"))[0] == "success"
-    assert verdicts.verdict_from_trajectory(_traj("failure"))[0] == "failure"
-    verdict, basis = verdicts.verdict_from_trajectory(
-        _traj("infra_error", meta={"verdict_reason": "pseudo_zero"}))
-    assert verdict == "invalid"
-    assert "pseudo_zero" in basis
+        correctness=correctness, meta=meta or {})
 
 
 def _attempt(judge_verdict=False, judge_reason="wrong"):
@@ -216,15 +212,24 @@ def _attempt(judge_verdict=False, judge_reason="wrong"):
                    judge_verdict=judge_verdict, judge_reason=judge_reason)
 
 
-def test_verdict_from_attempt_reads_the_judge():
-    verdict, basis = verdicts.verdict_from_attempt(
+def test_the_r2b_bridges_are_gone():
+    # R2b deleted them: every consumer judges through verdict_from_run.
+    assert not hasattr(verdicts, "verdict_from_trajectory")
+    assert not hasattr(verdicts, "verdict_from_attempt")
+
+
+def test_reports_judge_stored_objects_through_verdict_from_run():
+    from expedistill.composites import reports
+    record = reports._run_record_from_trajectory(_traj(True))
+    assert verdicts.verdict_from_run(
+        record, rule_name="scorer")[0] == "success"
+    record = reports._run_record_from_trajectory(_traj(None))
+    assert verdicts.verdict_from_run(
+        record, rule_name="scorer")[0] == "invalid"
+    record = reports._run_record_from_attempt(
         _attempt(judge_verdict=True, judge_reason="matches"))
-    assert verdict == "success"
-    assert "matches" in basis
-    verdict, _ = verdicts.verdict_from_attempt(_attempt(judge_verdict=False))
-    assert verdict == "failure"
-    with pytest.raises(CodeBugError, match="in-flight"):
-        verdicts.verdict_from_attempt(_attempt(judge_verdict=None))
+    assert verdicts.verdict_from_run(
+        record, rule_name="exam_judge") == ("success", "exam_judge: matches")
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +375,7 @@ def test_the_verdict_core_never_writes_the_bank(tmp_path, monkeypatch):
                     question_text="q", reference_answer="a",
                     subtask_id=subtask_id,
                     skill_id=skill.skill_id), "exams")
-    store.save(_traj("failure"), "trajectories")
+    store.save(_traj(False), "trajectories")
 
     skills_before = [
         (path.name, path.read_bytes())

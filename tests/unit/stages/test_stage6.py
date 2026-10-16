@@ -58,7 +58,7 @@ class RecordingPlugin(BenchmarkPlugin):
 
     def __init__(self, outcome=None):
         self.calls = []
-        self.outcome = outcome or (lambda task_id, token, armed: "success")
+        self.outcome = outcome or (lambda task_id, token, armed: True)
 
     @property
     def name(self):
@@ -80,10 +80,10 @@ class RecordingPlugin(BenchmarkPlugin):
         # -- instruction plus the injected block (empty for the bare arm).
         handle.client.complete(handle.name, "system",
                                f"{task.instruction}\n{skills_block}")
-        status = self.outcome(task.task_id, token, armed)
+        correctness = self.outcome(task.task_id, token, armed)
         return RunOutcome(steps=[{"action": f"exec {task.task_id}",
                                   "observation": "ok"}],
-                          status=status)
+                          correctness=correctness)
 
     @property
     def view_rules(self):
@@ -192,7 +192,7 @@ def _make_ctx(tmp_path, mode, *, n_attempts=2, delivery=None):
     return ctx
 
 
-def _stage1_weak_trajectory(ctx, task_id, attempt, status):
+def _stage1_weak_trajectory(ctx, task_id, attempt, correctness):
     """A stage-1 weak bare trajectory exactly as K1 would have stored it."""
     prefixed = make_task_id(_FAKE, task_id)
     return Trajectory(
@@ -200,7 +200,7 @@ def _stage1_weak_trajectory(ctx, task_id, attempt, status):
         task_id=prefixed, benchmark=_FAKE, model_role="weak",
         model_name="weak-7b", attempt_index=attempt, skills_injected=None,
         steps=[{"action": f"exec {task_id}", "observation": "ok"}],
-        status=status)
+        correctness=correctness)
 
 
 def _run_stage6(ctx, monkeypatch, plugin, tasks):
@@ -251,10 +251,10 @@ def test_split_mode_runs_both_arms_and_computes_delta(tmp_path, monkeypatch):
 
     def outcome(task_id, token, armed):
         if not armed:
-            return "failure"
+            return False
         if task_id == "t1":
-            return "success"
-        return "success" if token == "a01" else "failure"
+            return True
+        return True if token == "a01" else False
 
     plugin = RecordingPlugin(outcome)
     summary = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
@@ -482,25 +482,26 @@ def test_whole_bank_delivery_writes_no_retrieval_audit(tmp_path, monkeypatch):
 # Full mode
 # ---------------------------------------------------------------------------
 
-def _seed_stage1_weak(ctx, statuses):
-    """Store stage-1 weak bare trajectories: {task_id: [status per attempt]}."""
-    for task_id, per_attempt in statuses.items():
-        for attempt, status in enumerate(per_attempt):
+def _seed_stage1_weak(ctx, correctnesses):
+    """Store stage-1 weak bare trajectories:
+    {task_id: [verdict per attempt]}."""
+    for task_id, per_attempt in correctnesses.items():
+        for attempt, correctness in enumerate(per_attempt):
             ctx.store.save(
-                _stage1_weak_trajectory(ctx, task_id, attempt, status),
+                _stage1_weak_trajectory(ctx, task_id, attempt, correctness),
                 "trajectories")
 
 
 def test_full_mode_reuses_stage1_without_rerunning(tmp_path, monkeypatch):
     ctx = _make_ctx(tmp_path, "full")
     # Stage 1 already measured the weak model bare on the whole task set.
-    _seed_stage1_weak(ctx, {"t1": ["success", "success"],
-                            "t2": ["failure", "failure"]})
+    _seed_stage1_weak(ctx, {"t1": [True, True],
+                            "t2": [False, False]})
     n_stored_before = set(ctx.store.ids("trajectories"))
 
     def outcome(task_id, token, armed):
         assert armed, "the control arm must not execute in full mode"
-        return "success"
+        return True
 
     plugin = RecordingPlugin(outcome)
     summary = _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
@@ -527,8 +528,8 @@ def test_full_mode_missing_stage1_unit_is_resumable_infra(tmp_path, monkeypatch)
     ctx = _make_ctx(tmp_path, "full")
     # Stage 1 is missing t2's second attempt: an incomplete control would
     # manufacture a delta, so the stage must refuse to run.
-    _seed_stage1_weak(ctx, {"t1": ["success", "success"],
-                            "t2": ["failure"]})
+    _seed_stage1_weak(ctx, {"t1": [True, True],
+                            "t2": [False]})
     # A hole in stage 1 is an infra hole, not a config error: re-running the
     # same command resumes stage 1 first, which retries it.
     plugin = RecordingPlugin()
@@ -542,11 +543,14 @@ def test_full_mode_missing_stage1_unit_is_resumable_infra(tmp_path, monkeypatch)
 
 
 def _bank_t2_infra(task_id, token, armed):
-    """With-bank arm: t1 succeeds, t2 always infra-errors (K1 exhausts its
-    retries and stores nothing). Bare arm: t1 fails, t2 succeeds."""
+    """With-bank arm: t1 succeeds, t2 always fails on infrastructure (K1
+    exhausts its retries and stores nothing). Bare arm: t1 fails, t2
+    succeeds."""
     if armed:
-        return "infra_error" if task_id == "t2" else "success"
-    return "failure" if task_id == "t1" else "success"
+        if task_id == "t2":
+            raise InfrastructureError("sandbox down")
+        return True
+    return False if task_id == "t1" else True
 
 
 def _units(task_id, n=2):
@@ -612,8 +616,8 @@ def test_full_mode_flag_alone_cannot_accept_a_stage1_hole(
     # and the bank). The flag in stage 6 alone is not enough.
     ctx = _make_ctx(tmp_path, "full")
     ctx = replace(ctx, run_settings=RunSettings(allow_infra_shortfall=True))
-    _seed_stage1_weak(ctx, {"t1": ["failure", "failure"],
-                            "t2": ["success"]})
+    _seed_stage1_weak(ctx, {"t1": [False, False],
+                            "t2": [True]})
     plugin = RecordingPlugin()
     with pytest.raises(InfrastructureError, match="stage 1"):
         _run_stage6(ctx, monkeypatch, plugin, _tasks("t1", "t2"))
@@ -639,7 +643,7 @@ def test_accepted_shortfall_is_durable_across_resume(tmp_path, monkeypatch):
 
     def outcome(task_id, token, armed):
         if healthy["on"]:
-            return "success"
+            return True
         return _bank_t2_infra(task_id, token, armed)
 
     ctx = _make_ctx(tmp_path, "split")
@@ -665,8 +669,8 @@ def test_full_mode_control_inherits_stage1_accepted_holes(
     from expedistill.stages import stage1_baseline
 
     ctx = _make_ctx(tmp_path, "full")
-    _seed_stage1_weak(ctx, {"t1": ["failure", "failure"],
-                            "t2": ["success"]})
+    _seed_stage1_weak(ctx, {"t1": [False, False],
+                            "t2": [True]})
     stage1_baseline.write_accepted_infra_shortfall(
         ctx.run_dir, [_units("t2")[1]])
     summary = _run_stage6(ctx, monkeypatch, RecordingPlugin(),
@@ -713,7 +717,7 @@ def test_arms_report_aux_and_delta_has_the_same_aux_deltas(
     ctx = _make_ctx(tmp_path, "split")
 
     def outcome(task_id, token, armed):
-        return "failure"  # primary: nothing succeeds on either arm
+        return False  # primary: nothing succeeds on either arm
 
     def aux_fn(task_id, token, armed):
         return armed and task_id == "t1"  # with-bank t1 answers aux-good

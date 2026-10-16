@@ -18,7 +18,8 @@ from expedistill.blocks.rules import get_task_select
 from expedistill.core.models import Trajectory
 
 
-def _traj(task_id, attempt_index, status, benchmark="tb", model_role="weak"):
+def _traj(task_id, attempt_index, correctness,
+         benchmark="tb", model_role="weak"):
     return Trajectory(
         trajectory_id=f"{task_id}#{attempt_index}",
         task_id=task_id,
@@ -26,18 +27,18 @@ def _traj(task_id, attempt_index, status, benchmark="tb", model_role="weak"):
         model_role=model_role,
         model_name="test-model",
         attempt_index=attempt_index,
-        status=status,
+        correctness=correctness,
     )
 
 
 def test_compute_task_metrics_counts_and_infra_separation():
     # a: one success, one failure; b: two failures; c: one infra only.
     trajectories = [
-        _traj("a", 0, "success"),
-        _traj("a", 1, "failure"),
-        _traj("b", 0, "failure"),
-        _traj("b", 1, "failure"),
-        _traj("c", 0, "infra_error"),
+        _traj("a", 0, True),
+        _traj("a", 1, False),
+        _traj("b", 0, False),
+        _traj("b", 1, False),
+        _traj("c", 0, None),
     ]
     assert compute_task_metrics(trajectories) == {
         "a": {"attempts": 2, "valid": 2, "success": 1, "infra": 0},
@@ -48,9 +49,9 @@ def test_compute_task_metrics_counts_and_infra_separation():
 
 def test_compute_task_metrics_uses_raw_task_id_and_groups_loose_order():
     trajectories = [
-        _traj("z-1", 0, "failure", benchmark="other"),
-        _traj("a", 0, "success"),
-        _traj("z-1", 1, "failure"),
+        _traj("z-1", 0, False, benchmark="other"),
+        _traj("a", 0, True),
+        _traj("z-1", 1, False),
     ]
     metrics = compute_task_metrics(trajectories)
     assert set(metrics) == {"z-1", "a"}
@@ -67,15 +68,15 @@ def test_summarize_worked_example():
     # avg@N = mean(0.5, 0.0, 1.0) over the three valid tasks = 0.5
     # pass@N = 2 of 4 tasks (a and c) = 0.5
     trajectories = [
-        _traj("a", 0, "success"),
-        _traj("a", 1, "failure"),
-        _traj("b", 0, "failure"),
-        _traj("b", 1, "failure"),
-        _traj("b", 2, "failure"),
-        _traj("c", 0, "success"),
-        _traj("c", 1, "infra_error"),
-        _traj("d", 0, "infra_error"),
-        _traj("d", 1, "infra_error"),
+        _traj("a", 0, True),
+        _traj("a", 1, False),
+        _traj("b", 0, False),
+        _traj("b", 1, False),
+        _traj("b", 2, False),
+        _traj("c", 0, True),
+        _traj("c", 1, None),
+        _traj("d", 0, None),
+        _traj("d", 1, None),
     ]
     summary = summarize(compute_task_metrics(trajectories), n_attempts=3)
     assert summary["tasks"] == 4
@@ -91,10 +92,10 @@ def test_avg_is_per_task_mean_not_pooled_share():
     # Pooled success share would be 1/4 = 0.25; the per-task mean of
     # (1/1, 0/3) is 0.5. The definitions (tb_stats.py) require 0.5.
     trajectories = [
-        _traj("a", 0, "success"),
-        _traj("b", 0, "failure"),
-        _traj("b", 1, "failure"),
-        _traj("b", 2, "failure"),
+        _traj("a", 0, True),
+        _traj("b", 0, False),
+        _traj("b", 1, False),
+        _traj("b", 2, False),
     ]
     summary = summarize(compute_task_metrics(trajectories), n_attempts=3)
     assert summary["avg_at_n"] == 0.5
@@ -102,7 +103,7 @@ def test_avg_is_per_task_mean_not_pooled_share():
 
 
 def test_summarize_without_valid_trials():
-    trajectories = [_traj("a", 0, "infra_error")]
+    trajectories = [_traj("a", 0, None)]
     summary = summarize(compute_task_metrics(trajectories), n_attempts=1)
     assert summary["tasks"] == 1
     assert summary["avg_at_n"] is None
@@ -126,14 +127,14 @@ def test_failed_tasks_all_valid_failed_rule():
     rule = get_task_select("all_valid_failed")
     trajectories = [
         # f1: full valid sample, all failed -> in F.
-        _traj("f1", 0, "failure"),
-        _traj("f1", 1, "failure"),
+        _traj("f1", 0, False),
+        _traj("f1", 1, False),
         # f2: infra errors left it short of the sample -> NOT in F.
-        _traj("f2", 0, "failure"),
-        _traj("f2", 1, "infra_error"),
+        _traj("f2", 0, False),
+        _traj("f2", 1, None),
         # ok: one success disqualifies.
-        _traj("ok", 0, "success"),
-        _traj("ok", 1, "failure"),
+        _traj("ok", 0, True),
+        _traj("ok", 1, False),
     ]
     assert failed_tasks(
         compute_task_metrics(trajectories), rule, n_attempts=2) == ["f1"]
@@ -142,8 +143,8 @@ def test_failed_tasks_all_valid_failed_rule():
 def test_failed_tasks_output_is_sorted():
     rule = get_task_select("all_valid_failed")
     trajectories = [
-        _traj("z", 0, "failure"),
-        _traj("a", 0, "failure"),
+        _traj("z", 0, False),
+        _traj("a", 0, False),
     ]
     assert failed_tasks(
         compute_task_metrics(trajectories), rule, n_attempts=1) == ["a", "z"]
@@ -157,7 +158,7 @@ def test_failed_tasks_output_is_sorted():
 def test_expected_units_without_trajectory_count_as_infra():
     # a: one stored success of 2 expected; b: nothing stored at all (every
     # attempt exhausted its infra retries, so K1 returned no trajectory).
-    trajectories = [_traj("a", 0, "success")]
+    trajectories = [_traj("a", 0, True)]
     metrics = compute_task_metrics(trajectories, expected={"a": 2, "b": 2})
     assert metrics == {
         "a": {"attempts": 2, "valid": 1, "success": 1, "infra": 1},
@@ -175,13 +176,13 @@ def test_expected_units_without_trajectory_count_as_infra():
 def test_expected_counts_stored_infra_trajectory_once():
     # A stored infra_error trajectory (another producer than K1) fills its
     # unit; only genuinely absent units are added on top.
-    trajectories = [_traj("a", 0, "infra_error"), _traj("a", 1, "failure")]
+    trajectories = [_traj("a", 0, None), _traj("a", 1, False)]
     assert compute_task_metrics(trajectories, expected={"a": 3}) == {
         "a": {"attempts": 3, "valid": 1, "success": 0, "infra": 2}}
 
 
 def test_expected_without_holes_matches_plain_counting():
-    trajectories = [_traj("a", 0, "success"), _traj("a", 1, "failure")]
+    trajectories = [_traj("a", 0, True), _traj("a", 1, False)]
     assert compute_task_metrics(trajectories, expected={"a": 2}) == \
         compute_task_metrics(trajectories)
 
@@ -190,7 +191,7 @@ def test_trajectory_outside_expected_set_is_rejected():
     import pytest
 
     with pytest.raises(ValueError, match="b"):
-        compute_task_metrics([_traj("b", 0, "success")], expected={"a": 1})
+        compute_task_metrics([_traj("b", 0, True)], expected={"a": 1})
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +207,9 @@ def _even_attempt_aux(traj):
 def test_aux_scorer_counts_aux_success_over_valid_trials_only():
     # a: attempts 0 (aux hit) and 1; b: one infra attempt (never aux).
     trajectories = [
-        _traj("a", 0, "failure"),
-        _traj("a", 1, "failure"),
-        _traj("b", 0, "infra_error"),
+        _traj("a", 0, False),
+        _traj("a", 1, False),
+        _traj("b", 0, None),
     ]
     assert compute_task_metrics(
         trajectories, aux_scorer=_even_attempt_aux) == {
@@ -223,7 +224,7 @@ def test_aux_counts_absent_expected_units_as_never_aux():
     # A missing (infra-exhausted) unit cannot be an aux success, exactly as
     # it cannot be a primary success: same expected-unit denominator.
     metrics = compute_task_metrics(
-        [_traj("a", 0, "failure")], expected={"a": 2, "b": 2},
+        [_traj("a", 0, False)], expected={"a": 2, "b": 2},
         aux_scorer=_even_attempt_aux)
     assert metrics["a"]["aux_success"] == 1
     assert metrics["b"] == {"attempts": 2, "valid": 0, "success": 0,
@@ -235,10 +236,10 @@ def test_summarize_aux_both_avg_disciplines():
     # infra -> no rate. avg_at_n = mean(0.5, 0.0) = 0.25; conservative
     # = (0.5 + 0.0 + 0.0) / 3.
     trajectories = [
-        _traj("a", 0, "failure"),
-        _traj("a", 1, "failure"),
-        _traj("b", 1, "failure"),
-        _traj("c", 0, "infra_error"),
+        _traj("a", 0, False),
+        _traj("a", 1, False),
+        _traj("b", 1, False),
+        _traj("c", 0, None),
     ]
     metrics = compute_task_metrics(trajectories, aux_scorer=_even_attempt_aux)
     summary = summarize(metrics, n_attempts=2, aux_metric="sub_em")
@@ -248,13 +249,13 @@ def test_summarize_aux_both_avg_disciplines():
 
 
 def test_summarize_aux_is_none_without_a_declared_metric():
-    summary = summarize(compute_task_metrics([_traj("a", 0, "failure")]),
+    summary = summarize(compute_task_metrics([_traj("a", 0, False)]),
                         n_attempts=1)
     assert summary["aux"] is None
 
 
 def test_summarize_aux_none_when_no_task_has_a_valid_trial():
-    trajectories = [_traj("a", 0, "infra_error")]
+    trajectories = [_traj("a", 0, None)]
     metrics = compute_task_metrics(trajectories, aux_scorer=_even_attempt_aux)
     summary = summarize(metrics, n_attempts=1, aux_metric="sub_em")
     assert summary["aux"] == {
@@ -265,6 +266,6 @@ def test_summarize_aux_none_when_no_task_has_a_valid_trial():
 def test_summarize_aux_metric_without_aux_counts_is_rejected():
     import pytest
 
-    metrics = compute_task_metrics([_traj("a", 0, "failure")])
+    metrics = compute_task_metrics([_traj("a", 0, False)])
     with pytest.raises(ValueError, match="aux_success"):
         summarize(metrics, n_attempts=1, aux_metric="sub_em")

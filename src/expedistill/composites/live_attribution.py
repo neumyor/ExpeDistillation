@@ -65,7 +65,8 @@ from typing import Any, Dict, List, Optional, Union
 
 from expedistill.blocks.attribution import attribute_failure, revise_skill
 from expedistill.blocks.author import skill_markers
-from expedistill.blocks.view import render_trajectory_view
+from expedistill.blocks.view import final_status_word, \
+    render_trajectory_view
 from expedistill.composites import decision
 from expedistill.composites.live_measurement import (
     ATTRIBUTIONS_LEDGER,
@@ -192,7 +193,10 @@ def _attribute_group(
 
     baseline_trajectories, _ = load_baseline(store, task_id, n_attempts)
     baseline_summary = "\n".join(
-        f"attempt {traj.attempt_index}: {traj.status}"
+        # The same display word the evidence driver renders, frozen
+        # byte-for-byte: this text feeds the G10 prompt.
+        f"attempt {traj.attempt_index}: "
+        f"{final_status_word(traj.correctness)}"
         for traj in baseline_trajectories)
     round_trajs = _trajectories_from(round_store_dir, task_id, round_)
     per_view_budget = _LIVE_VIEWS_BUDGET_CHARS // max(1, len(round_trajs))
@@ -360,7 +364,7 @@ def _apply_revisions(
             "attribute the group before applying its plan")
     failed = [traj for traj in _trajectories_from(round_store_dir, task_id,
                                                   round_)
-              if traj.status == "failure"]
+              if traj.correctness is False]
     per_view_budget = _FAILURE_VIEW_BUDGET_CHARS // max(1, len(failed))
     failure_view = "\n\n".join(
         _clip_view(render_trajectory_view(traj, view_rules),

@@ -9,7 +9,7 @@ from expedistill.core.models import (
     PROCEDURE_MARKERS,
     SKILL_SCHEMA_VERSION,
     SKILL_STATUSES,
-    TRAJECTORY_STATUSES,
+    TRAJECTORY_SCHEMA_VERSION,
     Attempt,
     Exam,
     Skill,
@@ -31,7 +31,7 @@ def make_trajectory(**overrides):
         model_name="model-s",
         attempt_index=0,
         steps=[Step(action="ls", observation="a b")],
-        status="success",
+        correctness=True,
         meta={"n": 1},
     )
     base.update(overrides)
@@ -79,23 +79,12 @@ def make_attempt(**overrides):
 
 
 class TestTrajectory:
-    def test_success_is_derived_from_status(self):
-        assert make_trajectory(status="success").success is True
-        assert make_trajectory(status="failure").success is False
-        assert make_trajectory(status="infra_error").success is False
-
-    def test_derived_success_overrides_stored_value(self):
-        # A stored record whose success disagrees with its status is repaired
-        # on load, so the invariant can never be violated on a live object.
-        traj = Trajectory.from_dict(
-            {**make_trajectory(status="success").to_dict(), "success": False})
-        assert traj.success is True
-
-    @pytest.mark.parametrize("status", TRAJECTORY_STATUSES)
-    def test_round_trip(self, status):
-        traj = make_trajectory(status=status)
+    @pytest.mark.parametrize("correctness", [True, False, None])
+    def test_round_trip(self, correctness):
+        traj = make_trajectory(correctness=correctness)
         restored = Trajectory.from_dict(traj.to_dict())
         assert restored == traj
+        assert restored.correctness is correctness
         assert isinstance(restored.steps[0], Step)
 
     def test_steps_accept_plain_dicts(self):
@@ -116,13 +105,55 @@ class TestTrajectory:
         payload["future_field"] = "ignored"
         assert Trajectory.from_dict(payload) == make_trajectory()
 
-    def test_invalid_status_raises(self):
-        with pytest.raises(ValueError, match="status"):
-            make_trajectory(status="ok")
+    def test_invalid_correctness_raises(self):
+        with pytest.raises(ValueError, match="correctness"):
+            make_trajectory(correctness="ok")
 
     def test_invalid_role_raises(self):
         with pytest.raises(ValueError, match="model_role"):
             make_trajectory(model_role="medium")
+
+    # -- the v1 -> v2 migration (R2b) --------------------------------------
+
+    @staticmethod
+    def _v1_row(status, **extra):
+        # A v1 record: status + the derived success flag, schema_version 1.
+        correctness = {"success": True, "failure": False}.get(status)
+        v2 = make_trajectory(correctness=correctness).to_dict()
+        row = {key: value for key, value in v2.items()
+               if key not in ("correctness", "schema_version")}
+        row["status"] = status
+        row["success"] = status == "success"
+        row["schema_version"] = 1
+        row.update(extra)
+        return row
+
+    def test_v1_success_migrates_to_true(self):
+        traj = Trajectory.from_dict(self._v1_row("success", success=False))
+        assert traj.correctness is True
+        assert traj.schema_version == TRAJECTORY_SCHEMA_VERSION
+
+    def test_v1_failure_migrates_to_false(self):
+        traj = Trajectory.from_dict(self._v1_row("failure"))
+        assert traj.correctness is False
+        assert traj.schema_version == TRAJECTORY_SCHEMA_VERSION
+
+    def test_v1_infra_error_refuses_loudly(self):
+        # K1 never stored an infra_error trajectory, so a v1 row carrying
+        # one is a corrupt/pre-contract run: never a silent default.
+        with pytest.raises(ValueError, match="infra_error"):
+            Trajectory.from_dict(self._v1_row("infra_error"))
+
+    def test_v1_row_without_a_version_is_treated_as_v1(self):
+        row = self._v1_row("success")
+        del row["schema_version"]
+        assert Trajectory.from_dict(row).correctness is True
+
+    def test_v1_row_without_a_status_refuses_loudly(self):
+        row = self._v1_row("success")
+        del row["status"]
+        with pytest.raises(ValueError, match="status"):
+            Trajectory.from_dict(row)
 
 
 class TestSubtask:

@@ -30,7 +30,7 @@ def make_strong_traj(attempt):
         model_name="strong-model", attempt_index=attempt,
         steps=[Step(action=f"do s{attempt} {i}",
                     observation=f"obs s{attempt} {i}") for i in range(4)],
-        status="success",
+        correctness=True,
     )
 
 

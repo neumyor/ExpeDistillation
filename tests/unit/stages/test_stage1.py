@@ -73,7 +73,7 @@ class StagePlugin(BenchmarkPlugin):
         self.calls.append(record)
         handle.client.complete(handle.name, "system", task.instruction)
         if self.behavior is None:
-            return _outcome(task.task_id, "success")
+            return _outcome(task.task_id, True)
         return self.behavior(record)
 
     @property
@@ -85,10 +85,10 @@ class StagePlugin(BenchmarkPlugin):
         return "FAKE_TASK"
 
 
-def _outcome(task_id, status):
+def _outcome(task_id, correctness):
     return RunOutcome(
         steps=[{"action": f"exec {task_id}", "observation": "ok"}],
-        status=status,
+        correctness=correctness,
     )
 
 
@@ -190,7 +190,7 @@ def _prefixed(task_id):
 def test_both_arms_run_and_F_is_any_weak_failed(monkeypatch, tmp_path):
     def behavior(record):
         if record["handle"].role == "strong":
-            return _outcome(record["task_id"], "success")
+            return _outcome(record["task_id"], True)
         if record["task_id"] == "t3":
             # A mixed task: the first weak attempt fails, the second
             # succeeds. plugin.calls already holds this call, so 1 means
@@ -198,10 +198,9 @@ def test_both_arms_run_and_F_is_any_weak_failed(monkeypatch, tmp_path):
             t3_calls = sum(1 for call in plugin.calls
                            if call["task_id"] == "t3"
                            and call["handle"] is record["handle"])
-            status = "failure" if t3_calls == 1 else "success"
-            return _outcome("t3", status)
+            return _outcome("t3", t3_calls != 1)
         # Weak arm: t1 and t2 fail every attempt.
-        return _outcome(record["task_id"], "failure")
+        return _outcome(record["task_id"], False)
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
     ctx = make_ctx(tmp_path, make_config())
@@ -246,12 +245,12 @@ def _t2_weak_infra(record):
     """Strong succeeds; weak t1 fails, weak t2 always infra-errors (so K1
     exhausts its retries and stores nothing), weak t3 succeeds."""
     if record["handle"].role == "strong":
-        return _outcome(record["task_id"], "success")
+        return _outcome(record["task_id"], True)
     if record["task_id"] == "t1":
-        return _outcome("t1", "failure")
+        return _outcome("t1", False)
     if record["task_id"] == "t2":
-        return RunOutcome(status="infra_error", meta={"error": "sandbox"})
-    return _outcome(record["task_id"], "success")
+        raise InfrastructureError("sandbox")
+    return _outcome(record["task_id"], True)
 
 
 _T2_WEAK_UNITS = [f"traj/{_prefixed('t2')}/weak/00",
@@ -314,7 +313,7 @@ def test_resume_after_infra_holes_completes(monkeypatch, tmp_path):
 
     def behavior(record):
         if healthy["on"]:
-            return _outcome(record["task_id"], "success")
+            return _outcome(record["task_id"], True)
         return _t2_weak_infra(record)
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
@@ -348,7 +347,7 @@ def test_partial_sample_with_real_failure_is_in_F_and_shortfalls(
 
     def behavior(record):
         if record["handle"].role == "strong":
-            return _outcome(record["task_id"], "success")
+            return _outcome(record["task_id"], True)
         if record["task_id"] == "t1":
             # plugin.calls already holds this call, and the strong arm's
             # t1 run is in there too -- count this handle's calls only:
@@ -359,9 +358,9 @@ def test_partial_sample_with_real_failure_is_in_F_and_shortfalls(
                            if call["task_id"] == "t1"
                            and call["handle"] is record["handle"])
             if t1_calls == 1:
-                return _outcome("t1", "failure")
-            return RunOutcome(status="infra_error", meta={"error": "sandbox"})
-        return _outcome(record["task_id"], "success")
+                return _outcome("t1", False)
+            raise InfrastructureError("sandbox")
+        return _outcome(record["task_id"], True)
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
     ctx = make_ctx(tmp_path, make_config())
@@ -384,8 +383,8 @@ def test_partial_sample_with_real_failure_is_in_F_and_shortfalls(
 
 def test_rerun_reaggregates_without_model_calls(monkeypatch, tmp_path):
     def behavior(record):
-        status = "success" if record["handle"].role == "strong" else "failure"
-        return _outcome(record["task_id"], status)
+        correctness = record["handle"].role == "strong"
+        return _outcome(record["task_id"], correctness)
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
     config = make_config()
@@ -465,7 +464,7 @@ def test_accepted_shortfall_is_durable_across_resume(monkeypatch, tmp_path):
         if healthy["on"]:
             # The endpoint recovered: t2 would now succeed, and fail-free
             # data would change F if the holes were ever re-executed.
-            return _outcome(record["task_id"], "success")
+            return _outcome(record["task_id"], True)
         return _t2_weak_infra(record)
 
     plugin = _install_plugin(monkeypatch, StagePlugin(behavior=behavior))
@@ -523,7 +522,7 @@ def test_accepted_unit_stored_later_is_still_excluded(monkeypatch, tmp_path):
             task_id=_prefixed("t2"), benchmark=_FAKE, model_role="weak",
             model_name="weak-7b", attempt_index=attempt,
             steps=[{"action": "exec t2", "observation": "ok"}],
-            status="failure"), "trajectories")
+            correctness=False), "trajectories")
     second = stage1_baseline.run(make_ctx(tmp_path, config),
                                  train_tasks=tasks, test_tasks=tasks)
     assert second == first
@@ -543,8 +542,8 @@ class AuxPlugin(StagePlugin):
         return traj.meta.get("fake_aux") is True
 
 
-def _aux_outcome(task_id, status, aux):
-    outcome = _outcome(task_id, status)
+def _aux_outcome(task_id, correctness, aux):
+    outcome = _outcome(task_id, correctness)
     outcome.meta["fake_aux"] = aux
     return outcome
 
@@ -552,15 +551,15 @@ def _aux_outcome(task_id, status, aux):
 def test_arm_summaries_report_the_auxiliary_metric(monkeypatch, tmp_path):
     def behavior(record):
         if record["handle"].role == "strong":
-            return _aux_outcome(record["task_id"], "success", True)
+            return _aux_outcome(record["task_id"], True, True)
         # Weak arm per (task, attempt-index is unknown here, so per task):
         aux = {"t1": [False, True], "t2": [False, False],
                "t3": [True, True]}[record["task_id"]]
         attempt = len([c for c in plugin.calls
                        if c["task_id"] == record["task_id"]
                        and c["handle"] is record["handle"]]) - 1
-        status = "success" if record["task_id"] == "t3" else "failure"
-        return _aux_outcome(record["task_id"], status, aux[attempt])
+        correctness = record["task_id"] == "t3"
+        return _aux_outcome(record["task_id"], correctness, aux[attempt])
 
     plugin = _install_plugin(monkeypatch, AuxPlugin(behavior=behavior))
     ctx = make_ctx(tmp_path, make_config())

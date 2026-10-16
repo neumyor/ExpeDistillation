@@ -117,7 +117,7 @@ def make_ctx(tmp_path, config, segmenter=None, run_name="run"):
     )
 
 
-def plant(ctx, task, role, attempt=0, status="failure", n_steps=4):
+def plant(ctx, task, role, attempt=0, correctness=False, n_steps=4):
     task_id = make_task_id(_FAKE, task)
     trajectory = Trajectory(
         trajectory_id=make_trajectory_id(task_id, role, attempt),
@@ -128,7 +128,7 @@ def plant(ctx, task, role, attempt=0, status="failure", n_steps=4):
         attempt_index=attempt,
         steps=[Step(action=f"a{i}", observation=f"o{i}")
                for i in range(n_steps)],
-        status=status,
+        correctness=correctness,
     )
     ctx.store.save(trajectory, "trajectories")
     return trajectory
@@ -158,12 +158,12 @@ def _plant_rich_task(ctx):
     """t1 with 3 strong (failure, success, success) and 3 weak (success,
     failure, failure) trajectories: every preference branch of
     strong2_weak2 is reachable."""
-    plant(ctx, "t1", "strong", attempt=0, status="failure")
-    plant(ctx, "t1", "strong", attempt=1, status="success")
-    plant(ctx, "t1", "strong", attempt=2, status="success")
-    plant(ctx, "t1", "weak", attempt=0, status="success")
-    plant(ctx, "t1", "weak", attempt=1, status="failure")
-    plant(ctx, "t1", "weak", attempt=2, status="failure")
+    plant(ctx, "t1", "strong", attempt=0, correctness=False)
+    plant(ctx, "t1", "strong", attempt=1, correctness=True)
+    plant(ctx, "t1", "strong", attempt=2, correctness=True)
+    plant(ctx, "t1", "weak", attempt=0, correctness=True)
+    plant(ctx, "t1", "weak", attempt=1, correctness=False)
+    plant(ctx, "t1", "weak", attempt=2, correctness=False)
 
 
 # ---------------------------------------------------------------------------

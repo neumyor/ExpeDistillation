@@ -12,10 +12,10 @@ Division of labour per the design review:
   (a bare import of a plugin package must be cheap and dependency-free: the
   ALFWorld plugin loads its heavy deps inside its methods, not at import
   time), so the plugin package is imported lazily, here, right before use.
-- Plugins own their own failures: expected infrastructure failures come
-  back as ``RunOutcome(status="infra_error")`` (K1 retries them); anything
-  that raises out of ``plugin.run`` is a code bug and propagates unchanged.
-  E1 never retries, never catches, never writes disk.
+- Plugins own their own failures: expected infrastructure failures raise
+  ``InfrastructureError`` (K1 retries them); anything else that raises out
+  of ``plugin.run`` is a code bug and propagates unchanged. E1 never
+  retries, never catches, never writes disk.
 - E1 owns the Trajectory bookkeeping: the plugin's RunOutcome carries only
   what happened inside the environment; the identity fields (ids, role,
   attempt, injected-skills provenance) are attached here so every
@@ -103,6 +103,6 @@ def run_one(
         attempt_index=attempt_index,
         skills_injected=skills_injected,
         steps=list(outcome.steps),
-        status=outcome.status,
+        correctness=outcome.correctness,
         meta=meta,
     )

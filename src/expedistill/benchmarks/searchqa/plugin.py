@@ -258,19 +258,20 @@ class SearchQAPlugin(BenchmarkPlugin):
         - a scored episode carries ``meta["searchqa"]`` (the evaluator's
           em/f1/sub_em dict, copied verbatim by ``run``); sub_em >= 1 is
           the auxiliary success;
-        - a VALID trajectory without a submitted answer (step-budget
-          exhaustion / model output error) has no eval meta, and no
-          answer can be a substring of gold: sub_EM is 0, a real
+        - a SCORED trajectory (``correctness`` is True / False) without a
+          submitted answer (step-budget exhaustion) has no eval meta, and
+          no answer can be a substring of gold: sub_EM is 0, a real
           measurement;
-        - a trajectory whose status or termination REQUIRES a score
-          (success, or an episode the env terminated via Finish) but has
-          no eval meta is broken data, not a zero: CodeBugError, so the
-          run stops loudly instead of quietly under-reporting.
+        - a trajectory whose correctness or termination REQUIRES a score
+          (a scored Finish: ``correctness`` is True, or an episode the env
+          terminated via Finish) but has no eval meta is broken data, not
+          a zero: CodeBugError, so the run stops loudly instead of quietly
+          under-reporting.
         """
         meta = traj.meta.get("searchqa") if isinstance(traj.meta, dict) else None
         if isinstance(meta, dict) and "sub_em" in meta:
             return float(meta["sub_em"]) >= 1.0
-        if traj.status == "success" or traj.meta.get("termination") \
+        if traj.correctness is True or traj.meta.get("termination") \
                 == "terminated":
             raise CodeBugError(
                 f"trajectory {traj.trajectory_id} has no searchqa eval "

@@ -48,7 +48,7 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.react_loop import run_react
-from expedistill.infra.reliability import ConfigError, InfrastructureError
+from expedistill.infra.reliability import ConfigError
 from expedistill.prompts import PromptSpec, register
 
 __all__ = [
@@ -267,10 +267,9 @@ class ALFWorldPlugin(BenchmarkPlugin):
     ) -> RunOutcome:
         env = ALFWorldEnv(task.task_id)
         try:
-            try:
-                initial_observation = env.reset()
-            except InfrastructureError as exc:
-                return RunOutcome.infra_error(error=exc)
+            # An InfrastructureError from reset (hung adapter, dead
+            # subprocess) propagates: K1 retries the unit (R2b contract).
+            initial_observation = env.reset()
             # ALFWorld's task line names no receptacles; the room description
             # from reset is the rest of the instruction, exactly as the old
             # ReAct fewshots and the outer eval repo's own runner present it.

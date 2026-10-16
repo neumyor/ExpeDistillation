@@ -33,7 +33,11 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 # Per-object schema versions. Bump the affected object's constant whenever a
 # field is added or its meaning changes (README section 2 is the contract).
-TRAJECTORY_SCHEMA_VERSION = 1
+# Trajectory v2 (R2b): the three-value run status (success / failure /
+# infra_error) and the derived ``success`` flag became ``correctness:
+# Optional[bool]``; infrastructure failures no longer occupy the record's
+# vocabulary (they raise instead of being stored).
+TRAJECTORY_SCHEMA_VERSION = 2
 SUBTASK_SCHEMA_VERSION = 1
 SKILL_SCHEMA_VERSION = 2
 EXAM_SCHEMA_VERSION = 2
@@ -45,10 +49,6 @@ ATTEMPT_SCHEMA_VERSION = 1
 
 #: Which executor produced a trajectory / which model a segment came from.
 MODEL_ROLES = ("strong", "weak")
-
-#: Outcome of one execution. ``infra_error`` is not a model failure: sandbox
-#: timeouts, network errors and the like must not count as "the model failed".
-TRAJECTORY_STATUSES = ("success", "failure", "infra_error")
 
 #: Lifecycle of a skill. ``merged`` means its content lives on in another skill
 #: (``merged_from`` on the survivor); the original text stays on disk.
@@ -136,9 +136,13 @@ class Step(_Record):
 class Trajectory(_Record):
     """One execution of one task by one model (E1 output).
 
-    ``success`` is derived: it is true if and only if ``status == "success"``.
-    Callers never set it; assigning it directly is always overwritten in
-    ``__post_init__`` so a stored record cannot disagree with its status.
+    ``correctness`` is the benchmark's own scorer verdict, passed through
+    verbatim: ``True`` the scorer judged the run right, ``False`` wrong,
+    ``None`` no scorer verdict came back (a no-scorer benchmark, or a run
+    that completed without a measurable result). It is never an acceptance
+    conclusion -- drawing one is acceptance's job, and an infrastructure
+    failure never reaches this record at all (it raises and K1 retries the
+    unit; nothing is stored for the failed attempt).
     """
 
     trajectory_id: str
@@ -151,20 +155,25 @@ class Trajectory(_Record):
     #: digest of the whole skill bank for stage-6 bank-injected runs.
     skills_injected: Optional[Any] = None
     steps: List[Step] = field(default_factory=list)
-    status: str = "failure"
-    success: bool = False
+    #: The scorer verdict (class docstring); True / False / None.
+    correctness: Optional[bool] = None
     meta: Dict[str, Any] = field(default_factory=dict)
     schema_version: int = TRAJECTORY_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         _check_vocab(self.model_role, MODEL_ROLES, "Trajectory", "model_role")
-        _check_vocab(self.status, TRAJECTORY_STATUSES, "Trajectory", "status")
+        if self.correctness is not None \
+                and not isinstance(self.correctness, bool):
+            raise ValueError(
+                f"Trajectory.correctness must be True, False or None, got "
+                f"{self.correctness!r}")
         self.steps = [Step(**step) if isinstance(step, dict) else step
                       for step in self.steps]
-        self.success = self.status == "success"
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Trajectory":
+        if data.get("schema_version", 1) == 1:
+            data = _migrate_v1_trajectory_row(data)
         return cls(**_known_kwargs(cls, data))
 
 
@@ -319,9 +328,43 @@ class Attempt(_Record):
 
 
 # ---------------------------------------------------------------------------
-# v1 -> v2 migration (schema bump 2026-10-15; AGENTS "修改数据对象" rule 3:
-# explicit migration or a loud error, never a silent default)
+# v1 -> v2 migrations (schema bumps 2026-10-15 / 2026-10-16; AGENTS
+# "修改数据对象" rule 3: explicit migration or a loud error, never a silent
+# default)
 # ---------------------------------------------------------------------------
+
+def _migrate_v1_trajectory_row(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive ``correctness`` for one schema-v1 trajectory row (v2 row out).
+
+    The local, lossless mappings only: ``success`` -> ``True`` and
+    ``failure`` -> ``False`` (the scorer's answer, which is what the old
+    two values carried). A v1 ``infra_error`` row refuses loudly: K1's
+    contract never stored one, so its presence means the source run
+    predates that contract or is corrupt -- silently reading it as any
+    correctness value (a default None included) would misreport a
+    machine failure as a measurement, and a human must look at the run.
+    """
+    trajectory_id = data.get("trajectory_id")
+    status = data.get("status")
+    if status == "success":
+        correctness: Optional[bool] = True
+    elif status == "failure":
+        correctness = False
+    else:
+        raise ValueError(
+            f"trajectory {trajectory_id!r} is a schema-v1 record with "
+            f"status {status!r}: a v1 infra_error trajectory was never "
+            "supposed to be stored (K1 retries infra failures and stores "
+            "nothing for them), so this run predates the contract or is "
+            "corrupt -- a human must look at it. Resuming a v1 run "
+            "directly on this code is not supported: a formal run stays "
+            "on the old code of its own maintenance branch (AGENTS.md "
+            "section 6 rule 1)")
+    return {key: value for key, value in data.items()
+            if key not in ("status", "success", "schema_version")} | {
+                "correctness": correctness,
+                "schema_version": TRAJECTORY_SCHEMA_VERSION,
+            }
 
 #: The stage-3 skill id suffix, mirroring ``ids.make_skill_id`` (models must
 #: not import ids: ids imports models). The migration unit tests pin the

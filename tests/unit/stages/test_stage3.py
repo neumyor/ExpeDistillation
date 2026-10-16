@@ -153,7 +153,7 @@ def make_trajectory(task, role, attempt, actions):
         model_name=f"{role}-model",
         attempt_index=attempt,
         steps=steps,
-        status="failure",
+        correctness=False,
     )
 
 

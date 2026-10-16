@@ -41,7 +41,7 @@ class _Plugin(BenchmarkPlugin):
         return [Task(task_id="t1", instruction="do t1")]
 
     def run(self, task, handle, skills_block, workdir):
-        return RunOutcome(status="success")
+        return RunOutcome(correctness=True)
 
     @property
     def view_rules(self):

@@ -4,16 +4,16 @@ Pure counting over Trajectory objects; no model, no disk. The metric
 definitions follow the TB campaign's ``scripts/tb21/tb_stats.py`` so stage-1
 and stage-6 numbers stay comparable with the reference pipeline:
 
-* ``avg@N`` -- per task, average over that task's VALID trials first
+* ``avg@N`` -- per task, average over that task's SCORED trials first
   (success / valid), then average over tasks. Tasks whose trials were all
-  infrastructure errors have no valid trial and contribute no rate; with no
+  unscored have no valid trial and contribute no rate; with no
   valid task at all the aggregate is ``None`` rather than a fake zero.
   (Deviation from tb_stats.py, which divides the rate sum by ALL tasks and
   thereby scores infra-only tasks as 0; the per-task-mean-then-task-mean over
   valid tasks is the definition this repo froze.)
 * ``pass@N`` -- the share of tasks with at least one success among their
-  valid trials; an infra-only task counts in the denominator but can never
-  pass, matching tb_stats.py.
+  valid trials; a task with no scored trial counts in the denominator but
+  can never pass, matching tb_stats.py.
 * the AUXILIARY metric -- an optional, plugin-declared second success
   notion (e.g. SearchQA's sub_EM substring match beside the strict-EM
   primary) reported ALWAYS alongside the primary under both avg@N
@@ -21,20 +21,23 @@ and stage-6 numbers stay comparable with the reference pipeline:
   The metric stays benchmark-blind here: the caller passes the scorer as a
   callable and the metric's frozen NAME; the plugin contract
   (``benchmarks/base.py``) maps trajectories to auxiliary success. An
-  infra/missing unit is never an auxiliary success, and the auxiliary
+  unscored/missing unit is never an auxiliary success, and the auxiliary
   averages use the same denominators as the primary.
 
-``infra_error`` is never a model failure (README 1.3, E1 row): it is counted
-separately and excluded from valid/success everywhere.
+An attempt without a scorer verdict is never a model failure (README 1.3,
+E1 row): ``correctness=None`` (a run that came back with no scorer verdict)
+and an absent unit (a run that never came back -- K1 never stores a unit
+whose infrastructure retries ran out) both count as ``infra``, separately
+from valid/success everywhere.
 
-The expected unit set: K1 never stores an infra-exhausted unit, so on real
-data an infra error usually shows up as a MISSING trajectory, not as an
-``infra_error`` one. Counting only what came back would let a task whose
-every attempt exhausted infra vanish from all denominators (the conservative
-avg@N would equal the conditional one, ``infra_tasks`` would always be empty,
-and two arms could be compared over different task sets). Callers that know
-which units they asked for pass ``expected`` (task_id -> n_attempts) and every
-expected unit without a trajectory is counted as one infra attempt.
+The expected unit set: on real data an infrastructure failure usually shows
+up as a MISSING trajectory. Counting only what came back would let a task
+whose every attempt exhausted infra vanish from all denominators (the
+conservative avg@N would equal the conditional one, ``infra_tasks`` would
+always be empty, and two arms could be compared over different task sets).
+Callers that know which units they asked for pass ``expected`` (task_id ->
+n_attempts) and every expected unit without a trajectory is counted as one
+infra attempt.
 
 ``failed_tasks`` applies a *named* task_select rule (``blocks/rules.py``) to
 each task's metrics -- D4 is the application, the rule is the definition, so
@@ -49,10 +52,6 @@ from expedistill.core.models import Trajectory
 
 __all__ = ["compute_task_metrics", "summarize", "failed_tasks"]
 
-#: Statuses that count as a real attempt of the model (README 1.3: infra
-#: errors are excluded from scoring, never read as "the model failed").
-VALID_STATUSES = ("success", "failure")
-
 
 def compute_task_metrics(
     trajectories: List[Trajectory],
@@ -62,8 +61,11 @@ def compute_task_metrics(
     """Count per-task attempts / valid / success / infra, keyed by raw task_id.
 
     Uses the task_id exactly as given on each Trajectory (benchmark-native,
-    no prefixing). The four counts satisfy ``attempts == valid + infra``
-    because Trajectory statuses are exactly success / failure / infra_error.
+    no prefixing). The four counts satisfy ``attempts == valid + infra``: a
+    stored trajectory counts as valid when its scorer verdict came back
+    (``correctness`` is True / False) and as infra when it did not
+    (``correctness`` is None -- module docstring), and an absent expected
+    unit is one infra attempt.
 
     ``expected`` (task_id -> n_attempts) is the unit set the caller asked
     for: every expected task gets an entry, and each of its attempts with no
@@ -73,8 +75,8 @@ def compute_task_metrics(
     it. ``expected=None`` counts exactly the given trajectories.
 
     ``aux_scorer`` (plugin-declared auxiliary metric, module docstring)
-    adds an ``aux_success`` count per task: valid trajectories the scorer
-    accepts. An infra trajectory and an absent expected unit are never
+    adds an ``aux_success`` count per task: scored trajectories the scorer
+    accepts. An unscored trajectory and an absent expected unit are never
     auxiliary successes. Without a scorer no key is added, so the per-task
     dicts keep their exact four-field shape.
     """
@@ -98,13 +100,13 @@ def compute_task_metrics(
         seen.setdefault(traj.task_id, set()).add(traj.attempt_index)
         per_task = metrics.setdefault(traj.task_id, new_counts())
         per_task["attempts"] += 1
-        if traj.status in VALID_STATUSES:
+        if traj.correctness is not None:
             per_task["valid"] += 1
             if aux_scorer is not None and aux_scorer(traj):
                 per_task["aux_success"] += 1
-        if traj.status == "success":
+        if traj.correctness is True:
             per_task["success"] += 1
-        if traj.status == "infra_error":
+        if traj.correctness is None:
             per_task["infra"] += 1
     for task_id, n_attempts in (expected or {}).items():
         per_task = metrics.setdefault(task_id, new_counts())

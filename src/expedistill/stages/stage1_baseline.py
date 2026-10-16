@@ -30,8 +30,10 @@ and no scorer ever runs. The scorer is plugin code and the trajectory meta
 it reads is unit-level evidence, so a rerun re-derives the aux numbers from
 the same stored trajectories.
 
-Infra holes. K1 never stores an ``infra_error`` trajectory, so a unit whose
-infra retries ran out is simply ABSENT from what K1 returns. D3 is therefore
+Infra holes. K1 stores nothing for a unit whose infrastructure retries ran
+out (the failure raised; R2b), so the unit is simply ABSENT from what K1
+returns. A run that completed without a scorer verdict
+(``correctness=None``) IS stored and counts as one infra attempt in D3. D3 is therefore
 given each arm's full expected unit set (prefixed task id -> frozen
 n_attempts): every absent unit counts as one infra attempt, so a task whose
 every attempt exhausted infra stays in every all-task denominator instead of

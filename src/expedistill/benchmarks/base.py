@@ -49,9 +49,6 @@ __all__ = [
 ENV_TIMEOUT_ENV = "EXPEDISTILL_ENV_TIMEOUT_SECONDS"
 DEFAULT_ENV_TIMEOUT_SECONDS = 120.0
 
-#: Allowed RunOutcome.status values; Trajectory statuses mirror these exactly.
-RUN_STATUSES = ("success", "failure", "infra_error")
-
 #: Subprocess/pipe failures that the deadline wrapper reclassifies as infra:
 #: the environment died under us, the agent did nothing wrong.
 _NATIVE_ENV_ERRORS = (BrokenPipeError, ConnectionResetError, EOFError)
@@ -77,39 +74,29 @@ class Task:
 class RunOutcome:
     """Uniform result of one execution of one task (E1's runner output).
 
-    ``status`` is one of ``success`` / ``failure`` / ``infra_error``: an
-    infrastructure failure (sandbox timeout, network error, dead subprocess)
-    is not the model's failure and must not be counted as one (README 1.3,
-    E1 row). ``steps`` holds the full, untruncated action/observation pairs --
-    view truncation (D5) happens later, at render time, never here. ``meta``
-    is free-form plugin data (reward details, remote run id, error text).
+    ``correctness`` is the benchmark's own scorer verdict, passed through
+    verbatim: ``True`` the scorer judged the run right, ``False`` wrong,
+    ``None`` no scorer verdict came back (a benchmark without a scorer, or
+    a run that completed without a measurable result). Execution draws no
+    other conclusion -- whether a ``None`` run counts, and what made a run
+    invalid, is acceptance's named-rule decision. An infrastructure failure
+    (sandbox timeout, network error, dead subprocess) never lands here: the
+    runner raises ``InfrastructureError`` and K1 retries the unit. ``steps``
+    holds the full, untruncated action/observation pairs -- view truncation
+    (D5) happens later, at render time, never here. ``meta`` is free-form
+    plugin data (scorer facts, remote run id, error text).
     """
 
     steps: List[Dict[str, str]] = field(default_factory=list)
-    status: str = "failure"
+    correctness: Optional[bool] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.status not in RUN_STATUSES:
+        if self.correctness is not None \
+                and not isinstance(self.correctness, bool):
             raise CodeBugError(
-                f"RunOutcome.status must be one of {RUN_STATUSES}, "
-                f"got {self.status!r}")
-
-    @classmethod
-    def infra_error(
-        cls,
-        steps: Optional[List[Dict[str, str]]] = None,
-        error: Optional[BaseException] = None,
-    ) -> "RunOutcome":
-        """Build an ``infra_error`` outcome, keeping the partial steps.
-
-        Pins the convention that the failure reason lands in
-        ``meta["error"]`` so all plugins report infra failures the same way.
-        """
-        meta: Dict[str, Any] = {}
-        if error is not None:
-            meta["error"] = f"{type(error).__name__}: {error}"
-        return cls(steps=list(steps or []), status="infra_error", meta=meta)
+                f"RunOutcome.correctness must be True, False or None, got "
+                f"{self.correctness!r}")
 
 
 @dataclass(frozen=True)
@@ -167,7 +154,7 @@ class BaseEnv(abc.ABC):
     - The env tracks its own state: the loop polls ``is_terminated`` /
       ``is_truncated`` after each step and reads ``success_fn()`` once at the
       end. An env that reports success must also flag termination, otherwise
-      a budget-exhausted episode is scored ``failure`` even if the goal was
+      a budget-exhausted episode scores ``False`` even if the goal was
       reached (the loop trusts the termination flags, not the clock).
 
     The default ``is_terminated``/``is_truncated`` read the same attributes
@@ -280,9 +267,9 @@ class BenchmarkPlugin(abc.ABC):
       nothing when empty. All model calls go through ``llm.call.call_model``
       (local runners: via ``benchmarks.react_loop.run_react``; the TB runner's
       calls happen remotely in Harbor and are accounted from its results).
-      Expected infrastructure failures (sandbox timeout, network error) are
-      returned as ``RunOutcome(status="infra_error")`` -- K1 retries them;
-      anything else that raises is a code bug and stops everything. Files the
+      Expected infrastructure failures (sandbox timeout, network error)
+      raise ``InfrastructureError`` -- K1 retries the unit; anything else
+      that raises is a code bug and stops everything. Files the
       runner produces go under ``workdir`` and nowhere else. B1's request
       dumps are not runner files: ``call_model`` writes them under the
       handle's ``run_dir`` (``<run>/llm_requests/``, set by K1), so a runner
@@ -342,10 +329,11 @@ class BenchmarkPlugin(abc.ABC):
         The default returns None: this plugin declares no auxiliary metric
         (``aux_metric_name`` is None) and no stage ever calls this method.
         A plugin that declares ``aux_metric_name`` must override this to
-        answer for every VALID trajectory (status success / failure):
-        True / False is the measurement; a None from a declared scorer is
-        a contract violation and the stage wiring raises on it. Infra
-        trajectories and missing units are never shown to the scorer (an
-        infrastructure failure is not a measurement of anything).
+        answer for every SCORED trajectory (``correctness`` is True or
+        False): True / False is the measurement; a None from a declared
+        scorer is a contract violation and the stage wiring raises on it.
+        Unscored trajectories (``correctness`` is None) and missing units
+        are never shown to the scorer (a run without a scorer verdict is
+        not a measurement of anything).
         """
         return None

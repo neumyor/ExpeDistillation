@@ -37,7 +37,7 @@ from expedistill.benchmarks.registry import _reset_registry
 from expedistill.blocks.author import render_skill_content, skill_markers
 from expedistill.core.config import ROLE_DEFAULTS, ExperimentConfig, save_config
 from expedistill.core.models import FAILURE_REFERENCE_MARKERS, PROCEDURE_MARKERS
-from expedistill.infra.reliability import ConfigError
+from expedistill.infra.reliability import ConfigError, InfrastructureError
 from expedistill.infra.runlock import RunLockedError
 from expedistill.infra.store import read_jsonl
 from expedistill.llm.fake import FakeClient, json_script
@@ -86,12 +86,12 @@ class FakePipelinePlugin(BenchmarkPlugin):
         # strong-arm segments on the trajectory's "final status: success"
         # view header, and D6/G2 distill material has to be successes.
         if handle.role == "executor_strong":
-            status = "success"
+            correctness = True
         else:
-            status = "success" if skills_block else "failure"
+            correctness = True if skills_block else False
         return RunOutcome(
             steps=[{"action": "run", "observation": "the environment state"}],
-            status=status,
+            correctness=correctness,
         )
 
     @property
@@ -762,7 +762,6 @@ def test_cli_infra_flags_reach_every_handle(
 
 def test_transient_infra_error_is_retried_and_run_completes(
         plugin, config_path, tmp_path, monkeypatch):
-    from expedistill.infra.reliability import InfrastructureError
     from expedistill.llm import call as call_module
 
     waits = []
@@ -806,7 +805,7 @@ class BareT2InfraPlugin(FakePipelinePlugin):
                 and not skills_block):
             self.calls.append({"task_id": task.task_id, "role": handle.role,
                                "with_skills": False})
-            return RunOutcome(status="infra_error", meta={"error": "sandbox"})
+            raise InfrastructureError("sandbox")
         return super().run(task, handle, skills_block, workdir)
 
 
@@ -1097,13 +1096,12 @@ class _LivePipelinePlugin(FakePipelinePlugin):
             "block": skills_block,
         })
         if handle.role == "executor_strong":
-            status = "success"
+            correctness = True
         else:
-            status = ("success" if "REVISED-BY-G11" in skills_block
-                      else "failure")
+            correctness = ("REVISED-BY-G11" in skills_block)
         return RunOutcome(
             steps=[{"action": "run", "observation": "the environment state"}],
-            status=status,
+            correctness=correctness,
         )
 
 
@@ -1248,10 +1246,12 @@ def test_pipeline_live_run_mode_walks_both_rounds_end_to_end(
     round01 = Store(live / "round01")
     assert len(round00.ids("trajectories")) == 4
     assert len(round01.ids("trajectories")) == 4
-    assert all(round00.load("trajectories", trajectory_id, Trajectory).status
-               == "failure" for trajectory_id in round00.ids("trajectories"))
-    assert all(round01.load("trajectories", trajectory_id, Trajectory).status
-               == "success" for trajectory_id in round01.ids("trajectories"))
+    assert all(round00.load("trajectories", trajectory_id,
+                            Trajectory).correctness is False
+               for trajectory_id in round00.ids("trajectories"))
+    assert all(round01.load("trajectories", trajectory_id,
+                            Trajectory).correctness is True
+               for trajectory_id in round01.ids("trajectories"))
     audit0 = read_jsonl(live / "round00" / "injection_audit.jsonl")
     audit1 = read_jsonl(live / "round01" / "injection_audit.jsonl")
     assert {row["task_id"] for row in audit0} == {f"{_FAKE}:t1",

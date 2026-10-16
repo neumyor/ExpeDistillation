@@ -245,11 +245,11 @@ def v3(root):
         trajs, per_task_counts = [], {}
         for rank, task, source, origin, tdir, reward, orig in body:
             r = None if reward == "None" else float(reward)
-            status = "success" if (r is not None and r >= 1.0) else "failure"
+            correctness = r is not None and r >= 1.0
             trajs.append(Trajectory(
                 trajectory_id=f"{label}:{task}:{rank}", task_id=task,
                 benchmark="tb", model_role="strong", model_name=label,
-                attempt_index=int(rank) - 1, status=status))
+                attempt_index=int(rank) - 1, correctness=correctness))
             per_task_counts[task] = per_task_counts.get(task, 0) + 1
         check(len(trajs) == 445, f"{label}: {len(trajs)} trials in manifest, expected 445")
         check(len(per_task_counts) == 89, f"{label}: {len(per_task_counts)} tasks")

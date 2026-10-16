@@ -29,33 +29,19 @@ def test_task_defaults():
     assert task.meta == {}
 
 
-def test_runoutcome_defaults_and_valid_statuses():
+def test_runoutcome_defaults_and_correctness_values():
     outcome = RunOutcome()
     assert outcome.steps == []
-    assert outcome.status == "failure"
+    assert outcome.correctness is None
     assert outcome.meta == {}
-    for status in ("success", "failure", "infra_error"):
-        assert RunOutcome(status=status).status == status
+    for correctness in (True, False, None):
+        assert RunOutcome(correctness=correctness).correctness \
+            is correctness
 
 
-def test_runoutcome_rejects_unknown_status():
+def test_runoutcome_rejects_a_non_boolean_correctness():
     with pytest.raises(CodeBugError):
-        RunOutcome(status="crashed")
-
-
-def test_runoutcome_infra_error_keeps_partial_steps():
-    error = InfrastructureError("sandbox died")
-    outcome = RunOutcome.infra_error(
-        [{"action": "a", "observation": "o"}], error)
-    assert outcome.status == "infra_error"
-    assert outcome.steps == [{"action": "a", "observation": "o"}]
-    assert outcome.meta["error"] == "InfrastructureError: sandbox died"
-
-
-def test_runoutcome_infra_error_without_error():
-    outcome = RunOutcome.infra_error()
-    assert outcome.steps == []
-    assert outcome.meta == {}
+        RunOutcome(correctness="crashed")
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +238,7 @@ class _ToyPlugin(BenchmarkPlugin):
         return [Task(task_id="t-1", instruction="do it")]
 
     def run(self, task, handle, skills_block, workdir):
-        return RunOutcome(status="success")
+        return RunOutcome(correctness=True)
 
     @property
     def view_rules(self):
@@ -274,7 +260,7 @@ def test_toy_plugin_satisfies_interface():
     assert tasks[0].task_id == "t-1"
     outcome = plugin.run(tasks[0], ModelHandle(name="m", role="r", client=None),
                          "", "/tmp/nowhere")
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert plugin.view_rules.max_obs_chars == ViewRules().max_obs_chars
     assert plugin.task_prompt_name == "TOY_TASK"
 

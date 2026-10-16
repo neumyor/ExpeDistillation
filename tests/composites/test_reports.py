@@ -56,23 +56,23 @@ MARKED_A = "\n".join([
 # Fixture helpers (the shapes tests/composites/ already use)
 # ---------------------------------------------------------------------------
 
-def make_traj(attempt, status, task_id, role="weak"):
+def make_traj(attempt, correctness, task_id, role="weak"):
     return Trajectory(
         trajectory_id=make_trajectory_id(task_id, role, attempt),
         task_id=task_id, benchmark=BENCHMARK, model_role=role,
         model_name=f"{role}-model", attempt_index=attempt,
         steps=[Step(action=f"do {attempt}",
                     observation=f"obs {attempt}")],
-        status=status,
+        correctness=correctness,
     )
 
 
 def seed_task(store, task_id, weak_statuses, strong_statuses=()):
-    for attempt, status in enumerate(weak_statuses):
-        store.save(make_traj(attempt, status, task_id, "weak"),
+    for attempt, correctness in enumerate(weak_statuses):
+        store.save(make_traj(attempt, correctness, task_id, "weak"),
                    "trajectories")
-    for attempt, status in enumerate(strong_statuses):
-        store.save(make_traj(attempt, status, task_id, "strong"),
+    for attempt, correctness in enumerate(strong_statuses):
+        store.save(make_traj(attempt, correctness, task_id, "strong"),
                    "trajectories")
 
 
@@ -136,9 +136,9 @@ def freeze_audit(store, task_id, round_=0):
 
 def seed_round(store, task_id, round_, statuses):
     directory = round_dir(store, round_)
-    for attempt, status in enumerate(statuses):
-        Store(directory).save(make_traj(attempt, status, task_id),
-                              "trajectories")
+    for attempt, correctness in enumerate(statuses):
+        Store(directory).save(
+            make_traj(attempt, correctness, task_id), "trajectories")
 
 
 def _tree(root):
@@ -156,7 +156,7 @@ def _rows_by_unit(report):
 
 def test_every_row_is_the_one_shape(tmp_path):
     store = Store(tmp_path / "run")
-    seed_task(store, TASK_ID, ("failure",) * N_ATTEMPTS)
+    seed_task(store, TASK_ID, (False,) * N_ATTEMPTS)
 
     for report in (
             acceptance_report(store, kind="baseline", benchmark=BENCHMARK,
@@ -198,11 +198,11 @@ def test_baseline_rows_split_by_role_and_count(tmp_path):
     store = Store(tmp_path / "run")
     t1, t2, t3, t4 = (make_task_id(BENCHMARK, name)
                      for name in ("t1", "t2", "t3", "t4"))
-    seed_task(store, t1, ("success", "failure", "failure"),
-              ("success", "failure"))
-    seed_task(store, t2, ("failure", "failure"), ("failure", "failure"))
-    seed_task(store, t3, ("success", "success", "success"),
-              ("success", "success"))
+    seed_task(store, t1, (True, False, False),
+              (True, False))
+    seed_task(store, t2, (False, False), (False, False))
+    seed_task(store, t3, (True, True, True),
+              (True, True))
     # t4: every unit is an accepted hole -- no trajectory, still rows.
     accept_holes(store, [make_trajectory_id(t2, "weak", 2)]
                  + [make_trajectory_id(t4, "weak", attempt)
@@ -253,7 +253,7 @@ def test_baseline_missing_units_are_invalid_runs(tmp_path):
     store = Store(tmp_path / "run")
     t1, t2 = make_task_id(BENCHMARK, "t1"), make_task_id(BENCHMARK, "t2")
     # t1: one stored failure, two units that never came back.
-    seed_task(store, t1, ("failure",))
+    seed_task(store, t1, (False,))
     # t2: one accepted hole (so the task is in the universe), the rest
     # never came back -- the dispatch budget died.
     accept_holes(store, [make_trajectory_id(t2, "weak", 0)])
@@ -405,11 +405,11 @@ def test_exam_candidate_without_exam_is_generation_failed(tmp_path):
 # ---------------------------------------------------------------------------
 
 def judged_round(tmp_path, *, task_id=TASK_ID,
-                 live=("failure", "failure", "failure")):
+                 live=(False, False, False)):
     """A run directory with one judged round-0 group (no model calls:
     judging is a pure recomputation over the seeded stores)."""
     store = Store(tmp_path / "run")
-    seed_task(store, task_id, ("failure",) * N_ATTEMPTS)
+    seed_task(store, task_id, (False,) * N_ATTEMPTS)
     skills = [group_skill(task_id, segment) for segment in range(2)]
     for skill in skills:
         store.save(skill, "skills")
@@ -445,7 +445,7 @@ def test_live_row_of_a_judged_round(tmp_path):
 
 def test_live_zero_execution_weak_already_knows_row(tmp_path):
     store, _, _ = judged_round(tmp_path)
-    seed_task(store, OTHER_TASK_ID, ("success",) * N_ATTEMPTS)
+    seed_task(store, OTHER_TASK_ID, (True,) * N_ATTEMPTS)
     for segment in range(2):
         store.save(group_skill(OTHER_TASK_ID, segment), "skills")
     _, baseline_counts = lm.load_baseline(store, OTHER_TASK_ID, N_ATTEMPTS)
@@ -475,7 +475,7 @@ def _dispatched_group(tmp_path, *, round_statuses):
     """A dispatched round-0 group: frozen audit row, stored round
     trajectories as given, unjudged (the caller judges)."""
     store = Store(tmp_path / "run")
-    seed_task(store, TASK_ID, ("failure",) * N_ATTEMPTS)
+    seed_task(store, TASK_ID, (False,) * N_ATTEMPTS)
     skills = [group_skill(TASK_ID, segment) for segment in range(2)]
     for skill in skills:
         store.save(skill, "skills")
@@ -487,7 +487,7 @@ def _dispatched_group(tmp_path, *, round_statuses):
 
 
 def test_live_injection_overflow_row(tmp_path):
-    store, _ = _dispatched_group(tmp_path, round_statuses=("failure",) * 3)
+    store, _ = _dispatched_group(tmp_path, round_statuses=(False,) * 3)
     lv.judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
                    baseline_counts={"valid": N_ATTEMPTS, "success": 1},
                    n_attempts=N_ATTEMPTS, skip_ids=[],

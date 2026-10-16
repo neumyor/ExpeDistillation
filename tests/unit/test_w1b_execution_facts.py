@@ -1,15 +1,16 @@
-"""W1-B / R2 tests: the execution modules record facts, they do not judge.
+"""W1-B / R2 + R2b tests: the execution modules record facts, not verdicts.
 
-Pins the three contract points of R2 (docs/decisions/
+Pins the contract points of R2 and R2b (docs/decisions/
 execute_learn_repair_plan_20261016.md, boundaries doc section 3 rule 2):
 
 1. The TB plugin passes the benchmark scorer's verdict through verbatim
-   and reports raw facts beside it (``verifier_ran``, the trial's
-   exception); pseudo-zero invalidation and model-vs-infra exception
-   reclassification no longer happen on the execution path.
+   (``correctness``) and reports raw facts beside it (``verifier_ran``,
+   the trial's exception); a reward without verifier evidence carries NO
+   verdict (``correctness=None``, stored, never mechanically retried) --
+   judging it is acceptance's named rule.
 2. K1's retry stays mechanical: a run that came back with a scorer
    verdict -- however suspicious its facts look -- is never retried;
-   only a run without one is.
+   only a run that raised an infrastructure failure is.
 3. Exam answering (the A-phase execution half) persists the answer with
    correctness blank (``judge_verdict=None``) and never grades.
 
@@ -29,6 +30,7 @@ from expedistill.benchmarks.tb import TBPlugin
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.composites.exam_answering import answer_exam
 from expedistill.core.models import Attempt, Exam
+from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store
 from expedistill.llm.call import ModelHandle
 from expedistill.llm.fake import make_fake_handle
@@ -105,11 +107,21 @@ _HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",
 # 1. The TB plugin reports facts; the scorer's verdict passes through
 # ---------------------------------------------------------------------------
 
-def test_scorer_verdict_passes_through_whatever_the_verifier_log_says(tmp_path):
-    # A scored trial: status is the scorer's reward and NOTHING else. The
-    # pseudo-zero pattern (reward present, pytest never collected) keeps
-    # the scorer's verdict and gains the ``verifier_ran`` fact; execution
-    # no longer invalidates the run (that is acceptance's named rule).
+def test_scorer_verdict_passes_through_when_the_verifier_ran(tmp_path):
+    # A scored trial: correctness is the scorer's reward and NOTHING else.
+    link = JobsRemoteLink()
+    outcome = _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
+    assert outcome.meta["reward"] == 1.0
+    assert outcome.meta["verifier_ran"] is True
+    assert outcome.correctness is True
+
+
+def test_a_reward_without_verifier_evidence_carries_no_verdict(tmp_path):
+    # The pseudo-zero pattern (reward present, pytest never collected) is
+    # no verdict in EITHER reward direction (R2b): the run is stored with
+    # correctness=None and the raw facts beside it -- never invalidated by
+    # the plugin, never mechanically retried, judged by acceptance's
+    # named rule.
     link = JobsRemoteLink(on_submit=lambda run_id, task, model: trial_files(
         run_id, task, result="result_failure.json",
         verifier_log="verifier_not_collected.txt"))
@@ -117,30 +129,24 @@ def test_scorer_verdict_passes_through_whatever_the_verifier_log_says(tmp_path):
     assert outcome.meta["reward"] == 0.0
     assert outcome.meta["verifier_ran"] is False
     assert "verdict_reason" not in outcome.meta
-    # The frozen status vocabulary maps the scorer's verdict directly.
-    assert outcome.status == "failure"
-
-    link = JobsRemoteLink()
-    outcome = _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "w2")
-    assert outcome.meta["reward"] == 1.0
-    assert outcome.meta["verifier_ran"] is True
-    assert outcome.status == "success"
+    assert outcome.correctness is None
 
 
 def test_reward_absent_trial_reports_no_verdict_and_raw_exception_facts(
         tmp_path):
     # The campaign's model-exception set (AgentTimeoutError et al.) used
     # to be reclassified as the model's failure by the plugin. R2 removed
-    # that: with no scorer verdict there is no claim about the model, the
-    # exception travels as a fact, and judging the trial is acceptance's.
+    # that; R2b additionally stopped the mechanical retry: with no scorer
+    # verdict there is no claim about the model, the run is stored with
+    # correctness=None and the exception travels as a fact, and judging
+    # the trial is acceptance's.
     link = JobsRemoteLink(on_submit=lambda run_id, task, model: trial_files(
         run_id, task, result="result_model_fail.json"))
     outcome = _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
     assert outcome.meta["reward"] is None
     assert outcome.meta["exception_type"] == "AgentTimeoutError"
     assert outcome.meta["exception_message"]
-    # The frozen vocabulary's one non-judgment bucket: "no measurement".
-    assert outcome.status == "infra_error"
+    assert outcome.correctness is None
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +159,7 @@ def test_a_suspicious_looking_result_is_executed_exactly_once(tmp_path):
     # retries it -- "after a result comes back, no retry, however
     # suspicious it looks" (plan R2 item 2).
     plugin = _install_plugin(CountingPlugin([
-        RunOutcome(steps=[], status="failure",
+        RunOutcome(steps=[], correctness=False,
                    meta={"error": "verifier log looks broken"}),
     ]))
     try:
@@ -170,7 +176,7 @@ def test_a_suspicious_looking_result_is_executed_exactly_once(tmp_path):
             infra_backoff=(0.0, 0.0),
         )
         assert plugin.calls == 1
-        assert [t.status for t in result] == ["failure"]
+        assert [t.correctness for t in result] == [False]
         assert result[0].meta["error"] == "verifier log looks broken"
     finally:
         sys.meta_path.pop()
@@ -178,12 +184,19 @@ def test_a_suspicious_looking_result_is_executed_exactly_once(tmp_path):
         _reset_registry()
 
 
-def test_only_a_run_without_a_scorer_verdict_is_retried(tmp_path):
-    # No verdict came back (infra_error): the unit reruns mechanically,
-    # blind to the reason, until a result lands.
-    plugin = _install_plugin(CountingPlugin([
-        RunOutcome(status="infra_error", meta={"error": "sandbox down"}),
-        RunOutcome(steps=[], status="failure", meta={}),
+def test_only_an_infrastructure_failure_is_retried(tmp_path):
+    # The plugin raised an infrastructure failure: the unit reruns
+    # mechanically, blind to the reason, until a result lands. A stored
+    # correctness=None run (no scorer verdict) is NOT retried.
+    class RaisingPlugin(CountingPlugin):
+        def run(self, task, handle, skills_block, workdir):
+            self.calls += 1
+            if self._outcomes:
+                raise self._outcomes.pop(0)
+            return RunOutcome(steps=[], correctness=False, meta={})
+
+    plugin = _install_plugin(RaisingPlugin([
+        InfrastructureError("sandbox down"),
     ]))
     try:
         result = batch_execute(
@@ -199,7 +212,7 @@ def test_only_a_run_without_a_scorer_verdict_is_retried(tmp_path):
             infra_backoff=(0.0, 0.0),
         )
         assert plugin.calls == 2
-        assert [t.status for t in result] == ["failure"]
+        assert [t.correctness for t in result] == [False]
     finally:
         sys.meta_path.pop()
         sys.modules.pop(_MODULE, None)

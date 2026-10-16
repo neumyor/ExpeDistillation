@@ -81,9 +81,7 @@ __all__ = [
     "register_verdict_rule",
     "status_cause_for_terminal",
     "summarize_unit",
-    "verdict_from_attempt",
     "verdict_from_run",
-    "verdict_from_trajectory",
 ]
 
 
@@ -234,16 +232,17 @@ def get_verdict_rule(name: str):
 @VERDICT_RULES.register("scorer")
 def _scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
     """The benchmark's own scorer decided: correctness True -> success,
-    False -> failure. ``None`` is a CodeBugError, not a failure -- a
-    benchmark with no scorer must be judged by a model-judging rule, and
-    silently scoring "did not run" as wrong is the exact confusion of
-    execution with acceptance this module exists to prevent."""
+    False -> failure. ``None`` is an invalid run, not a failure and not a
+    wiring bug -- since R2b it is the honest per-run value "the run came
+    back with no scorer verdict" (a pseudo zero, a trial that died before
+    its verifier ran), and the run is excluded from every denominator,
+    never silently scored as wrong. A benchmark with NO scorer at all is
+    a different situation and is caught one level up: its default binding
+    is a model-judging rule (``exam_judge``), not this one."""
     correctness = facts.get("correctness")
     if correctness is None:
-        raise CodeBugError(
-            "the scorer rule judged a run the benchmark did not score "
-            "(correctness is None): a no-scorer benchmark needs a "
-            "model-judging rule, not the scorer rule")
+        return RUN_INVALID, ("scorer: no scorer verdict came back for "
+                             "this run")
     if correctness:
         return RUN_SUCCESS, "scorer: the benchmark's own scorer"
     return RUN_FAILURE, "scorer: the benchmark's own scorer"
@@ -253,16 +252,19 @@ def _scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
 def _exam_judge_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
     """The G5 model judge decided (the exam benchmark: the question is
     generated on the fly, so there is no scorer -- the judge's verdict
-    travels the run's ``aux`` from execution to acceptance)."""
-    verdict = (facts.get("aux") or {}).get("judge_verdict")
+    travels the run's ``aux`` from execution to acceptance, with the
+    judge's own reason beside it as the basis text)."""
+    aux = facts.get("aux") or {}
+    verdict = aux.get("judge_verdict")
     if verdict is None:
         raise CodeBugError(
             "the exam_judge rule judged a run with no judge verdict in "
             "aux: an unjudged attempt is in-flight work, never a "
             "reported run")
+    basis = "exam_judge: " + (aux.get("judge_reason") or "the G5 model judge")
     if verdict:
-        return RUN_SUCCESS, "exam_judge: the G5 model judge"
-    return RUN_FAILURE, "exam_judge: the G5 model judge"
+        return RUN_SUCCESS, basis
+    return RUN_FAILURE, basis
 
 
 #: The default named rule per benchmark (R1: the verdict rules are named
@@ -292,55 +294,16 @@ def default_verdict_rule(benchmark: str) -> str:
 def verdict_from_run(record: RunRecord, *,
                      rule_name: str) -> Tuple[str, str]:
     """One run's verdict under the named rule: the frozen-contract entry
-    point once R2 lands (execution hands over RunRecords, acceptance
-    judges them here)."""
+    point (execution hands over RunRecords, acceptance judges them
+    here). The pre-R2b bridges ``verdict_from_trajectory`` /
+    ``verdict_from_attempt`` are gone: a stored Trajectory maps onto a
+    RunRecord (its ``meta`` is the run metrics; an exam Attempt's judge
+    verdict travels ``aux``) and every consumer judges through this
+    entry."""
     rule = get_verdict_rule(rule_name)
     return rule({"correctness": record.correctness,
                  "metrics": record.metrics,
                  "aux": record.aux})
-
-
-def verdict_from_trajectory(trajectory) -> Tuple[str, str]:
-    """One stored Trajectory's run verdict -- the R2b BRIDGE, not a rule:
-    today's Trajectory still carries the concluded three-value status the
-    plugin wrote (G1 site 1 is W1-B's to strip), so the verdict is the
-    mechanical mapping of that status. Deleted in R2b, when the plugin
-    reports facts and ``verdict_from_run`` takes over."""
-    status = trajectory.status
-    if status == "success":
-        return RUN_SUCCESS, "trajectory status: success"
-    if status == "failure":
-        return RUN_FAILURE, "trajectory status: failure"
-    if status == "infra_error":
-        basis = "trajectory status: infra_error"
-        reason = (trajectory.meta or {}).get("verdict_reason")
-        if reason:
-            basis += f" ({reason})"
-        return RUN_INVALID, basis
-    raise CodeBugError(f"unknown trajectory status {status!r}")
-
-
-def verdict_from_attempt(attempt) -> Tuple[str, str]:
-    """One judged exam attempt's run verdict -- the R2b BRIDGE, not a
-    rule (the sibling of :func:`verdict_from_trajectory` above): today's
-    Attempt still carries the concluded judge_verdict the judge wrote,
-    so the verdict is the mechanical mapping of that output. Deleted in
-    R2b, when ``correctness: Optional[bool]`` replaces the run-verdict
-    vocabulary and ``verdict_from_run`` takes over. Grading itself (the
-    G5 model judge under its crash-persistent budget) is
-    :func:`grade_attempt` / ``exam_grading``; this only reads a judge's
-    output. An unjudged attempt is in-flight work and a CodeBugError
-    here -- callers skip it, never report it."""
-    if attempt.judge_verdict is None:
-        raise CodeBugError(
-            f"attempt {attempt.attempt_id} has no judge verdict: an "
-            "unjudged attempt is in-flight work, never a reported run")
-    if attempt.judge_verdict:
-        verdict = RUN_SUCCESS
-    else:
-        verdict = RUN_FAILURE
-    basis = "exam_judge: " + (attempt.judge_reason or "the G5 judge")
-    return verdict, basis
 
 
 # ---------------------------------------------------------------------------

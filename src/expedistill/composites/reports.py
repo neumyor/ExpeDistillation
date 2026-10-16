@@ -17,7 +17,8 @@ former readers read and hands each found run to the verdict core:
 * ``kind="baseline"`` -- the D phase's bare arms over the run-level
   trajectory store and stage 1's accepted-shortfall record: one row per
   (task, role) (D phases split by role), ``runs`` one entry per expected
-  unit (a stored trajectory judged by the R2b bridge, or an invalid
+  unit (a stored trajectory judged by its benchmark's default named rule
+  through ``verdict_from_run``, or an invalid
   ``missing`` entry for a unit whose infra retries were exhausted; an
   accepted hole is no run at all);
 * ``kind="exam"`` -- the A phase over the shared exams/attempts stores:
@@ -72,7 +73,7 @@ from expedistill.composites.acceptance_skill_status import (
 )
 from expedistill.composites.skill_status import stage3_candidates
 from expedistill.core import ids
-from expedistill.core.contracts import AcceptanceReportRow
+from expedistill.core.contracts import AcceptanceReportRow, RunRecord
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import Store, read_jsonl
@@ -85,6 +86,52 @@ _KINDS = ("baseline", "exam", "live")
 
 #: The D phase's two bare arms (role split, core/contracts.py).
 _ROLES = ("strong", "weak")
+
+
+def _run_record_from_trajectory(traj: Trajectory) -> RunRecord:
+    """A stored Trajectory as the RunRecord acceptance judges (R2b: the
+    ``verdict_from_trajectory`` bridge is gone; the record's interface
+    view is the same facts -- the scorer verdict plus the run metrics the
+    plugin recorded in ``meta``)."""
+    return RunRecord(
+        unit_id=traj.trajectory_id,
+        task_ref=traj.task_id,
+        skills_injected=traj.skills_injected,
+        skills_block="",
+        model_role=traj.model_role,
+        model_name=traj.model_name,
+        sample_index=traj.attempt_index,
+        dispatch_index=0,
+        correctness=traj.correctness,
+        metrics=dict(traj.meta or {}),
+        aux={},
+        artifacts={},
+    )
+
+
+def _run_record_from_attempt(attempt) -> RunRecord:
+    """A judged exam Attempt as the RunRecord acceptance judges (R2b: the
+    ``verdict_from_attempt`` bridge is gone; an exam has no scorer, so
+    ``correctness`` is None by the frozen contract and the G5 judge's
+    verdict travels ``aux`` exactly where the ``exam_judge`` rule reads
+    it)."""
+    return RunRecord(
+        unit_id=attempt.attempt_id,
+        task_ref=attempt.exam_id,
+        skills_injected=([{"skill_id": attempt.skill_id,
+                            "version": attempt.skill_version}]
+                         if attempt.skill_id is not None else None),
+        skills_block="",
+        model_role="weak",
+        model_name="",
+        sample_index=ids.parse_attempt_id(attempt.attempt_id)[1],
+        dispatch_index=attempt.retry_round,
+        correctness=None,
+        metrics={},
+        aux={"judge_verdict": attempt.judge_verdict,
+             "judge_reason": attempt.judge_reason},
+        artifacts={},
+    )
 
 
 def acceptance_report(store: Store, *, kind: str, benchmark: str,
@@ -164,7 +211,8 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
                        ) -> AcceptanceReportRow:
     """One (task, role) bare unit's row: one run per expected unit.
 
-    A stored trajectory is judged by the R2b bridge; an accepted hole is
+    A stored trajectory is judged by its benchmark's default named rule
+    (R2b: through ``verdict_from_run``); an accepted hole is
     no run at all; a unit that is neither was dispatched but never
     completed (its infra retries were exhausted) and is an invalid run --
     the honest shape of "not testable", never a silently shrunken
@@ -174,6 +222,7 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
     of_role = {traj.trajectory_id: traj
                for traj in trajectories
                if traj.task_id == task_id and traj.model_role == role}
+    rule_name = verdicts.default_verdict_rule(benchmark)
     runs: List[Dict[str, Any]] = []
     for attempt in range(n_attempts):
         unit_trajectory_id = ids.make_trajectory_id(task_id, role, attempt)
@@ -181,7 +230,8 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
             continue
         traj = of_role.get(unit_trajectory_id)
         if traj is not None:
-            verdict, basis = verdicts.verdict_from_trajectory(traj)
+            verdict, basis = verdicts.verdict_from_run(
+                _run_record_from_trajectory(traj), rule_name=rule_name)
         else:
             verdict, basis = (verdicts.RUN_INVALID,
                               "missing: dispatched but never completed "
@@ -278,7 +328,9 @@ def _exam_unit_rows(store: Store, skill, exam_id: str, *, benchmark: str,
                             key=_serial_of)
             runs = []
             for attempt in judged:
-                verdict, basis = verdicts.verdict_from_attempt(attempt)
+                verdict, basis = verdicts.verdict_from_run(
+                    _run_record_from_attempt(attempt),
+                    rule_name=verdicts.default_verdict_rule("exam"))
                 runs.append({"run": attempt.attempt_id,
                              "verdict": verdict, "basis": basis})
             if runs:
@@ -322,7 +374,9 @@ def _exam_bare_row(attempts, exam_id: str, *, benchmark: str,
     bare = _find_bare(attempts)
     runs: List[Dict[str, Any]] = []
     if bare is not None:
-        verdict, basis = verdicts.verdict_from_attempt(bare)
+        verdict, basis = verdicts.verdict_from_run(
+            _run_record_from_attempt(bare),
+            rule_name=verdicts.default_verdict_rule("exam"))
         runs.append({"run": bare.attempt_id, "verdict": verdict,
                      "basis": basis})
     if runs:
@@ -386,10 +440,12 @@ def _live_rows(store: Store, *, benchmark: str, phase_label: str,
             status, cause = verdicts.status_cause_for_terminal(terminal)
         else:
             if directory.exists():
+                rule_name = verdicts.default_verdict_rule(benchmark)
                 for traj in lm._trajectories_from(directory, task_id,
                                                   round_):
-                    verdict, basis = verdicts.verdict_from_trajectory(
-                        traj)
+                    verdict, basis = verdicts.verdict_from_run(
+                        _run_record_from_trajectory(traj),
+                        rule_name=rule_name)
                     runs.append({"run": traj.trajectory_id,
                                  "verdict": verdict, "basis": basis})
             if any(run["verdict"] != verdicts.RUN_INVALID for run in runs):

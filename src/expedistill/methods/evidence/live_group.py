@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Union
 
 from expedistill.blocks.attribution import attribute_failure
-from expedistill.blocks.view import render_trajectory_view
+from expedistill.blocks.view import final_status_word, render_trajectory_view
 from expedistill.composites.decision import REVISE
 from expedistill.composites.live_attribution import (
     _LIVE_VIEWS_BUDGET_CHARS,
@@ -55,10 +55,14 @@ __all__ = ["collect_group_evidence"]
 
 def _measurement_facts(kind: str, trajectories: List[Trajectory]) \
         -> List[dict]:
-    """One fact per attempt: the run's own status line (a measurement
-    number the author reads alongside the diagnosis)."""
+    """One fact per attempt: the run's own verdict line (a measurement
+    number the author reads alongside the diagnosis; the display word is
+    blocks.view.final_status_word, frozen byte-for-byte because this text
+    feeds the G10 prompt the semantic instrument pins call for call)."""
     return [
-        {"kind": kind, "text": f"attempt {traj.attempt_index}: {traj.status}"}
+        {"kind": kind,
+         "text": f"attempt {traj.attempt_index}: "
+                 f"{final_status_word(traj.correctness)}"}
         for traj in trajectories]
 
 
@@ -124,7 +128,7 @@ def collect_group_evidence(
     segments = [
         {"trajectory_id": traj.trajectory_id,
          "step_range": [0, len(traj.steps)],
-         "status": traj.status}
+         "correctness": traj.correctness}
         for traj in round_trajs]
 
     packages: List[EvidencePackage] = []

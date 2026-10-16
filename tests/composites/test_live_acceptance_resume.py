@@ -136,9 +136,9 @@ GROUP = [make_group_skill(0, MARKED_A), make_group_skill(1, MARKED_A),
 # live_no_improvement path).
 SCENARIOS = {
     "revise_round1_pass": {
-        "baseline": ("failure", "failure", "success"),
-        "round0": ("failure", "failure", "failure"),
-        "round1": ("success", "success", "failure"),
+        "baseline": (False, False, True),
+        "round0": (False, False, False),
+        "round1": (True, True, False),
         "scripts": {
             "author": [
                 MOE("LIVE_RUN_ATTRIBUTION: bad json"),
@@ -154,9 +154,9 @@ SCENARIOS = {
         },
     },
     "revise_round1_miss": {
-        "baseline": ("failure", "failure", "success"),
-        "round0": ("failure", "failure", "failure"),
-        "round1": ("failure", "failure", "failure"),
+        "baseline": (False, False, True),
+        "round0": (False, False, False),
+        "round1": (False, False, False),
         "scripts": {
             "author": [
                 plan([(A_ID, "revise", "trigger too vague"),
@@ -176,14 +176,14 @@ SCENARIOS = {
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-def make_traj(attempt, status):
+def make_traj(attempt, correctness):
     return Trajectory(
         trajectory_id=make_trajectory_id(TASK_ID, "weak", attempt),
         task_id=TASK_ID, benchmark=BENCHMARK, model_role="weak",
         model_name="weak-model", attempt_index=attempt,
         steps=[Step(action=f"do x {attempt}",
                     observation=f"obs x {attempt}")],
-        status=status,
+        correctness=correctness,
     )
 
 
@@ -201,8 +201,8 @@ def round_store(store, round_):
 
 
 def seed_baseline(store, statuses):
-    for attempt, status in enumerate(statuses):
-        store.save(make_traj(attempt, status), "trajectories")
+    for attempt, correctness in enumerate(statuses):
+        store.save(make_traj(attempt, correctness), "trajectories")
 
 
 def scripted(role, items, log):
@@ -256,10 +256,10 @@ def _dispatch_round(store, round_, statuses):
         # counted with them.
         lv.append_jsonl(path, row)
     rs = round_store(store, round_)
-    for attempt, status in enumerate(statuses):
+    for attempt, correctness in enumerate(statuses):
         if not rs.exists("trajectories",
                          make_trajectory_id(TASK_ID, "weak", attempt)):
-            rs.save(make_traj(attempt, status), "trajectories")
+            rs.save(make_traj(attempt, correctness), "trajectories")
 
 
 def _flow(store, handles, scenario):
@@ -659,8 +659,8 @@ def test_crash_between_verdict_and_commit_sweep_completes(tmp_path):
     commits. The resumed flow's finalization sweep commits them with no
     model call at all."""
     scenario = {
-        "baseline": ("failure", "failure", "success"),
-        "round0": ("success", "success", "failure"),
+        "baseline": (False, False, True),
+        "round0": (True, True, False),
         "round1": (),
         "scripts": {"author": [], "rewriter": []},
     }

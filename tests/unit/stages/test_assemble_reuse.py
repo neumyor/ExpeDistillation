@@ -136,7 +136,7 @@ def _traj(task, role, attempt=0, meta=None):
         model_name=STRONG if role == "strong" else WEAK,
         attempt_index=attempt,
         steps=[],
-        status="success",
+        correctness=True,
         meta=dict(meta or {}),
     )
 

@@ -83,7 +83,8 @@ MARKED = "\n".join([
 
 class LivePlugin(BenchmarkPlugin):
     """Two tasks; every execution answered by ``behave(task, skills_block)``
-    returning a status; every call logged (the log is how the tests prove a
+    returning the scorer verdict (or raising InfrastructureError); every
+    call logged (the log is how the tests prove a
     group was or was not dispatched -- A10's regression)."""
 
     def __init__(self, behave):
@@ -108,10 +109,10 @@ class LivePlugin(BenchmarkPlugin):
         self.calls.append({"task_id": task.task_id,
                            "token": task.meta.get("attempt_token"),
                            "block": skills_block})
-        status = self.behave(task, skills_block)
+        correctness = self.behave(task, skills_block)
         return RunOutcome(
             steps=[{"action": "run", "observation": "the state"}],
-            status=status,
+            correctness=correctness,
         )
 
     @property
@@ -164,19 +165,19 @@ def live_registry(monkeypatch):
 # Store seeding: the state the pipeline would have handed the stage
 # ---------------------------------------------------------------------------
 
-def make_traj(attempt, status, task_id=TASK1, role="weak"):
+def make_traj(attempt, correctness, task_id=TASK1, role="weak"):
     return Trajectory(
         trajectory_id=make_trajectory_id(task_id, role, attempt),
         task_id=task_id, benchmark=BENCHMARK, model_role=role,
         model_name="weak-model", attempt_index=attempt,
         steps=[Step(action=f"step {attempt}", observation="obs")],
-        status=status,
+        correctness=correctness,
     )
 
 
 def seed_baseline(store, statuses, task_id=TASK1):
-    for attempt, status in enumerate(statuses):
-        store.save(make_traj(attempt, status, task_id), "trajectories")
+    for attempt, correctness in enumerate(statuses):
+        store.save(make_traj(attempt, correctness, task_id), "trajectories")
 
 
 def seed_group(store, contents, task_id=TASK1):
@@ -222,7 +223,7 @@ def make_ctx(tmp_path, *, author=None, rewriter=None, acceptance=None,
 
 def build_env(tmp_path, monkeypatch, *, behave, author=None, rewriter=None,
               acceptance=None, allow_infra_shortfall=False,
-              baseline=("failure", "failure"), contents=(MARKED,),
+              baseline=(False, False), contents=(MARKED,),
               task_id=TASK1):
     """One task's complete entry state: baseline, group, plugin, context."""
     plugin = install(monkeypatch, LivePlugin(behave))
@@ -310,7 +311,7 @@ def stored_skill(store, skill):
 def test_round0_pass_accepts_with_zero_attribution_calls(tmp_path, monkeypatch):
     ctx, store, plugin, skills = build_env(
         tmp_path, monkeypatch,
-        behave=lambda task, block: "success",
+        behave=lambda task, block: True,
         author=author_plan(lambda skill_id: "revise"))
 
     summary = run_live(ctx)
@@ -336,7 +337,7 @@ def test_round0_pass_accepts_with_zero_attribution_calls(tmp_path, monkeypatch):
 def test_two_failed_rounds_discard_the_group(tmp_path, monkeypatch):
     ctx, store, plugin, skills = build_env(
         tmp_path, monkeypatch,
-        behave=lambda task, block: "failure",
+        behave=lambda task, block: False,
         author=author_plan(lambda skill_id: "revise"),
         rewriter=rewriter_append())
 
@@ -361,7 +362,7 @@ def test_two_failed_rounds_discard_the_group(tmp_path, monkeypatch):
 
 def test_revision_then_round1_pass_accepts(tmp_path, monkeypatch):
     def behave(task, block):
-        return "success" if "Revised." in block else "failure"
+        return True if "Revised." in block else False
 
     ctx, store, plugin, skills = build_env(
         tmp_path, monkeypatch, behave=behave,
@@ -424,7 +425,7 @@ def test_revision_then_round1_pass_accepts(tmp_path, monkeypatch):
 def test_delete_plus_round1_pass_reports_mixed_outcome(
         tmp_path, monkeypatch):
     def behave(task, block):
-        return "success" if "Revised." in block else "failure"
+        return True if "Revised." in block else False
 
     ctx, store, plugin, skills = build_env(
         tmp_path, monkeypatch, behave=behave,
@@ -455,7 +456,7 @@ def test_all_keep_fires_the_noop_guard_and_never_runs_round1(
         tmp_path, monkeypatch):
     ctx, store, plugin, skills = build_env(
         tmp_path, monkeypatch,
-        behave=lambda task, block: "failure",
+        behave=lambda task, block: False,
         author=author_plan(lambda skill_id: "keep"))
 
     summary = run_live(ctx)
@@ -476,13 +477,13 @@ def test_all_keep_fires_the_noop_guard_and_never_runs_round1(
 
 def test_zero_execution_terminals_are_never_dispatched_or_redispatched(
         tmp_path, monkeypatch):
-    plugin = install(monkeypatch, LivePlugin(lambda task, block: "success"))
+    plugin = install(monkeypatch, LivePlugin(lambda task, block: True))
     ctx = make_ctx(tmp_path)
     # t1: the baseline is all-success -> weak_already_knows, zero executions.
-    seed_baseline(ctx.store, ("success", "success"), TASK1)
+    seed_baseline(ctx.store, (True, True), TASK1)
     seed_group(ctx.store, [MARKED], TASK1)
     # t2: a normal round-0 pass.
-    seed_baseline(ctx.store, ("failure", "failure"), TASK2)
+    seed_baseline(ctx.store, (False, False), TASK2)
     seed_group(ctx.store, [MARKED], TASK2)
 
     summary = run_live(ctx)
@@ -517,7 +518,7 @@ def test_injection_overflow_terminalizes_before_any_execution(
         tmp_path, monkeypatch):
     acceptance = dict(LIVE_ACCEPTANCE, max_injection_tokens=1)
     ctx, store, plugin, skills = build_env(
-        tmp_path, monkeypatch, behave=lambda task, block: "success",
+        tmp_path, monkeypatch, behave=lambda task, block: True,
         acceptance=acceptance)
 
     summary = run_live(ctx)
@@ -551,8 +552,8 @@ def test_infra_holes_raise_at_stage_end_and_a_resume_completes(
     def behave(task, block):
         token = task.meta.get("attempt_token", "")
         if broken["a00"] and token.startswith("a00"):
-            return "infra_error"
-        return "success"
+            raise InfrastructureError("sandbox down")
+        return True
 
     ctx, store, plugin, skills = build_env(
         tmp_path, monkeypatch, behave=behave,
@@ -591,14 +592,17 @@ def test_shortfall_acceptance_judges_holes_and_undetermines_all_hole_groups(
 
     def behave(task, block):
         if task.task_id == "t1":
-            return "infra_error"          # every unit of t1 is a hole
+            raise InfrastructureError(   # every unit of t1 is a hole
+                "sandbox down")
         token = task.meta.get("attempt_token", "")
-        return "infra_error" if token.startswith("a00") else "success"
+        if token.startswith("a00"):
+            raise InfrastructureError("sandbox down")
+        return True
 
     install(monkeypatch, LivePlugin(behave))
     ctx = make_ctx(tmp_path, allow_infra_shortfall=True)
     for task_id in (TASK1, TASK2):
-        seed_baseline(ctx.store, ("failure", "failure"), task_id)
+        seed_baseline(ctx.store, (False, False), task_id)
         seed_group(ctx.store, [MARKED], task_id)
 
     summary = run_live(ctx)    # no raise under the flag
@@ -637,10 +641,10 @@ def test_a_previously_accepted_hole_is_skipped_and_judges_with_shortfall(
     judged complete -- the state a crash between acceptance and judgment
     would have left, hand-built the way the K6 fixtures build theirs."""
     ctx, store, plugin, skills = build_env(
-        tmp_path, monkeypatch, behave=lambda task, block: "success")
+        tmp_path, monkeypatch, behave=lambda task, block: True)
 
     round_store = Store(live_dir(store) / "round00")
-    round_store.save(make_traj(0, "success"), "trajectories")
+    round_store.save(make_traj(0, True), "trajectories")
     write_json(live_dir(store) / "round00"
                / stage4_live_run.SHORTFALL_NAME,
                {"unit_ids": [unit(TASK1, 1)]}, indent=2)
@@ -669,7 +673,7 @@ def test_a_previously_accepted_hole_is_skipped_and_judges_with_shortfall(
 def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
         tmp_path, monkeypatch):
     ctx, store, plugin, skills = build_env(
-        tmp_path, monkeypatch, behave=lambda task, block: "failure",
+        tmp_path, monkeypatch, behave=lambda task, block: False,
         contents=(MARKED, MARKED))
     # Round 0 executed, judged not better, attributed all-keep, and the
     # guard fired -- a crash then ate half of its discards. The remaining
@@ -677,7 +681,7 @@ def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
     # alone would miss the frozen line and wrongly dispatch round 1.
     round_store = Store(live_dir(store) / "round00")
     for attempt in range(N_ATTEMPTS):
-        round_store.save(make_traj(attempt, "failure"), "trajectories")
+        round_store.save(make_traj(attempt, False), "trajectories")
     audit = lm.audit_row(store, TASK1, 0)
     append_jsonl(live_dir(store) / "round00" / lm.INJECTION_AUDIT_NAME,
                  audit)
@@ -715,9 +719,9 @@ def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
 
 def test_a_missing_baseline_unit_stops_the_stage_before_any_execution(
         tmp_path, monkeypatch):
-    plugin = install(monkeypatch, LivePlugin(lambda task, block: "success"))
+    plugin = install(monkeypatch, LivePlugin(lambda task, block: True))
     ctx = make_ctx(tmp_path)
-    seed_baseline(ctx.store, ("failure",), TASK1)   # one unit never ran
+    seed_baseline(ctx.store, (False,), TASK1)   # one unit never ran
     seed_group(ctx.store, [MARKED], TASK1)
 
     with pytest.raises(InfrastructureError, match="stage 1"):
@@ -727,7 +731,7 @@ def test_a_missing_baseline_unit_stops_the_stage_before_any_execution(
 
 
 def test_an_all_invalid_baseline_is_a_config_error(tmp_path, monkeypatch):
-    plugin = install(monkeypatch, LivePlugin(lambda task, block: "success"))
+    plugin = install(monkeypatch, LivePlugin(lambda task, block: True))
     ctx = make_ctx(tmp_path)
     write_json(ctx.run_dir / "stage1_baseline"
                / "accepted_infra_shortfall.json",
@@ -750,8 +754,8 @@ def test_stage1_weak_arm_holes_are_inherited_as_round_skips(
     weak-arm holes into the round-0 skip set (both arms are in that
     record; only the weak arm of this task may skip here)."""
     ctx, store, plugin, skills = build_env(
-        tmp_path, monkeypatch, behave=lambda task, block: "success",
-        baseline=("failure", "failure"))
+        tmp_path, monkeypatch, behave=lambda task, block: True,
+        baseline=(False, False))
     # The record carries a strong-arm unit and another task's unit too:
     # neither belongs in t1's round-0 skip set.
     write_json(ctx.run_dir / "stage1_baseline"
@@ -786,8 +790,8 @@ def test_worker_counts_produce_identical_outcomes(tmp_path, monkeypatch):
     # One plugin instance serves both runs (install registers one finder;
     # the second run simply clears the call log).
     plugin = install(monkeypatch, LivePlugin(
-        lambda task, block: "success" if "Revised." in block
-        else "failure"))
+        lambda task, block: True if "Revised." in block
+        else False))
 
     def run_once(tag, workers):
         run_dir = tmp_path / f"run-{tag}"
@@ -795,7 +799,7 @@ def test_worker_counts_produce_identical_outcomes(tmp_path, monkeypatch):
                        author=author_plan(lambda skill_id: "revise"),
                        rewriter=rewriter_append())
         for task_id in (TASK1, TASK2):
-            seed_baseline(ctx.store, ("failure", "failure"), task_id)
+            seed_baseline(ctx.store, (False, False), task_id)
             seed_group(ctx.store, [MARKED, MARKED], task_id)
         ctx = replace(ctx, run_settings=RunSettings(workers=workers))
         plugin.calls.clear()

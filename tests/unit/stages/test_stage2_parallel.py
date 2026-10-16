@@ -130,7 +130,7 @@ def plant_marked(ctx, task, role, marker, *, attempt=0, n_steps=4):
         attempt_index=attempt,
         steps=[Step(action=f"{marker}-{index}", observation=f"o{index}")
                for index in range(n_steps)],
-        status="failure",
+        correctness=False,
     )
     ctx.store.save(trajectory, "trajectories")
     return trajectory

@@ -141,7 +141,7 @@ def as_trajectories(rows_by_task: dict, role: str, model_name: str) -> list:
                 attempt_index=attempt,
                 skills_injected=None,
                 steps=[],
-                status="success" if row["reward"] == "1.0" else "failure",
+                correctness=row["reward"] == "1.0",
             ))
     return trajectories
 

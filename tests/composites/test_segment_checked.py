@@ -16,7 +16,7 @@ from expedistill.llm.fake import json_script, make_fake_handle
 TRAJ_ID = "traj/tb:t1/strong/00"
 
 
-def make_trajectory(role="strong", status="failure", n_steps=4,
+def make_trajectory(role="strong", correctness=False, n_steps=4,
                     trajectory_id=TRAJ_ID):
     return Trajectory(
         trajectory_id=trajectory_id,
@@ -27,7 +27,7 @@ def make_trajectory(role="strong", status="failure", n_steps=4,
         attempt_index=0,
         steps=[Step(action=f"a{i}", observation=f"o{i}")
                for i in range(n_steps)],
-        status=status,
+        correctness=correctness,
     )
 
 
@@ -65,7 +65,7 @@ def test_happy_path_builds_and_stores_subtasks_with_correct_fields(tmp_path):
     assert first.task_id == "tb:t1"
     assert first.trajectory_id == TRAJ_ID
     assert first.source == "strong"
-    assert first.trajectory_success is False  # status was "failure"
+    assert first.trajectory_success is False  # correctness was False
     assert first.step_range == (0, 2)
     assert second.step_range == (2, 4)
     assert first.label == "setup"
@@ -90,7 +90,7 @@ def test_source_and_trajectory_success_follow_the_trajectory(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=json_script(valid_payload()))
     result = segment_checked(
-        store=store, trajectory=make_trajectory(role="weak", status="success"),
+        store=store, trajectory=make_trajectory(role="weak", correctness=True),
         K=4, view_rules=None, handle=handle, segment_retry_limit=0,
         run_dir=tmp_path)
     assert result[0].source == "weak"
@@ -207,7 +207,7 @@ def test_resume_ignores_other_trajectories_subtasks(tmp_path):
         store=store, trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=0, run_dir=tmp_path)
 
-    other = make_trajectory(status="failure", trajectory_id="traj/tb:t1/weak/00",
+    other = make_trajectory(correctness=False, trajectory_id="traj/tb:t1/weak/00",
                             role="weak")
     other_handle = make_fake_handle(script=json_script(valid_payload()))
     result = segment_checked(

@@ -12,12 +12,12 @@ TIGHT_RULES = ViewRules(
     truncation_marker="[... {omitted} characters omitted ...]")
 
 
-def make_traj(n_steps=2, status="failure"):
+def make_traj(n_steps=2, correctness=False):
     return Trajectory(
         trajectory_id="t/0", task_id="task-7", benchmark="tb",
         model_role="weak", model_name="m", attempt_index=0,
         steps=[Step(action=f"do {i}", observation=f"saw {i}") for i in range(n_steps)],
-        status=status)
+        correctness=correctness)
 
 
 def test_numbering_starts_at_zero_and_format_is_exact():
@@ -81,7 +81,7 @@ def test_render_is_deterministic():
 
 
 def test_trajectory_view_header_and_steps():
-    traj = make_traj(n_steps=2, status="success")
+    traj = make_traj(n_steps=2, correctness=True)
     view = render_trajectory_view(traj)
     assert view.startswith("task: task-7 (final status: success)\n\n")
     assert "step 0\naction: do 0\nobservation: saw 0" in view
@@ -93,7 +93,7 @@ def test_trajectory_view_with_rules_truncates_observations():
         trajectory_id="t/1", task_id="task-8", benchmark="tb",
         model_role="strong", model_name="m", attempt_index=0,
         steps=[Step(action="run", observation="y" * 200)],
-        status="failure")
+        correctness=False)
     view = render_trajectory_view(traj, TIGHT_RULES)
     assert "characters omitted" in view
     assert "y" * 50 not in view

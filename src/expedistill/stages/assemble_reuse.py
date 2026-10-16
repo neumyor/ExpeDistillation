@@ -460,9 +460,11 @@ def _copy_kind(source_run: Path, run_dir: Path, kind: str,
                checksums: Dict[str, str]) -> None:
     """Byte-exact copy of every kept object into its kind dir.
 
-    Only for the kinds whose schema did not move (trajectories, subtasks,
-    attempts); skills and exams go through _write_migrated_kind instead
-    (M1 acceptance ruling 1)."""
+    Only for the kinds whose stored rows can be copied verbatim (trajectories,
+    subtasks, attempts); skills and exams go through _write_migrated_kind
+    instead (M1 acceptance ruling 1). A v1 trajectory row copied here keeps
+    its v1 bytes and migrates on read (R2b: Trajectory.from_dict derives
+    ``correctness``; a v1 ``infra_error`` row refuses loudly)."""
     directory = run_dir / KIND_DIRS[kind]
     directory.mkdir(parents=True, exist_ok=True)
     pairs = []

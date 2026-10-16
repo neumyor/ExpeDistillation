@@ -174,7 +174,10 @@ def segment_checked(
             task_id=trajectory.task_id,
             trajectory_id=trajectory.trajectory_id,
             source=source,
-            trajectory_success=trajectory.success,
+            # The run the segment was cut from was a scorer-confirmed
+            # success only when its verdict came back True; an unscored
+            # run (correctness None) is not one.
+            trajectory_success=trajectory.correctness is True,
             segment_index=index,
             step_range=(entry["start"], entry["end"]),
             label=entry["label"],

@@ -736,14 +736,14 @@ def render_report(audit: Audit) -> Tuple[str, Dict[str, Any]]:
 # Self-test: a hand-built fake run directory (the composites-test shape)
 # ---------------------------------------------------------------------------
 
-def _fake_trajectory(unit_id: str, status: str,
+def _fake_trajectory(unit_id: str, correctness: Optional[bool],
                      refs: Optional[List[Dict[str, Any]]] = None) -> Trajectory:
     task_id, role, attempt = ids.parse_trajectory_id(unit_id)
     return Trajectory(
         trajectory_id=unit_id, task_id=task_id, benchmark="tb",
         model_role=role, model_name="weak-model", attempt_index=attempt,
-        steps=[{"action": "do", "observation": "obs"}], status=status,
-        skills_injected=refs)
+        steps=[{"action": "do", "observation": "obs"}],
+        correctness=correctness, skills_injected=refs)
 
 
 def _fake_group_skill(task_id: str, segment: int) -> Skill:
@@ -800,7 +800,7 @@ def _build_fake_run(root: Path) -> Path:
     # Stage-1 weak baseline: 0/3 success.
     for attempt in range(n_attempts):
         store.save(_fake_trajectory(
-            ids.make_trajectory_id(task_id, "weak", attempt), "failure"),
+            ids.make_trajectory_id(task_id, "weak", attempt), False),
             "trajectories")
 
     # The group: two pending candidates.
@@ -818,7 +818,7 @@ def _build_fake_run(root: Path) -> Path:
     refs0 = [{"skill_id": s.skill_id, "version": 1} for s in members]
     for attempt in range(n_attempts):
         round0_store.save(_fake_trajectory(
-            ids.make_trajectory_id(task_id, "weak", attempt), "failure",
+            ids.make_trajectory_id(task_id, "weak", attempt), False,
             refs0), "trajectories")
 
     # Verdict rows: both rounds miss (baseline 0/3, live 0/3).
@@ -866,7 +866,7 @@ def _build_fake_run(root: Path) -> Path:
     round1_store = Store(_round_dir(run_dir, 1))
     for attempt in range(n_attempts):
         round1_store.save(_fake_trajectory(
-            ids.make_trajectory_id(task_id, "weak", attempt), "failure",
+            ids.make_trajectory_id(task_id, "weak", attempt), False,
             [{"skill_id": revised.skill_id, "version": 2}]), "trajectories")
 
     # The terminal states: deleted -> live_revision_deleted,
@@ -885,7 +885,7 @@ def _build_fake_run(root: Path) -> Path:
     task2 = ids.make_task_id("tb", "t2")
     for attempt in range(n_attempts):
         store.save(_fake_trajectory(
-            ids.make_trajectory_id(task2, "weak", attempt), "failure"),
+            ids.make_trajectory_id(task2, "weak", attempt), False),
             "trajectories")
     member2 = _fake_group_skill(task2, 0)
     store.save(member2, "skills")
@@ -918,7 +918,7 @@ def _build_fake_run(root: Path) -> Path:
     task3 = ids.make_task_id("tb", "t3")
     for attempt in range(n_attempts):
         store.save(_fake_trajectory(
-            ids.make_trajectory_id(task3, "weak", attempt), "failure"),
+            ids.make_trajectory_id(task3, "weak", attempt), False),
             "trajectories")
     member3 = _fake_group_skill(task3, 0)
     store.save(member3, "skills")
@@ -936,7 +936,7 @@ def _build_fake_run(root: Path) -> Path:
     })
     for attempt in range(n_attempts):
         Store(_round_dir(run_dir, 0)).save(_fake_trajectory(
-            ids.make_trajectory_id(task3, "weak", attempt), "failure",
+            ids.make_trajectory_id(task3, "weak", attempt), False,
             [{"skill_id": member3.skill_id, "version": 1}]), "trajectories")
     _append_jsonl_raw(run_dir / LIVE_SUBTREE / ATTRIBUTION_FAILURES, {
         "schema": "live-repair-failure-v1", "task_id": task3, "round": 0,

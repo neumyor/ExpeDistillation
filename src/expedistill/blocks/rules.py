@@ -213,8 +213,9 @@ def _strong2_weak2(
     successes, some weak failures) enters F too, and for the first time the
     failure-first ordering does real work -- the weak quota spends itself on
     the failures before the successes. Fewer available than the quota is
-    fine: take what exists. ``infra_error`` trajectories are never stored
-    (K1), so "not the preferred status" covers them deterministically.
+    fine: take what exists. An unscored trajectory (``correctness`` None,
+    no scorer verdict) is never the preferred verdict, so it sorts last
+    in both roles deterministically.
     """
     selected: List[Trajectory] = []
     # Materialize once: the two role passes must not re-consume the input
@@ -224,8 +225,9 @@ def _strong2_weak2(
         of_role = sorted(
             (trajectory for trajectory in available
              if trajectory.model_role == role),
-            key=lambda trajectory: (trajectory.success != prefer_success,
-                                    trajectory.trajectory_id),
+            key=lambda trajectory: (
+                trajectory.correctness is not prefer_success,
+                trajectory.trajectory_id),
         )
         selected.extend(of_role[:2])
     return selected

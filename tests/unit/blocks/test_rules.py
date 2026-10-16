@@ -37,7 +37,7 @@ def _subtask(source, success):
     )
 
 
-def _trajectory(status, role="weak", attempt=0):
+def _trajectory(correctness, role="weak", attempt=0):
     task_id = make_task_id("tb", "t")
     return Trajectory(
         trajectory_id=make_trajectory_id(task_id, role, attempt),
@@ -46,7 +46,7 @@ def _trajectory(status, role="weak", attempt=0):
         model_role=role,
         model_name="test-model",
         attempt_index=attempt,
-        status=status,
+        correctness=correctness,
     )
 
 
@@ -113,9 +113,9 @@ def test_trajectory_select_all_returns_the_whole_task():
     # task (both roles mixed) and returns the sublist to segment.
     rule = get_trajectory_select("all")
     trajectories = [
-        _trajectory("success", role="strong"),
-        _trajectory("failure", role="weak", attempt=0),
-        _trajectory("infra_error", role="weak", attempt=1),
+        _trajectory(True, role="strong"),
+        _trajectory(False, role="weak", attempt=0),
+        _trajectory(None, role="weak", attempt=1),
     ]
     assert rule(trajectories) == trajectories
     assert rule([]) == []
@@ -126,14 +126,14 @@ def test_strong2_weak2_takes_two_per_role_with_status_preference():
     # 3 strong (a failure, then two successes) and 3 weak (a success, then
     # two failures): enough for every branch of both preferences.
     strong = [
-        _trajectory("failure", role="strong", attempt=0),
-        _trajectory("success", role="strong", attempt=1),
-        _trajectory("success", role="strong", attempt=2),
+        _trajectory(False, role="strong", attempt=0),
+        _trajectory(True, role="strong", attempt=1),
+        _trajectory(True, role="strong", attempt=2),
     ]
     weak = [
-        _trajectory("success", role="weak", attempt=0),
-        _trajectory("failure", role="weak", attempt=1),
-        _trajectory("failure", role="weak", attempt=2),
+        _trajectory(True, role="weak", attempt=0),
+        _trajectory(False, role="weak", attempt=1),
+        _trajectory(False, role="weak", attempt=2),
     ]
     selected = rule(strong + weak)
     # Strong arm: successes first (stable by trajectory_id within the
@@ -149,20 +149,20 @@ def test_strong2_weak2_clamps_to_what_exists():
     rule = get_trajectory_select("strong2_weak2")
     # One strong and three weak: 1 + 2.
     selected = rule([
-        _trajectory("success", role="strong", attempt=0),
-        _trajectory("failure", role="weak", attempt=0),
-        _trajectory("failure", role="weak", attempt=1),
-        _trajectory("failure", role="weak", attempt=2),
+        _trajectory(True, role="strong", attempt=0),
+        _trajectory(False, role="weak", attempt=0),
+        _trajectory(False, role="weak", attempt=1),
+        _trajectory(False, role="weak", attempt=2),
     ])
     assert [t.trajectory_id for t in selected] == [
         "traj/tb:t/strong/00", "traj/tb:t/weak/00", "traj/tb:t/weak/01"]
     # No strong trajectories at all: still the first two weak ones.
-    only_weak = [_trajectory("failure", role="weak", attempt=i)
+    only_weak = [_trajectory(False, role="weak", attempt=i)
                  for i in range(3)]
     assert rule(only_weak) == only_weak[:2]
     # A weak arm with no failures (impossible on F, but the rule must be
     # total): the quota falls back to the weak successes.
-    weak_successes = [_trajectory("success", role="weak", attempt=i)
+    weak_successes = [_trajectory(True, role="weak", attempt=i)
                       for i in range(3)]
     assert rule(weak_successes) == weak_successes[:2]
     # Nothing stored: nothing selected.
@@ -172,12 +172,12 @@ def test_strong2_weak2_clamps_to_what_exists():
 def test_strong2_weak2_is_deterministic_under_input_order():
     rule = get_trajectory_select("strong2_weak2")
     trajectories = [
-        _trajectory("failure", role="weak", attempt=2),
-        _trajectory("success", role="strong", attempt=0),
-        _trajectory("failure", role="strong", attempt=1),
-        _trajectory("success", role="weak", attempt=1),
-        _trajectory("success", role="strong", attempt=2),
-        _trajectory("failure", role="weak", attempt=0),
+        _trajectory(False, role="weak", attempt=2),
+        _trajectory(True, role="strong", attempt=0),
+        _trajectory(False, role="strong", attempt=1),
+        _trajectory(True, role="weak", attempt=1),
+        _trajectory(True, role="strong", attempt=2),
+        _trajectory(False, role="weak", attempt=0),
     ]
     first = rule(trajectories)
     assert rule(list(reversed(trajectories))) == first

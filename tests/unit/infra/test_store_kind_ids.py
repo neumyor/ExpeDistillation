@@ -44,7 +44,7 @@ def test_skill_and_subtask_ids_resolve_via_kind(tmp_path):
     tr = Trajectory(trajectory_id="traj/t/x/weak/00", task_id="t/x",
                     benchmark="tb", model_role="weak", model_name="w",
                     attempt_index=0, skills_injected=None, steps=[],
-                    status="failure", meta={})
+                    correctness=False, meta={})
     for obj, kind in ((sub, "subtasks"), (sk, "skills"),
                       (at, "attempts"), (tr, "trajectories")):
         s.save(obj, kind)

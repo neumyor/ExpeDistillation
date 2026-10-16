@@ -134,7 +134,7 @@ def test_success_assembles_full_trajectory(monkeypatch, tmp_path):
             {"action": "ls", "observation": "a.txt"},
             {"action": "finish", "observation": "done"},
         ],
-        status="success",
+        correctness=True,
         meta={"termination": "terminated", "steps_used": 2},
     )
     plugin = _install_plugin(monkeypatch, FakePlugin(outcome=outcome))
@@ -161,8 +161,7 @@ def test_success_assembles_full_trajectory(monkeypatch, tmp_path):
     assert traj.skills_injected is None
     assert [(s.action, s.observation) for s in traj.steps] == [
         ("ls", "a.txt"), ("finish", "done")]
-    assert traj.status == "success"
-    assert traj.success is True
+    assert traj.correctness is True
     # meta: the plugin's dict plus workdir; the plugin's own dict untouched.
     assert traj.meta == {
         "termination": "terminated",
@@ -179,17 +178,19 @@ def test_success_assembles_full_trajectory(monkeypatch, tmp_path):
     }]
 
 
-@pytest.mark.parametrize("status", ["failure", "infra_error"])
-def test_non_success_status_forces_success_false(monkeypatch, tmp_path, status):
+@pytest.mark.parametrize("correctness", [False, None])
+def test_correctness_passes_through_verbatim(monkeypatch, tmp_path,
+                                             correctness):
+    # Whatever the plugin reported -- the scorer said wrong (False) or said
+    # nothing (None) -- E1 records it as the fact it is, no conclusion drawn.
     outcome = RunOutcome(
         steps=[{"action": "ls", "observation": "empty"}],
-        status=status,
+        correctness=correctness,
         meta={"error": "boom"},
     )
     plugin = _install_plugin(monkeypatch, FakePlugin(outcome=outcome))
     traj = _run(plugin, tmp_path)
-    assert traj.status == status
-    assert traj.success is False
+    assert traj.correctness is correctness
     assert traj.meta == {"error": "boom", "workdir": str(tmp_path)}
 
 
@@ -277,7 +278,7 @@ def test_plugin_runtime_error_propagates(monkeypatch, tmp_path):
 
 def test_run_one_never_writes_disk(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, FakePlugin(outcome=RunOutcome(
-        steps=[{"action": "ls", "observation": "a.txt"}], status="failure")))
+        steps=[{"action": "ls", "observation": "a.txt"}], correctness=False)))
     run_dir = tmp_path / "my_run"
     _run(plugin, tmp_path, usage=object(), run_dir=run_dir)
     # Neither the workdir nor the (accepted-but-unused) run_dir exist on disk.

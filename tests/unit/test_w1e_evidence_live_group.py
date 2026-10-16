@@ -49,14 +49,14 @@ def make_group_skill(segment, content=MARKED_A):
                  subtask_id=subtask_id, source_subtasks=[subtask_id])
 
 
-def make_traj(attempt, status, role="weak", marker="x"):
+def make_traj(attempt, correctness, role="weak", marker="x"):
     return Trajectory(
         trajectory_id=make_trajectory_id(TASK_ID, role, attempt),
         task_id=TASK_ID, benchmark=BENCHMARK, model_role=role,
         model_name="weak-model", attempt_index=attempt,
         steps=[Step(action=f"do {marker} {attempt}",
                     observation=f"obs {marker} {attempt}")],
-        status=status,
+        correctness=correctness,
     )
 
 
@@ -65,11 +65,11 @@ def seeded_store(tmp_path):
     a weak baseline, a failed round store and one frozen audit line."""
     store = Store(tmp_path / "run")
     for attempt in range(N_ATTEMPTS):
-        store.save(make_traj(attempt, "failure"), "trajectories")
+        store.save(make_traj(attempt, False), "trajectories")
     round_dir = store.run_dir / "stage4_acceptance" / "live_run" / "round00"
     round_store = Store(round_dir)
     for attempt in range(N_ATTEMPTS):
-        round_store.save(make_traj(attempt, "failure"), "trajectories")
+        round_store.save(make_traj(attempt, False), "trajectories")
     skills = [make_group_skill(segment) for segment in range(3)]
     for skill in skills:
         store.save(skill, "skills")
@@ -168,7 +168,7 @@ def test_segments_pin_the_rounds_trajectories(tmp_path):
 
     assert packages[0].segments == [
         {"trajectory_id": make_trajectory_id(TASK_ID, "weak", attempt),
-         "step_range": [0, 1], "status": "failure"}
+         "step_range": [0, 1], "correctness": False}
         for attempt in range(N_ATTEMPTS)]
 
 

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from expedistill.infra.reliability import InfrastructureError
+
 import expedistill.benchmarks.alfworld as alfworld_pkg
 from expedistill.benchmarks.alfworld.env import (
     DATA_ENV,
@@ -242,7 +244,7 @@ def test_tasks_loaded_on_one_root_run_on_a_moved_root(plugin, eval_env, tmp_path
     monkeypatch.setenv(DATA_ENV, str(moved))
     handle = make_fake_handle(role="executor", script=["look", "win"])
     outcome = plugin.run(task, handle, "", tmp_path / "work")
-    assert outcome.status == "success"
+    assert outcome.correctness is True
 
 
 def test_load_tasks_list_strips_old_bookkeeping_suffix(plugin, data_root, monkeypatch):
@@ -294,7 +296,7 @@ def test_run_success_roundtrip(plugin, eval_env, tmp_path):
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, "", tmp_path)
 
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert outcome.meta["termination"] == "terminated"
     assert [step["action"] for step in outcome.steps] == ["look", "win"]
     assert outcome.steps[-1]["observation"] == "Task is SOLVED."
@@ -316,7 +318,7 @@ def test_run_dumps_requests_under_the_handle_run_dir(plugin, eval_env, tmp_path)
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, "", workdir)
 
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert len(list((run_dir / "llm_requests").glob("*.json"))) == 2
     assert not (workdir / "llm_requests").exists()
 
@@ -326,7 +328,7 @@ def test_run_budget_exhaustion_is_failure(plugin, eval_env, tmp_path):
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, "", tmp_path)
 
-    assert outcome.status == "failure"
+    assert outcome.correctness is False
     assert outcome.meta["termination"] == "truncated"
     assert len(outcome.steps) == 3
 
@@ -336,21 +338,21 @@ def test_run_skills_block_reaches_the_prompt(plugin, eval_env, tmp_path):
     handle = make_fake_handle(role="executor", script=["win"])
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, skills, tmp_path)
-    assert outcome.status == "success"
+    assert outcome.correctness is True
     assert skills in handle.client.calls[0]["user"]
 
 
-def test_run_dead_adapter_is_infra_error(plugin, eval_env, tmp_path, monkeypatch):
+def test_run_dead_adapter_raises_infra(plugin, eval_env, tmp_path,
+                                        monkeypatch):
     monkeypatch.setattr(
         env_module, "ADAPTER_SOURCE",
         "import sys\nsys.stderr.write('dead on arrival\\n')\nsys.exit(3)\n")
     handle = make_fake_handle(role="executor", script=["look"])
     task = plugin.load_tasks([GAME_REL])[0]
-    outcome = plugin.run(task, handle, "", tmp_path)
-
-    assert outcome.status == "infra_error"
-    assert outcome.steps == []
-    assert "error" in outcome.meta
+    # R2b: a dead environment is an infrastructure failure that propagates
+    # (K1 retries the unit); nothing is stored for the failed attempt.
+    with pytest.raises(InfrastructureError, match="dead on arrival"):
+        plugin.run(task, handle, "", tmp_path)
     # No model call was spent on a dead environment.
     assert handle.client.calls == []
 

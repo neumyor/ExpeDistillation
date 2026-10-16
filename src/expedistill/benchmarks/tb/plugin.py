@@ -24,10 +24,11 @@ runner script there is the real remote entry point):
    ``result.json`` and, while absent, that the pid is still alive and
    still our runner (identity check, see below). A dead
    pid with no result means the runner exited early (config/adapter error)
-   -> infra_error with the runner log tail. The overall deadline and the
-   poll interval are configurable (env or constructor).
+   -> an InfrastructureError with the runner log tail. The overall deadline
+   and the poll interval are configurable (env or constructor).
 4. **Finish**: fetch ``result.json``, the verifier's pytest log and
-   ``agent/trajectory.json`` into ``workdir``; classify; reconstruct steps.
+   ``agent/trajectory.json`` into ``workdir``; read the facts; reconstruct
+   steps.
 
 Run ids and remote resume (docs/decisions/tb_run_namespace_20261011.md):
 
@@ -53,8 +54,8 @@ Run ids and remote resume (docs/decisions/tb_run_namespace_20261011.md):
   ``RUN_ID=<run_id>``; ``kill -0`` alone would accept a process that
   reused the pid). Every other case where the run id already exists
   (jobs dir, runner log -- created by the launch redirection -- or meta)
-  is an ``infra_error`` and the caller retries under a fresh token, with no
-  usage row (no rollout happened in this call). A run id is never
+  raises InfrastructureError and the caller retries under a fresh token,
+  with no usage row (no rollout happened in this call). A run id is never
   submitted twice.
 - On the deadline the plugin terminates the runner it recorded, after
   the same identity check in the same shell command -- the
@@ -67,24 +68,25 @@ Run ids and remote resume (docs/decisions/tb_run_namespace_20261011.md):
   ``source="unknown"`` when those fields are missing -- never the fetch
   time.
 
-Fact reporting (R2, docs/decisions/execute_learn_repair_plan_20261016.md:
-execution records facts, acceptance judges -- boundaries doc sections 2.2
-and 2.3):
+Fact reporting (R2/R2b, docs/decisions/
+execute_learn_repair_plan_20261016.md: execution records facts,
+acceptance judges -- boundaries doc sections 2.2 and 2.3):
 
-- a ``result.json`` carrying a verifier reward is the benchmark scorer's
-  verdict and passes through verbatim (reward > 0 -> success, reward == 0
-  -> failure), whatever the verifier log looks like. The campaign's
-  "pseudo zero" (a reward claimed without pytest ever collecting
-  anything) is no longer execution's call to invalidate: the plugin
-  records the raw fact ``verifier_ran`` beside the verdict, and what a
-  pseudo zero means is acceptance's named-rule decision;
-- a trial with no reward carries no scorer verdict, so execution claims
-  nothing about the model: it reports ``infra_error`` (the frozen
-  status vocabulary's "no measurement" bucket, mechanically retried by
-  K1) with the trial's exception_type / exception_message as raw facts.
-  The old model-vs-infra exception reclassification (AgentTimeoutError
-  et al. -> failure) is gone from this path; judging those trials is
-  acceptance's job too.
+- a ``result.json`` whose verifier actually ran (pytest collected
+  something) carries the benchmark scorer's verdict and it passes through
+  verbatim as ``correctness`` (reward > 0 -> True, reward == 0 -> False),
+  whatever the verifier log looks like beyond that;
+- a trial with no reward, or a reward claimed without verifier evidence
+  (the campaign's "pseudo zero" -- the verifier log missing or pytest
+  never collected anything, in EITHER reward direction), carries no
+  scorer verdict: the run is stored with ``correctness=None`` and the
+  trial's exception_type / exception_message / ``verifier_ran`` as raw
+  facts. Execution does not mechanically retry it and does not reclassify
+  the model-vs-infra exceptions (AgentTimeoutError et al.); judging
+  those runs is acceptance's named-rule decision;
+- infrastructure failures (transport, deadline, dead runner, an
+  untrusted pre-existing run id) raise ``InfrastructureError`` -- K1's
+  mechanical retry, never a stored record.
 
 ``classify_result`` below keeps the pre-R2 classification ONLY as the
 archive validator's historical lens (scripts/analysis/
@@ -110,7 +112,7 @@ import shlex
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
@@ -511,9 +513,10 @@ class TBPlugin(BenchmarkPlugin):
 
     def run(self, task: Task, handle: Any, skills_block: str,
             workdir: Any) -> RunOutcome:
-        """One task, one remote Harbor trial. Infra failures come back as
-        ``RunOutcome(status="infra_error")``; ConfigError/CodeBugError
-        propagate (they stop the phase, B6).
+        """One task, one remote Harbor trial. Infrastructure failures
+        (transport, deadline, dead runner, an untrusted pre-existing run
+        id) raise ``InfrastructureError`` -- K1 retries the unit;
+        ConfigError/CodeBugError propagate (they stop the phase, B6).
         """
         task_name = self._task_name(task)
         model_name = self._model_name(handle)
@@ -536,8 +539,9 @@ class TBPlugin(BenchmarkPlugin):
         }
         try:
             # Root resolution and everything after it goes over the wire, so
-            # a transport failure anywhere below is an infra_error outcome,
-            # never a raise (B6 retries infra, it never stops the phase).
+            # a transport failure anywhere below is re-raised as an
+            # InfrastructureError below (B6 retries infra, it never stops
+            # the phase).
             root = self._remote_root(link)
             meta["remote_root"] = root
             meta["jobs_dir"] = f"{root}/jobs"
@@ -582,35 +586,44 @@ class TBPlugin(BenchmarkPlugin):
             if outcome[0] == "result":
                 return self._finish(link, workdir, meta, outcome[1],
                                     started, polls, handle, run_id, task_name)
-            # deadline / dead runner: infra_error with whatever partial
-            # trajectory the trial directory already holds.
-            meta["polls"] = polls
-            if outcome[0] == "deadline":
-                meta["deadline_kill"] = self._kill_runner(link, pid, run_id)
-            self._augment_partial(link, meta, workdir)
-            if outcome[0] == "deadline":
-                exc = InfrastructureError(
-                    f"TB rollout {run_id} exceeded the {deadline_seconds:g}s "
-                    "deadline without result.json")
-            else:
-                exc = InfrastructureError(
-                    f"remote runner for {run_id} (pid {pid}) exited without "
-                    "producing result.json")
-            result = RunOutcome.infra_error(meta.pop("partial_steps", []), exc)
-            result.meta.update(meta)
-            self._record_usage(handle, run_id, task_name, (None, None),
-                               "infra_error")
-            return result
-        except InfrastructureError as exc:
-            # Transport failure (ssh timeout, scp error). Nothing was fetched,
-            # so there are no partial steps to keep; a usage row only if a
-            # rollout was actually launched or rejoined.
-            result = RunOutcome.infra_error([], exc)
-            result.meta.update(meta)
+        except InfrastructureError:
+            # Transport failure (ssh timeout, scp error) anywhere above --
+            # including the poll guard and the result fetch: nothing was
+            # fetched, so no partial steps; a usage row only if a rollout
+            # was actually launched or rejoined. The token is spent either
+            # way (the pre-R2b path returned the same failure as an
+            # outcome), so the retry asks for a fresh one.
             if launched:
+                # Usage-ledger label (pre-R2b rows say "infra_error";
+                # both simply count as a non-ok row).
                 self._record_usage(handle, run_id, task_name, (None, None),
-                                   "infra_error")
-            return result
+                                   "infra")
+            raise
+        # deadline / dead runner (outside the transport handler above: the
+        # failure raised here must not be re-caught and usage-recorded
+        # twice). An infrastructure failure: the partial trajectory and the
+        # runner log tail are fetched into the workdir for debugging before
+        # the raise; the failure itself travels as the exception (K1
+        # retries the unit).
+        meta["polls"] = polls
+        if outcome[0] == "deadline":
+            meta["deadline_kill"] = self._kill_runner(link, pid, run_id)
+        self._augment_partial(link, meta, workdir)
+        # Usage-ledger label (pre-R2b rows say "infra_error"; both
+        # simply count as a non-ok row).
+        self._record_usage(handle, run_id, task_name, (None, None),
+                           "infra")
+        if outcome[0] == "deadline":
+            raise InfrastructureError(
+                f"TB rollout {run_id} exceeded the "
+                f"{deadline_seconds:g}s deadline without result.json "
+                f"(deadline_kill: "
+                f"{json.dumps(meta['deadline_kill'], sort_keys=True)}; "
+                f"runner log tail: {meta.get('runner_log_tail', '')})")
+        raise InfrastructureError(
+            f"remote runner for {run_id} (pid {pid}) exited without "
+            "producing result.json "
+            f"(runner log tail: {meta.get('runner_log_tail', '')})")
 
     # ------------------------------------------------------------------
     # Submission
@@ -866,22 +879,19 @@ class TBPlugin(BenchmarkPlugin):
 
     def _stale(self, link: RemoteLink, meta: Dict[str, Any], workdir: Path,
                run_id: str, recorded_pid: Optional[int],
-               problem: str) -> RunOutcome:
+               problem: str) -> NoReturn:
         """A run id that exists remotely but may not be reused or rejoined.
         Resubmitting would start a second trial into a directory holding a
         stale one (duplicate trials, mixed logs: the 2026-09-20
-        double-driver incident), so it is an infra_error and the caller
-        retries under a fresh attempt token. No usage row: no rollout
-        happened in this call."""
+        double-driver incident), so it raises InfrastructureError and the
+        caller retries under a fresh attempt token. No usage row: no
+        rollout happened in this call."""
         meta["resumed"] = "stale"
         meta["remote_pid"] = recorded_pid
         self._augment_partial(link, meta, workdir)
-        exc = InfrastructureError(
+        raise InfrastructureError(
             f"TB run {run_id} already exists remotely but {problem}; "
             "refusing to reuse or resubmit into it")
-        result = RunOutcome.infra_error(meta.pop("partial_steps", []), exc)
-        result.meta.update(meta)
-        return result
 
     def _kill_runner(self, link: RemoteLink, pid: int,
                      run_id: str) -> Dict[str, Any]:
@@ -891,8 +901,8 @@ class TBPlugin(BenchmarkPlugin):
         runner (``_ours``). The runner was started under ``setsid``, so it
         leads its own process group: killing the group reaches the Harbor
         children holding the sandbox; the bare pid is the fallback. An
-        unverifiable pid is never signalled. Best effort -- the outcome is
-        infra_error either way."""
+        unverifiable pid is never signalled. Best effort -- the failure
+        being raised either way."""
         cmd = (f"if {_ours(pid, run_id)}; then "
                f"kill -TERM -- -{int(pid)} 2>/dev/null || kill -TERM {int(pid)}; "
                "printf 'KILLED %s\\n' \"$?\"; "
@@ -1062,28 +1072,20 @@ class TBPlugin(BenchmarkPlugin):
             "workdir": str(workdir),
         }
 
-        if reward is None:
-            # No scorer verdict came back, so execution claims nothing
-            # about the model (R2, module docstring). The frozen status
-            # vocabulary has no "correctness unknown" value yet -- that is
-            # R2b's ``correctness=None`` -- so the run lands in the one
-            # bucket that is not a model judgment ("no measurement",
-            # mechanically retried by K1), with the trial's exception
-            # facts riding in meta for acceptance's named rules.
-            detail = facts["exception_type"] or "no exception recorded"
-            outcome = RunOutcome.infra_error(
-                steps, InfrastructureError(
-                    f"TB trial {run_id}: the verifier produced no reward "
-                    f"({detail})"))
-            usage_status = "infra_error"
-        else:
-            # The benchmark scorer's verdict, passed through verbatim: no
-            # pseudo-zero override, no exception reclassification. The
-            # ``verifier_ran`` fact is recorded beside it for acceptance.
-            outcome = RunOutcome(
-                steps=steps,
-                status="success" if reward > 0.0 else "failure")
+        # The scorer verdict, or its absence, as a fact (R2b, module
+        # docstring): a reward whose verifier actually ran passes through
+        # verbatim; anything else (no reward, or a reward claimed without
+        # verifier evidence -- the pseudo zero, in either reward direction)
+        # carries NO verdict, so correctness stays None with the facts
+        # riding in meta. No mechanical retry either way: the run is
+        # stored and acceptance's named rule decides what it counts as.
+        if reward is not None and facts["verifier_ran"] is True:
+            correctness: Optional[bool] = reward > 0.0
             usage_status = "ok"
+        else:
+            correctness = None
+            usage_status = "unscored"
+        outcome = RunOutcome(steps=steps, correctness=correctness)
         self._record_usage(handle, run_id, task_name, usage_pair,
                            usage_status)
         outcome.meta.update(meta)
@@ -1134,7 +1136,8 @@ class TBPlugin(BenchmarkPlugin):
             if out.strip():
                 meta["runner_log_tail"] = _short(out, limit=2000)
         except (InfrastructureError, OSError, ValueError):
-            # Best effort by definition; the outcome is already infra_error.
+            # Best effort by definition; the failure being raised stands
+            # with or without the partial artifacts.
             pass
 
     def _record_usage(self, handle: Any, run_id: str, task_name: str,

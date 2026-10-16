@@ -307,8 +307,10 @@ configs/
 ### 新增一个 benchmark
 
 1. 在 `benchmarks/<名字>/` 实现插件接口的四项：`load_tasks`、`run`（单题单次
-   执行，返回统一结果 `RunOutcome{steps, status, meta}`——status 为
-   success / failure / `infra_error`；Trajectory 的 ID、角色等簿记字段由
+   执行，返回统一结果 `RunOutcome{steps, correctness, meta}`——`correctness`
+   为 `True`（判分器判对）/ `False`（判错）/ `None`（没拿到判分结果）；
+   基础设施失败（沙箱超时、断网等）抛 `InfrastructureError`，由 K1 重试；
+   Trajectory 的 ID、角色等簿记字段由
    E1 组装）、`view_rules`（截断规则）、`task_prompt`（执行 prompt，
    登记进 prompt 注册表）；
 2. 在 `benchmarks/registry.py` 登记名字；

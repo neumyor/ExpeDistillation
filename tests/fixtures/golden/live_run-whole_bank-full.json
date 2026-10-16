@@ -1647,126 +1647,120 @@
   "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fstrong%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fstrong%2F00"
     },
     "model_name": "strong-model",
     "model_role": "strong",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/strong/00"
   },
   "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/00"
   },
   "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/01"
   },
   "stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fstrong%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At2%2Fstrong%2F00"
     },
     "model_name": "strong-model",
     "model_role": "strong",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/strong/00"
   },
   "stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },
   "stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At2%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": null,
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/01"
   },
@@ -2242,12 +2236,13 @@
   "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round00/traj%2Ffakebench%3At1%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
@@ -2262,26 +2257,25 @@
         "version": 1
       }
     ],
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/00"
   },
   "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round00/traj%2Ffakebench%3At1%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
@@ -2296,26 +2290,25 @@
         "version": 1
       }
     ],
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/01"
   },
   "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round00/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
@@ -2330,26 +2323,25 @@
         "version": 1
       }
     ],
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },
   "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": false,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round00/traj%2Ffakebench%3At2%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
@@ -2364,14 +2356,12 @@
         "version": 1
       }
     ],
-    "status": "failure",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": false,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/01"
   },
@@ -2425,12 +2415,13 @@
   "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round01/traj%2Ffakebench%3At1%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
@@ -2445,26 +2436,25 @@
         "version": 2
       }
     ],
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/00"
   },
   "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round01/traj%2Ffakebench%3At1%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
@@ -2479,26 +2469,25 @@
         "version": 2
       }
     ],
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/01"
   },
   "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round01/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
@@ -2513,26 +2502,25 @@
         "version": 2
       }
     ],
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },
   "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage4_live/round01/traj%2Ffakebench%3At2%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": [
       {
         "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
@@ -2547,14 +2535,12 @@
         "version": 2
       }
     ],
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/01"
   },
@@ -2783,84 +2769,80 @@
   "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At1%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": "bank:7cbfc57bf28f",
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/00"
   },
   "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At1%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": "bank:7cbfc57bf28f",
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t1",
     "trajectory_id": "traj/fakebench:t1/weak/01"
   },
   "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": "bank:7cbfc57bf28f",
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },
   "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
+    "correctness": true,
     "meta": {
       "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At2%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
-    "schema_version": 1,
+    "schema_version": 2,
     "skills_injected": "bank:7cbfc57bf28f",
-    "status": "success",
     "steps": [
       {
         "action": "run",
         "observation": "the environment state"
       }
     ],
-    "success": true,
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/01"
   },

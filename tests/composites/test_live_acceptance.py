@@ -129,20 +129,20 @@ def store_group(store, contents, task_id=TASK_ID):
     return skills
 
 
-def make_traj(attempt, status, task_id=TASK_ID, role="weak", marker="x"):
+def make_traj(attempt, correctness, task_id=TASK_ID, role="weak", marker="x"):
     return Trajectory(
         trajectory_id=make_trajectory_id(task_id, role, attempt),
         task_id=task_id, benchmark=BENCHMARK, model_role=role,
         model_name="weak-model", attempt_index=attempt,
         steps=[Step(action=f"do {marker} {attempt}",
                     observation=f"obs {marker} {attempt}")],
-        status=status,
+        correctness=correctness,
     )
 
 
 def seed_baseline(store, statuses, task_id=TASK_ID):
-    for attempt, status in enumerate(statuses):
-        store.save(make_traj(attempt, status, task_id), "trajectories")
+    for attempt, correctness in enumerate(statuses):
+        store.save(make_traj(attempt, correctness, task_id), "trajectories")
 
 
 def round_dir(store, round_):
@@ -155,8 +155,8 @@ def round_store(store, round_):
 
 def seed_round(store, round_, statuses, task_id=TASK_ID):
     rs = round_store(store, round_)
-    for attempt, status in enumerate(statuses):
-        rs.save(make_traj(attempt, status, task_id), "trajectories")
+    for attempt, correctness in enumerate(statuses):
+        rs.save(make_traj(attempt, correctness, task_id), "trajectories")
     return rs
 
 
@@ -207,8 +207,8 @@ def revision_script(text, category="missing_step",
                         "revision_reason": reason})
 
 
-def seeded_run(tmp_path, *, baseline=("failure", "failure", "failure"),
-               live=("failure", "failure", "failure"),
+def seeded_run(tmp_path, *, baseline=(False, False, False),
+               live=(False, False, False),
                contents=(MARKED_A, MARKED_A, MARKED_A), round_=0):
     """A run directory the stage would hand to round-0 judging."""
     store = Store(tmp_path / "run")
@@ -246,9 +246,9 @@ def test_expected_units_is_the_full_set(tmp_path):
 
 def test_load_baseline_reads_only_the_weak_arm_by_id(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure", "success", "failure"))
+    seed_baseline(store, (False, True, False))
     for attempt in range(2):
-        store.save(make_traj(attempt, "success", role="strong"),
+        store.save(make_traj(attempt, True, role="strong"),
                    "trajectories")
 
     trajectories, baseline = load_baseline(store, TASK_ID, N_ATTEMPTS)
@@ -260,7 +260,7 @@ def test_load_baseline_reads_only_the_weak_arm_by_id(tmp_path):
 
 def test_load_baseline_counts_accepted_holes_as_infra(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure", "success"))
+    seed_baseline(store, (False, True))
     hole = make_trajectory_id(TASK_ID, "weak", 2)
     strong_hole = make_trajectory_id(TASK_ID, "strong", 2)
     other_hole = make_trajectory_id(OTHER_TASK_ID, "weak", 0)
@@ -276,7 +276,7 @@ def test_load_baseline_counts_accepted_holes_as_infra(tmp_path):
 
 def test_load_baseline_missing_unit_is_infrastructure_error(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure", "failure"))
+    seed_baseline(store, (False, False))
 
     with pytest.raises(InfrastructureError, match="stage 1 resumes first"):
         load_baseline(store, TASK_ID, N_ATTEMPTS)
@@ -295,10 +295,10 @@ def test_load_baseline_zero_valid_is_config_error(tmp_path):
 
 def test_load_baseline_aux_scorer_counts(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure", "success", "failure"))
+    seed_baseline(store, (False, True, False))
 
     _, baseline = load_baseline(store, TASK_ID, N_ATTEMPTS,
-                                aux_scorer=lambda t: t.status == "success")
+                                aux_scorer=lambda t: t.correctness is True)
 
     assert baseline["aux_success"] == 1
 
@@ -427,7 +427,7 @@ JUDGE_CASES = [
 def test_judge_truth_table(tmp_path, bv, bs, lv, ls, better):
     # The live store realizes the case's counts: ls successes, lv valid,
     # and the units beyond lv are accepted holes (skip).
-    statuses = ["success"] * ls + ["failure"] * (lv - ls)
+    statuses = [True] * ls + [False] * (lv - ls)
     skip = _unit_list()[lv:]
     store, _ = seeded_run(tmp_path, live=tuple(statuses))
     verdict = judge_round(
@@ -443,8 +443,7 @@ def test_judge_truth_table(tmp_path, bv, bs, lv, ls, better):
 
 
 def test_judge_row_shape(tmp_path):
-    store, skills = seeded_run(tmp_path, baseline=("failure", "success",
-                                                   "failure"))
+    store, skills = seeded_run(tmp_path, baseline=(False, True, False))
     audit = audit_row(store, TASK_ID, 0)
 
     verdict = judge_round(
@@ -498,7 +497,7 @@ def test_judge_recompute_mismatch_is_code_bug(tmp_path):
 
     # A tampered round store is caught the same way: an extra trajectory
     # changes the recomputed live counts under the stored row.
-    seed_round(store, 0, ["failure"] * N_ATTEMPTS + ["success"])
+    seed_round(store, 0, [False] * N_ATTEMPTS + [True])
     with pytest.raises(CodeBugError, match="disagrees"):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
@@ -525,8 +524,8 @@ def test_judge_tampered_verdict_row_is_code_bug(tmp_path):
 
 
 def test_judge_ignores_other_tasks_trajectories(tmp_path):
-    store, _ = seeded_run(tmp_path, live=("success", "failure", "failure"))
-    seed_round(store, 0, ("success",) * N_ATTEMPTS, task_id=OTHER_TASK_ID)
+    store, _ = seeded_run(tmp_path, live=(True, False, False))
+    seed_round(store, 0, (True,) * N_ATTEMPTS, task_id=OTHER_TASK_ID)
 
     verdict = judge_round(
         store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
@@ -536,7 +535,7 @@ def test_judge_ignores_other_tasks_trajectories(tmp_path):
 
 
 def test_judge_counts_holes_and_flags_shortfall(tmp_path):
-    store, _ = seeded_run(tmp_path, live=("success", "success"))
+    store, _ = seeded_run(tmp_path, live=(True, True))
     hole = make_trajectory_id(TASK_ID, "weak", 2)
 
     verdict = judge_round(
@@ -551,7 +550,7 @@ def test_judge_counts_holes_and_flags_shortfall(tmp_path):
 
 
 def test_judge_incomplete_group_is_code_bug(tmp_path):
-    store, _ = seeded_run(tmp_path, live=("failure", "failure"))
+    store, _ = seeded_run(tmp_path, live=(False, False))
 
     with pytest.raises(CodeBugError, match="incomplete"):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
@@ -561,7 +560,7 @@ def test_judge_incomplete_group_is_code_bug(tmp_path):
 
 def test_judge_requires_a_dispatched_round_store(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure",) * N_ATTEMPTS)
+    seed_baseline(store, (False,) * N_ATTEMPTS)
     store_group(store, [MARKED_A])
 
     # No audit frozen and no round store: the guard that fires first is
@@ -630,7 +629,7 @@ def test_judge_stored_infra_trajectory_is_not_undetermined(tmp_path):
     K1, which never stores infra-exhausted units) is NOT the all-holes
     case: it flows to the rule, whose defensive branch reads "no live
     evidence" as not better instead of crashing."""
-    store, _ = seeded_run(tmp_path, live=("infra_error", "failure", "failure"))
+    store, _ = seeded_run(tmp_path, live=(None, False, False))
 
     verdict = judge_round(
         store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
@@ -651,7 +650,7 @@ def test_judge_undetermined_cannot_be_asserted_by_caller(tmp_path):
 
 def test_judge_weak_already_knows_zero_execution(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("success", "success", "success"))
+    seed_baseline(store, (True, True, True))
     store_group(store, [MARKED_A, PROSE])
 
     verdict = judge_round(
@@ -682,7 +681,7 @@ def test_judge_weak_already_knows_requires_all_success(tmp_path):
 
 def test_judge_weak_already_knows_is_limited_to_safe_rules(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("success",) * N_ATTEMPTS)
+    seed_baseline(store, (True,) * N_ATTEMPTS)
     store_group(store, [MARKED_A])
     with pytest.raises(CodeBugError, match="strict-family"):
         judge_round(store=store, task_id=TASK_ID, round_=0,
@@ -694,8 +693,8 @@ def test_judge_weak_already_knows_is_limited_to_safe_rules(tmp_path):
 def overflow_run(tmp_path, tokens):
     """A dispatched-looking run whose frozen audit row claims ``tokens``."""
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure",) * N_ATTEMPTS)
-    seed_round(store, 0, ("failure",) * N_ATTEMPTS)
+    seed_baseline(store, (False,) * N_ATTEMPTS)
+    seed_round(store, 0, (False,) * N_ATTEMPTS)
     skills = store_group(store, [MARKED_A])
     append_jsonl(round_dir(store, 0) / lm.INJECTION_AUDIT_NAME, {
         "schema": "injection-audit-v1", "task_id": TASK_ID, "round": 0,
@@ -741,16 +740,15 @@ def test_judge_injection_overflow_row(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_judge_aux_slot_records_both_arms(tmp_path):
-    store, _ = seeded_run(tmp_path, baseline=("failure", "success",
-                                              "failure"),
-                          live=("success", "failure", "failure"))
+    store, _ = seeded_run(tmp_path, baseline=(False, True, False),
+                          live=(True, False, False))
     _, baseline = load_baseline(store, TASK_ID, N_ATTEMPTS,
-                                aux_scorer=lambda t: t.status == "success")
+                                aux_scorer=lambda t: t.correctness is True)
 
     verdict = judge_round(
         store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
         baseline_counts=baseline, n_attempts=N_ATTEMPTS, skip_ids=[],
-        aux_scorer=lambda t: t.status == "success")
+        aux_scorer=lambda t: t.correctness is True)
 
     assert verdict["aux"] == {
         "baseline": {"valid": 3, "aux_success": 1},
@@ -794,7 +792,7 @@ def test_attribution_views_are_clipped_to_budget(tmp_path, monkeypatch):
     store, skills = seeded_run(tmp_path)
     rs = round_store(store, 0)
     for attempt in range(N_ATTEMPTS):
-        traj = make_traj(attempt, "failure")
+        traj = make_traj(attempt, False)
         traj.steps = [Step(action=f"cmd {attempt}-{i}",
                            observation="x" * 400)
                       for i in range(40)]
@@ -815,8 +813,8 @@ def test_attribution_views_are_clipped_to_budget(tmp_path, monkeypatch):
 
 
 def attribution_run(tmp_path, author_script, *, plan_actions=None,
-                    baseline=("failure",) * N_ATTEMPTS,
-                    live=("failure",) * N_ATTEMPTS,
+                    baseline=(False,) * N_ATTEMPTS,
+                    live=(False,) * N_ATTEMPTS,
                     contents=(MARKED_A, MARKED_A, MARKED_A)):
     store, skills = seeded_run(tmp_path, baseline=baseline, live=live,
                                contents=contents)
@@ -829,8 +827,7 @@ def attribution_run(tmp_path, author_script, *, plan_actions=None,
 
 
 def test_attribution_appends_row_with_store_versions(tmp_path):
-    store, skills = seeded_run(tmp_path, live=("failure", "success",
-                                               "failure"))
+    store, skills = seeded_run(tmp_path, live=(False, True, False))
     # The model never sees or emits versions; the row's versions are read
     # from the store at append time -- prove it by bumping one first.
     bumped = store.load("skills", skills[0].skill_id, Skill)
@@ -996,8 +993,8 @@ def test_attribution_infra_propagates_group_stays_pending(tmp_path):
 
 def test_attribution_prompt_carries_composed_inputs(tmp_path):
     store, skills = seeded_run(
-        tmp_path, baseline=("failure", "success", "failure"),
-        live=("failure", "success", "failure"))
+        tmp_path, baseline=(False, True, False),
+        live=(False, True, False))
     author = make_fake_handle("author", [
         plan_script([(s.skill_id, "keep", "") for s in skills])])
 
@@ -1019,7 +1016,7 @@ def test_attribution_prompt_carries_composed_inputs(tmp_path):
 
 def test_attribution_requires_dispatched_round(tmp_path):
     store = Store(tmp_path / "run")
-    seed_baseline(store, ("failure",) * N_ATTEMPTS)
+    seed_baseline(store, (False,) * N_ATTEMPTS)
     store_group(store, [MARKED_A])
     with pytest.raises(CodeBugError, match="never dispatched"):
         attribute_group(
@@ -1100,7 +1097,7 @@ def test_apply_failure_view_is_clipped_to_budget(tmp_path, monkeypatch):
     store, skills = seeded_run(tmp_path, contents=(MARKED_A,))
     rs = round_store(store, 0)
     for attempt in range(N_ATTEMPTS):
-        traj = make_traj(attempt, "failure")
+        traj = make_traj(attempt, False)
         traj.steps = [Step(action=f"cmd {attempt}-{i}",
                            observation="y" * 400)
                       for i in range(40)]
@@ -1304,8 +1301,8 @@ def test_no_op_guard_reads_the_frozen_row_not_a_rederivation(tmp_path):
     data source is the audit row's sha, never a re-render of round 0's
     pre-revision state (which no longer exists)."""
     store2 = Store(tmp_path / "tampered")
-    seed_baseline(store2, ("failure",) * N_ATTEMPTS)
-    seed_round(store2, 0, ("failure",) * N_ATTEMPTS)
+    seed_baseline(store2, (False,) * N_ATTEMPTS)
+    seed_round(store2, 0, (False,) * N_ATTEMPTS)
     store_group(store2, [MARKED_A, MARKED_A])
     _, block = survivors_and_block(store2, TASK_ID)
 

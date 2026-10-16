@@ -46,9 +46,11 @@ Pinned design decisions (see the repo docs this was specified against):
 - Resume of remote trials is the plugin's half of the contract: given the
   same (namespace, token) a resumed unit asks for the same run id, and the
   TB plugin reuses its ``result.json`` or rejoins its live runner instead of
-  resubmitting; a run id that exists remotely with neither comes back as
-  ``infra_error`` and is retried under the next token.
-- Infra retries: an ``infra_error`` outcome is retried up to ``infra_retries``
+  resubmitting; a run id that exists remotely with neither raises
+  ``InfrastructureError`` and is retried under the next token.
+- Infra retries: an ``InfrastructureError`` raised by the plugin (R2b:
+  infrastructure failures travel as exceptions, never as stored statuses)
+  is retried up to ``infra_retries``
   times per call (default 2 = 3 attempts; next attempt_token suffix per
   retry, same workdir), sleeping ``random.uniform(*infra_backoff)`` seconds
   between attempts -- the fix for the 2026-10-13 stage-6 driver meltdown,
@@ -56,13 +58,15 @@ Pinned design decisions (see the repo docs this was specified against):
   and every worker's single zero-backoff retry burned out inside the same
   5-second storm window: a 15-45s random wait carries a retry past the
   storm, and the random draw keeps simultaneous retries from re-colliding
-  in one burst. Still ``infra_error`` after that is recorded in the
+  in one burst. Still failing after that is recorded in the
   unit-failure ledger (unit id = trajectory_id) and skipped -- never a
   valid Trajectory for metrics, and never stored under its trajectory_id
   (a stored file means "done", so storing it would make resume skip a
   unit that still needs a retry).
   The retry index continues across calls: ``<workdir>/k1_retry_cursor.json``
-  holds the next unused index, advanced after every infra_error, so a
+  holds the next unused index, advanced after every InfrastructureError
+  (the failed token is spent; the pre-R2b path advanced it on every
+  infra outcome, which is every infra failure), so a
   resume starts from the token that was in flight when the process died
   (rejoinable remotely) and never re-asks for a token already spent (which
   the TB plugin would refuse forever). A fresh run's tokens are still
@@ -104,8 +108,9 @@ Pinned design decisions (see the repo docs this was specified against):
   accepted infra shortfall). They are excluded from pending -- never
   executed, never recorded as failed-to-retry -- and, being unstored, are
   absent from the return value; nothing else changes.
-- Exceptions raised by ``plugin.run`` are code bugs and propagate (see
-  Stopping).
+- Exceptions raised by ``plugin.run``: an ``InfrastructureError`` is the
+  R2b infra-failure channel and is retried (see Infra retries); anything
+  else is a code bug and propagates (see Stopping).
 
 K1 does not compute metrics or select F; the stages do (README 1.5). The
 return value is the whole unit set as it stands in the store after this call,
@@ -317,10 +322,13 @@ def _execute_unit(
 ) -> Optional[Trajectory]:
     """Run one unit with B6 infra retries; save it or record its failure.
 
-    Retries sleep ``random.uniform(*infra_backoff)`` seconds between
-    attempts. Returns the stored Trajectory, or None when the unit
-    exhausted its infra retries (recorded in the ledger; a later resume
-    retries it because nothing was stored under its trajectory_id).
+    An ``InfrastructureError`` raised by the plugin (R2b: infrastructure
+    failures travel as exceptions) advances the retry cursor -- the failed
+    token is spent -- and is retried by :func:`with_retries`, sleeping
+    ``random.uniform(*infra_backoff)`` seconds between attempts. Returns
+    the stored Trajectory, or None when the unit exhausted its infra
+    retries (recorded in the ledger; a later resume retries it because
+    nothing was stored under its trajectory_id).
     """
     workdir = workdir_root / urllib.parse.quote(unit.trajectory_id, safe="")
     workdir.mkdir(parents=True, exist_ok=True)
@@ -340,27 +348,24 @@ def _execute_unit(
                   "attempt_token": _attempt_token(unit.attempt_index, retry),
                   "run_namespace": run_namespace},
         )
-        traj = run_one(
-            benchmark=benchmark,
-            task=task,
-            model_role=role,
-            model_name=model_name,
-            attempt_index=unit.attempt_index,
-            skills_injected=skills_injected,
-            skills_block=skills_block,
-            handle=handle,
-            workdir=workdir,
-        )
-        if traj.status == "infra_error":
-            # This token is spent: the next call (in this process or a
-            # resumed one) must ask for a fresh one.
+        try:
+            return run_one(
+                benchmark=benchmark,
+                task=task,
+                model_role=role,
+                model_name=model_name,
+                attempt_index=unit.attempt_index,
+                skills_injected=skills_injected,
+                skills_block=skills_block,
+                handle=handle,
+                workdir=workdir,
+            )
+        except InfrastructureError:
+            # This token is spent (the attempt failed on infrastructure):
+            # the next call -- in this process or a resumed one -- must ask
+            # for a fresh one; the machine or service was not the work.
             write_json(cursor_path, {"next_retry": retry + 1})
-            # Same disposition as a raised InfrastructureError: retry the
-            # whole unit; the work is valid, the machine or service was not.
-            raise InfrastructureError(
-                f"{unit.trajectory_id}: infrastructure failure: "
-                f"{traj.meta.get('error', 'no error detail')}")
-        return traj
+            raise
 
     try:
         traj = with_retries(

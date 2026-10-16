@@ -54,14 +54,14 @@ MARKED_A = "\n".join([
 ])
 
 
-def make_traj(attempt, status, task_id, role="weak"):
+def make_traj(attempt, correctness, task_id, role="weak"):
     return Trajectory(
         trajectory_id=make_trajectory_id(task_id, role, attempt),
         task_id=task_id, benchmark=BENCHMARK, model_role=role,
         model_name=f"{role}-model", attempt_index=attempt,
         steps=[Step(action=f"do {attempt}",
                     observation=f"obs {attempt}")],
-        status=status,
+        correctness=correctness,
     )
 
 
@@ -328,7 +328,7 @@ def test_scenario_redispatch_budget_died_is_invalid_redispatch_exhausted(
     an exam phase -- never K6's live_undetermined."""
     store = Store(tmp_path / "run")
     task_id = make_task_id(BENCHMARK, "t9")
-    store.save(make_traj(0, "success", task_id, role="strong"),
+    store.save(make_traj(0, True, task_id, role="strong"),
                "trajectories")
 
     report = acceptance_report(store, kind="baseline", benchmark=BENCHMARK,
@@ -355,8 +355,8 @@ def _live_fixture(tmp_path, *, baseline, live, terminal=None,
     """A dispatched round-0 group with a frozen audit line, judged the
     way the driver judges it."""
     store = Store(tmp_path / "run")
-    for attempt, status in enumerate(baseline):
-        store.save(make_traj(attempt, status, TASK_ID), "trajectories")
+    for attempt, correctness in enumerate(baseline):
+        store.save(make_traj(attempt, correctness, TASK_ID), "trajectories")
     skills = []
     for segment in range(2):
         subtask_id = make_subtask_id(
@@ -370,8 +370,8 @@ def _live_fixture(tmp_path, *, baseline, live, terminal=None,
     directory.mkdir(parents=True)
     append_jsonl(directory / lm.INJECTION_AUDIT_NAME, lm.audit_row(
         store, TASK_ID, 0))
-    for attempt, status in enumerate(live):
-        Store(directory).save(make_traj(attempt, status, TASK_ID),
+    for attempt, correctness in enumerate(live):
+        Store(directory).save(make_traj(attempt, correctness, TASK_ID),
                               "trajectories")
     _, baseline_counts = lm.load_baseline(store, TASK_ID, N_ATTEMPTS)
     lv.judge_round(store=store, task_id=TASK_ID, round_=0,
@@ -393,7 +393,7 @@ def test_scenario_all_success_baseline_short_circuits(tmp_path):
     """The live weak_already_knows zero-execution short-circuit: the
     control was already perfect, the with-skill run never happened, and
     the row says exactly that."""
-    store, _ = _live_fixture(tmp_path, baseline=("success",) * N_ATTEMPTS,
+    store, _ = _live_fixture(tmp_path, baseline=(True,) * N_ATTEMPTS,
                              live=(), terminal=lv.WEAK_ALREADY_KNOWS)
 
     row = _live_row(store)
@@ -413,7 +413,7 @@ def test_scenario_injection_overflow_never_dispatched(tmp_path):
     """The live_injection_overflow terminal: the injection never entered
     execution, the row is not_testable with the overflow cause."""
     store, _ = _live_fixture(
-        tmp_path, baseline=("failure",) * N_ATTEMPTS, live=(),
+        tmp_path, baseline=(False,) * N_ATTEMPTS, live=(),
         terminal=lv.LIVE_INJECTION_OVERFLOW, max_injection_tokens=0)
 
     row = _live_row(store)
@@ -438,7 +438,7 @@ def test_scenario_all_accepted_holes_is_undetermined(tmp_path):
     live denominator, no judgment -- the row is not_testable/all_holes."""
     skip = tuple(make_trajectory_id(TASK_ID, "weak", attempt)
                  for attempt in range(N_ATTEMPTS))
-    store, _ = _live_fixture(tmp_path, baseline=("failure",) * N_ATTEMPTS,
+    store, _ = _live_fixture(tmp_path, baseline=(False,) * N_ATTEMPTS,
                              live=(), skip_units=skip)
 
     row = _live_row(store)
@@ -462,8 +462,8 @@ def test_scenario_last_round_miss_feeds_the_comparison(tmp_path):
     of pure failures and the baseline's weak row is the control -- the
     strict-rate-gain rule answers "not better" from the two rows alone,
     and decision deletes on the last round."""
-    store, _ = _live_fixture(tmp_path, baseline=("failure",) * N_ATTEMPTS,
-                             live=("failure",) * N_ATTEMPTS)
+    store, _ = _live_fixture(tmp_path, baseline=(False,) * N_ATTEMPTS,
+                             live=(False,) * N_ATTEMPTS)
 
     row = _live_row(store)
     baseline_report = acceptance_report(
@@ -495,8 +495,8 @@ def test_scenario_no_op_rewrite_leaves_a_single_version_row(tmp_path):
     group is exactly the injected one and the report keeps describing
     one measured round of the same members."""
     store, skills = _live_fixture(tmp_path,
-                                  baseline=("failure",) * N_ATTEMPTS,
-                                  live=("failure",) * N_ATTEMPTS)
+                                  baseline=(False,) * N_ATTEMPTS,
+                                  live=(False,) * N_ATTEMPTS)
     # The no-op guard's comparison inputs, straight from the report:
     # the round's frozen audit line vs the survivors' current block.
     survivors, block = lm.survivors_and_block(store, TASK_ID)

@@ -85,13 +85,15 @@
 
 | 编号 | 名称 | 输入 → 输出 | benchmark 相关 |
 |---|---|---|---|
-| E1 | 执行（Executor） | （模型, 一道任务, skill 列表（可选））→ Trajectory（含结果：成功 / 失败 / 基础设施异常） | 是：内部按 benchmark 选 runner |
+| E1 | 执行（Executor） | （模型, 一道任务, skill 列表（可选））→ Trajectory（含判分器结果 `correctness`：对 / 错 / 无判分） | 是：内部按 benchmark 选 runner |
 
-**基础设施异常不算失败**：沙箱启动超时、评测超时、网络错误等不是模型做错了，
-E1 把结果标成 `infra_error`，而不是 `success = false`。K1 按 B6 的策略对这类
-单元重试；D3 统计成绩时只算有效执行（成功 / 失败），基础设施异常单独计数。
-重试耗尽的单元不落盘（"已存 = 已完成"，存了续跑就不会再试），所以 D3 按调用方
-给出的应有单元集合计分：应有而缺失的单元算一次基础设施异常（见阶段 1、6）。
+**执行只记录事实**：E1 把 benchmark 自带判分器的结果原样写进
+`correctness`（`true`=对、`false`=错、`null`=没拿到判分结果，包括没有判分器的
+benchmark），不做任何判定。基础设施失败（沙箱超时、断网、进程死亡）不占用记录
+词汇：插件抛出 `InfrastructureError`，K1 按 B6 的策略对这类单元重试；重试耗尽的
+单元不落盘（"已存 = 已完成"，存了续跑就不会再试）。D3 统计成绩时只算拿到判分
+结果的执行，没拿到判分结果（`null`）与应有而缺失的单元都计入基础设施异常、
+单独计数（见阶段 1、6）。
 
 E1 内部的 runner：
 
@@ -123,7 +125,8 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
   和远程 `jobs/<run_id>.ed_meta.json`。续跑时远程已经有这个 run id 的任何痕迹
   （结果、jobs 目录、日志、meta），只有两份记录都在、且都与本次请求一致才复用：
   有 `result.json` 就直接取结果，没有结果但 runner 还活着就接着等；其余情况一律
-  返回 `infra_error`，由 K1 换下一个 token 重跑，绝不往旧 run id 里再提交一次；
+  抛 `InfrastructureError`，由 K1 换下一个 token 重跑，绝不往旧 run id 里再提交
+  一次；
 - **核对进程身份**：判断 runner 还活着、判定它已经退出、超时终止它，都先核对
   `/proc/<pid>/environ` 里有 `RUN_ID=<run_id>`。只看 `kill -0` 会把复用了这个 pid
   的无关进程当成自己的 runner，甚至把它杀掉。核对不了（远端没有 `/proc`、没有权限）
@@ -169,7 +172,7 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
 
 | 编号 | 名称 | 组成 | 说明 |
 |---|---|---|---|
-| K1 | 批量执行 | E1 × 题目 × 采样次数，经 B5 并行 | 每完成一次执行就落盘一条 Trajectory，可续跑；`infra_error` 按 B6 重试，重试耗尽的单元不落盘、记入失败账本，续跑时再试 |
+| K1 | 批量执行 | E1 × 题目 × 采样次数，经 B5 并行 | 每完成一次执行就落盘一条 Trajectory，可续跑；`InfrastructureError` 按 B6 重试，重试耗尽的单元不落盘、记入失败账本，续跑时再试 |
 | K2 | 切段（带校验） | D5 → G1 → D7；不通过就把错误清单交给 G1 重切 | 重切次数上限 `segment_retry_limit`；耗尽则跳过这条轨迹并记入审计日志，本 run 内不再重切 |
 | K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt | skill 列表为空即裸答；Attempt 记录用途（裸答 / 验收 / 回归）；先存作答、再判卷 |
 | K4 | 验收（exam 模式） | K3（裸答）→ 循环 [K3（带 skill）→ 不过则 G6 → D8] | 裸答就对则丢弃；循环上限 `retry_limit`；D8 不通过的版本作废、本轮算用掉一次，回到 G6 重写。文本考试协议，由配置 `methods.acceptance` 缺省（exam）选中 |
@@ -188,7 +191,8 @@ TB runner 复用 `scripts/tb21` 那套远程链路（runner 脚本、沙箱环�
   多次采样不相邻；返回值仍按 trajectory_id 排序；
 - 重试游标：每个单元的工作目录里有 `k1_retry_cursor.json`，记着下一个没用过的
   重试序号。续跑从这里接着数，崩溃时正在跑的 token 会被再次请求（可复用远程
-  结果或接上存活的 runner），已经判为 `infra_error` 的 token 不再请求；
+  结果或接上存活的 runner），已经失败过的 token 不再请求（每次基础设施失败都会
+  推进游标）；
 - 批弹性（`docs/decisions/k1_batch_resilience_20261013.md`）：每个单元 3 次尝试
   （`infra_retries` 默认 2），重试之间按 uniform 随机等待 15–45 秒——第一次重试落在
   开局连接风暴窗外，随机值防止并行 worker 的重试再次对齐；`--k1-stagger` 让每个单元
@@ -351,7 +355,7 @@ Trajectory（轨迹）
   trajectory_id, task_id, benchmark, model_role(强/弱), model_name,
   attempt_index(第几次采样), skills_injected(null=裸跑；否则为 skill_id+version 列表或库的 digest),
   steps[ {action, observation} ... ],
-  status(success / failure / infra_error), success(status 为 success 时为 true), meta
+  correctness(判分器结果：true / false / null（无判分器或没拿到判分结果），schema v2 新增，v1 记录的读取迁移见下), meta
 
 Subtask（段）
   subtask_id, task_id, trajectory_id(→轨迹), source(强模型段/弱模型段),
@@ -420,6 +424,11 @@ bank 行读取同走该迁移，且 skills / exams / bank 行**迁移为 v2 后�
 完结后的一次性技术债，见 `docs/runbooks/live_run_acceptance_runbook.md` 的遗留事项）。
 该技术债已于 2026-10-15 执行—学习闭环重构 M1 偿还：Skill/Exam 升对象
 schema v2（见上节"对象 schema v1→v2"），`CONFIG_SCHEMA_VERSION` 仍不动。
+Trajectory 于 2026-10-16 R2b 独立升 schema v2：三值运行状态
+（success / failure / infra_error）与派生的 `success` 标志改为
+`correctness: true / false / null`，基础设施失败改走 `InfrastructureError`
+异常，不再占运行状态词汇；v1 的 success / failure 行读取时迁移，v1 的
+infra_error 行（按 K1 契约本就不该存在）明确拒载。
 
 落盘布局（每个 run 目录）：
 
@@ -613,14 +622,14 @@ schema v2（见上节"对象 schema v1→v2"），`CONFIG_SCHEMA_VERSION` 仍不
   补上了空洞，`F` 和库都会变，而阶段 6 已存的轨迹对应旧库，这个 run 目录就废了。
   开关只决定"新出现的空洞接不接受"。
 - **辅助指标与主指标并列报告**（预登记，见 D3 与阶段 0 的 `aux_metric`）：
-  主指标恒为 EM / 状态口径；benchmark 插件声明了辅助指标时（SearchQA 的
+  主指标恒为判分器口径（`correctness`）；benchmark 插件声明了辅助指标时（SearchQA 的
   `sub_em`，子串匹配——EM 里 "lumbar" 对金标 "lumbar vertebrae" 记 0，sub_EM 记 1），
   两臂的 summary 各加一节 `aux`（指标名 + 同两种口径的辅助 avg@N），
   分母与主指标完全一致（缺失 / 基础设施单元不可能算辅助成功）。辅助指标
   **永远只并列**，不因为结果好看就替换主指标、也不看结果后再挑。
-  插件未声明时 `aux` 为 null，不打分。SearchQA 的打分器对数据严格：成功或
-  已提交答案的轨迹必须有评测 meta，缺失即数据损坏（报错停下）；从未提交答案的
-  失败轨迹 sub_EM 记 0（没有答案可匹配，是真实的 0，不是缺数据）。
+  插件未声明时 `aux` 为 null，不打分。SearchQA 的打分器对数据严格：判为成功或
+  已终止提交答案的轨迹必须有评测 meta，缺失即数据损坏（报错停下）；从未提交答案的
+  判错轨迹 sub_EM 记 0（没有答案可匹配，是真实的 0，不是缺数据）。
 - 产出：强模型轨迹库、弱模型轨迹库、失败题清单 `F`。
 
 ### 阶段 2：轨迹切段（K2，方法参照 AMD）

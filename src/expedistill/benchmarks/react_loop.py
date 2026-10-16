@@ -13,22 +13,25 @@ step loop inside l1/agent.py:execute_trial). What was kept, and why:
   the stored steps keep full observations, so D5 can render later with any
   rules without re-running anything (README measurement rule 4: keep raw
   unit-level evidence).
-- The status discipline: success/failure comes from the env's own
-  ``success_fn`` plus its termination flags; a step-budget exhaustion is a
-  ``failure``; anything infra is an ``infra_error`` carrying the partial
-  steps, never a silent success or a crash.
+- The scorer discipline: ``correctness`` comes from the env's own
+  ``success_fn`` plus its termination flags; a step-budget exhaustion is
+  ``False`` (the env's contract: an unfinished episode has not achieved the
+  goal). A run that ends without an env verdict carries ``correctness=None``
+  -- execution claims nothing about the model -- and acceptance decides.
 - Failure dispositions mid-episode, by B6 category:
 
-  * ``InfrastructureError`` (model call, ``env.step``, ``env.reset``) ->
-    ``status="infra_error"`` with the partial steps; K1 retries the unit and
-    D3 never counts it against the model.
+  * ``InfrastructureError`` (model call, ``env.step``, ``env.reset``)
+    propagates; K1 retries the unit and D3 never counts it against the
+    model.
   * ``ModelOutputError`` from the model call (the client found no usable
-    reply, e.g. empty content; call_model does not retry it) -> the
-    episode ends as the MODEL's failure: ``status="failure"``,
-    ``meta["termination"] = "model_output_error"`` plus ``meta["error"]``,
-    partial steps kept. Producing no action is acting badly on this task,
-    not a broken machine (retrying would resample the measured model until
-    it behaves) and not a code bug (stopping the pipeline over one reply).
+    reply, e.g. empty content; call_model does not retry it) -> the episode
+    ends with ``correctness=None`` (R2b: no scorer verdict exists for an
+    episode that died without an action, so execution records the fact and
+    lets acceptance judge), ``meta["termination"] = "model_output_error"``
+    plus ``meta["error"]``, partial steps kept. Producing no action is not
+    a code bug (stopping the pipeline over one reply) and no longer
+    execution's call to score as the model's failure (the pre-R2b
+    ``status="failure"`` reclassification).
   * Anything else -- ProviderRefusalError, ConfigError, code bugs --
     propagates and stops the phase.
 
@@ -55,7 +58,6 @@ from typing import Any, Dict, List, Optional, Union
 from expedistill.benchmarks.base import BaseEnv, RunOutcome, Task, ViewRules
 from expedistill.infra.reliability import (
     ConfigError,
-    InfrastructureError,
     ModelOutputError,
 )
 from expedistill.llm.call import ModelHandle, call_model
@@ -104,15 +106,15 @@ def run_react(
     action/observation pair.
 
     Termination: when the env flags ``is_terminated``/``is_truncated`` the
-    status comes from ``success_fn()``; a step-budget exhaustion is
-    ``failure``. Infrastructure failures (``InfrastructureError`` from the
+    verdict comes from ``success_fn()``; a step-budget exhaustion is
+    ``False``. Infrastructure failures (``InfrastructureError`` from the
     model call or from ``env.step``, including the ``environment_call``
-    deadline) return ``status="infra_error"`` with the steps so far --
-    K1 retries the unit, D3 never counts it as the model's failure. A
-    ``ModelOutputError`` from the model call (no usable reply) ends the
-    episode as ``failure`` with ``meta["termination"] = "model_output_error"``
-    and the error text, keeping the steps so far (see the module docstring).
-    Anything else that raises propagates.
+    deadline) propagate -- K1 retries the unit, D3 never counts the
+    attempt against the model. A ``ModelOutputError`` from the model call
+    (no usable reply) ends the episode with ``correctness=None`` and
+    ``meta["termination"] = "model_output_error"`` plus the error text,
+    keeping the steps so far (see the module docstring). Anything else that
+    raises propagates.
 
     ``max_steps`` is the loop's own budget (K1 config); the env may also
     truncate earlier through its own ``max_steps``.
@@ -125,16 +127,7 @@ def run_react(
 
     steps: List[Dict[str, str]] = []
 
-    def infra(exc: BaseException, stage: str) -> RunOutcome:
-        meta: Dict[str, Any] = {"stage": stage, "steps_used": len(steps)}
-        outcome = RunOutcome.infra_error(steps, exc)
-        outcome.meta.update(meta)
-        return outcome
-
-    try:
-        env.reset()
-    except InfrastructureError as exc:
-        return infra(exc, "reset")
+    env.reset()
 
     termination = "step_budget"
     while len(steps) < max_steps and not env.is_terminated() \
@@ -151,21 +144,16 @@ def run_react(
                 run_dir=run_dir,
                 system_override=system_override,
             )
-        except InfrastructureError as exc:
-            return infra(exc, "model_call")
         except ModelOutputError as exc:
             return RunOutcome(
                 steps=steps,
-                status="failure",
+                correctness=None,
                 meta={"termination": "model_output_error",
                       "steps_used": len(steps),
                       "error": f"{type(exc).__name__}: {exc}"},
             )
         action = str(reply).strip()
-        try:
-            observation = env.step(action)
-        except InfrastructureError as exc:
-            return infra(exc, "env_step")
+        observation = env.step(action)
         steps.append({"action": action, "observation": str(observation)})
         if env.is_terminated():
             termination = "terminated"
@@ -177,11 +165,11 @@ def run_react(
     # A budget-exhausted episode is a failure even if success_fn() happens to
     # read true: the env's contract is that success flags termination, and
     # trusting the clock instead would score half-finished episodes.
-    status = "failure"
+    correctness = False
     if termination != "step_budget" and env.success_fn():
-        status = "success"
+        correctness = True
     return RunOutcome(
         steps=steps,
-        status=status,
+        correctness=correctness,
         meta={"termination": termination, "steps_used": len(steps)},
     )
