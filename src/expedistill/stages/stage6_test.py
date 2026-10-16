@@ -99,7 +99,7 @@ from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import Store, read_json, write_json
-from expedistill.methods import resolve
+from expedistill.methods import resolve, resolve_fixed
 from expedistill.inject import bank_reference
 from expedistill.stages import stage1_baseline
 
@@ -330,7 +330,12 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         control_source = "stage1_reuse"
     else:
         bare_store = _arm_store(ctx, "bare")
-        control = batch_execute(
+        # The bare control's injection is fixed semantics, not the
+        # config's delivery choice: the ``none`` driver supplies the bare
+        # run's scalar kwargs through the same registry seam as the
+        # with-bank arm above.
+        bare_delivery, bare_params = resolve_fixed("delivery", "none")
+        bare_kwargs: Dict[str, Any] = dict(
             store=bare_store,
             benchmark=ctx.config.benchmark,
             tasks=test_tasks,
@@ -338,8 +343,6 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
             model_name=model_name,
             handle=handle,
             n_attempts=n_attempts,
-            skills_injected=None,
-            skills_block="",
             workdir_root=Path(ctx.workdir_root) / "stage6_bare",
             usage=ctx.usage,
             run_dir=ctx.run_dir,
@@ -347,6 +350,10 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
             dispatch_stagger=ctx.run_settings.k1_stagger,
             skip_unit_ids=frozenset(accepted["control"]),
         )
+        method_kwargs, _ = bare_delivery.resolve(
+            ctx, bare_params, bank, test_tasks)
+        bare_kwargs.update(method_kwargs)
+        control = batch_execute(**bare_kwargs)
         control_source = "fresh_bare_run"
 
     # A durable hole stays a hole even if a trajectory for it appears.

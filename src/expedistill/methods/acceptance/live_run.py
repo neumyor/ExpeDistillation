@@ -135,6 +135,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store, append_jsonl, read_jsonl, write_json
 from expedistill.prompts import get as get_prompt
+from expedistill.methods import resolve_fixed
 from expedistill.methods.acceptance import (LiveRunParams, STAGE4_DIR,
                                          SUMMARY_FILENAME)
 
@@ -363,33 +364,6 @@ def _task_instruction(plugin: Any, task: Any) -> str:
     context (recorded in the prompt's design note, not papered over)."""
     return get_prompt(plugin.task_prompt_name).format(
         instruction=task.instruction, skills_block="", history="")
-
-
-def _injection_resolver(store: Store, benchmark: str) -> Any:
-    """The per-task injection resolver K1 enumerates with: each task's
-    pending group at its CURRENT stored versions, as
-    ``(references, block)``.
-
-    Both values come from K6's own derivation
-    (``survivors_and_block``), the same one ``audit_row`` froze -- round 0
-    and round 1 alike, because "survivors" IS "pending members" and the
-    un-revised round-0 group is its own survivor set. Byte-identity with
-    the frozen audit line is what the dispatch-time freeze compare
-    enforces across resumes.
-    """
-    def skills_for_task(task: Any) -> Any:
-        prefixed = ids.make_task_id(benchmark, task.task_id)
-        members, block = la.survivors_and_block(store, prefixed)
-        if not members:
-            # A dispatched group is never empty; an empty injection would
-            # be a bare run under the with-skills label.
-            raise CodeBugError(
-                f"task {prefixed!r} has no pending skill group to "
-                "inject; it must not have been dispatched")
-        references = [{"skill_id": skill.skill_id, "version": skill.version}
-                      for skill in members]
-        return references, block
-    return skills_for_task
 
 
 def _round_detail(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -775,7 +749,12 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
     (round 1's re-execution never collides with round 0's trajectories),
     a per-task injection resolver, and the round's workdir subtree (the
     retry cursor is per workdir and trajectory ids repeat across rounds --
-    sharing one tree would make round 1 inherit round 0's cursor)."""
+    sharing one tree would make round 1 inherit round 0's cursor).
+
+    The resolver comes from the delivery registry (methods modules never
+    import each other; the registry is the only seam): the group_by_task
+    driver wraps K6's ``survivors_and_block``, the same derivation the
+    frozen audit line carries."""
     config = ctx.config
     benchmark = config.benchmark
     stage1_holes = shortfall.stage1_accepted_unit_ids(ctx.run_dir)
@@ -784,6 +763,9 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
     for task_id in task_ids:
         skip_unit_ids.update(
             la.skip_ids_for(stage1_holes, accepted, task_id))
+    delivery, delivery_params = resolve_fixed("delivery", "group_by_task")
+    method_kwargs, _ = delivery.resolve(ctx, delivery_params, store,
+                                        benchmark)
     batch_execute(
         store=Store(la.round_dir(store, round_)),
         benchmark=benchmark,
@@ -792,7 +774,7 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
         model_name=config.models["executor_weak"],
         handle=ctx.handle("executor_weak"),
         n_attempts=n_attempts,
-        skills_for_task=_injection_resolver(store, benchmark),
+        skills_for_task=method_kwargs["skills_for_task"],
         workdir_root=Path(ctx.workdir_root) / "stage4_live"
         / f"round{round_:02d}",
         usage=ctx.usage,

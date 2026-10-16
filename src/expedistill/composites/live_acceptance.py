@@ -17,6 +17,16 @@ parameters. Every function here derives its state from disk and is
 idempotent, so a resumed stage re-runs the same calls and only the work
 that was never persisted happens again.
 
+M2 de-rounding (plan section 3, D5/P5): the measurement core -- the
+``_``-prefixed bodies behind ``judge_round`` / ``attribute_group`` /
+``apply_revisions`` / ``no_op_guard`` / ``audit_row`` / ``finalize_group``
+-- is round-agnostic: every ledger path, round-store directory and round
+label is an explicit parameter, and the core reads neither
+``LIVE_DIR_NAME`` nor the pinned ``_ROUNDS``. The public functions are
+thin shells that keep today's exact signatures and compute today's exact
+paths; the shells are deleted in M4, when the phase drivers pass the
+phase directory's paths in.
+
 State is derived from disk only (decision section 2.4 -- no new state
 objects):
 
@@ -67,7 +77,17 @@ Skill.discard_reason field carries it):
 
 import hashlib
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from expedistill.blocks.attribution import attribute_failure, revise_skill
 from expedistill.blocks.author import skill_markers
@@ -121,7 +141,10 @@ __all__ = [
 ]
 
 #: Live-run subtree inside the stage-4 directory (decision section 2.2):
-#: round stores and the ledgers all live under it.
+#: round stores and the ledgers all live under it. Shell-layer constant
+#: (module docstring): the measurement core takes its paths as explicit
+#: parameters and never reads this; the path derivation dies with the
+#: shells in M4.
 LIVE_DIR_NAME = "stage4_acceptance/live_run"
 
 #: The decision ledgers plus the two repair-failure ledgers (decision
@@ -164,8 +187,11 @@ _ATTRIBUTION_ATTEMPTS = 2
 _REVISION_ATTEMPTS = 2
 
 #: Rounds are pinned to two (user ruling 8 -- no max_revision_rounds
-#: config), so every round-taking function rejects anything else loudly
+#: config), so every round-taking shell rejects anything else loudly
 #: instead of silently inventing a third round the design never had.
+#: Shell-layer constant (module docstring): the measurement core takes
+#: its round labels as parameters and never reads this; the pin and its
+#: check die with the shells in M4.
 _ROUNDS = (0, 1)
 
 #: Rules for which "the baseline is all-success" mathematically implies
@@ -237,13 +263,6 @@ def round_dir(store: Store, round_: int) -> Path:
     return _live_dir(store) / f"round{round_:02d}"
 
 
-def _round_store(store: Store, round_: int) -> Store:
-    """The round's B3 store (the stage-6 arm-store pattern: one store per
-    round, so round 1's re-execution never collides with round 0's
-    trajectories)."""
-    return Store(round_dir(store, round_))
-
-
 def _check_round(round_: int) -> None:
     if round_ not in _ROUNDS:
         raise CodeBugError(
@@ -251,46 +270,47 @@ def _check_round(round_: int) -> None:
             f"got {round_!r}")
 
 
-def _rows_of(store: Store, ledger: str, task_id: str,
-             round_: Optional[int] = None) -> List[Dict[str, Any]]:
-    """One task's rows of a live-run ledger, in append order."""
-    rows = [row for row in read_jsonl(_ledger_path(store, ledger))
+def _rows_from(path: Path, task_id: str,
+               round_: Optional[int] = None) -> List[Dict[str, Any]]:
+    """One task's rows of a ledger file, in append order (core reader:
+    the path is the caller's, never derived here)."""
+    rows = [row for row in read_jsonl(path)
             if row.get("task_id") == task_id]
     if round_ is not None:
         rows = [row for row in rows if row.get("round") == round_]
     return rows
 
 
-def _first_row(store: Store, ledger: str, task_id: str,
-               round_: int) -> Optional[Dict[str, Any]]:
+def _first_row_from(path: Path, task_id: str,
+                    round_: int) -> Optional[Dict[str, Any]]:
     """The first ledger row of a (task, round) -- the one that sticks.
 
     Only one row is ever appended per (task, round), but reading the first
     (not the last) is what makes a hand-edited duplicate ledger fail
     loudly in the recompute check instead of silently switching verdicts.
     """
-    for row in _rows_of(store, ledger, task_id, round_):
+    for row in _rows_from(path, task_id, round_):
         return row
     return None
 
 
-def _audit_row_of(store: Store, round_: int,
-                  task_id: str) -> Optional[Dict[str, Any]]:
-    """The frozen injection-audit row of one group (the stage wrote it
-    before the round's dispatch); None when the round never got that
-    far."""
-    for row in read_jsonl(round_dir(store, round_) / INJECTION_AUDIT_NAME):
+def _audit_row_from(audit_path: Path, round_: int,
+                    task_id: str) -> Optional[Dict[str, Any]]:
+    """The frozen injection-audit row of one group in one round's audit
+    file (the stage wrote it before the round's dispatch); None when the
+    round never got that far."""
+    for row in read_jsonl(audit_path):
         if row.get("task_id") == task_id:
             return row
     return None
 
 
-def _require_audit_row(store: Store, round_: int,
-                       task_id: str) -> Dict[str, Any]:
+def _require_audit_row_from(audit_path: Path, round_: int,
+                            task_id: str) -> Dict[str, Any]:
     """The frozen audit row, or a CodeBugError: judging or guarding a
     round that has no frozen audit row means the first write and the
     dispatch disagree -- exactly the hole the freeze exists to close."""
-    row = _audit_row_of(store, round_, task_id)
+    row = _audit_row_from(audit_path, round_, task_id)
     if row is None:
         raise CodeBugError(
             f"no frozen injection_audit row for task {task_id!r} in "
@@ -335,21 +355,23 @@ def _unit_ids(task_id: str, n_attempts: int) -> List[str]:
             for attempt in range(n_attempts)]
 
 
-def _round_trajectories(store: Store, task_id: str,
-                        round_: int) -> List[Trajectory]:
-    """Every trajectory one round stored for one task, attempt order.
+def _trajectories_from(round_store_dir: Path, task_id: str,
+                       round_: int) -> List[Trajectory]:
+    """Every trajectory the round store at ``round_store_dir`` holds for
+    one task, attempt order (core reader: the directory is the caller's,
+    the round label only names it in errors).
 
     Attribution, revision and judging all read the same stored views, so
     the read lives once. A round directory that does not exist means the
     round was never dispatched -- the caller is ahead of the stage, which
     is a bug, not a resume state (a dispatched round's directory exists
     even when every unit was an accepted hole)."""
-    if not round_dir(store, round_).exists():
+    if not round_store_dir.exists():
         raise CodeBugError(
             f"round {round_} of task {task_id!r} was never dispatched: "
             "attribution, revision and judging read its stored "
             "trajectories")
-    round_store = _round_store(store, round_)
+    round_store = Store(round_store_dir)
     trajectories = [
         round_store.load("trajectories", trajectory_id, Trajectory)
         for trajectory_id in round_store.ids("trajectories")]
@@ -533,6 +555,23 @@ def skip_ids_for(stage1_shortfall: Iterable[str],
 # Injection audit row
 # ---------------------------------------------------------------------------
 
+def _audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
+    """The round-agnostic core of ``audit_row``: the row for one round
+    label, with no pinned-round check (that is the shell's, and dies
+    with it in M4)."""
+    members = _require_group(store, task_id)
+    block = format_skills_block(members)
+    return {
+        "schema": "injection-audit-v1",
+        "task_id": task_id,
+        "round": round_,
+        "members": [{"skill_id": skill.skill_id, "version": skill.version}
+                    for skill in members],
+        "injection_block_sha256": _block_sha(block),
+        "injection_tokens": estimate_tokens(block),
+    }
+
+
 def audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
     """Construct the group's injection-audit row for one round.
 
@@ -547,19 +586,12 @@ def audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
     D10 estimate the overflow check reads. An empty group is a
     CodeBugError: an empty injection is a bare run and is never
     dispatched or audited.
+
+    Thin shell over ``_audit_row`` (module docstring): checks the pinned
+    round; deleted in M4.
     """
     _check_round(round_)
-    members = _require_group(store, task_id)
-    block = format_skills_block(members)
-    return {
-        "schema": "injection-audit-v1",
-        "task_id": task_id,
-        "round": round_,
-        "members": [{"skill_id": skill.skill_id, "version": skill.version}
-                    for skill in members],
-        "injection_block_sha256": _block_sha(block),
-        "injection_tokens": estimate_tokens(block),
-    }
+    return _audit_row(store, task_id, round_)
 
 
 def _block_sha(block: str) -> str:
@@ -569,6 +601,130 @@ def _block_sha(block: str) -> str:
 # ---------------------------------------------------------------------------
 # Judging
 # ---------------------------------------------------------------------------
+
+def _judge_round(
+    *,
+    task_id: str,
+    round_: int,
+    rule_name: str,
+    baseline_counts: Dict[str, int],
+    n_attempts: int,
+    skip_ids: Iterable[str],
+    aux_scorer: Optional[Callable[[Trajectory], bool]] = None,
+    terminal: Optional[str] = None,
+    max_injection_tokens: Optional[int] = None,
+    verdicts_path: Path,
+    round_store_dir: Path,
+    audit_path: Path,
+) -> Dict[str, Any]:
+    """The round-agnostic core of ``judge_round`` (module docstring):
+    the judgment and the verdicts ledger's append-once / recompute
+    compare, against the explicit ledger / round-store / audit paths.
+    ``round_`` is a row label only -- written into the row, filtered
+    by, named in errors -- never checked against a pinned round set."""
+    get_acceptance_improve(rule_name)  # unknown rule names fail loudly here
+    skip = set(skip_ids)
+    expected_ids = _unit_ids(task_id, n_attempts)
+    judged_with_shortfall = bool(skip.intersection(expected_ids))
+
+    if terminal == LIVE_UNDETERMINED:
+        raise CodeBugError(
+            "live_undetermined is derived by judge_round (a live sample "
+            "that is all accepted holes), never asserted by the caller")
+    if terminal is not None and terminal not in (WEAK_ALREADY_KNOWS,
+                                                 LIVE_INJECTION_OVERFLOW):
+        raise CodeBugError(
+            f"unknown zero-execution terminal {terminal!r}; expected one "
+            f"of {(WEAK_ALREADY_KNOWS, LIVE_INJECTION_OVERFLOW)}")
+
+    if terminal == WEAK_ALREADY_KNOWS:
+        if rule_name not in _ALL_SUCCESS_SAFE_RULES:
+            raise CodeBugError(
+                f"weak_already_knows short-circuit is limited to the "
+                f"strict-family rules {sorted(_ALL_SUCCESS_SAFE_RULES)} "
+                f"(decision section 2.2); rule {rule_name!r} may still "
+                "improve on an all-success baseline, so the round must "
+                "be executed")
+        if (baseline_counts["valid"] <= 0
+                or baseline_counts["success"] != baseline_counts["valid"]):
+            raise CodeBugError(
+                f"weak_already_knows asserted for task {task_id!r} with "
+                f"baseline {baseline_counts}: the baseline is not "
+                "all-success, so there is something to prove and the "
+                "round must be executed")
+        row = _verdict_row(task_id, round_, rule_name, baseline=None,
+                           live=None, better=None, verdict=WEAK_ALREADY_KNOWS,
+                           injection_tokens=None,
+                           judged_with_shortfall=False, aux=None)
+    elif terminal == LIVE_INJECTION_OVERFLOW:
+        audit = _require_audit_row_from(audit_path, round_, task_id)
+        if (max_injection_tokens is None
+                or audit["injection_tokens"] <= max_injection_tokens):
+            raise CodeBugError(
+                f"live_injection_overflow asserted for task {task_id!r} "
+                f"but the frozen audit row shows {audit['injection_tokens']}"
+                f" tokens against a limit of {max_injection_tokens!r}: "
+                "the overflow must be the audit row's own evidence")
+        row = _verdict_row(task_id, round_, rule_name, baseline=None,
+                           live=None, better=None,
+                           verdict=LIVE_INJECTION_OVERFLOW,
+                           injection_tokens=audit["injection_tokens"],
+                           judged_with_shortfall=False, aux=None)
+    else:
+        trajectories = _trajectories_from(round_store_dir, task_id, round_)
+        stored = {t.trajectory_id for t in trajectories}
+        incomplete = [unit for unit in expected_ids
+                      if unit not in stored and unit not in skip]
+        if incomplete:
+            # Judging an incomplete group would count its missing units as
+            # infra and silently shrink the verdict; the stage judges only
+            # complete groups (resume re-dispatches the rest).
+            raise CodeBugError(
+                f"round {round_} of task {task_id!r} is incomplete: "
+                f"units {incomplete} are neither stored nor accepted "
+                "holes")
+        live_counts = compute_task_metrics(
+            trajectories, expected_units(task_id, n_attempts),
+            aux_scorer=aux_scorer)[task_id]
+        audit = _require_audit_row_from(audit_path, round_, task_id)
+        if all(unit in skip for unit in expected_ids):
+            # The precise condition (decision section 2.5): every expected
+            # unit is an accepted hole -- nothing was executed, so there is
+            # no live denominator and no rule to run. (Completeness passed
+            # above, and K1 never stores an infra-exhausted unit, so this
+            # is also exactly the live_counts["valid"] == 0 case.)
+            row = _verdict_row(task_id, round_, rule_name, baseline=None,
+                               live=None, better=None,
+                               verdict=LIVE_UNDETERMINED,
+                               injection_tokens=audit["injection_tokens"],
+                               judged_with_shortfall=True, aux=None)
+        else:
+            rule = get_acceptance_improve(rule_name)
+            better = bool(rule(baseline_counts, live_counts, n_attempts))
+            row = _verdict_row(
+                task_id, round_, rule_name,
+                baseline={"valid": baseline_counts["valid"],
+                          "success": baseline_counts["success"]},
+                live={"valid": live_counts["valid"],
+                      "success": live_counts["success"]},
+                better=better, verdict=None,
+                injection_tokens=audit["injection_tokens"],
+                judged_with_shortfall=judged_with_shortfall,
+                aux=_aux_slot(aux_scorer, baseline_counts, live_counts))
+
+    stored_row = _first_row_from(verdicts_path, task_id, round_)
+    if stored_row is not None:
+        if stored_row != row:
+            raise CodeBugError(
+                f"recomputed verdict for task {task_id!r} round {round_} "
+                f"disagrees with the stored first row:\nstored: "
+                f"{stored_row}\nrecomputed: {row}\nThe store or the "
+                "caller's inputs changed under the ledger; refusing to "
+                "re-judge")
+        return stored_row
+    append_jsonl(verdicts_path, row)
+    return row
+
 
 def judge_round(
     *,
@@ -614,110 +770,20 @@ def judge_round(
     The row is appended BEFORE any status is committed (``finalize_group``
     does the committing), so the finalization sweep can always finish a
     commit the crash cut short.
+
+    Thin shell over ``_judge_round`` (module docstring): checks the
+    pinned round and computes today's exact paths; deleted in M4.
     """
     _check_round(round_)
-    get_acceptance_improve(rule_name)  # unknown rule names fail loudly here
-    skip = set(skip_ids)
-    expected_ids = _unit_ids(task_id, n_attempts)
-    judged_with_shortfall = bool(skip.intersection(expected_ids))
-
-    if terminal == LIVE_UNDETERMINED:
-        raise CodeBugError(
-            "live_undetermined is derived by judge_round (a live sample "
-            "that is all accepted holes), never asserted by the caller")
-    if terminal is not None and terminal not in (WEAK_ALREADY_KNOWS,
-                                                 LIVE_INJECTION_OVERFLOW):
-        raise CodeBugError(
-            f"unknown zero-execution terminal {terminal!r}; expected one "
-            f"of {(WEAK_ALREADY_KNOWS, LIVE_INJECTION_OVERFLOW)}")
-
-    if terminal == WEAK_ALREADY_KNOWS:
-        if rule_name not in _ALL_SUCCESS_SAFE_RULES:
-            raise CodeBugError(
-                f"weak_already_knows short-circuit is limited to the "
-                f"strict-family rules {sorted(_ALL_SUCCESS_SAFE_RULES)} "
-                f"(decision section 2.2); rule {rule_name!r} may still "
-                "improve on an all-success baseline, so the round must "
-                "be executed")
-        if (baseline_counts["valid"] <= 0
-                or baseline_counts["success"] != baseline_counts["valid"]):
-            raise CodeBugError(
-                f"weak_already_knows asserted for task {task_id!r} with "
-                f"baseline {baseline_counts}: the baseline is not "
-                "all-success, so there is something to prove and the "
-                "round must be executed")
-        row = _verdict_row(task_id, round_, rule_name, baseline=None,
-                           live=None, better=None, verdict=WEAK_ALREADY_KNOWS,
-                           injection_tokens=None,
-                           judged_with_shortfall=False, aux=None)
-    elif terminal == LIVE_INJECTION_OVERFLOW:
-        audit = _require_audit_row(store, round_, task_id)
-        if (max_injection_tokens is None
-                or audit["injection_tokens"] <= max_injection_tokens):
-            raise CodeBugError(
-                f"live_injection_overflow asserted for task {task_id!r} "
-                f"but the frozen audit row shows {audit['injection_tokens']}"
-                f" tokens against a limit of {max_injection_tokens!r}: "
-                "the overflow must be the audit row's own evidence")
-        row = _verdict_row(task_id, round_, rule_name, baseline=None,
-                           live=None, better=None,
-                           verdict=LIVE_INJECTION_OVERFLOW,
-                           injection_tokens=audit["injection_tokens"],
-                           judged_with_shortfall=False, aux=None)
-    else:
-        trajectories = _round_trajectories(store, task_id, round_)
-        stored = {t.trajectory_id for t in trajectories}
-        incomplete = [unit for unit in expected_ids
-                      if unit not in stored and unit not in skip]
-        if incomplete:
-            # Judging an incomplete group would count its missing units as
-            # infra and silently shrink the verdict; the stage judges only
-            # complete groups (resume re-dispatches the rest).
-            raise CodeBugError(
-                f"round {round_} of task {task_id!r} is incomplete: "
-                f"units {incomplete} are neither stored nor accepted "
-                "holes")
-        live_counts = compute_task_metrics(
-            trajectories, expected_units(task_id, n_attempts),
-            aux_scorer=aux_scorer)[task_id]
-        audit = _require_audit_row(store, round_, task_id)
-        if all(unit in skip for unit in expected_ids):
-            # The precise condition (decision section 2.5): every expected
-            # unit is an accepted hole -- nothing was executed, so there is
-            # no live denominator and no rule to run. (Completeness passed
-            # above, and K1 never stores an infra-exhausted unit, so this
-            # is also exactly the live_counts["valid"] == 0 case.)
-            row = _verdict_row(task_id, round_, rule_name, baseline=None,
-                               live=None, better=None,
-                               verdict=LIVE_UNDETERMINED,
-                               injection_tokens=audit["injection_tokens"],
-                               judged_with_shortfall=True, aux=None)
-        else:
-            rule = get_acceptance_improve(rule_name)
-            better = bool(rule(baseline_counts, live_counts, n_attempts))
-            row = _verdict_row(
-                task_id, round_, rule_name,
-                baseline={"valid": baseline_counts["valid"],
-                          "success": baseline_counts["success"]},
-                live={"valid": live_counts["valid"],
-                      "success": live_counts["success"]},
-                better=better, verdict=None,
-                injection_tokens=audit["injection_tokens"],
-                judged_with_shortfall=judged_with_shortfall,
-                aux=_aux_slot(aux_scorer, baseline_counts, live_counts))
-
-    stored_row = _first_row(store, VERDICTS_LEDGER, task_id, round_)
-    if stored_row is not None:
-        if stored_row != row:
-            raise CodeBugError(
-                f"recomputed verdict for task {task_id!r} round {round_} "
-                f"disagrees with the stored first row:\nstored: "
-                f"{stored_row}\nrecomputed: {row}\nThe store or the "
-                "caller's inputs changed under the ledger; refusing to "
-                "re-judge")
-        return stored_row
-    append_jsonl(_ledger_path(store, VERDICTS_LEDGER), row)
-    return row
+    directory = round_dir(store, round_)
+    return _judge_round(
+        task_id=task_id, round_=round_, rule_name=rule_name,
+        baseline_counts=baseline_counts, n_attempts=n_attempts,
+        skip_ids=skip_ids, aux_scorer=aux_scorer, terminal=terminal,
+        max_injection_tokens=max_injection_tokens,
+        verdicts_path=_ledger_path(store, VERDICTS_LEDGER),
+        round_store_dir=directory,
+        audit_path=directory / INJECTION_AUDIT_NAME)
 
 
 def _verdict_row(task_id: str, round_: int, rule_name: str, *,
@@ -780,6 +846,100 @@ def _aux_slot(
 # Attribution (G10)
 # ---------------------------------------------------------------------------
 
+def _attribute_group(
+    *,
+    store: Store,
+    task_id: str,
+    round_: int,
+    n_attempts: int,
+    task_instruction: str,
+    weak_profile: str,
+    author_handle: ModelHandle,
+    view_rules: Any = None,
+    usage: Any = None,
+    run_dir: Optional[Union[str, Path]] = None,
+    attributions_path: Path,
+    failures_path: Path,
+    round_store_dir: Path,
+    audit_path: Path,
+) -> Optional[Dict[str, Any]]:
+    """The round-agnostic core of ``attribute_group`` (module docstring):
+    the G10 pipeline against explicit ledger / round-store / audit paths,
+    ``round_`` a row label only."""
+    stored_row = _first_row_from(attributions_path, task_id, round_)
+    if stored_row is not None:
+        return stored_row
+    members = _require_group(store, task_id)
+
+    failures = _rows_from(failures_path, task_id, round_)
+    if (any(row.get("exhausted") for row in failures)
+            or len(failures) >= _ATTRIBUTION_ATTEMPTS):
+        # Unreachable through the stage (the exhausted row follows the
+        # discards, so exhaustion with pending members only happens when
+        # a crash ate the discards' tail); completing the discards here
+        # keeps this function total and idempotent.
+        _discard_group(store, members, MODEL_OUTPUT_ERROR)
+        return None
+
+    baseline_trajectories, _ = load_baseline(store, task_id, n_attempts)
+    baseline_summary = "\n".join(
+        f"attempt {traj.attempt_index}: {traj.status}"
+        for traj in baseline_trajectories)
+    round_trajs = _trajectories_from(round_store_dir, task_id, round_)
+    per_view_budget = _LIVE_VIEWS_BUDGET_CHARS // max(1, len(round_trajs))
+    live_views = "\n\n".join(
+        _clip_view(render_trajectory_view(traj, view_rules),
+                   per_view_budget)
+        for traj in round_trajs)
+    audit = _require_audit_row_from(audit_path, round_, task_id)
+
+    for try_index in range(len(failures), _ATTRIBUTION_ATTEMPTS):
+        try:
+            plan = attribute_failure(
+                members, task_instruction, baseline_summary, live_views,
+                weak_profile, author_handle, usage=usage, run_dir=run_dir)
+        except ModelOutputError as exc:
+            if try_index + 1 >= _ATTRIBUTION_ATTEMPTS:
+                # Terminal state first, ledger row second (module
+                # docstring): a crash in between leaves a partially
+                # discarded group whose budget rows say "one try left",
+                # and the last try is simply asked again.
+                _discard_group(store, members, MODEL_OUTPUT_ERROR)
+                append_jsonl(
+                    failures_path,
+                    _failure_row(task_id, round_, try_index=try_index,
+                                 skill_id=None, skill_version=None,
+                                 exhausted=True, message=str(exc)))
+                return None
+            append_jsonl(
+                failures_path,
+                _failure_row(task_id, round_, try_index=try_index,
+                             skill_id=None, skill_version=None,
+                             exhausted=False, message=str(exc)))
+            continue
+        versions = {skill.skill_id: store.load(
+                        "skills", skill.skill_id, Skill).version
+                    for skill in members}
+        row = {
+            "schema": "live-attribution-v1",
+            "task_id": task_id,
+            "round": round_,
+            "diagnosis": plan["diagnosis"],
+            "skill_actions": [
+                {"skill_id": entry["skill_id"],
+                 "version": versions[entry["skill_id"]],
+                 "action": entry["action"],
+                 "problem": entry["problem"]}
+                for entry in plan["skill_actions"]],
+            "injection_block_sha256": audit["injection_block_sha256"],
+        }
+        append_jsonl(attributions_path, row)
+        return row
+
+    raise CodeBugError(  # pragma: no cover - the loop always returns
+        f"attribution budget loop for {task_id!r} fell through")
+
+
 def attribute_group(
     *,
     store: Store,
@@ -818,81 +978,21 @@ def attribute_group(
     then the exhausting row with ``exhausted: true`` is appended.
     Infrastructure errors are not budget items: they propagate and the
     group stays pending for the stage to record and retry.
+
+    Thin shell over ``_attribute_group`` (module docstring): checks the
+    pinned round and computes today's exact paths; deleted in M4.
     """
     _check_round(round_)
-    stored_row = _first_row(store, ATTRIBUTIONS_LEDGER, task_id, round_)
-    if stored_row is not None:
-        return stored_row
-    members = _require_group(store, task_id)
-
-    failures = _rows_of(store, ATTRIBUTION_FAILURES_LEDGER, task_id,
-                        round_)
-    if (any(row.get("exhausted") for row in failures)
-            or len(failures) >= _ATTRIBUTION_ATTEMPTS):
-        # Unreachable through the stage (the exhausted row follows the
-        # discards, so exhaustion with pending members only happens when
-        # a crash ate the discards' tail); completing the discards here
-        # keeps this function total and idempotent.
-        _discard_group(store, members, MODEL_OUTPUT_ERROR)
-        return None
-
-    baseline_trajectories, _ = load_baseline(store, task_id, n_attempts)
-    baseline_summary = "\n".join(
-        f"attempt {traj.attempt_index}: {traj.status}"
-        for traj in baseline_trajectories)
-    round_trajs = _round_trajectories(store, task_id, round_)
-    per_view_budget = _LIVE_VIEWS_BUDGET_CHARS // max(1, len(round_trajs))
-    live_views = "\n\n".join(
-        _clip_view(render_trajectory_view(traj, view_rules),
-                   per_view_budget)
-        for traj in round_trajs)
-    audit = _require_audit_row(store, round_, task_id)
-
-    for try_index in range(len(failures), _ATTRIBUTION_ATTEMPTS):
-        try:
-            plan = attribute_failure(
-                members, task_instruction, baseline_summary, live_views,
-                weak_profile, author_handle, usage=usage, run_dir=run_dir)
-        except ModelOutputError as exc:
-            if try_index + 1 >= _ATTRIBUTION_ATTEMPTS:
-                # Terminal state first, ledger row second (module
-                # docstring): a crash in between leaves a partially
-                # discarded group whose budget rows say "one try left",
-                # and the last try is simply asked again.
-                _discard_group(store, members, MODEL_OUTPUT_ERROR)
-                append_jsonl(
-                    _ledger_path(store, ATTRIBUTION_FAILURES_LEDGER),
-                    _failure_row(task_id, round_, try_index=try_index,
-                                 skill_id=None, skill_version=None,
-                                 exhausted=True, message=str(exc)))
-                return None
-            append_jsonl(
-                _ledger_path(store, ATTRIBUTION_FAILURES_LEDGER),
-                _failure_row(task_id, round_, try_index=try_index,
-                             skill_id=None, skill_version=None,
-                             exhausted=False, message=str(exc)))
-            continue
-        versions = {skill.skill_id: store.load(
-                        "skills", skill.skill_id, Skill).version
-                    for skill in members}
-        row = {
-            "schema": "live-attribution-v1",
-            "task_id": task_id,
-            "round": round_,
-            "diagnosis": plan["diagnosis"],
-            "skill_actions": [
-                {"skill_id": entry["skill_id"],
-                 "version": versions[entry["skill_id"]],
-                 "action": entry["action"],
-                 "problem": entry["problem"]}
-                for entry in plan["skill_actions"]],
-            "injection_block_sha256": audit["injection_block_sha256"],
-        }
-        append_jsonl(_ledger_path(store, ATTRIBUTIONS_LEDGER), row)
-        return row
-
-    raise CodeBugError(  # pragma: no cover - the loop always returns
-        f"attribution budget loop for {task_id!r} fell through")
+    directory = round_dir(store, round_)
+    return _attribute_group(
+        store=store, task_id=task_id, round_=round_, n_attempts=n_attempts,
+        task_instruction=task_instruction, weak_profile=weak_profile,
+        author_handle=author_handle, view_rules=view_rules, usage=usage,
+        run_dir=run_dir,
+        attributions_path=_ledger_path(store, ATTRIBUTIONS_LEDGER),
+        failures_path=_ledger_path(store, ATTRIBUTION_FAILURES_LEDGER),
+        round_store_dir=directory,
+        audit_path=directory / INJECTION_AUDIT_NAME)
 
 
 def _discard_group(store: Store, members: List[Skill], reason: str) -> None:
@@ -927,7 +1027,7 @@ def _failure_row(task_id: str, round_: int, *, try_index: int,
 # Applying a plan (G11)
 # ---------------------------------------------------------------------------
 
-def apply_revisions(
+def _apply_revisions(
     *,
     store: Store,
     task_id: str,
@@ -937,43 +1037,20 @@ def apply_revisions(
     view_rules: Any = None,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
+    attributions_path: Path,
+    revision_failures_path: Path,
+    round_store_dir: Path,
 ) -> List[Dict[str, str]]:
-    """Apply the group's stored attribution plan to its skills, one skill
-    at a time; return the per-skill outcomes (``{"skill_id", "action",
-    "outcome"}``, in plan order).
-
-    The plan is read back from attributions.jsonl (first judgment sticks)
-    -- never re-asked. keep leaves the skill alone; delete terminalizes it
-    as ``live_revision_deleted`` immediately; revise runs G11 with the
-    composite-level marker check (``skill_markers(new) ==
-    skill_markers(old)``; an unmarked original is passed through, the
-    K4/K5 precedent). A marker failure is a ModelOutputError inside the
-    skill's own repair budget of ``_REVISION_ATTEMPTS`` tries, and a
-    budget exhaustion discards ONLY that skill (model_output_error)
-    while the group continues (decision section 2.5). A successful
-    revision bumps the version, appends the rewrite_history entry and
-    saves immediately -- the version number is the proof of completion.
-
-    Replay guard per plan entry (decision section 2.4): version ==
-    from_version means apply, == from_version + 1 means the revision
-    already landed (skip -- the version number is the completion
-    proof), anything else is a CodeBugError. Terminal skills are
-    skipped with ``skipped_terminal`` -- a discard that an interrupted
-    budget run landed is the truth, and no plan entry rewrites it.
-
-    An InfrastructureError from one skill's revision is recorded to
-    failed_units.jsonl (stage label ``FAILURE_STAGE``) and that skill
-    stays pending for the resume while the rest of the group continues
-    (decision section 2.5); the ``infra_failed`` outcome is what tells
-    the stage to raise at its end.
-    """
-    _check_round(round_)
-    row = _first_row(store, ATTRIBUTIONS_LEDGER, task_id, round_)
+    """The round-agnostic core of ``apply_revisions`` (module docstring):
+    the G11 pipeline against explicit ledger / round-store paths,
+    ``round_`` a row label only."""
+    row = _first_row_from(attributions_path, task_id, round_)
     if row is None:
         raise CodeBugError(
             f"no attribution row for task {task_id!r} round {round_}: "
             "attribute the group before applying its plan")
-    failed = [traj for traj in _round_trajectories(store, task_id, round_)
+    failed = [traj for traj in _trajectories_from(round_store_dir, task_id,
+                                                  round_)
               if traj.status == "failure"]
     per_view_budget = _FAILURE_VIEW_BUDGET_CHARS // max(1, len(failed))
     failure_view = "\n\n".join(
@@ -1026,10 +1103,64 @@ def apply_revisions(
         outcome = _revise_one(
             store, task_id, round_, stored, from_version,
             attribution_report, failure_view, weak_profile,
-            rewriter_handle, recorder, usage=usage, run_dir=run_dir)
+            rewriter_handle, recorder, revision_failures_path,
+            usage=usage, run_dir=run_dir)
         outcomes.append({"skill_id": skill_id, "action": action,
                          "outcome": outcome})
     return outcomes
+
+
+def apply_revisions(
+    *,
+    store: Store,
+    task_id: str,
+    round_: int,
+    rewriter_handle: ModelHandle,
+    weak_profile: str,
+    view_rules: Any = None,
+    usage: Any = None,
+    run_dir: Optional[Union[str, Path]] = None,
+) -> List[Dict[str, str]]:
+    """Apply the group's stored attribution plan to its skills, one skill
+    at a time; return the per-skill outcomes (``{"skill_id", "action",
+    "outcome"}``, in plan order).
+
+    The plan is read back from attributions.jsonl (first judgment sticks)
+    -- never re-asked. keep leaves the skill alone; delete terminalizes it
+    as ``live_revision_deleted`` immediately; revise runs G11 with the
+    composite-level marker check (``skill_markers(new) ==
+    skill_markers(old)``; an unmarked original is passed through, the
+    K4/K5 precedent). A marker failure is a ModelOutputError inside the
+    skill's own repair budget of ``_REVISION_ATTEMPTS`` tries, and a
+    budget exhaustion discards ONLY that skill (model_output_error)
+    while the group continues (decision section 2.5). A successful
+    revision bumps the version, appends the rewrite_history entry and
+    saves immediately -- the version number is the proof of completion.
+
+    Replay guard per plan entry (decision section 2.4): version ==
+    from_version means apply, == from_version + 1 means the revision
+    already landed (skip -- the version number is the completion
+    proof), anything else is a CodeBugError. Terminal skills are
+    skipped with ``skipped_terminal`` -- a discard that an interrupted
+    budget run landed is the truth, and no plan entry rewrites it.
+
+    An InfrastructureError from one skill's revision is recorded to
+    failed_units.jsonl (stage label ``FAILURE_STAGE``) and that skill
+    stays pending for the resume while the rest of the group continues
+    (decision section 2.5); the ``infra_failed`` outcome is what tells
+    the stage to raise at its end.
+
+    Thin shell over ``_apply_revisions`` (module docstring): checks the
+    pinned round and computes today's exact paths; deleted in M4.
+    """
+    _check_round(round_)
+    return _apply_revisions(
+        store=store, task_id=task_id, round_=round_,
+        rewriter_handle=rewriter_handle, weak_profile=weak_profile,
+        view_rules=view_rules, usage=usage, run_dir=run_dir,
+        attributions_path=_ledger_path(store, ATTRIBUTIONS_LEDGER),
+        revision_failures_path=_ledger_path(store, REVISION_FAILURES_LEDGER),
+        round_store_dir=round_dir(store, round_))
 
 
 def _revise_one(
@@ -1043,14 +1174,15 @@ def _revise_one(
     weak_profile: str,
     rewriter_handle: ModelHandle,
     recorder: UnitFailureRecorder,
+    revision_failures_path: Path,
     *,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> str:
     """Run one skill's G11 revision inside its own repair budget; return
     the outcome recorded for it."""
-    prior = [row for row in _rows_of(store, REVISION_FAILURES_LEDGER,
-                                     task_id, round_)
+    prior = [row for row in _rows_from(revision_failures_path, task_id,
+                                       round_)
              if row.get("skill_id") == stored.skill_id
              and row.get("skill_version") == from_version]
     for try_index in range(len(prior), _REVISION_ATTEMPTS):
@@ -1085,14 +1217,14 @@ def _revise_one(
                 # closing ledger row, like the attribution path.
                 discard_skill(store, stored, MODEL_OUTPUT_ERROR)
                 append_jsonl(
-                    _ledger_path(store, REVISION_FAILURES_LEDGER),
+                    revision_failures_path,
                     _failure_row(task_id, round_, try_index=try_index,
                                  skill_id=stored.skill_id,
                                  skill_version=from_version, exhausted=True,
                                  message=str(exc)))
                 return "discarded_model_output_error"
             append_jsonl(
-                _ledger_path(store, REVISION_FAILURES_LEDGER),
+                revision_failures_path,
                 _failure_row(task_id, round_, try_index=try_index,
                              skill_id=stored.skill_id,
                              skill_version=from_version, exhausted=False,
@@ -1130,6 +1262,20 @@ def survivors_and_block(store: Store,
     return members, format_skills_block(members)
 
 
+def _no_op_guard(store: Store, task_id: str, round_: int,
+                 audit_path: Path) -> bool:
+    """The round-agnostic core of ``no_op_guard`` (module docstring): the
+    byte-identity comparison against the explicit audit path, the round
+    label naming it in errors."""
+    survivors, block = survivors_and_block(store, task_id)
+    audit = _require_audit_row_from(audit_path, round_, task_id)
+    if _block_sha(block) != audit["injection_block_sha256"]:
+        return False
+    for skill in survivors:
+        discard_skill(store, skill, LIVE_NO_IMPROVEMENT)
+    return True
+
+
 def no_op_guard(store: Store, task_id: str, round_: int) -> bool:
     """Fire the no-op guard after round ``round_``'s revisions: True when
     the survivors' current block is byte-identical to the round's FROZEN
@@ -1144,15 +1290,59 @@ def no_op_guard(store: Store, task_id: str, round_: int) -> bool:
     False: there is no round 1 to skip, the members' own discards are
     the terminal state (and an empty block can never equal the frozen
     row of a dispatched round, so the empty case needs no special
-    form)."""
+    form).
+
+    Thin shell over ``_no_op_guard`` (module docstring): checks the
+    pinned round and computes today's exact path; deleted in M4.
+    """
     _check_round(round_)
-    survivors, block = survivors_and_block(store, task_id)
-    audit = _require_audit_row(store, round_, task_id)
-    if _block_sha(block) != audit["injection_block_sha256"]:
-        return False
-    for skill in survivors:
-        discard_skill(store, skill, LIVE_NO_IMPROVEMENT)
-    return True
+    return _no_op_guard(store, task_id, round_,
+                        round_dir(store, round_) / INJECTION_AUDIT_NAME)
+
+
+def _finalize_group(store: Store, task_id: str, *, verdicts_path: Path,
+                    rounds: Sequence[int]) -> Dict[str, Any]:
+    """The round-agnostic core of ``finalize_group`` (module docstring):
+    the verdicts file at ``verdicts_path`` decides over the round labels
+    ``rounds`` (in order). Any zero-execution verdict row discards; the
+    latest round with a row is decisive (better accepts, a miss on the
+    LAST round discards as ``live_no_improvement``); a better row of an
+    earlier round accepts, a miss there leaves the group pending -- the
+    revision pipeline still owes it work."""
+    rows = _rows_from(verdicts_path, task_id)
+    decision: Optional[Tuple[str, str]] = None
+    for row in rows:
+        if "verdict" in row:
+            decision = ("discarded", row["verdict"])
+            break
+    if decision is None:
+        for round_label in reversed(rounds):
+            of_round = [row for row in rows
+                        if row.get("round") == round_label]
+            if not of_round:
+                continue
+            if round_label == rounds[-1]:
+                if of_round[0]["better"]:
+                    decision = ("accepted", "")
+                else:
+                    decision = ("discarded", LIVE_NO_IMPROVEMENT)
+            elif of_round[0]["better"]:
+                decision = ("accepted", "")
+            break
+    if decision is None:
+        return {"outcome": "pending", "reason": None, "committed": []}
+
+    direction, reason = decision
+    committed: List[str] = []
+    for skill in _pending_group(store, task_id):
+        if direction == "accepted":
+            skill.status = "accepted"
+            store.save(skill, "skills")
+        else:
+            discard_skill(store, skill, reason)
+        committed.append(skill.skill_id)
+    return {"outcome": direction, "reason": reason if reason else None,
+            "committed": committed}
 
 
 def finalize_group(store: Store, task_id: str) -> Dict[str, Any]:
@@ -1178,35 +1368,12 @@ def finalize_group(store: Store, task_id: str) -> Dict[str, Any]:
 
     Commits land in skill_id order, pending members only: already
     terminal members keep their own truth, which is what makes a second
-    call a no-op."""
-    rows = _rows_of(store, VERDICTS_LEDGER, task_id)
-    decision: Optional[Tuple[str, str]] = None
-    for row in rows:
-        if "verdict" in row:
-            decision = ("discarded", row["verdict"])
-            break
-    if decision is None:
-        round1 = [row for row in rows if row.get("round") == 1]
-        if round1:
-            if round1[0]["better"]:
-                decision = ("accepted", "")
-            else:
-                decision = ("discarded", LIVE_NO_IMPROVEMENT)
-        else:
-            round0 = [row for row in rows if row.get("round") == 0]
-            if round0 and round0[0]["better"]:
-                decision = ("accepted", "")
-    if decision is None:
-        return {"outcome": "pending", "reason": None, "committed": []}
+    call a no-op.
 
-    direction, reason = decision
-    committed: List[str] = []
-    for skill in _pending_group(store, task_id):
-        if direction == "accepted":
-            skill.status = "accepted"
-            store.save(skill, "skills")
-        else:
-            discard_skill(store, skill, reason)
-        committed.append(skill.skill_id)
-    return {"outcome": direction, "reason": reason if reason else None,
-            "committed": committed}
+    Thin shell over ``_finalize_group`` (module docstring): computes
+    today's exact path and passes the pinned rounds; deleted in M4.
+    """
+    return _finalize_group(
+        store, task_id,
+        verdicts_path=_ledger_path(store, VERDICTS_LEDGER),
+        rounds=_ROUNDS)

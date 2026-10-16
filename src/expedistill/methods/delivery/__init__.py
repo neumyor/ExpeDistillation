@@ -1,6 +1,6 @@
-"""Stage-6 delivery drivers: how the with-bank arm's injection is built.
+"""Delivery drivers: how an arm's skill injection is built.
 
-Params for both methods live here (light, never a driver import) so
+Params for every method live here (light, never a driver import) so
 stage 0 can validate them before anything freezes.
 """
 
@@ -8,12 +8,28 @@ from dataclasses import dataclass
 
 from expedistill.core.config import ConfigError
 
-__all__ = ["WholeBankParams", "RetrievalParams"]
+__all__ = ["GroupByTaskParams", "NoneParams", "PerSkillParams",
+           "RetrievalParams", "WholeBankParams"]
 
 
 @dataclass(frozen=True)
 class WholeBankParams:
     """No parameters: the whole bank, one fixed injection."""
+
+
+@dataclass(frozen=True)
+class NoneParams:
+    """No parameters: no skills, the bare injection."""
+
+
+@dataclass(frozen=True)
+class PerSkillParams:
+    """No parameters: one skill, one single-skill block."""
+
+
+@dataclass(frozen=True)
+class GroupByTaskParams:
+    """No parameters: the pending group of the task being injected."""
 
 
 @dataclass(frozen=True)

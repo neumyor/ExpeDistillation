@@ -17,6 +17,10 @@ validates its params (the slot's dataclass) and runs its check before
 any driver is imported.
 """
 
-from expedistill.methods.registry import resolve, resolve_params
+from expedistill.methods.registry import (
+    resolve,
+    resolve_fixed,
+    resolve_params,
+)
 
-__all__ = ["resolve", "resolve_params"]
+__all__ = ["resolve", "resolve_fixed", "resolve_params"]

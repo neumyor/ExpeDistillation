@@ -8,7 +8,7 @@ they moved wholesale so the contracts live with their owners.
 import pytest
 
 from expedistill.core.config import ConfigError, ExperimentConfig
-from expedistill.methods import resolve_params
+from expedistill.methods import resolve_fixed, resolve_params
 from expedistill.methods.params import build_params
 
 
@@ -169,6 +169,35 @@ class TestLiveRunParams:
         with pytest.raises(ConfigError, match="needs a name"):
             resolve_params("acceptance", make_config(
                 methods={"acceptance": {"n_attempts": 3}}))
+
+
+class TestResolveFixed:
+    """The by-name entry for call sites whose semantics are not a config
+    choice: stage 6's bare control arm (``none``) and the live driver's
+    group injection (``group_by_task``)."""
+
+    def test_fixed_name_builds_empty_params_and_loads_the_driver(self):
+        from expedistill.methods.delivery import NoneParams
+
+        driver, params = resolve_fixed("delivery", "none")
+        assert driver.__name__.endswith(".none")
+        assert isinstance(params, NoneParams)
+
+    def test_unknown_name_lists_the_known_ones(self):
+        with pytest.raises(ConfigError, match="unknown methods.delivery"):
+            resolve_fixed("delivery", "whole_bench")
+
+    def test_required_params_still_fail_loudly(self):
+        # The empty raw mapping is still validated: an entry with
+        # required fields cannot be resolved by fixed name.
+        with pytest.raises(ConfigError, match="missing required parameter"):
+            resolve_fixed("delivery", "retrieval")
+
+    def test_check_carrying_entry_refused(self):
+        # live_run's cross-constraint check needs the config; a
+        # fixed-name resolution has none to give.
+        with pytest.raises(ConfigError, match="cross-constraint"):
+            resolve_fixed("acceptance", "live_run")
 
 
 class TestExamAndOtherSlots:
