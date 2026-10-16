@@ -70,11 +70,11 @@ def leak_verdict_for(
     one exists, else one D8 judge call whose row is appended BEFORE it
     is acted on.
 
-    Extracted verbatim from accept_skill's round body in R0 (same lookup,
-    same call, same append). ``leaked=True`` voids the version: the round
-    is consumed without a with-skill attempt for it, and the judge's
-    reason travels into the rewrite's error description (the caller's
-    job, composites/acceptance_submit.py).
+    Extracted verbatim from the retired accept_skill's round body in R0
+    (same lookup, same call, same append). ``leaked=True`` voids the
+    version: the round is consumed without a with-skill attempt for it,
+    and the judge's reason travels into the rewrite's error description
+    (the exam phase driver's job).
     """
     verdict = find_leak_verdict(store, skill_id, skill_version)
     if verdict is None:

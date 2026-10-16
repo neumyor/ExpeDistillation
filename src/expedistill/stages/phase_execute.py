@@ -155,8 +155,8 @@ from expedistill.composites.exam_once import exam_once
 from expedistill.core import ids
 from expedistill.core.config import (
     DEFAULT_INVALID_REDISPATCH_LIMIT,
-    EXECUTION_NAMES,
     FRESH_BARE,
+    ConfigError as CoreConfigError,
     PHASE_ROLE_BASELINE,
     PHASE_ROLE_EXAM,
     PHASE_ROLE_LIVE,
@@ -187,6 +187,7 @@ from expedistill.infra.store import (
 )
 from expedistill.inject import bank_reference, estimate_tokens
 from expedistill.methods import registry as method_registry
+from expedistill.methods.execution import RealExecutionParams
 from expedistill.stages.context import StageContext
 
 # Private-name seams, the same discipline reports' own imports of
@@ -398,89 +399,42 @@ def _rebased_row(row: AcceptanceReportRow, *, unit_id: str,
 # Method resolution (the phase's raw mappings -> driver + params)
 # ---------------------------------------------------------------------------
 
-class _PhaseMethods:
-    """A one-slot view of the experiment config for method resolution.
+def _resolve_delivery(spec: ExecutePhaseSpec) -> Tuple[Any, Any]:
+    """(driver module, params) for the phase's delivery mapping: the
+    registry's delivery family over the phase's OWN raw mapping (v4 --
+    the ``name`` key plus that method's parameters)."""
+    return method_registry.resolve("delivery", spec.delivery)
 
-    SWAP POINT (the frozen contract, W2-C's second commit): the methods
-    registry gains ``resolve(family, raw_mapping[, config])`` for the
-    five content families; until it lands, the phase's raw mapping
-    rides through the existing slot API under its family key. When it
-    lands, :func:`_resolve_delivery`'s body becomes
-    ``method_registry.resolve("delivery", raw, ctx.config)`` and this
-    class dies; nothing else changes.
+
+def _execution_params(spec: ExecutePhaseSpec) -> Any:
+    """The phase's execution parameters through the registry's execution
+    family (``real`` -> RealExecutionParams, ``exam`` ->
+    ExamExecutionParams); unknown keys are refused loudly by the
+    params builder, the values' contracts by the params classes. The
+    params layer speaks core's ConfigError (its stdlib-only
+    vocabulary); this stage re-raises it as the infra ConfigError the
+    run's failure handling and the tests expect.
+
+    The ARMS consistency is re-checked here although core's load-time
+    checklist owns it: a driver can receive a directly constructed spec
+    (parse_phases never saw it), and the same loud refusal must hold.
     """
-
-    def __init__(self, family: str, raw: Dict[str, Any]) -> None:
-        self.methods = {family: dict(raw)}
-
-
-def _resolve_delivery(ctx: StageContext, spec: ExecutePhaseSpec
-                      ) -> Tuple[Any, Any]:
-    """(driver module, params) for the phase's delivery mapping."""
-    return method_registry.resolve(
-        "delivery", _PhaseMethods("delivery", spec.delivery))
-
-
-@dataclass(frozen=True)
-class _RealParams:
-    """The ``real`` execution's parameters, parsed here until the
-    registry's ``execution`` family lands (SWAP POINT, same note as
-    :class:`_PhaseMethods`): ``n_attempts`` None means the weak depth
-    at runtime, ``max_injection_tokens`` is the injection cap, ``arms``
-    is the baseline phase's fixed pair (W2-C's frozen contract)."""
-
-    n_attempts: Optional[int]
-    max_injection_tokens: Optional[int]
-    arms: Tuple[str, ...] = ()
-
-
-def _execution_params(spec: ExecutePhaseSpec) -> _RealParams:
-    """The phase's execution parameters, unknown keys refused loudly
-    (core.config validates the shape; the values' contracts belong to
-    the family that owns them, so this parsing is the swap point for
-    the registry's ``execution`` family)."""
-    raw = spec.execution
-    name = raw.get("name")
-    if name == "exam":
-        unknown = sorted(set(raw) - {"name"})
-        if unknown:
-            raise ConfigError(
-                f"the exam execution takes no parameters, got {unknown}")
-        return _RealParams(n_attempts=1, max_injection_tokens=None)
-    if name != EXECUTION_NAMES[0]:
-        raise ConfigError(f"unknown execution name {name!r}")
-    allowed = {"name", "n_attempts", "max_injection_tokens"}
+    try:
+        params = method_registry.resolve_params("execution", spec.execution)
+    except CoreConfigError as exc:
+        raise ConfigError(str(exc)) from exc
+    if not isinstance(params, RealExecutionParams):
+        return params
     if spec.role == PHASE_ROLE_BASELINE:
-        allowed |= {"arms"}
-    unknown = sorted(set(raw) - allowed)
-    if unknown:
-        raise ConfigError(
-            f"the real execution for role {spec.role!r} does not take "
-            f"{unknown}; accepted keys: {sorted(allowed)}")
-    n_attempts = raw.get("n_attempts")
-    if n_attempts is not None and not _is_positive_int(n_attempts):
-        raise ConfigError(
-            "execution.n_attempts must be a positive int or null, got "
-            f"{n_attempts!r}")
-    cap = raw.get("max_injection_tokens")
-    if cap is not None and not _is_positive_int(cap):
-        raise ConfigError(
-            "execution.max_injection_tokens must be a positive int or "
-            f"null, got {cap!r}")
-    arms: Tuple[str, ...] = ()
-    if spec.role == PHASE_ROLE_BASELINE:
-        arms = tuple(raw.get("arms") or ())
-        if arms != _BASELINE_ARMS:
+        if tuple(params.arms or ()) != _BASELINE_ARMS:
             raise ConfigError(
-                f"execution.arms must be exactly {list(_BASELINE_ARMS)} "
-                f"for a baseline phase, got {list(arms)}")
-    return _RealParams(n_attempts=n_attempts, max_injection_tokens=cap,
-                       arms=arms)
-
-
-def _is_positive_int(value: Any) -> bool:
-    return (isinstance(value, int) and not isinstance(value, bool)
-            and value > 0)
+                f"execution.arms must be exactly {list(_BASELINE_ARMS)} for "
+                f"a baseline phase, got {list(params.arms or ())}")
+    elif params.arms is not None:
+        raise ConfigError(
+            "the real execution carries arms but only a baseline phase "
+            "is two-armed; every other execute phase runs the weak model")
+    return params
 
 
 def _resolve_verdict_rule(spec: ExecutePhaseSpec, benchmark: str) -> str:
@@ -782,7 +736,7 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
     failure-set derivation is NOT here (G3/R3: decision applies the
     named task-select rule to the weak rows)."""
     params = _execution_params(spec)
-    delivery, delivery_params = _resolve_delivery(ctx, spec)
+    delivery, delivery_params = _resolve_delivery(spec)
     tasks = _prefixed_task_map(ctx, list(phase.task_ids))
     rows = delivery.resolve(None, list(tasks),
                             delivery_params)  # the none driver ignores bank
@@ -910,7 +864,7 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
         raise ConfigError(
             "the exam phase's runs are model-judged attempts; its "
             f"acceptance rule must be 'exam_judge', got {rule_name!r}")
-    delivery, delivery_params = _resolve_delivery(ctx, spec)
+    delivery, delivery_params = _resolve_delivery(spec)
     bank = _bank_skills(ctx, phase)
     pending = _pending_bank_skills(bank)
     skill_by_exam = {ids.make_exam_id(skill.subtask_id): skill
@@ -1262,7 +1216,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     groups = _live_phase_groups(
         ctx, {ids.make_task_id(benchmark, raw) for raw in phase.task_ids})
     task_ids = sorted(groups)
-    delivery, delivery_params = _resolve_delivery(ctx, spec)
+    delivery, delivery_params = _resolve_delivery(spec)
     rows = delivery.resolve(lm.pending_groups(store), task_ids,
                            delivery_params)
     tasks = _prefixed_task_map(
@@ -1559,7 +1513,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     so with-bank runs made now could be measured against the wrong
     bank."""
     _execution_params(spec)
-    delivery, delivery_params = _resolve_delivery(ctx, spec)
+    delivery, delivery_params = _resolve_delivery(spec)
     bank = _bank_skills(ctx, phase)
     benchmark = ctx.config.benchmark
     tasks = _task_objects(ctx, list(phase.task_ids))

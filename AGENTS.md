@@ -140,43 +140,55 @@ src/expedistill/
     exam_answering.py     K3 作答部分（R0 拆分：序列号、同题锁、作答落盘）
     exam_grading.py       K3 判卷部分（R0 拆分：跨崩溃持续的判卷修复预算）
     exam_once.py          K3 薄接线：作答 + 判卷拼成一条 Attempt
-    acceptance_leak.py    K4 泄题判定（R0 拆分：D8 判定与 leak_verdicts 账本）
-    acceptance_skill_status.py  K4 技能状态判定（R0 拆分：从存量记录读出
-                          skill 状态与轮次）
-    acceptance_submit.py  K4 提交助手（R0 拆分：accept_skill 循环与 G6 改写
-                          落盘）
+    acceptance_leak.py    K4 泄题判定（R0 拆分：D8 判定与 leak_verdicts 账本；
+                          A 相位驱动 phase_execute 调用）
+    acceptance_skill_status.py  从存量记录读出 skill 状态、考题的已判作答
+                          序列与裸答（报告读取器与 A 相位驱动共用）
     curation.py           K5
     live_measurement.py   K6 测量部分（R0 拆分：live_run 路径与账本名、组推导、
-                          基线读取、注入审计行、幸存组推导）
+                          基线读取、注入审计行、幸存组推导、轨迹视图的
+                          预算裁剪）
     live_verdicts.py      K6 判定部分（R0 拆分：轮判定、no-op 守卫、组终态提交；
-                          discard_reason 词表的 K6 侧再导出在此）
-    live_attribution.py   K6 归因部分（R0 拆分：G10 归因、G11 修订应用）
-    decision.py           决策规则（M3 起的纯函数）：K4/K6/验收驱动判定清单的落点；
-                          discard_reason 词表与 strict 短路规则集的定义处
+                          discard_reason 词表的 K6 侧再导出在此；B 相位驱动
+                          phase_execute 经它写判定账本）
+    decision.py           决策规则（M3 起的纯函数）：相位世界统一决策入口
+                          decide_task_list 与 4.2/4.3 规则表；discard_reason
+                          词表与 strict 短路规则集的定义处
     reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件
+    shortfall.py          接受洞的落盘记录（D 相位与旧 stage1 共用路径）
+    skill_status.py       skill 状态提交（accept/discard）的唯一入口
+    verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
+                          统一报告行
+    phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
-    registry.py           (槽位/族, 名字) → (驱动, 参数类, check) 的纯数据表
-    segmentation/         切段槽位：re-export evidence 族的 SegmentationParams（M3）
-    authoring/            写 skill 槽位：re-export author 族的 AuthoringParams +
-                          v3 exams 开关的跨槽 check（M3）
-    evidence/             evidence 族：SegmentationParams 的定义处（M3；驱动待 M4）
-    author/               author 族：AuthoringParams 的定义处（M3；驱动待 M4，
-                          exams 开关随 M4 调用点迁移删除）
-    acceptance/           验收驱动 exam.py、live_run.py + 两方法的 Params 与
-                          check_live_run（跨约束：n_attempts ≤ n_attempts_weak）
-    curation/             库整理驱动 agentbrew.py（K5 薄壳；merge_check 开关 M3）、
-                          none.py（消融：裸 accepted 集，预算仍是硬阀）+ Params
-    delivery/             注入驱动 whole_bank.py、retrieval.py + 两方法的 Params
-  stages/                 第 7 层：阶段 0–6 的流程（薄分发 + 写摘要/阶段末抛错）
-    stage0_freeze.py … stage6_test.py
-    stage4_acceptance.py  阶段 4 前端：按名取验收驱动并调用
-    pipeline.py           按实验模式（split / full）串起各阶段
+    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（R8 五族：
+                          delivery / execution / evidence / author / curation）
+    execution/            execution 族参数契约：RealExecutionParams /
+                          ExamExecutionParams（无驱动，相位驱动直接消费）
+    evidence/             evidence 族：SegmentationParams + 三个采集器
+                          add_path（加分路径）、live_group（G10 事实）、
+                          exam_sheet（考卷答卷材料）
+    author/               author 族：AuthoringParams + write 驱动
+                          （写新 skill / 组修订 revise_group）
+    curation/             库整理驱动 agentbrew.py、none.py（消融：裸 accepted 集，
+                          预算仍是硬阀）+ phase_bank.py（R7 相位库入口）+ Params
+    delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
+                          group_by_task.py、none.py + 各自的 Params
+  stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
+    stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
+    phase_execute.py      执行相位驱动（R9/R8）：D 基线 / A 考试 / B live /
+                          C 终测四种 role 的执行 + 验收 + 重派发 + 规则 1 复用
+    phase_learn.py        learn 相位驱动（R9）：决策 → 证据 → 写作 → 整理
+    learn_tasks.py        learn 相位的逐行落地（keep/delete/revise/add 与
+                          断点续跑账本）
+    context.py            StageContext / RunSettings（相位驱动的公共上下文）
     assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run；
                           上移到本层是为了复用 stage0 的 build_manifest（组合层
                           不得 import 阶段层）
-  cli.py                  第 8 层：命令行入口（唯一的方法入口）
+  cli.py                  第 8 层：命令行入口（唯一的方法入口）+ 相位循环
+                          （run_experiment 逐个派发 sequence 条目）
 ```
 
 积木编号与文件的对应以 README 第一节为准；新增积木时两处同时更新。

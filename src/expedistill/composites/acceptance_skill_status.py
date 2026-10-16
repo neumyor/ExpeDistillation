@@ -8,9 +8,10 @@ current state purely from disk -- the attempts of an exam (serial order)
 and the resumes each lookup supports (a judged bare answer, a passing
 acceptance attempt ON this version, the judged with-skill attempt of one
 round, the most recent judged with-skill attempt before a round, and the
-next round's number). Read-only; the loop that acts on these facts is
-composites/acceptance_submit.py, and the leak verdicts are
-composites/acceptance_leak.py.
+next round's number). Read-only; the consumers are the acceptance report reader
+(composites/reports.py), the exam phase driver (stages/phase_execute.py)
+and the exam evidence collector (methods/evidence/exam_sheet.py), and
+the leak verdicts are composites/acceptance_leak.py.
 """
 
 from pathlib import Path
@@ -114,8 +115,8 @@ def _last_with_skill(attempts: List[Attempt], skill_id: str,
 
 
 def _next_round(store: Store, skill: Skill) -> int:
-    """Rounds already closed by a rewrite outcome (see
-    composites/acceptance_submit.py's module docstring)."""
+    """Rounds already closed by a rewrite outcome (the retired
+    accept_skill loop's round accounting)."""
     exhausted = [record for record in _skill_records(
                      store, REWRITE_FAILURE_LEDGER, skill.skill_id)
                  if record.get("exhausted")]

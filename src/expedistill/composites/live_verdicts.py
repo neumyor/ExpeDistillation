@@ -102,14 +102,6 @@ LIVE_NO_IMPROVEMENT = decision.LIVE_NO_IMPROVEMENT
 LIVE_REVISION_DELETED = decision.LIVE_REVISION_DELETED
 MODEL_OUTPUT_ERROR = decision.MODEL_OUTPUT_ERROR
 
-#: Rules for which "the baseline is all-success" mathematically implies
-#: "the live arm cannot be better", so the weak_already_knows zero-
-#: execution short-circuit may fire (decision section 2.2: strict-family
-#: only). Defined in composites.decision since M3 (the short-circuit rule
-#: and judge_round's enforcement share one set); kept under this name for
-#: the live driver's entry guard, which reads it off K6.
-_ALL_SUCCESS_SAFE_RULES = decision.STRICT_SHORT_CIRCUIT_RULES
-
 
 # ---------------------------------------------------------------------------
 # Judging
@@ -166,10 +158,11 @@ def _judge_round(
             f"unknown zero-execution terminal {terminal!r}; expected one "
             f"of {(WEAK_ALREADY_KNOWS, LIVE_INJECTION_OVERFLOW)}")
     elif terminal == WEAK_ALREADY_KNOWS:
-        if rule_name not in _ALL_SUCCESS_SAFE_RULES:
+        if rule_name not in decision.STRICT_SHORT_CIRCUIT_RULES:
             raise CodeBugError(
                 f"weak_already_knows short-circuit is limited to the "
-                f"strict-family rules {sorted(_ALL_SUCCESS_SAFE_RULES)} "
+                "strict-family rules "
+                f"{sorted(decision.STRICT_SHORT_CIRCUIT_RULES)} "
                 f"(decision section 2.2); rule {rule_name!r} may still "
                 "improve on an all-success baseline, so the round must "
                 "be executed")

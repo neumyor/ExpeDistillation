@@ -147,6 +147,10 @@ def clean_registry():
 
 
 def make_config(**overrides):
+    # A legal v4 method (the parse_phases checklist runs at construction,
+    # so these ExperimentConfigs freeze the way a loaded one does). The
+    # phases the tests RUN are constructed directly through the spec
+    # helpers below; this sequence only has to be a legal method.
     defaults = dict(
         benchmark=_FAKE,
         mode="full",
@@ -155,6 +159,12 @@ def make_config(**overrides):
         n_attempts_strong=1,
         n_attempts_weak=2,
         rules={},
+        sequence=["D"],
+        phases={"D": {"kind": "execute", "role": "baseline",
+                      "tasks": "train", "delivery": {"name": "none"},
+                      "execution": {"name": "real",
+                                    "arms": ["executor_strong",
+                                             "executor_weak"]}}},
     )
     defaults.update(overrides)
     return _config(**defaults)

@@ -3,115 +3,38 @@
 Plan section 3's decision checklist (D10, the M3 acceptance baseline):
 one small pure function per rule. Each answers ONE question -- what to
 do next -- from facts the caller already read off disk; every store
-write, ledger append and model call stays with the caller (K4, K6 and
-the acceptance drivers), so the persistence order that makes resume
-equal an uninterrupted run is untouched. I3: the module sits in
-composites beside its callers on purpose -- no decision registry, no
-new state object, no new ledger (skill changes keep going through the
-existing commit helpers only), and no import of K4/K6 (they import
-this module; the shared discard vocabulary therefore lives HERE, with
-K6 re-exporting it, so there is one definition and no import cycle).
-
-Rules return :class:`Action` (``kind`` is one of ``KEEP`` / ``DELETE``
-/ ``REVISE``, the plan's verbs; ``reason`` carries the
-``Skill.discard_reason`` vocabulary when the kind is ``DELETE``) or
-``None`` when no rule fires and the caller's flow simply continues.
-Boolean predicates answer yes/no criteria directly.
-
-Checklist landing, item by item (exam 8 + live 9):
-
-exam (K4 = composites/acceptance_submit.py; driver =
-methods/acceptance/exam.py):
-
-* bare answer correct -> delete(weak_already_knows):
-  ``exam_bare_answer_action`` (K4's precheck).
-* a judged with-skill attempt passing ON the stored version ->
-  keep(accepted): ``exam_stored_pass_action`` (K4's resume precheck)
-  and ``exam_answer_action`` (K4's in-round branch).
-* any measurement budget exhausted (exam generation, answer, judge or
-  leak audit) -> delete(model_output_error):
-  ``exam_measurement_exhausted_action``; the disposition itself stays
-  with the exam driver's unit worker -- the discard is the
-  crash-recovery truth its ledger row completes, and the exception is
-  the fact (there is no read state to decide from).
-* leaked, a verification round left -> revise (the voided rewrite):
-  ``exam_leak_action``; the rewrite's source selection (the most
-  recent judged with-skill attempt, else the bare attempt -- P7b) is
-  ``exam_voided_rewrite_source``.
-* leaked, no round left -> delete(leak_audit): ``exam_leak_action``.
-* wrong answer, a round left -> revise (judge_reason + weak_answer):
-  ``exam_answer_action``.
-* wrong answer, no round left -> delete(retry_exhausted):
-  ``exam_answer_action`` (K4's empty-range fall-through discards with
-  the same rule's reason).
-* rewrite budget exhausted -> version unchanged, round consumed, the
-  next round re-answers the same version: STAYS in K4's
-  ``_rewrite_round`` -- the decision is fused with the per-try
-  REWRITE_FAILURE_LEDGER appends that carry the budget across crashes
-  (a resumed round continues the same budget); splitting them would
-  break the resume protocol's round accounting.
-
-live (K6 = composites/live_verdicts.py and its two siblings; driver =
-methods/acceptance/live_run.py):
-
-* group improved -> keep: ``live_final_action`` (the finalization
-  sweep's decision, read from the verdicts ledger rows).
-* miss with a verification round left -> the G10 per-skill plan
-  applied as G11 revisions: the plan APPLICATION stays in K6's
-  ``_apply_revisions`` -- each entry's version-replay guard (version ==
-  from_version -> apply, +1 -> already landed, anything else ->
-  CodeBugError) IS the resume protocol for a half-applied plan; a plan
-  entry cannot be decided off the store.
-* miss on the last round -> delete(live_no_improvement):
-  ``live_final_action``.
-* no-op guard criterion (the survivors' current block hashing equal to
-  the round's frozen audit line) -> discard without running the next
-  round: ``live_no_op_fires``; the guard itself -- its timing after the
-  revisions land, and the discards -- stays with K6/the orchestration
-  (P7a: computed at the reader's decision time the comparison would be
-  trivially true).
-* all-success baseline under a strict-family rule -> zero-execution
-  weak_already_knows: ``live_zero_execution_short_circuit`` (the live
-  driver's entry guard calls it; judge_round keeps enforcing the
-  family limit).
-* injection over max_injection_tokens -> live_injection_overflow:
-  ``live_injection_overflows`` (both dispatch loops call it before K1).
-* no valid measurement -> live_undetermined: every expected unit an
-  accepted hole (``live_all_holes``) or every stored run back without a
-  scorer verdict (R2b), and -- asserted by the caller only here, an
-  unmeasured baseline (valid == 0) -- (K6's judging core short-circuits
-  before any rule runs -- no judgment without a denominator).
-* G10 budget exhausted -> the whole group discarded
-  (model_output_error): ``live_attribution_exhausted`` covers the
-  ledger-read branch (a stored exhausted row, or a full budget of
-  failed tries); the in-loop exhaustion branch stays in K6's
-  ``_attribute_group`` -- the terminal discards land BEFORE the
-  exhausted receipt row, and that order is the resume protocol.
-* G11 budget exhausted -> only that skill discarded, the group
-  continues (model_output_error): STAYS in K6's ``_revise_one`` for
-  the same reason -- the per-try REVISION_FAILURES_LEDGER appends and
-  the discard-then-receipt order are the crash window's only durable
-  accounting.
-
-"Verification round left" maps to K4's ``last_round`` today; in the
-phase world it is the count of A/B-kind execution phases after this
-learn phase (plan section 3, P1/I8 -- counting learn phases would give
-the wrong action under a legal [D, L, L] sequence). The callers pass
-whichever fact they hold.
+write, ledger append and model call stays with the caller, so the
+persistence order that makes resume equal an uninterrupted run is
+untouched. I3: the module sits in composites beside its callers on
+purpose -- no decision registry, no new state object, no new ledger
+(skill changes keep going through the existing commit helpers only),
+and no import of the live verdicts module (it imports this module; the
+shared discard vocabulary therefore lives HERE, with live_verdicts
+re-exporting it, so there is one definition and no import cycle).
 
 R3 (repair plan, item R3; boundary doc sections 2.4, 3, 4): the phase
 world's ONE decision entry is :func:`decide_task_list` -- (this round's
 report, the control report, the current bank, how many checks are left)
 -> task list -- with the comparison rules as named parameters (default
 ``strict_rate_gain``) and the section 4.2 action table as
-:func:`table_action`. The exam_*/live_* rules above are the LEGACY
-per-mode rules the still-unwired K4/K6 shells call; they retire with the
-Wave 2 phase drivers (their callers -- acceptance_submit, live_verdicts,
-live_attribution, reports, the two acceptance drivers -- are other
-agents' frozen files, so removing them now would break a tree this wave
-must keep green). The other half of G3 moves NOW: stage 6's delta
+:func:`table_action`. The per-mode exam_*/live_* rules the old K4/K6
+shells called retired with those shells (Wave 2): the phase drivers
+route through the entry and the section 4.3 companion rules. The
+verdict-protocol rules the retained live ledger still calls stay:
+
+* ``live_final_action`` -- the finalization sweep's decision, read
+  from the verdicts ledger rows (live_verdicts.finalize_group);
+* ``live_no_op_fires`` -- the no-op guard's criterion (the survivors'
+  current block hashing equal to the round's frozen audit line);
+* ``live_all_holes`` -- every expected unit an accepted hole (one of
+  the two zero-measurement shapes judge_round short-circuits on);
+* ``live_injection_overflows`` -- the injection over
+  ``max_injection_tokens`` check (phase_execute's live dispatch calls
+  it before K1).
+
+The other half of G3 moved here too: the final test's delta
 computation and control-source choice are :func:`final_test_delta` and
-:func:`control_arm_source` here, so no execution stage compares arms
+:func:`control_arm_source`, so no execution stage compares arms
 anymore.
 """
 
@@ -127,7 +50,7 @@ from expedistill.core.contracts import (
     ExecutionUnitRow,
     TaskListRow,
 )
-from expedistill.core.models import Attempt, MODEL_ROLES, Skill
+from expedistill.core.models import MODEL_ROLES, Skill
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
 __all__ = [
@@ -176,20 +99,12 @@ __all__ = [
     "control_arm_source",
     "control_perfect_skips_run",
     "decide_task_list",
-    "exam_answer_action",
-    "exam_bare_answer_action",
-    "exam_leak_action",
-    "exam_measurement_exhausted_action",
-    "exam_stored_pass_action",
-    "exam_voided_rewrite_source",
     "final_test_delta",
     "first_success_gain",
     "live_all_holes",
-    "live_attribution_exhausted",
     "live_final_action",
     "live_injection_overflows",
     "live_no_op_fires",
-    "live_zero_execution_short_circuit",
     "remaining_checks",
     "reuse_key",
     "reusable_units",
@@ -250,72 +165,8 @@ class Action:
 
 
 # ---------------------------------------------------------------------------
-# Exam rules (K4)
-# ---------------------------------------------------------------------------
-
-def exam_bare_answer_action(bare_verdict: Optional[bool]) -> Optional[Action]:
-    """A correct bare answer means the weak model already knows the exam,
-    so the skill cannot teach it anything -> delete(weak_already_knows).
-    None (no rule fired) when the bare answer was wrong or absent."""
-    if bare_verdict is True:
-        return Action(DELETE, WEAK_ALREADY_KNOWS)
-    return None
-
-
-def exam_stored_pass_action(passed_on_stored_version: bool) -> Optional[Action]:
-    """A judged with-skill attempt that passed ON the stored version ->
-    keep(accepted) (an attempt on any other version proves nothing
-    about the stored content). None when no such attempt exists."""
-    if passed_on_stored_version:
-        return Action(KEEP)
-    return None
-
-
-def exam_leak_action(*, last_round: bool) -> Action:
-    """A leaked version: the round with no verification round after it
-    has no budget left to fix it -> delete(leak_audit); any earlier
-    round consumes itself with the voided rewrite (revise -- the
-    version is never examined, the audit's reason travels into the
-    rewrite description)."""
-    if last_round:
-        return Action(DELETE, LEAK_AUDIT)
-    return Action(REVISE)
-
-
-def exam_answer_action(*, verdict: bool, last_round: bool) -> Action:
-    """The round's judged with-skill attempt: a pass -> keep(accepted);
-    a wrong answer with a verification round left -> revise (the
-    rewrite carries the judge reason and the weak answer); a wrong
-    answer on the last round -> delete(retry_exhausted)."""
-    if verdict:
-        return Action(KEEP)
-    if last_round:
-        return Action(DELETE, RETRY_EXHAUSTED)
-    return Action(REVISE)
-
-
-def exam_voided_rewrite_source(
-        *, last_with_skill: Optional[Attempt],
-        bare: Optional[Attempt]) -> Optional[Attempt]:
-    """The voided rewrite's source attempt (P7b): the most recent judged
-    with-skill attempt of an already completed round -- with none (a
-    round-0 leak) the bare attempt, whose judge reason still says how
-    the weak model misunderstood the question."""
-    return last_with_skill if last_with_skill is not None else bare
-
-
-def exam_measurement_exhausted_action() -> Action:
-    """Any measurement's repair budget exhausted (exam generation, the
-    answer, the judge or the leak audit) -> delete(model_output_error):
-    the skill is terminally discarded -- resampling the same broken
-    contract would only burn tokens. The caller owns the
-    terminal-write-first protocol around this verdict (the discard is
-    the truth a resume reads; the failure ledger row is its receipt)."""
-    return Action(DELETE, MODEL_OUTPUT_ERROR)
-
-
-# ---------------------------------------------------------------------------
-# Live rules (K6)
+# The live verdict protocol's rules (live_verdicts / phase_execute call
+# these; the retired K4/K6 shells' exam_* rules are gone with the shells)
 # ---------------------------------------------------------------------------
 
 def live_final_action(rows: Sequence[Dict[str, Any]],
@@ -366,24 +217,6 @@ def live_no_op_fires(*, rendered_block_sha: str,
     return rendered_block_sha == frozen_audit_sha
 
 
-def live_zero_execution_short_circuit(
-        *, rule_name: str,
-        baseline_counts: Mapping[str, int]) -> bool:
-    """An all-success baseline under a rule a rate-1.0 baseline can
-    never lose to (the strict family) -> the group is terminalized
-    weak_already_knows with zero executions: there is nothing the
-    injection could prove. A pass@N-style rule can still improve on
-    rate 1.0 and never short-circuits, and neither does an UNMEASURED
-    baseline (valid == 0 would read 0 == 0 as "all success"): a
-    baseline with no valid attempt is live_undetermined, not this
-    short-circuit. Whether the round was already
-    judged is the caller's resume fact, not part of the criterion;
-    judge_round re-verifies both halves before writing the row."""
-    return (rule_name in STRICT_SHORT_CIRCUIT_RULES
-            and baseline_counts["valid"] > 0
-            and baseline_counts["success"] == baseline_counts["valid"])
-
-
 def live_injection_overflows(*, max_injection_tokens: Optional[int],
                              injection_tokens: int) -> bool:
     """The injection's D10 token estimate over ``max_injection_tokens``:
@@ -401,22 +234,9 @@ def live_all_holes(expected_ids: Sequence[str],
     the round is live_undetermined, never a judgment on an empty
     sample. One of the two ways a round reaches zero valid
     measurements; the other (every stored run back without a scorer
-    verdict, R2b) is read off the counts by K6's judging core."""
+    verdict, R2b) is read off the counts by the judging core."""
     skip = set(skip_ids)
     return all(unit in skip for unit in expected_ids)
-
-
-def live_attribution_exhausted(failure_rows: List[Dict[str, Any]],
-                               budget: int) -> bool:
-    """The G10 repair budget is spent: an exhausted ledger row (a
-    previous call completed the exhaustion -- the discards are the
-    truth, the line their receipt) or a full budget of failed tries
-    means the whole group is terminally discarded as
-    model_output_error. The in-loop exhaustion branch (which lands the
-    discards BEFORE the exhausted receipt row) stays with K6; this is
-    the ledger-read half a resumed call decides from."""
-    return (any(row.get("exhausted") for row in failure_rows)
-            or len(failure_rows) >= budget)
 
 
 # ---------------------------------------------------------------------------

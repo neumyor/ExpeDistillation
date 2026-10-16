@@ -15,14 +15,15 @@ these facts.
 
 What stays out on purpose:
 
-* the repair budget and its failure ledger are composite machinery
-  (composites/live_attribution.py owns them for the stage's legacy
-  path); a ModelOutputError propagates to the caller. The group-abandon
+* the repair budget and its failure ledger are the phase driver's own
+  machinery (stages/learn_tasks.py's ledgers); a ModelOutputError
+  propagates to the caller. The group-abandon
   on budget EXHAUSTION is the decision module's call (R6 item 3), never
   this driver's -- it does not touch the skill store at all.
 * persistence and resume. The driver reads the run directory through
-  composites/live_measurement.py's disk-only readers and writes
-  nothing; the Wave 2 phase driver owns the ledgers.
+  composites/live_measurement.py's disk-only readers (and its
+  view-budget fender) and writes nothing; the phase driver owns the
+  ledgers.
 """
 
 from pathlib import Path
@@ -31,12 +32,10 @@ from typing import Any, List, Optional, Union
 from expedistill.blocks.attribution import attribute_failure
 from expedistill.blocks.view import final_status_word, render_trajectory_view
 from expedistill.composites.decision import REVISE
-from expedistill.composites.live_attribution import (
-    _LIVE_VIEWS_BUDGET_CHARS,
-    _clip_view,
-)
 from expedistill.composites.live_measurement import (
     INJECTION_AUDIT_NAME,
+    _LIVE_VIEWS_BUDGET_CHARS,
+    _clip_view,
     _require_audit_row_from,
     _require_group,
     _trajectories_from,

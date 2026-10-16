@@ -780,47 +780,6 @@ def test_crash_between_dispatch_write_and_duplicate_records(tmp_path,
     assert snapshot(store) == reference
 
 
-# ---------------------------------------------------------------------------
-# Stage plumbing: the run setting reaches K5's wave pool
-# ---------------------------------------------------------------------------
-
-def test_stage5_threads_workers_into_the_wave_pool(tmp_path):
-    from expedistill.core.config import ExperimentConfig
-    from expedistill.stages import stage5_curation
-    from expedistill.stages.context import RunSettings, StageContext
-
-    summaries = {}
-    for tag, workers in (("serial", 1), ("parallel", 8)):
-        run_dir = tmp_path / tag / "run"
-        ctx = StageContext(
-            run_dir=run_dir, store=Store(run_dir),
-            config=ExperimentConfig(
-                benchmark="tb", mode="full",
-                models={"executor_strong": "strong-model",
-                        "executor_weak": "weak-model"},
-                weak_profile="weak",
-                methods={"acceptance": {"name": "exam", "retry_limit": 1},
-                         "curation": {"name": "agentbrew",
-                                      "token_budget": 10 ** 6,
-                                      "rounds": 3}}),
-            usage=None,
-            handles={
-                "answerer": _routed_handle("weak",
-                                           overlap_world().answerer_resolve),
-                "judge": _routed_handle("judge",
-                                        overlap_world().judge_resolve),
-                "curator": _routed_handle("curator",
-                                          overlap_world().curator_resolve),
-            },
-            workdir_root=run_dir / "work",
-            run_settings=RunSettings(workers=workers))
-        seed(ctx.store, overlap_world())
-        summaries[tag] = stage5_curation.run(ctx)
-    assert summaries["serial"] == summaries["parallel"]
-    assert summaries["parallel"]["members"] == [
-        merge_id(0), merge_id(2), skill_id(4)]
-
-
 def test_journal_less_pending_merge_is_reused_by_merged_from(tmp_path):
     """v2 behaviour kept for runs whose journal was lost: a pending merge
     matching the first undecided unit's sources is reused, not re-merged.

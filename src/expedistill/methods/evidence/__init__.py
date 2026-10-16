@@ -1,7 +1,7 @@
 """The evidence family: segmenting experience into fact-only packages.
 
 R6 (docs/decisions/execute_learn_repair_plan_20261016.md) turned this
-family from a params-only package into a real driver family. Two
+family from a params-only package into a real driver family. Three
 entries stand next to the params class:
 
 * ``methods.evidence.live_group.collect_group_evidence`` -- the live
@@ -9,19 +9,20 @@ entries stand next to the params class:
   diagnosis, per-skill problems, failure views; the model prompt's
   keep/revise/delete vocabulary is dropped at this boundary);
 * ``methods.evidence.add_path.collect_add_evidence`` -- the add path's
-  evidence (a task's strong segments, as source experiences).
+  evidence (a task's strong segments, as source experiences);
+* ``methods.evidence.exam_sheet.collect_exam_evidence`` -- the exam
+  path's answer-sheet package (the exam, the judged attempt's weak
+  answer and judge reason; moved there from learn_tasks' inline
+  assembly at the Wave 2 integration).
 
 ``methods.evidence.package`` defines the evidence-package shape
 (target, facts, segments, old_skill, source_experiences) and the
-fact-only guard. The stage drivers do not call any of these yet: the
-legacy live path keeps its action-plan G10 (composites/
-live_attribution.py) until Wave 2 rewires phase_learn.
+fact-only guard. The phase driver (stages/phase_learn.py through
+learn_tasks) is the consumer of all three.
 
 ``SegmentationParams`` is the family's registered ``segment`` method
 (the add path's K and re-segmentation budget); the registry's
-``(evidence, segment)`` entry resolves it here, and the segmentation
-slot package re-exports it so the v3 config path stays byte-identical
-until the slot dies.
+``(evidence, segment)`` entry resolves it here.
 """
 
 from dataclasses import dataclass

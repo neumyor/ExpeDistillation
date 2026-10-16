@@ -10,7 +10,9 @@ have pending stage-3 candidates), the stage-1 baseline reader, the D3
 expected set, the round skip set, the frozen injection-audit row, and the
 survivors-and-block derivation that round 1 and the group_by_task
 delivery inject. No judgment, no attribution, no skill-status write:
-those live in composites/live_verdicts.py and composites/live_attribution.py.
+judgment lives in composites/live_verdicts.py; attribution and revision
+are the phase world's evidence/author families (methods/evidence,
+methods/author).
 
 State is derived from disk only (decision section 2.4 -- no new state
 objects): a dispatched round's directory exists even when every unit was
@@ -448,3 +450,46 @@ def survivors_and_block(store: Store,
     line."""
     members = _pending_group(store, task_id)
     return members, format_skills_block(members)
+
+
+# ---------------------------------------------------------------------------
+# The view-budget fender (moved here from composites/live_attribution.py
+# when the attribution shell retired; the readers' family owns it)
+# ---------------------------------------------------------------------------
+
+#: Hard char budgets on the G10 / G11 trajectory-view inputs (review fix
+#: 2026-10-14, three-reviewer round; re-anchored 2026-10-15 by reviewer C's
+#: envelope accounting). The views are otherwise unbounded: the pilot's
+#: real mteb group rendered 562k chars across three views (~140k
+#: est-tokens), and a context overflow comes back as 400/413 -- a
+#: permanent provider refusal that is neither a repair-budget item nor an
+#: InfrastructureError, so the first failed group with long trajectories
+#: would hard-stop the whole stage (and re-hit it on every resume).
+#: 140k chars targets the REQUEST ENVELOPE, not just the input: ~35k
+#: est-tokens, calibrated with the endpoint's measured low-estimate
+#: factor (~1.38) to ~48k real input tokens, plus the author/rewriter
+#: roles' max_tokens=65536 lands the whole request at ~120k tokens --
+#: within the largest request envelope this endpoint has ever accepted
+#: (~119k) whether or not it counts max_tokens against the window.
+#: Clipping keeps each view's head and tail (the tail is where terminal-
+#: benchmark failures actually show) and marks the elided middle. The
+#: values are pre-registered in the runbook and deliberately not
+#: config keys: they are a fender, not an experimental variable (same
+#: discipline as the ViewRules constants in the benchmark plugins).
+_LIVE_VIEWS_BUDGET_CHARS = 140_000
+
+#: Marker inserted where a view was clipped (both budget constants feed
+#: _clip_view; the marker's own length is accounted for in the clip).
+_ELIDED_NOTE = "\n[... {n} chars elided to fit the attribution view budget ...]\n"
+
+
+def _clip_view(text: str, budget: int) -> str:
+    """Clip one rendered trajectory view to ``budget`` chars, keeping the
+    head (setup) and tail (where TB failures evidence themselves) and
+    marking the elided middle. A no-op under budget."""
+    if len(text) <= budget:
+        return text
+    head = max(1, int(budget * 0.6))
+    note = _ELIDED_NOTE.format(n=len(text) - budget)
+    tail = max(0, budget - head - len(note))
+    return text[:head] + note + text[len(text) - tail:]

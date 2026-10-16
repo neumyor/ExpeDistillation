@@ -39,14 +39,12 @@ driver. A group row (live) goes through
 ``methods.evidence.live_group.collect_group_evidence`` (G10 as facts)
 plus ``methods.author.write.revise_group`` -- the G10/G11 migration
 (wiring list item 10): the legacy ``live_attribution`` action-plan
-path retired with stage 4. A skill row (exam) has no collector in the
-evidence family yet, so the answer-sheet package is assembled HERE
-from the report row's own artifacts (the exam, the judged attempt's
-weak answer and judge reason; P7b's source selection and the
-leak-voided description mirror ``acceptance_submit``). That assembly
-is a disclosed deviation -- the boundary says evidence gathering
-belongs to the evidence family, and moving it there is a one-file
-follow-up once the family is reopened.
+path retired with stage 4. A skill row (exam) goes through
+``methods.evidence.exam_sheet.collect_exam_evidence`` (the exam, the
+judged attempt's weak answer and judge reason; P7b's source selection
+and the leak-voided description moved there from this module's inline
+assembly at the Wave 2 integration -- evidence gathering belongs to
+the evidence family).
 
 **Resume** is K6's replay guard on a per-phase ledger: one
 ``revisions.jsonl`` row per skill BEFORE the author call records
@@ -79,14 +77,13 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import tasks as tasks_block
 from expedistill.composites import decision
-from expedistill.composites.acceptance_leak import find_leak_verdict
 from expedistill.composites.live_measurement import pending_groups
 from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.composites.skill_status import discard_skill
 from expedistill.core import ids
 from expedistill.core.config import ExecutePhaseSpec, PhaseInstance
 from expedistill.core.contracts import AcceptanceReportRow, TaskListRow
-from expedistill.core.models import Attempt, Exam, Skill
+from expedistill.core.models import Skill
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -100,7 +97,7 @@ from expedistill.infra.store import (
     write_jsonl,
 )
 from expedistill.methods.author import write as author
-from expedistill.methods.evidence import add_path, live_group
+from expedistill.methods.evidence import add_path, exam_sheet, live_group
 from expedistill.methods.evidence.package import EvidencePackage
 from expedistill.prompts import get as get_prompt
 
@@ -120,11 +117,6 @@ OUTCOMES_NAME = "outcomes.jsonl"
 _TASK_LIST_SCHEMA = "learn-task-list-v1"
 _REVISION_SCHEMA = "learn-revision-v1"
 _OUTCOME_SCHEMA = "learn-outcome-v1"
-
-#: Prefix of the error description synthesized for a leak-voided rewrite
-#: (acceptance_submit's wording: the audit report is the failure being
-#: repaired, the judge reason the extra context).
-_VOID_NOTE = "The previous skill version was voided by the leak audit: "
 
 #: The statuses a learn phase may still act on. "merged" is curation's
 #: product and "discarded" is terminal: decision rows pointing at either
@@ -160,7 +152,7 @@ def merge_task_list(rows: Sequence[TaskListRow],
                 f"task-list row for {row.target_id!r} names basis unit "
                 f"{row.basis_unit!r}, which the current report does not "
                 "carry: the decision and the merge disagree")
-        version = _injected_version(report_row)
+        version = exam_sheet.injected_version(report_row)
         current = best.get(row.target_id)
         if current is None:
             best[row.target_id] = (version, row.basis_unit)
@@ -177,19 +169,6 @@ def merge_task_list(rows: Sequence[TaskListRow],
     dropped = set(superseded)
     effective = [row for row in rows if row.basis_unit not in dropped]
     return effective, superseded
-
-
-def _injected_version(report_row: AcceptanceReportRow) -> int:
-    """The single skill version an exam row injected (its unit id's
-    join back to the target)."""
-    injected = report_row.injected_skills
-    if (not isinstance(injected, list) or len(injected) != 1
-            or not isinstance(injected[0], dict)
-            or not isinstance(injected[0].get("version"), int)):
-        raise CodeBugError(
-            f"report row {report_row.unit_id!r} injects {injected!r}; an "
-            "exam-phase row injects exactly one {skill_id, version}")
-    return injected[0]["version"]
 
 
 # ---------------------------------------------------------------------------
@@ -398,9 +377,9 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
         decide = None  # the author's own default per-skill policy
     else:
         report_row = _report_row_of(current_rows, row.basis_unit)
-        packages = [_exam_evidence(store, report_row,
-                                  store.load("skills", row.target_id,
-                                             Skill))]
+        packages = [exam_sheet.collect_exam_evidence(
+            store, report_row,
+            store.load("skills", row.target_id, Skill))]
         # A single-skill revision is already authorized: the author's
         # per-skill discretion exists for GROUP revisions, and the
         # default policy would keep a package with no skill_problem
@@ -483,82 +462,6 @@ def _land_revision(ctx: Any, phase: PhaseInstance, row: TaskListRow,
             "content the author did not produce; the store drifted from "
             "the revision ledger")
     _append_outcome(phase, row, skill_id, "revised", expected, phase_dir)
-
-
-# ---------------------------------------------------------------------------
-# The exam answer-sheet evidence (assembled here -- see module docstring)
-# ---------------------------------------------------------------------------
-
-def _exam_evidence(store: Store, report_row: AcceptanceReportRow,
-                   skill: Skill) -> EvidencePackage:
-    """One skill's answer-sheet package from the report row's artifacts.
-
-    The rewrite material is P7b's source selection, mirrored from
-    ``acceptance_submit``: the latest judged attempt of THIS version
-    (the row's runs), else the latest judged with-skill attempt of the
-    exam, else the bare attempt -- and a leaked version's rewrite
-    carries the audit report as its failure description (the voided
-    rewrite; the leak verdict is read back, never re-asked).
-    """
-    exam_id = report_row.artifacts.get("exam_id")
-    if not exam_id:
-        raise CodeBugError(
-            f"report row {report_row.unit_id!r} carries no exam_id; an "
-            "exam-phase row always names its exam")
-    exam = store.load("exams", exam_id, Exam)
-    judged = [store.load("attempts", run["run"], Attempt)
-              for run in report_row.runs]
-    if judged:
-        source = judged[-1]
-        error = source.judge_reason
-    else:
-        attempts = _exam_attempts(store, exam_id)
-        with_skill = [attempt for attempt in attempts
-                      if attempt.purpose == "acceptance"
-                      and attempt.skill_id is not None
-                      and attempt.judge_verdict is not None]
-        if with_skill:
-            source = with_skill[-1]
-        else:
-            bare = [attempt for attempt in attempts
-                    if attempt.purpose == "bare"
-                    and attempt.judge_verdict is not None]
-            if not bare:
-                raise CodeBugError(
-                    f"exam {exam_id!r} has no judged attempt to revise "
-                    f"skill {skill.skill_id!r} from: the report row "
-                    "authorized a revision without answer-sheet material")
-            source = bare[-1]
-        error = source.judge_reason
-        if report_row.status == decision.ROW_NOT_TESTABLE \
-                and report_row.cause == decision.CAUSE_LEAK:
-            leak = find_leak_verdict(store, skill.skill_id,
-                                     _injected_version(report_row))
-            report = leak["reason"] if leak else ""
-            reason = (source.judge_reason or "").strip()
-            error = (f"{reason} {_VOID_NOTE}{report}" if reason
-                     else f"{_VOID_NOTE}{report}")
-    return EvidencePackage(
-        target=skill.skill_id,
-        facts=[{"kind": "exam_question", "text": exam.question_text},
-               {"kind": "weak_answer", "text": source.weak_answer},
-               {"kind": "judge_reason", "text": error or ""}],
-        segments=[{"exam_id": exam_id, "attempt_id": source.attempt_id}],
-        old_skill=skill)
-
-
-def _exam_attempts(store: Store, exam_id: str) -> List[Attempt]:
-    """The exam's attempts in serial order (the run-level store's
-    deterministic id scan)."""
-    out = []
-    for attempt_id in store.ids("attempts"):
-        try:
-            parsed_exam_id, _ = ids.parse_attempt_id(attempt_id)
-        except ValueError:
-            continue
-        if parsed_exam_id == exam_id:
-            out.append(store.load("attempts", attempt_id, Attempt))
-    return out
 
 
 def _report_row_of(current_rows: Optional[List[AcceptanceReportRow]],

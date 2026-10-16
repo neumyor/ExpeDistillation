@@ -1,13 +1,16 @@
 """K6 live-acceptance phase-function tests (llm.fake + tmp run dir).
 
 Every test drives the composites-level functions directly with explicit
-parameters -- the stage driver (stage4_live_run.py) is T4's and is not
-imported here. The run directory is hand-built the way the stage would
-have left it: stage-1 weak bare trajectories in the main store, the
-group's pending candidate skills, the frozen injection_audit rows, and
-the round stores' trajectories. Model verdicts and plans are FakeClient
+parameters -- the phase driver (stages/phase_execute.py) has its own
+suite. The run directory is hand-built the way the phase would have left
+it: stage-1 weak bare trajectories in the main store, the group's
+pending candidate skills, the frozen injection_audit rows, and the
+round stores' trajectories. Model verdicts and plans are FakeClient
 scripts on the author / rewriter handles (AGENTS.md section 8: no
-network, deterministic, assertable).
+network, deterministic, assertable). The retired G10/G11 composite
+(attribution + revision application) went with the K6 shell; its
+phase-world heirs are methods/evidence/live_group (facts) and
+methods/author/write (decisions), tested under tests/unit.
 """
 
 import hashlib
@@ -16,7 +19,6 @@ import json
 import pytest
 
 from expedistill.composites import (
-    live_attribution as lat,
     live_measurement as lm,
     live_verdicts as lv,
 )
@@ -34,10 +36,6 @@ from expedistill.composites.live_verdicts import (
     judge_round,
     no_op_guard,
 )
-from expedistill.composites.live_attribution import (
-    apply_revisions,
-    attribute_group,
-)
 from expedistill.core.ids import (
     make_merged_skill_id,
     make_skill_id,
@@ -51,19 +49,15 @@ from expedistill.infra.reliability import (
     CodeBugError,
     ConfigError,
     InfrastructureError,
-    ModelOutputError,
 )
 from expedistill.infra.store import Store, append_jsonl, read_jsonl, write_json
 from expedistill.inject.skills import estimate_tokens, format_skills_block
-from expedistill.llm import json_script, make_fake_handle
 
 BENCHMARK = "tb"
 TASK_ID = make_task_id(BENCHMARK, "t1")
 OTHER_TASK_ID = make_task_id(BENCHMARK, "t2")
 N_ATTEMPTS = 3
 RULE = "strict_rate_gain"
-WEAK_PROFILE = "A small model; known to skip intermediate steps."
-TASK_INSTRUCTION = "Fix the stuck service on host <host>."
 
 # Protocol-v2 contents: four bracket sections at line starts, so
 # blocks.author.skill_markers reads the procedure set off them.
@@ -73,14 +67,6 @@ MARKED_A = "\n".join([
     "1. Check the service status with the status command.",
     "2. Restart the service with the restart command.",
     "[Verify] The status command reports the service as running.",
-    "[Do not use when] The status command already reports running.",
-])
-#: A revision that drops [Verify]: skill_markers reads None -> rejected.
-MARKED_A_DROPPED = "\n".join([
-    "[When to use] The service rejects connections and needs a restart.",
-    "[Steps]",
-    "1. Run the status command on the service.",
-    "2. Restart the service with its restart command.",
     "[Do not use when] The status command already reports running.",
 ])
 #: Same four sections, reworded: passes the keep-structure check.
@@ -188,23 +174,6 @@ def counts(valid, success, infra=0, aux_success=None):
     if aux_success is not None:
         base["aux_success"] = aux_success
     return base
-
-
-def plan_script(actions, diagnosis="the injected skill did not help"):
-    """A G10 response: one (skill_id, action, problem) per group member."""
-    return json_script({
-        "diagnosis": diagnosis,
-        "skill_actions": [
-            {"skill_id": skill_id, "action": action, "problem": problem}
-            for skill_id, action, problem in actions
-        ],
-    })
-
-
-def revision_script(text, category="missing_step",
-                    reason="spelled out the verification step"):
-    return json_script({"skill_text": text, "failure_category": category,
-                        "revision_reason": reason})
 
 
 def seeded_run(tmp_path, *, baseline=(False, False, False),
@@ -828,499 +797,19 @@ def test_judge_aux_scorer_without_baseline_counts_is_code_bug(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# attribute_group
-# ---------------------------------------------------------------------------
-
 def test_clip_view_keeps_head_and_tail_under_budget():
     """The clip keeps the head and tail of an over-budget view (the tail
     is where terminal-benchmark failure evidence lives), marks the
     elided middle, and never exceeds the budget."""
     text = "A" * 600 + "B" * 600 + "C" * 600
-    clipped = lat._clip_view(text, 700)
+    clipped = lm._clip_view(text, 700)
     assert len(clipped) <= 700
     assert clipped.startswith("A")
     assert clipped.endswith("C")
     assert "chars elided to fit the attribution view budget" in clipped
-    assert lat._clip_view("short view", 700) == "short view"   # no-op
+    assert lm._clip_view("short view", 700) == "short view"   # no-op
 
 
-def test_attribution_views_are_clipped_to_budget(tmp_path, monkeypatch):
-    """Three long-trajectory views are clipped per-view against the
-    joined budget: the author's user prompt carries the elision marker
-    for every one, and the attribution row still lands normally. Without
-    the clip a context overflow comes back as a permanent 400/413 that
-    neither repair budget nor the stage catches, hard-stopping the run."""
-    store, skills = seeded_run(tmp_path)
-    rs = round_store(store, 0)
-    for attempt in range(N_ATTEMPTS):
-        traj = make_traj(attempt, False)
-        traj.steps = [Step(action=f"cmd {attempt}-{i}",
-                           observation="x" * 400)
-                      for i in range(40)]
-        rs.save(traj, "trajectories")
-    monkeypatch.setattr(lat, "_LIVE_VIEWS_BUDGET_CHARS", 2_000)
-    author = make_fake_handle("author", [
-        plan_script([(s.skill_id, "keep", "") for s in skills])])
-
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    assert row is not None and row["schema"] == "live-attribution-v1"
-    prompt = author.client.calls[0]["user"]
-    assert (prompt.count("chars elided to fit the attribution view budget")
-            == N_ATTEMPTS)
-
-
-def attribution_run(tmp_path, author_script, *, plan_actions=None,
-                    baseline=(False,) * N_ATTEMPTS,
-                    live=(False,) * N_ATTEMPTS,
-                    contents=(MARKED_A, MARKED_A, MARKED_A)):
-    store, skills = seeded_run(tmp_path, baseline=baseline, live=live,
-                               contents=contents)
-    author = make_fake_handle("author", author_script)
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-    return store, skills, author, row
-
-
-def test_attribution_appends_row_with_store_versions(tmp_path):
-    store, skills = seeded_run(tmp_path, live=(False, True, False))
-    # The model never sees or emits versions; the row's versions are read
-    # from the store at append time -- prove it by bumping one first.
-    bumped = store.load("skills", skills[0].skill_id, Skill)
-    bumped.version = 4
-    bumped.content = MARKED_A_REVISED
-    store.save(bumped, "skills")
-    author = make_fake_handle("author", [
-        plan_script([(skills[0].skill_id, "revise", "trigger too vague"),
-                     (skills[1].skill_id, "keep", ""),
-                     (skills[2].skill_id, "delete", "harmful here")]),
-    ])
-
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    assert row["schema"] == "live-attribution-v1"
-    assert row["task_id"] == TASK_ID and row["round"] == 0
-    assert row["diagnosis"] == "the injected skill did not help"
-    assert row["skill_actions"] == [
-        {"skill_id": skills[0].skill_id, "version": 4, "action": "revise",
-         "problem": "trigger too vague"},
-        {"skill_id": skills[1].skill_id, "version": 1, "action": "keep",
-         "problem": ""},
-        {"skill_id": skills[2].skill_id, "version": 1, "action": "delete",
-         "problem": "harmful here"},
-    ]
-    frozen = read_jsonl(round_dir(store, 0) / lm.INJECTION_AUDIT_NAME)[0]
-    # Bumping the skill changed what a re-derivation would say now; the
-    # sha on the row is the frozen audit's, read from disk.
-    assert row["injection_block_sha256"] == frozen["injection_block_sha256"]
-    current_members = [store.load("skills", skill_id, Skill)
-                       for skill_id in store.ids("skills")]
-    current_block = format_skills_block(current_members)
-    assert row["injection_block_sha256"] != lm._block_sha(current_block)
-    stored = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                       / lm.ATTRIBUTIONS_LEDGER)
-    assert stored == [row]
-
-
-def test_attribution_lookup_reuses_first_row_without_reasking(tmp_path):
-    store, skills = seeded_run(tmp_path)
-    first = {"schema": "live-attribution-v1", "task_id": TASK_ID,
-             "round": 0, "diagnosis": "the stored judgment",
-             "skill_actions": [
-                 {"skill_id": skills[0].skill_id, "version": 1,
-                  "action": "keep", "problem": ""}],
-             "injection_block_sha256": "frozen"}
-    append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / lm.ATTRIBUTIONS_LEDGER, first)
-    author = make_fake_handle("author", [])
-
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    assert row == first
-    assert author.client.calls == []
-
-
-def test_attribution_budget_repairs_then_succeeds(tmp_path):
-    store, skills = seeded_run(tmp_path)
-    author = make_fake_handle("author", [
-        ModelOutputError("LIVE_RUN_ATTRIBUTION: bad coverage"),
-        plan_script([(s.skill_id, "keep", "") for s in skills]),
-    ])
-
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    assert row["diagnosis"] == "the injected skill did not help"
-    failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / lm.ATTRIBUTION_FAILURES_LEDGER)
-    assert [(f["try_index"], f["exhausted"]) for f in failures] == [
-        (0, False)]
-    assert len(author.client.calls) == 2
-
-
-def test_attribution_budget_persists_across_crash(tmp_path):
-    """One failed try is already ledgered (a crash after its line): the
-    resumed call gets the REMAINING budget, not a fresh one."""
-    store, skills = seeded_run(tmp_path)
-    append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / lm.ATTRIBUTION_FAILURES_LEDGER,
-                 {"schema": "live-repair-failure-v1", "task_id": TASK_ID,
-                  "round": 0, "skill_id": None, "skill_version": None,
-                  "try_index": 0, "exhausted": False, "message": "earlier"})
-    author = make_fake_handle("author", [
-        plan_script([(s.skill_id, "keep", "") for s in skills])])
-
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    assert row is not None
-    assert len(author.client.calls) == 1   # only the last try was left
-    failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / lm.ATTRIBUTION_FAILURES_LEDGER)
-    assert len(failures) == 1              # the pre-crash line is the budget
-
-
-def test_attribution_exhaustion_discards_first_then_ledger_row(tmp_path,
-                                                               monkeypatch):
-    store, skills = seeded_run(tmp_path)
-    author = make_fake_handle("author", [
-        ModelOutputError("LIVE_RUN_ATTRIBUTION: bad one"),
-        ModelOutputError("LIVE_RUN_ATTRIBUTION: bad two"),
-    ])
-    # Terminal states first: at the moment the exhausted row lands, every
-    # member is already discarded (the discard is the truth, the line is
-    # its receipt).
-    seen = {}
-
-    def spy(path, record):
-        if record.get("exhausted"):
-            seen["statuses"] = {
-                skill_id: store.load("skills", skill_id, Skill).status
-                for skill_id in store.ids("skills")}
-        return append_jsonl(path, record)
-
-    monkeypatch.setattr(lat, "append_jsonl", spy)
-    row = attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-    monkeypatch.undo()
-
-    assert row is None
-    assert len(author.client.calls) == 2
-    assert seen["statuses"] == {
-        skill.skill_id: "discarded" for skill in skills}
-    failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / lm.ATTRIBUTION_FAILURES_LEDGER)
-    assert [(f["try_index"], f["exhausted"]) for f in failures] == [
-        (0, False), (1, True)]
-    assert all(s["status"] == "discarded"
-               and s["discard_reason"] == lv.MODEL_OUTPUT_ERROR
-               for s in stored_skills(store).values())
-
-
-def test_attribution_infra_propagates_group_stays_pending(tmp_path):
-    store, skills = seeded_run(tmp_path)
-    author = make_fake_handle("author", [
-        InfrastructureError("endpoint unreachable")])
-
-    with pytest.raises(InfrastructureError):
-        attribute_group(
-            store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-            task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-            author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    assert all(s["status"] == "pending" for s in stored_skills(store).values())
-    assert read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                      / lm.ATTRIBUTIONS_LEDGER) == []
-    assert read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                      / lm.ATTRIBUTION_FAILURES_LEDGER) == []
-
-
-def test_attribution_prompt_carries_composed_inputs(tmp_path):
-    store, skills = seeded_run(
-        tmp_path, baseline=(False, True, False),
-        live=(False, True, False))
-    author = make_fake_handle("author", [
-        plan_script([(s.skill_id, "keep", "") for s in skills])])
-
-    attribute_group(
-        store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-        task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-        author_handle=author, view_rules=None, run_dir=store.run_dir)
-
-    prompt = author.client.calls[0]["user"]
-    # The baseline is one status line per attempt, successes included in
-    # the live views, and every group member is listed.
-    assert "attempt 0: failure" in prompt
-    assert "attempt 1: success" in prompt
-    assert "do x 1" in prompt          # a live view's step text
-    assert TASK_INSTRUCTION in prompt
-    assert MARKED_A in prompt
-    assert WEAK_PROFILE in prompt
-
-
-def test_attribution_requires_dispatched_round(tmp_path):
-    store = Store(tmp_path / "run")
-    seed_baseline(store, (False,) * N_ATTEMPTS)
-    store_group(store, [MARKED_A])
-    with pytest.raises(CodeBugError, match="never dispatched"):
-        attribute_group(
-            store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
-            task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
-            author_handle=make_fake_handle("author", []),
-            run_dir=store.run_dir)
-
-
-# ---------------------------------------------------------------------------
-# apply_revisions
-# ---------------------------------------------------------------------------
-
-def apply_run(tmp_path, plan_actions, rewriter_script, *,
-              contents=(MARKED_A, MARKED_A, MARKED_A)):
-    store, skills = seeded_run(tmp_path, contents=contents)
-    append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / lm.ATTRIBUTIONS_LEDGER,
-                 {"schema": "live-attribution-v1", "task_id": TASK_ID,
-                  "round": 0, "diagnosis": "the steps were skipped",
-                  "skill_actions": [
-                      {"skill_id": skill_id, "version": 1, "action": action,
-                       "problem": problem}
-                      for skill_id, action, problem in plan_actions],
-                  "injection_block_sha256": "frozen"})
-    rewriter = make_fake_handle("rewriter", rewriter_script)
-    outcomes = apply_revisions(
-        store=store, task_id=TASK_ID, round_=0, rewriter_handle=rewriter,
-        weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
-    return store, skills, rewriter, outcomes
-
-
-def test_apply_keep_delete_revise(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, outcomes = apply_run(
-        tmp_path,
-        [(skills_ids[0], "keep", ""),
-         (skills_ids[1], "delete", "wrong for this group"),
-         (skills_ids[2], "revise", "the trigger never fires")],
-        [revision_script(MARKED_A_REVISED)])
-
-    assert [o["outcome"] for o in outcomes] == [
-        "kept", "deleted", "revised"]
-    stored = stored_skills(store)
-    assert stored[skills_ids[0]]["status"] == "pending"
-    assert stored[skills_ids[1]]["status"] == "discarded"
-    assert stored[skills_ids[1]]["discard_reason"] == lv.LIVE_REVISION_DELETED
-    revised = stored[skills_ids[2]]
-    assert revised["version"] == 2
-    assert revised["content"] == MARKED_A_REVISED
-    assert revised["rewrite_history"] == [{
-        "content": MARKED_A, "error_category": "missing_step",
-        "reason": "spelled out the verification step"}]
-    assert len(rewriter.client.calls) == 1
-
-
-def test_apply_revise_prompt_carries_report_and_failure_views(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, _ = apply_run(
-        tmp_path,
-        [(skills_ids[0], "revise", "the verify step is missing")],
-        [revision_script(MARKED_A_REVISED)],
-        contents=(MARKED_A,))
-
-    prompt = rewriter.client.calls[0]["user"]
-    assert "the steps were skipped" in prompt      # the group diagnosis
-    assert "This skill's problem: the verify step is missing" in prompt
-    assert "do x 0" in prompt                      # the failed attempt's view
-    assert MARKED_A in prompt
-    assert WEAK_PROFILE in prompt
-
-
-def test_apply_failure_view_is_clipped_to_budget(tmp_path, monkeypatch):
-    """The revision call's failure view obeys its own hard budget: the
-    rewriter's prompt carries the elision marker and the revision still
-    lands (the same permanent-400 overflow the G10 clip guards against)."""
-    skills_ids = group_skill_ids()
-    store, skills = seeded_run(tmp_path, contents=(MARKED_A,))
-    rs = round_store(store, 0)
-    for attempt in range(N_ATTEMPTS):
-        traj = make_traj(attempt, False)
-        traj.steps = [Step(action=f"cmd {attempt}-{i}",
-                           observation="y" * 400)
-                      for i in range(40)]
-        rs.save(traj, "trajectories")
-    append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / lm.ATTRIBUTIONS_LEDGER,
-                 {"schema": "live-attribution-v1", "task_id": TASK_ID,
-                  "round": 0, "diagnosis": "the steps were skipped",
-                  "skill_actions": [
-                      {"skill_id": skills_ids[0], "version": 1,
-                       "action": "revise",
-                       "problem": "the verify step is missing"}],
-                  "injection_block_sha256": "frozen"})
-    monkeypatch.setattr(lat, "_FAILURE_VIEW_BUDGET_CHARS", 700)
-    rewriter = make_fake_handle("rewriter",
-                                [revision_script(MARKED_A_REVISED)])
-
-    outcomes = apply_revisions(
-        store=store, task_id=TASK_ID, round_=0, rewriter_handle=rewriter,
-        weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
-
-    assert outcomes[0]["outcome"] == "revised"
-    prompt = rewriter.client.calls[0]["user"]
-    assert (prompt.count("chars elided to fit the attribution view budget")
-            == N_ATTEMPTS)
-
-
-def test_apply_marker_failure_rides_the_budget(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, outcomes = apply_run(
-        tmp_path,
-        [(skills_ids[0], "revise", "trigger too vague")],
-        [revision_script(MARKED_A_DROPPED),      # drops [Verify]
-         revision_script(MARKED_A_REVISED)],
-        contents=(MARKED_A,))
-
-    assert outcomes[0]["outcome"] == "revised"
-    stored = stored_skills(store)
-    assert stored[skills_ids[0]]["version"] == 2
-    assert stored[skills_ids[0]]["content"] == MARKED_A_REVISED
-    failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / lm.REVISION_FAILURES_LEDGER)
-    assert [(f["try_index"], f["exhausted"]) for f in failures] == [(0, False)]
-    assert "bracket sections" in failures[0]["message"]
-    assert len(rewriter.client.calls) == 2
-
-
-def test_apply_budget_exhaustion_discards_only_that_skill(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, outcomes = apply_run(
-        tmp_path,
-        [(skills_ids[0], "keep", ""),
-         (skills_ids[1], "revise", "hopeless")],
-        [ModelOutputError("LIVE_SKILL_REVISION: bad json"),
-         revision_script(MARKED_A_DROPPED)],
-        contents=(MARKED_A, MARKED_A))
-
-    assert [o["outcome"] for o in outcomes] == [
-        "kept", "discarded_model_output_error"]
-    stored = stored_skills(store)
-    assert stored[skills_ids[0]]["status"] == "pending"
-    assert stored[skills_ids[1]]["status"] == "discarded"
-    assert stored[skills_ids[1]]["discard_reason"] == lv.MODEL_OUTPUT_ERROR
-    assert stored[skills_ids[1]]["version"] == 1
-    failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / lm.REVISION_FAILURES_LEDGER)
-    assert [(f["try_index"], f["exhausted"]) for f in failures] == [
-        (0, False), (1, True)]
-
-
-def test_apply_replay_guard_three_branches(tmp_path):
-    skills_ids = group_skill_ids()
-    # Branch 1: version == from_version -> the revision is applied.
-    store, skills, rewriter, _ = apply_run(
-        tmp_path,
-        [(skills_ids[0], "revise", "problem one")],
-        [revision_script(MARKED_A_REVISED)],
-        contents=(MARKED_A,))
-    assert stored_skills(store)[skills_ids[0]]["version"] == 2
-
-    # Branch 2: version == from_version + 1 -> already landed, skipped,
-    # and the rewriter is not asked again.
-    outcomes = apply_revisions(
-        store=store, task_id=TASK_ID, round_=0,
-        rewriter_handle=make_fake_handle("rewriter", []),
-        weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
-    assert outcomes[0]["outcome"] == "already_revised"
-
-    # Branch 3: any other version is a store that drifted from the ledger.
-    drifted = store.load("skills", skills_ids[0], Skill)
-    drifted.version = 5
-    store.save(drifted, "skills")
-    with pytest.raises(CodeBugError, match="drifted from the ledger"):
-        apply_revisions(
-            store=store, task_id=TASK_ID, round_=0,
-            rewriter_handle=make_fake_handle("rewriter", []),
-            weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
-
-
-def test_apply_delete_replay_skips_terminal(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, outcomes = apply_run(
-        tmp_path,
-        [(skills_ids[0], "delete", "wrong for this group")],
-        [],
-        contents=(MARKED_A,))
-    first = stored_skills(store)[skills_ids[0]]
-
-    outcomes = apply_revisions(
-        store=store, task_id=TASK_ID, round_=0,
-        rewriter_handle=make_fake_handle("rewriter", []),
-        weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
-
-    assert outcomes[0]["outcome"] == "skipped_terminal"
-    assert stored_skills(store)[skills_ids[0]] == first
-
-
-def test_apply_infra_failure_recorded_and_group_continues(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, outcomes = apply_run(
-        tmp_path,
-        [(skills_ids[0], "revise", "problem one"),
-         (skills_ids[1], "revise", "problem two")],
-        [InfrastructureError("sandbox died"),
-         revision_script(MARKED_A_REVISED)],
-        contents=(MARKED_A, MARKED_A))
-
-    assert [o["outcome"] for o in outcomes] == [
-        "infra_failed", "revised"]
-    stored = stored_skills(store)
-    assert stored[skills_ids[0]]["status"] == "pending"   # retried on resume
-    assert stored[skills_ids[1]]["version"] == 2
-    failures = read_jsonl(store.run_dir / "failed_units.jsonl")
-    assert [f["unit_id"] for f in failures] == [skills_ids[0]]
-    assert failures[0]["stage"] == lat.FAILURE_STAGE
-    assert failures[0]["error_class"] == "InfrastructureError"
-
-
-def test_apply_requires_the_attribution_row(tmp_path):
-    store, _ = seeded_run(tmp_path)
-    with pytest.raises(CodeBugError, match="attribute the group"):
-        apply_revisions(
-            store=store, task_id=TASK_ID, round_=0,
-            rewriter_handle=make_fake_handle("rewriter", []),
-            weak_profile=WEAK_PROFILE, view_rules=None, run_dir=store.run_dir)
-
-
-def test_apply_of_an_unmarked_original_passes_through(tmp_path):
-    """The K4/K5 precedent: prose content (no section markers) is never
-    marker-checked, so any rewrite of it lands."""
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, outcomes = apply_run(
-        tmp_path,
-        [(skills_ids[0], "revise", "too terse")],
-        [revision_script(MARKED_A)],   # gains markers, original had none
-        contents=(PROSE,))
-
-    assert outcomes[0]["outcome"] == "revised"
-    assert stored_skills(store)[skills_ids[0]]["content"] == MARKED_A
-
-
-# ---------------------------------------------------------------------------
 # no_op_guard
 # ---------------------------------------------------------------------------
 
@@ -1345,11 +834,14 @@ def test_no_op_guard_fires_on_identical_block(tmp_path):
 
 
 def test_no_op_guard_passes_when_the_block_changed(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, _ = apply_run(
-        tmp_path,
-        [(skills_ids[0], "revise", "trigger too vague")],
-        [revision_script(MARKED_A_REVISED)])
+    store, skills = seeded_run(tmp_path)
+    # A revision landed (the phase world's shape): the content changed in
+    # place, so the survivors' current block no longer hashes to the
+    # round's frozen line.
+    stored = store.load("skills", skills[0].skill_id, Skill)
+    stored.content = MARKED_A_REVISED
+    stored.version = 2
+    store.save(stored, "skills")
 
     assert no_op_guard(store, TASK_ID, 0) is False
 
@@ -1384,13 +876,13 @@ def test_no_op_guard_reads_the_frozen_row_not_a_rederivation(tmp_path):
 
 
 def test_no_op_guard_empty_survivors_returns_false(tmp_path):
-    skills_ids = group_skill_ids()
-    store, skills, rewriter, _ = apply_run(
-        tmp_path,
-        [(skills_ids[0], "delete", "wrong for this group"),
-         (skills_ids[1], "delete", "also wrong")],
-        [],
-        contents=(MARKED_A, MARKED_A))
+    store, skills = seeded_run(tmp_path, contents=(MARKED_A, MARKED_A))
+    # Every member is terminal (deletes landed): there is no round 1 to
+    # skip, and an empty block can never equal a dispatched round's
+    # frozen line anyway.
+    for skill in skills:
+        discard_skill(store, store.load("skills", skill.skill_id, Skill),
+                      lv.LIVE_REVISION_DELETED)
 
     assert no_op_guard(store, TASK_ID, 0) is False
 

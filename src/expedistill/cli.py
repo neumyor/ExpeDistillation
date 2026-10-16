@@ -58,6 +58,7 @@ Three subcommands:
 """
 
 import argparse
+import importlib
 import json
 import math
 import shlex
@@ -282,19 +283,23 @@ def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
         raise ConfigError("invalid run setting(s): " + "; ".join(problems))
 
 
-def _phase_driver(kind: str) -> Callable:
+def _phase_driver(kind: str) -> Any:
     """The sequence entry's driver module: ``stages.phase_execute`` for an
     execute phase, ``stages.phase_learn`` for a learn phase.
 
     Imported per call (and so never at module import): the two phase
     drivers are Wave 2's other two agents' files, and a bad import must
     name the phase that wanted it, not break every CLI invocation.
+    ``importlib.import_module`` (not a ``from`` import) so a sys.modules
+    entry wins: that entry is the tests' fake-driver seam
+    (tests/unit/test_w2c_run_loop.py), and once the real driver was
+    imported elsewhere in the process a ``from expedistill.stages import
+    phase_execute`` would return the bound package attribute around the
+    seam.
     """
-    if kind == "execute":
-        from expedistill.stages import phase_execute
-        return phase_execute
-    from expedistill.stages import phase_learn
-    return phase_learn
+    return importlib.import_module(
+        "expedistill.stages.phase_execute" if kind == "execute"
+        else "expedistill.stages.phase_learn")
 
 
 def run_experiment(

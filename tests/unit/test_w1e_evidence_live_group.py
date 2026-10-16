@@ -24,6 +24,7 @@ from expedistill.infra.store import Store, append_jsonl
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.evidence.package import ensure_fact_only
 
+from expedistill.methods.evidence import live_group
 from expedistill.methods.evidence.live_group import collect_group_evidence
 
 BENCHMARK = "tb"
@@ -212,3 +213,33 @@ def test_refuses_a_task_row_that_is_not_a_revision(tmp_path):
             task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
             author_handle=make_fake_handle("author", []),
             run_dir=store.run_dir)
+
+
+def test_views_are_clipped_to_the_joined_budget(tmp_path, monkeypatch):
+    """Long trajectory views are clipped per-view against the joined
+    budget (live_measurement's fender, ported from the retired
+    attribution shell): the author's prompt carries the elision marker
+    for every one. Without the clip a context overflow comes back as a
+    permanent 400/413 that neither repair budget nor the phase driver
+    catches, hard-stopping the run."""
+    store, skills = seeded_store(tmp_path)
+    round_store = Store(store.run_dir / "stage4_acceptance" / "live_run"
+                        / "round00")
+    for attempt in range(N_ATTEMPTS):
+        traj = make_traj(attempt, False)
+        traj.steps = [Step(action=f"cmd {attempt}-{i}",
+                           observation="x" * 400)
+                      for i in range(40)]
+        round_store.save(traj, "trajectories")
+    monkeypatch.setattr(live_group, "_LIVE_VIEWS_BUDGET_CHARS", 2_000)
+    author = make_fake_handle("author", plan_script(KEEP_PLAN(skills)))
+
+    collect_group_evidence(
+        task_row=revise_row(), store=store, round_=0,
+        n_attempts=N_ATTEMPTS, task_instruction=TASK_INSTRUCTION,
+        weak_profile=WEAK_PROFILE, author_handle=author,
+        run_dir=store.run_dir)
+
+    prompt = author.client.calls[0]["user"]
+    assert prompt.count(
+        "chars elided to fit the attribution view budget") == N_ATTEMPTS

@@ -14,6 +14,7 @@ discard leaves behind and asserts two things:
    decides, but its facts must be enough to decide from).
 """
 
+from dataclasses import replace as dataclass_replace
 from pathlib import Path
 
 import pytest
@@ -105,9 +106,10 @@ def version_row(rows, version):
 # ---------------------------------------------------------------------------
 
 def test_scenario_bare_answer_right_is_weak_already_knows(tmp_path):
-    """K4's precheck discard (weak_already_knows): the bare control row
-    is a success and the version row never ran -- decision fires off the
-    two rows alone."""
+    """The control-perfect discard (weak_already_knows): the bare control
+    row is a success, so the A-phase driver skips the with-skill run and
+    its report answers with not_run_control_perfect -- decision deletes
+    off that row alone."""
     store = Store(tmp_path / "run")
     skill, exam = make_pair()
     store.save(skill, "skills")
@@ -123,11 +125,18 @@ def test_scenario_bare_answer_right_is_weak_already_knows(tmp_path):
     assert bare.status == "normal" and bare.success_count == 1
     assert version.status == "not_testable"
     assert version.cause == "zero_execution"
-    # The decision side fires from the bare row's fact alone.
-    action = decision.exam_bare_answer_action(
-        bare.success_count == bare.valid_count)
-    assert action == decision.Action(decision.DELETE,
-                                     decision.WEAK_ALREADY_KNOWS)
+    # The phase-world decision: the driver's own report answers a correct
+    # bare control with the control-perfect skip; deciding from that
+    # acceptance fact deletes weak_already_knows (the shared reader's
+    # zero_execution row is the B1 visibility fact and decides nothing).
+    skipped = dataclass_replace(
+        version, status="not_run_control_perfect",
+        cause="weak_already_knows")
+    task_rows = decision.decide_task_list(
+        current_kind=decision.PHASE_EXAM, current_report=[bare, skipped],
+        bank=[skill], checks_left=0)
+    assert [(row.action, row.reason) for row in task_rows] == \
+        [("delete", decision.WEAK_ALREADY_KNOWS)]
 
 
 def test_scenario_leaked_version_is_not_testable_leak(tmp_path):
@@ -151,8 +160,13 @@ def test_scenario_leaked_version_is_not_testable_leak(tmp_path):
     assert version.status == "not_testable"
     assert version.cause == "leak"
     assert version.runs == []
-    action = decision.exam_leak_action(last_round=True)
-    assert action == decision.Action(decision.DELETE, decision.LEAK_AUDIT)
+    # The phase-world decision: no verification round left, so the
+    # table deletes with the leak_audit reason off the row's cause.
+    task_rows = decision.decide_task_list(
+        current_kind=decision.PHASE_EXAM,
+        current_report=exam_rows(store), bank=[skill], checks_left=0)
+    assert [(row.action, row.reason) for row in task_rows] == \
+        [("delete", decision.LEAK_AUDIT)]
 
 
 def test_scenario_last_round_wrong_answer_is_retry_exhausted(tmp_path):
@@ -178,9 +192,13 @@ def test_scenario_last_round_wrong_answer_is_retry_exhausted(tmp_path):
 
     assert version.status == "normal"
     assert version.valid_count == 2 and version.success_count == 0
-    action = decision.exam_answer_action(verdict=False, last_round=True)
-    assert action == decision.Action(decision.DELETE,
-                                     decision.RETRY_EXHAUSTED)
+    # The phase-world decision: no gain with no verification round left
+    # deletes the exam kind's way (retry_exhausted).
+    task_rows = decision.decide_task_list(
+        current_kind=decision.PHASE_EXAM,
+        current_report=exam_rows(store), bank=[skill], checks_left=0)
+    assert [(row.action, row.reason) for row in task_rows] == \
+        [("delete", decision.RETRY_EXHAUSTED)]
 
 
 def test_scenario_judge_budget_died_is_exam_generation_failed(tmp_path):

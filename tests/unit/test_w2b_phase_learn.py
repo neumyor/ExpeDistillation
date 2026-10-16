@@ -194,7 +194,9 @@ def _install_curation(monkeypatch):
 
     def produce_as_is(ctx, curate, label):
         calls.append(("produce_as_is", curate, label))
-        return real_as_is(ctx, label)
+        # The merged produce_as_is takes the phase's curate mapping (the
+        # W2-C frozen contract); delegate with it.
+        return real_as_is(ctx, curate, label)
 
     monkeypatch.setattr(curation_phase_bank, "produce", produce)
     monkeypatch.setattr(curation_phase_bank, "produce_as_is", produce_as_is)
