@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
-"""Seed a TB21 run directory's stage-1 units from the campaign archive.
+"""Seed a TB21 run directory's baseline (D-phase) units from the campaign
+archive.
 
-The TB21 full campaign does not need live rollouts for stage 1: the tb21
-bare-rollout campaign already produced, per task and arm, five ranked valid
-trials on node29 (/data2/niuyiming/e1_final_archive/{qwen,dpsk}/<task>/).
+The TB21 full campaign does not need live rollouts for its baseline: the
+tb21 bare-rollout campaign already produced, per task and arm, five ranked
+valid trials on node29 (/data2/niuyiming/e1_final_archive/{qwen,dpsk}/<task>/).
 The pre-registered seeding rule maps archive rank 1..3 to attempt 0..2 of
 each arm (strong = dpsk / deepseek-v4-flash-0731--ali, weak = qwen / qwen3.6-flash-
-distill), so a run configured with n_attempts 3/3 gets its whole stage-1
+distill), so a run configured with n_attempts 3/3 gets its whole baseline
 unit set (89 tasks x 2 arms x 3 attempts = 534 units) from the archive and
-K1 skips every unit -- zero model calls, zero remote rollouts.
+K1 skips every unit -- zero model calls, zero remote rollouts. Under the
+phase world the baseline is the sequence's first execute phase (D), whose
+bare arms keep the run-level store and the deterministic ids, so the
+seeding rule and the store layout are unchanged.
 
 Steps (each idempotent, so an interrupted seeding is re-run as-is):
 
-1. Stage 0 through the REAL CLI (``expedistill run --until-stage 0``):
-   loads the task set, freezes the manifest. On a re-run the freeze is the
-   resume check (a changed config is refused; that is the point).
+1. The freeze step through the REAL CLI (``expedistill run --until-phase
+   -1``): loads the task set, freezes the manifest, dispatches no phase.
+   On a re-run the freeze is the resume check (a changed config is refused;
+   that is the point).
 2. Download the needed ``agent/trajectory.json`` files (rank 1..3 of both
    arms) into the cache (default ``tmp/tb_seed_cache/``, mirroring the
    archive layout) with ONE tar-over-ssh stream -- only files not already
@@ -29,7 +34,7 @@ Steps (each idempotent, so an interrupted seeding is re-run as-is):
    model_name / skills_injected exactly what K1's stored-unit check
    compares. Units already in the store are verified, not rebuilt.
 4. Print a summary table: per-arm seeded/skipped counts, per-task status
-   mixes, the stage-1 aggregates implied by the stored statuses (avg@3 /
+   mixes, the baseline aggregates implied by the stored statuses (avg@3 /
    pass@3 / F -- compare with docs/tb21_f3_baseline_20261011.md), total
    steps, and this run's download volume.
 
@@ -50,7 +55,7 @@ Usage (from the repo root; .env is loaded automatically if present):
 
 Inputs : configs/experiments/<cfg>.yaml, configs/seed/manifest_{qwen,dpsk}.tsv,
          configs/seed/audit_20261011.json, node29 e1_final_archive (read-only).
-Output : the frozen run dir with all stage-1 trajectories stored (+ stdout
+Output : the frozen run dir with all baseline trajectories stored (+ stdout
          summary). Exit 0 on success; a non-zero exit leaves a resumable
          partial seeding.
 """
@@ -154,9 +159,15 @@ def read_tasks_file(path: Path) -> list:
 
 
 def run_stage0(cli: Path, config: Path, run_dir: Path) -> None:
-    """Stage 0 via the real CLI; its freeze is the resume check."""
+    """The freeze step via the real CLI; its freeze is the resume check.
+
+    ``--until-phase -1`` stops right after the freeze (W3-B's freeze-only
+    entry): the manifest and task table land on disk and no phase
+    dispatches, which is what leaves room for the seeding below before
+    the baseline phase runs.
+    """
     argv = [str(cli), "run", "--config", str(config),
-            "--run-dir", str(run_dir), "--until-stage", "0"]
+            "--run-dir", str(run_dir), "--until-phase", "-1"]
     print("$ " + " ".join(argv))
     completed = subprocess.run(argv)
     if completed.returncode != 0:
@@ -376,8 +387,8 @@ def main() -> int:
     if unseeded:
         print(f"warning: {len(unseeded)} frozen task(s) NOT seeded "
               f"(--tasks-file): {unseeded}")
-        print("warning: stage 1 would EXECUTE those remotely; seed them "
-              "before running the pipeline")
+        print("warning: the baseline phase would EXECUTE those remotely; "
+              "seed them before running the pipeline")
 
     # --- campaign manifests: rank -> row; KEEP_MODEL reward check ----------
     manifests = {role: load_manifest(args.manifest_dir / arm[2])
@@ -584,7 +595,7 @@ def main() -> int:
 
     weak = aggregate("weak")
     strong = aggregate("strong")
-    print(f"implied stage-1 aggregates over {weak['n']} task(s):")
+    print(f"implied baseline aggregates over {weak['n']} task(s):")
     print(f"  weak   avg@{attempts['weak']}={weak['avg']:.6f} "
           f"pass@{attempts['weak']}={weak['passed']}/{weak['n']} "
           f"|F|={len(weak['failed'])}")
@@ -592,14 +603,17 @@ def main() -> int:
           f"pass@{attempts['strong']}={strong['passed']}/{strong['n']} "
           f"(F tasks with a strong success: "
           f"{len([t for t in weak['failed'] if 'S' in statuses['strong'].get(t, [])])})")
-    print("compare with docs/tb21_f3_baseline_20261011.md before stage 1")
+    print("compare with docs/tb21_f3_baseline_20261011.md before the "
+          "baseline phase")
     print("per-task status mixes (attempt order, S=success F=failure):")
     for task in sorted(seed_tasks):
         print(f"  {task:<42} "
               f"weak={''.join(statuses['weak'][task])} "
               f"strong={''.join(statuses['strong'][task])}")
     print("next: expedistill run --config "
-          f"{args.config} --run-dir {run_dir} --until-stage 1 --workers 8")
+          f"{args.config} --run-dir {run_dir} --until-phase 0 --workers 8 "
+          "(freeze + the baseline phase, zero executions: every unit is "
+          "already stored)")
     return 0
 
 

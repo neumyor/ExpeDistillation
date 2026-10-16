@@ -4,7 +4,11 @@ HISTORICAL TOOL (the 2026-10-12 budget fork): written for the schema-v2
 era. Under schema v3 the old run's manifest compare refuses loudly by
 design -- reuse the v2-era checkout for v2-era runs, or use
 stages/assemble_reuse.py (which upgrades v2 source manifests) for a
-fresh v3 run from old products.
+fresh v3 run from old products. Under the phase world (schema v4) this
+tool has no counterpart at all: the stage1..4 directories it copies no
+longer exist and the CLI flag it passes (``--until-stage``) with them --
+it runs only on the schema-v2 maintenance-branch checkout of the run it
+was written for, which is exactly where it is still used from.
 
 Usage:
     set -a; . ./.env; set +a

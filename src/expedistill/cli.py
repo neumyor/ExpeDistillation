@@ -13,7 +13,9 @@ Three subcommands:
   step, then ``pNN:<local name>`` for sequence entry i (0-based), with
   ``NN = i + 1`` -- the numbering tests/golden/semantics.py froze.
   ``--until-phase N`` stops after sequence entry N (0-based) for smoke
-  tests and pilots; the run stays resumable (see the flag's help).
+  tests and pilots; ``-1`` stops right after the freeze step (the task
+  table and the manifest on disk, no phase dispatched -- the pre-run
+  seeders' entry point); the run stays resumable (see the flag's help).
   Expected stops print a clear message instead of a traceback:
 
   - FrozenProtocolChanged / RunLockedError / ConfigError /
@@ -327,7 +329,8 @@ def run_experiment(
     progress.
 
     ``until_phase`` stops the loop after that sequence entry
-    (inclusive, 0-based); ``None`` runs the whole sequence. The freeze
+    (inclusive, 0-based); ``-1`` stops right after the freeze step (no
+    phase dispatched); ``None`` runs the whole sequence. The freeze
     step always runs, so the return value is always a real summary. It
     is operational, like ``workers``: not frozen into the manifest, and
     a resume may change it freely. A stopped run simply replays the
@@ -383,12 +386,18 @@ def run_experiment(
         raise ConfigError(
             f"invalid config {config_path}: {exc}") from exc
     # The bound is the frozen sequence's length, so this check can only
-    # run after the config loads (the implementation contract, T3).
-    if until_phase is not None and not 0 <= until_phase < len(cfg.sequence):
+    # run after the config loads (the implementation contract, T3). -1
+    # is the freeze-only stop (W3-B): the freeze step is p00 and the
+    # sequence starts at p01, so "before the first phase" is -1 -- the
+    # pre-run seeders need a manifest on disk before any phase dispatches.
+    if until_phase is not None \
+            and not -1 <= until_phase < len(cfg.sequence):
         raise ConfigError(
-            f"until_phase must be an int in [0, {len(cfg.sequence) - 1}] "
-            f"(the frozen sequence has {len(cfg.sequence)} phases) or be "
-            f"omitted, got {until_phase!r}")
+            f"until_phase must be -1 (run the freeze step only: the task "
+            "table and manifest land on disk and no phase runs), an int "
+            f"in [0, {len(cfg.sequence) - 1}] (the frozen sequence has "
+            f"{len(cfg.sequence)} phases), or be omitted, got "
+            f"{until_phase!r}")
 
     store = Store(run_dir)
     lock = RunLock(run_dir)
@@ -684,7 +693,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--until-phase", type=int, default=None, metavar="N",
                      help="run the freeze step plus sequence entries 0 "
                           "through N, inclusive -- N is the sequence's "
-                          "0-based index (default: the whole sequence). "
+                          "0-based index (default: the whole sequence); "
+                          "N=-1 runs the freeze step ONLY: the task table "
+                          "and manifest land on disk and no phase runs "
+                          "(the pre-run seeders' entry point). "
                           "Operational, not frozen: a stopped run simply "
                           "replays from the first phase next time and each "
                           "phase skips its finished units, so continue by "
