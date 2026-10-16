@@ -1,10 +1,13 @@
-"""Contract tests for the delivery drivers registered in M2 (none /
-per_skill / group_by_task).
+"""Contract tests for the delivery drivers' LEGACY module seam (the
+pre-R5 ``resolve(ctx, params, ...)`` shapes stage 6 and the live driver
+still call, none / per_skill / group_by_task here; whole_bank and
+retrieval through their callers).
 
-per_skill has no caller until the exam execution driver lands in M4, so
-its contract is pinned here directly; none and group_by_task are also
-exercised through their callers (stage 6's bare arm, the live driver),
-but a direct test keeps the whole family's resolve shape honest.
+R5 (Wave 1) freezes the new signature ``resolve(bank, tasks, params) ->
+ExecutionUnitList`` and keeps the legacy shapes as a compat layer that
+delegates to it; these tests pin that delegation byte-for-byte until
+Wave 2 replaces the call sites. The frozen signature itself is pinned by
+tests/unit/test_w1d_delivery_signature.py.
 """
 
 import pytest
