@@ -49,6 +49,17 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("authoring", "distill_diagnose"):
         _Entry(None, "expedistill.methods.authoring", "AuthoringParams",
                "check_authoring"),
+    # The M3 content families (plan section 3's key set): params in place,
+    # config wiring lands in M4. The params classes are re-homed into the
+    # family packages (the slot packages re-export them), the old slot
+    # entries stay until the v3 config path dies, and both family entries
+    # are driver-less -- like the slot entries they mirror, the stage
+    # consumes their params directly until the phase drivers exist.
+    ("evidence", "segment"):
+        _Entry(None, "expedistill.methods.evidence",
+               "SegmentationParams", None),
+    ("author", "distill_diagnose"):
+        _Entry(None, "expedistill.methods.author", "AuthoringParams", None),
     ("acceptance", "exam"):
         _Entry("expedistill.methods.acceptance.exam",
                "expedistill.methods.acceptance", "ExamParams", None),

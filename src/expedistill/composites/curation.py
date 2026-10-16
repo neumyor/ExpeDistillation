@@ -901,6 +901,7 @@ def curate_bank(
     curator_handle: ModelHandle,
     bank_token_budget: int,
     curation_rounds: int,
+    merge_check: str = "exam",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
@@ -916,6 +917,13 @@ def curate_bank(
     still over budget after ``curation_rounds`` rounds; nothing is deleted
     in that case.
 
+    ``merge_check`` (M3, plan section 3's curate family): ``exam`` (the
+    default) is the frozen behaviour -- each kept merge re-answers every
+    source's exam; ``none`` skips the regression exams (the merge product
+    goes pending -> accepted with zero answerer/judge calls). The G8
+    marker gates and the budget valve are unchanged either way, and the
+    merge journal records the same outcomes.
+
     ``workers`` bounds the parallelism of one wave's units (B5 run_units);
     any output is bit-identical to the serial run (module docstring).
     ``weak_profile`` is part of the frozen stage signature but unused
@@ -923,6 +931,9 @@ def curate_bank(
     """
     if curation_rounds < 1:
         raise ConfigError(f"curation_rounds must be >= 1, got {curation_rounds}")
+    if merge_check not in ("exam", "none"):
+        raise ConfigError(
+            f"merge_check must be 'exam' or 'none', got {merge_check!r}")
     if workers < 1:
         raise ConfigError(f"workers must be >= 1, got {workers}")
     log_path = _log_path(store, run_dir)
@@ -1198,18 +1209,25 @@ def curate_bank(
                     store.save(merged, "skills")  # commit step 1
 
                 discard_reason = "regression_failed"
-                try:
-                    passed, reason = _regression_passes(
-                        merged, exams, store, answerer_handle, judge_handle,
-                        usage, run_dir)
-                except InfrastructureError as exc:
-                    record_failure(f"{unit_id}/regression", exc)
-                    raise
-                except ModelOutputError as exc:
-                    record_failure(f"{unit_id}/regression", exc)
-                    passed = False
-                    reason = f"regression exam unusable: {_describe(exc)}"
-                    discard_reason = "regression_error"
+                if merge_check == "none":
+                    # merge_check: none -- the product goes pending ->
+                    # accepted without any regression exam (M3): zero
+                    # answerer/judge calls; the marker gates above and the
+                    # budget valve below are unchanged.
+                    passed, reason = True, ""
+                else:
+                    try:
+                        passed, reason = _regression_passes(
+                            merged, exams, store, answerer_handle,
+                            judge_handle, usage, run_dir)
+                    except InfrastructureError as exc:
+                        record_failure(f"{unit_id}/regression", exc)
+                        raise
+                    except ModelOutputError as exc:
+                        record_failure(f"{unit_id}/regression", exc)
+                        passed = False
+                        reason = f"regression exam unusable: {_describe(exc)}"
+                        discard_reason = "regression_error"
                 return {"status": "kept" if passed else "reverted",
                         "base": base, "sources": source_ids, "merged": merged,
                         "reason": "" if passed else reason,

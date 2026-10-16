@@ -229,6 +229,23 @@ class TestExamAndOtherSlots:
                                    "token_budget": 96000}}))
         assert none.token_budget == 96000
 
+    def test_agentbrew_merge_check_param(self):
+        # M3: "exam" is the default (the frozen behaviour); "none" skips
+        # K5's regression exams; anything else is refused loudly.
+        default = resolve_params("curation", make_config(
+            methods={"curation": {"name": "agentbrew",
+                                  "token_budget": 96000}}))
+        assert default.merge_check == "exam"
+        params = resolve_params("curation", make_config(
+            methods={"curation": {"name": "agentbrew", "token_budget": 96000,
+                                  "merge_check": "none"}}))
+        assert params.merge_check == "none"
+        with pytest.raises(ConfigError, match="merge_check"):
+            resolve_params("curation", make_config(
+                methods={"curation": {"name": "agentbrew",
+                                       "token_budget": 96000,
+                                       "merge_check": "regression"}}))
+
     def test_defaults_satisfy_every_contract(self):
         # METHOD_DEFAULTS is what an absent slot completes to; if a
         # contract tightened, this pins the mismatch at the default.

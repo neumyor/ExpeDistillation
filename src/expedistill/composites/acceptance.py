@@ -10,7 +10,9 @@ consumed (README: 该版作废，本轮算用掉一次): the rewrite happens wit
 with-skill attempt for the voided version, and the judge's reason travels
 into the rewrite's error description. This composite owns all disk IO and
 resume for the flow; the pieces it wires (K3 via ``exam_once``, G6, D8, D9)
-stay single-purpose.
+stay single-purpose. The per-round verdict rules (the bare-answer, leak and
+wrong-answer decisions and their last-round splits) are named rules in
+``composites.decision`` since M3; this module keeps every read and write.
 
 Leak-verdict ledger ``stage4_acceptance/leak_verdicts.jsonl``: one JSON row
 ``{"skill_id": str, "skill_version": int, "leaked": bool, "reason": str}``
@@ -81,6 +83,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from expedistill.blocks.audit import audit_leak
 from expedistill.blocks.author import rewrite_skill
+from expedistill.composites import decision
 from expedistill.composites.exam_once import exam_once
 from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam, Skill
@@ -332,7 +335,7 @@ def accept_skill(
     attempts = _exam_attempts(store, exam.exam_id)
 
     accepted = _find_accepted(attempts, working.skill_id, working.version)
-    if accepted is not None:
+    if decision.exam_stored_pass_action(accepted is not None) is not None:
         working.status = "accepted"
         store.save(working, "skills")
         return working
@@ -343,11 +346,12 @@ def accept_skill(
             store=store, exam=exam, answerer_handle=answerer_handle,
             judge_handle=judge_handle, skills_block="", purpose="bare",
             usage=usage, run_dir=run_dir)
-    if bare.judge_verdict:
+    bare_action = decision.exam_bare_answer_action(bare.judge_verdict)
+    if bare_action is not None:
         # The weak model already answers this exam without any skill, so the
         # skill cannot teach it anything (README stage 4 step 1).
         working.status = "discarded"
-        working.discard_reason = "weak_already_knows"
+        working.discard_reason = bare_action.reason
         store.save(working, "skills")
         return working
 
@@ -375,14 +379,16 @@ def accept_skill(
                        "leaked": leaked, "reason": reason}
             append_jsonl(_ledger_path(store, LEAK_VERDICTS_LEDGER), verdict)
         if verdict["leaked"]:
-            if last_round:
+            action = decision.exam_leak_action(last_round=last_round)
+            if action.kind == decision.DELETE:
                 working.status = "discarded"
-                working.discard_reason = "leak_audit"
+                working.discard_reason = action.reason
                 store.save(working, "skills")
                 return working
             # The voided version is never examined: rewrite straight from the
             # last with-skill attempt if one exists, else the bare attempt.
-            source = last_with_skill if last_with_skill is not None else bare
+            source = decision.exam_voided_rewrite_source(
+                last_with_skill=last_with_skill, bare=bare)
             _rewrite_round(
                 store, working, exam, retry_round, source.weak_answer,
                 _void_error_description(source, verdict["reason"]),
@@ -399,15 +405,17 @@ def accept_skill(
                 purpose="acceptance", skill_id=working.skill_id,
                 skill_version=working.version, retry_round=retry_round,
                 usage=usage, run_dir=run_dir)
-        if attempt.judge_verdict:
+        action = decision.exam_answer_action(
+            verdict=attempt.judge_verdict, last_round=last_round)
+        if action.kind == decision.KEEP:
             working.status = "accepted"
             store.save(working, "skills")
             return working
 
         last_with_skill = attempt
-        if last_round:
+        if action.kind == decision.DELETE:
             working.status = "discarded"
-            working.discard_reason = "retry_exhausted"
+            working.discard_reason = action.reason
             store.save(working, "skills")
             return working
         _rewrite_round(
@@ -416,6 +424,6 @@ def accept_skill(
             run_dir)
 
     working.status = "discarded"
-    working.discard_reason = "retry_exhausted"
+    working.discard_reason = decision.RETRY_EXHAUSTED
     store.save(working, "skills")
     return working

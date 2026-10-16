@@ -142,16 +142,23 @@ src/expedistill/
     curation.py           K5
     live_acceptance.py    K6 live-run 验收（阶段 4 的 live_run 模式；逐组阶段函数库，
                           轮序编排归 methods/acceptance/live_run.py）
+    decision.py           决策规则（M3 起的纯函数）：K4/K6/验收驱动判定清单的落点；
+                          discard_reason 词表与 strict 短路规则集的定义处
+    reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
-    registry.py           (槽位, 名字) → (驱动, 参数类, check) 的纯数据表
-    segmentation/         切段槽位：SegmentationParams（驱动待第二实现出现）
-    authoring/            写 skill 槽位：AuthoringParams（exams 开关，P4 放开 false）
+    registry.py           (槽位/族, 名字) → (驱动, 参数类, check) 的纯数据表
+    segmentation/         切段槽位：re-export evidence 族的 SegmentationParams（M3）
+    authoring/            写 skill 槽位：re-export author 族的 AuthoringParams +
+                          v3 exams 开关的跨槽 check（M3）
+    evidence/             evidence 族：SegmentationParams 的定义处（M3；驱动待 M4）
+    author/               author 族：AuthoringParams 的定义处（M3；驱动待 M4，
+                          exams 开关随 M4 调用点迁移删除）
     acceptance/           验收驱动 exam.py、live_run.py + 两方法的 Params 与
                           check_live_run（跨约束：n_attempts ≤ n_attempts_weak）
-    curation/             库整理驱动 agentbrew.py（K5 薄壳）、none.py（消融：裸
-                          accepted 集，预算仍是硬阀）+ 两方法的 Params
+    curation/             库整理驱动 agentbrew.py（K5 薄壳；merge_check 开关 M3）、
+                          none.py（消融：裸 accepted 集，预算仍是硬阀）+ Params
     delivery/             注入驱动 whole_bank.py、retrieval.py + 两方法的 Params
   stages/                 第 7 层：阶段 0–6 的流程（薄分发 + 写摘要/阶段末抛错）
     stage0_freeze.py … stage6_test.py

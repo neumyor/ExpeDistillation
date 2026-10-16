@@ -23,10 +23,20 @@ SUMMARY_NAME = "stage5_summary.json"
 
 @dataclass(frozen=True)
 class AgentBrewParams:
-    """K5's bank budget and merge-round limit."""
+    """K5's bank budget, merge-round limit and regression-exam switch.
+
+    ``merge_check`` (plan section 3's curate family, M3): ``exam`` (the
+    default) is the frozen behaviour -- every kept merge re-answers each
+    source's exam; ``none`` skips the regression exams (the merge product
+    goes pending -> accepted with zero answerer/judge calls; the marker
+    gates and the budget valve are unchanged) -- the live-run sequence's
+    setting, where merges are proven by the round-1 group re-execution
+    instead.
+    """
 
     token_budget: int
     rounds: int = 3
+    merge_check: str = "exam"
 
     def __post_init__(self) -> None:
         if self.token_budget < 1:
@@ -37,6 +47,10 @@ class AgentBrewParams:
             raise ConfigError(
                 f"methods.curation.agentbrew rounds must be >= 1, "
                 f"got {self.rounds}")
+        if self.merge_check not in ("exam", "none"):
+            raise ConfigError(
+                "methods.curation.agentbrew merge_check must be 'exam' or "
+                f"'none', got {self.merge_check!r}")
 
 
 @dataclass(frozen=True)

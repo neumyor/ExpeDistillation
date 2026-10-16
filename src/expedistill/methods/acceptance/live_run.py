@@ -45,9 +45,9 @@ re-enters exactly where the crash cut it:
   (an unaccepted missing unit is an InfrastructureError pointing at stage
   1; valid==0 is a ConfigError) and short-circuits an all-success baseline
   under a strict-family rule to weak_already_knows with zero executions
-  (the family check reads K6's own strict-rule set; judge_round enforces
-  it, the stage only needs it to decide whether the short-circuit may
-  fire -- a pass@N-style rule can still improve on a rate-1.0 baseline);
+  (the strict-family limit lives in the decision rule the stage calls;
+  judge_round enforces it too -- a pass@N-style rule can still improve
+  on a rate-1.0 baseline);
 * a group without a round-0 verdict row owes round 0 (dispatch when the
   store is incomplete, then judge);
 * a group judged not better owes the attribution/revision pipeline until
@@ -119,6 +119,10 @@ from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.rules import get_acceptance_improve
 from expedistill.composites import live_acceptance as la
 from expedistill.composites import shortfall
+from expedistill.composites.decision import (
+    live_injection_overflows,
+    live_zero_execution_short_circuit,
+)
 from expedistill.composites.skill_status import (
     discard_skill,
     stage3_candidates,
@@ -427,11 +431,11 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             store, task_id, n_attempts, aux_scorer=aux_scorer)
         baselines[task_id] = baseline_counts
         if (0 not in _verdict_rows(store, task_id)
-                # The strict-family set is K6's (judge_round enforces it);
-                # the stage reads it to decide whether the short-circuit
-                # may fire, so a pass@N-style rule still gets executed.
-                and rule_name in la._ALL_SUCCESS_SAFE_RULES
-                and baseline_counts["success"] == baseline_counts["valid"]):
+                # The strict-family limit lives in the decision rule
+                # (judge_round enforces it too), so a pass@N-style rule
+                # still gets executed.
+                and live_zero_execution_short_circuit(
+                    rule_name=rule_name, baseline_counts=baseline_counts)):
             la.judge_round(
                 store=store, task_id=task_id, round_=0, rule_name=rule_name,
                 baseline_counts=baseline_counts, n_attempts=n_attempts,
@@ -475,8 +479,9 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             # names the exact injection this dispatch is about to render.
             append_jsonl(la.round_dir(store, 0) / la.INJECTION_AUDIT_NAME,
                          row)
-        if (max_injection_tokens is not None
-                and row["injection_tokens"] > max_injection_tokens):
+        if live_injection_overflows(
+                max_injection_tokens=max_injection_tokens,
+                injection_tokens=row["injection_tokens"]):
             # Zero executions wasted: the overflow verdict carries the
             # audit row's own evidence and the group never enters K1.
             la.judge_round(
@@ -604,8 +609,9 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
         else:
             append_jsonl(la.round_dir(store, 1) / la.INJECTION_AUDIT_NAME,
                          row)
-        if (max_injection_tokens is not None
-                and row["injection_tokens"] > max_injection_tokens):
+        if live_injection_overflows(
+                max_injection_tokens=max_injection_tokens,
+                injection_tokens=row["injection_tokens"]):
             la.judge_round(
                 store=store, task_id=task_id, round_=1, rule_name=rule_name,
                 baseline_counts=baselines[task_id], n_attempts=n_attempts,

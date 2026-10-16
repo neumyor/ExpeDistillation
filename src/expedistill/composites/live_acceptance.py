@@ -94,6 +94,7 @@ from expedistill.blocks.author import skill_markers
 from expedistill.blocks.metrics import compute_task_metrics
 from expedistill.blocks.rules import get_acceptance_improve
 from expedistill.blocks.view import render_trajectory_view
+from expedistill.composites import decision
 from expedistill.composites.skill_status import discard_skill
 from expedistill.core import ids
 from expedistill.core.models import Skill, Trajectory
@@ -160,17 +161,17 @@ REVISION_FAILURES_LEDGER = "revision_failures.jsonl"
 #: contents, this module never writes it).
 INJECTION_AUDIT_NAME = "injection_audit.jsonl"
 
-#: discard_reason values (decision ruling A13). ``weak_already_knows``
-#: crosses modes (exam: the bare answer was right; live: the baseline was
-#: all-success -- the evidence base differs, the README vocabulary notes
-#: it); ``live_no_improvement`` is dual (no-op guard vs round-1 miss) and
-#: the verdicts row's round tells them apart.
-WEAK_ALREADY_KNOWS = "weak_already_knows"
-LIVE_INJECTION_OVERFLOW = "live_injection_overflow"
-LIVE_UNDETERMINED = "live_undetermined"
-LIVE_NO_IMPROVEMENT = "live_no_improvement"
-LIVE_REVISION_DELETED = "live_revision_deleted"
-MODEL_OUTPUT_ERROR = "model_output_error"
+#: discard_reason values (decision ruling A13). Defined in
+#: composites.decision since M3 (one definition shared with K4 and the
+#: decision rules, no import cycle); the module-level names stay so the
+#: drivers and tests that read them off K6 keep working. See decision.py
+#: for the vocabulary's semantics.
+WEAK_ALREADY_KNOWS = decision.WEAK_ALREADY_KNOWS
+LIVE_INJECTION_OVERFLOW = decision.LIVE_INJECTION_OVERFLOW
+LIVE_UNDETERMINED = decision.LIVE_UNDETERMINED
+LIVE_NO_IMPROVEMENT = decision.LIVE_NO_IMPROVEMENT
+LIVE_REVISION_DELETED = decision.LIVE_REVISION_DELETED
+MODEL_OUTPUT_ERROR = decision.MODEL_OUTPUT_ERROR
 
 #: Stage label for this module's failed_units.jsonl lines (an infra
 #: failure of one skill's revision); the stage reuses it for group-level
@@ -197,11 +198,10 @@ _ROUNDS = (0, 1)
 #: Rules for which "the baseline is all-success" mathematically implies
 #: "the live arm cannot be better", so the weak_already_knows zero-
 #: execution short-circuit may fire (decision section 2.2: strict-family
-#: only). Registering a new improve rule must consciously revisit this
-#: set -- an unconditional guard would short-circuit groups under a rule
-#: where a rate-1.0 baseline can still lose (pass@N-style rules).
-_ALL_SUCCESS_SAFE_RULES = frozenset({"strict_rate_gain",
-                                     "first_success_gain"})
+#: only). Defined in composites.decision since M3 (the short-circuit rule
+#: and judge_round's enforcement share one set); kept under this name for
+#: the live driver's entry guard, which reads it off K6.
+_ALL_SUCCESS_SAFE_RULES = decision.STRICT_SHORT_CIRCUIT_RULES
 
 #: Hard char budgets on the G10 / G11 trajectory-view inputs (review fix
 #: 2026-10-14, three-reviewer round; re-anchored 2026-10-15 by reviewer C's
@@ -687,7 +687,7 @@ def _judge_round(
             trajectories, expected_units(task_id, n_attempts),
             aux_scorer=aux_scorer)[task_id]
         audit = _require_audit_row_from(audit_path, round_, task_id)
-        if all(unit in skip for unit in expected_ids):
+        if decision.live_all_holes(expected_ids, skip):
             # The precise condition (decision section 2.5): every expected
             # unit is an accepted hole -- nothing was executed, so there is
             # no live denominator and no rule to run. (Completeness passed
@@ -872,8 +872,7 @@ def _attribute_group(
     members = _require_group(store, task_id)
 
     failures = _rows_from(failures_path, task_id, round_)
-    if (any(row.get("exhausted") for row in failures)
-            or len(failures) >= _ATTRIBUTION_ATTEMPTS):
+    if decision.live_attribution_exhausted(failures, _ATTRIBUTION_ATTEMPTS):
         # Unreachable through the stage (the exhausted row follows the
         # discards, so exhaustion with pending members only happens when
         # a crash ate the discards' tail); completing the discards here
@@ -1265,11 +1264,13 @@ def survivors_and_block(store: Store,
 def _no_op_guard(store: Store, task_id: str, round_: int,
                  audit_path: Path) -> bool:
     """The round-agnostic core of ``no_op_guard`` (module docstring): the
-    byte-identity comparison against the explicit audit path, the round
-    label naming it in errors."""
+    byte-identity comparison (composites.decision.live_no_op_fires) against
+    the explicit audit path, the round label naming it in errors."""
     survivors, block = survivors_and_block(store, task_id)
     audit = _require_audit_row_from(audit_path, round_, task_id)
-    if _block_sha(block) != audit["injection_block_sha256"]:
+    if not decision.live_no_op_fires(
+            rendered_block_sha=_block_sha(block),
+            frozen_audit_sha=audit["injection_block_sha256"]):
         return False
     for skill in survivors:
         discard_skill(store, skill, LIVE_NO_IMPROVEMENT)
@@ -1304,35 +1305,17 @@ def _finalize_group(store: Store, task_id: str, *, verdicts_path: Path,
                     rounds: Sequence[int]) -> Dict[str, Any]:
     """The round-agnostic core of ``finalize_group`` (module docstring):
     the verdicts file at ``verdicts_path`` decides over the round labels
-    ``rounds`` (in order). Any zero-execution verdict row discards; the
-    latest round with a row is decisive (better accepts, a miss on the
-    LAST round discards as ``live_no_improvement``); a better row of an
-    earlier round accepts, a miss there leaves the group pending -- the
-    revision pipeline still owes it work."""
-    rows = _rows_from(verdicts_path, task_id)
-    decision: Optional[Tuple[str, str]] = None
-    for row in rows:
-        if "verdict" in row:
-            decision = ("discarded", row["verdict"])
-            break
-    if decision is None:
-        for round_label in reversed(rounds):
-            of_round = [row for row in rows
-                        if row.get("round") == round_label]
-            if not of_round:
-                continue
-            if round_label == rounds[-1]:
-                if of_round[0]["better"]:
-                    decision = ("accepted", "")
-                else:
-                    decision = ("discarded", LIVE_NO_IMPROVEMENT)
-            elif of_round[0]["better"]:
-                decision = ("accepted", "")
-            break
-    if decision is None:
+    ``rounds`` (in order), through composites.decision.live_final_action
+    (the finalization sweep's decision rule); this core owns the commit
+    -- the statuses land in skill_id order, pending members only."""
+    action = decision.live_final_action(
+        _rows_from(verdicts_path, task_id), rounds)
+    if action is None:
         return {"outcome": "pending", "reason": None, "committed": []}
 
-    direction, reason = decision
+    direction = ("accepted" if action.kind == decision.KEEP
+                 else "discarded")
+    reason = action.reason or ""
     committed: List[str] = []
     for skill in _pending_group(store, task_id):
         if direction == "accepted":

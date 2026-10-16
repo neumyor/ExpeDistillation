@@ -1,4 +1,8 @@
-"""The authoring slot's contract (stage 3, G2/G3).
+"""The authoring slot's contract (stage 3, G2/G3) -- v3 shim + check.
+
+``AuthoringParams`` lives in the author family package since M3 (plan
+section 3's registry key set); this slot package re-exports it and keeps
+the exams switch's v3 cross-slot check. Both die with the slot in M4.
 
 One method today (distill/diagnose, dispatched per subtask source). The
 ``exams`` switch opens the pre-registered ablation pair with
@@ -8,18 +12,10 @@ below refuses the combinations that would silently break (the exam
 acceptance protocol, and the agentbrew curator's regression exams).
 """
 
-from dataclasses import dataclass
-
 from expedistill.core.config import METHOD_DEFAULTS, ConfigError
+from expedistill.methods.author import AuthoringParams
 
 __all__ = ["AuthoringParams", "check_authoring"]
-
-
-@dataclass(frozen=True)
-class AuthoringParams:
-    """Whether the authoring stage generates exam questions."""
-
-    exams: bool = True
 
 
 def check_authoring(params: AuthoringParams, experiment) -> None:

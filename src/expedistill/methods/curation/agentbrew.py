@@ -34,6 +34,7 @@ def run(ctx: Any, params: AgentBrewParams) -> Dict[str, Any]:
         curator_handle=ctx.handle("curator"),
         bank_token_budget=params.token_budget,
         curation_rounds=params.rounds,
+        merge_check=params.merge_check,
         usage=ctx.usage,
         run_dir=ctx.run_dir,
         workers=ctx.run_settings.workers,

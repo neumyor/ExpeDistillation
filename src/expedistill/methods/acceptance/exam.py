@@ -46,6 +46,10 @@ worker, not in K4:
 from typing import Any, Dict, List, Optional, Tuple
 
 from expedistill.composites.acceptance import accept_skill
+from expedistill.composites.decision import (
+    MODEL_OUTPUT_ERROR,
+    exam_measurement_exhausted_action,
+)
 from expedistill.composites.skill_status import (
     discard_skill,
     stage3_candidates,
@@ -67,11 +71,8 @@ from expedistill.methods.acceptance import (
     SUMMARY_FILENAME,
 )
 
-__all__ = ["MODEL_OUTPUT_DISCARD", "run"]
+__all__ = ["run"]
 
-
-#: discard_reason of a skill whose K3 repair budget ran out.
-MODEL_OUTPUT_DISCARD = "model_output_error"
 
 #: Stage label of this driver's lines in the unit-failure ledger (the
 #: live driver writes under its own label).
@@ -125,7 +126,7 @@ def run(ctx: Any, params: ExamParams) -> Dict[str, Any]:
     for skill in candidates:
         if skill.status != "pending":
             if (skill.status == "discarded"
-                    and skill.discard_reason == MODEL_OUTPUT_DISCARD):
+                    and skill.discard_reason == MODEL_OUTPUT_ERROR):
                 # A crash between the discard and its ledger row: the
                 # discard is the truth, the row is completed from it.
                 record_model_output(
@@ -165,7 +166,8 @@ def run(ctx: Any, params: ExamParams) -> Dict[str, Any]:
             # Terminal state first, ledger row second: a crash in between
             # leaves a discard whose row the next call completes (above),
             # never a ledger row for a skill that a resume then accepts.
-            result = discard_skill(store, skill, MODEL_OUTPUT_DISCARD)
+            result = discard_skill(
+                store, skill, exam_measurement_exhausted_action().reason)
             record_model_output(skill.skill_id, str(exc))
         except InfrastructureError as exc:
             recorder.record(skill.skill_id, STAGE_LABEL, exc, exc)

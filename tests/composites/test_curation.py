@@ -65,12 +65,14 @@ def _handles(curator_script, answer_script, judge_script):
     }
 
 
-def _curate(store: Store, handles, *, budget=10 ** 6, rounds=3):
+def _curate(store: Store, handles, *, budget=10 ** 6, rounds=3,
+            merge_check="exam"):
     return curate_bank(
         store=store,
         weak_profile="a weak model that needs short sentences",
         bank_token_budget=budget,
         curation_rounds=rounds,
+        merge_check=merge_check,
         run_dir=store.run_dir,
         **handles,
     )
@@ -150,6 +152,48 @@ def test_dedup_merge_kept(store):
     assert log["final_member_ids"] == [merged_id]
     assert log["bank_tokens"] == count_bank_tokens(
         [store.load("skills", merged_id, Skill)])
+
+
+# ---------------------------------------------------------------------------
+# merge_check: none -- merges skip the regression exams (M3)
+# ---------------------------------------------------------------------------
+
+def test_merge_check_none_merges_without_any_regression_call(store):
+    # The answerer and judge scripts are EMPTY: any regression call would
+    # exhaust the script and raise, so passing this test means the merge
+    # happened with zero answerer/judge calls throughout, the product went
+    # pending -> accepted, and the journal records the same kept outcome.
+    skills = [_add_skill(store, 0, "Check the log file first."),
+              _add_skill(store, 1, "Look at the log file before anything else.")]
+    for index in range(2):
+        _add_exam(store, index)
+    handles = _handles(
+        curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+                        "Read the log file before doing anything else.",
+                        _grouping({"bank/merge/0000": "error handling"})],
+        answer_script=[],
+        judge_script=[],
+    )
+
+    bank = _curate(store, handles, merge_check="none")
+
+    merged_id = "bank/merge/0000"
+    assert [row["skill_id"] for row in bank] == [merged_id]
+    assert bank[0]["status"] == "accepted"
+    assert store.load("skills", merged_id, Skill).status == "accepted"
+    for skill in skills:
+        assert store.load("skills", skill.skill_id, Skill).status == "merged"
+    assert store.ids("attempts") == []
+    assert handles["answerer_handle"].client.calls == []
+    assert handles["judge_handle"].client.calls == []
+    assert _log_of(store)["merges"] == {"attempted": 1, "kept": 1,
+                                        "reverted": 0, "skipped": 0}
+
+
+def test_merge_check_unknown_value_refused(store):
+    handles = _handles(curator_script=[], answer_script=[], judge_script=[])
+    with pytest.raises(ConfigError, match="merge_check"):
+        _curate(store, handles, merge_check="regression")
 
 
 # ---------------------------------------------------------------------------
