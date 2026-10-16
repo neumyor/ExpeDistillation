@@ -157,13 +157,53 @@ def test_a_final_test_report_is_an_error(tmp_path):
                for message in _errors(run_dir))
 
 
-def test_a_bank_artifact_without_the_summary_commit_is_an_error(tmp_path):
+def test_a_bank_artifact_without_the_summary_commit_is_a_warn(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
     # Remove the last learn phase's commit signal but keep its artifact:
-    # the artifact is then an interrupted commit, not a settled state.
+    # the artifact is then an interrupted commit the resume must finish
+    # (and every assembled run sits in this state until its last learn
+    # phase runs) -- a human look, not a dead run (Wave 3 review O3's
+    # ruling: ERROR downgraded to WARN, matching the module's own
+    # grading docstring and the legacy terminals check).
     (run_dir / "phases" / "p06_Lfinal"
      / audit_live_run.LEARN_SUMMARY_NAME).unlink()
-    assert any("never committed it" in message
+    audit = audit_live_run.audit_run(run_dir)
+    assert not audit.errors()
+    warns = [finding["message"] for finding in audit.findings
+             if finding["severity"] == "WARN"]
+    assert any("never committed it" in message for message in warns)
+
+
+def test_an_already_accepted_echo_of_an_earlier_receipt_is_the_resume_idiom(
+        tmp_path):
+    """Wave 3 review O2's ruling: a phase-internal resume re-derives the
+    same keep row and lands it on the now-accepted member, so
+    "accepted" followed by "already_accepted" for one (target, skill)
+    is the legal resume idiom, not a replayed landing. Only a second
+    receipt that CARRIES AN ACTION is a duplicate."""
+    run_dir = _clean_v4_run(tmp_path)
+    # A task no live round ever measured, so no group verdict claims it.
+    keeper = audit_live_run._fake_group_skill(ids.make_task_id("tb", "t9"),
+                                               0)
+    keeper.status = "accepted"
+    Store(run_dir).save(keeper, "skills")
+    outcomes = run_dir / "phases" / "p02_Lseed" / audit_live_run.OUTCOMES_NAME
+    for outcome in ("accepted", "already_accepted"):
+        audit_live_run._append_jsonl_raw(outcomes, {
+            "schema": audit_live_run.LEARN_OUTCOME_SCHEMA,
+            "phase_label": "p02:Lseed", "target_kind": "skill",
+            "target_id": keeper.skill_id, "action": "keep",
+            "skill_id": keeper.skill_id, "outcome": outcome, "version": 1})
+    assert not _errors(run_dir)
+
+
+def test_a_second_action_receipt_for_one_target_skill_is_an_error(tmp_path):
+    run_dir = _clean_v4_run(tmp_path)
+    outcomes = run_dir / "phases" / "p04_Lmid" / audit_live_run.OUTCOMES_NAME
+    duplicate = json.loads(outcomes.read_text(encoding="utf-8"
+                                              ).splitlines()[0])
+    audit_live_run._append_jsonl_raw(outcomes, duplicate)
+    assert any("duplicate receipt" in message
                for message in _errors(run_dir))
 
 

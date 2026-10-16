@@ -16,8 +16,10 @@ runs frozen before the phase world are still audited with the exact
 code that audited them when they ran, so their numbers stay
 checkable on today's checkout. The acceptance MODE of a v4 run comes
 from the frozen sequence, not from a config slot: a sequence that
-carries an exam phase is exam mode, anything else with a live phase
-is live_run mode (the alignment review's finding 1).
+carries a live phase is live_run mode, else one with an exam phase
+is exam mode (live wins when both appear -- the upgrade-mapped
+sequences never mix, and a hand-written mixed sequence is graded by
+its live subtree; the Wave 3 A-review's D2 correction, 2026-10-16).
 
 What it verifies on the live subtree (five checks, each reported
 separately; a pre-v4 run gets exactly these, a v4 run gets their
@@ -66,8 +68,12 @@ five classes' phase-world counterparts, "对象一致 / 重复执行 / 统计
      planned units with sane pass counts;
   8. learn-ledgers: the learn phases' three ledgers reconcile with the
      skill store (receipts land as real statuses, the revision chain
-     from_version -> version is intact) and the bank artifact exists
-     exactly when the phase's summary committed it;
+     from_version -> version is intact, one receipt per (target,
+     skill) -- an "already_accepted" echo of an earlier receipt is the
+     in-phase resume idiom, an action receipt twice is a replayed
+     landing) and the bank artifact exists exactly when the phase's
+     summary committed it (an artifact without its commit summary is an
+     interrupted commit -- WARN, not a settled state);
   9. final-test: a complete final-test summary's both arms hold every
      expected test unit (its own phase store, or the run-level store
      for a reused baseline control), minus the accepted holes.
@@ -917,8 +923,14 @@ def check_learn_ledgers(audit: Audit, run_dir: Path,
 
         # The receipts: one per (target, skill); every outcome that claims
         # a state must match the store (a later phase may have moved the
-        # skill further, never backwards).
-        seen: Set[Tuple[Any, Any]] = set()
+        # skill further, never backwards). ONE repeat is legal: a resumed
+        # phase re-derives the same keep row and lands it on the now-
+        # accepted member, writing "already_accepted" after the first
+        # "accepted" -- the in-phase resume idiom (Wave 3 review O2,
+        # 2026-10-16 ruling). A second receipt that CARRIES AN ACTION
+        # (accepted / revised / discarded / ...) is still a replayed
+        # landing and an ERROR.
+        seen: Dict[Tuple[Any, Any], str] = {}
         for row in read_jsonl(directory / OUTCOMES_NAME):
             if row.get("phase_label") != label:
                 audit.add(
@@ -937,13 +949,18 @@ def check_learn_ledgers(audit: Audit, run_dir: Path,
                 continue  # target-level rows (skips) name no skill
             key = (row.get("target_id"), skill_id)
             if key in seen:
+                if outcome == "already_accepted":
+                    # The resume idiom: the first receipt landed the
+                    # member, this one re-landed the same (now accepted)
+                    # row. Not a duplicate landing.
+                    continue
                 audit.add(
                     ERROR, "learn-ledgers",
                     f"phase {label}: duplicate receipt for target "
                     f"{key[0]!r} skill {skill_id!r} (the receipt is the "
-                    "proof of completion; a second one means a landing "
-                    "replayed)")
-            seen.add(key)
+                    "proof of completion; a second one that carries an "
+                    "action means a landing replayed)")
+            seen[key] = outcome
             skill = skills.get(str(skill_id))
             if skill is None:
                 audit.add(
@@ -991,8 +1008,15 @@ def check_learn_ledgers(audit: Audit, run_dir: Path,
                 f"{BANK_NAME} is missing -- the artifact was deleted or "
                 "the summary was hand-edited")
         elif bank_path.exists() and not committed:
+            # WARN, not ERROR (Wave 3 review O3, 2026-10-16 ruling): this
+            # is the normal state of every interrupted commit the resume's
+            # finalization sweep finishes AND of every assembled run before
+            # its last learn phase runs (the pre-seeded artifact). The
+            # module's own grading docstring puts "an interrupted commit
+            # the resume would finish" under WARN; the legacy terminals
+            # check grades the same shape WARN too.
             audit.add(
-                ERROR, "learn-ledgers",
+                WARN, "learn-ledgers",
                 f"phase {label}: {BANK_NAME} exists but the summary never "
                 "committed it (the artifact is written first, the summary "
                 "last; one without the other is an interrupted commit "

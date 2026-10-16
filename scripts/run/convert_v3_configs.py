@@ -13,7 +13,10 @@ record, and converting the v2 file again would freeze a second identity
 for the same experiment.
 
 Output: <stem>_v4.yaml next to the input (NEVER overwritten; v3 files
-are frozen experiment records, AGENTS section 6). The mapping is
+are frozen experiment records, AGENTS section 6). The write is atomic
+(temp file + rename, the Wave 3 review O4 ruling): an interrupted run
+leaves the previous state, never a half-written *_v4.yaml that the
+never-overwrite rule would then lock in. The mapping is
 core.config.upgrade_v3_config -- the same pure function the reuse
 assembler applies to a v3 source run's manifest.
 
@@ -25,7 +28,9 @@ acceptance slot dissolving into the sequence, live_run's params moving
 into the live phase, merge_check following the acceptance kind).
 """
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
@@ -60,8 +65,16 @@ def convert_file(path: Path, *, out_dir=None) -> str:
     ``out_dir`` redirects the output (the tests write into a temporary
     directory so the repository's configs stay untouched).
     """
-    with open(path, encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh)
+    except OSError as exc:
+        # The reader most likely to misplace a flag or a path is the
+        # one who least needs a traceback (Wave 3 review D7): name the
+        # file and the reason, per file like every other refusal.
+        return f"{path.name}: REFUSED (cannot read: {exc})"
+    except yaml.YAMLError as exc:
+        return f"{path.name}: REFUSED (not parsable YAML: {str(exc).splitlines()[0]})"
     if not isinstance(raw, dict):
         return f"{path.name}: REFUSED (not a YAML mapping)"
     version = detect_version(raw)
@@ -89,11 +102,26 @@ def convert_file(path: Path, *, out_dir=None) -> str:
            else path.parent) / f"{path.stem}_v4.yaml"
     if out.exists():
         return f"{out.name}: exists, left untouched"
-    save_config(config, str(out))
-    # The written file must load through the real loader too (the YAML
-    # round-trip and the file-level key checks), so what lands on disk is
-    # what today's code accepts.
-    load_config(str(out))
+    # Atomic write (O4): a temp file in the destination directory, then
+    # rename. A crash mid-write leaves no half *_v4.yaml behind -- the
+    # never-overwrite rule would otherwise lock a truncated file in and
+    # silently block the retry. The verification loads the TEMP file, so
+    # only a file today's code accepts is ever renamed into place.
+    fd, temp_name = tempfile.mkstemp(dir=str(out.parent),
+                                     prefix=out.name + ".",
+                                     suffix=".tmp")
+    os.close(fd)
+    temp = Path(temp_name)
+    try:
+        save_config(config, str(temp))
+        load_config(str(temp))
+        os.replace(temp, out)
+    except BaseException:
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+        raise
     acceptance = ((raw.get("methods") or {}).get("acceptance") or {})
     return (f"{path.name} -> {out.name} (sequence: "
             f"{' '.join(config.sequence)}; acceptance slot "
@@ -102,20 +130,35 @@ def convert_file(path: Path, *, out_dir=None) -> str:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    directory = (Path(argv[argv.index("--dir") + 1])
-                 if "--dir" in argv
-                 else Path(__file__).resolve().parents[2]
-                 / "configs" / "experiments")
+    directory = None
     positional = []
-    skip_next = False
-    for arg in argv:
-        if skip_next:
-            skip_next = False
-            continue
+    # Hand-rolled parsing with actionable usage errors (Wave 3 review
+    # D7): a "--dir" without a value used to die on an IndexError, and a
+    # mistyped flag was silently treated as a file path (its traceback
+    # pointed at open(), not at the typo). Both now print one line that
+    # says what to do instead.
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
         if arg == "--dir":
-            skip_next = True
+            if index + 1 >= len(argv):
+                print("usage: convert_v3_configs.py [--dir <directory of "
+                      "v3 configs>] [config files...]\n"
+                      f"error: {arg} needs a value")
+                return 2
+            directory = Path(argv[index + 1])
+            index += 2
             continue
+        if arg.startswith("--"):
+            print(f"error: unknown flag {arg!r}; the only flag is "
+                  "--dir <directory>; positional arguments are config "
+                  "file paths")
+            return 2
         positional.append(arg)
+        index += 1
+    if directory is None:
+        directory = (Path(__file__).resolve().parents[2]
+                     / "configs" / "experiments")
     explicit = [Path(arg) for arg in positional]
     if explicit:
         paths = explicit

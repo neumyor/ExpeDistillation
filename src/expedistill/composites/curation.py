@@ -206,7 +206,14 @@ The final append loop is healed the same way as before: the log records
 ``final_member_ids`` first and a resumed call completes a truncated
 append. A non-empty bank short-circuits every model call unless the
 store holds accepted skills the bank does not cover ("skill bank is
-stale", ConfigError: nothing is ever merged into a curation uncurated).
+stale", ConfigError: nothing is ever merged into a curation uncurated)
+-- with ONE dest-mode exception: the short-circuit first refreshes the
+artifact to the store's current state (``_refresh_dest_artifact``), so
+a PRE-SEEDED artifact (an assembled run's last learn phase, whose A/B
+phases accept members the source run never knew) reconciles instead of
+refusing; the newly accepted members land uncurated, exactly as the
+assembler's ASSEMBLED_FROM record discloses (the Wave 3 review's B1
+ruling, 2026-10-16).
 
 The ``weak_profile`` parameter is accepted for signature uniformity with
 the stage entry point but unused here: stage 5 runs no leak audit and no
@@ -924,6 +931,68 @@ def _check_store_matches_log(store: Store, log: Dict[str, Any]) -> None:
             "log but are not")
 
 
+def _refresh_dest_artifact(store: Store,
+                           dest: Union[str, Path]) -> None:
+    """Bring a finished dest artifact back in step with the store (the
+    Wave 3 review's B1 fix, the 2026-10-16 coordinator ruling).
+
+    An assembled run pre-seeds the last learn phase's bank artifact from
+    the SOURCE run's curation, then its own A/B phases legitimately
+    accept members the artifact does not know yet (a ride-along pending
+    member that passes its exam; a re-offered generation-failure unit).
+    The run-mode answer to that state is the staleness refusal -- the
+    pre-seeded case must not be refused, so the short-circuit refreshes
+    the artifact to the store's current state first, program-only:
+
+    * a row whose member the store has since moved pending -> accepted
+      is replaced by the member's own on-disk record (the same form the
+      final-append loop uses, guaranteed to match what K5 itself would
+      have written);
+    * an accepted store skill with no row at all is appended, sorted by
+      skill_id, in that same on-disk record form -- uncurated, exactly
+      as the ASSEMBLED_FROM record discloses.
+
+    The source run's curation products (the merged rows) are kept
+    verbatim. Deterministic and idempotent: a repeat call finds nothing
+    left to do -- the file is only rewritten when a row actually
+    changed, so a pre-seeded artifact the run never touched stays
+    byte-identical."""
+    path = _bank_path(store, dest)
+    rows = list(read_jsonl(path))
+    if not rows:
+        return  # nothing pre-seeded: the caller's short-circuit never ran
+    stored_ids = set(store.ids("skills"))
+    records: Dict[str, Dict[str, Any]] = {}
+
+    def record_of(skill_id: str) -> Dict[str, Any]:
+        if skill_id not in records:
+            records[skill_id] = read_json(
+                store.path_for("skills", skill_id))
+        return records[skill_id]
+
+    changed = False
+    refreshed: List[Dict[str, Any]] = []
+    for row in rows:
+        skill_id = row.get("skill_id")
+        if (row.get("status") == "pending" and skill_id in stored_ids
+                and record_of(skill_id).get("status") == "accepted"):
+            # The phase's own keep row landed after the artifact was
+            # written: the artifact row follows the store's record.
+            row = record_of(skill_id)
+            changed = True
+        refreshed.append(row)
+    present = {row.get("skill_id") for row in refreshed}
+    missing = sorted(
+        skill_id for skill_id in stored_ids
+        if skill_id not in present
+        and store.load("skills", skill_id, Skill).status == "accepted")
+    if missing:
+        refreshed.extend(record_of(skill_id) for skill_id in missing)
+        changed = True
+    if changed:
+        write_jsonl(path, refreshed)
+
+
 def _check_bank_not_stale(store: Store,
                           bank: Sequence[Dict[str, Any]]) -> None:
     """Refuse a finished bank that no longer covers the accepted skills.
@@ -971,10 +1040,12 @@ def curate_bank(
     order. Idempotent at the stage level -- a non-empty bank (completed
     from the log first if a crash interrupted the final append) is returned
     without any model call, unless the store holds accepted skills the bank
-    does not cover (ConfigError: the bank is stale) -- and resumable at the
-    unit level (see module docstring). Raises ConfigError when the bank is
-    still over budget after ``curation_rounds`` rounds; nothing is deleted
-    in that case.
+    does not cover (ConfigError: the bank is stale; in dest mode the
+    short-circuit instead REFRESHES the artifact from the store first --
+    the pre-seeded/assemble case, see ``_refresh_dest_artifact``) -- and
+    resumable at the unit level (see module docstring). Raises ConfigError
+    when the bank is still over budget after ``curation_rounds`` rounds;
+    nothing is deleted in that case.
 
     ``merge_check`` (M3, plan section 3's curate family): ``exam`` (the
     default) is the frozen behaviour -- each kept merge re-answers every
@@ -1027,6 +1098,14 @@ def curate_bank(
                 # product at all (from_dict lacks the sibling records).
                 _append_bank_row(store, dest,
                                 read_json(store.path_for("skills", skill_id)))
+        if dest is not None:
+            # The assembled-run case (B1 fix): a pre-seeded artifact predates
+            # the run's own acceptances. The refresh reconciles it with the
+            # store BEFORE the staleness check, so the short-circuit stays a
+            # short-circuit. Run mode keeps the refusal: a run-level bank
+            # never has a pre-seeding author, and stage 6's stored
+            # trajectories would silently diverge from a patched bank.
+            _refresh_dest_artifact(store, dest)
         bank = _read_bank(store, dest)
         _check_bank_not_stale(store, bank)
         return bank

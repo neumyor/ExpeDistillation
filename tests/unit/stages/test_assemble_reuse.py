@@ -56,6 +56,7 @@ from expedistill.core.config import (
     phase_label,
     upgrade_v3_config,
 )
+from expedistill.core import ids
 from expedistill.core.models import (
     Attempt,
     Exam,
@@ -67,7 +68,7 @@ from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
 from expedistill.infra.store import Store, read_json, read_jsonl, write_json
 from expedistill.infra.usage import UsageRecorder
-from expedistill.llm.fake import FakeClient
+from expedistill.llm.fake import FakeClient, json_script
 from expedistill.stages import stage0_freeze
 from expedistill.stages.assemble_reuse import (
     assemble_reuse,
@@ -330,7 +331,7 @@ def write_reuse_config(tmp_path: Path, config: dict = None,
 # The synthetic source run
 # ---------------------------------------------------------------------------
 
-def _traj(task, role, attempt=0, meta=None):
+def _traj(task, role, attempt=0, meta=None, correctness=True):
     task_id = f"{_FAKE}:{task}"
     return Trajectory(
         trajectory_id=f"traj/{task_id}/{role}/{attempt:02d}",
@@ -340,7 +341,7 @@ def _traj(task, role, attempt=0, meta=None):
         model_name=STRONG if role == "strong" else WEAK,
         attempt_index=attempt,
         steps=[],
-        correctness=True,
+        correctness=correctness,
         meta=dict(meta or {}),
     )
 
@@ -480,7 +481,13 @@ def build_source_run(tmp_path: Path, source_tasks=None, *,
     trajs = {
         "t1s": _traj("t1", "strong",
                      meta={"campaign_origin_run": "archived-campaign"}),
-        "t1w": _traj("t1", "weak"),
+        # The weak arm FAILS the train task (the Wave 3 review's A-P1
+        # fixture gap, closed 2026-10-16): a real reuse source always has
+        # weak-failed train tasks, so the assembled run's first learn
+        # phase derives a real add row and the zero-model-call resume
+        # test covers the add-row x segmentation wiring in the assembled
+        # context (skipped_existing, zero calls).
+        "t1w": _traj("t1", "weak", correctness=False),
         "t2s": _traj("t2", "strong"),
         "t3s": _traj("t3", "strong"),
     }
@@ -1103,6 +1110,11 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     * p00 freezes the manifest (the identity re-check of last resort);
     * the D phase skips every stored trajectory (the copied shortfall
       unit is an accepted hole, never re-dispatched);
+    * the FIRST learn phase derives a real add row (the fixture's weak
+      arm fails the train task) -- the cross-agent seam the Wave 3
+      review found untested: the segmentation wiring finds the copied
+      subtasks (K2's stored-subtask skip, zero calls), the collected
+      experiences all have skills (skipped_existing), no author call;
     * the learn phases re-derive their decisions over the copied
       records and write their own artifacts -- the LAST one's curation
       short-circuits on the pre-seeded bank, zero calls, byte-identical;
@@ -1136,6 +1148,19 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     # and the copied shortfall unit is an accepted hole.
     assert stages["p01:D"]["report_rows"] == 2
     assert stages["p01:D"]["infra_accepted"] == [source.ids["traj"]["t1s"]]
+    # The first learn phase's add row (the assembled-context seam): the
+    # weak arm failed the train task and the (empty) first-learn bank
+    # covers nothing, so the decision authorizes an add -- and it lands
+    # with ZERO model calls: the copied subtasks satisfy K2's skip and
+    # every collected experience already has its skill.
+    assert stages["p02:L"]["task_list"] == {"add": 1,
+                                            "superseded_rows": 0}
+    assert stages["p02:L"]["outcomes"] == {"skipped_existing": 1}
+    receipt = read_jsonl(run_dir / "phases" / "p02_L"
+                         / "outcomes.jsonl")[0]
+    assert receipt["action"] == "add"
+    assert receipt["target_id"] == f"{_FAKE}:t1"
+    assert receipt["outcome"] == "skipped_existing"
     # The last learn phase: the curation short-circuited on the
     # pre-seeded artifact (the bank members are exactly the kept rows)
     # and the artifact is byte-identical to what the assembly wrote.
@@ -1153,6 +1178,98 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
         config_path=config_path, run_dir=run_dir,
         make_client=refusing_client, until_phase=last_learn)
     assert artifact.read_bytes() == artifact_before
+
+
+def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
+        tmp_path):
+    """The Wave 3 review's blocker B1 (ruling 1's acceptance test): an
+    assembled run whose pre-seeded bank carries a PENDING member has
+    that member measured by its own A phase (real model calls -- the
+    exam answering, the leak audit and the judging), accepted by the
+    next learn phase's keep row, and the LAST learn phase's curation
+    short-circuit must then complete the run by REFRESHING the
+    pre-seeded artifact from the store (the pending row follows the
+    store's accepted record; the source run's merged rows stay
+    verbatim; zero curation model calls). Before the fix this path
+    raised ConfigError ("skill bank is stale") -- any assembled run
+    that ever accepted a member could not finish."""
+    source = build_source_run(tmp_path)
+    s_p = _skill(source.ids["subtask"]["st1w2"], "pending",
+                 content="never finished measuring")
+    Store(source.run_dir).save(s_p, "skills")
+    rows = read_jsonl(source.bank_path) + [s_p.to_dict()]
+    _write_source_bank(source.run_dir, source.config,
+                       sorted(rows, key=lambda row: row["skill_id"]))
+    config_path = write_reuse_config(tmp_path)
+    run_dir = tmp_path / "assembled"
+    assemble_reuse(source.run_dir, config_path, run_dir)
+    artifact = run_dir / "phases" / "p08_L" / "skill_bank.jsonl"
+    seeded = read_jsonl(artifact)
+    assert [row["skill_id"] for row in seeded] == [
+        source.ids["m0"], source.ids["s_a"], s_p.skill_id]
+
+    cfg = load_config(str(config_path))
+    last_learn = max(index for index, name in enumerate(cfg.sequence)
+                     if isinstance(cfg.phases[name], LearnPhaseSpec))
+    exam_id = ids.make_exam_id(source.ids["subtask"]["st1w2"])
+    stages = {}
+    clients = {}
+
+    # The A phase measures the pending member for real: the answerer
+    # (the weak model) answers bare then with the skill, the judge
+    # fails the bare and passes the skilled answer, the leak audit is
+    # clean. Curation must make no call -- its short-circuit refreshes
+    # the artifact programmatically.
+    def scripted_client(model_name):
+        if model_name == WEAK:
+            clients[model_name] = FakeClient(["bare answer",
+                                              "skilled answer"])
+        else:
+            clients[model_name] = FakeClient([
+                json_script({"verdict": "incorrect",
+                             "error_description": ""}),
+                json_script({"leaked": False, "reason": "clean"}),
+                json_script({"verdict": "correct",
+                             "error_description": ""})])
+        return clients[model_name]
+
+    result = run_experiment(
+        config_path=config_path, run_dir=run_dir,
+        make_client=scripted_client, until_phase=last_learn,
+        on_stage=lambda label, summary: stages.setdefault(label, summary))
+
+    # The A phase measured exactly the ride-along member; the next learn
+    # phase accepted it (the keep row's receipt).
+    assert stages["p03:A"]["measured"] == [exam_id]
+    accepted_receipts = [
+        row for row in read_jsonl(run_dir / "phases" / "p04_L"
+                                 / "outcomes.jsonl")
+        if row["skill_id"] == s_p.skill_id]
+    assert [row["outcome"] for row in accepted_receipts] == ["accepted"]
+    assert Store(run_dir).load("skills", s_p.skill_id, Skill).status \
+        == "accepted"
+    # Exactly the A phase's five calls, nothing else (the curation
+    # short-circuit spent zero).
+    assert len(clients[WEAK].calls) == 2
+    assert len(clients[STRONG].calls) == 3
+
+    # The run COMPLETED through the last learn phase (before the fix:
+    # ConfigError "skill bank is stale"), and the last learn phase's
+    # summary reports the refreshed artifact.
+    assert result["bank"]["members"] == [source.ids["m0"],
+                                         source.ids["s_a"], s_p.skill_id]
+    refreshed = read_jsonl(artifact)
+    # The source run's curation rows are untouched; the pending row
+    # followed the store's accepted record.
+    assert refreshed[:2] == seeded[:2]
+    assert refreshed[2] == read_json(
+        Store(run_dir).path_for("skills", s_p.skill_id))
+    assert refreshed[2]["status"] == "accepted"
+    # The refresh's replay idempotency (a repeated refresh rewrites
+    # nothing) is pinned by test_w1f_phase_bank's refresh tests; a
+    # full pipeline replay would re-enter the exam phase, which re-
+    # answers its exams (K3 is not idempotent by design) -- out of this
+    # test's scope.
 
 
 # ---------------------------------------------------------------------------

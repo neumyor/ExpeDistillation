@@ -22,7 +22,7 @@ from expedistill.core import ids
 from expedistill.core.config import ConfigError, ExperimentConfig
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import ConfigError as InfraConfigError
-from expedistill.infra.store import Store, read_json
+from expedistill.infra.store import Store, read_json, write_jsonl
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.curation import phase_bank as phase_bank_entry
 from expedistill.stages.context import StageContext
@@ -462,3 +462,117 @@ def test_bank_summary_agrees_with_the_artifact_rows(tmp_path):
     assert summary["size"] == len(rows)
     assert summary["members"] == [row["skill_id"] for row in rows]
     assert summary["bank_reference"] == bank_reference(rows)
+
+
+# ---------------------------------------------------------------------------
+# The dest short-circuit's pre-seeded refresh (Wave 3 review B1,
+# the 2026-10-16 coordinator ruling)
+# ---------------------------------------------------------------------------
+
+def _record_of(store: Store, skill_id: str) -> dict:
+    return read_json(store.path_for("skills", skill_id))
+
+
+def test_the_dest_short_circuit_refreshes_a_pre_seeded_artifact(tmp_path):
+    """An assembled run pre-seeds the last learn phase's bank artifact
+    from the SOURCE run's curation, then its own phases accept members
+    the artifact does not know (a ride-along pending member that passed
+    its exam; a re-offered unit's new skill). The short-circuit must
+    refresh the artifact from the store instead of refusing it stale:
+    the seeded rows stay verbatim, the pending -> accepted row follows
+    the store's own record, and a member with no row is appended in its
+    on-disk record form, sorted by skill_id. Before the fix this exact
+    state raised ConfigError ("skill bank is stale") and the assembled
+    run could never finish."""
+    from expedistill.composites import curation
+
+    ctx = _make_ctx(tmp_path, curator=[], answerer=[], judge=[])
+    seeded = _add_skill(ctx.store, 0, "A seeded curation member.")
+    ride_along = _add_skill(ctx.store, 1, "A ride-along pending member.",
+                            status="pending")
+    dest = phase_bank_dir(ctx.run_dir, "p02:learn")
+    dest.mkdir(parents=True)
+    # What the assembler writes: the filtered bank (accepted rows) with
+    # the pending members riding along.
+    write_jsonl(dest / "skill_bank.jsonl",
+                [_record_of(ctx.store, seeded.skill_id),
+                 _record_of(ctx.store, ride_along.skill_id)])
+    # The run's own phases: the keep row accepts the ride-along member,
+    # and a re-offered unit lands a brand-new accepted skill.
+    accepted = ctx.store.load("skills", ride_along.skill_id, Skill)
+    accepted.status = "accepted"
+    ctx.store.save(accepted, "skills")
+    late = _add_skill(ctx.store, 2, "Accepted after the seeding.")
+
+    bank = curation.curate_bank(
+        store=ctx.store, weak_profile="",
+        answerer_handle=make_fake_handle("weak", []),
+        judge_handle=make_fake_handle("judge", []),
+        curator_handle=make_fake_handle("curator", []),
+        bank_token_budget=BIG, curation_rounds=3, merge_check="exam",
+        run_dir=ctx.run_dir, dest=dest)
+
+    # The short-circuit returned the refreshed artifact's accepted rows
+    # -- not a staleness refusal.
+    assert [row["skill_id"] for row in bank] == [
+        seeded.skill_id, ride_along.skill_id, late.skill_id]
+    assert bank[1] == _record_of(ctx.store, ride_along.skill_id)
+    assert bank[2] == _record_of(ctx.store, late.skill_id)
+    # The seeded row is untouched: the source run's curation result is
+    # never re-merged, edited or reordered.
+    rows = load_phase_bank(ctx.run_dir, "p02:learn")
+    assert rows[0] == _record_of(ctx.store, seeded.skill_id)
+
+
+def test_the_pre_seeded_refresh_is_idempotent(tmp_path):
+    """The refresh is a pure function of (artifact, store): a replay
+    finds nothing left to do and leaves the file byte-identical, so a
+    resumed short-circuit never drifts."""
+    from expedistill.composites import curation
+
+    ctx = _make_ctx(tmp_path, curator=[], answerer=[], judge=[])
+    seeded = _add_skill(ctx.store, 0, "A seeded curation member.")
+    ride_along = _add_skill(ctx.store, 1, "A ride-along pending member.",
+                            status="pending")
+    dest = phase_bank_dir(ctx.run_dir, "p02:learn")
+    dest.mkdir(parents=True)
+    write_jsonl(dest / "skill_bank.jsonl",
+                [_record_of(ctx.store, seeded.skill_id),
+                 _record_of(ctx.store, ride_along.skill_id)])
+    accepted = ctx.store.load("skills", ride_along.skill_id, Skill)
+    accepted.status = "accepted"
+    ctx.store.save(accepted, "skills")
+    late = _add_skill(ctx.store, 2, "Accepted after the seeding.")
+    path = dest / "skill_bank.jsonl"
+
+    curation._refresh_dest_artifact(ctx.store, dest)
+    once = path.read_bytes()
+    assert [row["skill_id"] for row in load_phase_bank(ctx.run_dir,
+                                                       "p02:learn")] == [
+        seeded.skill_id, ride_along.skill_id, late.skill_id]
+
+    # The replay: nothing changes, not even the bytes.
+    curation._refresh_dest_artifact(ctx.store, dest)
+    assert path.read_bytes() == once
+
+
+def test_the_run_mode_staleness_refusal_stands(tmp_path):
+    """The refresh is a dest-mode remedy only: a run-level bank (dest
+    None) that no longer covers the accepted skills is still refused
+    loudly -- the pre-existing stage-5 semantics, unchanged."""
+    from expedistill.composites import curation
+
+    ctx = _make_ctx(tmp_path, curator=[], answerer=[], judge=[])
+    seeded = _add_skill(ctx.store, 0, "A banked member.")
+    ctx.store.append_bank(seeded.to_dict())
+    late = _add_skill(ctx.store, 1, "Accepted after curation finished.")
+
+    with pytest.raises(InfraConfigError, match="skill bank is stale"):
+        curation.curate_bank(
+            store=ctx.store, weak_profile="",
+            answerer_handle=make_fake_handle("weak", []),
+            judge_handle=make_fake_handle("judge", []),
+            curator_handle=make_fake_handle("curator", []),
+            bank_token_budget=BIG, curation_rounds=3, merge_check="exam",
+            run_dir=ctx.run_dir)
+    assert late.status == "accepted"  # nothing was mutated by the refusal

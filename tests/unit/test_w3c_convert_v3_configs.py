@@ -172,3 +172,40 @@ def test_directory_scan_picks_exactly_the_schema_3_files(tmp_path,
     assert converted == set(V3_CONFIGS)
     assert "a_v2.yaml" not in out
     assert "converted 7 config(s)" in out
+
+
+def test_dir_without_a_value_prints_usage_and_exits_2(capsys):
+    code = CONVERTER.main(["--dir"])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "usage" in out
+    assert "--dir needs a value" in out
+
+
+def test_an_unknown_flag_is_rejected_instead_of_treated_as_a_path(
+        tmp_path, capsys):
+    # A mistyped flag used to be opened as a file (FileNotFoundError
+    # traceback); it now names the flag and the only real one.
+    code = CONVERTER.main(["--dry"])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "unknown flag '--dry'" in out
+    assert "--dir" in out
+
+
+def test_an_unreadable_input_file_is_refused_per_file(tmp_path):
+    missing = tmp_path / "no_such_config.yaml"
+    status = CONVERTER.convert_file(missing)
+    assert status.startswith("no_such_config.yaml: REFUSED (cannot read:")
+
+
+def test_the_write_is_atomic_no_temp_left_behind(tmp_path):
+    # The output lands through a temp file + rename (the O4 ruling): a
+    # successful conversion leaves exactly one file, no *.tmp residue
+    # for the never-overwrite rule to trip over.
+    path = _write(tmp_path / "old.yaml", _MINIMAL_V2)
+    status = CONVERTER.convert_file(path, out_dir=tmp_path)
+    assert status.startswith("old.yaml -> "), status
+    assert sorted(p.name for p in tmp_path.glob("*")) == [
+        "old.yaml", "old_v4.yaml"]
+    load_config(str(tmp_path / "old_v4.yaml"))

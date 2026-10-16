@@ -43,8 +43,6 @@ v4 相位世界走相位目录与学习相位账本），`--self-test` 覆盖两
 
 ## 0. 适用范围与身份声明
 
-## 0. 适用范围与身份声明
-
 本手册服务 stage-4 live_run 模式的正式 run 与 pilot。方法的完整定义在
 `docs/decisions/acceptance_live_run_20261014.md`（最终实施方案修订三）与 README；
 本文件只写"怎么跑、怎么查、出问题怎么办"，不重复设计论证。冲突时以决策文档为准。
@@ -73,9 +71,11 @@ v4 相位世界走相位目录与学习相位账本），`--self-test` 覆盖两
    - 基线全成功的组会被 `weak_already_knows` 零执行短路（这是特性不是 bug）；基线
      valid == 0 的组是 ConfigError（数据与冻结规则矛盾，须人工诊断）；
 3. **acceptance 配置校验**：`load_config` + stage 0 会校验 `methods` 五槽位形状、
-   各方法参数契约（`n_attempts >= 2` 等）、`improvement` 规则名已注册、未知键拒绝。
+   各方法参数契约、`improvement` 规则名已注册、未知键拒绝。
    启动前手动复核配置里的 `improvement` 名字
-   与预注册文档一致（拼写错会在 stage 0 停下，但核对是免费的）；
+   与预注册文档一致（拼写错会在 stage 0 停下，但核对是免费的）。注意
+   live 深度代码只强制 `n_attempts >= 1`，`>= 2` 是设计文档的推荐下限
+   （README 七.4），配 1 不会被加载期拒绝；
 4. **在飞 run 兼容**：同一 run 目录不得在两版代码间混跑——老 run 用它自己的
    维护分支 + 独立 venv 续跑（AGENTS 六.1）；schema v2 的 run 目录在 v3 代码
    的 stage 0 会被明确拒载（config.methods 形状不同）；

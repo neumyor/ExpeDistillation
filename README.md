@@ -52,7 +52,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | 执行阶段 | 题 | 注入的技能 | 谁做、做几次 |
 |---|---|---|---|
 | D 摸底（baseline） | 每个训练任务 | 不注入 | 强、弱模型各做若干次 |
-| A 纸面验收（exam） | 每条待定技能对应的考题 | 这一条技能 | 弱模型答 1 次 |
+| A 纸面验收（exam） | 每条待定（pending）技能对应的考题 | 这一条技能 | 弱模型答 1 次 |
 | B 实战验收（live） | 每个有技能的训练任务 | 该任务的整包技能 | 弱模型做 n 次 |
 | C 最终测试（test） | 每个测试任务 | 检索出的若干条，或整个技能库 | 弱模型做 n 次 |
 
@@ -148,7 +148,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | `benchmark` | benchmark 名字（tb / searchqa / alfworld） |
 | `mode` | `split`（划分 train/test）或 `full`（全部题目一起蒸馏） |
 | `models` | 模型角色表：角色 → 模型名。必须给出 `executor_strong` 与 `executor_weak` 两个锚点，其余角色按 `ROLE_DEFAULTS` 补齐（answerer 用弱模型，其余用强模型） |
-| `weak_profile`（或 `weak_profile_file`） | 弱模型画像：一段描述弱模型是谁、已知弱点的文本，是写技能（G2）与改写（G6/G11）的输入 |
+| `weak_profile`（或 `weak_profile_file`） | 弱模型画像：一段描述弱模型是谁、已知弱点的文本，是写技能（G2）与改写（G6/G11）的输入。两者二选一：`weak_profile_file` 是画像文本文件的路径，相对路径相对配置文件所在目录解析 |
 | `n_attempts_strong` / `n_attempts_weak` | 摸底相位两臂各自的采样次数 |
 | `split` | `split` 模式的划分：显式 train/test/reserved 列表，或 `{ratio, seed}` |
 | `tasks` | 任务集：不写（插件全集）、任务 ID 列表、或任务文件路径 |
@@ -446,7 +446,7 @@ E1 内部的 runner：
 | — | 报告读取器 | 从磁盘现读三种验收报告（baseline / exam / live），只读 | `composites/reports.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
-| — | 空洞记录 | 已接受基础设施空洞的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
+| — | 空洞记录 | 已接受基础设施空洞（什么叫空洞见 5.9）的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
 | — | 考卷状态读取 | 从存量记录读出考题的已判作答与裸答 | `composites/acceptance_skill_status.py` |
 | — | 装配工具 | 从源 run 按 train 溯源装配新 run（`assemble-reuse` 子命令；读旧版本源 manifest 时经 `core/config.py` 的升级纯函数做身份核对） | `stages/assemble_reuse.py` |
 
@@ -841,7 +841,10 @@ K2（确定 ID、逐单元落盘、按存量跳过、D7 校验、重切预算、
 内终态）时记 `skipped_no_material` 回执并继续，**不抛错**（抛错会让续跑
 永远卡在同一行）；审计通道 `stage2_segments/segmentation_audit.jsonl`
 沿用不变。惰性由结构保证：只有 add 行才付切段的钱，exam-only / live-only
-的序列永远不碰切段。
+的序列永远不碰切段。随接线进入 add 路径的既有取舍（K2 的 PARTIAL SAVE）：
+一条轨迹**内部**是逐段落盘的，写作中断在两段之间时续跑按"任何已存
+subtask 即算该单元完成"返回已存**前缀**——前缀即最终结果，不会补切，
+续跑结果可能与一次跑完不同（K2 既有设计，非本次引入）。
 
 **三本相位账本**（都在 `phases/pNN_<名>/`）+ 摘要：
 
@@ -851,7 +854,8 @@ K2（确定 ID、逐单元落盘、按存量跳过、D7 校验、重切预算、
   续跑看到版本已加一就只补回执、不再问模型（K6 版本号重放守卫的沿用）；
 - `outcomes.jsonl`：逐技能回执（`learn-outcome-v1`：phase_label /
   target_kind / target_id / action / skill_id / outcome / version），
-  旧世界 attributions.jsonl 的接替者，审计脚本与金基线以它为准；
+  旧世界 attributions.jsonl 的接替者，审计脚本与 `tests/golden/` 的金基线
+  测试以它为准；
 - `learn_summary.json`：摘要最后写，**带 bank 键即该相位的完成信号**——
   已完成的学习相位重放时整个跳过（回执不翻倍、工件不按当前技能仓重写）。
 
@@ -864,7 +868,8 @@ K2（确定 ID、逐单元落盘、按存量跳过、D7 校验、重切预算、
 | `already_accepted` | keep 遇到已接受成员（复测又通过） |
 | `revised` | revise 产出新版本 |
 | `unchanged` | revise 没产出新版本（没变化，下次再试） |
-| `kept` / `deleted` | live 组修订时写作侧决定保留 / 删除 |
+| `kept` | live 组修订时写作侧决定保留这条技能 |
+| `deleted` | live 组修订时写作侧决定删除（按 LIVE_REVISION_DELETED 弃用） |
 | `discarded` | delete 按决策原因弃用 |
 | `skipped_no_material` | add 切不出可学材料（见上） |
 | `skipped_existing` | add 遇到技能已存在的经历（续跑的另一重保障） |
@@ -935,8 +940,11 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
   退出码 1；
 - `assemble-reuse` 从已完结的源 run 装配新 run（读旧版本源 manifest 时经
   升级纯函数做身份核对），零模型调用，产出可直接 `run` 的新 run 目录；
-  两档位：`bank`（拷贝源 run 的训练侧产物与过滤库，下游零调用）、
-  `baseline`（只拷摸底轨迹，其余按当前协议全新执行）。
+  两档位：`bank`（拷贝源 run 的训练侧产物与过滤库：D 相位按存储轨迹跳过、
+  学习相位零调用复用——末相位的整理在预置库上短路，短路前把产物刷新为
+  技能仓当前状态；C 相位全新执行，设计如此；v3 源的生成失败行不拷贝，
+  新 run 的首个学习相位会真实重试它们——有模型调用，逐项披露见
+  ASSEMBLED_FROM）、`baseline`（只拷摸底轨迹，其余按当前协议全新执行）。
 
 ### 运行设置（只影响"怎么跑"，不进配置、不进 manifest）
 
@@ -985,9 +993,11 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
    "答得对"与"做得到"的差距只能在 C 相位的成绩里看出来。live 方法消掉了
    验收环节的这一差距，但整理的合并回归考试仍是文本考。
 4. **live 验收的统计功效**：`n_attempts = 3` 的二值比较在"技能无效果"的
-   假设下单任务假通过率约 27–34%（数字按 n 重算，n=1 时约 50%，故
-   `n_attempts ≥ 2` 是硬约束）。验收是库的入门过滤器，库的总体主张由
-   C 相位的 test 集承载；逐组计数全部落盘，可事后复核。
+   假设下单任务假通过率约 27–34%（数字按 n 重算，n=1 时约 50%，故设计
+   文档把 live 相位的 `n_attempts ≥ 2` 定为推荐下限——总体设计 A2 的
+   D1 守卫；代码在加载期只强制 ≥ 1，配 1 不会被拒绝——预检一律纯报告、
+   不阻塞流程，统计功效由实验设计纪律保证）。验收是库的入门过滤器，库的
+   总体主张由 C 相位的 test 集承载；逐组计数全部落盘，可事后复核。
 5. **live 通过 ≠ 可迁移**：live 验收的组来自训练任务，可迁移性看 split
    模式的 test 集。full 模式下 live 验收与终测同任务——任务定制的内容会
    同时抬高验收与终测，这是 full 模式的定义，主张可迁移性时用 split 模式。
