@@ -171,6 +171,19 @@ merged skill without a logged keep decision is corruption. A finished
 bank must still cover every accepted skill (staleness). The empty-member
 early return and the over-budget stop-for-a-human are unchanged.
 
+*Phase-directory mode (R7).* The ``dest`` parameter retargets every
+artifact this composite owns: the journal, the bank file
+(``<dest>/skill_bank.jsonl``) and the unit-failure records all land
+inside ``dest``, and the run-level ``skill_bank.jsonl`` /
+``stage5_curation`` journal are never touched -- so a per-phase
+curation (every learn phase ends with its own loadable bank, plan item
+R7) coexists with the frozen stage-5 behaviour. The resume and
+staleness machinery is unchanged -- every check is relative to
+``dest``'s own journal -- with one deliberate difference: an empty
+accepted set still writes an (empty) bank file, because the artifact's
+existence is the point of a phase bank. ``dest=None`` (the default) is
+byte-for-byte the frozen stage-5 path.
+
 Resume is unit-level. ``curation_log.json`` (schema ``curation-log-v3``;
 v2 journals are refused -- the old run directory stays on the old code)
 is the journal: it records each round's G7 output, the round's dispatch
@@ -223,7 +236,14 @@ from expedistill.infra.reliability import (
     ModelOutputError,
     UnitFailureRecorder,
 )
-from expedistill.infra.store import Store, read_json, write_json
+from expedistill.infra.store import (
+    Store,
+    append_jsonl,
+    read_json,
+    read_jsonl,
+    write_json,
+    write_jsonl,
+)
 from expedistill.inject import count_bank_tokens, format_skills_block
 from expedistill.llm.call import ModelHandle
 
@@ -232,6 +252,9 @@ __all__ = ["curate_bank"]
 #: Where the curation audit log lives inside the run directory.
 LOG_DIR = "stage5_curation"
 LOG_NAME = "curation_log.json"
+#: The bank file this composite writes: the run-level stage-5 output, or
+#: the phase artifact in dest mode (composites.phase_bank's layout).
+BANK_NAME = "skill_bank.jsonl"
 #: Journal format; a log without it (or with another value) is refused on
 #: resume rather than misread. v3 adds the per-round dispatch maps (the
 #: in-flight identity of the wave-parallel run); v2 logs stay on the old
@@ -247,11 +270,40 @@ _MERGED_ID_RE = re.compile(r"^bank/merge/(\d+)$")
 # Audit log (the journal)
 # ---------------------------------------------------------------------------
 
-def _log_path(store: Store, run_dir: Optional[Union[str, Path]]) -> Path:
+def _log_path(store: Store, run_dir: Optional[Union[str, Path]],
+              dest: Optional[Union[str, Path]]) -> Path:
     # Falls back to the store's run directory: the log is the resume journal,
-    # so curating without one is not an option.
+    # so curating without one is not an option. Dest mode (R7) keeps the
+    # journal inside the phase directory instead.
+    if dest is not None:
+        return Path(dest) / LOG_NAME
     base = Path(run_dir) if run_dir is not None else store.run_dir
     return base / LOG_DIR / LOG_NAME
+
+
+def _bank_path(store: Store, dest: Optional[Union[str, Path]]) -> Path:
+    """The bank file this call reads and writes (skill_bank.jsonl rows)."""
+    if dest is not None:
+        return Path(dest) / BANK_NAME
+    return store.run_dir / BANK_NAME
+
+
+def _read_bank(store: Store,
+               dest: Optional[Union[str, Path]]) -> List[Dict[str, Any]]:
+    # Run mode goes through the store's own accessors (not the raw file):
+    # tests subclass them to inject crashes, and the frozen behaviour is
+    # what those accessors do.
+    if dest is None:
+        return store.bank()
+    return read_jsonl(_bank_path(store, dest))
+
+
+def _append_bank_row(store: Store, dest: Optional[Union[str, Path]],
+                     row: Dict[str, Any]) -> None:
+    if dest is None:
+        store.append_bank(row)
+        return
+    append_jsonl(_bank_path(store, dest), row)
 
 
 def _write_log(log: Dict[str, Any], path: Path) -> None:
@@ -905,6 +957,7 @@ def curate_bank(
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
+    dest: Optional[Union[str, Path]] = None,
 ) -> List[Dict[str, Any]]:
     """Curate the accepted skills into the final bank (README stage 5).
 
@@ -928,6 +981,12 @@ def curate_bank(
     any output is bit-identical to the serial run (module docstring).
     ``weak_profile`` is part of the frozen stage signature but unused
     (see module docstring).
+
+    ``dest`` (R7): the phase-directory mode -- when given, the journal,
+    the bank file and the unit-failure records all land inside ``dest``
+    and the run-level ``skill_bank.jsonl`` is never touched (module
+    docstring). An empty accepted set still writes an empty bank file
+    there: every learn phase ends with a loadable artifact.
     """
     if curation_rounds < 1:
         raise ConfigError(f"curation_rounds must be >= 1, got {curation_rounds}")
@@ -936,10 +995,10 @@ def curate_bank(
             f"merge_check must be 'exam' or 'none', got {merge_check!r}")
     if workers < 1:
         raise ConfigError(f"workers must be >= 1, got {workers}")
-    log_path = _log_path(store, run_dir)
+    log_path = _log_path(store, run_dir, dest)
 
     # -- resume: a written bank means the stage already finished -----------
-    bank = store.bank()
+    bank = _read_bank(store, dest)
     if bank:
         final_ids = _read_final_member_ids(log_path)
         if final_ids is not None:
@@ -960,9 +1019,9 @@ def curate_bank(
                 # the from_dict roundtrip would migrate a v1 record to v2
                 # (a mixed-version bank) and cannot load a v1 merge
                 # product at all (from_dict lacks the sibling records).
-                store.append_bank(
-                    read_json(store.path_for("skills", skill_id)))
-        bank = store.bank()
+                _append_bank_row(store, dest,
+                                read_json(store.path_for("skills", skill_id)))
+        bank = _read_bank(store, dest)
         _check_bank_not_stale(store, bank)
         return bank
 
@@ -980,13 +1039,18 @@ def curate_bank(
         _check_store_matches_log(store, log)
     next_serial = _initial_next_serial(store, log)
     recorder = UnitFailureRecorder(
-        Path(run_dir) if run_dir is not None else store.run_dir)
+        Path(dest) if dest is not None
+        else (Path(run_dir) if run_dir is not None else store.run_dir))
 
     members = _accepted_members(store)
     if not members:
         # An empty bank is a valid bank; nothing to curate or append. (An
-        # in-flight merge implies accepted sources, so none can be pending.)
+        # in-flight merge implies accepted sources, so none can be
+        # pending.) Dest mode still writes the (empty) artifact: a phase
+        # bank's existence is the point (R7).
         _write_log(log, log_path)
+        if dest is not None:
+            write_jsonl(_bank_path(store, dest), [])
         return []
 
     def record_merge(record: Dict[str, Any]) -> None:
@@ -1301,5 +1365,5 @@ def curate_bank(
     # a crash mid-append can be completed on resume (see the resume path).
     _write_log(log, log_path)
     for skill in members:  # already sorted by skill_id
-        store.append_bank(skill.to_dict())
-    return store.bank()
+        _append_bank_row(store, dest, skill.to_dict())
+    return _read_bank(store, dest)
