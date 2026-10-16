@@ -71,6 +71,12 @@ _INSTRUCTIONS = {
     "t2": "inspect the reported state of the service for task two",
 }
 
+#: The marker the scripted G11 revision appends to a skill (and the live
+#: plugin keys on). A named constant because the M4.1 semantic instrument
+#: crashes on the first block that carries it (the revision-persisted
+#: window of its E5 machinery); one source of truth for both.
+G11_REVISION_MARKER = "REVISED-BY-G11"
+
 #: The combo axes of the matrix (decision doc section 7, P-1).
 COMBOS: Tuple[Dict[str, str], ...] = tuple(
     {"acceptance": acceptance, "delivery": delivery, "mode": mode}
@@ -131,7 +137,7 @@ class GoldenLivePlugin(GoldenExamPlugin):
         if handle.role == "executor_strong":
             status = "success"
         else:
-            status = ("success" if "REVISED-BY-G11" in skills_block
+            status = ("success" if G11_REVISION_MARKER in skills_block
                       else "failure")
         return RunOutcome(
             steps=[{"action": "run",
@@ -239,8 +245,8 @@ def _script(system: str, user: str) -> str:
             "\n\nATTRIBUTION REPORT", 1)[0]
         return json_script({
             "failure_category": "wrong_trigger",
-            "skill_text": original + "\nREVISED-BY-G11: name the concrete "
-                                     "state before acting.",
+            "skill_text": original + "\n" + G11_REVISION_MARKER +
+                          ": name the concrete state before acting.",
             "revision_reason": "made the trigger condition concrete",
         })
     # -- the exam conversation ----------------------------------------
@@ -541,10 +547,30 @@ def assert_resume_equivalent(golden: Dict[str, Any],
     whose results were never persisted (README's documented resume
     semantics: a pair-written unit loses both halves). A missing call or
     a NOVEL call after resume is a failure.
+
+    K1's ``skip_audit.jsonl`` (any directory) is the same class of
+    in-process-injection bookkeeping: a crashing UNIT sets the error-stop
+    gate, which appends one row per still-queued sibling before the
+    exception surfaces -- rows a real process death never writes (the
+    process is gone before the gate runs; the file only ever exists
+    because the injected raise unwinds in-process). The resumed run may
+    therefore carry those gated rows as extras; it may never MISS a row
+    the straight run wrote. Nothing consumes the file as state (the
+    heartbeat counts lines for progress only), so a genuinely skipped
+    unit still fails this check where it matters: its trajectory is
+    missing from the result state.
     """
     history = (_USAGE, _REQUESTS_DIR + "dumps")
+
+    def _skip_audit(key: str) -> bool:
+        # The audit file and its (always empty) flock sidecar.
+        return (key == "skip_audit.jsonl"
+                or key.endswith("/skip_audit.jsonl")
+                or key == "skip_audit.jsonl.lock"
+                or key.endswith("/skip_audit.jsonl.lock"))
+
     for key in sorted(set(golden) | set(resumed)):
-        if key in history:
+        if key in history or _skip_audit(key):
             continue
         if golden.get(key) != resumed.get(key):
             raise AssertionError(f"resume inequivalence in {key}")
@@ -567,3 +593,12 @@ def assert_resume_equivalent(golden: Dict[str, Any],
                 raise AssertionError(
                     f"{key}: novel call after resume: "
                     f"{_canonical(row)[:200]}")
+    for key in sorted(key for key in set(golden) | set(resumed)
+                      if _skip_audit(key)):
+        missing = list(golden.get(key, []))
+        for row in resumed.get(key, []):
+            if row in missing:
+                missing.remove(row)
+        if missing:
+            raise AssertionError(
+                f"{key}: {len(missing)} skip row(s) missing after resume")

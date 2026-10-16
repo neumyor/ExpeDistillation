@@ -1,0 +1,262 @@
+{
+  "E1": {
+    "bank_rows": [
+      {
+        "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+        "discard_reason": null,
+        "final_version": 2,
+        "group": "state inspection",
+        "merged_from": [],
+        "rewrite_history": [
+          {
+            "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+            "error_category": "wrong_trigger",
+            "reason": "made the trigger condition concrete"
+          }
+        ],
+        "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+        "status": "accepted"
+      },
+      {
+        "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+        "discard_reason": null,
+        "final_version": 2,
+        "group": "state inspection",
+        "merged_from": [],
+        "rewrite_history": [
+          {
+            "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+            "error_category": "wrong_trigger",
+            "reason": "made the trigger condition concrete"
+          }
+        ],
+        "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+        "status": "accepted"
+      },
+      {
+        "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+        "discard_reason": null,
+        "final_version": 2,
+        "group": "state inspection",
+        "merged_from": [],
+        "rewrite_history": [
+          {
+            "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+            "error_category": "wrong_trigger",
+            "reason": "made the trigger condition concrete"
+          }
+        ],
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "status": "accepted"
+      }
+    ]
+  },
+  "E2": {
+    "generation_failures": [],
+    "groups": [
+      {
+        "final_round": 1,
+        "outcome": "improved",
+        "task_id": "fakebench:t1"
+      }
+    ],
+    "leak_verdicts": [],
+    "revision_failures": [],
+    "rewrite_failures": [],
+    "terminal_states": [
+      {
+        "discard_reason": null,
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "status": "accepted"
+      },
+      {
+        "discard_reason": null,
+        "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+        "status": "accepted"
+      },
+      {
+        "discard_reason": null,
+        "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+        "status": "accepted"
+      }
+    ],
+    "unborn": []
+  },
+  "E3": {
+    "aux": null,
+    "bare": {
+      "aux": null,
+      "avg_at_n": 0.0,
+      "avg_at_n_conservative": 0.0,
+      "infra_tasks": [],
+      "pass_at_n": 0.0,
+      "tasks": 1
+    },
+    "control_source": "fresh_bare_run",
+    "delta": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "pass_at_n": 1.0
+    },
+    "retrieval_audit": [],
+    "with_bank": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "infra_tasks": [],
+      "pass_at_n": 1.0,
+      "tasks": 1
+    }
+  },
+  "E4": {
+    "calls": [
+      {
+        "prompt": "EXAM_GEN",
+        "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
+        "role": "examiner"
+      },
+      {
+        "prompt": "EXAM_GEN",
+        "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
+        "role": "examiner"
+      },
+      {
+        "prompt": "EXAM_GEN",
+        "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
+        "role": "examiner"
+      },
+      {
+        "prompt": "GROUP",
+        "request_text": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/00/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/01/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n\nGroup by WHAT KIND of ability the skill teaches, not by where it came from. Use\nshort, consistent group names (two to four words, for example \"file inspection\"\nor \"error recovery\"), and reuse the same name for skills of the same capability.\nEvery skill id in the listing must appear exactly once.\n\nOutput ONLY JSON with exactly these fields:\n{\"groups\": {\"skill_id\": \"<group_name>\", ...}}\n",
+        "role": "curator"
+      },
+      {
+        "prompt": "LIVE_RUN_ATTRIBUTION",
+        "request_text": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the baseline), then with a group of\nskills injected into its execution prompt. The run with skills did NOT do\nbetter than the baseline. Diagnose why, and decide what happens to each\nskill.\n\nTASK (the execution prompt the weak model actually saw):\nSolve the task: inspect the reported state of the service for task one\n\n\n\nBASELINE (the weak model's bare attempts at the same task, one status line\nper attempt):\nattempt 0: failure\nattempt 1: failure\n\nRUN WITH SKILLS (every attempt of this round, successful and failed ones\nalike):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nSKILLS (the group that was injected; each skill's id, then its full text):\nskill_id: traj/fakebench:t1/strong/00/seg00/skill\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nskill_id: traj/fakebench:t1/weak/00/seg00/skill\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nskill_id: traj/fakebench:t1/weak/01/seg00/skill\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nTHE MODEL THAT EXECUTED THE TASK (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Diagnose. Compare the baseline with the run-with-skills and say why the\n   real execution did not get better. 1 to 3 sentences, concrete: name the\n   skill that misfired or went unused, what the weak model did instead, and\n   where the injected text changed its behavior for the worse. Do not\n   restate the attempt counts; say what actually happened.\n\n2. Decide, per skill. Emit exactly one action for EVERY skill in the group,\n   each skill exactly once, identified by its skill_id exactly as listed:\n   - \"keep\": the skill is not part of the problem.\n   - \"revise\": the skill is part of the problem and fixable. The problem\n     must be concrete and about the skill AS WRITTEN: a trigger the weak\n     model cannot recognize during real execution, a step it cannot carry\n     out, an ordering that misleads it, a case the skill leaves uncovered.\n   - \"delete\": the skill is harmful or useless in this group. The problem\n     must say why, concretely.\n\n   Revision discipline, binding on every \"revise\" problem: the fix must be\n   phrased as a TRANSFERABLE skill -- general patterns and command forms\n   with generic placeholders (for example <config-file>, <port>), never\n   this task's file names, concrete values, or entity names. Every library\n   skill is retrieved and injected into OTHER tasks, where this task's\n   specifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"diagnosis\": \"<1 to 3 sentences: why the real execution did not get better>\",\n  \"skill_actions\": [\n    {\"skill_id\": \"<the skill's id, exactly as listed>\",\n      \"action\": \"<keep|revise|delete>\",\n      \"problem\": \"<empty string for keep; for revise/delete the concrete\n      problem, phrased transferably>\"}\n  ]}\n",
+        "role": "author"
+      },
+      {
+        "prompt": "LIVE_SKILL_REVISION",
+        "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite the skill.\n\nSKILL (current version):\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Rewrite the skill to fix the classified problem and the attribution\n   report. Change the wording, granularity, or trigger conditions of the\n   skill -- not its underlying idea. The rewritten skill must keep the same\n   four bracket sections as the original skill ([When to use]/[Steps]/\n   [Verify]/[Do not use when] for a procedure skill, [Trigger]/\n   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):\n   rewrite each section's content, never collapse them into prose.\n   Reproduce the bracketed section headers exactly as written, each on its\n   own line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders (for example <config-file>, <port>). Library\nskills are retrieved and injected into OTHER tasks, where this task's\nspecifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why>\"}\n",
+        "role": "rewriter"
+      },
+      {
+        "prompt": "LIVE_SKILL_REVISION",
+        "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite the skill.\n\nSKILL (current version):\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Rewrite the skill to fix the classified problem and the attribution\n   report. Change the wording, granularity, or trigger conditions of the\n   skill -- not its underlying idea. The rewritten skill must keep the same\n   four bracket sections as the original skill ([When to use]/[Steps]/\n   [Verify]/[Do not use when] for a procedure skill, [Trigger]/\n   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):\n   rewrite each section's content, never collapse them into prose.\n   Reproduce the bracketed section headers exactly as written, each on its\n   own line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders (for example <config-file>, <port>). Library\nskills are retrieved and injected into OTHER tasks, where this task's\nspecifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why>\"}\n",
+        "role": "rewriter"
+      },
+      {
+        "prompt": "LIVE_SKILL_REVISION",
+        "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite the skill.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Rewrite the skill to fix the classified problem and the attribution\n   report. Change the wording, granularity, or trigger conditions of the\n   skill -- not its underlying idea. The rewritten skill must keep the same\n   four bracket sections as the original skill ([When to use]/[Steps]/\n   [Verify]/[Do not use when] for a procedure skill, [Trigger]/\n   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):\n   rewrite each section's content, never collapse them into prose.\n   Reproduce the bracketed section headers exactly as written, each on its\n   own line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders (for example <config-file>, <port>). Library\nskills are retrieved and injected into OTHER tasks, where this task's\nspecifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why>\"}\n",
+        "role": "rewriter"
+      },
+      {
+        "prompt": "SEGMENT",
+        "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+        "role": "segmenter"
+      },
+      {
+        "prompt": "SEGMENT",
+        "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+        "role": "segmenter"
+      },
+      {
+        "prompt": "SEGMENT",
+        "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: success)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+        "role": "segmenter"
+      },
+      {
+        "prompt": "SIMILARITY",
+        "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the listing below. Each entry\nstarts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/00/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/01/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n\n- similar_groups: groups of skills that teach the same thing (same advice, same\n  trigger conditions). Group only skills that could be merged into one skill;\n  every group has at least two skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n\nOnly group or pair skills of the same kind: procedure skills (whose content\ncontains the '[When to use]' section header) with procedure skills, failure\nreferences (whose content contains the '[Trigger]' section header) with\nfailure references -- in similar_groups AND in conflicts.\n\nJudge by literal meaning, not surface wording: skills about the same behavior\nwith different examples still belong to one group. Do not force anything:\nreturn empty lists when there is nothing to merge and no conflicts.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...]}\n",
+        "role": "curator"
+      },
+      {
+        "prompt": "SKILL_DIAGNOSE",
+        "request_text": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it went wrong. The weak model will\nread it to recognize the same kind of mistake and avoid it.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING (context summary):\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in three passes:\n1. Diagnose: find where the weak model started going wrong -- which step or\n   decision, and what kind of mistake it made there (a wrong command, a\n   skipped check, a misread observation, a repeated failing action, ...).\n   Name the missing capability at the weak model's level, not a vague\n   \"logical error\".\n2. Adapt: read the weak model profile. It is the capability boundary of your\n   reader: every corrective step must be an action this exact model can carry\n   out as written -- vocabulary it knows, tool syntax it handles, one action\n   per step. Where the profile names a weakness that caused or worsened this\n   failure, the fix must guard against it.\n3. Write the reference in four sections:\n   - trigger: the failure signature -- what the weak model is doing when this\n     mistake is happening. Concrete and observable, phrased so the model can\n     recognize it in its own behavior.\n   - why_it_fails: one or two sentences: what goes wrong and why.\n   - do_instead: an ordered checklist of concrete actions, the correct\n     procedure for this kind of subtask. One action per item, imperative\n     voice, WITHOUT its own numbering; the exact command FORM with generic\n     placeholders where the subtask shows one.\n   - not_applicable_when: when this reference does NOT apply.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the reference must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"trigger\": \"<one or two sentences>\",\n  \"why_it_fails\": \"<one or two sentences>\",\n  \"do_instead\": [\"<one action>\", \"<one action>\", ...],\n  \"not_applicable_when\": \"<one sentence>\"}\n",
+        "role": "author"
+      },
+      {
+        "prompt": "SKILL_DIAGNOSE",
+        "request_text": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it went wrong. The weak model will\nread it to recognize the same kind of mistake and avoid it.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING (context summary):\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in three passes:\n1. Diagnose: find where the weak model started going wrong -- which step or\n   decision, and what kind of mistake it made there (a wrong command, a\n   skipped check, a misread observation, a repeated failing action, ...).\n   Name the missing capability at the weak model's level, not a vague\n   \"logical error\".\n2. Adapt: read the weak model profile. It is the capability boundary of your\n   reader: every corrective step must be an action this exact model can carry\n   out as written -- vocabulary it knows, tool syntax it handles, one action\n   per step. Where the profile names a weakness that caused or worsened this\n   failure, the fix must guard against it.\n3. Write the reference in four sections:\n   - trigger: the failure signature -- what the weak model is doing when this\n     mistake is happening. Concrete and observable, phrased so the model can\n     recognize it in its own behavior.\n   - why_it_fails: one or two sentences: what goes wrong and why.\n   - do_instead: an ordered checklist of concrete actions, the correct\n     procedure for this kind of subtask. One action per item, imperative\n     voice, WITHOUT its own numbering; the exact command FORM with generic\n     placeholders where the subtask shows one.\n   - not_applicable_when: when this reference does NOT apply.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the reference must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"trigger\": \"<one or two sentences>\",\n  \"why_it_fails\": \"<one or two sentences>\",\n  \"do_instead\": [\"<one action>\", \"<one action>\", ...],\n  \"not_applicable_when\": \"<one sentence>\"}\n",
+        "role": "author"
+      },
+      {
+        "prompt": "SKILL_DISTILL",
+        "request_text": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCEEDED: the skill is the executable\nprocedure the weak model should follow when it faces the same kind of subtask.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every step you write must be an action this exact model can carry out\nas written -- vocabulary it knows, tool syntax it handles, one action per\nstep. Where the profile names a weakness, add an explicit guard step against\nit; where it says the model cannot do something, never assume it can.\n\nWrite the skill in four sections:\n- when_to_use: the concrete, observable trigger -- \"when you need to\n  <goal>\". Surface features the weak model can recognize mid-task, never\n  abstract categories.\n- steps: an ordered checklist of concrete actions. One action per item,\n  imperative voice, WITHOUT its own numbering (the numbering is added\n  downstream). Write the exact command FORM to run, with generic\n  placeholders (for example <config-file>, <port>) where the subtask used\n  a concrete value -- the discipline below forbids copying that value.\n- verify: the observable sign that the subtask worked. State what to do\n  when the sign is absent (redo the previous step, or report the failure);\n  never \"keep retrying\".\n- not_applicable_when: when this skill does NOT apply, so it is not forced\n  onto unrelated subtasks.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the skill must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<one or two sentences>\",\n  \"steps\": [\"<one action>\", \"<one action>\", ...],\n  \"verify\": \"<one or two sentences>\",\n  \"not_applicable_when\": \"<one sentence>\"}\n",
+        "role": "author"
+      }
+    ]
+  },
+  "E6": {
+    "attributions": [
+      {
+        "diagnosis": "the skill's trigger is too vague to recognize",
+        "injection_block_sha256": "7249a604c3dc943c07e19ce348a378efd146ed63c5bd43ad26395a79633342c9",
+        "round": 0,
+        "schema": "live-attribution-v1",
+        "skill_actions": [
+          {
+            "action": "revise",
+            "problem": "the trigger condition is too vague to recognize during real execution",
+            "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+            "version": 1
+          },
+          {
+            "action": "revise",
+            "problem": "the trigger condition is too vague to recognize during real execution",
+            "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+            "version": 1
+          },
+          {
+            "action": "revise",
+            "problem": "the trigger condition is too vague to recognize during real execution",
+            "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+            "version": 1
+          }
+        ],
+        "task_id": "fakebench:t1"
+      }
+    ],
+    "verdicts": [
+      {
+        "aux": null,
+        "baseline": {
+          "success": 0,
+          "valid": 2
+        },
+        "better": false,
+        "injection_tokens": 186,
+        "judged_with_shortfall": false,
+        "live": {
+          "success": 0,
+          "valid": 2
+        },
+        "round": 0,
+        "rule": "strict_rate_gain",
+        "schema": "live-verdict-v1",
+        "task_id": "fakebench:t1"
+      },
+      {
+        "aux": null,
+        "baseline": {
+          "success": 0,
+          "valid": 2
+        },
+        "better": true,
+        "injection_tokens": 228,
+        "judged_with_shortfall": false,
+        "live": {
+          "success": 2,
+          "valid": 2
+        },
+        "round": 1,
+        "rule": "strict_rate_gain",
+        "schema": "live-verdict-v1",
+        "task_id": "fakebench:t1"
+      }
+    ]
+  },
+  "acceptance": "live_run",
+  "label": "live_run-whole_bank-split"
+}
