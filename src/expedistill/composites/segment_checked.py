@@ -67,6 +67,13 @@ __all__ = ["segment_checked"]
 #: Relative to the run directory (README section 2 layout).
 _AUDIT_PATH = Path("stage2_segments") / "segmentation_audit.jsonl"
 
+#: Public spelling of the audit channel's path for the evidence family's
+#: segmentation wiring (methods.evidence.segmentation), which appends the
+#: old stage 2's "empty trajectory" exclusion records to the same file.
+#: The old stage duplicated the constant; one owner is cheaper to keep
+#: correct.
+AUDIT_PATH = _AUDIT_PATH
+
 #: Prepended to the view on retry attempts. Wording is fixed so downstream
 #: log analysis can recognise it.
 _RETRY_NOTE = (

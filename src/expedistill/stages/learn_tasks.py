@@ -30,7 +30,11 @@ resurrected); a revise that produced no new version is NO CHANGE
 (``decision.revise_outcome``, boundaries section 4.3 rule 2) -- the
 version stays, nothing is discarded, the next learn phase tries again;
 add distills the task's strong segments into new PENDING skills, the
-stage-3 grain and status exactly as stage 3 always wrote them.
+stage-3 grain and status exactly as stage 3 always wrote them -- and
+produces those segments first when they do not exist yet (the evidence
+family's segmentation wiring, ``methods.evidence.segmentation``; Wave
+3-S), so the whole chain from the D-phase trajectories to the new
+skill runs inside the phase world with nothing seeded.
 
 **Evidence and author** (boundaries sections 2.5/2.6): a revise row
 collects fact-only evidence packages and hands them to the author
@@ -91,8 +95,10 @@ from expedistill.infra.store import (
     read_jsonl,
     write_jsonl,
 )
+from expedistill.methods import resolve_params
 from expedistill.methods.author import write as author
 from expedistill.methods.evidence import add_path, exam_sheet, live_group
+from expedistill.methods.evidence import segmentation
 from expedistill.methods.evidence.package import EvidencePackage
 from expedistill.prompts import get as get_prompt
 
@@ -281,15 +287,42 @@ def _land_delete(ctx: Any, phase: PhaseInstance, row: TaskListRow,
 def _land_add(ctx: Any, phase: PhaseInstance, row: TaskListRow,
               phase_dir) -> None:
     """Add: distill the task's strong segments into new pending skills
-    (the stage-3 grain: one segment, one skill). Experiences whose
-    skill already exists are skipped -- the add path's resume guard: a
-    crashed add re-derives the same task row and writes only what is
-    missing. A ModelOutputError that survives the write block's own
-    budget propagates to the per-target handler (recorded, no skill)."""
+    (the stage-3 grain: one segment, one skill). The segments are
+    produced first if they do not exist yet: no execute phase cuts
+    them, so the landing runs the evidence family's segmentation
+    wiring (``segmentation.segment_add_material`` -- K2 over the task's
+    trajectory_select-selected strong D-phase trajectories) right
+    before collecting, lazily -- only an add row pays for the cut, and
+    K2's stored-subtask skip makes a resumed add row free. Experiences
+    whose skill already exists are skipped -- the add path's other
+    resume guard: a crashed add re-derives the same task row and
+    writes only what is missing. A ModelOutputError that survives the
+    write block's own budget propagates to the per-target handler
+    (recorded, no skill)."""
     store: Store = ctx.store
-    package = add_path.collect_add_evidence(
-        task_row=row, store=store,
-        rule_name=ctx.config.rules["segment_select"])
+    segmentation.segment_add_material(
+        store=store,
+        task_id=row.target_id,
+        params=resolve_params("evidence", phase.spec.evidence),
+        trajectory_select=ctx.config.rules["trajectory_select"],
+        view_rules=get_plugin(ctx.config.benchmark).view_rules,
+        handle=ctx.handle("segmenter"),
+        usage=ctx.usage,
+        run_dir=ctx.run_dir)
+    try:
+        package = add_path.collect_add_evidence(
+            task_row=row, store=store,
+            rule_name=ctx.config.rules["segment_select"])
+    except add_path.NoAddMaterial:
+        # A data fact the old stage 3 answered with silence (no subtask,
+        # no skill): the weak arm's failure authorized the add, but the
+        # strong arm holds no learnable material -- not run, all cut
+        # away by the segment rule, or K2-exhausted (terminal within
+        # this run, so raising here would brick the phase on a resume
+        # that re-derives the same row forever). Recorded, not raised.
+        _append_outcome(phase, row, None, "skipped_no_material", None,
+                        phase_dir)
+        return
     fresh = [experience for experience in package.source_experiences
              if not store.exists(
                  "skills",

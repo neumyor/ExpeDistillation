@@ -10,6 +10,11 @@ entries stand next to the params class:
   keep/revise/delete vocabulary is dropped at this boundary);
 * ``methods.evidence.add_path.collect_add_evidence`` -- the add path's
   evidence (a task's strong segments, as source experiences);
+* ``methods.evidence.segmentation.segment_add_material`` -- the add
+  path's segmentation wiring (Wave 3-S): K2 over the task's
+  trajectory_select-selected strong D-phase trajectories, called by
+  the landing right before ``collect_add_evidence`` reads the store --
+  the add row's material is produced, not assumed;
 * ``methods.evidence.exam_sheet.collect_exam_evidence`` -- the exam
   path's answer-sheet package (the exam, the judged attempt's weak
   answer and judge reason; moved there from learn_tasks' inline

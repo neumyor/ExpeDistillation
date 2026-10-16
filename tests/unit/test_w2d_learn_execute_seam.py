@@ -6,10 +6,11 @@ discarding the skill off the A phase's report, and the two-round exam
 skeleton (D L A L A L A L C) as one smoke.
 
 Every phase here is the production driver -- no seeded report files, no
-seeded artifacts, no hand-written acceptance rows; the only seeded
-object is the SUBTASK of the strong trajectory (segmentation has no
-phase-world call site yet, so the add path's source experience is
-seeded the way the learn-phase tests seed it).
+seeded artifacts, no hand-written acceptance rows, and since Wave 3-S no
+seeded SUBTASK either: the add path segments the D phase's strong
+trajectory itself (methods.evidence.segmentation through learn_tasks),
+so the chain from the D-phase trajectories to the new skill is real end
+to end.
 """
 
 import importlib
@@ -31,7 +32,7 @@ from expedistill.composites import phase_bank, verdicts
 from expedistill.composites.phase_bank import load_phase_bank
 from expedistill.core import ids
 from expedistill.core.config import ExperimentConfig
-from expedistill.core.models import Skill, Subtask
+from expedistill.core.models import Skill
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import json_script, make_fake_handle
@@ -179,7 +180,7 @@ def _config(retry_rounds=3):
 
 
 def _handles(examiner=(), answerer=(), judge=(), auditor=(),
-             author=(), rewriter=()):
+             author=(), rewriter=(), segmenter=()):
     handles = {
         "executor_strong": make_fake_handle("strong"),
         "executor_weak": make_fake_handle("weak"),
@@ -189,6 +190,7 @@ def _handles(examiner=(), answerer=(), judge=(), auditor=(),
         "auditor": make_fake_handle("auditor", list(auditor)),
         "author": make_fake_handle("author", list(author)),
         "rewriter": make_fake_handle("rewriter", list(rewriter)),
+        "segmenter": make_fake_handle("segmenter", list(segmenter)),
     }
     return handles
 
@@ -247,6 +249,16 @@ def _distill():
     })
 
 
+def _segmentation():
+    # The SEGMENT prompt's output contract over t1's 1-step strong
+    # trajectory: one segment covering [0, 1) exactly (D7 demands full
+    # coverage), kept by the default segment_select rule because its
+    # own goal succeeded.
+    return json_script([{"start": 0, "end": 1, "label": "restart",
+                         "description": "restart the stuck service",
+                         "success": True}])
+
+
 def _revision():
     # The REWRITE prompt's output contract (same keys the exam revise
     # path's tests use): the rewritten text, the failure category and
@@ -256,20 +268,13 @@ def _revision():
                         "rewrite_reason": "spelled out verification"})
 
 
-def _seed_t1_subtask(ctx):
-    """The add path's source experience: one strong segment of t1 (the
-    segmentation product -- seeded because segmentation has no
-    phase-world call site yet)."""
+def _t1_subtask_id():
+    """The add path's real segment id: the first cut of the D phase's
+    strong attempt 0 on t1 (the deterministic chain the segmentation
+    wiring produces inside L1)."""
     task_id = ids.make_task_id(_FAKE, "t1")
-    trajectory_id = ids.make_trajectory_id(task_id, "strong", 0)
-    subtask_id = ids.make_subtask_id(trajectory_id, 0)
-    ctx.store.save(Subtask(
-        subtask_id=subtask_id, task_id=task_id,
-        trajectory_id=trajectory_id, source="strong",
-        trajectory_success=True, segment_index=0, step_range=(0, 1),
-        label="restart", description="restart the stuck service",
-        success=True), "subtasks")
-    return subtask_id
+    return ids.make_subtask_id(ids.make_trajectory_id(task_id, "strong", 0),
+                               0)
 
 
 def _load_skill(ctx, skill_id):
@@ -288,13 +293,15 @@ def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
         answerer=["bare answer", "skilled answer"],
         judge=[_verdict(False), _verdict(True)],
         auditor=[_audit()],
-        author=[_distill()])
+        author=[_distill()],
+        segmenter=[_segmentation()])
     ctx = _ctx(tmp_path, config, handles)
 
     # D: the baseline (strong all-success, weak fails t1).
     _run(ctx, config, 0)
-    # L1: the baseline-gap learn -- decide (add for t1), author, land.
-    subtask_id = _seed_t1_subtask(ctx)
+    # L1: the baseline-gap learn -- decide (add for t1), segment the D
+    # phase's strong trajectory, author, land.
+    subtask_id = _t1_subtask_id()
     first = _run(ctx, config, 1)
 
     skill_id = ids.make_skill_id(subtask_id)
@@ -342,11 +349,12 @@ def test_a_still_failing_skill_is_discarded_at_the_last_check(
         answerer=["bare answer", "skilled answer"],
         judge=[_verdict(False), _verdict(False)],
         auditor=[_audit()],
-        author=[_distill()])
+        author=[_distill()],
+        segmenter=[_segmentation()])
     ctx = _ctx(tmp_path, config, handles)
 
     _run(ctx, config, 0)
-    subtask_id = _seed_t1_subtask(ctx)
+    subtask_id = _t1_subtask_id()
     _run(ctx, config, 1)
     _run(ctx, config, 2)
 
@@ -389,12 +397,14 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
                _verdict(False), _verdict(True)],  # A2: bare, with-skill
         auditor=[_audit(), _audit()],            # A1 (v1), A2 (v2)
         author=[_distill()],                    # L1's add
-        rewriter=[_revision()])                  # L2's revise
+        rewriter=[_revision()],                  # L2's revise
+        segmenter=[_segmentation()])             # L1's cut of t1
     ctx = _ctx(tmp_path, config, handles)
 
-    # D + L1: the weak model fails t1, the learn phase adds one skill.
+    # D + L1: the weak model fails t1, the learn phase segments the D
+    # phase's strong trajectory and adds one skill from its cut.
     _run(ctx, config, 0)
-    subtask_id = _seed_t1_subtask(ctx)
+    subtask_id = _t1_subtask_id()
     skill_id = ids.make_skill_id(subtask_id)
     _run(ctx, config, 1)
     assert _load_skill(ctx, skill_id).status == "pending"

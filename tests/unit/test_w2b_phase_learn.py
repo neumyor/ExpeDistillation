@@ -428,8 +428,12 @@ def test_a_label_off_the_frozen_derivation_is_refused(tmp_path):
 def test_the_first_learn_phase_adds_skills_for_failed_bare_tasks(
         tmp_path, monkeypatch):
     sequence, phases = _exam_sequence()
+    # The segmenter is never called here (the segment is seeded), and an
+    # empty script says so: the add path's segmentation wiring must
+    # find the stored subtask and make zero model calls.
     handles = {"author": make_fake_handle("author", [_distill_script()]),
-               "rewriter": make_fake_handle("rewriter", [])}
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter", [])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
     calls = _install_curation(monkeypatch)
     _seed_baseline(ctx.store, weak_correctness=False)
@@ -469,7 +473,8 @@ def test_a_finished_learn_phase_is_skipped_on_replay(tmp_path,
     # phase's accepted skills would leak into this one's snapshot).
     sequence, phases = _exam_sequence()
     handles = {"author": make_fake_handle("author", [_distill_script()]),
-               "rewriter": make_fake_handle("rewriter", [])}
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter", [])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
     _install_curation(monkeypatch)
     _seed_baseline(ctx.store, weak_correctness=False)
@@ -502,7 +507,8 @@ def test_a_finished_learn_phase_is_skipped_on_replay(tmp_path,
 def test_the_add_path_is_idempotent_across_a_crash(tmp_path, monkeypatch):
     sequence, phases = _exam_sequence()
     handles = {"author": make_fake_handle("author", []),
-               "rewriter": make_fake_handle("rewriter", [])}
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter", [])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
     _install_curation(monkeypatch)
     _seed_baseline(ctx.store, weak_correctness=False)

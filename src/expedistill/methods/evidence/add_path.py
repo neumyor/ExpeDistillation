@@ -9,7 +9,9 @@ steps view from its source trajectory, and packages them as one
 evidence package's ``source_experiences`` -- the material the author
 module writes new skills from. No actions, no store writes, no model
 calls: segmentation itself is the evidence family's ``segment`` method
-(stage 2 / K2 territory); this driver only gathers what it produced.
+(K2 territory -- ``methods.evidence.segmentation.segment_add_material``,
+which the landing calls right before this collector reads the store);
+this driver only gathers what it produced.
 """
 
 from typing import Any, List
@@ -23,7 +25,21 @@ from expedistill.infra.store import Store
 
 from expedistill.methods.evidence.package import EvidencePackage
 
-__all__ = ["collect_add_evidence"]
+__all__ = ["NoAddMaterial", "collect_add_evidence"]
+
+
+class NoAddMaterial(ValueError):
+    """The task has no strong segment the rule keeps: a data fact, not a
+    wiring bug. The decision authorizes an add off the WEAK arm's
+    failure alone, so the strong arm may hold no learnable material --
+    it was never run, its segments were all cut away by the segment
+    rule, or K2 exhausted its trajectories (terminal within a run).
+    With segmentation wired into the add path this is reachable on real
+    data; the landing records it (learn_tasks' ``skipped_no_material``
+    receipt) where the old stage 3 answered with silence. A ValueError
+    subclass because the contract violation shape (a caller handing in
+    a task with material it knows exists) is still a bug and older
+    tests assert ValueError."""
 
 
 def collect_add_evidence(
@@ -75,10 +91,10 @@ def collect_add_evidence(
                          "trajectory_id": sub.trajectory_id,
                          "step_range": [start, end]})
     if not source_experiences:
-        raise ValueError(
+        raise NoAddMaterial(
             f"task {task_id!r} has no strong segment the rule "
-            f"{rule_name!r} keeps: there is nothing to learn from, so "
-            "the add task row contradicts the run's segmentation")
+            f"{rule_name!r} keeps: there is nothing to learn from on "
+            "this task")
     return EvidencePackage(
         target=task_id,
         facts=[{"kind": "add_target_task", "text": task_id}],
