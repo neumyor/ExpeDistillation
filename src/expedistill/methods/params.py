@@ -18,7 +18,8 @@ from expedistill.core.config import ConfigError
 __all__ = ["build_params"]
 
 
-def build_params(cls: Type, raw: Dict[str, Any], slot: str, name: str) -> Any:
+def build_params(cls: Type, raw: Dict[str, Any], family: str,
+                 name: str) -> Any:
     """``cls(**raw)`` with the loud validation described in the module
     docstring. ``raw`` must already have the method ``name`` removed."""
     hints = typing.get_type_hints(cls)
@@ -26,7 +27,7 @@ def build_params(cls: Type, raw: Dict[str, Any], slot: str, name: str) -> Any:
     unknown = sorted(set(raw) - set(fields))
     if unknown:
         raise ConfigError(
-            f"methods.{slot} method {name!r} got unknown parameter(s) "
+            f"methods.{family} method {name!r} got unknown parameter(s) "
             f"{unknown}; accepted: {sorted(fields)}")
     for fname, field in sorted(fields.items()):
         if fname in raw:
@@ -34,12 +35,12 @@ def build_params(cls: Type, raw: Dict[str, Any], slot: str, name: str) -> Any:
         if (field.default is dataclasses.MISSING
                 and field.default_factory is dataclasses.MISSING):
             raise ConfigError(
-                f"methods.{slot} method {name!r} is missing required "
+                f"methods.{family} method {name!r} is missing required "
                 f"parameter {fname!r}")
     for fname, value in sorted(raw.items()):
         if not _matches(value, hints[fname]):
             raise ConfigError(
-                f"methods.{slot} method {name!r}: parameter {fname!r} "
+                f"methods.{family} method {name!r}: parameter {fname!r} "
                 f"must be {hints[fname]}, got {value!r}")
     return cls(**raw)
 
@@ -61,6 +62,14 @@ def _matches(value: Any, annotation: Any) -> bool:
         return isinstance(value, str)
     if annotation is bool:
         return isinstance(value, bool)
+    if origin is list:
+        # A homogeneous list of the minimal scalars (e.g. the baseline
+        # phase's two arm-role names); a tuple is NOT accepted -- the
+        # frozen manifest is JSON, where a tuple would not compare equal.
+        (item_annotation,) = typing.get_args(annotation)
+        return (isinstance(value, list)
+                and all(_matches(item, item_annotation) for item in value))
     raise ConfigError(
         f"unsupported params annotation {annotation!r}; the minimal set "
-        "is int / float / str / bool and Optional of those")
+        "is int / float / str / bool, a homogeneous list of those, and "
+        "Optional of any of them")

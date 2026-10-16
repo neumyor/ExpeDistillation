@@ -76,30 +76,48 @@ def _correct():
     return json_script({"verdict": "correct", "error_description": ""})
 
 
-def _make_ctx(tmp_path, *, methods, curator=(), answerer=(), judge=()):
+def _make_ctx(tmp_path, *, curator=(), answerer=(), judge=()):
     run_dir = tmp_path / "run"
     handles = {
         "curator": make_fake_handle("curator", list(curator)),
         "answerer": make_fake_handle("weak", list(answerer)),
         "judge": make_fake_handle("judge", list(judge)),
     }
+    # The config only carries the phase-agnostic identity; the curate
+    # mapping (v4: every learn phase carries its own) is an argument of
+    # the produce entries now.
     config = ExperimentConfig(
         benchmark="tb", mode="split",
         models={"executor_strong": "strong-x", "executor_weak": "weak-7b"},
         weak_profile="a weak model that needs short sentences",
-        methods=methods)
+        sequence=["D", "L", "C"],
+        phases={
+            "D": {"kind": "execute", "role": "baseline",
+                  "delivery": {"name": "none"},
+                  "execution": {"name": "real",
+                                "arms": ["executor_strong",
+                                         "executor_weak"]}},
+            "L": {"kind": "learn",
+                  "evidence": {"name": "segment", "K": 1},
+                  "author": {"name": "distill_diagnose"},
+                  "curate": {"name": "none", "token_budget": BIG}},
+            "C": {"kind": "execute", "role": "test", "tasks": "test",
+                  "delivery": {"name": "whole_bank"},
+                  "execution": {"name": "real"},
+                  "compare": {"against": "fresh_bare"}},
+        })
     return StageContext(run_dir=run_dir, store=Store(run_dir), config=config,
                         usage=None, handles=handles,
                         workdir_root=run_dir / "work")
 
 
-def _agentbrew_methods(budget=BIG, rounds=3, merge_check="exam"):
-    return {"curation": {"name": "agentbrew", "token_budget": budget,
-                         "rounds": rounds, "merge_check": merge_check}}
+def _agentbrew_curate(budget=BIG, rounds=3, merge_check="exam"):
+    return {"name": "agentbrew", "token_budget": budget,
+            "rounds": rounds, "merge_check": merge_check}
 
 
-def _none_methods(budget=BIG):
-    return {"curation": {"name": "none", "token_budget": budget}}
+def _none_curate(budget=BIG):
+    return {"name": "none", "token_budget": budget}
 
 
 _MERGE_SCRIPTS = dict(
@@ -156,12 +174,13 @@ def test_loading_a_missing_artifact_names_the_phase(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_produce_none_writes_a_loadable_phase_artifact(tmp_path):
-    ctx = _make_ctx(tmp_path, methods=_none_methods())
+    curate = _none_curate()
+    ctx = _make_ctx(tmp_path)
     kept = _add_skill(ctx.store, 0, "keep me")
     _add_skill(ctx.store, 1, "deleted", status="discarded")
     _add_skill(ctx.store, 2, "still pending", status="pending")
 
-    summary = phase_bank_entry.produce(ctx, "p01:learn")
+    summary = phase_bank_entry.produce(ctx, curate, "p01:learn")
 
     assert summary["members"] == [kept.skill_id]
     assert summary["size"] == 1
@@ -185,14 +204,15 @@ def test_produce_none_writes_a_loadable_phase_artifact(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_produce_agentbrew_merges_with_k3_regression_exams(tmp_path):
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods(),
+    curate = _agentbrew_curate()
+    ctx = _make_ctx(tmp_path,
                      **_MERGE_SCRIPTS)
     skills = [_add_skill(ctx.store, 0, "Check the log file first."),
               _add_skill(ctx.store, 1, "Look at the log file before anything else.")]
     for index in range(2):
         _add_exam(ctx.store, index)
 
-    summary = phase_bank_entry.produce(ctx, "p02:learn")
+    summary = phase_bank_entry.produce(ctx, curate, "p02:learn")
 
     merged_id = "bank/merge/0000"
     assert summary["members"] == [merged_id]
@@ -225,7 +245,8 @@ def test_produce_agentbrew_merges_with_k3_regression_exams(tmp_path):
 
 def test_produce_agentbrew_merge_check_none_skips_k3(tmp_path):
     # Empty answerer/judge scripts: any K3 call would exhaust the script.
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods(merge_check="none"),
+    curate = _agentbrew_curate(merge_check="none")
+    ctx = _make_ctx(tmp_path,
                     curator=_MERGE_SCRIPTS["curator"],
                     answerer=[], judge=[])
     _add_skill(ctx.store, 0, "Check the log file first.")
@@ -233,7 +254,7 @@ def test_produce_agentbrew_merge_check_none_skips_k3(tmp_path):
     for index in range(2):
         _add_exam(ctx.store, index)
 
-    summary = phase_bank_entry.produce(ctx, "p01:learn")
+    summary = phase_bank_entry.produce(ctx, curate, "p01:learn")
 
     merged_id = "bank/merge/0000"
     assert summary["members"] == [merged_id]
@@ -244,15 +265,16 @@ def test_produce_agentbrew_merge_check_none_skips_k3(tmp_path):
 def test_produce_agentbrew_second_call_is_a_pure_rewrite(tmp_path):
     # The scripts are consumed by the first call; the second (resume)
     # call must make zero model calls and land on the same artifact.
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods(),
+    curate = _agentbrew_curate()
+    ctx = _make_ctx(tmp_path,
                     **_MERGE_SCRIPTS)
     _add_skill(ctx.store, 0, "Check the log file first.")
     _add_skill(ctx.store, 1, "Look at the log file before anything else.")
     for index in range(2):
         _add_exam(ctx.store, index)
-    first = phase_bank_entry.produce(ctx, "p01:learn")
+    first = phase_bank_entry.produce(ctx, curate, "p01:learn")
 
-    second = phase_bank_entry.produce(ctx, "p01:learn")
+    second = phase_bank_entry.produce(ctx, curate, "p01:learn")
 
     assert second == first
     assert load_phase_bank(ctx.run_dir, "p01:learn")[0]["skill_id"] \
@@ -262,9 +284,10 @@ def test_produce_agentbrew_second_call_is_a_pure_rewrite(tmp_path):
 def test_produce_agentbrew_empty_accepted_set_writes_empty_artifact(tmp_path):
     # No skills at all: the phase still ends with a (loadable, empty)
     # bank artifact -- its existence is the point of R7.
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods())
+    curate = _agentbrew_curate()
+    ctx = _make_ctx(tmp_path)
 
-    summary = phase_bank_entry.produce(ctx, "p01:learn")
+    summary = phase_bank_entry.produce(ctx, curate, "p01:learn")
 
     assert summary["members"] == []
     assert summary["size"] == 0
@@ -275,12 +298,13 @@ def test_produce_agentbrew_empty_accepted_set_writes_empty_artifact(tmp_path):
 def test_produce_agentbrew_over_budget_stops_loudly(tmp_path):
     # One long skill against a tiny budget: K5 refuses after its rounds
     # and no phase artifact is written.
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods(budget=2, rounds=1),
+    curate = _agentbrew_curate(budget=2, rounds=1)
+    ctx = _make_ctx(tmp_path,
                     curator=[_similarity()], judge=[], answerer=[])
     _add_skill(ctx.store, 0, "a much longer skill than the budget allows")
 
     with pytest.raises(InfraConfigError, match="bank_token_budget"):
-        phase_bank_entry.produce(ctx, "p01:learn")
+        phase_bank_entry.produce(ctx, curate, "p01:learn")
 
     assert not phase_bank_path(ctx.run_dir, "p01:learn").exists()
 
@@ -292,12 +316,13 @@ def test_produce_agentbrew_over_budget_stops_loudly(tmp_path):
 def test_produce_as_is_ignores_the_configured_merge_loop(tmp_path):
     # The config asks for agentbrew, but produce_as_is writes the
     # accepted rows verbatim with no model call and no journal.
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods())
+    curate = _agentbrew_curate()
+    ctx = _make_ctx(tmp_path)
     kept = [_add_skill(ctx.store, 0, "one"),
             _add_skill(ctx.store, 1, "two")]
     _add_skill(ctx.store, 2, "gone", status="discarded")
 
-    summary = phase_bank_entry.produce_as_is(ctx, "p01:learn")
+    summary = phase_bank_entry.produce_as_is(ctx, curate, "p01:learn")
 
     assert summary["members"] == [skill.skill_id for skill in kept]
     rows = load_phase_bank(ctx.run_dir, "p01:learn")
@@ -310,11 +335,12 @@ def test_produce_as_is_ignores_the_configured_merge_loop(tmp_path):
 
 
 def test_produce_as_is_keeps_the_budget_valve(tmp_path):
-    ctx = _make_ctx(tmp_path, methods=_agentbrew_methods(budget=2))
+    curate = _agentbrew_curate(budget=2)
+    ctx = _make_ctx(tmp_path)
     _add_skill(ctx.store, 0, "a much longer skill")
 
     with pytest.raises(ConfigError, match="without curation"):
-        phase_bank_entry.produce_as_is(ctx, "p01:learn")
+        phase_bank_entry.produce_as_is(ctx, curate, "p01:learn")
 
     assert not phase_bank_path(ctx.run_dir, "p01:learn").exists()
 
@@ -328,17 +354,18 @@ def test_each_learn_phase_ends_with_the_bank_of_its_own_round(tmp_path):
     # set (one skill discarded, one added), and each phase directory
     # holds the bank of its own round -- the previous artifact is never
     # rewritten by a later phase.
-    ctx = _make_ctx(tmp_path, methods=_none_methods())
+    curate = _none_curate()
+    ctx = _make_ctx(tmp_path)
     _add_skill(ctx.store, 0, "one")
     _add_skill(ctx.store, 1, "two")
-    first = phase_bank_entry.produce(ctx, "p01:learn")
+    first = phase_bank_entry.produce(ctx, curate, "p01:learn")
     assert first["members"] == [_skill_id(0), _skill_id(1)]
 
     gone = ctx.store.load("skills", _skill_id(1), Skill)
     gone.status = "discarded"
     ctx.store.save(gone, "skills")
     _add_skill(ctx.store, 2, "three")
-    second = phase_bank_entry.produce(ctx, "p03:learn")
+    second = phase_bank_entry.produce(ctx, curate, "p03:learn")
 
     assert second["members"] == [_skill_id(0), _skill_id(2)]
     assert [row["skill_id"]
@@ -356,10 +383,11 @@ def test_bank_summary_agrees_with_the_artifact_rows(tmp_path):
     # the bank_reference recomputable from the artifact rows alone (what
     # stage 6 records as skills_injected today).
     from expedistill.inject import bank_reference
-    ctx = _make_ctx(tmp_path, methods=_none_methods())
+    curate = _none_curate()
+    ctx = _make_ctx(tmp_path)
     _add_skill(ctx.store, 0, "one")
     _add_skill(ctx.store, 1, "two")
-    phase_bank_entry.produce(ctx, "p01:learn")
+    phase_bank_entry.produce(ctx, curate, "p01:learn")
     rows = load_phase_bank(ctx.run_dir, "p01:learn")
     summary = load_phase_bank_summary(ctx.run_dir, "p01:learn")
     assert summary["size"] == len(rows)

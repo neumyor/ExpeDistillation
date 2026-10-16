@@ -4,17 +4,19 @@ One YAML file under ``configs/experiments/`` describes one experiment. The
 frozen copy of this config (``to_dict``) goes into the run manifest; changing
 any field after the run started is a new experiment (B4 enforces that).
 
-SCHEMA v3 (the multi-method switch, docs/decisions/
-multi_method_framework_20261015.md section 5): every method parameter moved
-into one ``methods`` mapping keyed by the five slots -- segmentation,
-authoring, acceptance, curation, delivery. A slot's params are validated by
-the SLOT'S OWN contract (a dataclass in the methods layer) at resolution
-time, NOT here: core is layer 0 and cannot know a method's parameters. Core
-owns only the shape -- the five known slots, mappings as values -- and
-completes absent slots from ``METHOD_DEFAULTS`` (the complete-don't-reject
-discipline: the frozen config always carries the effective method identity).
-A single-method slot may be written with or without its ``name``; a
-multi-method slot (acceptance, delivery) names its method explicitly.
+SCHEMA v4 (the execute-learn repair, R9): the method is a ``sequence``
+of phases -- local names looked up under ``phases``, an execute or a
+learn phase each (see the schema-v4 section below for the parsed specs,
+the R8 role vocabulary and the load-time checklist). A phase family's
+params are validated by the FAMILY'S OWN contract (a dataclass in the
+methods layer) at resolution time, NOT here: core is layer 0 and cannot
+know a method's parameters. Core owns only the shape, and nothing is
+completed by default -- an absent family is an error, because an
+experiment's identity includes every phase it runs. v3 and older are
+refused with a pointer at the pure upgrade mappings
+(``upgrade_v3_config``, chaining ``upgrade_v2_config`` for v2) and the
+converter script (``scripts/run/convert_v3_configs.py``); the v3 files
+are frozen experiment records, so the converter writes new names.
 
 The role table is a plain dict on purpose: ``models[role] -> model name``.
 Two entries are the anchors -- ``executor_strong`` and ``executor_weak`` --
@@ -36,15 +38,10 @@ the real one depending on merge order.
 Config files fail loud: unknown top-level keys and schema versions other
 than this code's are ConfigErrors instead of being silently dropped. The
 trap this closes: a new config run by old code dropped ``token_budgets``
-without a trace and fell back to the dead 5120 default. A v2 config is
-rejected with a pointer at the one-time converter
-(``scripts/run/convert_v2_configs.py``); ``upgrade_v2_config`` is the pure
-stdlib mapping both that converter and the reuse assembler (reading a v2
-source run's manifest) share. ``upgrade_v3_config`` is the same kind of
-pure mapping for schema v4's phase sequences (docs/decisions/
-execute_learn_implementation_20261015.md section 4); it lands ahead of
-the M4.3 core flip, so its result carries ``schema_version: 4`` as data
-while this module still loads v3 only.
+without a trace and fell back to the dead 5120 default. ``upgrade_v2_config``
+and ``upgrade_v3_config`` are the pure stdlib mappings the one-time
+converters and the reuse assembler (reading an old source run's manifest)
+share.
 
 Deviation from the layer rule "core depends on stdlib only": ``load_config`` /
 ``save_config`` need YAML, and the wave spec places them here. The ``yaml``
@@ -78,17 +75,11 @@ DEFAULT_RULES = {
     "trajectory_select": "all",
 }
 
-#: The five method slots (multi-method plan section 5). The frozen config
-#: always carries all five (complete-don't-reject): an absent slot is the
-#: default method with default params.
-METHOD_SLOTS = (
-    "segmentation", "authoring", "acceptance", "curation", "delivery")
-
-#: Default slot params -- the effective method identity when the config
-#: names none. Per-parameter validation belongs to the slot's contract in
-#: the methods layer (stage 0 resolves every slot before freezing); these
-#: defaults must satisfy those contracts, and a test pins that they do.
-METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
+#: The v3 slot defaults -- schema-v3 knowledge, kept ONLY for
+#: ``upgrade_v3_config`` (the v4 loader has no slots; an absent phase
+#: family is a load-time error, not a default). These must match what
+#: the v3 loader froze for an absent slot; the upgrade's tests pin that.
+_V3_METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "segmentation": {"K": 5, "retry_limit": 2},
     "authoring": {"exams": True},
     "acceptance": {"name": "exam", "retry_limit": 2},
@@ -133,8 +124,10 @@ _TOKEN_BUDGET_KEYS = ("default_max_output_tokens", "max_input_tokens", "roles")
 #: Keys accepted inside one ``token_budgets.roles`` entry.
 _ROLE_BUDGET_KEYS = ("max_output_tokens", "max_input_tokens")
 
-#: v3: every method parameter lives in the ``methods`` mapping.
-CONFIG_SCHEMA_VERSION = 3
+#: v4: the method is a ``sequence`` of phases; every method parameter
+#: lives in the phase definitions under ``phases`` (R9). v3 and older
+#: are refused with a pointer at the upgrade mapping and the converter.
+CONFIG_SCHEMA_VERSION = 4
 
 
 class ConfigError(ValueError):
@@ -718,45 +711,6 @@ def _validate_split(split: Dict[str, Any]) -> None:
             f"{{'ratio': float, 'seed': int}}, got keys {sorted(keys)}")
 
 
-def _validate_methods(methods: Any) -> Dict[str, Dict[str, Any]]:
-    """Validate the ``methods`` shape and complete it; a completed copy is
-    returned so the frozen value cannot change through a later mutation of
-    the caller's mapping (same contract as token_budgets).
-
-    Only the SHAPE is checked here: five known slots, each value a
-    mapping. Per-parameter validation (unknown keys, types, the method's
-    own constraints) belongs to the slot's contract in the methods layer
-    and runs at resolution -- stage 0 resolves every slot before anything
-    freezes, so a bad parameter stops the run before a single task loads.
-    """
-    if not isinstance(methods, dict):
-        raise ConfigError(
-            f"methods must be a mapping, got {type(methods).__name__}")
-    unknown = sorted(set(methods) - set(METHOD_SLOTS), key=str)
-    if unknown:
-        raise ConfigError(
-            f"methods has unknown slot(s) {unknown}; the slots are "
-            f"{list(METHOD_SLOTS)}")
-    completed: Dict[str, Dict[str, Any]] = {}
-    for slot in METHOD_SLOTS:
-        given = methods.get(slot)
-        if given is not None and not isinstance(given, dict):
-            raise ConfigError(
-                f"methods.{slot} must be a mapping of parameter names to "
-                f"values, got {type(given).__name__}")
-        # An absent, null or EMPTY mapping is the default method with
-        # default params (the v2 ``{}``-means-exam precedent, one spelling
-        # for every slot); a non-empty mapping freezes verbatim -- no
-        # per-key merge, which would smuggle one method's params into
-        # another's slot (the params dataclass completes the semantics at
-        # resolution).
-        if not given:
-            completed[slot] = dict(METHOD_DEFAULTS[slot])
-            continue
-        completed[slot] = dict(given)
-    return completed
-
-
 def _is_positive_int(value: Any) -> bool:
     """True for a positive int; bool is an int subclass but never a budget."""
     return (isinstance(value, int) and not isinstance(value, bool)
@@ -858,10 +812,21 @@ class ExperimentConfig:
     #: task ids, or a task-file path (plugin-interpreted). Stage 0 loads
     #: exactly this; explicit split lists must then cover it exactly.
     tasks: Union[None, str, List[str]] = None
-    #: The five method slots (METHOD_SLOTS); absent slots are completed
-    #: from METHOD_DEFAULTS, and per-parameter validation runs at method
-    #: resolution (stage 0 resolves every slot before freezing).
-    methods: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: The method, as a sequence of phase LOCAL names (R9). Position i
+    #: (0-based) is the phase the ledger and the per-phase directories
+    #: label ``p{i+1:02d}:<name>``; a name may repeat (the exam method's
+    #: ``[D, L] + [A, L] x 3 + [C]``).
+    sequence: List[str] = field(default_factory=list)
+    #: The parsed phase definitions, keyed by local name: raw mappings on
+    #: the way in (YAML / a frozen manifest), ExecutePhaseSpec /
+    #: LearnPhaseSpec afterwards (parse_phases runs the load-time
+    #: checklist in __post_init__).
+    phases: Dict[str, PhaseSpec] = field(default_factory=dict)
+    #: How many times the phase driver may re-dispatch one unit the
+    #: verdict ruled invalid (R9); after the limit the unit stays a hole
+    #: with cause ``invalid_redispatch_exhausted``. A method parameter:
+    #: accepting holes changes what is measured, so it freezes.
+    invalid_redispatch_limit: int = DEFAULT_INVALID_REDISPATCH_LIMIT
     #: Named-rule selections; missing keys are filled from DEFAULT_RULES,
     #: and stage 0 validates every name against the rule registries.
     rules: Dict[str, str] = field(default_factory=dict)
@@ -897,10 +862,25 @@ class ExperimentConfig:
         if self.split is not None:
             _validate_split(self.split)
         self.tasks = _normalise_tasks(self.tasks)
-        # Method slots: shape-checked and completed here (the frozen config
-        # always carries the effective method identity); the per-parameter
-        # contracts live in the methods layer and run at resolution.
-        self.methods = _validate_methods(self.methods)
+        # The phase sequence: parsed here (the load-time checklist runs
+        # before anything freezes), whether the caller handed raw
+        # mappings (YAML / a frozen manifest) or already-parsed specs
+        # (dataclasses.replace on a loaded config). Deep-copied inside,
+        # so the frozen value never aliases the caller's mapping.
+        self.sequence = list(self.sequence)
+        raw_phases = {
+            name: (phase_spec_to_raw(spec)
+                   if isinstance(spec, (ExecutePhaseSpec, LearnPhaseSpec))
+                   else spec)
+            for name, spec in self.phases.items()}
+        self.phases = parse_phases(
+            raw_phases, self.sequence,
+            n_attempts_strong=self.n_attempts_strong,
+            n_attempts_weak=self.n_attempts_weak)
+        if not _is_positive_int(self.invalid_redispatch_limit):
+            raise ConfigError(
+                "invalid_redispatch_limit must be a positive int, got "
+                f"{self.invalid_redispatch_limit!r}")
         unknown_rules = set(self.rules) - set(RULE_KEYS)
         if unknown_rules:
             raise ValueError(
@@ -1016,10 +996,14 @@ class ExperimentConfig:
         return self.token_budgets["default_max_output_tokens"]
 
     def to_dict(self) -> Dict[str, Any]:
-        """The freezable payload: every field, values included as they are
-        (v3 has no optional fields -- the v2 ``acceptance: null`` special
-        case died with the slot it named)."""
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        """The freezable payload: every field, values included as they are,
+        with the parsed phase specs back in their raw (JSON-safe) form so
+        ``from_dict(to_dict(x))`` round-trips -- B4's resume comparison
+        depends on that equality."""
+        payload = {f.name: getattr(self, f.name) for f in fields(self)}
+        payload["phases"] = {name: phase_spec_to_raw(spec)
+                             for name, spec in self.phases.items()}
+        return payload
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExperimentConfig":
@@ -1045,10 +1029,13 @@ class ExperimentConfig:
         if version < CONFIG_SCHEMA_VERSION:
             raise ConfigError(
                 f"config schema_version is {version}; this code speaks "
-                f"schema {CONFIG_SCHEMA_VERSION} -- convert the config with "
-                "scripts/run/convert_v2_configs.py (which writes NEW file "
-                "names; the v2 files are frozen experiment records), and "
-                "resume runs frozen under v2 on their maintenance branch")
+                f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
+                "convert the config with upgrade_v3_config (the converter "
+                "script scripts/run/convert_v3_configs.py writes NEW file "
+                "names; v3 files are frozen experiment records; a v2 file "
+                "chains through upgrade_v2_config first), and resume runs "
+                "frozen under an older schema on their maintenance branch "
+                "(AGENTS section 6)")
         unknown = [key for key in data if key not in known]
         if unknown:
             raise ConfigError(
@@ -1133,6 +1120,31 @@ def _refuse_unmapped_keys(slot: str, given: Dict[str, Any],
             "dropping them")
 
 
+def _v3_methods(methods: Any) -> Dict[str, Dict[str, Any]]:
+    """Validate and complete a v3 ``methods`` mapping (upgrade_v3_config's
+    input side; the v4 loader has no slots). Same contract the v3 loader's
+    ``_validate_methods`` had: five known slots, an absent/null/empty slot
+    completes from ``_V3_METHOD_DEFAULTS``, a non-empty mapping freezes
+    verbatim."""
+    if not isinstance(methods, dict):
+        raise ConfigError(
+            f"methods must be a mapping, got {type(methods).__name__}")
+    unknown = sorted(set(methods) - set(_V3_METHOD_DEFAULTS), key=str)
+    if unknown:
+        raise ConfigError(
+            f"methods has unknown slot(s) {unknown}; the slots are "
+            f"{list(_V3_METHOD_DEFAULTS)}")
+    completed: Dict[str, Dict[str, Any]] = {}
+    for slot, default in _V3_METHOD_DEFAULTS.items():
+        given = methods.get(slot)
+        if given is not None and not isinstance(given, dict):
+            raise ConfigError(
+                f"methods.{slot} must be a mapping of parameter names to "
+                f"values, got {type(given).__name__}")
+        completed[slot] = dict(given) if given else dict(default)
+    return completed
+
+
 def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     """Map a schema-v3 CONFIG dict (a raw YAML mapping, or a frozen v3
     manifest's ``config`` entry) to the v4 phase-sequence shape (docs/
@@ -1174,8 +1186,8 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     * the five ``methods`` slots are deleted; delivery and curation
       params move key-for-key into the C and L phases.
 
-    Absent, null or empty slots complete from ``METHOD_DEFAULTS``
-    exactly as the v3 loader freezes them, so the output is the v4
+    Absent, null or empty slots complete from the v3 defaults
+    (``_V3_METHOD_DEFAULTS``) exactly as the v3 loader froze them, so the output is the v4
     identity of what the same file loads as. Everything else -- rules,
     budgets, the role table, weak_profile, mode, split, tasks,
     model_options, prompts_digests -- passes through untouched. Inputs
@@ -1205,7 +1217,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     if mode not in MODES:
         raise ConfigError(f"mode must be one of {MODES}, got {mode!r}")
     v4 = copy.deepcopy(data)
-    methods = _validate_methods(v4.pop("methods"))
+    methods = _v3_methods(v4.pop("methods"))
 
     # -- segmentation -> L.evidence (the add path's cutting budget) -----
     segmentation = methods["segmentation"]
@@ -1224,7 +1236,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
         "name": "segment",
         "K": segmentation["K"],
         "retry_limit": segmentation.get(
-            "retry_limit", METHOD_DEFAULTS["segmentation"]["retry_limit"]),
+            "retry_limit", _V3_METHOD_DEFAULTS["segmentation"]["retry_limit"]),
     }
 
     # -- authoring -> L.author (the exams switch dies with the slot) ----
@@ -1236,7 +1248,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "v3 authoring method is the author family's "
             "'distill_diagnose'")
     _refuse_unmapped_keys("authoring", authoring, ("name", "exams"))
-    exams = authoring.get("exams", METHOD_DEFAULTS["authoring"]["exams"])
+    exams = authoring.get("exams", _V3_METHOD_DEFAULTS["authoring"]["exams"])
     if not isinstance(exams, bool):
         raise ConfigError(
             f"methods.authoring.exams must be a bool, got {exams!r}")
@@ -1283,7 +1295,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "merge_check": merge_check,
             "token_budget": curation["token_budget"],
             "rounds": curation.get(
-                "rounds", METHOD_DEFAULTS["curation"]["rounds"]),
+                "rounds", _V3_METHOD_DEFAULTS["curation"]["rounds"]),
         }
     elif curate_name == "none":
         _refuse_unmapped_keys("curation", curation,
@@ -1335,7 +1347,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
         _refuse_unmapped_keys("acceptance", acceptance,
                               ("name", "retry_limit"))
         retry_limit = acceptance.get(
-            "retry_limit", METHOD_DEFAULTS["acceptance"]["retry_limit"])
+            "retry_limit", _V3_METHOD_DEFAULTS["acceptance"]["retry_limit"])
         if (not isinstance(retry_limit, int) or isinstance(retry_limit, bool)
                 or retry_limit < 0):
             raise ConfigError(
@@ -1406,9 +1418,10 @@ def load_config(path: str) -> ExperimentConfig:
     expanded), so the frozen value does not depend on the cwd a run or a
     resume was started from. A ``tasks`` list is kept as is.
 
-    v3 fails loud on the RAW mapping: unknown top-level keys, future schema
-    versions, and schema v2 files (convert them first -- the error names
-    the converter) are ConfigErrors naming the offender.
+    v4 fails loud on the RAW mapping: unknown top-level keys, future
+    schema versions, and older-schema files (convert them first -- the
+    error names the upgrade mapping and the converter) are ConfigErrors
+    naming the offender.
     """
     import yaml  # function-local: see the module docstring
 
@@ -1422,7 +1435,7 @@ def load_config(path: str) -> ExperimentConfig:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
-    version = data.get("schema_version", 2)
+    version = data.get("schema_version", 3)
     if not isinstance(version, int) or isinstance(version, bool):
         raise ConfigError(
             f"{path}: schema_version must be an int, got {version!r}")
@@ -1434,9 +1447,13 @@ def load_config(path: str) -> ExperimentConfig:
     if version < CONFIG_SCHEMA_VERSION:
         raise ConfigError(
             f"{path} has schema_version {version}; this code speaks "
-            f"schema {CONFIG_SCHEMA_VERSION} -- convert it with "
-            "scripts/run/convert_v2_configs.py (the converter writes NEW "
-            "file names; v2 files are frozen experiment records)")
+            f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
+            "convert it with upgrade_v3_config (the converter script "
+            "scripts/run/convert_v3_configs.py writes NEW file names; "
+            "v3 files are frozen experiment records; a v2 file chains "
+            "through upgrade_v2_config first), and resume runs frozen "
+            "under an older schema on their maintenance branch "
+            "(AGENTS section 6)")
     known_file_keys = ({f.name for f in fields(ExperimentConfig)}
                        | {"weak_profile_file"})
     unknown = [key for key in data if key not in known_file_keys]

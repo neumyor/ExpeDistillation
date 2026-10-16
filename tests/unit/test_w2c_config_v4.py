@@ -426,3 +426,12 @@ class TestCheckedInConfigs:
                                      PHASE_ROLE_LEARN)
             assert v4["invalid_redispatch_limit"] == \
                 DEFAULT_INVALID_REDISPATCH_LIMIT
+            # The whole converted identity loads under the v4 gate: the
+            # checklist runs from ExperimentConfig's own __post_init__,
+            # role tables and token budgets included.
+            from expedistill.core.config import ExperimentConfig
+            cfg = ExperimentConfig.from_dict(v4)
+            assert cfg.sequence == v4["sequence"]
+            # The canonical (all-keys) to_dict round-trips: the frozen
+            # manifest of a converted run compares equal on resume.
+            assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg

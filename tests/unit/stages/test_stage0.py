@@ -4,6 +4,7 @@ Fake plugin registered through the real registry/import machinery (the stub
 finder pattern of tests/unit/blocks/test_execute.py); no real plugins, no
 network, no model calls (stage 0 executes nothing)."""
 
+import copy
 import importlib
 import importlib.abc
 import importlib.machinery
@@ -124,6 +125,29 @@ def clean_registry():
     _reset_registry()
 
 
+#: The exam-style method every fixture carries (an A phase so stage 0
+#: resolves the exam execution and the merge_check: exam constraint).
+SEQUENCE = ["D", "L", "A", "L", "C"]
+PHASES = {
+    "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+          "delivery": {"name": "none"},
+          "execution": {"name": "real",
+                        "arms": ["executor_strong", "executor_weak"]}},
+    "L": {"kind": "learn",
+          "evidence": {"name": "segment", "K": 4},
+          "author": {"name": "distill_diagnose"},
+          "curate": {"name": "agentbrew", "token_budget": 4096,
+                     "rounds": 3, "merge_check": "exam"}},
+    "A": {"kind": "execute", "role": "exam", "tasks": "train",
+          "delivery": {"name": "per_skill"},
+          "execution": {"name": "exam"}},
+    "C": {"kind": "execute", "role": "test", "tasks": "test",
+          "delivery": {"name": "whole_bank"},
+          "execution": {"name": "real"},
+          "compare": {"against": "fresh_bare"}},
+}
+
+
 def make_config(**overrides):
     defaults = dict(
         benchmark=_FAKE,
@@ -132,7 +156,8 @@ def make_config(**overrides):
         weak_profile="a weak model",
         n_attempts_strong=1,
         n_attempts_weak=2,
-        methods={"segmentation": {"K": 4}},
+        sequence=list(SEQUENCE),
+        phases=copy.deepcopy(PHASES),
         split={"train": ["t1", "t2"], "test": ["t3"]},
         rules={"task_select": "all_valid_failed", "trajectory_select": "all"},
     )
@@ -185,8 +210,8 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert manifest["prompt_digests"]["SEGMENT"]
     # The frozen config copy carries the digests (core.config contract).
     assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
-    assert (manifest["config"]["methods"]["segmentation"]["K"]
-            == config.methods["segmentation"]["K"])
+    assert (manifest["config"]["phases"]["L"]["evidence"]["K"]
+            == config.phases["L"].evidence["K"])
     # Explicit-list configs load exactly the union of the lists (reserved
     # included -- held-back tasks are still loaded).
     assert plugin.load_specs == [["t1", "t2", "t3"]]
@@ -305,9 +330,11 @@ def test_changed_config_on_frozen_run_raises(monkeypatch, tmp_path):
     ctx = make_ctx(tmp_path, make_config())
     stage0_freeze.run(ctx)
 
-    changed = make_ctx(tmp_path, make_config(
-        methods={"segmentation": {"K": 9}}))
-    with pytest.raises(FrozenProtocolChanged, match="config.methods.segmentation.K"):
+    phases = copy.deepcopy(PHASES)
+    phases["L"]["evidence"]["K"] = 9
+    changed = make_ctx(tmp_path, make_config(phases=phases))
+    with pytest.raises(FrozenProtocolChanged,
+                       match=r"config\.phases\.L\.evidence\.K"):
         stage0_freeze.run(changed)
 
 
@@ -663,19 +690,37 @@ def _golden_config(split):
         "n_attempts_weak": 2,
         "split": split,
         "tasks": None,
-        "methods": {
-            "segmentation": {"K": 4},
-            "authoring": {"exams": True},
-            "acceptance": {"name": "exam", "retry_limit": 2},
-            "curation": {"name": "agentbrew",
-                        "token_budget": 4096, "rounds": 3},
-            "delivery": {"name": "whole_bank"},
+        "sequence": ["D", "L", "A", "L", "C"],
+        "phases": {
+            "D": {"role": "baseline", "tasks": "train",
+                  "delivery": {"name": "none"},
+                  "execution": {"name": "real",
+                                "arms": ["executor_strong",
+                                         "executor_weak"]},
+                  "compare": None, "acceptance": None,
+                  "kind": "execute"},
+            "L": {"evidence": {"name": "segment", "K": 4},
+                  "author": {"name": "distill_diagnose"},
+                  "curate": {"name": "agentbrew", "token_budget": 4096,
+                             "rounds": 3, "merge_check": "exam"},
+                  "kind": "learn", "role": "learn"},
+            "A": {"role": "exam", "tasks": "train",
+                  "delivery": {"name": "per_skill"},
+                  "execution": {"name": "exam"},
+                  "compare": None, "acceptance": None,
+                  "kind": "execute"},
+            "C": {"role": "test", "tasks": "test",
+                  "delivery": {"name": "whole_bank"},
+                  "execution": {"name": "real"},
+                  "compare": {"against": "fresh_bare", "rule": None},
+                  "acceptance": None, "kind": "execute"},
         },
+        "invalid_redispatch_limit": 1,
         "rules": dict(_GOLDEN_RULES),
         "prompts_digests": dict(_GOLDEN_PROMPT_DIGESTS),
         "model_options": {},
         "token_budgets": {},
-        "schema_version": 3,
+        "schema_version": 4,
     }
 
 
@@ -696,10 +741,11 @@ def _golden_manifest(split, train, test):
 @pytest.mark.parametrize("shape", ["full", "split"])
 def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
         monkeypatch, tmp_path, shape):
-    """The frozen manifest matches the pinned v3 literal: the completed
-    methods slots, and the prompt_digests KEY SET of every registered
-    method prompt (the v3 full freeze -- the two live names included by
-    design, their digests never called by an exam run)."""
+    """The frozen manifest matches the pinned v4 literal: the parsed
+    phase definitions (canonical form), and the prompt_digests KEY SET
+    of every registered method prompt (the full freeze -- the two live
+    names included by design, their digests never called by an exam
+    run)."""
     _install_plugin(monkeypatch, StagePlugin())
     if shape == "full":
         config = make_config(mode="full", split=None)
@@ -721,24 +767,23 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
         "LIVE_RUN_ATTRIBUTION")
     assert frozen["LIVE_SKILL_REVISION"] == prompts.digest(
         "LIVE_SKILL_REVISION")
-    # The completed acceptance slot freezes like every slot.
-    assert (load_manifest(ctx.run_dir)["config"]["methods"]["acceptance"]
-            == {"name": "exam", "retry_limit": 2})
+    # The A phase's exam execution freezes like every phase definition.
+    assert (load_manifest(ctx.run_dir)["config"]["phases"]["A"]
+            ["execution"] == {"name": "exam"})
 
 
-def test_live_run_config_freezes_acceptance_and_both_live_digests(
+def test_the_full_prompt_freeze_covers_the_live_digests(
         monkeypatch, tmp_path):
+    # Since v3 the freeze is FULL: an exam-sequence run still freezes the
+    # two live prompts' digests (they register at prompts/__init__ import
+    # like every method prompt) -- a manifest listing digests this run
+    # never calls is noise, not risk.
     _install_plugin(monkeypatch, StagePlugin())
-    acceptance = {"name": "live_run", "n_attempts": 2,
-                  "improvement": "strict_rate_gain"}
-    ctx = make_ctx(tmp_path, make_config(
-        methods={"acceptance": acceptance}))
+    ctx = make_ctx(tmp_path, make_config())
 
     stage0_freeze.run(ctx)
 
     manifest = load_manifest(ctx.run_dir)
-    # The slot freezes verbatim.
-    assert manifest["config"]["methods"]["acceptance"] == acceptance
     frozen = manifest["prompt_digests"]
     assert set(frozen) == set(prompts.METHOD_PROMPT_NAMES) | {"FAKE_TASK"}
     assert frozen["LIVE_RUN_ATTRIBUTION"] == prompts.digest(
@@ -748,14 +793,27 @@ def test_live_run_config_freezes_acceptance_and_both_live_digests(
     assert manifest["config"]["prompts_digests"] == frozen
 
 
-def test_live_run_unknown_improve_rule_stops_stage0(monkeypatch, tmp_path):
-    """The criterion is part of the experiment identity: a typo in the
-    improvement rule name is a ConfigError before anything is loaded or
-    frozen, exactly like the three task/segment/trajectory rule names."""
+def test_unknown_compare_rule_stops_stage0(monkeypatch, tmp_path):
+    """The comparison criterion is part of the experiment identity: a
+    typo in an execute phase's compare.rule name is a ConfigError
+    before anything is loaded or frozen, exactly like the three
+    task/segment/trajectory rule names."""
     plugin = _install_plugin(monkeypatch, StagePlugin())
-    config = make_config(methods={
-        "acceptance": {"name": "live_run", "n_attempts": 2,
-                       "improvement": "no_such_rule"}})
+    config = make_config(
+        sequence=["D", "L", "B", "L", "C"],
+        phases={
+            "D": PHASES["D"],
+            # A live-only sequence: merge_check flips to 'none' (the
+            # load-time checklist requires an exam phase otherwise).
+            "L": {**PHASES["L"],
+                  "curate": {"name": "agentbrew", "token_budget": 4096,
+                             "rounds": 3, "merge_check": "none"}},
+            "B": {"kind": "execute", "role": "live", "tasks": "train",
+                  "delivery": {"name": "group_by_task"},
+                  "execution": {"name": "real", "n_attempts": 2},
+                  "compare": {"against": "D", "rule": "no_such_rule"}},
+            "C": PHASES["C"],
+        })
     ctx = make_ctx(tmp_path, config)
     with pytest.raises(ConfigError, match="no_such_rule"):
         stage0_freeze.run(ctx)
@@ -764,17 +822,35 @@ def test_live_run_unknown_improve_rule_stops_stage0(monkeypatch, tmp_path):
     assert not (ctx.run_dir / "stage0_summary.json").exists()
 
 
-def test_v2_run_directory_gets_the_maintenance_branch_hint(
-        monkeypatch, tmp_path):
-    """Schema v3 code cannot resume a v2-frozen run (the key sets differ
-    by design); the refusal points at the maintenance-branch rule instead
-    of burying the reason in the generic manifest diff (reviewer A)."""
+def test_unknown_acceptance_rule_stops_stage0(monkeypatch, tmp_path):
+    """C11: an execute phase's named verdict rule (``acceptance``) is
+    part of the experiment identity and validates against the verdict
+    registry before anything is loaded or frozen."""
+    plugin = _install_plugin(monkeypatch, StagePlugin())
+    phases = copy.deepcopy(PHASES)
+    phases["A"]["acceptance"] = "no_such_verdict_rule"
+    ctx = make_ctx(tmp_path, make_config(phases=phases))
+    with pytest.raises(ConfigError, match="no_such_verdict_rule"):
+        stage0_freeze.run(ctx)
+    assert plugin.load_specs == []
+    assert not (ctx.run_dir / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("frozen_version", [2, 3])
+def test_pre_v4_run_directory_gets_the_maintenance_branch_hint(
+        monkeypatch, tmp_path, frozen_version):
+    """Schema v4 code cannot resume a pre-v4-frozen run (the key sets
+    differ by design: the v3 ``methods`` slots are gone); the refusal
+    points at the maintenance-branch rule instead of burying the reason
+    in the generic manifest diff (reviewer A). One gate, both eras --
+    the third place the version gate is unified with load_config and
+    from_dict."""
     plugin = _install_plugin(monkeypatch, StagePlugin())
     ctx = make_ctx(tmp_path, make_config())
     stage0_freeze.run(ctx)
     manifest_path = ctx.run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["config"]["schema_version"] = 2
+    manifest["config"]["schema_version"] = frozen_version
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ConfigError, match="maintenance"):
         stage0_freeze.run(ctx)

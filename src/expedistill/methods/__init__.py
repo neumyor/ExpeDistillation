@@ -1,4 +1,4 @@
-"""Method drivers (layer 6): one driver per (slot, name), by-name dispatch.
+"""Method drivers (layer 6): one driver per (family, name), by-name dispatch.
 
 A method is the DRIVER -- the function that takes the run context,
 orchestrates composites and disposes failures (R1 of the multi-method
@@ -12,9 +12,9 @@ graph: importing ``composites`` as a package has always pulled the live
 blocks in through ``composites/__init__`` -- the guarded invariant is
 the name set, not which modules happen to be loaded.)
 
-The config speaks the v3 methods slots (schema v3); resolving a slot
-validates its params (the slot's dataclass) and runs its check before
-any driver is imported.
+The config speaks the v4 phase families (schema v4, R8's five content
+families); resolving a family validates its params (the family's
+dataclass) before any driver is imported.
 """
 
 from expedistill.methods.registry import (

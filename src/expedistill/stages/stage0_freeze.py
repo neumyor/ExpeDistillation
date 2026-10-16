@@ -100,7 +100,8 @@ from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import rules as rules_block
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.tasks import tasks_digest
-from expedistill.core.config import METHOD_SLOTS
+from expedistill.composites.verdicts import get_verdict_rule
+from expedistill.core.config import ExecutePhaseSpec, LearnPhaseSpec
 from expedistill.methods import resolve_params
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
@@ -266,6 +267,38 @@ def build_manifest(config: Any, tasks: Sequence[Any], *,
     }
 
 
+def _resolve_phase_methods(config: Any) -> None:
+    """Resolve every phase family's params, fail-early (R9): a bad
+    parameter, an unregistered method name or an unknown named rule
+    stops the run before any task is loaded or executed.
+
+    Per-phase: the v4 config carries its method mappings inside the
+    phase definitions (an execute phase resolves delivery + execution,
+    a learn phase evidence + author + curate), and the named-rule
+    selections the phases carry -- an execute phase's verdict rule
+    (``acceptance``) and comparison rule (``compare.rule``) -- validate
+    against their registries here (core cannot: layer 0 must not import
+    composites or blocks). An ABSENT acceptance name is the benchmark's
+    default verdict rule, resolved by the phase driver at run time --
+    validating it here would refuse every test-plugin benchmark the
+    verdict table has not heard of, and the benchmark registry itself
+    has already been checked by now (``get_plugin`` in _prompt_digests).
+    """
+    for name in config.sequence:
+        spec = config.phases[name]
+        if isinstance(spec, ExecutePhaseSpec):
+            resolve_params("delivery", spec.delivery)
+            resolve_params("execution", spec.execution)
+            if spec.acceptance is not None:
+                get_verdict_rule(spec.acceptance)
+            if spec.compare is not None and spec.compare.rule is not None:
+                rules_block.get_acceptance_improve(spec.compare.rule)
+        elif isinstance(spec, LearnPhaseSpec):
+            resolve_params("evidence", spec.evidence)
+            resolve_params("author", spec.author)
+            resolve_params("curation", spec.curate)
+
+
 def run(ctx: StageContext) -> Dict[str, Any]:
     """Validate rules, load and split the task set, freeze, write summary.
 
@@ -276,16 +309,11 @@ def run(ctx: StageContext) -> Dict[str, Any]:
     """
     config = ctx.config
     _validate_rules(config.rules)
-    # Every method slot resolves here, fail-early: a bad parameter or an
-    # unregistered method name stops the run before any task is loaded or
-    # executed (the live method's check also re-validates its improvement
-    # rule name -- the v2 spot check moved into its owning method).
-    for slot in METHOD_SLOTS:
-        resolve_params(slot, config)
-    # A run frozen under schema v2 can never resume under v3 code: the
-    # frozen key sets differ by design. Point the operator at the
-    # maintenance branch instead of letting the generic manifest-diff
-    # refusal bury the reason.
+    _resolve_phase_methods(config)
+    # A run frozen under a pre-v4 schema can never resume under v4 code:
+    # the frozen key sets differ by design (the v3 ``methods`` slots are
+    # gone). Point the operator at the maintenance branch instead of
+    # letting the generic manifest-diff refusal bury the reason.
     manifest_path = Path(ctx.run_dir) / "manifest.json"
     if manifest_path.exists():
         try:
@@ -294,12 +322,13 @@ def run(ctx: StageContext) -> Dict[str, Any]:
             ).get("config", {}).get("schema_version")
         except (OSError, ValueError):
             frozen_version = None
-        if frozen_version == 2:
+        if frozen_version in (2, 3):
             raise ConfigError(
-                "this run was frozen under config schema v2; schema v3 "
-                "code cannot resume it -- continue it on its maintenance "
-                "branch (the run's own checkout, AGENTS section 6), or "
-                "assemble a new run from it")
+                f"this run was frozen under config schema v{frozen_version}; "
+                "schema v4 code (the phase sequence) cannot resume it -- "
+                "continue it on its maintenance branch (the run's own "
+                "checkout, AGENTS section 6), or assemble a new run from "
+                "it")
     tasks = tasks_block.load_tasks(config.benchmark, _tasks_spec(config))
     _check_unique_ids(tasks)
     _check_split_covers_task_set(config, tasks)

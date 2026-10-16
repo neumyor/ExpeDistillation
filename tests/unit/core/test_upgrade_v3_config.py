@@ -15,7 +15,6 @@ import yaml
 
 from expedistill.core.config import (
     ConfigError,
-    load_config,
     upgrade_v2_config,
     upgrade_v3_config,
 )
@@ -222,16 +221,31 @@ class TestUpgradeV3ConfigShapes:
             assert v4[key] == raw[key], key
 
     @pytest.mark.parametrize("name,sequence,phases", EXPECTED, ids=_IDS)
-    def test_frozen_manifest_path_agrees_with_the_raw_path(
+    def test_completed_slots_upgrade_identically_to_absent_ones(
             self, name, sequence, phases):
-        # The reuse assembler upgrades a frozen manifest's config entry
-        # (to_dict: slots completed, role table filled); it must land on
-        # the same phases as the converter's raw-file path.
-        frozen = load_config(str(EXPERIMENTS / name)).to_dict()
-        from_raw = upgrade_v3_config(_load_raw(name))
-        from_frozen = upgrade_v3_config(frozen)
-        assert from_frozen["sequence"] == from_raw["sequence"]
-        assert from_frozen["phases"] == from_raw["phases"]
+        # The v3 loader froze an absent slot as the default method with
+        # default params; the upgrade completes the same way, so a raw
+        # file and the v3-frozen manifest of the same experiment land on
+        # the same v4 identity. (The frozen path itself -- load_config on
+        # a v3 file -- died with the v3 loader; the reuse assembler's
+        # v3-source walk is Wave 3's to rebuild on this guarantee.)
+        raw = _load_raw(name)
+        completed = dict(raw)
+        completed["methods"] = {
+            "segmentation": {"K": 5, "retry_limit": 2},
+            "authoring": {"exams": True},
+            "acceptance": {"name": "exam", "retry_limit": 2},
+            "curation": {"name": "agentbrew", "token_budget": 4096,
+                         "rounds": 3},
+            "delivery": {"name": "whole_bank"},
+        }
+        for slot, given in raw.get("methods", {}).items():
+            if given:
+                completed["methods"][slot] = dict(given)
+        from_raw = upgrade_v3_config(raw)
+        from_completed = upgrade_v3_config(completed)
+        assert from_completed["sequence"] == from_raw["sequence"]
+        assert from_completed["phases"] == from_raw["phases"]
 
     def test_phase_and_field_order_is_pinned(self):
         # The construction order is part of the pinned shape (section

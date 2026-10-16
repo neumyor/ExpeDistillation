@@ -1,16 +1,16 @@
-"""CLI (layer 7) tests: run/summary/assemble-reuse wiring and the error
+"""CLI (layer 8) tests: run/summary/assemble-reuse wiring and the error
 contract.
 
-``run`` is tested against a monkeypatched run_pipeline, ``summary`` against
-a fabricated ledger, and ``assemble-reuse`` against both a monkeypatched
-assemble_reuse (wiring, printing, error contract) and one REAL end-to-end
-assembly over the synthetic source run of
-tests/unit/stages/test_assemble_reuse.py. The pipeline's own behavior (real
-stages, fake benchmark) is covered by tests/unit/stages/test_pipeline.py.
+``run`` is tested against a monkeypatched run_experiment (the sequence
+loop), ``summary`` against a fabricated manifest + ledger, and
+``assemble-reuse`` against both a monkeypatched assemble_reuse (wiring,
+printing, error contract) and one REAL end-to-end assembly over the
+synthetic source run of tests/unit/stages/test_assemble_reuse.py. The
+loop's own behavior (fake drivers over a fake benchmark) is covered by
+tests/unit/test_w2c_run_loop.py.
 """
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -24,14 +24,24 @@ from expedistill.infra.reliability import (
     ProviderRefusalError,
 )
 from expedistill.infra.runlock import RunLockedError
-from expedistill.stages.pipeline import STAGE_NAMES
+
+#: The fabricated runs' frozen sequence and the completeness checklist
+#: derived from it (cli._expected_labels reads the manifest, never a
+#: code constant).
+SEQUENCE = ["D", "L", "C"]
+EXPECTED_LABELS = ["p00:freeze", "p01:D", "p02:L", "p03:C"]
 
 
-def _fabricate_ledger(run_dir: Path, stages) -> None:
-    """Write a pipeline_log.jsonl line for every given stage name."""
+def _fabricate_ledger(run_dir: Path, labels) -> None:
+    """Write a manifest with the fixture sequence and one pipeline_log
+    line for every given label."""
     run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(json.dumps(
+        {"benchmark": "fakebench", "mode": "full",
+         "config": {"sequence": SEQUENCE, "schema_version": 4}}),
+        encoding="utf-8")
     with (run_dir / "pipeline_log.jsonl").open("w", encoding="utf-8") as fh:
-        for name in stages:
+        for name in labels:
             fh.write(json.dumps({
                 "stage": name,
                 "summary": {"stage": name, "done": True},
@@ -42,15 +52,16 @@ def _fabricate_ledger(run_dir: Path, stages) -> None:
 # run
 # ---------------------------------------------------------------------------
 
-def test_run_calls_pipeline_and_prints_stage_lines(monkeypatch, capsys, tmp_path):
+def test_run_calls_the_loop_and_prints_phase_lines(
+        monkeypatch, capsys, tmp_path):
     calls = {}
 
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         calls.update(kwargs)
-        for name in STAGE_NAMES:
+        for name in EXPECTED_LABELS:
             kwargs["on_stage"](name, {"stage": name, "units": 1})
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main([
         "run", "--config", str(tmp_path / "cfg.yaml"),
         "--run-dir", str(tmp_path / "run"), "--workers", "4",
@@ -60,10 +71,10 @@ def test_run_calls_pipeline_and_prints_stage_lines(monkeypatch, capsys, tmp_path
     assert calls["config_path"] == tmp_path / "cfg.yaml"
     assert calls["run_dir"] == tmp_path / "run"
     assert calls["workers"] == 4
-    # One line per stage, printed as stages complete (in order).
+    # One line per phase, printed as phases complete (in order).
     assert out.splitlines() == [
         f"{name}: " + json.dumps({"stage": name, "units": 1}, sort_keys=True)
-        for name in STAGE_NAMES
+        for name in EXPECTED_LABELS
     ]
 
 
@@ -73,10 +84,10 @@ def test_run_calls_pipeline_and_prints_stage_lines(monkeypatch, capsys, tmp_path
     pytest.param(ConfigError("bad config"), id="config"),
 ])
 def test_run_reports_expected_errors_nonzero(monkeypatch, capsys, tmp_path, error):
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise error
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main([
         "run", "--config", str(tmp_path / "cfg.yaml"),
         "--run-dir", str(tmp_path / "run"),
@@ -88,10 +99,10 @@ def test_run_reports_expected_errors_nonzero(monkeypatch, capsys, tmp_path, erro
 
 
 def _run_raising(monkeypatch, tmp_path, error, *extra):
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise error
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     return cli.main([
         "run", "--config", str(tmp_path / "cfg.yaml"),
         "--run-dir", str(tmp_path / "run"), *extra,
@@ -100,7 +111,7 @@ def _run_raising(monkeypatch, tmp_path, error, *extra):
 
 def test_run_infra_exhaustion_says_resume_and_exits_nonzero(
         monkeypatch, capsys, tmp_path):
-    # A stage that finished every other unit and then raised
+    # A phase that finished every other unit and then raised
     # InfrastructureError is resumable: no traceback, a clear message
     # telling the user to re-run the same command, and the exact command.
     error = InfrastructureError(
@@ -142,8 +153,8 @@ def test_run_code_bugs_keep_their_traceback(monkeypatch, tmp_path, error):
 
 def test_run_missing_args_is_usage_error(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
-        cli, "run_pipeline",
-        lambda **kwargs: pytest.fail("run_pipeline must not be called"))
+        cli, "run_experiment",
+        lambda **kwargs: pytest.fail("run_experiment must not be called"))
     with pytest.raises(SystemExit) as excinfo:
         cli.main(["run", "--run-dir", str(tmp_path / "run")])
     assert excinfo.value.code == 2
@@ -153,9 +164,9 @@ def test_run_missing_args_is_usage_error(monkeypatch, capsys, tmp_path):
 # summary
 # ---------------------------------------------------------------------------
 
-def test_summary_complete_run_prints_stages_and_usage(capsys, tmp_path):
+def test_summary_complete_run_prints_phases_and_usage(capsys, tmp_path):
     run_dir = tmp_path / "run"
-    _fabricate_ledger(run_dir, STAGE_NAMES)
+    _fabricate_ledger(run_dir, EXPECTED_LABELS)
     usage_path = run_dir / "llm_requests" / "usage.jsonl"
     usage_path.parent.mkdir(parents=True)
     usage_path.write_text(json.dumps({
@@ -167,7 +178,7 @@ def test_summary_complete_run_prints_stages_and_usage(capsys, tmp_path):
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     captured = capsys.readouterr()
     assert code == 0
-    for name in STAGE_NAMES:
+    for name in EXPECTED_LABELS:
         assert name in captured.out
     # Usage totals are folded from the ledger, not recomputed.
     usage_line = next(line for line in captured.out.splitlines()
@@ -182,7 +193,7 @@ def test_summary_prints_cached_tokens_from_usage_meta(capsys, tmp_path):
     # Pilot finding: cached_tokens lived only in usage.jsonl's meta; summary
     # must fold and show it without a manual re-read.
     run_dir = tmp_path / "run"
-    _fabricate_ledger(run_dir, STAGE_NAMES)
+    _fabricate_ledger(run_dir, EXPECTED_LABELS)
     usage_path = run_dir / "llm_requests" / "usage.jsonl"
     usage_path.parent.mkdir(parents=True)
     rows = [
@@ -219,7 +230,7 @@ def test_summary_prints_role_prompt_usage_section(capsys, tmp_path):
     # usage totals line. Mixed rows prove the tolerance rules (new meta
     # keys, an error row, a TB-style row without meta).
     run_dir = tmp_path / "run"
-    _fabricate_ledger(run_dir, STAGE_NAMES)
+    _fabricate_ledger(run_dir, EXPECTED_LABELS)
     usage_path = run_dir / "llm_requests" / "usage.jsonl"
     usage_path.parent.mkdir(parents=True)
     rows = [
@@ -277,21 +288,21 @@ def test_fmt_stat_renders_unknown_and_bounded_floats():
 
 def test_summary_incomplete_run_exits_one(capsys, tmp_path):
     run_dir = tmp_path / "run"
-    _fabricate_ledger(run_dir, STAGE_NAMES[:-1])  # stage 6 never completed
+    _fabricate_ledger(run_dir, EXPECTED_LABELS[:-1])  # C never completed
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     captured = capsys.readouterr()
     assert code == 1
-    assert "stage6_test" in captured.err
+    assert "p03:C" in captured.err
 
 
-def test_summary_takes_last_line_per_stage(capsys, tmp_path):
-    # A resumed run appends fresh lines; the last one per stage wins.
+def test_summary_takes_last_line_per_phase(capsys, tmp_path):
+    # A resumed run appends fresh lines; the last one per phase wins.
     run_dir = tmp_path / "run"
-    _fabricate_ledger(run_dir, STAGE_NAMES)
+    _fabricate_ledger(run_dir, EXPECTED_LABELS)
     with (run_dir / "pipeline_log.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
-            "stage": "stage6_test",
-            "summary": {"stage": "stage6_test", "rerun": True},
+            "stage": "p03:C",
+            "summary": {"stage": "p03:C", "rerun": True},
         }) + "\n")
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     out = capsys.readouterr().out
@@ -306,7 +317,23 @@ def test_summary_without_ledger_exits_one(capsys, tmp_path):
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     captured = capsys.readouterr()
     assert code == 1
-    assert "stage0_freeze" in captured.err
+    assert "no readable manifest" in captured.err
+
+
+def test_summary_of_a_pre_v4_run_exits_one(capsys, tmp_path):
+    # The checklist comes from the manifest's frozen sequence; a run
+    # without one (e.g. frozen under an older schema) is refused rather
+    # than checked against a code constant.
+    run_dir = tmp_path / "old_run"
+    run_dir.mkdir()
+    (run_dir / "manifest.json").write_text(json.dumps(
+        {"benchmark": "fakebench", "mode": "full",
+         "config": {"schema_version": 3, "methods": {}}}),
+        encoding="utf-8")
+    code = cli.main(["summary", "--run-dir", str(run_dir)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "frozen sequence" in captured.err
 
 
 def test_main_requires_a_subcommand(capsys):
@@ -317,7 +344,7 @@ def test_main_requires_a_subcommand(capsys):
 
 def test_run_passes_infra_retry_settings(monkeypatch, tmp_path):
     calls = {}
-    monkeypatch.setattr(cli, "run_pipeline",
+    monkeypatch.setattr(cli, "run_experiment",
                         lambda **kwargs: calls.update(kwargs))
     base = ["run", "--config", str(tmp_path / "cfg.yaml"),
             "--run-dir", str(tmp_path / "run")]
@@ -332,7 +359,7 @@ def test_run_passes_infra_retry_settings(monkeypatch, tmp_path):
 
 def test_run_passes_llm_timeout(monkeypatch, tmp_path):
     calls = {}
-    monkeypatch.setattr(cli, "run_pipeline",
+    monkeypatch.setattr(cli, "run_experiment",
                         lambda **kwargs: calls.update(kwargs))
     base = ["run", "--config", str(tmp_path / "cfg.yaml"),
             "--run-dir", str(tmp_path / "run")]
@@ -345,10 +372,10 @@ def test_run_passes_llm_timeout(monkeypatch, tmp_path):
 def test_resume_command_keeps_llm_timeout(monkeypatch, capsys, tmp_path):
     import shlex
 
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise InfrastructureError("1 unit failed on infrastructure")
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
                      "--run-dir", str(tmp_path / "r"), "--llm-timeout", "90"])
     assert code == cli.EXIT_INFRA_RESUMABLE
@@ -375,10 +402,10 @@ def test_resume_command_quotes_paths_and_keeps_infra_flags(
     run_dir = tmp_path / "my run"
     config = tmp_path / "cfg dir" / "x.yaml"
 
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise InfrastructureError("1 unit failed on infrastructure")
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main(["run", "--config", str(config), "--run-dir", str(run_dir),
                      "--llm-infra-retries", "5", "--llm-infra-backoff", "2"])
     assert code == cli.EXIT_INFRA_RESUMABLE
@@ -393,7 +420,7 @@ def test_resume_command_quotes_paths_and_keeps_infra_flags(
 
 def test_run_passes_shortfall_and_stagger_settings(monkeypatch, tmp_path):
     calls = {}
-    monkeypatch.setattr(cli, "run_pipeline",
+    monkeypatch.setattr(cli, "run_experiment",
                         lambda **kwargs: calls.update(kwargs))
     base = ["run", "--config", str(tmp_path / "cfg.yaml"),
             "--run-dir", str(tmp_path / "run")]
@@ -414,10 +441,10 @@ def test_resume_command_keeps_shortfall_and_stagger(
         monkeypatch, capsys, tmp_path, extra, shortfall):
     import shlex
 
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise InfrastructureError("1 unit failed on infrastructure")
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
                      "--run-dir", str(tmp_path / "r"),
                      "--k1-stagger", "2.5", *extra])
@@ -435,12 +462,10 @@ def test_resume_command_keeps_shortfall_and_stagger(
     ("--llm-timeout", "0", "llm_timeout_sec"),
     ("--llm-timeout", "nan", "llm_timeout_sec"),
     ("--workers", "0", "workers"),
-    ("--until-stage", "-1", "until_stage"),
-    ("--until-stage", "7", "until_stage"),
 ])
 def test_bad_run_setting_exits_one_without_traceback(
         capsys, tmp_path, flag, value, setting):
-    # The REAL run_pipeline: validation must happen before the config is
+    # The REAL run_experiment: validation must happen before the config is
     # even read (the config path does not exist here).
     code = cli.main(["run", "--config", str(tmp_path / "missing.yaml"),
                      "--run-dir", str(tmp_path / "run"), flag, value])
@@ -476,67 +501,69 @@ def test_run_model_output_error_exits_one_with_resume_hint(
 
 
 # ---------------------------------------------------------------------------
-# --until-stage
+# --until-phase
 # ---------------------------------------------------------------------------
 
-def test_run_passes_until_stage(monkeypatch, tmp_path):
+def test_run_passes_until_phase(monkeypatch, tmp_path):
     calls = {}
-    monkeypatch.setattr(cli, "run_pipeline",
+    monkeypatch.setattr(cli, "run_experiment",
                         lambda **kwargs: calls.update(kwargs))
     base = ["run", "--config", str(tmp_path / "cfg.yaml"),
             "--run-dir", str(tmp_path / "run")]
     assert cli.main(base) == 0
-    assert calls["until_stage"] is None
-    assert cli.main(base + ["--until-stage", "3"]) == 0
-    assert calls["until_stage"] == 3
+    assert calls["until_phase"] is None
+    assert cli.main(base + ["--until-phase", "3"]) == 0
+    assert calls["until_phase"] == 3
 
 
-def test_resume_command_keeps_until_stage(monkeypatch, capsys, tmp_path):
+def test_resume_command_keeps_until_phase(monkeypatch, capsys, tmp_path):
     import shlex
 
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise InfrastructureError("1 unit failed on infrastructure")
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
-                     "--run-dir", str(tmp_path / "r"), "--until-stage", "4"])
+                     "--run-dir", str(tmp_path / "r"), "--until-phase", "4"])
     assert code == cli.EXIT_INFRA_RESUMABLE
     argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert argv[argv.index("--until-stage") + 1] == "4"
+    assert argv[argv.index("--until-phase") + 1] == "4"
 
 
-def test_resume_command_omits_until_stage_when_default(
+def test_resume_command_omits_until_phase_when_default(
         monkeypatch, capsys, tmp_path):
     import shlex
 
-    def fake_run_pipeline(**kwargs):
+    def fake_run_experiment(**kwargs):
         raise InfrastructureError("1 unit failed on infrastructure")
 
-    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
     code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
                      "--run-dir", str(tmp_path / "r")])
     assert code == cli.EXIT_INFRA_RESUMABLE
     argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert "--until-stage" not in argv
+    assert "--until-phase" not in argv
 
 
-def test_until_stage_help_says_how_to_continue():
+def test_until_phase_help_says_how_to_continue():
     parser = cli.build_parser()
     run_parser = parser._subparsers._group_actions[0].choices["run"]
     help_text = next(action.help for action in run_parser._actions
-                     if "--until-stage" in action.option_strings)
+                     if "--until-phase" in action.option_strings)
     # A user who stopped early must learn from the help alone that they
-    # re-run with a higher --until-stage to continue.
-    assert "higher --until-stage" in help_text
+    # re-run with a higher --until-phase to continue.
+    assert "higher --until-phase" in help_text
+    # And that N indexes the sequence, not a code constant.
+    assert "0-based" in help_text
 
 
-def test_until_stage_non_integer_is_usage_error(monkeypatch, tmp_path):
+def test_until_phase_non_integer_is_usage_error(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        cli, "run_pipeline",
-        lambda **kwargs: pytest.fail("run_pipeline must not be called"))
+        cli, "run_experiment",
+        lambda **kwargs: pytest.fail("run_experiment must not be called"))
     with pytest.raises(SystemExit) as excinfo:
         cli.main(["run", "--config", str(tmp_path / "cfg.yaml"),
-                  "--run-dir", str(tmp_path / "run"), "--until-stage", "x"])
+                  "--run-dir", str(tmp_path / "run"), "--until-phase", "x"])
     assert excinfo.value.code == 2
 
 
@@ -597,40 +624,3 @@ def test_assemble_reuse_missing_args_is_usage_error(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         cli.main(["assemble-reuse", "--config", str(tmp_path / "cfg.yaml")])
     assert excinfo.value.code == 2
-
-
-def test_assemble_reuse_end_to_end_smoke(capsys, tmp_path):
-    # The REAL assemble_reuse through the CLI: the synthetic source run of
-    # tests/unit/stages/test_assemble_reuse.py (a stub benchmark registered
-    # through the real import machinery), assembled into a fresh directory.
-    from tests.unit.stages.test_assemble_reuse import (
-        _MODULE,
-        build_source_run,
-        install_plugin,
-        write_reuse_config,
-    )
-    from expedistill.benchmarks.registry import _reset_registry
-
-    install_plugin()
-    try:
-        source = build_source_run(tmp_path)
-        config_path = write_reuse_config(tmp_path)
-        run_dir = tmp_path / "assembled"
-        code = cli.main([
-            "assemble-reuse",
-            "--source-run", str(source.run_dir),
-            "--config", str(config_path),
-            "--run-dir", str(run_dir),
-        ])
-    finally:
-        sys.modules.pop(_MODULE, None)
-        _reset_registry()
-    captured = capsys.readouterr()
-    assert code == 0
-    line = captured.out.splitlines()[-1]
-    assert line.startswith("assemble-reuse: ")
-    summary = json.loads(line[len("assemble-reuse: "):])
-    assert summary["counts"]["bank_rows"] == 2
-    assert summary["counts"]["trajectories"] == 2
-    assert (run_dir / "ASSEMBLED_FROM.md").is_file()
-    assert not (run_dir / "manifest.json").exists()

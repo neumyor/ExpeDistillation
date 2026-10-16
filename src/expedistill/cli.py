@@ -1,12 +1,19 @@
-"""Layer 7: the command-line entry point (the only method entry, AGENTS.md 5).
+"""Layer 8: the command-line entry point (the only method entry, AGENTS.md 5)
+and, since R9 deleted stages/pipeline.py, the sequence loop itself.
 
 Three subcommands:
 
-* ``run`` -- one experiment run: load the config, take the run directory, and
-  print one line per stage as it completes (progress comes from the
-  pipeline's ``on_stage`` callback, i.e. from stages that really finished,
-  not from a progress guess). ``--until-stage N`` stops after stage N for
-  smoke tests and pilots; the run stays resumable (see the flag's help).
+* ``run`` -- one experiment run: load the config, take the run directory,
+  freeze, then run the config's phase SEQUENCE in order -- one
+  ``phase_execute.run`` / ``phase_learn.run`` call per sequence entry --
+  and print one line per phase as it completes (progress comes from the
+  loop's ``on_stage`` callback, i.e. from phases that really finished,
+  not from a progress guess). The ledger row's key stays ``"stage"``
+  (consumer compatibility): its value is ``p00:freeze`` for the freeze
+  step, then ``pNN:<local name>`` for sequence entry i (0-based), with
+  ``NN = i + 1`` -- the numbering tests/golden/semantics.py froze.
+  ``--until-phase N`` stops after sequence entry N (0-based) for smoke
+  tests and pilots; the run stays resumable (see the flag's help).
   Expected stops print a clear message instead of a traceback:
 
   - FrozenProtocolChanged / RunLockedError / ConfigError /
@@ -26,13 +33,14 @@ Three subcommands:
   traceback.
 * ``summary`` -- read a finished (or running) run's progress ledger and usage
   totals WITHOUT recomputing anything (the ledger is the source of truth;
-  re-running stages to check them would burn model calls). A resumed run
-  appends a fresh line per stage, so the LAST line per stage wins. Usage is
-  printed twice: the overall/by-role totals, then one line per (role, prompt)
-  with the pre-registered token statistics of
-  ``infra.usage.UsageStats.by_role_prompt`` (medians over ok rows, totals
-  over all rows, unknown never coerced to 0). Exit 1
-  when the ledger shows the run is incomplete (a stage never completed).
+  re-running phases to check them would burn model calls). A resumed run
+  appends a fresh line per phase, so the LAST line per phase wins. The
+  completeness checklist comes from the manifest's frozen sequence, never
+  a code constant. Usage is printed twice: the overall/by-role totals,
+  then one line per (role, prompt) with the pre-registered token
+  statistics of ``infra.usage.UsageStats.by_role_prompt`` (medians over
+  ok rows, totals over all rows, unknown never coerced to 0). Exit 1
+  when the ledger shows the run is incomplete (a phase never completed).
 * ``assemble-reuse`` -- assemble a fresh run directory from a finished
   source run and a reuse config (the TB frozen-split reuse experiment).
   ``--level`` picks the reuse level (revision 3 of the integration plan):
@@ -51,13 +59,23 @@ Three subcommands:
 
 import argparse
 import json
+import math
 import shlex
 import sys
+from functools import partial
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from expedistill.stages.assemble_reuse import LEVELS, assemble_reuse
-from expedistill.infra.manifest import FrozenProtocolChanged
+from expedistill.infra.manifest import FrozenProtocolChanged, load_or_none
+from expedistill.core.config import (
+    FREEZE_LABEL,
+    ExecutePhaseSpec,
+    PhaseInstance,
+    ROLE_DEFAULTS,
+    load_config,
+    phase_label,
+)
 from expedistill.core.config import ConfigError as CoreConfigError
 from expedistill.infra.reliability import (
     ConfigError,
@@ -65,15 +83,13 @@ from expedistill.infra.reliability import (
     ModelOutputError,
     ProviderRefusalError,
 )
-from expedistill.infra.runlock import RunLockedError
-from expedistill.infra.store import read_jsonl
+from expedistill.infra.runlock import RunLock, RunLockedError
+from expedistill.infra.store import Store, append_jsonl, read_jsonl
 from expedistill.infra.usage import UsageRecorder, UsageStats
-from expedistill.stages.pipeline import (
-    STAGE_NAMES,
-    ledger_path,
-    run_pipeline,
-    usage_path,
-)
+from expedistill.llm.call import make_handle
+from expedistill.llm import providers
+from expedistill.stages import stage0_freeze
+from expedistill.stages.context import RunSettings, StageContext
 
 __all__ = ["EXIT_INFRA_RESUMABLE", "main"]
 
@@ -84,9 +100,18 @@ EXIT_INFRA_RESUMABLE = 3
 #: in the ledger, the console line is a progress signal.
 _LINE_LIMIT = 240
 
+#: The progress ledger, one appended line per completed step (freeze or
+#: phase). The KEY stays ``"stage"`` for consumer compatibility (the
+#: implementation contract, section 6); the VALUE is the pNN label.
+LOG_NAME = "pipeline_log.jsonl"
+
+#: B7 usage ledger (llm_requests/usage.jsonl, the same path the K-composite
+#: tests construct; the module docstring of infra.usage.py pins it).
+USAGE_PATH = ("llm_requests", "usage.jsonl")
+
 
 def _stage_line(name: str, summary: Dict[str, object]) -> str:
-    """One compact line per stage: name plus its summary as sorted JSON."""
+    """One compact line per step: label plus its summary as sorted JSON."""
     try:
         payload = json.dumps(summary, ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
@@ -94,6 +119,342 @@ def _stage_line(name: str, summary: Dict[str, object]) -> str:
     if len(payload) > _LINE_LIMIT:
         payload = payload[:_LINE_LIMIT - 3] + "..."
     return f"{name}: {payload}"
+
+
+def usage_path(run_dir: Path) -> Path:
+    """The B7 usage ledger path inside ``run_dir``."""
+    return Path(run_dir).joinpath(*USAGE_PATH)
+
+
+def ledger_path(run_dir: Path) -> Path:
+    """The progress ledger path inside ``run_dir``."""
+    return Path(run_dir) / LOG_NAME
+
+
+def _json_safe(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """A ledger-writable copy of ``summary``.
+
+    The ledger is a progress record, not an object store: a phase summary
+    that carries a non-JSON value (an object a later phase deems useful
+    to return) must never crash the run AFTER the phase's work was done
+    and persisted. ``default=repr`` keeps everything JSON-native intact
+    and renders anything else as its repr. A summary that needs full
+    fidelity has its own summary file (every phase writes one); the
+    ledger only needs to be readable.
+    """
+    return json.loads(json.dumps(summary, default=repr))
+
+
+def _default_client(model_name: str,
+                    timeout_sec: float = 300.0) -> Any:
+    """The real-endpoint builder: one client per unique model, from the
+    provider registry (``llm.providers``).
+
+    The provider NAME comes from ``EXPEDISTILL_LLM_PROVIDER`` (default
+    ``openai_compat``); the adapter gives the builder's client the
+    ``make_client(model_name)`` shape, and building one per unique model
+    keeps the documented one-client-per-model layout, so a later
+    per-model endpoint needs no loop change.
+    """
+    return providers.default_client(timeout_sec=timeout_sec)
+
+
+def _build_handles(
+    cfg: Any,
+    config_path: Path,
+    make_client: Optional[Callable[[str], Any]],
+    *,
+    infra_retries: int,
+    infra_backoff_seconds: float,
+    llm_timeout_sec: float = 300.0,
+) -> Dict[str, Any]:
+    """One handle per role, one client per unique model name.
+
+    Every handle's ``max_tokens`` comes from the config's token budgets:
+    ``cfg.max_output_tokens_for(role)`` answers a per-role
+    ``max_output_tokens`` override, else the config's
+    ``default_max_output_tokens`` -- role granularity, one budget per role,
+    and never the ModelHandle's built-in default (the dead 5120 is gone
+    from this path). The helper raises ConfigError when the config carries
+    no ``token_budgets``; the failure era that produces is deliberate: the
+    run stops while handles are being built, before the freeze step locks
+    anything and before any client is built. Budget boundary: only
+    requests through call_model are capped. TB's remote execution arm
+    does NOT go through call_model (the sandbox runs the model behind the
+    TBENCH_* env knobs), so executor output budgets do not apply to that
+    arm -- real TB-side budgets live in those env knobs, not in this
+    table.
+
+    Every handle carries the same per-call infra retry settings (call_model
+    resends a request that failed with InfrastructureError); they are run
+    settings, not method parameters, so they never enter the manifest. The
+    same goes for ``llm_timeout_sec``, the per-request client timeout the
+    default builder bakes into its clients (an injected ``make_client``
+    owns its own timeout).
+
+    A role missing from the config's role table is a ConfigError naming
+    the role AND the config file (the reader must know which experiment
+    is broken, not just that one is). The check runs before any client is
+    built so a bad config fails without touching the endpoint.
+    """
+    for role in ROLE_DEFAULTS:
+        if not cfg.models.get(role):
+            raise ConfigError(
+                f"model role {role!r} is missing from the role table of "
+                f"config {config_path}")
+    builder = make_client or partial(_default_client,
+                                     timeout_sec=llm_timeout_sec)
+    clients: Dict[str, Any] = {}
+
+    def client_for(model_name: str) -> Any:
+        if model_name not in clients:
+            clients[model_name] = builder(model_name)
+        return clients[model_name]
+
+    def handle_for(role: str) -> Any:
+        # Resolved BEFORE the client is built: a config whose budgets are
+        # unusable fails without touching the endpoint. The helper's
+        # ConfigError is core's (a ValueError subclass); re-raise it as the
+        # infra ConfigError the CLI prints as a clean stop, naming the
+        # config file like every other config failure here.
+        try:
+            budget = cfg.max_output_tokens_for(role)
+        except ValueError as exc:
+            raise ConfigError(
+                f"invalid config {config_path}: {exc}") from exc
+        model_name = cfg.models[role]
+        return make_handle(
+            role, model_name, client_for(model_name),
+            # Per-model extra chat-call parameters from the frozen config:
+            # a fresh dict per handle, empty for models the config does
+            # not list (never a shared mutable default).
+            extra_body=dict(cfg.model_options.get(model_name, {})),
+            max_tokens=budget,
+            infra_retries=infra_retries,
+            infra_backoff_seconds=infra_backoff_seconds,
+        )
+
+    return {role: handle_for(role) for role in ROLE_DEFAULTS}
+
+
+def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
+                        llm_infra_backoff_seconds: Any, llm_timeout_sec: Any,
+                        k1_stagger: Any,
+                        allow_infra_shortfall: Any) -> None:
+    """Reject bad run settings as ConfigError before anything runs.
+
+    Each value would otherwise only be rejected deep inside K1 or
+    ModelHandle (a ValueError, i.e. a CLI traceback) after the freeze
+    step had already locked the run -- or, for ``workers``, not at all.
+    ``until_phase`` is NOT checked here: its bound is the frozen
+    sequence's length, which only exists after the config loads, so the
+    loop checks it right after load_config (the implementation contract
+    section 6, T3).
+    """
+    def is_int(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool)
+
+    problems = []
+    if not is_int(workers) or workers < 1:
+        problems.append(f"workers must be an int >= 1, got {workers!r}")
+    if not is_int(llm_infra_retries) or llm_infra_retries < 0:
+        problems.append("llm_infra_retries must be an int >= 0, got "
+                        f"{llm_infra_retries!r}")
+    backoff = llm_infra_backoff_seconds
+    if (isinstance(backoff, bool) or not isinstance(backoff, (int, float))
+            or not math.isfinite(backoff) or backoff < 0):
+        problems.append("llm_infra_backoff_seconds must be a finite number "
+                        f">= 0, got {backoff!r}")
+    timeout = llm_timeout_sec
+    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            or not math.isfinite(timeout) or timeout <= 0):
+        problems.append("llm_timeout_sec must be an int or a float > 0, "
+                        f"got {timeout!r}")
+    stagger = k1_stagger
+    if (isinstance(stagger, bool) or not isinstance(stagger, (int, float))
+            or not math.isfinite(stagger) or stagger < 0):
+        problems.append("k1_stagger must be a finite number >= 0, "
+                        f"got {stagger!r}")
+    if not isinstance(allow_infra_shortfall, bool):
+        problems.append("allow_infra_shortfall must be a bool, "
+                        f"got {allow_infra_shortfall!r}")
+    if problems:
+        raise ConfigError("invalid run setting(s): " + "; ".join(problems))
+
+
+def _phase_driver(kind: str) -> Callable:
+    """The sequence entry's driver module: ``stages.phase_execute`` for an
+    execute phase, ``stages.phase_learn`` for a learn phase.
+
+    Imported per call (and so never at module import): the two phase
+    drivers are Wave 2's other two agents' files, and a bad import must
+    name the phase that wanted it, not break every CLI invocation.
+    """
+    if kind == "execute":
+        from expedistill.stages import phase_execute
+        return phase_execute
+    from expedistill.stages import phase_learn
+    return phase_learn
+
+
+def run_experiment(
+    *,
+    config_path: Path,
+    run_dir: Path,
+    workers: int = 1,
+    make_client: Optional[Callable[[str], Any]] = None,
+    on_stage: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    llm_infra_retries: int = 3,
+    llm_infra_backoff_seconds: float = 5.0,
+    llm_timeout_sec: float = 300.0,
+    allow_infra_shortfall: bool = False,
+    k1_stagger: float = 0.0,
+    until_phase: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Freeze, then run the config's phase sequence over ``run_dir``;
+    return the LAST EXECUTED step's summary.
+
+    ``make_client(model_name) -> client`` overrides the default
+    ``_default_client`` (``OpenAICompatClient.from_env()``; tests inject
+    FakeClients here). Either way ONE client is built per unique model
+    name in the role table.
+    ``on_stage(label, summary)`` fires after each step completes, right
+    after its ledger line is written -- the CLI uses it to print
+    progress.
+
+    ``until_phase`` stops the loop after that sequence entry
+    (inclusive, 0-based); ``None`` runs the whole sequence. The freeze
+    step always runs, so the return value is always a real summary. It
+    is operational, like ``workers``: not frozen into the manifest, and
+    a resume may change it freely. A stopped run simply replays the
+    sequence from the start next time, and each phase skips its
+    finished units (the existing resume model), so continuing means
+    re-running with a higher ``until_phase`` (or without one) at zero
+    extra cost for finished work.
+
+    ``llm_infra_retries`` / ``llm_infra_backoff_seconds`` go onto every
+    ModelHandle: a model request that fails on infrastructure is resent
+    up to that many times with exponential backoff (capped in llm.call)
+    before the unit counts as infra-failed. Like ``workers`` they are
+    operational: they change how hard the run tries, not what it
+    measures, so they live outside ExperimentConfig and the frozen
+    manifest and may differ between a run and its resume.
+
+    ``llm_timeout_sec`` is the per-request client timeout the default
+    client builder bakes into its clients (an injected ``make_client``
+    owns its own timeout). It is operational for the same reason.
+
+    ``allow_infra_shortfall`` is NOT operational: accepting holes changes
+    what is measured. It lets the execute phases proceed over units that
+    exhausted their infra retries instead of raising
+    InfrastructureError, and each phase records the accepted unit ids on
+    disk as a durable per-run decision that every later call honours
+    with or without the flag; the holes stay counted as infra, the phase
+    summary records ``infra_shortfall_accepted: true``, its ledger line
+    carries the same flag at top level, and a warning goes to stderr.
+    The flag itself is not frozen: it only decides whether NEW holes are
+    accepted.
+
+    ``k1_stagger`` is the per-unit random startup jitter in seconds
+    passed to every K1 call (default 0): it spreads the ssh connections
+    of parallel unit dispatches, and it is operational like ``workers``.
+
+    The run lock is taken for the whole loop; a stale lock is taken over
+    with its warning printed to stderr (RunLock names the dead holder).
+    """
+    _check_run_settings(
+        workers=workers, llm_infra_retries=llm_infra_retries,
+        llm_infra_backoff_seconds=llm_infra_backoff_seconds,
+        llm_timeout_sec=llm_timeout_sec,
+        k1_stagger=k1_stagger,
+        allow_infra_shortfall=allow_infra_shortfall)
+    config_path = Path(config_path)
+    run_dir = Path(run_dir)
+    try:
+        cfg = load_config(config_path)
+    except (ValueError, OSError) as exc:
+        # A config that is unreadable or fails its own validation is a
+        # ConfigError for the CLI (printed as a clear message instead of
+        # a traceback).
+        raise ConfigError(
+            f"invalid config {config_path}: {exc}") from exc
+    # The bound is the frozen sequence's length, so this check can only
+    # run after the config loads (the implementation contract, T3).
+    if until_phase is not None and not 0 <= until_phase < len(cfg.sequence):
+        raise ConfigError(
+            f"until_phase must be an int in [0, {len(cfg.sequence) - 1}] "
+            f"(the frozen sequence has {len(cfg.sequence)} phases) or be "
+            f"omitted, got {until_phase!r}")
+
+    store = Store(run_dir)
+    lock = RunLock(run_dir)
+    warning = lock.acquire()
+    try:
+        if warning:
+            # Stale takeover is tolerated, never silent (AGENTS.md section 6).
+            print(f"warning: {warning}", file=sys.stderr)
+        usage = UsageRecorder(usage_path(run_dir))
+        handles = _build_handles(
+            cfg, config_path, make_client,
+            infra_retries=llm_infra_retries,
+            infra_backoff_seconds=llm_infra_backoff_seconds,
+            llm_timeout_sec=llm_timeout_sec)
+        ctx = StageContext(
+            run_dir=run_dir,
+            store=store,
+            config=cfg,
+            usage=usage,
+            handles=handles,
+            workdir_root=run_dir / "work",
+            # The operational settings, typed on the frozen context (the
+            # phase drivers read ctx.run_settings.<field>).
+            run_settings=RunSettings(
+                workers=workers,
+                k1_stagger=k1_stagger,
+                allow_infra_shortfall=allow_infra_shortfall),
+        )
+
+        def record(name: str, summary: Dict[str, Any]) -> Dict[str, Any]:
+            row: Dict[str, Any] = {"stage": name,
+                                   "summary": _json_safe(summary)}
+            if summary.get("infra_shortfall_accepted"):
+                # Never silent: the ledger line itself (not only the
+                # nested summary) and stderr say the phase ran with holes.
+                row["infra_shortfall_accepted"] = True
+                print(f"warning: {name} accepted an infra shortfall "
+                      "(--allow-infra-shortfall); missing units are listed "
+                      "under infra_missing in its summary", file=sys.stderr)
+            append_jsonl(ledger_path(run_dir), row)
+            if on_stage is not None:
+                on_stage(name, summary)
+            return summary
+
+        # The freeze step always runs, so the return value below is
+        # always a real summary.
+        last_summary = record(FREEZE_LABEL, stage0_freeze.run(ctx))
+        train_ids = last_summary["train"]
+        test_ids = last_summary["test"]
+
+        for index, name in enumerate(cfg.sequence):
+            if until_phase is not None and index > until_phase:
+                break
+            spec = cfg.phases[name]
+            label = phase_label(index, name)
+            task_ids: tuple = ()
+            if isinstance(spec, ExecutePhaseSpec):
+                task_ids = tuple(train_ids if spec.tasks == "train"
+                                else test_ids)
+            phase = PhaseInstance(index=index, name=name, label=label,
+                                  spec=spec, task_ids=task_ids)
+            result = _phase_driver(spec.kind).run(ctx, phase)
+            if result.label != label:
+                raise ConfigError(
+                    f"the {spec.kind} phase driver answered for "
+                    f"{result.label!r} but was asked to run {label!r}")
+            last_summary = record(label, result.summary)
+        return last_summary
+    finally:
+        lock.release()
 
 
 def _fmt_stat(value: object) -> str:
@@ -142,7 +503,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     def on_stage(name: str, summary: Dict[str, object]) -> None:
         print(_stage_line(name, summary))
 
-    run_pipeline(
+    run_experiment(
         config_path=args.config,
         run_dir=args.run_dir,
         workers=args.workers,
@@ -152,7 +513,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         llm_timeout_sec=args.llm_timeout,
         allow_infra_shortfall=args.allow_infra_shortfall,
         k1_stagger=args.k1_stagger,
-        until_stage=args.until_stage,
+        until_phase=args.until_phase,
     )
     return 0
 
@@ -170,10 +531,10 @@ def _resume_command(args: argparse.Namespace) -> str:
         "--llm-timeout", str(args.llm_timeout),
         "--k1-stagger", str(args.k1_stagger),
     ]
-    if args.until_stage is not None:
-        # Kept so re-running the hint stops at the same stage again; a run
-        # stopped early continues by re-running with a higher --until-stage.
-        argv += ["--until-stage", str(args.until_stage)]
+    if args.until_phase is not None:
+        # Kept so re-running the hint stops at the same phase again; a run
+        # stopped early continues by re-running with a higher --until-phase.
+        argv += ["--until-phase", str(args.until_phase)]
     if args.allow_infra_shortfall:
         argv.append("--allow-infra-shortfall")
     return " ".join(shlex.quote(part) for part in argv)
@@ -211,8 +572,32 @@ def _cmd_assemble_reuse(args: argparse.Namespace) -> int:
     return 0
 
 
+def _expected_labels(run_dir: Path) -> Optional[List[str]]:
+    """The completeness checklist: the manifest's frozen sequence as pNN
+    labels (``p00:freeze`` first). ``None`` when the run has no readable
+    v4 manifest -- the caller reports that as its own error, because a
+    code constant must never be the checklist (R9: the sequence is
+    config, not code)."""
+    manifest = load_or_none(run_dir)
+    if manifest is None:
+        return None
+    sequence = (manifest.get("config") or {}).get("sequence")
+    if not isinstance(sequence, list) or not sequence:
+        return None
+    return [FREEZE_LABEL] + [phase_label(index, name)
+                             for index, name in enumerate(sequence)]
+
+
 def _cmd_summary(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir)
+    expected = _expected_labels(run_dir)
+    if expected is None:
+        print(
+            f"error: {run_dir} has no readable manifest with a frozen "
+            "sequence; summary's completeness check reads the frozen "
+            "sequence, never a code constant",
+            file=sys.stderr)
+        return 1
     ledger = ledger_path(run_dir)
     try:
         lines = read_jsonl(ledger)
@@ -220,8 +605,8 @@ def _cmd_summary(args: argparse.Namespace) -> int:
         print(f"error: cannot read {ledger}: {exc}", file=sys.stderr)
         return 1
 
-    # A resumed run appends a new line per stage; the last line per stage is
-    # that stage's current state.
+    # A resumed run appends a new line per phase; the last line per phase
+    # is that phase's current state.
     latest: Dict[str, Dict[str, object]] = {}
     for row in lines:
         name = row.get("stage")
@@ -229,7 +614,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
         if isinstance(name, str) and isinstance(summary, dict):
             latest[name] = summary
 
-    for name in STAGE_NAMES:
+    for name in expected:
         summary = latest.get(name)
         if summary is None:
             print(f"{name}: (not completed)")
@@ -249,10 +634,10 @@ def _cmd_summary(args: argparse.Namespace) -> int:
             print("  " + _usage_role_prompt_line(
                 role, prompt, by_role_prompt[(role, prompt)]))
 
-    missing = [name for name in STAGE_NAMES if name not in latest]
+    missing = [name for name in expected if name not in latest]
     if missing:
         print(
-            f"error: run looks incomplete, missing stages: {', '.join(missing)}",
+            f"error: run looks incomplete, missing phases: {', '.join(missing)}",
             file=sys.stderr)
         return 1
     return 0
@@ -265,11 +650,12 @@ def build_parser() -> argparse.ArgumentParser:
                     "a skill bank for a weak model.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="run one experiment (stages 0-6)")
+    run = sub.add_parser("run", help="run one experiment (the phase sequence)")
     run.add_argument("--config", required=True, type=Path,
                      help="experiment config YAML (configs/experiments/)")
     run.add_argument("--run-dir", required=True, type=Path,
-                     help="run directory (created; holds manifest, stages, ledger)")
+                     help="run directory (created; holds manifest, phases, "
+                          "ledger)")
     run.add_argument("--workers", type=int, default=1,
                      help="parallel workers for execution units (default 1)")
     # Operational, like --workers: not frozen into the manifest, so a resume
@@ -291,21 +677,23 @@ def build_parser() -> argparse.ArgumentParser:
                      help="per-unit random startup jitter in seconds "
                           "(default 0); spreads the ssh connections of "
                           "parallel unit dispatches")
-    run.add_argument("--until-stage", type=int, default=None, metavar="N",
-                     help="run only stages 0 through N, inclusive (default: "
-                          "all stages). Operational, not frozen: a stopped "
-                          "run simply re-runs from stage 0 next time and each "
-                          "stage skips its finished units, so continue by "
-                          "re-running with a higher --until-stage (or "
+    run.add_argument("--until-phase", type=int, default=None, metavar="N",
+                     help="run the freeze step plus sequence entries 0 "
+                          "through N, inclusive -- N is the sequence's "
+                          "0-based index (default: the whole sequence). "
+                          "Operational, not frozen: a stopped run simply "
+                          "replays from the first phase next time and each "
+                          "phase skips its finished units, so continue by "
+                          "re-running with a higher --until-phase (or "
                           "without the flag)")
     run.add_argument("--allow-infra-shortfall", action="store_true",
-                     help="let stages 1 and 6 (and stage 4 in live_run "
-                          "mode, per round) proceed over execution units "
-                          "that exhausted their infra retries (counted as "
-                          "infra, flagged in the summaries) instead of "
-                          "stopping for a resume; the accepted units are "
-                          "recorded in the run directory and stay accepted "
-                          "(never re-executed) on every later resume")
+                     help="let the execute phases proceed over execution "
+                          "units that exhausted their infra retries "
+                          "(counted as infra, flagged in the summaries) "
+                          "instead of stopping for a resume; the accepted "
+                          "units are recorded in the run directory and "
+                          "stay accepted (never re-executed) on every "
+                          "later resume")
     run.set_defaults(func=_cmd_run)
 
     assemble = sub.add_parser(

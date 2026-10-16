@@ -1,26 +1,18 @@
-"""The method slots' param contracts (methods layer; the v2-era validators
-this replaces lived in core.config, which cannot know a method's params).
-
-Every case here was a core-level validation test before the v3 switch;
-they moved wholesale so the contracts live with their owners.
+"""The method families' param contracts (methods layer; the v2-era
+validators this replaces lived in core.config, which cannot know a
+method's params). R8 re-keyed the registry to the five content families
+and moved the config lookup out of the API: every test resolves a
+family's RAW mapping, exactly what a v4 phase carries. The retired v3
+slot keys (segmentation, authoring, acceptance) have no entries any
+more -- their coverage moved to the evidence/author/execution families
+here and to the load-time checklist in tests/unit/test_w2c_config_v4.py.
 """
 
 import pytest
 
-from expedistill.core.config import ConfigError, ExperimentConfig
-from expedistill.methods import resolve_fixed, resolve_params
+from expedistill.core.config import ConfigError
+from expedistill.methods import resolve, resolve_fixed, resolve_params
 from expedistill.methods.params import build_params
-
-
-def make_config(**overrides):
-    base = dict(
-        benchmark="tb",
-        mode="full",
-        models={"executor_strong": "model-s", "executor_weak": "model-w"},
-        n_attempts_weak=3,
-    )
-    base.update(overrides)
-    return ExperimentConfig(**base)
 
 
 RETRIEVAL = {"name": "retrieval", "top_k": 5,
@@ -29,23 +21,20 @@ RETRIEVAL = {"name": "retrieval", "top_k": 5,
 
 class TestRetrievalParams:
     def test_all_params_load(self):
-        params = resolve_params(
-            "delivery", make_config(methods={"delivery": RETRIEVAL}))
+        params = resolve_params("delivery", RETRIEVAL)
         assert params.top_k == 5
         assert params.max_categories == 3
         assert params.min_score == 0.05
 
     def test_unknown_key_rejected(self):
         with pytest.raises(ConfigError, match="unknown parameter"):
-            resolve_params("delivery", make_config(methods={
-                "delivery": {**RETRIEVAL, "temperature": 0}}))
+            resolve_params("delivery", {**RETRIEVAL, "temperature": 0})
 
     def test_missing_required_key_rejected(self):
         for missing in ("top_k", "max_categories", "min_score"):
             delivery = {k: v for k, v in RETRIEVAL.items() if k != missing}
             with pytest.raises(ConfigError, match=missing):
-                resolve_params("delivery", make_config(
-                    methods={"delivery": delivery}))
+                resolve_params("delivery", delivery)
 
     @pytest.mark.parametrize("key,bad", [
         ("top_k", 0), ("top_k", -1), ("top_k", True), ("top_k", "5"),
@@ -56,19 +45,16 @@ class TestRetrievalParams:
     ])
     def test_counts_must_be_ints_at_least_one(self, key, bad):
         with pytest.raises(ConfigError, match=key):
-            resolve_params("delivery", make_config(
-                methods={"delivery": {**RETRIEVAL, key: bad}}))
+            resolve_params("delivery", {**RETRIEVAL, key: bad})
 
     @pytest.mark.parametrize("bad", [-0.1, 1.0, 1.5, True, "0.05", None])
     def test_min_score_must_be_a_number_below_one(self, bad):
         with pytest.raises(ConfigError, match="min_score"):
-            resolve_params("delivery", make_config(
-                methods={"delivery": {**RETRIEVAL, "min_score": bad}}))
+            resolve_params("delivery", {**RETRIEVAL, "min_score": bad})
 
     def test_min_score_bounds_inclusive_zero_exclusive_one(self):
         # The interval is [0, 1): the grid's lower bound is legal here.
-        params = resolve_params("delivery", make_config(
-            methods={"delivery": {**RETRIEVAL, "min_score": 0}}))
+        params = resolve_params("delivery", {**RETRIEVAL, "min_score": 0})
         assert params.min_score == 0
 
     def test_whole_bank_rejects_retrieval_params(self):
@@ -76,105 +62,130 @@ class TestRetrievalParams:
         # the run injects; the config is the experiment's identity.
         for key in ("top_k", "max_categories", "min_score"):
             with pytest.raises(ConfigError, match="whole_bank"):
-                resolve_params("delivery", make_config(
-                    methods={"delivery": {"name": "whole_bank",
-                                         key: RETRIEVAL[key]}}))
+                resolve_params("delivery", {"name": "whole_bank",
+                                             key: RETRIEVAL[key]})
+
+    def test_two_method_family_without_a_name_rejected(self):
+        with pytest.raises(ConfigError, match="needs a name"):
+            resolve_params("delivery", {"top_k": 5})
+
+    def test_unknown_method_name_lists_the_known_ones(self):
+        with pytest.raises(ConfigError, match="retrieval"):
+            resolve_params("delivery", {"name": "whole_bench"})
 
 
-LIVE = {"name": "live_run", "n_attempts": 3,
-        "improvement": "strict_rate_gain"}
+class TestRealExecutionParams:
+    """The execution family's ``real`` entry (R8's new family): what a
+    v4 execute phase's ``execution`` mapping validates at resolution.
+    The role-consistency and depth rules around these values live in the
+    config loader's checklist (tests/unit/test_w2c_config_v4.py)."""
 
-
-class TestLiveRunParams:
     def test_all_params_load(self):
-        params = resolve_params(
-            "acceptance", make_config(methods={"acceptance": LIVE}))
+        params = resolve_params("execution", {
+            "name": "real", "n_attempts": 3,
+            "max_injection_tokens": 4096,
+            "arms": ["executor_strong", "executor_weak"]})
         assert params.n_attempts == 3
-        assert params.improvement == "strict_rate_gain"
+        assert params.max_injection_tokens == 4096
+        assert params.arms == ["executor_strong", "executor_weak"]
+
+    def test_everything_defaults_to_none(self):
+        # None means "the run-time global" (n_attempts -> n_attempts_weak;
+        # no cap; single weak arm) -- the params object carries no policy.
+        params = resolve_params("execution", {"name": "real"})
+        assert params.n_attempts is None
         assert params.max_injection_tokens is None
+        assert params.arms is None
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "3", 2.5])
+    def test_n_attempts_must_be_a_positive_int(self, bad):
+        with pytest.raises(ConfigError, match="n_attempts"):
+            resolve_params("execution", {"name": "real",
+                                          "n_attempts": bad})
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "4096", 4096.5])
+    def test_max_injection_tokens_positive_int_or_none(self, bad):
+        with pytest.raises(ConfigError, match="max_injection_tokens"):
+            resolve_params("execution", {"name": "real",
+                                          "max_injection_tokens": bad})
+
+    @pytest.mark.parametrize("bad", ["both", 5, [], [""], ["a", 5]])
+    def test_arms_must_be_a_list_of_role_names(self, bad):
+        with pytest.raises(ConfigError, match="arms"):
+            resolve_params("execution", {"name": "real", "arms": bad})
+
+    def test_tuple_arms_rejected(self):
+        # A tuple would not compare equal through the JSON manifest.
+        with pytest.raises(ConfigError, match="arms"):
+            resolve_params("execution", {
+                "name": "real",
+                "arms": ("executor_strong", "executor_weak")})
 
     def test_unknown_key_rejected(self):
         with pytest.raises(ConfigError, match="unknown parameter"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {**LIVE, "max_rounds": 2}}))
+            resolve_params("execution", {"name": "real", "depth": 3})
 
-    def test_missing_required_keys_rejected(self):
-        for missing in ("n_attempts", "improvement"):
-            acceptance = {k: v for k, v in LIVE.items() if k != missing}
-            with pytest.raises(ConfigError, match=missing):
-                resolve_params("acceptance", make_config(
-                    methods={"acceptance": acceptance}))
 
-    @pytest.mark.parametrize("bad", [1, 0, -1, True, "3", 2.5, None])
-    def test_n_attempts_must_be_int_at_least_two(self, bad):
-        # 1 is rejected on purpose: one attempt per arm makes the
-        # comparison's false pass rate the model's own success rate.
-        with pytest.raises(ConfigError, match="n_attempts"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {**LIVE, "n_attempts": bad}}))
+class TestExamExecutionParams:
+    def test_the_exam_entry_has_no_parameters(self):
+        params = resolve_params("execution", {"name": "exam"})
+        assert params == resolve_params("execution", {"name": "exam"})
 
-    @pytest.mark.parametrize("bad", ["", None, 3])
-    def test_improvement_must_be_nonempty_rule_name(self, bad):
-        with pytest.raises(ConfigError, match="improvement"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {**LIVE, "improvement": bad}}))
+    def test_rejects_real_params(self):
+        with pytest.raises(ConfigError, match="unknown parameter"):
+            resolve_params("execution", {"name": "exam", "n_attempts": 1})
 
-    @pytest.mark.parametrize("bad", [0, -1, True, "1000", 1000.5])
-    def test_max_injection_tokens_positive_int_or_null(self, bad):
-        with pytest.raises(ConfigError, match="max_injection_tokens"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {**LIVE,
-                                        "max_injection_tokens": bad}}))
 
-    def test_max_injection_tokens_null_and_positive_int_load(self):
-        for value in (None, 4096):
-            params = resolve_params("acceptance", make_config(
-                methods={"acceptance": {**LIVE,
-                                        "max_injection_tokens": value}}))
-            assert params.max_injection_tokens == value
+class TestEvidenceAndAuthorParams:
+    def test_segment_params(self):
+        params = resolve_params("evidence", {"name": "segment",
+                                             "K": 1, "retry_limit": 0})
+        assert (params.K, params.retry_limit) == (1, 0)
+        with pytest.raises(ConfigError, match="K"):
+            resolve_params("evidence", {"name": "segment", "K": 0})
 
-    def test_unknown_improvement_rule_name_rejected(self):
-        # The registry check lives in blocks.rules, which raises infra's
-        # ConfigError (a ReliabilityError, not core's ValueError subclass).
-        from expedistill.infra.reliability import ConfigError as InfraError
-        with pytest.raises(InfraError, match="unknown acceptance improve"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {**LIVE,
-                                        "improvement": "no_such_rule"}}))
+    def test_author_params(self):
+        # distill_diagnose is the author family's one method; the v3
+        # exams switch is gone from the config surface (a v4 config
+        # naming it is refused at load, see test_w2c_config_v4).
+        params = resolve_params("author", {"name": "distill_diagnose"})
+        assert params.exams is True
 
-    def test_n_attempts_may_not_exceed_the_weak_depth(self):
-        # The cross-constraint (decision doc 2026-10-14): the stage-1
-        # baseline units exist by id, so a deeper live arm would report
-        # missing baseline units as infrastructure errors.
-        with pytest.raises(ConfigError, match="n_attempts_weak"):
-            resolve_params("acceptance", make_config(
-                n_attempts_weak=2,
-                methods={"acceptance": LIVE}))
 
-    def test_exam_rejects_live_params(self):
-        for key, value in (("n_attempts", 3),
-                           ("improvement", "strict_rate_gain"),
-                           ("max_injection_tokens", None)):
-            with pytest.raises(ConfigError, match="unknown parameter"):
-                resolve_params("acceptance", make_config(
-                    methods={"acceptance": {"name": "exam",
-                                            key: value}}))
+class TestCurationParams:
+    def test_agentbrew_params(self):
+        params = resolve_params("curation", {
+            "name": "agentbrew", "token_budget": 96000, "rounds": 3})
+        assert (params.token_budget, params.rounds) == (96000, 3)
+        with pytest.raises(ConfigError, match="token_budget"):
+            resolve_params("curation", {"name": "agentbrew",
+                                         "token_budget": 0})
 
-    def test_unknown_method_name_lists_the_known_ones(self):
-        with pytest.raises(ConfigError, match="live_run"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {"name": "retake"}}))
+    def test_none_params(self):
+        none = resolve_params("curation", {"name": "none",
+                                           "token_budget": 96000})
+        assert none.token_budget == 96000
 
-    def test_two_method_slot_without_a_name_rejected(self):
-        with pytest.raises(ConfigError, match="needs a name"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {"n_attempts": 3}}))
+    def test_agentbrew_merge_check_param(self):
+        # "exam" is the default (the frozen behaviour); "none" skips
+        # K5's regression exams; anything else is refused loudly.
+        default = resolve_params("curation", {"name": "agentbrew",
+                                              "token_budget": 96000})
+        assert default.merge_check == "exam"
+        params = resolve_params("curation", {
+            "name": "agentbrew", "token_budget": 96000,
+            "merge_check": "none"})
+        assert params.merge_check == "none"
+        with pytest.raises(ConfigError, match="merge_check"):
+            resolve_params("curation", {
+                "name": "agentbrew", "token_budget": 96000,
+                "merge_check": "regression"})
 
 
 class TestResolveFixed:
     """The by-name entry for call sites whose semantics are not a config
-    choice: stage 6's bare control arm (``none``) and the live driver's
-    group injection (``group_by_task``)."""
+    choice: the bare control arm (``none``) and the live driver's group
+    injection (``group_by_task``)."""
 
     def test_fixed_name_builds_empty_params_and_loads_the_driver(self):
         from expedistill.methods.delivery import NoneParams
@@ -193,106 +204,45 @@ class TestResolveFixed:
         with pytest.raises(ConfigError, match="missing required parameter"):
             resolve_fixed("delivery", "retrieval")
 
-    def test_check_carrying_entry_refused(self):
-        # live_run's cross-constraint check needs the config; a
-        # fixed-name resolution has none to give.
-        with pytest.raises(ConfigError, match="cross-constraint"):
-            resolve_fixed("acceptance", "live_run")
+    def test_driver_less_family_refused_by_resolve_fixed(self):
+        # execution/evidence/author have no driver to load; asking for one
+        # is a construction bug in the caller. (evidence.segment cannot
+        # stand in here: its K is required, so the refusal would fire in
+        # the params build before the driver load.)
+        with pytest.raises(ConfigError, match="no driver"):
+            resolve_fixed("execution", "real")
+
+    def test_resolve_imports_the_driver_on_demand(self):
+        driver, params = resolve("curation", {"name": "none",
+                                              "token_budget": 4096})
+        assert driver.__name__.endswith(".none")
+        assert params.token_budget == 4096
+
+    def test_raw_mapping_must_be_a_mapping(self):
+        with pytest.raises(ConfigError, match="mapping"):
+            resolve_params("delivery", "retrieval")
 
 
-class TestExamAndOtherSlots:
-    def test_exam_retry_limit_must_be_non_negative(self):
-        with pytest.raises(ConfigError, match="retry_limit"):
-            resolve_params("acceptance", make_config(
-                methods={"acceptance": {"name": "exam",
-                                        "retry_limit": -1}}))
-
-    def test_segmentation_params(self):
-        params = resolve_params("segmentation", make_config(
-            methods={"segmentation": {"K": 1, "retry_limit": 0}}))
-        assert (params.K, params.retry_limit) == (1, 0)
-        with pytest.raises(ConfigError, match="K"):
-            resolve_params("segmentation", make_config(
-                methods={"segmentation": {"K": 0}}))
-
-    def test_curation_params(self):
-        params = resolve_params("curation", make_config(
-            methods={"curation": {"name": "agentbrew",
-                                  "token_budget": 96000, "rounds": 3}}))
-        assert (params.token_budget, params.rounds) == (96000, 3)
-        with pytest.raises(ConfigError, match="token_budget"):
-            resolve_params("curation", make_config(
-                methods={"curation": {"name": "agentbrew",
-                                      "token_budget": 0}}))
-        none = resolve_params("curation", make_config(
-            methods={"curation": {"name": "none",
-                                   "token_budget": 96000}}))
-        assert none.token_budget == 96000
-
-    def test_agentbrew_merge_check_param(self):
-        # M3: "exam" is the default (the frozen behaviour); "none" skips
-        # K5's regression exams; anything else is refused loudly.
-        default = resolve_params("curation", make_config(
-            methods={"curation": {"name": "agentbrew",
-                                  "token_budget": 96000}}))
-        assert default.merge_check == "exam"
-        params = resolve_params("curation", make_config(
-            methods={"curation": {"name": "agentbrew", "token_budget": 96000,
-                                  "merge_check": "none"}}))
-        assert params.merge_check == "none"
-        with pytest.raises(ConfigError, match="merge_check"):
-            resolve_params("curation", make_config(
-                methods={"curation": {"name": "agentbrew",
-                                       "token_budget": 96000,
-                                       "merge_check": "regression"}}))
-
-    def test_defaults_satisfy_every_contract(self):
-        # METHOD_DEFAULTS is what an absent slot completes to; if a
-        # contract tightened, this pins the mismatch at the default.
-        config = make_config()
-        for slot in ("segmentation", "authoring", "curation", "delivery"):
-            resolve_params(slot, config)
-
-    def test_build_params_rejects_unsupported_annotations(self):
+class TestBuildParams:
+    def test_homogeneous_string_lists_are_supported(self):
+        # The baseline phase's arm-role names need exactly this.
         from dataclasses import dataclass
-        from typing import List
+        from typing import List, Optional
+
+        @dataclass(frozen=True)
+        class _Arms:
+            arms: Optional[List[str]] = None
+
+        params = build_params(_Arms, {"arms": ["a", "b"]}, "x", "y")
+        assert params.arms == ["a", "b"]
+
+    def test_build_params_still_rejects_other_annotations(self):
+        from dataclasses import dataclass
+        from typing import Dict
 
         @dataclass(frozen=True)
         class _Bad:
-            tags: List[str] = None
+            tags: Dict[str, int] = None
 
         with pytest.raises(ConfigError, match="unsupported"):
-            build_params(_Bad, {"tags": ["a"]}, "x", "y")
-
-
-class TestAuthoringExamsSwitch:
-    """P4: the exams-off ablation pair (curation: none + live_run) and the
-    centralized conflicts the slot's check refuses."""
-
-    def test_conflict_with_exam_acceptance(self):
-        with pytest.raises(ConfigError, match="acceptance method"):
-            resolve_params("authoring", make_config(
-                n_attempts_weak=3,
-                methods={"authoring": {"exams": False}}))
-
-    def test_conflict_with_agentbrew_curation(self):
-        # Acceptance must be live_run first, or the acceptance conflict
-        # fires before the curation one (checks refuse in order).
-        with pytest.raises(ConfigError, match="curation method"):
-            resolve_params("authoring", make_config(
-                n_attempts_weak=3,
-                methods={"authoring": {"exams": False},
-                         "acceptance": {"name": "live_run",
-                                        "n_attempts": 3,
-                                        "improvement": "strict_rate_gain"},
-                         "curation": {"name": "agentbrew",
-                                      "token_budget": 96000, "rounds": 3}}))
-
-    def test_the_ablation_pair_resolves(self):
-        params = resolve_params("authoring", make_config(
-            n_attempts_weak=3,
-            methods={"authoring": {"exams": False},
-                     "curation": {"name": "none", "token_budget": 96000},
-                     "acceptance": {"name": "live_run", "n_attempts": 3,
-                                    "improvement": "strict_rate_gain"}}))
-        assert params.exams is False
+            build_params(_Bad, {"tags": {"a": 1}}, "x", "y")

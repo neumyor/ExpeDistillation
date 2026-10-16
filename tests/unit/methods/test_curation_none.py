@@ -21,8 +21,22 @@ def _ctx(tmp_path, budget=BIG):
         config=ExperimentConfig(
             benchmark="tb", mode="full",
             models={"executor_strong": "s", "executor_weak": "w"},
-            methods={"curation": {"name": "none",
-                                  "token_budget": budget}}),
+            sequence=["D", "L", "C"],
+            phases={
+                "D": {"kind": "execute", "role": "baseline",
+                      "delivery": {"name": "none"},
+                      "execution": {"name": "real",
+                                    "arms": ["executor_strong",
+                                             "executor_weak"]}},
+                "L": {"kind": "learn",
+                      "evidence": {"name": "segment", "K": 1},
+                      "author": {"name": "distill_diagnose"},
+                      "curate": {"name": "none", "token_budget": budget}},
+                "C": {"kind": "execute", "role": "test", "tasks": "test",
+                      "delivery": {"name": "whole_bank"},
+                      "execution": {"name": "real"},
+                      "compare": {"against": "fresh_bare"}},
+            }),
         usage=None, handles={}, workdir_root=run_dir / "work")
 
 
