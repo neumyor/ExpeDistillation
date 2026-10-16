@@ -270,13 +270,50 @@ def _exam_judge_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
     return RUN_FAILURE, basis
 
 
+@VERDICT_RULES.register("tb_scorer")
+def _tb_scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
+    """The scorer rule over the facts TB's plugin reports (W2-A, wiring
+    list rule 3): the same verdicts as ``scorer`` with the run's own
+    provenance named in the basis, so a ruled-invalid run says WHICH
+    fact killed it -- a pseudo zero (a reward whose verifier never ran,
+    ``verifier_ran`` False), a run whose verifier evidence never came
+    back (``verifier_ran`` None -- the log was not collected), a run
+    that died on a model output error (``exception_type``), or no
+    scorer verdict at all.
+
+    The rule consumes generic fact KEYS, never a benchmark branch
+    (AGENTS section 4 rule 3: benchmark-bound logic lives in the plugin,
+    which is where these facts come from; other benchmarks simply never
+    report them and keep the ``scorer`` binding)."""
+    correctness = facts.get("correctness")
+    if correctness is None:
+        metrics = facts.get("metrics") or {}
+        exception_type = metrics.get("exception_type")
+        verifier_ran = metrics.get("verifier_ran")
+        if exception_type:
+            return RUN_INVALID, ("tb_scorer: the run died on "
+                                 f"{exception_type}")
+        if verifier_ran is False:
+            return RUN_INVALID, ("tb_scorer: pseudo zero -- a reward "
+                                 "exists but the verifier never ran")
+        if verifier_ran is None:
+            return RUN_INVALID, ("tb_scorer: the verifier's evidence "
+                                 "never came back for this run")
+        return RUN_INVALID, ("tb_scorer: no scorer verdict came back "
+                             "for this run")
+    if correctness:
+        return RUN_SUCCESS, "tb_scorer: the benchmark's own scorer"
+    return RUN_FAILURE, "tb_scorer: the benchmark's own scorer"
+
+
 #: The default named rule per benchmark (R1: the verdict rules are named
 #: per benchmark; C11 lets the config name one explicitly, this table is
-#: the default binding). Every benchmark with a scorer scores through the
-#: scorer rule; the exam benchmark (questions generated on the fly) is
-#: judged by the model judge.
+#: the default binding). Every benchmark with a scorer scores through
+#: the scorer rule; TB's binding consumes its plugin's provenance facts
+#: (``tb_scorer``, W2-A); the exam benchmark (questions generated on
+#: the fly) is judged by the model judge.
 BENCHMARK_VERDICT_RULES = {
-    "tb": "scorer",
+    "tb": "tb_scorer",
     "searchqa": "scorer",
     "alfworld": "scorer",
     "exam": "exam_judge",
