@@ -9,8 +9,11 @@ wires live in their own files, split out mechanically with no behavior
 change: the answer half (the count-based serial, the unjudged
 pending-attempt lookup, the same-exam lock, G4 under its repair budget)
 in composites/exam_answering.py, the judge half (G5 with a crash-persistent
-repair budget) in composites/exam_grading.py. The D9-formatted skills
-block arrives as a parameter ("" for the bare control) because the
+repair budget) in composites/exam_grading.py -- acceptance's grading
+member, entered through composites.verdicts.grade_attempt since R1
+(boundaries doc §3.4: the model judge belongs to acceptance). The
+D9-formatted skills block arrives as a parameter ("" for the bare
+control) because the
 frozen signature hands it straight to G4 -- the caller (K4/K5) renders it
 with ``inject.format_skills_block``, which keeps "acceptance-time
 injection equals test-time injection" true by construction.
@@ -73,12 +76,12 @@ unjudged answer with the identical key (above), never a judged attempt.
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from expedistill.composites import verdicts
 from expedistill.composites.exam_answering import (
     _exam_lock,
     _pending_attempt,
     answer_exam,
 )
-from expedistill.composites.exam_grading import _judge_with_persistent_budget
 from expedistill.core.models import ATTEMPT_PURPOSES, Attempt, Exam
 from expedistill.infra.store import Store
 from expedistill.llm.call import ModelHandle
@@ -141,8 +144,9 @@ def exam_once(
                 skill_id=skill_id, skill_version=skill_version,
                 retry_round=retry_round, usage=usage, run_dir=run_dir)
 
-        verdict, error_description = _judge_with_persistent_budget(
-            store, exam, attempt, judge_handle, usage, run_dir)
+        verdict, error_description = verdicts.grade_attempt(
+            store=store, exam=exam, attempt=attempt,
+            judge_handle=judge_handle, usage=usage, run_dir=run_dir)
         attempt.judge_verdict = verdict
         attempt.judge_reason = error_description
         store.save(attempt, "attempts")

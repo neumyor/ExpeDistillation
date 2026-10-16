@@ -1,5 +1,8 @@
-"""K4 leak determination: the D8 leak audit and its first-verdict ledger
-(layer 5).
+"""Leak determination: the D8 leak audit and its first-verdict ledger
+(layer 5) -- the acceptance module's leak member since R1 (boundaries doc
+§3.4: everything that needs a model to judge belongs to acceptance; a
+leaked version's measurement is void, which maps onto the acceptance
+vocabulary's ``not_testable`` / ``leak``).
 
 The leak-audit part of the former composites/acceptance.py, split out
 mechanically in R0 (docs/decisions/execute_learn_repair_plan_20261016.md).
@@ -27,7 +30,7 @@ from expedistill.core.models import Exam
 from expedistill.infra.store import Store, append_jsonl
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["LEAK_VERDICTS_LEDGER"]
+__all__ = ["LEAK_VERDICTS_LEDGER", "find_leak_verdict", "leak_verdict_for"]
 
 #: Ledger of leak-audit verdicts, written into stage4_acceptance/ next to
 #: the attempts: one row per (skill, version), the first verdict the judge
@@ -36,13 +39,15 @@ __all__ = ["LEAK_VERDICTS_LEDGER"]
 LEAK_VERDICTS_LEDGER = "leak_verdicts.jsonl"
 
 
-def _find_leak_verdict(store: Store, skill_id: str,
-                       skill_version: int) -> Optional[Dict[str, Any]]:
+def find_leak_verdict(store: Store, skill_id: str,
+                      skill_version: int) -> Optional[Dict[str, Any]]:
     """The stored judge verdict for one (skill, version), if any.
 
     The first matching row wins; only one row per (skill, version) is ever
     appended, but reading the first keeps the lookup honest even if a
-    hand-edited ledger ever holds duplicates.
+    hand-edited ledger ever holds duplicates. Public since R1: the
+    acceptance report reader reads the leak state through this lookup
+    instead of a private cross-module name.
     """
     for record in _skill_records(store, LEAK_VERDICTS_LEDGER, skill_id):
         if record.get("skill_version") == skill_version:
@@ -71,7 +76,7 @@ def leak_verdict_for(
     reason travels into the rewrite's error description (the caller's
     job, composites/acceptance_submit.py).
     """
-    verdict = _find_leak_verdict(store, skill_id, skill_version)
+    verdict = find_leak_verdict(store, skill_id, skill_version)
     if verdict is None:
         leaked, reason = audit_leak(
             skill_content, exam.question_text, exam.reference_answer,

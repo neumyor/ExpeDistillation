@@ -31,6 +31,15 @@ and round label is an explicit parameter. The public functions are thin
 shells that keep today's exact signatures and compute today's exact
 paths; the shells are deleted in M4, when the phase drivers pass the
 phase directory's paths in.
+
+Since R1 the acceptance verdict core is ``composites/verdicts.py`` (the
+status/cause vocabulary, the named run-verdict rules, the one report
+row). This module keeps K6's frozen verdicts-ledger protocol for the
+stages/ callers until Wave 2's phase drivers replace it -- the ledger
+rows are E6-pinned, so the judgment here is deliberately unchanged; the
+zero-execution terminals it writes are exactly the keys of verdicts'
+terminal table, and the report reader (composites/reports.py, kind
+"live") maps them onto the one acceptance report shape.
 """
 
 from pathlib import Path

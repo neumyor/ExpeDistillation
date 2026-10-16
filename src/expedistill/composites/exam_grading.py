@@ -1,4 +1,8 @@
-"""K3 exam grading: the judge half of "take one exam" (layer 5).
+"""Exam grading: the judge half of "take one exam" (layer 5) -- the
+acceptance module's grading member since R1 (boundaries doc §3.4:
+everything that needs a model to judge belongs to acceptance; the entry
+point the execution-side wiring calls is
+``composites.verdicts.grade_attempt``).
 
 The grading part of the former composites/exam_once.py, split out
 mechanically in R0 (docs/decisions/execute_learn_repair_plan_20261016.md):
@@ -47,11 +51,16 @@ def _judge_failures(attempt: Attempt) -> int:
     return int(match.group(1)) if match else 0
 
 
-def _judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
-                                  judge_handle: ModelHandle, usage: Any,
-                                  run_dir: Optional[Union[str, Path]]
-                                  ) -> Tuple[bool, str]:
-    """G5 with a repair budget that survives a crash (module docstring)."""
+def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
+                                 judge_handle: ModelHandle, usage: Any,
+                                 run_dir: Optional[Union[str, Path]]
+                                 ) -> Tuple[bool, str]:
+    """G5 with a repair budget that survives a crash (module docstring).
+
+    Public since R1: acceptance's grading entry
+    (``composites.verdicts.grade_attempt``) delegates here, and
+    ``exam_once`` goes through that entry -- the judge is acceptance's,
+    only the wiring is execution-side."""
     failures = _judge_failures(attempt)
     if failures >= _BLOCK_REPAIR_ATTEMPTS:
         raise ModelOutputError(
