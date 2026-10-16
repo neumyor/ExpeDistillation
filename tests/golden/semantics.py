@@ -20,11 +20,13 @@ E1  ``skill_bank.jsonl`` -- per row: skill_id, content, version (stored as
     rewrite_history (each entry whole).
 
 E2  ``skill_bank.jsonl`` (terminals: skill_id, status, discard_reason);
-    ``stage3_generation/generation_failures.jsonl`` + the skills store
-    (presence only, for the G2-vs-G3 split of the plan's "unborn <->
-    discarded(model_output_error)" mapping); the live groups, derived from
-    the final-round verdicts; ``stage4_acceptance/leak_verdicts.jsonl``
-    rows; the rewrite / revision / generation failure-ledger rows.
+    the unborn bridge -- ``stage3_generation/generation_failures.jsonl``
+    rows (keyed subtask_id) and skills-store skills discarded with
+    model_output_error, projected onto ONE multiset (the plan's "v3
+    unborn <-> v4 discarded(model_output_error)" mapping, aligned by
+    make_skill_id); the live groups, derived from the final-round
+    verdicts; ``stage4_acceptance/leak_verdicts.jsonl`` rows; the
+    rewrite / revision / generation failure-ledger rows.
 
 E3  ``stage6_test/stage6_summary.json`` -- with_bank, control (stored as
     bare), delta, aux, control_source (through the alias table) -- and
@@ -37,7 +39,7 @@ E6  ``stage4_acceptance/live_run/verdicts.jsonl`` and ``.../attributions.
     jsonl`` -- full rows, ``round`` canonicalised to the B-phase ordinal.
 
 E5  the harness config/script + the baseline provenance call counts (see
-    resume_variants / run_e5).
+    resume_variants / run_e5 / expected_model_calls).
 
 Normalisation (plan section 8, fixed here -- nothing else may differ):
 
@@ -65,7 +67,6 @@ SEQUENCES / v4_layout -- the assertion functions hard-code no paths.
 from __future__ import annotations
 
 import json
-import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -89,7 +90,8 @@ from tests.golden.harness import (
 )
 
 #: Where the committed baseline bundle lives (extract_baseline.py writes
-#: it; the tamper tests copy it to a tmp dir before editing).
+#: it; the tamper tests corrupt in-memory deep copies of it -- the
+#: committed bytes are never touched).
 BASELINE_DIR = (Path(__file__).resolve().parents[1] / "fixtures"
                 / "golden_semantic_baseline")
 
@@ -126,7 +128,8 @@ TEST_SUMMARY = "stage6_test/stage6_summary.json"
 RETRIEVAL_AUDIT = "stage6_test/retrieval_audit.jsonl"
 REQUESTS = "llm_requests/dumps"
 
-#: The skills store key prefix (run-level, P4) for the E2 G2-vs-G3 split.
+#: The skills store key prefix (run-level, P4): E2 scans it for the v4
+#: form of the unborn bridge (see _e2).
 _SKILLS_PREFIX = KIND_DIRS["skills"] + "/"
 
 #: Values the C summary's ``control_source`` may take, canonicalised: a
@@ -148,8 +151,13 @@ def v4_layout(acceptance: str) -> Dict[str, Tuple[str, Optional[str], int]]:
     Key: a v4 snapshot path. Value: (canonical path, the row field that
     carries the phase-local round number, that round's canonical value).
     Ledger shards concatenate in table order (the sequences enumerate in
-    phase order, so shard order IS round order); ``None`` marks a plain
-    file move. Everything else in a v4 snapshot passes through unchanged.
+    phase order, so shard order IS round order). With a round field the
+    ordinal is the canonical round written into the rows; without one it
+    is the phase index that orders the concatenation -- list values
+    concatenate (generation failures are registered from EVERY L, so
+    several shards can feed one canonical ledger), dict values (the C
+    summary, a single source) move as they are. Everything else in a v4
+    snapshot passes through unchanged.
     """
     sequence = SEQUENCES[acceptance]
     table: Dict[str, Tuple[str, Optional[str], int]] = {}
@@ -169,7 +177,8 @@ def v4_layout(acceptance: str) -> Dict[str, Tuple[str, Optional[str], int]]:
             # The L after an execution phase owns that round's bookkeeping
             # (plan section 3): attributions/revision failures follow a B,
             # G6 rewrite failures follow an A; generation failures may
-            # land in any L (G2 runs wherever the baseline report is read).
+            # land in any L (G2 runs wherever the baseline report is
+            # read), so every L registers a shard.
             if i > 0 and sequence[i - 1] == "B":
                 table[f"{directory}/attributions.jsonl"] = (
                     LIVE_ATTRIBUTIONS, "round", b_seen - 1)
@@ -179,7 +188,7 @@ def v4_layout(acceptance: str) -> Dict[str, Tuple[str, Optional[str], int]]:
                 table[f"{directory}/rewrite_failures.jsonl"] = (
                     REWRITE_FAILURES, "retry_round", a_seen - 1)
             table[f"{directory}/generation_failures.jsonl"] = (
-                GENERATION_FAILURES, None, 0)
+                GENERATION_FAILURES, None, i)
         elif local == "A":
             a_seen += 1
     return table
@@ -193,9 +202,14 @@ def canonicalize(snapshot_data: Dict[str, Any], acceptance: str,
     ``"v4"`` the per-phase shards are merged onto their canonical paths
     with their round fields rewritten to the canonical phase ordinals
     (v3's round numbering -- the B ordinal for live ledgers, the exam
-    round for rewrite failures). Unmapped keys pass through: object
-    stores and run-level files do not move (P4), and the not-compared
-    files simply stay out of the views.
+    round for rewrite failures). Shards of one canonical ledger
+    CONCATENATE in table order: a rule without a round field still
+    concatenates list shards (generation failures are registered from
+    every L, and a plain assignment would let the last shard silently
+    drop the earlier ones -- reviewer C-1), while dict values (the C
+    summary, a single source) move as they are. Unmapped keys pass
+    through: object stores and run-level files do not move (P4), and the
+    not-compared files simply stay out of the views.
     """
     if layout != "v4":
         return snapshot_data
@@ -209,12 +223,13 @@ def canonicalize(snapshot_data: Dict[str, Any], acceptance: str,
             out[key] = value
             continue
         canonical, round_field, ordinal = rule
-        if round_field is None:
+        if round_field is None and not isinstance(value, list):
             out[canonical] = value
             continue
         rows = [dict(row) for row in value]
-        for row in rows:
-            row[round_field] = ordinal
+        if round_field is not None:
+            for row in rows:
+                row[round_field] = ordinal
         shards.setdefault(canonical, []).append((ordinal, rows))
     for canonical, parts in shards.items():
         parts.sort(key=lambda part: part[0])
@@ -249,30 +264,46 @@ def _e1(snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
         for row in snapshot_data[BANK]])}
 
 
-def _skill_in_store(snapshot_data: Dict[str, Any], skill_id: str) -> bool:
-    key = (_SKILLS_PREFIX + urllib.parse.quote(skill_id, safe="")
-           + ".json")
-    return key in snapshot_data
+def _discarded_model_output_skills(
+        snapshot_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Skills-store skills discarded for a model-output error. The store
+    is run-level (P4) and holds every skill's final state in both
+    layouts, while the bank exports accepted members only -- so a
+    discard's only durable home is the store."""
+    return [skill for key, skill in snapshot_data.items()
+            if key.startswith(_SKILLS_PREFIX) and key.endswith(".json")
+            and skill.get("status") == "discarded"
+            and skill.get("discard_reason") == "model_output_error"]
 
 
-def _e2(snapshot_data: Dict[str, Any], acceptance: str) -> Dict[str, Any]:
+def _e2(snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
     terminals = [{"skill_id": row["skill_id"], "status": row["status"],
                   "discard_reason": row["discard_reason"]}
                  for row in snapshot_data[BANK]]
     unborn: List[Dict[str, Any]] = []
-    # A terminally failed stage-3 unit is one row in generation_failures.
-    # The plan's E2 mapping: with its skill written (G3 failed after G2
-    # succeeded) it is a v4 bank discard; without one (G2 failed) it is a
-    # v4 never-born ledger row. The skills store is run-level (P4), so the
-    # presence probe works identically on both layouts.
+    # The unborn bridge (plan section 8 E2; reviewer P-A1). Both layouts
+    # record "this subtask's skill never reached the accepted library
+    # because the model output was unusable" in their own form. v3's
+    # stage 3 saves a skill only after G2 AND G3 both succeed (pair
+    # save), so a generation_failures row always means no skill was
+    # stored -- the row itself is the never-born verdict; no store probe
+    # can refine it. v4 moves G3 into the A phase, so its failure first
+    # stores the skill (born in L) and then discards it with
+    # model_output_error -- and discards never enter the bank, so the
+    # skills store is their only durable home. Projecting v3's rows
+    # (keyed subtask_id, aligned by make_skill_id) and the store's
+    # discarded(model_output_error) skills onto ONE multiset makes the
+    # two forms compare equal across layouts; other discard reasons are
+    # different event classes, pinned by the M4 acceptance scenario
+    # tests, not by this golden instrument. This branch is empty in the
+    # golden matrix by the P6 declaration (every fixture is all-accept,
+    # zero discard); the synthetic pair in the self-check suite pins it.
     for row in snapshot_data.get(GENERATION_FAILURES, []):
-        skill_id = make_skill_id(row["subtask_id"])
-        if _skill_in_store(snapshot_data, skill_id):
-            terminals.append({"skill_id": skill_id, "status": "discarded",
-                              "discard_reason": "model_output_error"})
-        else:
-            unborn.append({"skill_id": skill_id,
-                           "reason": "model_output_error"})
+        unborn.append({"skill_id": make_skill_id(row["subtask_id"]),
+                       "reason": "model_output_error"})
+    for skill in _discarded_model_output_skills(snapshot_data):
+        unborn.append({"skill_id": skill["skill_id"],
+                       "reason": "model_output_error"})
     finals: Dict[str, Dict[str, Any]] = {}
     for row in snapshot_data.get(LIVE_VERDICTS, []):
         prior = finals.get(row["task_id"])
@@ -305,6 +336,13 @@ def _e3(snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
         "with_bank": summary["with_bank"],
         "bare": summary["control"],
         "delta": summary["delta"],
+        # Kept (not deleted) although stage6's summary has no top-level
+        # aux key, so this is always None today: the aux numbers live in
+        # the with_bank/control/delta "aux" subkeys and are compared
+        # transitively by the whole-dict comparisons below, and removing
+        # the named key would force regenerating the frozen baseline
+        # bundle. If v4 hoists aux to a top-level key, this turns red --
+        # the loud direction (S-1).
         "aux": summary.get("aux"),
         "control_source": CONTROL_SOURCE_ALIASES.get(
             summary["control_source"], summary["control_source"]),
@@ -333,7 +371,7 @@ def semantic_views(snapshot_data: Dict[str, Any],
         "label": combo_label(combo),
         "acceptance": combo["acceptance"],
         "E1": _e1(snapshot_data),
-        "E2": _e2(snapshot_data, combo["acceptance"]),
+        "E2": _e2(snapshot_data),
         "E3": _e3(snapshot_data),
         "E4": _e4(snapshot_data),
         "E6": _e6(snapshot_data),
@@ -421,7 +459,7 @@ def _compare_e1(golden: Dict[str, Any], fresh: Dict[str, Any],
 
 
 def _compare_e2(golden: Dict[str, Any], fresh: Dict[str, Any],
-                combo: Dict[str, str]) -> Optional[str]:
+                combo: Dict[str, str], layout: str) -> Optional[str]:
     parts = []
     for key, label in (("terminal_states", "E2.terminal_states"),
                        ("unborn", "E2.unborn"),
@@ -432,6 +470,15 @@ def _compare_e2(golden: Dict[str, Any], fresh: Dict[str, Any],
                        ("revision_failures", "E2.revision_failures")):
         if not golden[key] and not fresh[key]:
             continue  # an empty pinned branch on a combo that cannot reach it
+        if key == "generation_failures" and layout == "v4":
+            # Cross-layout, the raw ledger is only the v3 FORM of the
+            # bridge: every row on either side already projects into
+            # unborn (see _e2), which the comparison below checks
+            # one-to-one. Comparing raw rows here would false-red exactly
+            # where the layouts differ BY DESIGN (v3's G3 row vs v4's
+            # discarded store skill, plan section 5). Same-layout (v3)
+            # comparisons keep the raw check at full strength.
+            continue
         parts.append(_multiset_diff(label, golden[key], fresh[key]))
     diffs = [part for part in parts if part]
     return "; ".join(diffs) if diffs else None
@@ -488,7 +535,7 @@ def _compare_e6(golden: Dict[str, Any], fresh: Dict[str, Any],
 
 _COMPARATORS = {
     "E1": lambda g, f, c, layout: _compare_e1(g["E1"], f["E1"], c),
-    "E2": lambda g, f, c, layout: _compare_e2(g["E2"], f["E2"], c),
+    "E2": lambda g, f, c, layout: _compare_e2(g["E2"], f["E2"], c, layout),
     "E3": lambda g, f, c, layout: _compare_e3(g["E3"], f["E3"], c),
     "E4": lambda g, f, c, layout: _compare_e4(g["E4"], f["E4"], c, layout),
     "E6": lambda g, f, c, layout: _compare_e6(g["E6"], f["E6"], c),
@@ -676,6 +723,37 @@ def _crash_in_revision_window(config_path: Path, combo: Dict[str, str],
             "check")
 
 
+def run_layout(run_dir: Path) -> str:
+    """The layout a run directory actually wrote: "v4" when the
+    phase-driven pipeline rooted its artifacts under ``phases/`` (plan
+    section 3 -- the same prefix the v4_layout table keys on), "v3" for
+    the stage-driven layout. The E5 anti-drift gate keys on this; see
+    expected_model_calls."""
+    return "v4" if (Path(run_dir) / "phases").is_dir() else "v3"
+
+
+def expected_model_calls(combo: Dict[str, str], layout: str,
+                         baseline_root: Path = BASELINE_DIR) -> int:
+    """The anti-drift call-count expectation for a straight run (C-2).
+
+    The 69904f7 provenance count is the expectation for a v3 run.
+    Whitelist 1 removes every (examiner, EXAM_GEN) call from a v4 LIVE
+    run (its phase sequence has no A phase), so that run must land
+    exactly that many calls short. Anything else is drift that would
+    move every crash point. This gate must NOT be deleted when M4.3
+    turns the runs v4 -- update the expectation, keep the check.
+    """
+    baseline_root = Path(baseline_root)
+    provenance = json.loads(
+        (baseline_root / "provenance.json").read_text(encoding="utf-8"))
+    calls = provenance["combos"][combo_label(combo)]["model_calls"]
+    if layout == "v4" and combo["acceptance"] == "live_run":
+        baseline = load_baseline(baseline_root, combo)
+        calls -= sum(1 for call in baseline["E4"]["calls"]
+                     if _exam_gen(call))
+    return calls
+
+
 def run_e5(config_path: Path, combo: Dict[str, str],
            workdir: Path) -> Dict[str, Any]:
     """E5 for one combo: the straight reference, then every crash-resume
@@ -686,8 +764,11 @@ def run_e5(config_path: Path, combo: Dict[str, str],
 
     Installs the combo's plugin per segment itself; the caller only
     provides the config and a scratch directory. Returns
-    ``{"model_calls": n, "variants": {name: "equivalent"}}``. Raises on
-    any inequivalence -- the loud-abort rule from generate.py: the
+    ``{"model_calls": n, "layout": "v3"|"v4", "variants": {name:
+    "equivalent"}}`` -- the layout is what the straight run's artifacts
+    actually wrote (run_layout), so the caller can assert the call count
+    against expected_model_calls(combo, layout). Raises on any
+    inequivalence -- the loud-abort rule from generate.py: the
     instrument must never land on a resume bug quietly. M4.3's acceptance
     runs this per combo and asserts every variant equivalent.
     """
@@ -708,4 +789,5 @@ def run_e5(config_path: Path, combo: Dict[str, str],
                 run_straight(Path(config_path), run_dir)
         assert_resume_equivalent(golden, snapshot(run_dir))
         results[variant["name"]] = "equivalent"
-    return {"model_calls": calls, "variants": results}
+    return {"model_calls": calls, "layout": run_layout(straight),
+            "variants": results}

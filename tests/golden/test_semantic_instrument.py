@@ -10,14 +10,19 @@ suite proves exactly that, four ways:
   matches it end to end, and a synthetic v4-layout snapshot
   (the predicted M4.3 shape) canonicalises back onto it -- so both sides
   of the layout table are exercised on real data;
-* tamper -- nine targeted corruptions of a bundle copy (in a tmp dir, the
+* tamper -- eleven targeted corruptions of in-memory bundle copies (the
   committed one is never touched); each must turn its criterion red and
   point at the corrupted item, and leave the unrelated criteria green;
+* bridge -- synthetic snapshot pairs pin the branches the golden matrix
+  can never reach (P6): the E2 unborn mapping across layouts (aligned
+  forms fully equal, misaligned forms red with a pointed diff) and the
+  multi-shard generation-failures concatenation;
 * E5 -- the crash-variant list has the required shape and every variant,
   including the "revision persisted, re-answer not yet run" window (C-1),
-  resumes equivalent on a live combo under today's code.
+  resumes equivalent on a live combo under today's code, and the
+  straight call count equals the layout-aware expectation (C-2).
 
-Baseline bundle: tests/fixtures/golden_semantic_baseline/ (~416 KiB; 8
+Baseline bundle: tests/fixtures/golden_semantic_baseline/ (~399 KiB; 8
 combo view files + provenance.json), extracted from commit 69904f7's
 golden matrix with:
     .venv/bin/python tests/golden/extract_baseline.py
@@ -26,10 +31,12 @@ golden matrix with:
 import json
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 import pytest
 
+from expedistill.core.ids import make_skill_id
 from tests.golden.harness import (
     COMBOS,
     combo_label,
@@ -54,10 +61,12 @@ from tests.golden.semantics import (
     compare_combo,
     compare_views,
     crash_points,
+    expected_model_calls,
     load_baseline,
     phase_dir,
     resume_variants,
     run_e5,
+    run_layout,
     semantic_views,
     v4_layout,
 )
@@ -105,6 +114,12 @@ def test_v4_layout_pins_the_predicted_phase_paths():
         REWRITE_FAILURES, "retry_round", 0)
     assert exam["phases/p06_L/rewrite_failures.jsonl"] == (
         REWRITE_FAILURES, "retry_round", 1)
+    # No round field to rewrite: the ordinal is the phase index that
+    # orders the shard concatenation (see the dual-shard test below).
+    assert exam["phases/p02_L/generation_failures.jsonl"] == (
+        GENERATION_FAILURES, None, 1)
+    assert exam["phases/p08_L/generation_failures.jsonl"] == (
+        GENERATION_FAILURES, None, 7)
     live = v4_layout("live_run")
     assert set(live) == {
         "phases/p07_C/summary.json", "phases/p07_C/retrieval_audit.jsonl",
@@ -252,6 +267,27 @@ def test_canonicalize_leaves_v3_snapshots_untouched():
     assert canonicalize(snapshot_data, "live_run", "v3") is snapshot_data
 
 
+def test_canonicalize_concatenates_generation_failure_shards():
+    """C-1/B-6: generation_failures is registered from EVERY L phase, so
+    a v4 run may write several shards onto the one canonical ledger.
+    They must concatenate in phase order -- the last shard must not
+    silently drop the earlier ones (the branch is unreachable on the
+    golden matrix, whose ledgers are empty; this is its pin)."""
+    shard_p02 = [{"subtask_id": "traj/fakebench:t1/strong/00/seg00",
+                  "error_class": "ModelOutputError", "message": "a"}]
+    shard_p06 = [{"subtask_id": "traj/fakebench:t1/strong/00/seg01",
+                  "error_class": "ModelOutputError", "message": "b"},
+                 {"subtask_id": "traj/fakebench:t1/weak/00/seg00",
+                  "error_class": "ModelOutputError", "message": "c"}]
+    snapshot_data = {  # insertion order deliberately not phase order
+        "phases/p06_L/generation_failures.jsonl": shard_p06,
+        "phases/p02_L/generation_failures.jsonl": shard_p02,
+    }
+    merged = canonicalize(snapshot_data, "exam", "v4")
+    assert merged[GENERATION_FAILURES] == shard_p02 + shard_p06
+    assert len(merged[GENERATION_FAILURES]) == 3
+
+
 # ---------------------------------------------------------------------------
 # Tamper proofs: every assertion must be able to fail, pointedly
 # ---------------------------------------------------------------------------
@@ -338,6 +374,99 @@ def test_tamper_snapshot_verdict_deletion_couples_e6_and_e2():
     golden = load_baseline(BASELINE_DIR, combo)
     report = _compare(combo, golden, fresh)
     _expected_red(report, "E2", "E6")
+
+
+def _store_key(skill_id: str) -> str:
+    """The skills-store snapshot key, built the way the store writes it
+    (infra.store.path_for: the percent-encoded id) -- derived here
+    independently of the instrument's own prefix, so a spelling bug in
+    its probe turns the bridge tests red."""
+    return ("stage3_generation/skills/"
+            + urllib.parse.quote(skill_id, safe="") + ".json")
+
+
+def _discarded_store_skill(skill_id: str, subtask_id: str) -> dict:
+    return {"skill_id": skill_id, "content": "inspect the state first.",
+            "subtask_id": subtask_id, "source_subtasks": [subtask_id],
+            "version": 1, "status": "discarded",
+            "discard_reason": "model_output_error", "group": None,
+            "merged_from": [], "rewrite_history": [], "schema_version": 2}
+
+
+def _bridge_views(combo: dict, subtask_id: str,
+                  v4_extras: dict) -> tuple:
+    """One synthetic pair: the v3 snapshot of ``combo`` with a
+    generation_failures row for ``subtask_id`` (stage 3's pair save --
+    no skill was stored) vs the synthetic v4 snapshot of ``combo`` plus
+    ``v4_extras`` store entries. Returns (golden_views, fresh_views)."""
+    v3 = _golden_snapshot(combo)
+    v3[GENERATION_FAILURES] = [{
+        "subtask_id": subtask_id, "error_class": "ModelOutputError",
+        "message": "rewrite budget exhausted"}]
+    v4 = _synthetic_v4(_golden_snapshot(combo), combo)
+    v4.update(v4_extras)
+    golden = semantic_views(v3, combo)
+    fresh = semantic_views(canonicalize(v4, combo["acceptance"], "v4"),
+                           combo)
+    return golden, fresh
+
+
+def test_e2_unborn_bridge_aligns_v3_failure_rows_with_v4_discards():
+    """The plan's E2 mapping, end to end at snapshot level (P-A1/B-5):
+    v3 records a G3-exhausted subtask as a generation_failures row
+    (stage 3's pair save means no skill was stored); v4 records the same
+    event as a skills-store skill discarded with model_output_error
+    (born in L, deleted after the A-phase exam failure; discards never
+    enter the bank, so the store is their only durable home). The two
+    forms must compare FULLY equal. The branch is unreachable in the
+    golden matrix (P6: every fixture is all-accept, zero discard) --
+    this synthetic pair is its pin."""
+    combo = _combo("exam-whole_bank-split")
+    subtask_id = "traj/fakebench:t1/strong/00/seg07"  # not in the matrix
+    skill_id = make_skill_id(subtask_id)
+    golden, fresh = _bridge_views(
+        combo, subtask_id,
+        {_store_key(skill_id): _discarded_store_skill(skill_id,
+                                                      subtask_id)})
+    assert_semantically_equal(
+        compare_views(golden, fresh, combo, layout="v4"))
+
+
+def test_tamper_v4_discard_key_misalignment_reds_e2():
+    # The bridge's negative case: a v4-side discard naming a DIFFERENT
+    # subtask's skill does not line up with the v3 row -- both unborn
+    # multisets lose their counterpart and E2 must turn red with the
+    # diff pointing at the skill_id. This also pins the id derivation:
+    # a wrong make_skill_id spelling in the view reds the same way.
+    combo = _combo("exam-whole_bank-split")
+    other_subtask = "traj/fakebench:t1/strong/00/seg08"
+    other_skill = make_skill_id(other_subtask)
+    golden, fresh = _bridge_views(
+        combo, "traj/fakebench:t1/strong/00/seg07",
+        {_store_key(other_skill): _discarded_store_skill(
+            other_skill, other_subtask)})
+    report = compare_views(golden, fresh, combo, layout="v4")
+    _expected_red(report, "E2")
+    diff = report["criteria"]["E2"]["diff"]
+    assert "unborn" in diff and "skill_id" in diff
+
+
+def test_tamper_v4_discard_wrong_reason_reds_e2():
+    # The other negative case: a discard with a different reason is a
+    # different event class (retry_exhausted is the rewrite budget,
+    # pinned by the M4 acceptance scenario tests) and must NOT bridge
+    # into unborn -- the v3 row loses its counterpart.
+    combo = _combo("exam-whole_bank-split")
+    subtask_id = "traj/fakebench:t1/strong/00/seg07"
+    skill_id = make_skill_id(subtask_id)
+    wrong = _discarded_store_skill(skill_id, subtask_id)
+    wrong["discard_reason"] = "retry_exhausted"
+    golden, fresh = _bridge_views(
+        combo, subtask_id, {_store_key(skill_id): wrong})
+    report = compare_views(golden, fresh, combo, layout="v4")
+    _expected_red(report, "E2")
+    diff = report["criteria"]["E2"]["diff"]
+    assert "unborn" in diff and "missing" in diff
 
 
 def test_tamper_call_request_text_reds_e4():
@@ -443,19 +572,46 @@ def test_e5_all_variants_equivalent(combo, tmp_path):
     """The public E5 entry, per combo, under today's code: every
     crash-resume variant (three call-boundary fractions; live combos add
     the C-1 revision window) must land on the straight run's snapshot,
-    and the straight run's model-call count must still equal the one
-    recorded in the 69904f7 provenance (any drift would move every
-    crash point)."""
-    label = combo_label(combo)
+    and the straight run's model-call count must equal the LAYOUT-AWARE
+    expectation (C-2): the 69904f7 provenance count for a v3 run, that
+    count minus the (examiner, EXAM_GEN) calls for a v4 live run
+    (whitelist 1). This cross-check is the anti-drift gate -- any other
+    count would move every crash point -- so M4.3 updates the
+    expectation, never deletes the check."""
     config = write_config(tmp_path / "config.yaml", combo)
     result = run_e5(config, combo, tmp_path / "work")
-    provenance = json.loads(
-        (BASELINE_DIR / "provenance.json").read_text(encoding="utf-8"))
-    assert result["model_calls"] == provenance["combos"][label]["model_calls"]
+    assert result["model_calls"] == expected_model_calls(
+        combo, result["layout"])
     expected = {variant["name"]: "equivalent"
                 for variant in resume_variants(combo["acceptance"],
                                                result["model_calls"])}
     assert result["variants"] == expected
+
+
+def test_expected_model_calls_is_layout_aware():
+    """C-2's formula, pinned ahead of M4.3: the v3 provenance count for
+    a v3 run (and for exam combos, whose v4 sequence keeps the A
+    phases); for a v4 live run exactly the (examiner, EXAM_GEN) calls
+    fewer -- the whitelist-1 delta, derived from the baseline bundle
+    rather than hardcoded."""
+    for combo in COMBOS:
+        v3 = expected_model_calls(combo, "v3")
+        if combo["acceptance"] == "live_run":
+            baseline = load_baseline(BASELINE_DIR, combo)
+            exam_gen = sum(1 for call in baseline["E4"]["calls"]
+                           if call["role"] == "examiner"
+                           and call["prompt"] == "EXAM_GEN")
+            assert exam_gen > 0, combo_label(combo)
+            assert expected_model_calls(combo, "v4") == v3 - exam_gen
+        else:
+            # Exam combos keep their A phases under v4: no subtraction.
+            assert expected_model_calls(combo, "v4") == v3
+
+
+def test_run_layout_reads_the_artifact_shape(tmp_path):
+    assert run_layout(tmp_path) == "v3"
+    (tmp_path / "phases").mkdir()
+    assert run_layout(tmp_path) == "v4"
 
 
 def test_revision_window_crash_lands_mid_reanswer(tmp_path):
