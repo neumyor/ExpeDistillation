@@ -178,8 +178,11 @@ src/expedistill/
                           group_by_task.py、none.py + 各自的 Params
   stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
     stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
-    phase_execute.py      执行相位驱动（R9/R8）：D 基线 / A 考试 / B live /
-                          C 终测四种 role 的执行 + 验收 + 重派发 + 规则 1 复用
+    phase_execute/        执行相位驱动包（R9/R8）：__init__ 分发入口 run()；
+                          phase_disk 相位目录/早相位/库产物/复用连接；resolve
+                          配置映射到驱动与参数；engine 派发→判分→重派引擎；
+                          baseline / exam / live / final_test 四种 role 各一
+                          个模块（D 基线 / A 考试 / B live / C 终测）
     phase_learn.py        learn 相位驱动（R9）：决策 → 证据 → 写作 → 整理
     learn_tasks.py        learn 相位的逐行落地（keep/delete/revise/add 与
                           断点续跑账本）

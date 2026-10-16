@@ -16,6 +16,7 @@ import importlib.machinery
 import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -363,10 +364,16 @@ def test_baseline_leaves_the_bank_unchanged_r4(monkeypatch, tmp_path):
 
 
 def test_r4_call_face():
-    """R4's call face: the driver contains no bank mutation calls."""
-    source = open(phase_execute.__file__, encoding="utf-8").read()
-    assert "discard_skill(" not in source
-    assert "accept_skill(" not in source
+    """R4's call face: the driver package contains no bank mutation
+    calls (every module of it, not just the entry -- the split moved the
+    roles into sibling files and the pin must follow them)."""
+    package_dir = Path(phase_execute.__file__).parent
+    sources = [path.read_text(encoding="utf-8")
+               for path in sorted(package_dir.glob("*.py"))]
+    assert sources
+    for source in sources:
+        assert "discard_skill(" not in source
+        assert "accept_skill(" not in source
 
 
 def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
