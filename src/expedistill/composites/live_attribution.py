@@ -9,6 +9,23 @@ statuses through ``composites.skill_status.discard_skill``; the
 discard-reason vocabulary comes from composites.live_verdicts (its
 definition site is composites.decision).
 
+R6 MIDDLE STATE (docs/decisions/execute_learn_repair_plan_20261016.md,
+item R6): the target architecture moves G10's fact reporting to the
+evidence family (methods/evidence/live_group.collect_group_evidence,
+fact-only packages) and the per-skill decisions to the author family
+(methods/author/write.revise_group). Those drivers are in place with
+their own tests, but the stage still calls THIS module's
+``attribute_group`` / ``apply_revisions`` pair, so the legacy
+action-plan path stays byte-identical here until Wave 2 rewires
+phase_learn: its attributions.jsonl row shape is pinned by the stage's
+``_revisions_complete`` and by scripts/audit/audit_live_run.py, and the
+byte-for-byte golden matrix (tests/fixtures/golden) exercises it. Its
+budget-exhaustion discards also stay: the group-abandon on attribution
+exhaustion moves to the decision module with the Wave 2 rewiring, and
+the revision-exhaustion discard changes to "no change" (the C8 ruling)
+on the same move -- methods/author/write.py already implements the new
+behavior.
+
 State is derived from disk only (decision section 2.4 -- no new state
 objects):
 
