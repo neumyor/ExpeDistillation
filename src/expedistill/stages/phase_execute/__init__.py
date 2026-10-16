@@ -29,7 +29,11 @@ with-skill units run and get accepted. On the live role the same fact
 takes the ledger's shape: the entry guard short-circuits the group
 through ``judge_round``'s zero-execution ``weak_already_knows`` terminal.
 The final test C calls neither the skip logic nor the redispatch loop:
-it re-runs everything on every call (rule 1's own exception).
+it re-runs everything on every call of ITS OWN phase instance (rule 1's
+own exception -- only a crash resume inside the phase keeps stored
+units, K1's own resume model); a COMPLETED instance replays as itself
+(``_finished_summary``, the completion signal every execute phase now
+has) and nothing is ever reused ACROSS C phases.
 
 The frozen companions, wired here:
 
@@ -149,7 +153,7 @@ from expedistill.core.config import (
     PhaseResult,
 )
 from expedistill.infra.reliability import CodeBugError, ConfigError
-from expedistill.infra.store import write_json
+from expedistill.infra.store import read_json, write_json
 from expedistill.stages.context import StageContext
 
 from expedistill.stages.phase_execute.phase_disk import (
@@ -183,8 +187,52 @@ __all__ = [
 # this attribute at call time (engine.py / live.py).
 
 
+def _finished_summary(directory, role: str):
+    """The phase's stored summary when its last pass finished EVERYTHING
+    (the completion signal of an execute phase), else None.
+
+    The learn phases have had this since Wave 2 (the summary's ``bank``
+    entry is their commit point); the execute phases relied on per-role
+    replay rules alone, which left a real hole: a COMPLETED phase
+    re-entered by a resume re-derives its universe from the CURRENT
+    store -- a store its own successors have since mutated -- and can
+    plan units that belong to a later measurement round (the golden
+    matrix's revision-window crash caught the live role hijacking its
+    successor's round through rule-1 reuse). A finished phase is
+    therefore skipped whole: its measurement is frozen at its sequence
+    position, exactly like an uninterrupted run's.
+
+    "Finished" is the summary's own account: ``complete is True`` for
+    the baseline / live / test roles, an empty ``infra_failed`` list for
+    the exam role (its summary carries no ``complete`` key; the driver
+    writes it and then raises when units are still pending). A summary
+    naming another role is not a completion signal -- the phase re-enters
+    and the audit's phase-dirs check reports the drift.
+    """
+    path = directory / SUMMARY_NAME
+    if not path.exists():
+        return None
+    try:
+        summary = read_json(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(summary, dict) or summary.get("role") != role:
+        return None
+    if role == PHASE_ROLE_EXAM:
+        done = not summary.get("infra_failed")
+    else:
+        done = summary.get("complete") is True
+    return summary if done else None
+
+
 def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
     """Run one execute-phase position; returns its summary as PhaseResult.
+
+    A phase whose last pass completed everything is skipped whole (its
+    stored summary returned as-is): a resume replays the sequence from
+    the first position, and a finished phase's artifacts must stay the
+    bytes its own pass wrote -- re-deriving them would mix a later
+    phase's store mutations into an earlier phase's record.
 
     Raises ConfigError for a learn phase (``stages/phase_learn.py``
     owns those) and InfrastructureError AFTER the summary and report
@@ -199,6 +247,9 @@ def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
             f"{getattr(spec, 'kind', None)!r}: the learn-phase driver "
             "(stages/phase_learn.py) owns learn phases")
     directory = _phase_dir(ctx, phase)
+    finished = _finished_summary(directory, spec.role)
+    if finished is not None:
+        return PhaseResult(label=phase.label, summary=finished)
     directory.mkdir(parents=True, exist_ok=True)
     # What ran here -- the disk fact later phases derive from (the live
     # round number, the compare targets, the reuse sources).

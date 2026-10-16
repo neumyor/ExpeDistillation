@@ -34,6 +34,7 @@ from expedistill.stages.phase_execute.engine import (
 )
 from expedistill.stages.phase_execute.phase_disk import (
     SUMMARY_NAME,
+    _earlier_pass_units,
     _earlier_phases,
     _phase_dir,
     _rebased_row,
@@ -154,9 +155,25 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     plans = _plan_units(rows, tasks, phase_label=phase.label,
                         benchmark=benchmark, role="weak",
                         n_attempts=n_attempts)
-    _write_units(ctx, phase, [plan.unit for plan in plans])
+    # This phase's unit record is EVERY unit any of its passes resolved:
+    # the live universe (pending groups) shrinks as the phase's own
+    # earlier pass commits verdicts, so re-planning alone would rewrite
+    # ``units.jsonl`` without the earlier rows and desync the summary
+    # from the report (phase_disk._earlier_pass_units). Read BEFORE the
+    # overwrite; the merge is bookkeeping only -- the dispatch loop
+    # below still works off the CURRENT plans.
+    earlier_units = _earlier_pass_units(ctx, phase)
+    planned_ids = {plan.unit.unit_id for plan in plans}
+    carried = [unit for unit in earlier_units
+               if unit.unit_id not in planned_ids]
+    # unit-id order: the same set lands on the same bytes whichever pass
+    # contributed which unit (a re-entry's plan order need not match the
+    # first pass's).
+    all_units = sorted([plan.unit for plan in plans] + carried,
+                       key=lambda unit: unit.unit_id)
+    _write_units(ctx, phase, all_units)
     plan_by_task = {plan.unit.task_ref: plan for plan in plans}
-    reused = _reused_rows(ctx, phase, [plan.unit for plan in plans])
+    reused = _reused_rows(ctx, phase, all_units)
 
     accepted = shortfall.read_unit_ids(
         lm.round_dir(store, round_) / shortfall.SHORTFALL_NAME)
@@ -311,34 +328,49 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
                 by_id[plan.unit.unit_id] = replace(
                     row, unit_id=plan.unit.unit_id,
                     injected_skills=plan.unit.skills_injected)
-    for plan in plans:
-        if plan.unit.unit_id in reused:
+    for unit in all_units:
+        if unit.unit_id in reused:
             by_id.setdefault(
-                plan.unit.unit_id,
-                _rebased_row(reused[plan.unit.unit_id],
-                             unit_id=plan.unit.unit_id,
+                unit.unit_id,
+                _rebased_row(reused[unit.unit_id],
+                             unit_id=unit.unit_id,
                              phase_label=phase.label))
     report = sorted(by_id.values(), key=lambda row: row.unit_id)
     _write_report(ctx, phase, report)
 
+    # The summary derives from the phase's FULL unit record and the
+    # round's disk facts, never from this pass's plan lists: a re-entered
+    # phase (its earlier pass already dispatched and judged some groups)
+    # must land on the uninterrupted run's bytes, and the plan lists of
+    # the re-entry cover only what is still owed. "Dispatched" is the
+    # frozen-audit-row set minus the zero-execution terminals -- the
+    # audit row is frozen exactly when a group enters dispatch, so this
+    # equals the straight pass's dispatch list on first entry and keeps
+    # the earlier passes' groups counted on every later one.
+    terminals = {unit.task_ref: _round_terminal(store, unit.task_ref,
+                                                round_)
+                 for unit in all_units}
     summary = {
         "role": PHASE_ROLE_LIVE,
         "round": round_,
         "n_attempts": n_attempts,
         "improvement_rule": rule_name,
-        "units": [plan.unit.unit_id for plan in plans],
-        "dispatched": [plan.unit.task_ref for plan in dispatch],
+        "units": [unit.unit_id for unit in all_units],
+        "dispatched": sorted({
+            unit.task_ref for unit in all_units
+            if unit.unit_id not in reused
+            and _frozen_audit_row(store, round_, unit.task_ref) is not None
+            and terminals[unit.task_ref] not in (lv.WEAK_ALREADY_KNOWS,
+                                                 lv.LIVE_INJECTION_OVERFLOW)}),
         "skipped_reused": sorted(
-            plan.unit.unit_id for plan in plans
-            if plan.unit.unit_id in reused),
+            unit.unit_id for unit in all_units
+            if unit.unit_id in reused),
         "skipped_control_perfect": sorted(
-            plan.unit.unit_id for plan in plans
-            if _round_terminal(store, plan.unit.task_ref, round_)
-            == lv.WEAK_ALREADY_KNOWS),
+            unit.unit_id for unit in all_units
+            if terminals[unit.task_ref] == lv.WEAK_ALREADY_KNOWS),
         "skipped_injection_overflow": sorted(
-            plan.unit.unit_id for plan in plans
-            if _round_terminal(store, plan.unit.task_ref, round_)
-            == lv.LIVE_INJECTION_OVERFLOW),
+            unit.unit_id for unit in all_units
+            if terminals[unit.task_ref] == lv.LIVE_INJECTION_OVERFLOW),
         "infra_missing": sorted(infra_failed),
         "infra_accepted": sorted(accepted),
         "report_rows": len(report),

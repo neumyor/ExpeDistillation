@@ -679,12 +679,17 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     <臂>/accepted_infra_shortfall.json   本臂已接受的空洞
     generation_failures.jsonl    exam 相位：出题失败的终态记录（每道考题
                                  首行即定）
-    phase_summary.json           执行相位摘要（也是返回给相位循环的值）
+    phase_summary.json           执行相位摘要（也是返回给相位循环的值；
+                                 baseline/live/test 相位 complete=true、
+                                 exam 相位 infra_failed 为空即该相位的
+                                 完成信号——已完成的执行相位重放时整个
+                                 跳过，工件保持自己那一轮的落盘字节）
     task_list.jsonl              学习相位：生效的任务清单（每次整文件重写；
                                  被取代的多版本行单独记一行）
     revisions.jsonl              学习相位：改写前的版本号（改写调用前先写，
-                                 续跑按版本号重放）
-    outcomes.jsonl               学习相位：逐技能回执（见 5.6 的结局清单）
+                                 每条技能只写一行，续跑按版本号重放）
+    outcomes.jsonl               学习相位：逐技能回执（见 5.6 的结局清单；
+                                 同一目标每条技能至多一条回执，重放不补写）
     skill_bank.jsonl             学习相位：本相位的技能库工件（全体成员，
                                  含待定；下一个执行相位的交付从这里读）
     bank_summary.json            工件摘要（成员 / 大小 / 整库 digest）
@@ -784,6 +789,12 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 - 执行完毕逐组判定（`ACCEPTANCE_IMPROVE` 具名规则 × D3 计数，verdicts 账本
   append-once、首判为准、续跑重算逐字节核对）；判定、终态提交
   （finalize_group）都在相位内完成；
+- **相位宇宙会随自己的进度缩小**（判定提交后组不再是待定），所以重入的
+  live 相位把覆写前 `units.jsonl` 里已有、本轮没再规划的单元**并回**单元
+  清单与摘要——相位的单元记录是它所有 pass 解析过的并集；摘要的
+  units / dispatched / skipped_* 全部从并集与轮内磁盘事实（冻结审计行、
+  终态、规则 1 复用表）推导，不读本 pass 的计划清单，重放落在一次跑完
+  的同一些字节上；
 - **归因与修订不在这个相位**：没提升的组由下一个学习相位收证据（G10 事实，
   视图在字符预算内裁剪）、做修订（G11，保节结构、版本加一）、按证据定每条
   去留；改写没产出新版本时，注入块逐字节不变，下一个 live 相位按规则 1

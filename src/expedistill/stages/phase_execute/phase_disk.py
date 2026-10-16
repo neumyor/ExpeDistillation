@@ -32,6 +32,8 @@ __all__ = [
     "REPORT_NAME",
     "SUMMARY_NAME",
     "UNITS_NAME",
+    "_earlier_pass_unit_ids",
+    "_earlier_pass_units",
 ]
 
 #: The execute-phase layout inside ``<run>/phases/<label>/`` (the
@@ -145,10 +147,27 @@ def _earlier_pass_unit_ids(ctx: StageContext, phase: PhaseInstance
     measurement is not on disk yet (the earlier pass crashed before it)
     runs exactly like an unmarked one.
     """
+    return {row.unit_id for row in _earlier_pass_units(ctx, phase)}
+
+
+def _earlier_pass_units(ctx: StageContext, phase: PhaseInstance
+                        ) -> List[ExecutionUnitRow]:
+    """The FULL unit rows an earlier pass of this phase resolved.
+
+    The live role's universe (the store's pending groups) SHRINKS as its
+    own earlier pass commits verdicts, so a re-entered live phase would
+    re-plan fewer units than the pass that crashed -- and rewriting
+    ``units.jsonl`` with only the new plans would erase the earlier
+    pass's rows from the phase's record (and desync the summary from
+    the report, which the audit's units-report check then flags). The
+    re-entered pass therefore MERGES the earlier rows back in: the
+    phase's unit list is every unit ANY of its passes resolved, and the
+    resume lands on the uninterrupted run's bytes.
+    """
     path = _phase_dir(ctx, phase) / UNITS_NAME
     if not path.exists():
-        return set()
-    return {row["unit_id"] for row in read_jsonl(path)}
+        return []
+    return [ExecutionUnitRow(**row) for row in read_jsonl(path)]
 
 
 def _reused_rows(ctx: StageContext, phase: PhaseInstance,

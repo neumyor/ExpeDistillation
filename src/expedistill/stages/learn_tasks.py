@@ -52,9 +52,13 @@ belongs to the evidence family).
 version number is the proof of completion, decision section 2.4),
 finds a receipt row in ``outcomes.jsonl`` and skips the skill
 outright, and re-asks only what neither covers (the standing K3/K4
-model-call exemption). Keep / delete / add need no guard: their
-landings are idempotent (statuses and reasons rewritten to the same
-bytes) and the add path skips experiences whose skill already exists.
+model-call exemption). The receipt guard covers every action: keep /
+delete / revise skip members that already carry a receipt, and an add
+target with any receipt is done -- a re-derived row never writes a
+second receipt, so a resumed phase's ledger equals an uninterrupted
+one's byte for byte (on top of that, the landings themselves are
+idempotent: statuses and reasons rewritten to the same bytes, the add
+path skips experiences whose skill already exists).
 The ledgers live in the phase's own directory beside the bank
 artifact (composites.phase_bank's layout):
 
@@ -247,15 +251,33 @@ def _target_members(store: Store, row: TaskListRow) -> List[Skill]:
         f"{row.target_id!r}; only a skill or a group is actionable")
 
 
+def _receipted_skills(phase: PhaseInstance, row: TaskListRow,
+                      phase_dir) -> Set[Any]:
+    """The skill ids this target already receipted in this phase.
+
+    The receipt is the proof of completion -- including for the
+    resume-proof discipline: a re-derived row whose target landed in an
+    earlier pass of the same phase must not write a SECOND receipt, or
+    a resumed run's ledger differs from an uninterrupted one's byte for
+    byte (the golden matrix's E5 crash-resume contract)."""
+    return {record.get("skill_id")
+            for record in _rows_of(phase_dir / OUTCOMES_NAME, phase.label,
+                                   row.target_id)}
+
+
 def _land_keep(ctx: Any, phase: PhaseInstance, row: TaskListRow,
                phase_dir) -> None:
     """Keep: the pending target(s) enter the bank. An already-accepted
-    target is a no-op (its re-measurement passed again)."""
+    target is a no-op (its re-measurement passed again); a member this
+    phase already receipted owes nothing (the receipt guard)."""
     store: Store = ctx.store
+    receipted = _receipted_skills(phase, row, phase_dir)
     for skill in _target_members(store, row):
+        if skill.skill_id in receipted:
+            continue
         stored = store.load("skills", skill.skill_id, Skill)
         if stored.status not in _ACTABLE_STATUSES:
-            _append_outcome(phase, row, None, "skipped_terminal",
+            _append_outcome(phase, row, stored.skill_id, "skipped_terminal",
                             stored.version, phase_dir)
             continue
         if stored.status == "pending":
@@ -271,12 +293,17 @@ def _land_keep(ctx: Any, phase: PhaseInstance, row: TaskListRow,
 def _land_delete(ctx: Any, phase: PhaseInstance, row: TaskListRow,
                  phase_dir) -> None:
     """Delete: pending AND accepted members leave the bank with the
-    decision's reason; already-terminal members keep their own truth."""
+    decision's reason; already-terminal members keep their own truth.
+    A member this phase already receipted owes nothing (the receipt
+    guard)."""
     store: Store = ctx.store
+    receipted = _receipted_skills(phase, row, phase_dir)
     for skill in _target_members(store, row):
+        if skill.skill_id in receipted:
+            continue
         stored = store.load("skills", skill.skill_id, Skill)
         if stored.status not in _ACTABLE_STATUSES:
-            _append_outcome(phase, row, None, "skipped_terminal",
+            _append_outcome(phase, row, stored.skill_id, "skipped_terminal",
                             stored.version, phase_dir)
             continue
         discard_skill(store, stored, row.reason)
@@ -299,6 +326,8 @@ def _land_add(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     writes only what is missing. A ModelOutputError that survives the
     write block's own budget propagates to the per-target handler
     (recorded, no skill)."""
+    if _rows_of(phase_dir / OUTCOMES_NAME, phase.label, row.target_id):
+        return  # this add already landed; its receipt is the proof
     store: Store = ctx.store
     segmentation.segment_add_material(
         store=store,
@@ -360,8 +389,11 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     actable = [skill for skill in members
                if skill.status in _ACTABLE_STATUSES]
     if not actable:
+        receipted = _receipted_skills(phase, row, phase_dir)
         for skill in members:
-            _append_outcome(phase, row, None, "skipped_terminal",
+            if skill.skill_id in receipted:
+                continue
+            _append_outcome(phase, row, skill.skill_id, "skipped_terminal",
                             skill.version, phase_dir)
         return
     revisions = _revision_rows(phase, row, phase_dir)
@@ -421,6 +453,13 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     to_author = [package for package in packages
                  if package.target in todo_ids]
     for package in to_author:
+        if package.target in revisions:
+            # An earlier pass of this phase already logged this plan (the
+            # "in flight" branch above): the ledger carries ONE row per
+            # (target, skill) -- the resume's re-ask must not append a
+            # second copy of the same from_version, or a resumed run's
+            # ledger differs from an uninterrupted one's byte for byte.
+            continue
         append_jsonl(phase_dir / REVISIONS_NAME, {
             "schema": _REVISION_SCHEMA,
             "phase_label": phase.label,

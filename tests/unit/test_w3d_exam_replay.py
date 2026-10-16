@@ -50,6 +50,7 @@ from expedistill.core.ids import (
     make_trajectory_id,
 )
 from expedistill.core.models import Attempt, Skill, Step, Subtask, Trajectory
+from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import json_script, make_fake_handle
@@ -327,21 +328,50 @@ def test_a_completed_phase_replays_with_zero_model_calls(monkeypatch,
 
 def test_a_partial_replay_answers_only_the_unmeasured_units(monkeypatch,
                                                             tmp_path):
+    """The interrupted pass: one unit measured, one still owed. The
+    interruption is the real one -- the owed unit's model call raises
+    InfrastructureError, so the pass writes its summary (infra_failed
+    non-empty, hence NOT a completion signal) and raises; the resume
+    re-enters the phase, reuses the measured unit's judged attempts and
+    spends calls only on the owed one. (A phase whose pass COMPLETED is
+    skipped whole by the completion signal instead -- the test above
+    pins that path; and the bank cannot grow between two passes of the
+    same phase in a sequence replay, because the previous learn phase's
+    artifact is frozen and its own completion signal skips it.)"""
     _install_plugin(monkeypatch, PhasePlugin())
-    ctx = _ctx(tmp_path, _handles(allowed=("t1",)))
+
+    def _infra_exploding(allowed, owed_raw):
+        """Handles that serve ``allowed`` and raise InfrastructureError
+        for the owed unit -- the simulated mid-phase crash."""
+        handles = _handles(allowed=allowed)
+        marker = f"SUBTASK LABEL: fix-{owed_raw}"
+        question = _QUESTIONS[owed_raw]
+
+        def wrap(handle):
+            inner = handle.client.script
+
+            def script(system, user):
+                if marker in user or question in user:
+                    raise InfrastructureError("simulated infra crash")
+                return inner(system, user)
+            handle.client.script = script
+            return handle
+        for name in ("examiner", "answerer", "judge", "auditor"):
+            wrap(handles[name])
+        return handles
+
+    ctx = _ctx(tmp_path, _infra_exploding(("t1",), "t2"))
     measured = _skill_on(ctx, "t1")
     owed = _skill_on(ctx, "t2")
-    # The interrupted pass had only t1 in its universe (the crash hit
-    # before t2's unit started); the resumed pass sees both.
-    _write_bank(ctx, "p02:L", [measured])
+    _write_bank(ctx, "p02:L", [measured, owed])
     phase = _phase()
-    first = phase_execute.run(ctx, phase).summary
-    assert first["measured"] == [make_exam_id(measured.subtask_id)]
+    with pytest.raises(InfrastructureError):
+        phase_execute.run(ctx, phase)
     measured_attempts = _tree(_attempts_dir(ctx))
     measured_exam = _tree(ctx.run_dir / "stage3_generation" / "exams")
-    assert len(measured_attempts) == 2  # bare + with-skill, both judged
+    assert len(measured_attempts) == 2  # t1's bare + with-skill, judged
+    assert len(measured_exam) == 1      # only t1's exam was generated
 
-    _write_bank(ctx, "p02:L", [measured, owed])
     # Any model call for t1 (the replayed, already judged unit) explodes.
     resumed = _ctx(tmp_path, _handles(allowed=("t2",)))
     second = phase_execute.run(resumed, phase).summary
