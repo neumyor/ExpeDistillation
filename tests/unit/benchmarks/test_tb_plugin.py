@@ -491,6 +491,46 @@ def test_run_pseudo_zero_carries_no_scorer_verdict(tmp_path):
     assert "verdict_reason" not in outcome.meta
 
 
+def test_run_pseudo_zero_positive_direction_carries_no_scorer_verdict(
+        tmp_path):
+    # The historically dangerous direction (2026-10-16 review D2): a
+    # POSITIVE reward claimed without pytest ever collecting anything
+    # must not score as a success either -- the guard is symmetric in
+    # the reward value.
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files=_completed_trial_files(result="result_success.json",
+                                            verifier_log="verifier_not_collected.txt"))
+    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
+    assert outcome.correctness is None
+    assert outcome.meta["reward"] == 1.0
+    assert outcome.meta["verifier_ran"] is False
+    assert "verdict_reason" not in outcome.meta
+
+
+def test_run_verifier_log_fetch_failure_is_infra_and_retried(tmp_path):
+    # 2026-10-16 ruling 4 (C-path offset 1): the verifier log is the
+    # scorer's evidence, so a transport failure fetching it is an
+    # infrastructure failure -- K1 retries the unit, and a scored
+    # rollout is not silently voided as unscored. Only a log that
+    # arrives and shows pytest never collected may leave correctness
+    # None (the pseudo zero above).
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files={
+            f"{TRIAL}/result.json": _fixture_text("result_success.json"),
+            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
+        })
+    recorder = UsageRecorder(tmp_path / "usage.jsonl")
+    with pytest.raises(InfrastructureError,
+                       match="verifier log fetch failed"):
+        _make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
+    # The failed attempt is one non-ok usage row (the "infra" label).
+    rows = [json.loads(line) for line in
+            (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["status"] for row in rows] == ["infra"]
+
+
 def test_run_truncated_result_json_is_infra_error(tmp_path):
     # A fetch racing Harbor's non-atomic result.json write lands a truncated
     # file: transport-grade, so the unit refetches on retry instead of the
@@ -939,8 +979,8 @@ def test_live_remote_smoke(tmp_path):
     handle = ModelHandle(name=model, role="smoke", client=None)
     outcome = plugin.run(task, handle, "", tmp_path / "smoke")
     # The smoke asserts only that the link works end to end; a model failure
-    # (reward 0) is still a successful smoke of the plumbing.
-    assert outcome.status in ("success", "failure", "infra_error")
+    # (reward 0) is still a successful smoke of the plumbing, and an
+    # infra failure raises (never reaching this assert).
     assert outcome.meta["run_id"].startswith("ed_fix-git_smoke1")
 
 

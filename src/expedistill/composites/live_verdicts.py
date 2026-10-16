@@ -141,16 +141,31 @@ def _judge_round(
     judged_with_shortfall = bool(skip.intersection(expected_ids))
 
     if terminal == LIVE_UNDETERMINED:
-        raise CodeBugError(
-            "live_undetermined is derived by judge_round (a live sample "
-            "that is all accepted holes), never asserted by the caller")
-    if terminal is not None and terminal not in (WEAK_ALREADY_KNOWS,
-                                                 LIVE_INJECTION_OVERFLOW):
+        # The one caller-side fact live_undetermined may be asserted for
+        # is an unmeasured baseline (valid == 0): R2b made that a normal
+        # reachable state (its stage-1 trials all came back without a
+        # scorer verdict, or are all accepted holes), and with no control
+        # to compare against no round can ever be judged -- the entry
+        # guard terminalizes the group with zero executions. Verified
+        # here so the zero-execution row cannot paper over a measurable
+        # baseline; on the live side the terminal stays derived (below).
+        if baseline_counts["valid"] != 0:
+            raise CodeBugError(
+                "live_undetermined is derived by judge_round (a live "
+                "sample with no valid measurement); the one caller-side "
+                "fact it may be asserted for is an unmeasured baseline "
+                f"(valid == 0), and this baseline is {baseline_counts}")
+        row = _verdict_row(task_id, round_, rule_name, baseline=None,
+                           live=None, better=None,
+                           verdict=LIVE_UNDETERMINED,
+                           injection_tokens=None,
+                           judged_with_shortfall=False, aux=None)
+    elif terminal is not None and terminal not in (WEAK_ALREADY_KNOWS,
+                                                  LIVE_INJECTION_OVERFLOW):
         raise CodeBugError(
             f"unknown zero-execution terminal {terminal!r}; expected one "
             f"of {(WEAK_ALREADY_KNOWS, LIVE_INJECTION_OVERFLOW)}")
-
-    if terminal == WEAK_ALREADY_KNOWS:
+    elif terminal == WEAK_ALREADY_KNOWS:
         if rule_name not in _ALL_SUCCESS_SAFE_RULES:
             raise CodeBugError(
                 f"weak_already_knows short-circuit is limited to the "
@@ -200,12 +215,17 @@ def _judge_round(
             trajectories, expected_units(task_id, n_attempts),
             aux_scorer=aux_scorer)[task_id]
         audit = _require_audit_row_from(audit_path, round_, task_id)
-        if decision.live_all_holes(expected_ids, skip):
-            # The precise condition (decision section 2.5): every expected
-            # unit is an accepted hole -- nothing was executed, so there is
-            # no live denominator and no rule to run. (Completeness passed
-            # above, and K1 never stores an infra-exhausted unit, so this
-            # is also exactly the live_counts["valid"] == 0 case.)
+        if (decision.live_all_holes(expected_ids, skip)
+                or live_counts["valid"] == 0
+                or baseline_counts["valid"] == 0):
+            # No valid measurement on either side (decision section 2.5,
+            # widened by R2b): every expected unit an accepted hole, every
+            # stored run back without a scorer verdict, or a baseline
+            # whose trials never came back scored. Completeness passed
+            # above, so those are exactly the zero-valid cases -- there is
+            # no denominator and no rule to run. The verdict is
+            # live_undetermined, never a judgment over zero evidence (an
+            # unscored trial is not a measurement of anything).
             row = _verdict_row(task_id, round_, rule_name, baseline=None,
                                live=None, better=None,
                                verdict=LIVE_UNDETERMINED,
@@ -272,10 +292,14 @@ def judge_round(
     ``live_injection_overflow`` (the frozen audit row's estimate exceeds
     ``max_injection_tokens`` -- verified here against the audit row, so
     the verdict row never claims an overflow its evidence does not
-    show). ``live_undetermined`` is NOT a caller input: with no terminal
-    given, a live sample that is nothing but accepted holes
+    show). ``live_undetermined`` has one caller-side use, verified here:
+    an unmeasured baseline (valid == 0 -- R2b's normal reachable state;
+    the entry guard terminalizes the group with zero executions).
+    Otherwise it is DERIVED: a group whose round has no valid
+    measurement (every expected unit an accepted hole, every stored run
+    back without a scorer verdict, or the baseline unmeasured)
     short-circuits to it before any rule runs -- no judgment without a
-    live denominator. Zero-execution rows keep the schema's field set
+    denominator. Zero-execution rows keep the schema's field set
     with the counts and ``better`` null and the terminal's name in a
     ``verdict`` field -- the verdicts file is the audit's complete fact
     source (decision section 2.4).

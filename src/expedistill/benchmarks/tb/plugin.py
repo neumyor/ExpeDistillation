@@ -264,8 +264,10 @@ def result_facts(result: Dict[str, Any],
     Returns the fact dict for ``RunOutcome.meta``: the verifier reward as
     parsed (``None`` when absent or not a number), ``verifier_ran`` (True /
     False when the verifier log shows pytest did / did not collect,
-    ``None`` when the log could not be fetched), and the trial's exception
-    type and shortened message. No status, no verdict: what a fact pattern
+    ``None`` when no log was handed in -- the execution path never does
+    that: a fetch failure raises InfrastructureError and K1 retries), and
+    the trial's exception type and shortened message. No status, no
+    verdict: what a fact pattern
     means for a run's validity is acceptance's named-rule decision.
     """
     reward: Optional[float] = None
@@ -300,6 +302,9 @@ def classify_result(result: Dict[str, Any],
     model-vs-infra exceptions) live with acceptance's named rules now.
     Returns (status, reward, info). Pure.
     """
+    # The reward/exception parsing below is a FROZEN copy of
+    # result_facts' parsing, on purpose: this lens must reproduce the
+    # parsing as of the archived campaign, not follow the live function.
     reward: Optional[float] = None
     verifier_result = result.get("verifier_result") or {}
     raw_reward = (verifier_result.get("rewards") or {}).get("reward")
@@ -1036,8 +1041,15 @@ class TBPlugin(BenchmarkPlugin):
                 f"TB trial {run_id}: result.json is not a JSON object "
                 f"(got {type(result_data).__name__})")
 
-        # Best effort: a reward without verifier evidence is a pseudo zero
-        # either way, and a fetch failure here is an infra failure below.
+        # The verifier log is the scorer's evidence. A fetch failure only
+        # threatens a verdict when the trial claims one (a reward came
+        # back): that is an infrastructure failure (K1 retries the unit
+        # -- a scored rollout must not be voided by a transport hiccup),
+        # never a silent "no verdict". A trial that died before its
+        # verifier ran has no reward and no log to fetch -- best effort
+        # there, the facts ride meta and correctness is None either way.
+        # Only a log that arrives and shows pytest never collected
+        # leaves a rewarded trial unscored (the pseudo zero).
         verifier_log: Optional[str] = None
         try:
             verifier_local = workdir / "verifier_test_stdout.txt"
@@ -1045,10 +1057,16 @@ class TBPlugin(BenchmarkPlugin):
                      timeout=FETCH_TIMEOUT_SECONDS)
             verifier_log = verifier_local.read_text(encoding="utf-8",
                                                     errors="replace")
-        except (InfrastructureError, OSError):
-            verifier_log = None
+        except (InfrastructureError, OSError) as exc:
+            verifier_fetch_error = exc
+        else:
+            verifier_fetch_error = None
 
         facts = result_facts(result_data, verifier_log)
+        if verifier_fetch_error is not None and facts["reward"] is not None:
+            raise InfrastructureError(
+                f"TB trial {run_id}: verifier log fetch failed "
+                f"(refetches on retry): {verifier_fetch_error}") from None
         meta.update(facts)
         reward = facts["reward"]
 

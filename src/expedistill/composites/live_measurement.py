@@ -36,7 +36,6 @@ from expedistill.core import ids
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import (
     CodeBugError,
-    ConfigError,
     InfrastructureError,
 )
 from expedistill.infra.store import Store, read_json, read_jsonl
@@ -307,11 +306,12 @@ def load_baseline(
     holes are skipped and stay holes; any other missing unit raises
     InfrastructureError -- an unreachable guard that points at the fix
     (resume stage 1; a hole can only be accepted there). A baseline with
-    no valid attempt at all is a ConfigError: both registered task_select
-    rules require ``valid > 0``, so the data contradicts the frozen split
-    (decision ruling A17 -- the guard's unreachability depends on the
-    registered rules; swapping in a rule that admits valid==0 makes it
-    reachable).
+    no valid attempt at all is NOT an error since R2b: unscored trials
+    (``correctness`` None) are a normal stored state, so valid == 0 is
+    returned as counts and the group is judged not_testable up the
+    stack (the live driver's entry guard terminalizes it live_undetermined
+    with zero executions; judge_round verifies the fact before writing
+    the row).
 
     The counts are D3's single-task counts under the FULL expected set
     (``expected_units``): accepted holes and attempts beyond the stored
@@ -344,12 +344,6 @@ def load_baseline(
     counts = compute_task_metrics(
         trajectories, expected_units(task_id, n_attempts),
         aux_scorer=aux_scorer)[task_id]
-    if counts["valid"] == 0:
-        raise ConfigError(
-            f"live-run baseline of task {task_id!r} has no valid attempt "
-            f"({counts}); every registered task_select rule requires "
-            "valid > 0, so the frozen split and the store disagree -- "
-            "the run's task set must be rebuilt in a new run directory")
     return trajectories, counts
 
 

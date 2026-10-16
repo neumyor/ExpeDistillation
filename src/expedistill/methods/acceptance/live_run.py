@@ -43,8 +43,11 @@ re-enters exactly where the crash cut it:
   finishing any commit a crash left hanging on a verdict row;
 * the entry guard loads every group's baseline BEFORE anything executes
   (an unaccepted missing unit is an InfrastructureError pointing at stage
-  1; valid==0 is a ConfigError) and short-circuits an all-success baseline
-  under a strict-family rule to weak_already_knows with zero executions
+  1; a valid==0 baseline -- every trial unscored or an accepted hole,
+  R2b's normal reachable state -- terminalizes the group
+  live_undetermined with zero executions) and short-circuits an
+  all-success baseline under a strict-family rule to weak_already_knows
+  with zero executions
   (the strict-family limit lives in the decision rule the stage calls;
   judge_round enforces it too -- a pass@N-style rule can still improve
   on a rate-1.0 baseline);
@@ -435,6 +438,20 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             store, task_id, n_attempts, aux_scorer=aux_scorer)
         baselines[task_id] = baseline_counts
         if (0 not in _verdict_rows(store, task_id)
+                and baseline_counts["valid"] == 0):
+            # R2b: the baseline itself was never measured (its stage-1
+            # trials all came back without a scorer verdict, or are all
+            # accepted holes) -- no comparison can exist, ever. Zero
+            # executions: the group is terminal not_testable
+            # (live_undetermined); judge_round verifies the fact before
+            # writing the row.
+            lv.judge_round(
+                store=store, task_id=task_id, round_=0, rule_name=rule_name,
+                baseline_counts=baseline_counts, n_attempts=n_attempts,
+                skip_ids=[], terminal=lv.LIVE_UNDETERMINED,
+                max_injection_tokens=max_injection_tokens)
+            lv.finalize_group(store, task_id)
+        elif (0 not in _verdict_rows(store, task_id)
                 # The strict-family limit lives in the decision rule
                 # (judge_round enforces it too), so a pass@N-style rule
                 # still gets executed.

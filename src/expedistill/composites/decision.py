@@ -76,9 +76,11 @@ methods/acceptance/live_run.py):
   family limit).
 * injection over max_injection_tokens -> live_injection_overflow:
   ``live_injection_overflows`` (both dispatch loops call it before K1).
-* every expected unit an accepted hole -> live_undetermined:
-  ``live_all_holes`` (K6's judging core short-circuits before any rule
-  runs -- no judgment without a live denominator).
+* no valid measurement -> live_undetermined: every expected unit an
+  accepted hole (``live_all_holes``) or every stored run back without a
+  scorer verdict (R2b), and -- asserted by the caller only here, an
+  unmeasured baseline (valid == 0) -- (K6's judging core short-circuits
+  before any rule runs -- no judgment without a denominator).
 * G10 budget exhausted -> the whole group discarded
   (model_output_error): ``live_attribution_exhausted`` covers the
   ledger-read branch (a stored exhausted row, or a full budget of
@@ -371,10 +373,14 @@ def live_zero_execution_short_circuit(
     never lose to (the strict family) -> the group is terminalized
     weak_already_knows with zero executions: there is nothing the
     injection could prove. A pass@N-style rule can still improve on
-    rate 1.0 and never short-cuits. Whether the round was already
+    rate 1.0 and never short-circuits, and neither does an UNMEASURED
+    baseline (valid == 0 would read 0 == 0 as "all success"): a
+    baseline with no valid attempt is live_undetermined, not this
+    short-circuit. Whether the round was already
     judged is the caller's resume fact, not part of the criterion;
     judge_round re-verifies both halves before writing the row."""
     return (rule_name in STRICT_SHORT_CIRCUIT_RULES
+            and baseline_counts["valid"] > 0
             and baseline_counts["success"] == baseline_counts["valid"])
 
 
@@ -393,7 +399,9 @@ def live_all_holes(expected_ids: Sequence[str],
     """Every expected unit of the round is an accepted hole: nothing
     was executed, there is no live denominator and no rule to run --
     the round is live_undetermined, never a judgment on an empty
-    sample."""
+    sample. One of the two ways a round reaches zero valid
+    measurements; the other (every stored run back without a scorer
+    verdict, R2b) is read off the counts by K6's judging core."""
     skip = set(skip_ids)
     return all(unit in skip for unit in expected_ids)
 
@@ -448,7 +456,15 @@ ROW_NOT_RUN_CONTROL_PERFECT = "not_run_control_perfect"
 #: unjudged live round. It is a visibility fact, never the
 #: weak_already_knows short-circuit: that fact travels only as the
 #: ``not_run_control_perfect`` status with the ``weak_already_knows``
-#: cause.
+#: cause. ``all_holes`` is the settled zero-measurement cause (the
+#: 2026-10-16 R2b-review ruling): nothing was measured -- every unit an
+#: accepted hole, or every stored run back without a scorer verdict
+#: (``correctness`` None). Both readers report it for that state (the
+#: live side through the live_undetermined terminal) and the action
+#: table deletes with it; the two causes between them keep "completed
+#: but unscored" out of ``invalid_redispatch_exhausted`` (whose fact is
+#: missing units whose dispatch budget died) and out of
+#: ``zero_execution`` (whose fact is work still owed).
 CAUSE_LEAK = "leak"
 CAUSE_INJECTION_OVERFLOW = "injection_overflow"
 CAUSE_EXAM_GENERATION_FAILED = "exam_generation_failed"

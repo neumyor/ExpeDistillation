@@ -22,9 +22,12 @@ that needs a model to judge belongs to acceptance):
 Where G1's five sites stand after this module (the ones outside this
 wave's file ownership converge onto it when their owners land):
 
-1. ``benchmarks/tb/plugin.py``'s ``classify_result`` -- W1-B (R2): the
-   plugin reports facts (score, errors) and this module's named rules
-   draw the conclusion;
+1. ``benchmarks/tb/plugin.py``'s ``classify_result`` -- RETIRED from the
+   execution path since R2b: the plugin reports facts (score, errors)
+   and this module's named rules draw the conclusion, and
+   ``classify_result`` survives only as the archive validator's
+   historical lens (its one remaining consumer,
+   scripts/analysis/tb_archive_validate.py);
 2. ``batch_execute.py``'s infra retry -- W1-B / Wave 2: an invalid run is
    acceptance's verdict; the re-dispatch is the phase driver's;
 3. ``exam_once``'s judging -- the judge call is routed through

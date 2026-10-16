@@ -1049,8 +1049,9 @@ def test_one_broken_task_does_not_stop_the_others(monkeypatch, tmp_path):
 def test_untrusted_remote_run_is_retried_under_a_fresh_token(
         monkeypatch, tmp_path):
     # A result.json already sits under this unit's a00 run id, but nothing
-    # local says this unit launched it: K1 must get a stale infra_error and
-    # run a fresh trial under a00r1, never adopt the foreign result.
+    # local says this unit launched it: K1 must catch the stale-run
+    # InfrastructureError and run a fresh trial under a00r1, never adopt
+    # the foreign result.
     link = JobsRemoteLink(on_submit=lambda run_id, task, model: trial_files(
         run_id, task, result="result_failure.json"))
     plugin = _NamedTB.make(link)

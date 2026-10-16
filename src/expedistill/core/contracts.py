@@ -88,9 +88,13 @@ class RunRecord:
     #: after an invalid run; 0 on the first dispatch).
     dispatch_index: int
 
-    #: The benchmark's own scorer verdict. ``None`` ONLY means the
-    #: benchmark has no scorer; True/False is the scorer's answer, never
-    #: an acceptance conclusion (that is acceptance's job).
+    #: The benchmark's own scorer verdict. ``None`` means no scorer
+    #: verdict came back -- a benchmark without a scorer, or a run that
+    #: completed without one (a TB pseudo zero, a trial that died before
+    #: its verifier ran, a model output the loop could not use); an
+    #: unscored run is never a measurement of anything. True/False is
+    #: the scorer's answer, never an acceptance conclusion (that is
+    #: acceptance's job).
     correctness: Optional[bool]
 
     #: Run metrics: retry counts, each raw error text, durations, exit

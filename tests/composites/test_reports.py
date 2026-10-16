@@ -286,6 +286,54 @@ def test_baseline_missing_units_are_invalid_runs(tmp_path):
     assert t1_strong.cause == verdicts.CAUSE_INVALID_REDISPATCH_EXHAUSTED
 
 
+def test_baseline_all_stored_unscored_is_all_holes(tmp_path):
+    """Ruling 1's reader unification: a unit whose every run came back
+    STORED but unscored (correctness None, R2b's normal state) measured
+    nothing -- the baseline reader reports the same zero-measurement
+    cause (all_holes) the live reader reports through the
+    live_undetermined terminal, never invalid_redispatch_exhausted
+    (whose fact is units that never came back)."""
+    store = Store(tmp_path / "run")
+    t1 = make_task_id(BENCHMARK, "t1")
+    seed_task(store, t1, (None, None, None))
+
+    report = acceptance_report(store, kind="baseline", benchmark=BENCHMARK,
+                               phase_label=PHASE, n_attempts_strong=2,
+                               n_attempts_weak=N_ATTEMPTS)
+
+    t1_weak = next(row for row in report if row.role == "weak"
+                   and row.unit_id == verdicts.make_unit_id(
+                       phase_label=PHASE, benchmark=BENCHMARK,
+                       task_ref=t1, role="weak", skills_injected=None))
+    assert t1_weak.status == verdicts.STATUS_NOT_TESTABLE
+    assert t1_weak.cause == verdicts.CAUSE_ALL_HOLES
+    assert [run["verdict"] for run in t1_weak.runs] == ["invalid"] * 3
+
+
+def test_baseline_stored_unscored_beside_a_missing_unit_keeps_the_dispatch_cause(
+        tmp_path):
+    # A unit that mixes stored-unscored runs with one that never came
+    # back still has a missing unit whose dispatch budget died: the
+    # zero-measurement cause is only for units that all came back.
+    store = Store(tmp_path / "run")
+    t1 = make_task_id(BENCHMARK, "t1")
+    seed_task(store, t1, (None,))
+    accept_holes(store, [make_trajectory_id(t1, "weak", 2)])
+
+    report = acceptance_report(store, kind="baseline", benchmark=BENCHMARK,
+                               phase_label=PHASE, n_attempts_strong=2,
+                               n_attempts_weak=N_ATTEMPTS)
+
+    t1_weak = next(row for row in report if row.role == "weak"
+                   and row.unit_id == verdicts.make_unit_id(
+                       phase_label=PHASE, benchmark=BENCHMARK,
+                       task_ref=t1, role="weak", skills_injected=None))
+    assert t1_weak.status == verdicts.STATUS_NOT_TESTABLE
+    assert t1_weak.cause == verdicts.CAUSE_INVALID_REDISPATCH_EXHAUSTED
+    assert [run["verdict"] for run in t1_weak.runs] == [
+        "invalid", "invalid"]
+
+
 # ---------------------------------------------------------------------------
 # exam kind
 # ---------------------------------------------------------------------------

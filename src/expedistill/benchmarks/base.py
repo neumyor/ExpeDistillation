@@ -281,7 +281,8 @@ class BenchmarkPlugin(abc.ABC):
       ``{instruction}``, ``{skills_block}`` and ``{history}``.
     - the optional AUXILIARY metric (``aux_metric_name`` /
       ``aux_success``): a second, pre-registered success notion reported
-      ALWAYS beside the primary one (which stays status-based), never
+      ALWAYS beside the primary one (which stays the scorer verdict,
+      ``correctness``), never
       swapped in or picked between after seeing results. The primary
       metric's strictness (e.g. SearchQA's exact-match EM) is exactly why
       an auxiliary view exists; see ``aux_metric_name`` below for the
@@ -300,7 +301,8 @@ class BenchmarkPlugin(abc.ABC):
     @abc.abstractmethod
     def run(self, task: Task, handle: Any, skills_block: str,
             workdir: Any) -> RunOutcome:
-        """Execute one task once; infra failures come back as status."""
+        """Execute one task once; infra failures raise
+        ``InfrastructureError`` (K1 retries the unit)."""
 
     @property
     @abc.abstractmethod

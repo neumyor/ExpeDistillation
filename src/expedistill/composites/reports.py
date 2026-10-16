@@ -216,14 +216,18 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
     no run at all; a unit that is neither was dispatched but never
     completed (its infra retries were exhausted) and is an invalid run --
     the honest shape of "not testable", never a silently shrunken
-    denominator. Zero valid runs therefore means either every unit was a
-    hole (all_holes) or the dispatch budget died (invalid_redispatch_
-    exhausted)."""
+    denominator. Zero valid runs means one of three things: every unit
+    was a hole (all_holes), every stored run came back without a scorer
+    verdict (all_holes -- the zero-measurement cause, the same state the
+    live reader reports through the live_undetermined terminal), or at
+    least one unit never completed (invalid_redispatch_exhausted -- the
+    dispatch budget died)."""
     of_role = {traj.trajectory_id: traj
                for traj in trajectories
                if traj.task_id == task_id and traj.model_role == role}
     rule_name = verdicts.default_verdict_rule(benchmark)
     runs: List[Dict[str, Any]] = []
+    missing = 0
     for attempt in range(n_attempts):
         unit_trajectory_id = ids.make_trajectory_id(task_id, role, attempt)
         if unit_trajectory_id in accepted:
@@ -233,6 +237,7 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
             verdict, basis = verdicts.verdict_from_run(
                 _run_record_from_trajectory(traj), rule_name=rule_name)
         else:
+            missing += 1
             verdict, basis = (verdicts.RUN_INVALID,
                               "missing: dispatched but never completed "
                               "(infra retries exhausted)")
@@ -241,8 +246,9 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
 
     if any(run["verdict"] != verdicts.RUN_INVALID for run in runs):
         status, cause = verdicts.STATUS_NORMAL, ""
-    elif not runs:
-        # Every expected unit is an accepted hole: nothing was executed.
+    elif not runs or missing == 0:
+        # Either nothing was executed at all, or every unit came back
+        # stored with no scorer verdict: no measurement either way.
         status, cause = (verdicts.STATUS_NOT_TESTABLE,
                          verdicts.CAUSE_ALL_HOLES)
     else:

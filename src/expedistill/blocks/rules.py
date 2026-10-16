@@ -250,11 +250,14 @@ def _strict_rate_gain(
     baseline 2/3 has MORE successes but a WORSE rate, and "not better" is
     the right verdict. Strict on purpose: equality is not a gain.
 
-    Both defensive branches are unreachable in the live_run stage as
-    designed -- it short-circuits an all-infra live arm (live_undetermined)
-    and rejects a valid==0 baseline as ConfigError before any rule runs --
-    but keep the rule total: no live evidence, and no baseline to compare
-    against, are both "not better", never a crash.
+    The zero branches are defense in depth, not a live_run design
+    claim. The judge layer (composites/live_verdicts.judge_round)
+    short-circuits a group with no valid measurement on either side --
+    every expected unit an accepted hole, every stored run back without
+    a scorer verdict (R2b), or a baseline whose trials never came back
+    scored -- to live_undetermined before any rule runs. But the rule
+    stays total: a direct caller handing it zero evidence gets "not
+    better", never a crash.
     """
     if live["valid"] == 0:
         return False

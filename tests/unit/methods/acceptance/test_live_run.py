@@ -331,6 +331,41 @@ def test_round0_pass_accepts_with_zero_attribution_calls(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# A complete but all-unscored round: live_undetermined, no attribution
+# ---------------------------------------------------------------------------
+
+def test_an_all_unscored_round_is_undetermined_without_attribution(
+        tmp_path, monkeypatch):
+    """Ruling 1's end-to-end nail: a group whose every stored run came
+    back without a scorer verdict (R2b's normal reachable state) has
+    zero measurements -- it is never compared, never spends a G10
+    attribution, and terminalizes live_undetermined."""
+    ctx, store, plugin, skills = build_env(
+        tmp_path, monkeypatch,
+        behave=lambda task, block: None,
+        author=author_plan(lambda skill_id: "revise"))
+
+    summary = run_live(ctx)
+
+    # Round 0 executed and stored every attempt -- all unscored.
+    assert len(plugin.calls) == N_ATTEMPTS
+    verdict = verdict_of(store, TASK1, 0)
+    assert verdict["verdict"] == lv.LIVE_UNDETERMINED
+    assert verdict["better"] is None
+    # No attribution budget spent on an unmeasured group.
+    assert ctx.handle("author").client.calls == []
+    for skill in skills:
+        stored = stored_skill(store, skill)
+        assert (stored.status, stored.discard_reason) == (
+            "discarded", "live_undetermined")
+    # Terminal after round 0: no revision pipeline, no round 1.
+    assert verdict_of(store, TASK1, 1) is None
+    assert not (live_dir(store) / "round01").exists()
+    assert summary["discarded"] == {"live_undetermined": 1}
+    assert summary["infra_failed"] == []
+
+
+# ---------------------------------------------------------------------------
 # Both rounds fail: the group is discarded, live_no_improvement
 # ---------------------------------------------------------------------------
 
@@ -713,8 +748,8 @@ def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
 
 
 # ---------------------------------------------------------------------------
-# Entry guards: a missing baseline unit or a valid==0 baseline stops the
-# stage before any execution is spent
+# Entry guards: a missing baseline unit stops the stage before any
+# execution is spent; an unmeasured baseline terminalizes the group
 # ---------------------------------------------------------------------------
 
 def test_a_missing_baseline_unit_stops_the_stage_before_any_execution(
@@ -730,18 +765,51 @@ def test_a_missing_baseline_unit_stops_the_stage_before_any_execution(
     assert plugin.calls == []
 
 
-def test_an_all_invalid_baseline_is_a_config_error(tmp_path, monkeypatch):
+def test_an_unmeasured_baseline_terminalizes_with_zero_executions(
+        tmp_path, monkeypatch):
+    """Ruling 2: a baseline with no valid attempt (here: all accepted
+    holes) is no longer a ConfigError -- the group is terminal
+    live_undetermined with zero executions, the stage completes
+    normally."""
     plugin = install(monkeypatch, LivePlugin(lambda task, block: True))
     ctx = make_ctx(tmp_path)
     write_json(ctx.run_dir / "stage1_baseline"
                / "accepted_infra_shortfall.json",
                {"unit_ids": [unit(TASK1, 0), unit(TASK1, 1)]}, indent=2)
-    seed_group(ctx.store, [MARKED], TASK1)
+    skills = seed_group(ctx.store, [MARKED], TASK1)
 
-    with pytest.raises(Exception, match="no valid attempt"):
-        run_live(ctx)
+    summary = run_live(ctx)
 
     assert plugin.calls == []
+    verdict = verdict_of(ctx.store, TASK1, 0)
+    assert verdict["verdict"] == lv.LIVE_UNDETERMINED
+    assert verdict["injection_tokens"] is None
+    assert not (live_dir(ctx.store) / "round00").exists()
+    for skill in skills:
+        stored = stored_skill(ctx.store, skill)
+        assert (stored.status, stored.discard_reason) == (
+            "discarded", "live_undetermined")
+    assert summary["discarded"] == {"live_undetermined": 1}
+    assert summary["infra_failed"] == []
+
+
+def test_an_all_unscored_baseline_terminalizes_the_same_way(
+        tmp_path, monkeypatch):
+    # The same terminal via the R2b state: every baseline trial stored
+    # unscored (correctness None) instead of accepted as holes.
+    plugin = install(monkeypatch, LivePlugin(lambda task, block: True))
+    ctx = make_ctx(tmp_path)
+    seed_baseline(ctx.store, (None, None), TASK1)
+    skills = seed_group(ctx.store, [MARKED], TASK1)
+
+    summary = run_live(ctx)
+
+    assert plugin.calls == []
+    assert verdict_of(ctx.store, TASK1, 0)["verdict"] == lv.LIVE_UNDETERMINED
+    assert (stored_skill(ctx.store, skills[0]).status,
+            stored_skill(ctx.store, skills[0]).discard_reason) == (
+        "discarded", "live_undetermined")
+    assert summary["discarded"] == {"live_undetermined": 1}
 
 
 # ---------------------------------------------------------------------------

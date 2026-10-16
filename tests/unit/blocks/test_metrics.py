@@ -174,8 +174,9 @@ def test_expected_units_without_trajectory_count_as_infra():
 
 
 def test_expected_counts_stored_infra_trajectory_once():
-    # A stored infra_error trajectory (another producer than K1) fills its
-    # unit; only genuinely absent units are added on top.
+    # A stored unscored trajectory (correctness None, another producer
+    # than K1) fills its unit; only genuinely absent units are added on
+    # top.
     trajectories = [_traj("a", 0, None), _traj("a", 1, False)]
     assert compute_task_metrics(trajectories, expected={"a": 3}) == {
         "a": {"attempts": 3, "valid": 1, "success": 0, "infra": 2}}

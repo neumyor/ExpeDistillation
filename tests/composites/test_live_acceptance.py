@@ -282,15 +282,24 @@ def test_load_baseline_missing_unit_is_infrastructure_error(tmp_path):
         load_baseline(store, TASK_ID, N_ATTEMPTS)
 
 
-def test_load_baseline_zero_valid_is_config_error(tmp_path):
+def test_load_baseline_zero_valid_is_returned_not_raised(tmp_path):
+    # R2b / ruling 2: a baseline with no valid attempt is a normal
+    # reachable state (all its trials unscored, or all accepted holes),
+    # never a ConfigError -- the group is judged not_testable up the
+    # stack. The counts keep the full expected set in the denominator.
     store = Store(tmp_path / "run")
+    seed_baseline(store, (None, None, None))
+
+    _, baseline = load_baseline(store, TASK_ID, N_ATTEMPTS)
+
+    assert baseline == counts(0, 0, infra=3)
+
     hole0 = make_trajectory_id(TASK_ID, "weak", 0)
     hole1 = make_trajectory_id(TASK_ID, "weak", 1)
     hole2 = make_trajectory_id(TASK_ID, "weak", 2)
     write_stage1_shortfall(store, {hole0, hole1, hole2})
-
-    with pytest.raises(ConfigError, match="no valid attempt"):
-        load_baseline(store, TASK_ID, N_ATTEMPTS)
+    _, all_holes = load_baseline(store, TASK_ID, N_ATTEMPTS)
+    assert all_holes == counts(0, 0, infra=3)
 
 
 def test_load_baseline_aux_scorer_counts(tmp_path):
@@ -625,10 +634,11 @@ def _unit_list():
 
 
 def test_judge_stored_infra_trajectory_is_not_undetermined(tmp_path):
-    """A round store holding an infra_error trajectory (impossible through
-    K1, which never stores infra-exhausted units) is NOT the all-holes
-    case: it flows to the rule, whose defensive branch reads "no live
-    evidence" as not better instead of crashing."""
+    """A round store holding an unscored trajectory (a normal R2b state:
+    an unscored trial is stored, never retried) beside SCORED ones is
+    NOT the zero-measurement case: the group still has a live
+    denominator (2 valid), so it flows to the rule, whose defensive
+    branch reads the failures as not better instead of crashing."""
     store, _ = seeded_run(tmp_path, live=(None, False, False))
 
     verdict = judge_round(
@@ -640,12 +650,63 @@ def test_judge_stored_infra_trajectory_is_not_undetermined(tmp_path):
     assert verdict["live"] == {"valid": 2, "success": 0}
 
 
-def test_judge_undetermined_cannot_be_asserted_by_caller(tmp_path):
+def test_judge_all_unscored_live_group_is_undetermined(tmp_path):
+    """The complete-but-all-unscored group (every stored run came back
+    without a scorer verdict, R2b's normal reachable state) is
+    live_undetermined: no comparison, no attribution budget, and the
+    group terminalizes from the row alone (2026-10-16 ruling 1)."""
+    store, skills = seeded_run(tmp_path, live=(None, None, None))
+    audit = freeze_audit(store, 0)
+
+    verdict = judge_round(
+        store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
+        baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS, skip_ids=[])
+
+    assert verdict["verdict"] == lv.LIVE_UNDETERMINED
+    assert verdict["baseline"] is None and verdict["live"] is None
+    assert verdict["better"] is None
+    assert verdict["injection_tokens"] == audit["injection_tokens"]
+    assert verdict["judged_with_shortfall"] is True
+    result = finalize_group(store, TASK_ID)
+    assert result["outcome"] == "discarded"
+    assert result["reason"] == lv.LIVE_UNDETERMINED
+    assert all(s["status"] == "discarded"
+               and s["discard_reason"] == lv.LIVE_UNDETERMINED
+               for s in stored_skills(store).values())
+
+
+def test_judge_undetermined_cannot_be_asserted_for_a_measured_baseline(
+        tmp_path):
     store, _ = seeded_run(tmp_path)
     with pytest.raises(CodeBugError, match="derived by judge_round"):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
                     skip_ids=[], terminal=lv.LIVE_UNDETERMINED)
+
+
+def test_judge_undetermined_asserted_for_an_unmeasured_baseline(tmp_path):
+    """The entry guard's zero-execution path (ruling 2): a baseline with
+    no valid attempt may assert live_undetermined -- verified by
+    judge_round -- and the group terminalizes without a round store
+    ever existing."""
+    store = Store(tmp_path / "run")
+    seed_baseline(store, (None, None, None))
+    store_group(store, [MARKED_A])
+
+    verdict = judge_round(
+        store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
+        baseline_counts=counts(0, 0, infra=3), n_attempts=N_ATTEMPTS,
+        skip_ids=[], terminal=lv.LIVE_UNDETERMINED)
+
+    assert verdict["verdict"] == lv.LIVE_UNDETERMINED
+    assert verdict["baseline"] is None and verdict["live"] is None
+    assert verdict["better"] is None
+    assert verdict["injection_tokens"] is None
+    assert verdict["judged_with_shortfall"] is False
+    assert not round_dir(store, 0).exists()
+    result = finalize_group(store, TASK_ID)
+    assert result["outcome"] == "discarded"
+    assert result["reason"] == lv.LIVE_UNDETERMINED
 
 
 def test_judge_weak_already_knows_zero_execution(tmp_path):

@@ -1,4 +1,4 @@
-"""E1 run_one unit tests: plugin wiring, status mapping, bookkeeping.
+"""E1 run_one unit tests: plugin wiring, correctness pass-through, bookkeeping.
 
 Only a fake plugin registered through the real registry/import machinery;
 no real plugin packages, no network, no disk writes by run_one itself

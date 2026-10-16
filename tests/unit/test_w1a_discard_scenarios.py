@@ -457,6 +457,31 @@ def test_scenario_all_accepted_holes_is_undetermined(tmp_path):
         decision.DELETE, decision.ALL_HOLES)
 
 
+def test_scenario_all_unscored_round_is_undetermined(tmp_path):
+    """Ruling 1's end-to-end nail: a COMPLETE group whose every stored
+    run came back without a scorer verdict (R2b's normal reachable
+    state) has zero measurements. It is live_undetermined -- never
+    compared against the baseline, never "no improvement" -- the row is
+    not_testable/all_holes and the table deletes with the phase-neutral
+    all_holes reason."""
+    store, _ = _live_fixture(tmp_path, baseline=(False,) * N_ATTEMPTS,
+                             live=(None,) * N_ATTEMPTS)
+
+    row = _live_row(store)
+
+    assert row.status == "not_testable"
+    assert row.cause == "all_holes"
+    # The row carries the terminal: no rule ever ran.
+    assert decision.live_final_action(
+        [{"task_id": TASK_ID, "round": 0,
+          "verdict": lv.LIVE_UNDETERMINED}], [0]) == decision.Action(
+        decision.DELETE, decision.LIVE_UNDETERMINED)
+    assert decision.table_action(
+        conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=row.cause,
+        checks_left=0, phase_kind=decision.PHASE_LIVE) == decision.Action(
+        decision.DELETE, decision.ALL_HOLES)
+
+
 def test_scenario_last_round_miss_feeds_the_comparison(tmp_path):
     """The live_no_improvement discard: the group's row is a normal row
     of pure failures and the baseline's weak row is the control -- the

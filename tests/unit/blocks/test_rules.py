@@ -121,7 +121,7 @@ def test_trajectory_select_all_returns_the_whole_task():
     assert rule([]) == []
 
 
-def test_strong2_weak2_takes_two_per_role_with_status_preference():
+def test_strong2_weak2_takes_two_per_role_with_correctness_preference():
     rule = get_trajectory_select("strong2_weak2")
     # 3 strong (a failure, then two successes) and 3 weak (a success, then
     # two failures): enough for every branch of both preferences.

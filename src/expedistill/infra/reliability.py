@@ -41,7 +41,12 @@ class ReliabilityError(Exception):
 
 class InfrastructureError(ReliabilityError):
     """Sandbox, network or timeout failure: the work is valid, the machine
-    or service was not. Retried without bound from the caller's side."""
+    or service was not. R2b also made this the infra-failure channel
+    between benchmark plugins and K1: a plugin raises it instead of
+    storing an infra status, K1 catches it and retries the unit -- a
+    bounded number of retries per dispatch (``infra_retries``; the
+    exhaustion is recorded in the failure ledger) and an unbounded fresh
+    retry across resumes, so a crashed run always re-enters the holes."""
 
     retryable = True
 

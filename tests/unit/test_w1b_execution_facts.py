@@ -132,6 +132,20 @@ def test_a_reward_without_verifier_evidence_carries_no_verdict(tmp_path):
     assert outcome.correctness is None
 
 
+def test_a_positive_reward_without_verifier_evidence_carries_no_verdict(
+        tmp_path):
+    # The historically dangerous direction (2026-10-16 review D2): a
+    # POSITIVE reward with no verifier evidence must not score as a
+    # success -- the guard is symmetric in the reward value.
+    link = JobsRemoteLink(on_submit=lambda run_id, task, model: trial_files(
+        run_id, task, result="result_success.json",
+        verifier_log="verifier_not_collected.txt"))
+    outcome = _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
+    assert outcome.meta["reward"] == 1.0
+    assert outcome.meta["verifier_ran"] is False
+    assert outcome.correctness is None
+
+
 def test_reward_absent_trial_reports_no_verdict_and_raw_exception_facts(
         tmp_path):
     # The campaign's model-exception set (AgentTimeoutError et al.) used

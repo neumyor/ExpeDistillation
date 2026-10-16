@@ -414,7 +414,7 @@ bank 行读取同走该迁移，且 skills / exams / bank 行**迁移为 v2 后�
 裁决 A13）：字段本身是自由字符串（schema 不设闭合枚举），上面括号里的清单是系统实际
 会写入的词。live_run 验收新增四个词：`live_no_improvement`（两轮未更好 / no-op 守卫，
 双语义靠 verdicts 行的 round 字段区分）、`live_revision_deleted`（G10 判 delete）、
-`live_undetermined`（live 侧全单元皆为已接受空洞，无判定分母）、
+`live_undetermined`（零有效测量：live 侧全单元皆为已接受空洞，或全部落盘运行皆未判分；基线零有效测量时由入口守卫零执行落此终态）、
 `live_injection_overflow`（注入块超过 `max_injection_tokens`，零执行终态）。两个跨模式
 复用词的**证据基础不同**：`weak_already_knows` 在 exam = 裸答即对，在 live = 阶段 1
 基线全成功（零执行推断）；`model_output_error` 在 exam = 作答/判卷/改写预算耗尽，
@@ -777,9 +777,9 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
     基线下数学上不可能返回 True 时 → 全组 `weak_already_knows` 零执行终态。守卫
     限定在 strict 族规则集内硬编码（当前两条均满足）；注册新规则必须有意识地复核
     该集合，否则守卫会短路掉 pass@N 型规则本可执行的组。
-  - **无效基线**：基线 valid == 0 → ConfigError。该守卫的不可达性依赖两个已注册
-    task_select 规则都要求 valid > 0（这种 task 不入 F、无候选、无组）；换
-    task_select 规则时守卫从不可达变可达，fail-loud 而非静默跳过。
+  - **无效基线**：基线 valid == 0 → 全组 `live_undetermined` 零执行终态。R2b 后
+    这是自然可达状态（基线试验全部未判分、或全为已接受空洞），不再 ConfigError
+    终止整个 run；judge_round 落行前核验该事实。
 - **两轮循环（轮数钉死为 2，用户裁决 8；无 `max_revision_rounds` 配置面）**：
   轮栅栏（每轮一次 K1 大批，attempt-major 派发保持"同题采样不相邻"）——
   1. **入口**：finalization sweep（幂等补完崩溃截断的提交）→ 逐组加载基线
@@ -831,10 +831,10 @@ skill 的道理错了，而是表述它读不懂、照着做不了（缺了中�
   | G10 预算耗尽（含其契约校验失败计入） | 全组 discarded(`model_output_error`)，先终态后账本行 |
   | G11 单 skill 预算耗尽（含 marker 保结构校验失败计入——结构校验 raise 必须落在修复预算作用域内，K5 教训） | 该 skill discarded(`model_output_error`)，组继续 |
   | InfrastructureError（归因/修订/执行） | 组保持 pending、记账本、其余继续、阶段末 raise（退出码 3）、续跑重试 |
-  | live 单元 infra 耗尽 | 默认不接受（续跑补全）；`--allow-infra-shortfall` 时按轮写入 `round{NN}/accepted_infra_shortfall.json`，判定在剩余有效样本上按率进行，verdict 行带 `judged_with_shortfall`；**全单元皆空洞 → `live_undetermined` 终态（先于归因短路）** |
+  | live 单元 infra 耗尽 | 默认不接受（续跑补全）；`--allow-infra-shortfall` 时按轮写入 `round{NN}/accepted_infra_shortfall.json`，判定在剩余有效样本上按率进行，verdict 行带 `judged_with_shortfall`；**全单元皆空洞或全部落盘运行皆未判分（零有效测量）→ `live_undetermined` 终态（先于归因短路，不花归因预算）** |
   | 每轮 K1 的 skip_unit_ids | 阶段 1 已接受弱臂空洞（过滤 role==weak、限本 task）∪ 该轮自己的已接受空洞 |
   | 基线全成功 | `weak_already_knows` 零执行（strict 族限定，见判据预注册） |
-  | 基线 valid==0 / 未接受缺失 | ConfigError / InfrastructureError（不可达守卫） |
+  | 基线 valid==0 / 未接受缺失 | `live_undetermined` 零执行终态 / InfrastructureError（指路续跑阶段 1） |
   | 归因全 delete / 幸存组空 | 不跑轮 1，组终态即各成员已落的 discarded |
   | no-op（块 sha 不变） | 全组 `live_no_improvement`，不跑轮 1 |
   | 注入超长 | audit 首写时估算；超限 → 该组 `live_injection_overflow`（不进 K1，零执行浪费；证据在 audit 行），不烧整 run 的停机 |
@@ -940,7 +940,7 @@ prompt 容量。做法参照 AgentBrew §2.3.3 Note Curator 与 §2.5 Lifelong M
 - **辅助指标同口径并列**（与阶段 1 同一份预登记合同）：插件声明了辅助指标时
   （阶段 0 冻结的 `aux_metric`），两臂的 summary 各带 `aux` 一节，`delta` 对辅助
   avg@N 的两种口径各算一次，null 规则与主指标相同；未声明时相关字段全为 null。
-  主指标（EM / 状态口径）始终是主指标，两套数字并列报告，不得互换或事后挑选。
+  主指标（判分器口径）始终是主指标，两套数字并列报告，不得互换或事后挑选。
 - **空洞处置同阶段 1**：有未接受的空洞时先写摘要（`infra_missing` 按臂分开列出），
   再以基础设施错误停下；带 `--allow-infra-shortfall` 时按臂写进
   `stage6_test/accepted_infra_shortfall.json`，之后持久跳过、按空洞计分。`full` 模式的
