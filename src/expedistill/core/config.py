@@ -40,7 +40,11 @@ without a trace and fell back to the dead 5120 default. A v2 config is
 rejected with a pointer at the one-time converter
 (``scripts/run/convert_v2_configs.py``); ``upgrade_v2_config`` is the pure
 stdlib mapping both that converter and the reuse assembler (reading a v2
-source run's manifest) share.
+source run's manifest) share. ``upgrade_v3_config`` is the same kind of
+pure mapping for schema v4's phase sequences (docs/decisions/
+execute_learn_implementation_20261015.md section 4); it lands ahead of
+the M4.3 core flip, so its result carries ``schema_version: 4`` as data
+while this module still loads v3 only.
 
 Deviation from the layer rule "core depends on stdlib only": ``load_config`` /
 ``save_config`` need YAML, and the wave spec places them here. The ``yaml``
@@ -594,6 +598,267 @@ def upgrade_v2_config(data: Dict[str, Any]) -> Dict[str, Any]:
     v2["methods"] = methods
     v2["schema_version"] = 3
     return v2
+
+
+def _refuse_unmapped_keys(slot: str, given: Dict[str, Any],
+                          mapped: Any) -> None:
+    """Refuse slot keys the v3 -> v4 mapping has no destination for.
+
+    A key that neither moves into a phase nor is copied verbatim would
+    be silently dropped, and a dropped config key is a changed
+    experiment identity -- the same trap as the unknown top-level key.
+    """
+    unknown = sorted(set(given) - set(mapped), key=str)
+    if unknown:
+        raise ConfigError(
+            f"methods.{slot} has key(s) {unknown} with no v4 destination; "
+            f"the mapping moves {list(mapped)} -- refusing rather than "
+            "dropping them")
+
+
+def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a schema-v3 CONFIG dict (a raw YAML mapping, or a frozen v3
+    manifest's ``config`` entry) to the v4 phase-sequence shape (docs/
+    decisions/execute_learn_implementation_20261015.md section 4). Pure
+    stdlib, copy in / copy out; the consumers are the one-time v3 -> v4
+    converter and the reuse assembler's identity walk, both of which
+    chain v1/v2 sources through ``upgrade_v2_config`` first.
+
+    The result carries ``schema_version: 4`` as DATA only: this code
+    still speaks v3 (``CONFIG_SCHEMA_VERSION`` flips with the M4.3
+    core, whose loader learns ``sequence``/``phases``), so the output
+    does not load yet and the converter writes it under new file names.
+
+    Deliberate identity changes, disclosed here and in the converter's
+    diff output:
+
+    * the acceptance method dissolves into the SEQUENCE -- exam with
+      ``retry_limit=R`` becomes ``[D, L] + [A, L] x (R+1) + [C]`` (the
+      K4 answer rounds), live_run becomes ``[D, L, B, L, B, L, C]`` --
+      and live_run's ``n_attempts`` / ``improvement`` /
+      ``max_injection_tokens`` move into the B phase;
+    * a live_run config's merges are no longer proven on regression
+      exams: ``L.curate.merge_check = none`` (the live sequence has no
+      exam phase to check against; merges are proven by the round-1
+      group re-execution instead). An explicit ``merge_check`` in the
+      curation slot is preserved -- except ``exam`` under live_run,
+      which has no v4 image and is refused;
+    * the authoring ``exams`` switch is deleted: true is implied by
+      every emitted sequence; false converts only as the one legal
+      ablation pair (live_run acceptance + curation ``none`` -- the
+      same boundary v3's own cross-slot check draws) and is refused
+      otherwise. A live sequence has no A phase either way, so the
+      ablation pair upgrades to the identical shape;
+    * the five ``methods`` slots are deleted; delivery and curation
+      params move key-for-key into the C and L phases.
+
+    Absent, null or empty slots complete from ``METHOD_DEFAULTS``
+    exactly as the v3 loader freezes them, so the output is the v4
+    identity of what the same file loads as. Everything else -- rules,
+    budgets, the role table, weak_profile, mode, split, tasks,
+    model_options, prompts_digests -- passes through untouched. Inputs
+    that are not v3-shaped fail loudly: a non-mapping (TypeError, the
+    ``from_dict`` precedent), a config already carrying v4 keys, and a
+    config without a ``methods`` mapping (a v1/v2 config: chain
+    ``upgrade_v2_config`` first).
+    """
+    if not isinstance(data, dict):
+        raise TypeError(
+            f"config must be a mapping, got {type(data).__name__}")
+    carried = [key for key in ("sequence", "phases") if key in data]
+    if carried:
+        raise ConfigError(
+            f"the config already carries {carried} -- v4 keys naming the "
+            "phases; upgrade_v3_config maps v3 -> v4 and an already-v4 "
+            "config has nothing to upgrade")
+    methods_given = data.get("methods")
+    if not isinstance(methods_given, dict):
+        raise ConfigError(
+            "upgrade_v3_config needs a schema-v3 config (the method "
+            "parameters live under 'methods', got "
+            f"{type(methods_given).__name__}); a v1 or v2 config chains "
+            "through upgrade_v2_config first, and a v4 config is already "
+            "upgraded")
+    mode = data.get("mode")
+    if mode not in MODES:
+        raise ConfigError(f"mode must be one of {MODES}, got {mode!r}")
+    v4 = copy.deepcopy(data)
+    methods = _validate_methods(v4.pop("methods"))
+
+    # -- segmentation -> L.evidence (the add path's cutting budget) -----
+    segmentation = methods["segmentation"]
+    seg_name = segmentation.get("name", "llm")
+    if seg_name != "llm":
+        raise ConfigError(
+            f"methods.segmentation name {seg_name!r} has no v4 mapping; "
+            "the v3 LLM splitter is the evidence method 'segment'")
+    _refuse_unmapped_keys("segmentation", segmentation,
+                          ("name", "K", "retry_limit"))
+    if "K" not in segmentation:
+        raise ConfigError(
+            "methods.segmentation method 'llm' is missing required "
+            "parameter 'K'")
+    evidence = {
+        "name": "segment",
+        "K": segmentation["K"],
+        "retry_limit": segmentation.get(
+            "retry_limit", METHOD_DEFAULTS["segmentation"]["retry_limit"]),
+    }
+
+    # -- authoring -> L.author (the exams switch dies with the slot) ----
+    authoring = methods["authoring"]
+    auth_name = authoring.get("name", "distill_diagnose")
+    if auth_name != "distill_diagnose":
+        raise ConfigError(
+            f"methods.authoring name {auth_name!r} has no v4 mapping; the "
+            "v3 authoring method is the author family's "
+            "'distill_diagnose'")
+    _refuse_unmapped_keys("authoring", authoring, ("name", "exams"))
+    exams = authoring.get("exams", METHOD_DEFAULTS["authoring"]["exams"])
+    if not isinstance(exams, bool):
+        raise ConfigError(
+            f"methods.authoring.exams must be a bool, got {exams!r}")
+
+    # -- acceptance -> the sequence (and the B phase for live_run) ------
+    acceptance = methods["acceptance"]
+    kind = acceptance.get("name")
+    if kind is None:
+        raise ConfigError(
+            "methods.acceptance needs a name; known: ['exam', 'live_run']")
+    if kind not in ("exam", "live_run"):
+        raise ConfigError(
+            f"methods.acceptance name {kind!r} has no v4 mapping; the "
+            "sequence derives from 'exam' or 'live_run'")
+
+    # -- curation -> L.curate (merge_check follows the acceptance) ------
+    curation = methods["curation"]
+    curate_name = curation.get("name")
+    if curate_name is None:
+        raise ConfigError(
+            "methods.curation needs a name; known: ['agentbrew', 'none']")
+    if curate_name == "agentbrew":
+        _refuse_unmapped_keys("curation", curation,
+                              ("name", "token_budget", "rounds",
+                               "merge_check"))
+        if "token_budget" not in curation:
+            raise ConfigError(
+                "methods.curation method 'agentbrew' is missing required "
+                "parameter 'token_budget'")
+        merge_check = curation.get("merge_check")
+        if merge_check is None:
+            # The mapping's derivation: exam acceptance proves merges on
+            # the generated exams; live_run has no exam phase (merges are
+            # proven by the round-1 group re-execution instead).
+            merge_check = "exam" if kind == "exam" else "none"
+        elif kind == "live_run" and merge_check == "exam":
+            raise ConfigError(
+                "methods.curation.agentbrew merge_check is 'exam' but the "
+                "acceptance method is 'live_run': the v4 live sequence "
+                "generates no exams to check merges against (drop the "
+                "explicit merge_check or use exam acceptance)")
+        curate = {
+            "name": "agentbrew",
+            "merge_check": merge_check,
+            "token_budget": curation["token_budget"],
+            "rounds": curation.get(
+                "rounds", METHOD_DEFAULTS["curation"]["rounds"]),
+        }
+    elif curate_name == "none":
+        _refuse_unmapped_keys("curation", curation,
+                              ("name", "token_budget"))
+        if "token_budget" not in curation:
+            raise ConfigError(
+                "methods.curation method 'none' is missing required "
+                "parameter 'token_budget'")
+        curate = {"name": "none", "token_budget": curation["token_budget"]}
+    else:
+        raise ConfigError(
+            f"methods.curation name {curate_name!r} has no v4 mapping; "
+            "the curate family offers 'agentbrew' and 'none'")
+
+    if not exams and not (kind == "live_run" and curate_name == "none"):
+        raise ConfigError(
+            "methods.authoring.exams is false but the combination "
+            f"(acceptance {kind!r}, curation {curate_name!r}) has no v4 "
+            "image: exam generation off converts only with live_run "
+            "acceptance and curation 'none' -- the one legal ablation "
+            "pair, the same boundary v3's own cross-slot check draws")
+
+    # -- delivery -> C.delivery, verbatim (same name, same params) ------
+    delivery = methods["delivery"]
+    if "name" not in delivery:
+        raise ConfigError(
+            "methods.delivery needs a name; known: ['whole_bank', "
+            "'retrieval', 'none', 'per_skill', 'group_by_task']")
+
+    # -- the phases (section 4's shapes, fixed construction order) ------
+    phases: Dict[str, Any] = {
+        "D": {
+            "kind": "execute",
+            "tasks": "train",
+            "delivery": {"name": "none"},
+            "execution": {"name": "real",
+                          "arms": ["executor_strong", "executor_weak"]},
+        },
+        "L": {
+            "kind": "learn",
+            "evidence": evidence,
+            "author": {"name": "distill_diagnose"},
+            "curate": curate,
+        },
+    }
+    if kind == "exam":
+        _refuse_unmapped_keys("acceptance", acceptance,
+                              ("name", "retry_limit"))
+        retry_limit = acceptance.get(
+            "retry_limit", METHOD_DEFAULTS["acceptance"]["retry_limit"])
+        if (not isinstance(retry_limit, int) or isinstance(retry_limit, bool)
+                or retry_limit < 0):
+            raise ConfigError(
+                "methods.acceptance.exam retry_limit must be an int >= 0 "
+                f"(the sequence carries retry_limit + 1 A phases), got "
+                f"{retry_limit!r}")
+        phases["A"] = {
+            "kind": "execute",
+            "delivery": {"name": "per_skill"},
+            "execution": {"name": "exam"},
+        }
+        sequence = ["D", "L"] + ["A", "L"] * (retry_limit + 1) + ["C"]
+    else:
+        _refuse_unmapped_keys("acceptance", acceptance,
+                              ("name", "n_attempts", "improvement",
+                               "max_injection_tokens"))
+        for key in ("n_attempts", "improvement"):
+            if key not in acceptance:
+                raise ConfigError(
+                    "methods.acceptance method 'live_run' is missing "
+                    f"required parameter {key!r}")
+        phases["B"] = {
+            "kind": "execute",
+            "delivery": {"name": "group_by_task"},
+            "execution": {
+                "name": "real",
+                "n_attempts": acceptance["n_attempts"],
+                "max_injection_tokens": acceptance.get(
+                    "max_injection_tokens"),
+            },
+            "compare": {"against": "D", "rule": acceptance["improvement"]},
+        }
+        sequence = ["D", "L", "B", "L", "B", "L", "C"]
+    phases["C"] = {
+        "kind": "execute",
+        "tasks": "test",
+        "delivery": delivery,
+        "execution": {"name": "real"},
+        # Split mode runs its own fresh bare control arm on the test set;
+        # full mode reuses D's weak arm (and its accepted holes).
+        "compare": ({"against": "D"} if mode == "full"
+                    else {"against": "fresh_bare"}),
+    }
+    v4["sequence"] = sequence
+    v4["phases"] = phases
+    v4["schema_version"] = 4
+    return v4
 
 
 def load_config(path: str) -> ExperimentConfig:
