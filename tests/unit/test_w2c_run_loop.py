@@ -301,12 +301,13 @@ def test_until_phase_none_runs_the_whole_sequence(
     assert len(drivers) == 5
 
 
-@pytest.mark.parametrize("bad", [-1, 5, 99])
+@pytest.mark.parametrize("bad", [-2, 5, 99])
 def test_until_phase_out_of_bounds_is_refused_after_the_config_loads(
         plugin, config_path, tmp_path, drivers, bad):
-    # The bound is the frozen sequence's length (5 entries -> [0, 4]),
-    # so it can only be checked once the config is loaded -- never a
-    # code constant (the old --until-stage's [0, 6]).
+    # The bound is the frozen sequence's length (5 entries -> [0, 4];
+    # -1 is legal since W3-B -- the freeze-only stop), so it can only
+    # be checked once the config is loaded -- never a code constant
+    # (the old --until-stage's [0, 6]).
     with pytest.raises(InfraConfigError, match="until_phase"):
         cli.run_experiment(
             config_path=config_path, run_dir=tmp_path / "run",
