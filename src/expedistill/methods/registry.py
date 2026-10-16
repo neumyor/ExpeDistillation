@@ -80,6 +80,19 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
 }
 
 
+def _entry_named(slot: str, name: str) -> _Entry:
+    """The entry a KNOWN-name lookup selects; the one owner of the
+    unknown-name ConfigError. Both resolution paths go through here --
+    the config's choice and a fixed name -- so the message can never
+    drift between them (M2 review F2/T-1)."""
+    try:
+        return _ENTRIES[(slot, name)]
+    except KeyError:
+        known = [entry_name for (s, entry_name) in _ENTRIES if s == slot]
+        raise ConfigError(
+            f"unknown methods.{slot} name {name!r}; known: {known}") from None
+
+
 def _entry_for(slot: str, raw: Dict[str, Any]) -> Tuple[str, _Entry]:
     """The (name, entry) the config's raw slot mapping selects."""
     known = [name for (s, name) in _ENTRIES if s == slot]
@@ -89,11 +102,7 @@ def _entry_for(slot: str, raw: Dict[str, Any]) -> Tuple[str, _Entry]:
             raise ConfigError(
                 f"methods.{slot} needs a name; known: {known}")
         name = known[0]
-    try:
-        return name, _ENTRIES[(slot, name)]
-    except KeyError:
-        raise ConfigError(
-            f"unknown methods.{slot} name {name!r}; known: {known}") from None
+    return name, _entry_named(slot, name)
 
 
 def _load_params(slot: str, name: str, entry: _Entry,
@@ -160,12 +169,7 @@ def resolve_fixed(slot: str, name: str) -> Tuple[Any, Any]:
     fails loudly here. Entries carrying a ``check`` are refused -- the
     check needs the config this resolution has none of.
     """
-    try:
-        entry = _ENTRIES[(slot, name)]
-    except KeyError:
-        known = [method for (s, method) in _ENTRIES if s == slot]
-        raise ConfigError(
-            f"unknown methods.{slot} name {name!r}; known: {known}") from None
+    entry = _entry_named(slot, name)
     if entry.check is not None:
         raise ConfigError(
             f"methods.{slot} name {name!r} carries a config cross-"
