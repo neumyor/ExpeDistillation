@@ -96,15 +96,55 @@ phase world it is the count of A/B-kind execution phases after this
 learn phase (plan section 3, P1/I8 -- counting learn phases would give
 the wrong action under a legal [D, L, L] sequence). The callers pass
 whichever fact they hold.
+
+R3 (repair plan, item R3; boundary doc sections 2.4, 3, 4): the phase
+world's ONE decision entry is :func:`decide_task_list` -- (this round's
+report, the control report, the current bank, how many checks are left)
+-> task list -- with the comparison rules as named parameters (default
+``strict_rate_gain``) and the section 4.2 action table as
+:func:`table_action`. The exam_*/live_* rules above are the LEGACY
+per-mode rules the still-unwired K4/K6 shells call; they retire with the
+Wave 2 phase drivers (their callers -- acceptance_submit, live_verdicts,
+live_attribution, reports, the two acceptance drivers -- are other
+agents' frozen files, so removing them now would break a tree this wave
+must keep green). The other half of G3 moves NOW: stage 6's delta
+computation and control-source choice are :func:`final_test_delta` and
+:func:`control_arm_source` here, so no execution stage compares arms
+anymore.
 """
 
+import hashlib
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from expedistill.core.models import Attempt
+from expedistill.blocks.rules import get_task_select
+from expedistill.core import ids
+from expedistill.core.contracts import (
+    AcceptanceReportRow,
+    ExecutionUnitRow,
+    TaskListRow,
+)
+from expedistill.core.models import Attempt, MODEL_ROLES, Skill
+from expedistill.infra.reliability import CodeBugError, ConfigError
 
 __all__ = [
+    "ADD",
+    "BASELINE_GAP_REASON",
+    "CAUSE_ALL_HOLES",
+    "CAUSE_EXAM_GENERATION_FAILED",
+    "CAUSE_INJECTION_OVERFLOW",
+    "CAUSE_INVALID_REDISPATCH_EXHAUSTED",
+    "CAUSE_LEAK",
+    "CAUSE_ZERO_EXECUTION",
+    "CHECK_PHASE_KINDS",
+    "CONCLUSION_BASELINE_GAP",
+    "CONCLUSION_IMPROVED",
+    "CONCLUSION_NO_GAIN",
+    "CONCLUSION_NO_HEADROOM",
+    "CONCLUSION_NOT_TESTABLE",
     "DELETE",
+    "FinalTestReportRejected",
     "KEEP",
     "LEAK_AUDIT",
     "LIVE_INJECTION_OVERFLOW",
@@ -112,29 +152,54 @@ __all__ = [
     "LIVE_REVISION_DELETED",
     "LIVE_UNDETERMINED",
     "MODEL_OUTPUT_ERROR",
+    "NOT_TESTABLE_CAUSES",
+    "PHASE_BASELINE",
+    "PHASE_EXAM",
+    "PHASE_KINDS",
+    "PHASE_LEARN",
+    "PHASE_LIVE",
+    "PHASE_TEST",
     "RETRY_EXHAUSTED",
     "REVISE",
+    "ROW_NOT_RUN_CONTROL_PERFECT",
+    "ROW_NOT_TESTABLE",
+    "ROW_NORMAL",
     "STRICT_SHORT_CIRCUIT_RULES",
     "WEAK_ALREADY_KNOWS",
     "Action",
+    "compare_conclusion",
+    "control_arm_source",
+    "control_perfect_skips_run",
+    "decide_task_list",
     "exam_answer_action",
     "exam_bare_answer_action",
     "exam_leak_action",
     "exam_measurement_exhausted_action",
     "exam_stored_pass_action",
     "exam_voided_rewrite_source",
+    "final_test_delta",
+    "first_success_gain",
     "live_all_holes",
     "live_attribution_exhausted",
     "live_final_action",
     "live_injection_overflows",
     "live_no_op_fires",
     "live_zero_execution_short_circuit",
+    "remaining_checks",
+    "reuse_key",
+    "reusable_units",
+    "revise_outcome",
+    "strict_rate_gain",
+    "table_action",
 ]
 
-#: Action kinds: the plan section 3 verbs (keep / delete / revise).
+#: Action kinds: the plan section 3 verbs (keep / delete / revise), plus
+#: the unified table's add (a task list may grow a skill, not only act on
+#: existing ones; R3).
 KEEP = "keep"
 DELETE = "delete"
 REVISE = "revise"
+ADD = "add"
 
 #: The discard-reason vocabulary (decision ruling A13; the free-form
 #: Skill.discard_reason field carries it). ``weak_already_knows`` crosses
@@ -168,8 +233,9 @@ STRICT_SHORT_CIRCUIT_RULES = frozenset({"strict_rate_gain",
 class Action:
     """One rule's verdict: what the caller does next.
 
-    ``kind`` is one of ``KEEP`` / ``DELETE`` / ``REVISE``; ``reason`` is
-    the Skill.discard_reason when the kind is ``DELETE``, else None.
+    ``kind`` is one of ``KEEP`` / ``DELETE`` / ``REVISE`` (the unified
+    table also yields ``ADD``); ``reason`` is the Skill.discard_reason
+    when the kind is ``DELETE``, else None.
     """
 
     kind: str
@@ -338,3 +404,640 @@ def live_attribution_exhausted(failure_rows: List[Dict[str, Any]],
     the ledger-read half a resumed call decides from."""
     return (any(row.get("exhausted") for row in failure_rows)
             or len(failure_rows) >= budget)
+
+
+# ---------------------------------------------------------------------------
+# R3: the unified decision entry (the phase world's task list)
+# ---------------------------------------------------------------------------
+
+#: The phase-kind vocabulary (boundary doc sections 1.1 and 1.3): one
+#: kind per semantic phase role. The config's phase sequence (R9) maps
+#: onto these names; decision never sees a phase label -- labels are
+#: bookkeeping (unit ids, report rows), kinds are semantics.
+PHASE_BASELINE = "baseline"  # D: the two-arm bare baseline
+PHASE_EXAM = "exam"          # A: paper acceptance, one skill per exam
+PHASE_LIVE = "live"          # B: live acceptance, a task's whole group
+PHASE_TEST = "test"          # C: the final test -- never reaches decision
+PHASE_LEARN = "learn"        # L: a learn phase
+
+PHASE_KINDS = frozenset({PHASE_BASELINE, PHASE_EXAM, PHASE_LIVE,
+                         PHASE_TEST, PHASE_LEARN})
+
+#: Which execution phases count as "a later check" (boundary doc section
+#: 4.2): acceptance on the train set only. The final test C never counts
+#: (section 3 rule 9), and neither do further learn phases.
+CHECK_PHASE_KINDS = frozenset({PHASE_EXAM, PHASE_LIVE})
+
+#: Acceptance-report row statuses: the values core/contracts.py freezes
+#: in AcceptanceReportRow.status's comment, named for the entry's
+#: consumption side.
+ROW_NORMAL = "normal"
+ROW_NOT_TESTABLE = "not_testable"
+ROW_NOT_RUN_CONTROL_PERFECT = "not_run_control_perfect"
+
+#: The fixed ``cause`` set R0 places in this module (core/contracts.py
+#: names composites.decision as its definition site): why a row is
+#: ``not_testable`` (or, for ``zero_execution``, the weak_already_knows
+#: short-circuit's zero-run marker).
+CAUSE_LEAK = "leak"
+CAUSE_INJECTION_OVERFLOW = "injection_overflow"
+CAUSE_EXAM_GENERATION_FAILED = "exam_generation_failed"
+CAUSE_INVALID_REDISPATCH_EXHAUSTED = "invalid_redispatch_exhausted"
+CAUSE_ALL_HOLES = "all_holes"
+CAUSE_ZERO_EXECUTION = "zero_execution"
+
+NOT_TESTABLE_CAUSES = frozenset({
+    CAUSE_LEAK,
+    CAUSE_INJECTION_OVERFLOW,
+    CAUSE_EXAM_GENERATION_FAILED,
+    CAUSE_INVALID_REDISPATCH_EXHAUSTED,
+    CAUSE_ALL_HOLES,
+    CAUSE_ZERO_EXECUTION,
+})
+
+#: The four comparison conclusions (boundary doc section 4.1) plus the
+#: baseline gap (section 4.2's last row -- decided from the D report,
+#: not from a comparison).
+CONCLUSION_IMPROVED = "improved"
+CONCLUSION_NO_GAIN = "no_gain"
+CONCLUSION_NO_HEADROOM = "no_headroom"
+CONCLUSION_NOT_TESTABLE = "not_testable"
+CONCLUSION_BASELINE_GAP = "baseline_gap"
+
+#: The baseline row's task-list reason: what makes a task an add.
+BASELINE_GAP_REASON = "weak_fails_and_no_skill"
+
+#: Why a not-testable unit is deleted, per cause (the discard_reason
+#: vocabulary). ``leak`` reaches this table only through its revise
+#: split; ``zero_execution`` is the weak_already_knows short-circuit's
+#: zero-run marker, so its delete keeps that reason.
+_CAUSE_DELETE_REASONS = {
+    CAUSE_LEAK: LEAK_AUDIT,
+    CAUSE_INJECTION_OVERFLOW: LIVE_INJECTION_OVERFLOW,
+    CAUSE_EXAM_GENERATION_FAILED: MODEL_OUTPUT_ERROR,
+    CAUSE_INVALID_REDISPATCH_EXHAUSTED: LIVE_UNDETERMINED,
+    CAUSE_ALL_HOLES: LIVE_UNDETERMINED,
+    CAUSE_ZERO_EXECUTION: WEAK_ALREADY_KNOWS,
+}
+
+
+class FinalTestReportRejected(CodeBugError):
+    """A final-test (C-phase) report was handed to the decision entry.
+
+    Boundary doc section 3 rule 9: test results do not flow into
+    learning. The final summary computes the with-bank delta itself
+    (:func:`final_test_delta`); a C-phase report reaching decision is a
+    wiring bug, not data.
+    """
+
+
+def remaining_checks(phase_kinds: Sequence[str], learn_index: int) -> int:
+    """How many A/B-kind execution phases follow the learn phase at
+    ``learn_index`` (boundary doc section 4.2's "a later check" column).
+
+    ``phase_kinds`` is the method's whole frozen phase sequence as kind
+    strings (the vocabulary above); the final test C and further learn
+    phases never count. Unknown kinds and out-of-range indices are
+    CodeBugError: the sequence is config-frozen, so a mismatch means the
+    caller's wiring disagrees with the frozen config.
+    """
+    unknown = [kind for kind in phase_kinds if kind not in PHASE_KINDS]
+    if unknown:
+        raise CodeBugError(
+            f"unknown phase kind(s) {unknown!r} in the phase sequence; "
+            f"expected values from {sorted(PHASE_KINDS)}")
+    if not 0 <= learn_index < len(phase_kinds):
+        raise CodeBugError(
+            f"learn_index {learn_index} is outside the phase sequence of "
+            f"{len(phase_kinds)} phase(s)")
+    if phase_kinds[learn_index] != PHASE_LEARN:
+        raise CodeBugError(
+            f"phase {learn_index} is {phase_kinds[learn_index]!r}, not a "
+            "learn phase")
+    return sum(1 for kind in phase_kinds[learn_index + 1:]
+               if kind in CHECK_PHASE_KINDS)
+
+
+def strict_rate_gain(current: Mapping[str, int],
+                     control: Mapping[str, int]) -> bool:
+    """Default compare rule: the unit's success RATE strictly exceeds the
+    control's.
+
+    Compared by integer cross-multiplication, never a float division
+    (exact in small integers; the arms may have different valid
+    denominators). No valid run on either side is "not better", never a
+    crash. The same math as the registered live rule of the same name in
+    blocks/rules.py -- deliberately restated here: the comparison is a
+    decision PARAMETER (boundary doc section 2.4), not a named-rule seam,
+    and the entry must stay independent of that registry.
+    """
+    if current["valid"] == 0 or control["valid"] == 0:
+        return False
+    return (current["success"] * control["valid"]
+            > control["success"] * current["valid"])
+
+
+def first_success_gain(current: Mapping[str, int],
+                       control: Mapping[str, int]) -> bool:
+    """The pass@N-flavoured alternative: the control never succeeded and
+    the unit did at least once (weaker than strict_rate_gain on purpose --
+    running the two rules against each other measures exactly that)."""
+    return current["success"] >= 1 and control["success"] == 0
+
+
+#: Selection of a compare rule by parameter name: a fixed two-entry
+#: table, not a registry (repair plan section 5, note 19: no decision-
+#: rule registry). Adding a rule means adding a named function above and
+#: one line here.
+_COMPARE_RULES = {
+    "strict_rate_gain": strict_rate_gain,
+    "first_success_gain": first_success_gain,
+}
+
+
+def _get_compare_rule(name: str):
+    try:
+        return _COMPARE_RULES[name]
+    except KeyError:
+        raise ConfigError(
+            f"unknown compare rule {name!r}; the decision entry knows "
+            f"{sorted(_COMPARE_RULES)}") from None
+
+
+def _control_is_perfect(compare_rule: str, control_valid: int,
+                        control_success: int) -> bool:
+    # Rule 3's criterion and the no-headroom conclusion share one
+    # definition so the skip and the verdict can never disagree.
+    return (compare_rule in STRICT_SHORT_CIRCUIT_RULES
+            and control_valid > 0
+            and control_success == control_valid)
+
+
+def control_perfect_skips_run(*, compare_rule: str, control_valid: int,
+                              control_success: int) -> bool:
+    """Boundary doc section 4.3 rule 3: under a rule a rate-1.0 control
+    can never lose to (the strict family), an all-success control means
+    the with-skill run cannot conclude "improved", so the execution phase
+    may skip that run and report the unit ``not_run_control_perfect`` --
+    decision then concludes "no headroom" off that status. This saves
+    calls only; under any other rule it is False and the run happens."""
+    return _control_is_perfect(compare_rule, control_valid, control_success)
+
+
+def compare_conclusion(*, row: AcceptanceReportRow, control_valid: int,
+                       control_success: int, control_cause: str,
+                       compare_rule: str) -> Tuple[str, str]:
+    """One unit's section 4.1 conclusion from its report row and its
+    control's counts; returns ``(conclusion, cause)``.
+
+    Precedence:
+
+    * ``not_run_control_perfect`` (the section 4.3 rule-3 skip) -> no
+      headroom; the row consumed the skip, the conclusion follows it;
+    * ``not_testable`` -> the not-testable conclusion with the row's
+      cause (the fixed vocabulary above; an unknown cause is a
+      CodeBugError -- the set is frozen, a new value needs this module);
+    * an unmeasurable control (no valid run) -> not testable, carrying
+      the CONTROL's cause as the reason there is nothing to compare
+      against;
+    * an all-success control under a strict-family rule -> no headroom
+      (the same criterion as rule 3's skip);
+    * otherwise the compare rule decides improved vs no gain.
+    """
+    rule = _get_compare_rule(compare_rule)
+    if row.status == ROW_NOT_RUN_CONTROL_PERFECT:
+        return CONCLUSION_NO_HEADROOM, ""
+    if row.status == ROW_NOT_TESTABLE:
+        if row.cause not in NOT_TESTABLE_CAUSES:
+            raise CodeBugError(
+                f"unit {row.unit_id!r} reports cause {row.cause!r}, which "
+                f"is not in the frozen not-testable set "
+                f"{sorted(NOT_TESTABLE_CAUSES)}")
+        return CONCLUSION_NOT_TESTABLE, row.cause
+    if row.status != ROW_NORMAL:
+        raise CodeBugError(
+            f"unit {row.unit_id!r} reports unknown status "
+            f"{row.status!r}; the frozen set is "
+            f"{[ROW_NORMAL, ROW_NOT_TESTABLE, ROW_NOT_RUN_CONTROL_PERFECT]}")
+    if row.valid_count == 0:
+        raise CodeBugError(
+            f"unit {row.unit_id!r} reports status normal with no valid "
+            "run; acceptance must report not_testable instead")
+    if control_valid == 0:
+        if control_cause not in NOT_TESTABLE_CAUSES:
+            raise CodeBugError(
+                f"the control of unit {row.unit_id!r} has no valid run "
+                f"and no not-testable cause (got {control_cause!r}); "
+                "acceptance must report the control's cause")
+        return CONCLUSION_NOT_TESTABLE, control_cause
+    if _control_is_perfect(compare_rule, control_valid, control_success):
+        return CONCLUSION_NO_HEADROOM, ""
+    better = rule({"valid": row.valid_count, "success": row.success_count},
+                  {"valid": control_valid, "success": control_success})
+    return (CONCLUSION_IMPROVED if better else CONCLUSION_NO_GAIN), ""
+
+
+def table_action(*, conclusion: str, cause: str = "", checks_left: int,
+                 phase_kind: str) -> Action:
+    """The boundary doc section 4.2 action table, one row at a time:
+    (conclusion x whether a check remains) -> action.
+
+    * improved -> keep either way;
+    * no gain -> revise while a check remains, else delete -- the exam
+      kind keeps its historical reason (retry_exhausted) and the live
+      kind its (live_no_improvement);
+    * no headroom -> delete(weak_already_knows) either way;
+    * not testable, leaked -> the voided rewrite (revise) while a check
+      remains, else delete(leak_audit);
+    * not testable, any other cause -> delete with the cause's reason
+      (without a measurement there is nothing a rewrite could repair);
+    * the baseline gap (the D-report row: the weak model fails the task
+      and it has no skill yet) -> add, either way.
+    """
+    if checks_left < 0:
+        raise CodeBugError(f"checks_left must be >= 0, got {checks_left}")
+    if conclusion == CONCLUSION_IMPROVED:
+        return Action(KEEP, CONCLUSION_IMPROVED)
+    if conclusion == CONCLUSION_NO_GAIN:
+        if checks_left > 0:
+            return Action(REVISE, CONCLUSION_NO_GAIN)
+        reason = (RETRY_EXHAUSTED if phase_kind == PHASE_EXAM
+                  else LIVE_NO_IMPROVEMENT)
+        return Action(DELETE, reason)
+    if conclusion == CONCLUSION_NO_HEADROOM:
+        return Action(DELETE, WEAK_ALREADY_KNOWS)
+    if conclusion == CONCLUSION_NOT_TESTABLE:
+        if cause == CAUSE_LEAK and checks_left > 0:
+            return Action(REVISE, CAUSE_LEAK)
+        try:
+            return Action(DELETE, _CAUSE_DELETE_REASONS[cause])
+        except KeyError:
+            raise CodeBugError(
+                f"unknown not-testable cause {cause!r}") from None
+    if conclusion == CONCLUSION_BASELINE_GAP:
+        return Action(ADD, BASELINE_GAP_REASON)
+    raise CodeBugError(f"unknown conclusion {conclusion!r}")
+
+
+def _task_of_bank_skill(skill: Skill) -> Optional[str]:
+    """The task a bank skill's ID chain names (None when the chain
+    carries no task -- never true of a bank row: even a merge product
+    anchors on a real subtask)."""
+    try:
+        trajectory_id, _ = ids.parse_subtask_id(skill.subtask_id)
+        return ids.parse_trajectory_id(trajectory_id)[0]
+    except ValueError:
+        return None
+
+
+#: A unit id's sha field (core/contracts.py: the first eight hex chars of
+#: the sha256 over the canonical injected skills) and its phase label's
+#: ``pNN`` head (R9: labels are ``pNN:<local name>``).
+_UNIT_SHA_RE = re.compile(r"[0-9a-f]{8}")
+_PHASE_HEAD_RE = re.compile(r"p[0-9]+")
+
+
+def _parse_unit_id(unit_id: str) -> Tuple[str, str]:
+    """(task_or_exam_id, role) out of a unit id, per core/contracts.py's
+    frozen construction rule ``phase:benchmark:task:role:sha8``.
+
+    Parsed from BOTH ends because the middle swallows colons: task ids
+    carry their benchmark prefix (``tb:t1``) and exam ids carry a whole
+    trajectory chain, while the phase label is ``pNN:<local>`` (one
+    colon) and the benchmark carries none -- so the task id is everything
+    between the third colon and the role. Anything malformed is a
+    CodeBugError: the id is contract, and a report that disagrees with
+    it is a wiring bug, never data to guess with.
+
+    ExecutionUnitRow carries ``task_ref`` as a field and needs no
+    parsing; the report row does not (its shape is frozen), so this
+    parser is the report-side join.
+    """
+    try:
+        head, role, sha = unit_id.rsplit(":", 2)
+    except ValueError:
+        raise CodeBugError(f"malformed unit id {unit_id!r}") from None
+    prefix = head.split(":", 3)
+    if (len(prefix) != 4
+            or not _PHASE_HEAD_RE.fullmatch(prefix[0])
+            or role not in MODEL_ROLES
+            or not _UNIT_SHA_RE.fullmatch(sha)):
+        raise CodeBugError(f"malformed unit id {unit_id!r}")
+    return prefix[3], role
+
+
+def _exam_target(row: AcceptanceReportRow) -> Tuple[str, str]:
+    """The skill an exam-phase unit measures: the exam's own subtask's
+    stage-3 skill, from the ID chain (the report's injected refs are
+    evidence, not targeting -- the exam id is the address)."""
+    exam_id, _ = _parse_unit_id(row.unit_id)
+    if not exam_id.endswith("/exam"):
+        raise CodeBugError(
+            f"exam-phase unit {row.unit_id!r} names {exam_id!r}, which is "
+            "not an exam id")
+    return "skill", ids.make_skill_id(exam_id[: -len("/exam")])
+
+
+def _baseline_rows(*, control_kind: Optional[str],
+                   control_report: Optional[Sequence[AcceptanceReportRow]],
+                   bank: Sequence[Skill], n_attempts_weak: int,
+                   task_select_rule: str) -> List[TaskListRow]:
+    """The section 4.2 baseline row: the first learn phase follows the D
+    phase, no acceptance phase has run yet, so this round's report is
+    empty and the D-phase report acts as the input. Every train task the
+    weak model fails (the named task-select rule over its weak rows) and
+    that has no skill in the bank yet gets one add row."""
+    rows = list(control_report or ())
+    if control_kind != PHASE_BASELINE or not rows:
+        raise CodeBugError(
+            "the empty-current-report path (the first learn phase) needs "
+            "the D-phase report as the control: got control_kind="
+            f"{control_kind!r} with {len(rows)} row(s)")
+    rule = get_task_select(task_select_rule)
+    covered = {task for task in (_task_of_bank_skill(skill) for skill in bank)
+               if task is not None}
+    out: List[TaskListRow] = []
+    for row in sorted((r for r in rows if r.role == "weak"),
+                      key=lambda r: r.unit_id):
+        # The rules read only the keys they need (blocks/rules.py's fixed
+        # signature); a weak row with no valid run fails both registered
+        # rules, so an unmeasured baseline task is never an add.
+        counts = {"valid": row.valid_count, "success": row.success_count}
+        if not rule(counts, n_attempts_weak):
+            continue
+        task_id, _ = _parse_unit_id(row.unit_id)
+        if task_id in covered:
+            continue
+        action = table_action(conclusion=CONCLUSION_BASELINE_GAP,
+                              checks_left=0, phase_kind=PHASE_BASELINE)
+        out.append(TaskListRow(
+            target_kind="task", target_id=task_id, action=action.kind,
+            reason=action.reason or "", basis_unit=row.unit_id))
+    return out
+
+
+def decide_task_list(
+    *,
+    current_kind: Optional[str],
+    current_report: Optional[Sequence[AcceptanceReportRow]] = None,
+    control_kind: Optional[str] = None,
+    control_report: Optional[Sequence[AcceptanceReportRow]] = None,
+    bank: Sequence[Skill],
+    checks_left: int,
+    compare_rule: str = "strict_rate_gain",
+    n_attempts_weak: int = 0,
+    task_select_rule: str = "any_weak_failed",
+) -> List[TaskListRow]:
+    """The unified decision entry (boundary doc section 2.4): this
+    round's acceptance report, the control report, the current bank and
+    the number of checks left become one task list.
+
+    Pure: no store, no ledger, no bank mutation (R4's decision side -- a
+    skill's deletion is a task-list row, never a write here), and no
+    trajectory is read: the report rows are the only evidence (section 3
+    rule 7).
+
+    * ``current_kind`` / ``control_kind`` name the phases the two
+      reports belong to (the vocabulary above; the phase driver reads
+      them off the frozen config). ``PHASE_TEST`` on either side is
+      :class:`FinalTestReportRejected` (section 3 rule 9).
+    * ``current_kind=None`` is the first learn phase's path: no
+      acceptance phase has run yet, so this round's report is empty and
+      the D-phase report (``control_kind="baseline"``) acts as the input
+      -- the table's baseline row, one add per failed, skill-less train
+      task. ``task_select_rule`` (a named blocks/rules.py rule) plus
+      ``n_attempts_weak`` decide "the weak model fails"; the bank decides
+      "no skill yet".
+    * Otherwise every row of ``current_report`` that injected skills is
+      a decision target -- the skill its exam measures (exam kind:
+      ``target_kind="skill"``) or the task's whole group (live kind:
+      ``target_kind="group"``, the task names the group) -- and the
+      report's own no-injection rows plus ``control_report``'s weak rows
+      are the controls, matched by task. A target with no control is a
+      CodeBugError: the phase config names the control source, so a
+      missing one is wiring, not data.
+    * ``checks_left`` is the "a later check remains" column, computed by
+      :func:`remaining_checks` from the frozen phase sequence.
+    * ``compare_rule`` selects the comparison by name; unknown names are
+      a ConfigError before any work.
+
+    Rows come out in unit-id order, one per target, with the target's
+    own ``unit_id`` as ``basis_unit``.
+    """
+    _get_compare_rule(compare_rule)  # unknown names fail before any work
+    if current_kind == PHASE_TEST or control_kind == PHASE_TEST:
+        raise FinalTestReportRejected(
+            "the decision entry does not take final-test (C-phase) "
+            "reports (boundary doc section 3 rule 9: test results do not "
+            "flow into learning); the final summary computes the "
+            "with-bank delta itself (decision.final_test_delta)")
+    if current_kind not in (None, PHASE_EXAM, PHASE_LIVE):
+        raise CodeBugError(f"unknown current phase kind {current_kind!r}; "
+                           f"expected None or {PHASE_EXAM}/{PHASE_LIVE}")
+    if control_kind not in (None, PHASE_BASELINE, PHASE_EXAM, PHASE_LIVE):
+        raise CodeBugError(f"unknown control phase kind {control_kind!r}")
+    if checks_left < 0:
+        raise CodeBugError(f"checks_left must be >= 0, got {checks_left}")
+
+    rows = list(current_report or ())
+    if current_kind is None:
+        if rows:
+            raise CodeBugError(
+                "a current report without a phase kind: pass the kind of "
+                "the phase the report belongs to (current_kind=None is "
+                "the first learn phase's empty-report path)")
+        return _baseline_rows(control_kind=control_kind,
+                               control_report=control_report, bank=bank,
+                               n_attempts_weak=n_attempts_weak,
+                               task_select_rule=task_select_rule)
+    if not rows:
+        return []
+
+    # Targets are the rows that injected skills; a no-injection row of
+    # the same report is an in-phase control (the bare exam answer; a
+    # control unit may be run in-phase, boundary doc section 1.3).
+    targets = [row for row in rows if row.injected_skills is not None]
+    controls: Dict[str, List[AcceptanceReportRow]] = {}
+    for row in list(control_report or ()) + [
+            row for row in rows if row.injected_skills is None]:
+        if row.role != "weak":
+            # The control is the weak model's bare result: the question
+            # is about the student, and a D-phase control batch carries
+            # the strong arm's rows too.
+            continue
+        task_id, _ = _parse_unit_id(row.unit_id)
+        controls.setdefault(task_id, []).append(row)
+
+    out: List[TaskListRow] = []
+    for row in sorted(targets, key=lambda r: r.unit_id):
+        if not row.injected_skills:
+            raise CodeBugError(
+                f"unit {row.unit_id!r} is a with-skill unit that injects "
+                "nothing; delivery produced a bare run under a with-skill "
+                "label in an acceptance phase")
+        task_id, _ = _parse_unit_id(row.unit_id)
+        matched = controls.get(task_id, [])
+        if not matched:
+            raise CodeBugError(
+                f"no control row for unit {row.unit_id!r} (task "
+                f"{task_id!r}): an acceptance phase's units are "
+                "compared against the bare control the phase config names")
+        control_valid = sum(r.valid_count for r in matched)
+        control_success = sum(r.success_count for r in matched)
+        control_cause = next((r.cause for r in matched
+                              if r.status != ROW_NORMAL), "")
+        conclusion, cause = compare_conclusion(
+            row=row, control_valid=control_valid,
+            control_success=control_success, control_cause=control_cause,
+            compare_rule=compare_rule)
+        action = table_action(conclusion=conclusion, cause=cause,
+                              checks_left=checks_left,
+                              phase_kind=current_kind)
+        if current_kind == PHASE_EXAM:
+            target_kind, target_id = _exam_target(row)
+        else:
+            # The group is named by its task: the live phase injects one
+            # task's whole group and its verdict can only reach the pack.
+            target_kind, target_id = "group", task_id
+        out.append(TaskListRow(
+            target_kind=target_kind, target_id=target_id,
+            action=action.kind, reason=action.reason or "",
+            basis_unit=row.unit_id))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# R3: the section 4.3 companion rules
+# ---------------------------------------------------------------------------
+
+def reuse_key(unit: ExecutionUnitRow) -> str:
+    """Section 4.3 rule 1's judgement key: the task, the execution role
+    and the sha256 of the RENDERED injection block.
+
+    The block bytes -- not the injected references -- are the key on
+    purpose: a rewrite that lands byte-identical content still bumps the
+    version, so the references differ while the measurement does not,
+    and rule 1 counts that as "unchanged" (修改后内容和原来一字不差,
+    也算没变). A bare unit and a retrieval-miss unit share the empty
+    block because they are the same measurement. This key is separate
+    from the resume/skip key (repair plan section 4.2, note 7); the
+    final test C never uses it -- it re-runs every time.
+    """
+    digest = hashlib.sha256(unit.skills_block.encode("utf-8")).hexdigest()
+    _, role = _parse_unit_id(unit.unit_id)
+    return f"{unit.task_ref}:{role}:{digest}"
+
+
+def reusable_units(new_units: Sequence[ExecutionUnitRow],
+                   previous_units: Sequence[ExecutionUnitRow]
+                   ) -> Dict[str, str]:
+    """Which new units reuse a previous unit's acceptance result
+    (section 4.3 rule 1: task and injection both unchanged -> no
+    re-execution): ``{new unit_id: previous unit_id}``.
+
+    The phase driver skips execution for the new units in the mapping
+    and reads the previous report's row for the returned ids; every
+    other new unit re-executes. Two previous units sharing a key is a
+    CodeBugError: within one phase a (task, role, block) triple names
+    one unit, so a duplicate means the batches disagree.
+    """
+    by_key: Dict[str, str] = {}
+    for unit in previous_units:
+        key = reuse_key(unit)
+        if key in by_key:
+            raise CodeBugError(
+                f"two previous units share the reuse key {key!r}: "
+                f"{by_key[key]!r} and {unit.unit_id!r}")
+        by_key[key] = unit.unit_id
+    return {unit.unit_id: by_key[reuse_key(unit)]
+            for unit in new_units if reuse_key(unit) in by_key}
+
+
+def revise_outcome(row: TaskListRow, *,
+                   produced_new_version: bool) -> TaskListRow:
+    """Section 4.3 rule 2: a revise whose rewrite produced no new
+    version leaves the target exactly as it was -- the row becomes keep,
+    nothing changed (so rule 1 skips the re-test) and the next learn
+    phase tries the revision again. A last learn phase that still shows
+    no gain deletes it through the table. The row passes through
+    unchanged when a new version exists."""
+    if produced_new_version:
+        return row
+    return TaskListRow(target_kind=row.target_kind,
+                       target_id=row.target_id, action=KEEP,
+                       reason="rewrite_produced_no_new_version",
+                       basis_unit=row.basis_unit)
+
+
+# ---------------------------------------------------------------------------
+# R3: the comparisons that moved out of the execution stages (G3)
+# ---------------------------------------------------------------------------
+
+def final_test_delta(with_bank: Dict[str, Any],
+                     control: Dict[str, Any]) -> Dict[str, Any]:
+    """The C-phase summary's with-bank minus control difference.
+
+    Section 3 rule 9 / repair plan section 4.5: the final summary
+    computes the test delta itself -- this is the comparison that used
+    to live inside stage 6 (G3), moved here unchanged. It is a summary
+    statistic, NOT a decision: the decision entry never sees a C-phase
+    report (``decide_task_list`` rejects one).
+
+    D3 pre-registers two avg@N disciplines (conditional ``avg_at_n`` and
+    the TB21 ``avg_at_n_conservative``); both deltas are reported side by
+    side so nobody picks the friendlier one after seeing the numbers.
+
+    ``avg_at_n`` is None when an arm has no valid trial at all; a delta
+    between a number and nothing is not zero (that would claim "no
+    improvement" from absent evidence), it is None -- recorded honestly
+    rather than coerced.
+
+    The plugin-declared auxiliary metric (when there is one) gets the
+    same treatment: ``aux`` carries its name and the same two deltas
+    under the same None rule, always beside the primary, never instead
+    of it. It is None when the plugin declares no auxiliary metric (both
+    arms' summaries carry ``aux: null`` then).
+    """
+    with_avg = with_bank["avg_at_n"]
+    control_avg = control["avg_at_n"]
+    return {
+        "avg_at_n": (with_avg - control_avg
+                     if with_avg is not None and control_avg is not None
+                     else None),
+        # summarize() never yields None for these two (0.0 with no valid
+        # trial / no tasks), so their deltas are always numbers.
+        "avg_at_n_conservative": (with_bank["avg_at_n_conservative"]
+                                  - control["avg_at_n_conservative"]),
+        "pass_at_n": with_bank["pass_at_n"] - control["pass_at_n"],
+        "aux": _aux_delta(with_bank.get("aux"), control.get("aux")),
+    }
+
+
+def _aux_delta(with_aux: Optional[Dict[str, Any]],
+               control_aux: Optional[Dict[str, Any]]
+               ) -> Optional[Dict[str, Any]]:
+    """With-bank minus control for the auxiliary metric (None when absent)."""
+    if with_aux is None or control_aux is None:
+        return None
+    with_avg = with_aux["avg_at_n"]
+    control_avg = control_aux["avg_at_n"]
+    return {
+        "metric": with_aux["metric"],
+        "avg_at_n": (with_avg - control_avg
+                     if with_avg is not None and control_avg is not None
+                     else None),
+        "avg_at_n_conservative": (with_aux["avg_at_n_conservative"]
+                                  - control_aux["avg_at_n_conservative"]),
+    }
+
+
+def control_arm_source(*, reused_phase: Optional[str]) -> str:
+    """The control arm's source label -- the choice that used to sit
+    inside stage 6 (G3): a named earlier phase whose stored results the
+    control reuses, or a fresh bare run. Boundary doc section 2.4: the
+    control report's phase is a stage-config decision, not an execution
+    stage's. The label keeps the historical summary vocabulary (E3 pins
+    it): ``"<phase>_reuse"`` / ``"fresh_bare_run"``."""
+    if reused_phase is None:
+        return "fresh_bare_run"
+    return f"{reused_phase}_reuse"

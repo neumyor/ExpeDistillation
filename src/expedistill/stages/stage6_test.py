@@ -84,17 +84,27 @@ re-running the same command resumes stage 1 first, which retries the hole
 (or, under the flag, accepts it durably there), and filling the hole can
 change F and hence the bank, so with-bank runs made now could be measured
 against the wrong bank.
+
+R3 (G3): the stage no longer compares anything. The summary delta is
+composites.decision.final_test_delta and the control-source label is
+composites.decision.control_arm_source -- the comparison rules live in
+the decision layer; this file keeps only the arms' execution and dies
+with the Wave 2 phase drivers.
 """
 
 from pathlib import Path
 from typing import (
-    Any, Collection, Dict, List, Optional, Sequence,
+    Any, Collection, Dict, List, Sequence,
 )
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.base import Task
 from expedistill.blocks.metrics import compute_task_metrics, summarize
 from expedistill.composites.batch_execute import batch_execute
+from expedistill.composites.decision import (
+    control_arm_source,
+    final_test_delta,
+)
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
@@ -192,58 +202,6 @@ def _bare_stage1_trajectories(ctx: Any, test_tasks: Sequence[Task],
     return trajectories
 
 
-def _delta(with_bank: Dict[str, Any],
-           control: Dict[str, Any]) -> Dict[str, Any]:
-    """With-bank minus control for both avg@N disciplines and pass@N.
-
-    D3 pre-registers two avg@N disciplines (conditional ``avg_at_n`` and the
-    TB21 ``avg_at_n_conservative``); both deltas are reported side by side so
-    nobody picks the friendlier one after seeing the numbers.
-
-    ``avg_at_n`` is None when an arm has no valid trial at all; a delta
-    between a number and nothing is not zero (that would claim "no
-    improvement" from absent evidence), it is None -- recorded honestly
-    rather than coerced.
-
-    The plugin-declared auxiliary metric (when there is one) gets the same
-    treatment: ``aux`` carries its name and the same two deltas under the
-    same None rule, always beside the primary, never instead of it. It is
-    None when the plugin declares no auxiliary metric (both arms' summaries
-    carry ``aux: null`` then).
-    """
-    with_avg = with_bank["avg_at_n"]
-    control_avg = control["avg_at_n"]
-    return {
-        "avg_at_n": (with_avg - control_avg
-                     if with_avg is not None and control_avg is not None
-                     else None),
-        # summarize() never yields None for these two (0.0 with no valid
-        # trial / no tasks), so their deltas are always numbers.
-        "avg_at_n_conservative": (with_bank["avg_at_n_conservative"]
-                                  - control["avg_at_n_conservative"]),
-        "pass_at_n": with_bank["pass_at_n"] - control["pass_at_n"],
-        "aux": _aux_delta(with_bank.get("aux"), control.get("aux")),
-    }
-
-
-def _aux_delta(with_aux: Optional[Dict[str, Any]],
-               control_aux: Optional[Dict[str, Any]]
-               ) -> Optional[Dict[str, Any]]:
-    """With-bank minus control for the auxiliary metric (None when absent)."""
-    if with_aux is None or control_aux is None:
-        return None
-    with_avg = with_aux["avg_at_n"]
-    control_avg = control_aux["avg_at_n"]
-    return {
-        "metric": with_aux["metric"],
-        "avg_at_n": (with_avg - control_avg
-                     if with_avg is not None and control_avg is not None
-                     else None),
-        "avg_at_n_conservative": (with_aux["avg_at_n_conservative"]
-                                  - control_aux["avg_at_n_conservative"]),
-    }
-
-
 def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     """Run the with-bank and control arms and write the stage-6 summary.
 
@@ -325,9 +283,11 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
     if ctx.config.mode == "full":
         # Stage 1 already measured the weak model bare on these tasks
         # (full mode distils on the whole task set); re-running it would be
-        # a different sample, not a control.
+        # a different sample, not a control. The label itself comes from
+        # the decision layer (R3: choosing which phase's results act as
+        # the control is a decision-table concern, not the stage's).
         control = stage1_control
-        control_source = "stage1_reuse"
+        control_source = control_arm_source(reused_phase="stage1")
     else:
         bare_store = _arm_store(ctx, "bare")
         # The bare control's injection is fixed semantics, not the
@@ -354,7 +314,7 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
             ctx, bare_params, bank, test_tasks)
         bare_kwargs.update(method_kwargs)
         control = batch_execute(**bare_kwargs)
-        control_source = "fresh_bare_run"
+        control_source = control_arm_source(reused_phase=None)
 
     # A durable hole stays a hole even if a trajectory for it appears.
     with_bank = [traj for traj in with_bank
@@ -404,7 +364,7 @@ def run(ctx: Any, *, test_tasks: Sequence[Task]) -> Dict[str, Any]:
         "control_source": control_source,
         "with_bank": with_bank_summary,
         "control": control_summary,
-        "delta": _delta(with_bank_summary, control_summary),
+        "delta": final_test_delta(with_bank_summary, control_summary),
         "infra_missing": missing,
         "infra_accepted": {arm: sorted(accepted[arm]) for arm in _ARMS},
         "complete": not n_missing,
