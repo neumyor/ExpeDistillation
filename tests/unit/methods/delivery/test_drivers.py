@@ -1,15 +1,12 @@
-"""Contract tests for the delivery drivers' LEGACY module seam (the
-pre-R5 ``resolve(ctx, params, ...)`` shapes stage 6 and the live driver
-still call, none / group_by_task here; whole_bank and retrieval through
-their callers).
+"""Contract tests for the delivery drivers' frozen signature
+(``resolve(bank, tasks, params) -> ExecutionUnitList``, the only form
+the phase drivers call).
 
-R5 (Wave 1) freezes the new signature ``resolve(bank, tasks, params) ->
-ExecutionUnitList`` and keeps the legacy shapes as a compat layer that
-delegates to it; these tests pin that delegation byte-for-byte until
-Wave 2 replaces the call sites. The frozen signature itself is pinned by
-tests/unit/test_w1d_delivery_signature.py. per_skill's legacy form never
-had a production caller and was removed; its rendering equivalence is
-pinned here through the frozen signature.
+Also pins the bank-membership filter the whole-bank and retrieval
+drivers apply: the phase artifacts carry accepted AND pending members,
+but those two drivers inject the accepted set only -- the shape the
+run-level bank had before the phase artifacts existed (the 2026-10-16
+review ruling pins the filter to that pre-change behaviour).
 """
 
 import pytest
@@ -47,6 +44,66 @@ def make_group_skill(task_id, content=MARKED):
     subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
     return Skill(skill_id=make_skill_id(subtask_id), content=content,
                  subtask_id=subtask_id, source_subtasks=[subtask_id])
+
+
+def _bank():
+    """A full-membership phase artifact's worth of skills: one accepted,
+    one pending, one discarded."""
+    accepted = make_group_skill(make_task_id(BENCHMARK, "t1"))
+    accepted.status = "accepted"
+    pending = make_group_skill(make_task_id(BENCHMARK, "t2"))
+    pending.status = "pending"
+    discarded = make_group_skill(make_task_id(BENCHMARK, "t3"))
+    discarded.status = "discarded"
+    return [accepted, pending, discarded], accepted
+
+
+def _retrieval_params():
+    from expedistill.methods.delivery import RetrievalParams
+    return RetrievalParams(top_k=1, max_categories=1, min_score=0.0)
+
+
+def _task(task_id):
+    from expedistill.benchmarks.base import Task
+    return Task(task_id=task_id, instruction="restart the stuck service")
+
+
+def test_whole_bank_injects_the_accepted_members_only():
+    bank, accepted = _bank()
+    tasks = [make_task_id(BENCHMARK, f"t{i}") for i in (1, 2, 3)]
+    delivery, params = resolve_fixed("delivery", "whole_bank")
+    rows = delivery.resolve(bank, tasks, params)
+    # Every row carries the ACCEPTED bank's digest and its rendered
+    # block; the pending member never enters the injection.
+    expected_block = format_skills_block([accepted])
+    assert len(rows) == 3
+    for row in rows:
+        assert row.skills_injected.startswith("bank:")
+        assert row.skills_block == expected_block
+
+
+def test_retrieval_ranks_over_the_accepted_members_only():
+    bank, accepted = _bank()
+    from expedistill.methods.delivery.retrieval import resolve
+    rows = resolve(bank, [_task(make_task_id(BENCHMARK, "t1"))],
+                   _retrieval_params())
+    # The single accepted member is what the selection can reach; the
+    # pending member never enters the ranking.
+    assert len(rows) == 1
+    assert rows[0].skills_injected == [
+        {"skill_id": accepted.skill_id, "version": accepted.version}]
+
+
+def test_a_bank_of_only_pending_members_injects_nothing():
+    pending = make_group_skill(make_task_id(BENCHMARK, "t1"))
+    pending.status = "pending"
+    tasks = [make_task_id(BENCHMARK, "t1")]
+    whole, whole_params = resolve_fixed("delivery", "whole_bank")
+    rows = whole.resolve([pending], tasks, whole_params)
+    assert rows[0].skills_block == format_skills_block([])
+    from expedistill.methods.delivery.retrieval import resolve
+    rows = resolve([pending], [_task(tasks[0])], _retrieval_params())
+    assert rows[0].skills_injected == []    # a bare run under the label
 
 
 def test_none_supplies_the_bare_rows():

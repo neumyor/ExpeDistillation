@@ -7,18 +7,17 @@ plan's 400-line split rule (repair plan section 8) -- phase_learn.py
 keeps the phase wiring (reports, sequence, curation, summary), this
 module owns what happens to ONE decided target.
 
-**The multi-version merge** (Wave 1 review A, detail D4): the exam
-report reader emits one row per (skill, version) the run-level
-attempts store ever judged, so one skill can carry several task-list
-rows -- including contradictory ones (an old version's miss next to the
-current version's pass, or an old version's leak beside a newer
-version's verdict). :func:`merge_task_list` keeps ONE effective action
-per skill: the row of the HIGHEST version decides (the newest content
-is what the bank holds and what the next phase re-measures; an older
-version's measurement or leak verdict says nothing about it), every
-lower-version row is dropped as superseded. Visibility rows
-(zero_execution) never reach the merge -- the decision entry already
-skips them (B1's one-meaning rule).
+**The multi-version merge**: the exam report reader emits one row
+per (skill, version) the run-level attempts store ever judged, so one
+skill can carry several task-list rows -- including contradictory ones
+(an old version's miss next to the current version's pass, or an old
+version's leak beside a newer version's verdict).
+:func:`merge_task_list` keeps ONE effective action per skill: the row
+of the HIGHEST version decides (the newest content is what the bank
+holds and what the next phase re-measures; an older version's
+measurement or leak verdict says nothing about it), every lower-version
+row is dropped as superseded. Visibility rows (zero_execution) never
+reach the merge -- the decision entry already skips them.
 
 **Landing**: keep accepts the pending target(s) -- the bank's
 "accepted" is the learn phase's verdict, measurement validity travels
@@ -36,17 +35,13 @@ stage-3 grain and status exactly as stage 3 always wrote them.
 **Evidence and author** (boundaries sections 2.5/2.6): a revise row
 collects fact-only evidence packages and hands them to the author
 driver. A group row (live) goes through
-``methods.evidence.live_group.collect_group_evidence`` (G10 as facts)
-plus ``methods.author.write.revise_group`` -- the G10/G11 migration
-(wiring list item 10): the legacy ``live_attribution`` action-plan
-path retired with stage 4. A skill row (exam) goes through
+``methods.evidence.live_group.collect_group_evidence`` plus
+``methods.author.write.revise_group``; a skill row (exam) goes through
 ``methods.evidence.exam_sheet.collect_exam_evidence`` (the exam, the
-judged attempt's weak answer and judge reason; P7b's source selection
-and the leak-voided description moved there from this module's inline
-assembly at the Wave 2 integration -- evidence gathering belongs to
-the evidence family).
+judged attempt's weak answer and judge reason -- evidence gathering
+belongs to the evidence family).
 
-**Resume** is K6's replay guard on a per-phase ledger: one
+**Resume** is the replay guard on a per-phase ledger: one
 ``revisions.jsonl`` row per skill BEFORE the author call records
 ``from_version``; a resumed call finds the skill at
 ``from_version + 1`` and knows the revision already landed (the
@@ -67,9 +62,9 @@ artifact (composites.phase_bank's layout):
 * ``outcomes.jsonl`` -- one receipt row per landed skill (schema
   ``learn-outcome-v1``, fields ``phase_label`` / ``target_kind`` /
   ``target_id`` / ``action`` / ``skill_id`` (null on a target-level
-  row) / ``outcome`` / ``version``) -- the G10/G11 migration's
-  successor to attributions.jsonl: Wave 3's audit scripts and Wave
-  4's golden regeneration align to THIS shape.
+  row) / ``outcome`` / ``version``) -- the successor to the old
+  attributions.jsonl; the audit scripts and golden regeneration of
+  the later waves align to THIS shape.
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -359,8 +354,12 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
                 "post-revision version -- the store drifted from the "
                 "ledger")
         else:
-            # In flight (or a previous call's "unchanged" outcome, which
-            # changes nothing on disk): asked again.
+            # In flight: the revision plan row exists but the version
+            # never moved -- the author call crashed or is running in
+            # another process. Asked again (a previous call's
+            # "unchanged" outcome never reaches this branch: its
+            # receipt carries the skill_id and the receipts check above
+            # already skipped it).
             todo.append(skill)
     if not todo:
         return

@@ -9,9 +9,8 @@ before any of its work.
 
 from typing import Tuple, Any
 
-from expedistill.composites import verdicts
+from expedistill.composites import decision, verdicts
 from expedistill.core.config import (
-    DEFAULT_INVALID_REDISPATCH_LIMIT,
     ConfigError as CoreConfigError,
     PHASE_ROLE_BASELINE,
     ExecutePhaseSpec,
@@ -89,11 +88,9 @@ def _compare_rule(spec: ExecutePhaseSpec) -> str:
     """The phase's compare rule name (decision's compare family; the
     family's default when the config does not name one)."""
     rule = spec.compare.rule if spec.compare is not None else None
-    return rule or "strict_rate_gain"
+    return rule or decision.DEFAULT_COMPARE_RULE
 
 
 def _redispatch_limit(ctx: StageContext) -> int:
-    """The config's invalid-redispatch budget (the v4 global; the frozen
-    default until the v4 config object carries the field)."""
-    return int(getattr(ctx.config, "invalid_redispatch_limit",
-                       DEFAULT_INVALID_REDISPATCH_LIMIT))
+    """The config's invalid-redispatch budget (the v4 global)."""
+    return int(ctx.config.invalid_redispatch_limit)

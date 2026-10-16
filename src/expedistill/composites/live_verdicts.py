@@ -27,16 +27,17 @@ the sweep can finish any commit the crash cut short.
 
 The M2 de-rounding seam (plan section 3, D5/P5): the ``_``-prefixed
 cores are round-agnostic -- every ledger path, round-store directory
-and round label is an explicit parameter. The public functions are thin
-shells that keep today's exact signatures and compute today's exact
-paths; the shells are deleted in M4, when the phase drivers pass the
-phase directory's paths in.
+and round label is an explicit parameter. The public functions are the
+execute-phase driver's API (stages/phase_execute/live.py): thin shells
+that compute today's exact paths and pass them to the cores. The seam
+stays on purpose -- the tests drive the round-agnostic cores directly
+with explicit paths, and the shells keep the frozen call shape the
+driver uses.
 
 Since R1 the acceptance verdict core is ``composites/verdicts.py`` (the
 status/cause vocabulary, the named run-verdict rules, the one report
-row). This module keeps K6's frozen verdicts-ledger protocol for the
-stages/ callers until Wave 2's phase drivers replace it -- the ledger
-rows are E6-pinned, so the judgment here is deliberately unchanged; the
+row). This module is K6's frozen verdicts-ledger protocol -- the ledger
+rows are pinned, so the judgment here is deliberately unchanged; the
 zero-execution terminals it writes are exactly the keys of verdicts'
 terminal table, and the report reader (composites/reports.py, kind
 "live") maps them onto the one acceptance report shape.
@@ -59,11 +60,10 @@ from expedistill.composites import decision
 from expedistill.composites.live_measurement import (
     INJECTION_AUDIT_NAME,
     VERDICTS_LEDGER,
-    _ROUNDS,
-    _block_sha,
+    ROUNDS,
     _check_round,
-    _first_row_from,
-    _ledger_path,
+    first_row_from,
+    ledger_path,
     _pending_group,
     _require_audit_row_from,
     _rows_from,
@@ -71,7 +71,6 @@ from expedistill.composites.live_measurement import (
     _unit_ids,
     expected_units,
     round_dir,
-    survivors_and_block,
 )
 from expedistill.composites.skill_status import discard_skill
 from expedistill.core.models import Trajectory
@@ -87,7 +86,6 @@ __all__ = [
     "WEAK_ALREADY_KNOWS",
     "finalize_group",
     "judge_round",
-    "no_op_guard",
 ]
 
 #: discard_reason values (decision ruling A13). Defined in
@@ -238,7 +236,7 @@ def _judge_round(
                 judged_with_shortfall=judged_with_shortfall,
                 aux=_aux_slot(aux_scorer, baseline_counts, live_counts))
 
-    stored_row = _first_row_from(verdicts_path, task_id, round_)
+    stored_row = first_row_from(verdicts_path, task_id, round_)
     if stored_row is not None:
         if stored_row != row:
             raise CodeBugError(
@@ -302,7 +300,7 @@ def judge_round(
     commit the crash cut short.
 
     Thin shell over ``_judge_round`` (module docstring): checks the
-    pinned round and computes today's exact paths; deleted in M4.
+    pinned round and computes today's exact paths.
     """
     _check_round(round_)
     directory = round_dir(store, round_)
@@ -311,7 +309,7 @@ def judge_round(
         baseline_counts=baseline_counts, n_attempts=n_attempts,
         skip_ids=skip_ids, aux_scorer=aux_scorer, terminal=terminal,
         max_injection_tokens=max_injection_tokens,
-        verdicts_path=_ledger_path(store, VERDICTS_LEDGER),
+        verdicts_path=ledger_path(store, VERDICTS_LEDGER),
         round_store_dir=directory,
         audit_path=directory / INJECTION_AUDIT_NAME)
 
@@ -373,48 +371,8 @@ def _aux_slot(
 
 
 # ---------------------------------------------------------------------------
-# No-op guard, finalization
+# Finalization
 # ---------------------------------------------------------------------------
-
-def _no_op_guard(store: Store, task_id: str, round_: int,
-                 audit_path: Path) -> bool:
-    """The round-agnostic core of ``no_op_guard`` (module docstring): the
-    byte-identity comparison (composites.decision.live_no_op_fires) against
-    the explicit audit path, the round label naming it in errors."""
-    survivors, block = survivors_and_block(store, task_id)
-    audit = _require_audit_row_from(audit_path, round_, task_id)
-    if not decision.live_no_op_fires(
-            rendered_block_sha=_block_sha(block),
-            frozen_audit_sha=audit["injection_block_sha256"]):
-        return False
-    for skill in survivors:
-        discard_skill(store, skill, LIVE_NO_IMPROVEMENT)
-    return True
-
-
-def no_op_guard(store: Store, task_id: str, round_: int) -> bool:
-    """Fire the no-op guard after round ``round_``'s revisions: True when
-    the survivors' current block is byte-identical to the round's FROZEN
-    audit row, in which case every survivor is discarded as
-    ``live_no_improvement`` and round 1 must not run.
-
-    The comparison's data source is the frozen audit line, never a
-    re-render of the round's pre-revision state -- that state is gone
-    (rewrites bump in place), and re-sampling a changed group until it
-    round-trips to a lucky pass is exactly what the guard exists to
-    prevent (decision ruling A4). A group with no survivors returns
-    False: there is no round 1 to skip, the members' own discards are
-    the terminal state (and an empty block can never equal the frozen
-    row of a dispatched round, so the empty case needs no special
-    form).
-
-    Thin shell over ``_no_op_guard`` (module docstring): checks the
-    pinned round and computes today's exact path; deleted in M4.
-    """
-    _check_round(round_)
-    return _no_op_guard(store, task_id, round_,
-                        round_dir(store, round_) / INJECTION_AUDIT_NAME)
-
 
 def _finalize_group(store: Store, task_id: str, *, verdicts_path: Path,
                     rounds: Sequence[int]) -> Dict[str, Any]:
@@ -469,9 +427,9 @@ def finalize_group(store: Store, task_id: str) -> Dict[str, Any]:
     call a no-op.
 
     Thin shell over ``_finalize_group`` (module docstring): computes
-    today's exact path and passes the pinned rounds; deleted in M4.
+    today's exact path and passes the pinned rounds.
     """
     return _finalize_group(
         store, task_id,
-        verdicts_path=_ledger_path(store, VERDICTS_LEDGER),
-        rounds=_ROUNDS)
+        verdicts_path=ledger_path(store, VERDICTS_LEDGER),
+        rounds=ROUNDS)

@@ -1,20 +1,17 @@
-"""Shared skill-status operations of the acceptance drivers and K6.
+"""Shared skill-status operations.
 
 ``discard_skill`` (the terminal write for a skill given up on outside its
-loop), ``stage3_candidates`` (the store scan both stage-4 drivers
-enumerate) and ``tally_verdicts`` (the cumulative verdict accounting both
-summaries carry). The exam and live drivers used to carry byte-identical
-copies, kept apart only to protect the exam path's frozen prompt-name
-surface -- a concern the lazy-register removal retired.
+loop) and ``stage3_candidates`` (the store scan that enumerates the
+candidate skills).
 """
 
-from typing import Any, Dict, List
+from typing import List
 
 from expedistill.core.ids import is_stage3_candidate
 from expedistill.core.models import Skill
 from expedistill.infra.store import Store
 
-__all__ = ["discard_skill", "stage3_candidates", "tally_verdicts"]
+__all__ = ["discard_skill", "stage3_candidates"]
 
 
 def discard_skill(store: Store, skill: Skill, reason: str) -> Skill:
@@ -46,22 +43,3 @@ def stage3_candidates(store: Store) -> List[Skill]:
         if is_stage3_candidate(skill):
             candidates.append(skill)
     return candidates
-
-
-def tally_verdicts(store: Any, candidates: List[Skill]) -> Dict[str, Any]:
-    """Cumulative verdicts of every candidate, read back from the store.
-
-    "accepted" includes the skills stage 5 has since folded into a merge.
-    A discarded skill's free-form reason is tallied as given; a missing
-    reason is tallied instead of guessed at.
-    """
-    accepted = 0
-    discarded: Dict[str, int] = {}
-    for candidate in candidates:
-        skill = store.load("skills", candidate.skill_id, Skill)
-        if skill.status in ("accepted", "merged"):
-            accepted += 1
-        elif skill.status == "discarded":
-            reason = skill.discard_reason or "unspecified"
-            discarded[reason] = discarded.get(reason, 0) + 1
-    return {"accepted": accepted, "discarded": discarded}

@@ -12,6 +12,7 @@ import pytest
 
 from expedistill.core.config import ConfigError
 from expedistill.methods import resolve, resolve_fixed, resolve_params
+from expedistill.methods.author import AuthoringParams
 from expedistill.methods.params import build_params
 
 
@@ -145,11 +146,12 @@ class TestEvidenceAndAuthorParams:
             resolve_params("evidence", {"name": "segment", "K": 0})
 
     def test_author_params(self):
-        # distill_diagnose is the author family's one method; the v3
-        # exams switch is gone from the config surface (a v4 config
-        # naming it is refused at load, see test_w2c_config_v4).
+        # distill_diagnose is the author family's one method; its params
+        # are empty (the v3 exams switch is gone from the config surface
+        # AND from the params class -- a v4 config naming it is refused
+        # at load, see test_w2c_config_v4).
         params = resolve_params("author", {"name": "distill_diagnose"})
-        assert params.exams is True
+        assert params == AuthoringParams()
 
 
 class TestCurationParams:

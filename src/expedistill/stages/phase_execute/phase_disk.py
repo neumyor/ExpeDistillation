@@ -22,7 +22,7 @@ from expedistill.core.contracts import (
 )
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
-from expedistill.infra.store import append_jsonl, read_json, read_jsonl
+from expedistill.infra.store import read_json, read_jsonl, write_jsonl
 from expedistill.stages.context import StageContext
 
 __all__ = [
@@ -115,22 +115,19 @@ def _bank_skills(ctx: StageContext, phase: PhaseInstance) -> List[Skill]:
 def _write_units(ctx: StageContext, phase: PhaseInstance,
                  units: Sequence[ExecutionUnitRow]) -> None:
     """Persist the resolved unit list (one resolution per phase; the
-    rewrite never grows a second copy of a row)."""
-    path = _phase_dir(ctx, phase) / UNITS_NAME
-    if path.exists():
-        path.unlink()
-    for unit in units:
-        append_jsonl(path, asdict(unit))
+    rewrite never grows a second copy of a row). Atomic -- temp file +
+    rename (B3's pattern), so a crash mid-write leaves the previous file
+    intact instead of a truncated one."""
+    write_jsonl(_phase_dir(ctx, phase) / UNITS_NAME,
+                [asdict(unit) for unit in units])
 
 
 def _write_report(ctx: StageContext, phase: PhaseInstance,
                   rows: Sequence[AcceptanceReportRow]) -> None:
-    """Persist the phase's acceptance report (one JSON row per unit)."""
-    path = _phase_dir(ctx, phase) / REPORT_NAME
-    if path.exists():
-        path.unlink()
-    for row in rows:
-        append_jsonl(path, asdict(row))
+    """Persist the phase's acceptance report (one JSON row per unit),
+    atomically (temp file + rename, B3's pattern)."""
+    write_jsonl(_phase_dir(ctx, phase) / REPORT_NAME,
+                [asdict(row) for row in rows])
 
 
 def _reused_rows(ctx: StageContext, phase: PhaseInstance,

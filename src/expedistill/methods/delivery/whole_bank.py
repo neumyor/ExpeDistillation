@@ -8,6 +8,11 @@ whole_bank through K1's per-task resolver would turn the recorded
 ``skills_injected`` into a reference list and change the trajectory
 bookkeeping.
 
+The injection is the bank's ACCEPTED members only
+(:func:`units.accepted_bank`): the phase artifacts carry pending
+members too, but the curated accepted set is what "the bank" meant
+before the artifacts existed, so that is what gets injected whole.
+
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the curated skill bank (Skill objects or bank rows, whatever
 ``inject.bank_reference`` accepts), ``tasks`` the phase's tasks in any
@@ -28,9 +33,10 @@ __all__ = ["resolve"]
 
 def resolve(bank: Sequence[Any], tasks: Any,
              params: WholeBankParams) -> ExecutionUnitList:
-    """One row per task: the whole bank, one fixed injection."""
-    injected = bank_reference(bank)
-    block = format_skills_block(bank)
+    """One row per task: the whole accepted bank, one fixed injection."""
+    accepted = units.accepted_bank(bank)
+    injected = bank_reference(accepted)
+    block = format_skills_block(accepted)
     return [units.make_row(units.task_ref(task), injected, block)
             for task in tasks]
 

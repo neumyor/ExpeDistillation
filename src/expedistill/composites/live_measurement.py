@@ -59,9 +59,10 @@ __all__ = [
 ]
 
 #: Live-run subtree inside the stage-4 directory (decision section 2.2):
-#: round stores and the ledgers all live under it. Shell-layer constant:
-#: the measurement core takes its paths as explicit parameters and never
-#: reads this; the path derivation dies with the shells in M4.
+#: round stores and the ledgers all live under it. The measurement core
+#: takes its paths as explicit parameters and never reads this; the
+#: shell layer (this module's public functions, the execute-phase
+#: driver's API) derives them here.
 LIVE_DIR_NAME = "stage4_acceptance/live_run"
 
 #: The decision ledgers plus the two repair-failure ledgers (decision
@@ -78,19 +79,18 @@ REVISION_FAILURES_LEDGER = "revision_failures.jsonl"
 INJECTION_AUDIT_NAME = "injection_audit.jsonl"
 
 #: Rounds are pinned to two (user ruling 8 -- no max_revision_rounds
-#: config), so every round-taking shell rejects anything else loudly
+#: config), so every round-taking entry rejects anything else loudly
 #: instead of silently inventing a third round the design never had.
-#: Shell-layer constant: the measurement core takes its round labels as
-#: parameters and never reads this; the pin and its check die with the
-#: shells in M4.
-_ROUNDS = (0, 1)
+#: The measurement core takes its round labels as parameters and never
+#: reads this.
+ROUNDS = (0, 1)
 
 
 def _live_dir(store: Store) -> Path:
     return store.run_dir / LIVE_DIR_NAME
 
 
-def _ledger_path(store: Store, name: str) -> Path:
+def ledger_path(store: Store, name: str) -> Path:
     return _live_dir(store) / name
 
 
@@ -104,9 +104,9 @@ def round_dir(store: Store, round_: int) -> Path:
 
 
 def _check_round(round_: int) -> None:
-    if round_ not in _ROUNDS:
+    if round_ not in ROUNDS:
         raise CodeBugError(
-            f"live rounds are pinned to {list(_ROUNDS)} (user ruling 8), "
+            f"live rounds are pinned to {list(ROUNDS)} (user ruling 8), "
             f"got {round_!r}")
 
 
@@ -121,7 +121,7 @@ def _rows_from(path: Path, task_id: str,
     return rows
 
 
-def _first_row_from(path: Path, task_id: str,
+def first_row_from(path: Path, task_id: str,
                     round_: int) -> Optional[Dict[str, Any]]:
     """The first ledger row of a (task, round) -- the one that sticks.
 
@@ -392,8 +392,7 @@ def skip_ids_for(stage1_shortfall: Iterable[str],
 
 def _audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
     """The round-agnostic core of ``audit_row``: the row for one round
-    label, with no pinned-round check (that is the shell's, and dies
-    with it in M4)."""
+    label, with no pinned-round check (that is the shell's)."""
     members = _require_group(store, task_id)
     block = format_skills_block(members)
     return {
@@ -423,7 +422,7 @@ def audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
     dispatched or audited.
 
     Thin shell over ``_audit_row`` (module docstring): checks the pinned
-    round; deleted in M4.
+    round and is the execute-phase driver's entry point.
     """
     _check_round(round_)
     return _audit_row(store, task_id, round_)

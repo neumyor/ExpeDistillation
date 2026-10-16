@@ -34,15 +34,17 @@ __all__ = ["SegmentationParams"]
 
 @dataclass(frozen=True)
 class SegmentationParams:
-    """Max segments per trajectory, and K2's re-segmentation budget."""
+    """Max segments per trajectory, and the re-segmentation budget."""
 
     K: int
     retry_limit: int = 2
 
     def __post_init__(self) -> None:
         if self.K < 1:
-            raise ConfigError(f"methods.segmentation.K must be >= 1, got {self.K}")
+            raise ConfigError(
+                "evidence method 'segment': K must be >= 1, "
+                f"got {self.K}")
         if self.retry_limit < 0:
             raise ConfigError(
-                "methods.segmentation.retry_limit must be >= 0, "
+                "evidence method 'segment': retry_limit must be >= 0, "
                 f"got {self.retry_limit}")

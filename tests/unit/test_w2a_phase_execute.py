@@ -262,12 +262,13 @@ def phase_of(index, name, spec, task_ids=None):
                                         else TASK_IDS))
 
 
-def make_group_skill(task_id, content=MARKED, version=1):
+def make_group_skill(task_id, content=MARKED, version=1,
+                    status="pending"):
     subtask_id = make_subtask_id(
         make_trajectory_id(task_id, "strong", 0), 0)
     return Skill(skill_id=make_skill_id(subtask_id), content=content,
                  subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 version=version)
+                 version=version, status=status)
 
 
 def write_bank_artifact(ctx, label, skills):
@@ -355,7 +356,8 @@ def test_baseline_leaves_the_bank_unchanged_r4(monkeypatch, tmp_path):
                    handles=make_handles(examiner=examiner, answerer=answerer,
                                         judge=judge, auditor=auditor))
     phase_execute.run(ctx, phase_of(2, "A", exam_spec()))
-    write_bank_artifact(ctx, "p04:L", [make_group_skill(_prefixed("t1"))])
+    write_bank_artifact(ctx, "p04:L", [make_group_skill(
+        _prefixed("t1"), status="accepted")])
     before = snapshot_bank(ctx)
     phase_execute.run(ctx, phase_of(4, "C", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))
@@ -435,6 +437,45 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
                     if "t2" in row.unit_id and row.role == "weak")
     assert hole_row.status == verdicts.STATUS_NOT_TESTABLE
     assert hole_row.cause == verdicts.CAUSE_ALL_HOLES
+
+
+def test_baseline_resume_without_the_flag_honours_accepted_holes(
+        monkeypatch, tmp_path):
+    # The durable-acceptance contract on the baseline role: holes
+    # accepted under the flag are never re-raised by a later resume
+    # WITHOUT it (the old stage-1 rule; the accepted set is read at
+    # phase start and passed into the arm run).
+    _pin_k1(monkeypatch)
+
+    def behavior(record):
+        if record["task_id"] == "t2":
+            raise InfrastructureError("sandbox exploded")
+        return _outcome(record["task_id"], True)
+
+    plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
+    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
+    phase = phase_of(0, "D", baseline_spec())
+
+    with pytest.raises(InfrastructureError, match="infra_missing"):
+        phase_execute.run(ctx, phase)
+
+    accepting = StageContext(
+        run_dir=ctx.run_dir, store=ctx.store, config=ctx.config,
+        usage=ctx.usage, handles=ctx.handles,
+        workdir_root=ctx.workdir_root,
+        run_settings=RunSettings(allow_infra_shortfall=True))
+    accepted_summary = phase_execute.run(accepting, phase).summary
+    assert accepted_summary["infra_shortfall_accepted"] is True
+
+    # The resume WITHOUT the flag: the accepted holes stay accepted,
+    # nothing re-raises, nothing re-runs, the summary is unchanged.
+    calls_before = len(plugin.calls)
+    resumed = phase_execute.run(ctx, phase).summary
+
+    assert len(plugin.calls) == calls_before
+    assert resumed == accepted_summary
+    assert resumed["infra_accepted"] == [
+        "traj/fakebench:t2/strong/00", "traj/fakebench:t2/weak/00"]
 
 
 def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
@@ -618,6 +659,56 @@ def _exam_script(bare_correct, leaked=False, with_skill_correct=None):
     return examiner, answerer, judge, auditor
 
 
+def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
+        monkeypatch, tmp_path):
+    # Rule 1 on the exam role, the R5 shape: a revise that produced no
+    # new version leaves the pending skill byte-identical, so the NEXT
+    # A phase reuses the previous verdict with zero executions. The
+    # join goes through the real benchmark slot on BOTH the units and
+    # the report rows (one source), which is exactly what the review's
+    # blocking finding broke.
+    _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, make_config())
+    skill = _exam_universe(ctx, tmp_path)
+    write_bank_artifact(ctx, "p02:L", [skill])
+    examiner, answerer, judge, auditor = _exam_script(
+        bare_correct=False, with_skill_correct=True)
+    ctx = make_ctx(tmp_path, make_config(),
+                   handles=make_handles(examiner=examiner, answerer=answerer,
+                                        judge=judge, auditor=auditor))
+    first = phase_of(2, "A", exam_spec())
+    first_summary = phase_execute.run(ctx, first).summary
+    assert first_summary["measured"] == [make_exam_id(skill.subtask_id)]
+    first_rows = {row.unit_id: row for row in report_rows(ctx, first)}
+    calls_after_first = sum(
+        len(handle.client.calls) for handle in ctx.handles.values())
+
+    # The learn phase between the two A phases accepted nothing and
+    # revised nothing (the rewrite produced no new version): its
+    # artifact carries the same pending skill.
+    write_bank_artifact(ctx, "p04:L", [skill])
+
+    second = phase_of(4, "A", exam_spec())
+    second_summary = phase_execute.run(ctx, second).summary
+
+    assert second_summary["reused"] == [make_exam_id(skill.subtask_id)]
+    assert second_summary["measured"] == []
+    # Zero model calls: the exam, the answers and the audits all stand.
+    assert sum(len(handle.client.calls)
+               for handle in ctx.handles.values()) == calls_after_first
+    # The reused row is the previous verdict under the new unit id.
+    second_rows = {row.unit_id: row for row in report_rows(ctx, second)}
+    first_row = next(row for row in first_rows.values()
+                     if row.injected_skills is not None)
+    second_row = next(row for row in second_rows.values()
+                      if row.injected_skills is not None)
+    assert second_row.unit_id == first_row.unit_id.replace(
+        first.label, second.label)
+    assert (second_row.status, second_row.valid_count,
+            second_row.success_count) == (
+        first_row.status, first_row.valid_count, first_row.success_count)
+
+
 def test_exam_bare_correct_skips_the_with_skill_answer(monkeypatch,
                                                        tmp_path):
     _install_plugin(monkeypatch, PhasePlugin())
@@ -707,7 +798,7 @@ def test_c_phase_reuses_the_d_control_and_computes_the_delta(
                              PhasePlugin(_weak_baseline_behavior))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
     phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
-    skill = make_group_skill(_prefixed("t1"))
+    skill = make_group_skill(_prefixed("t1"), status="accepted")
     write_bank_artifact(ctx, "p02:L", [skill])
     calls_before = len(plugin.calls)
 
@@ -733,7 +824,7 @@ def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, PhasePlugin())
     config = make_config(mode="split", n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
-    skill = make_group_skill(_prefixed("t1"))
+    skill = make_group_skill(_prefixed("t1"), status="accepted")
     write_bank_artifact(ctx, "p02:L", [skill])
 
     phase = phase_of(2, "C", c_spec(compare=CompareSpec(
@@ -750,7 +841,8 @@ def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
 def test_c_phase_reruns_every_time(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config(mode="split", n_attempts_weak=1))
-    write_bank_artifact(ctx, "p02:L", [make_group_skill(_prefixed("t1"))])
+    write_bank_artifact(ctx, "p02:L", [make_group_skill(
+        _prefixed("t1"), status="accepted")])
 
     phase_execute.run(ctx, phase_of(2, "C", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))

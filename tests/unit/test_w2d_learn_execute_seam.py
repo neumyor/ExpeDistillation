@@ -1,0 +1,451 @@
+"""The learn <-> execute seam over the REAL drivers (the Wave 2 review C's
+hard requirement): a real learn phase (decision -> add -> pending skill ->
+artifact) feeding a real A phase (pending universe out of the ARTIFACT ->
+exam generated -> answered -> judged), the next learn phase accepting or
+discarding the skill off the A phase's report, and the two-round exam
+skeleton (D L A L A L A L C) as one smoke.
+
+Every phase here is the production driver -- no seeded report files, no
+seeded artifacts, no hand-written acceptance rows; the only seeded
+object is the SUBTASK of the strong trajectory (segmentation has no
+phase-world call site yet, so the add path's source experience is
+seeded the way the learn-phase tests seed it).
+"""
+
+import importlib
+import importlib.abc
+import importlib.machinery
+import sys
+import types
+
+import pytest
+
+from expedistill.benchmarks.base import (
+    BenchmarkPlugin,
+    RunOutcome,
+    Task,
+    ViewRules,
+)
+from expedistill.benchmarks.registry import _reset_registry, register_plugin
+from expedistill.composites import phase_bank, verdicts
+from expedistill.composites.phase_bank import load_phase_bank
+from expedistill.core import ids
+from expedistill.core.config import ExperimentConfig
+from expedistill.core.models import Skill, Subtask
+from expedistill.infra.store import Store
+from expedistill.infra.usage import UsageRecorder
+from expedistill.llm.fake import json_script, make_fake_handle
+from expedistill.stages import learn_tasks, phase_execute, phase_learn
+from expedistill.stages.context import RunSettings, StageContext
+
+_FAKE = "fakebench"
+_MODULE = f"expedistill.benchmarks.{_FAKE}"
+TASK_IDS = ("t1", "t2", "t3")
+BIG = 10 ** 6
+
+MARKED = "\n".join([
+    "[When to use] The service rejects connections.",
+    "[Steps]",
+    "1. Check the service status.",
+    "2. Restart the service.",
+    "[Verify] The status command reports running.",
+    "[Do not use when] The status command already reports running.",
+])
+
+REVISED = "\n".join([
+    "[When to use] The service rejects connections and a restart is due.",
+    "[Steps]",
+    "1. Run the status command to see the service state.",
+    "2. Restart the service with its restart command.",
+    "[Verify] The second status command reports running.",
+    "[Do not use when] The status command already reports running.",
+])
+
+
+class PhasePlugin(BenchmarkPlugin):
+    """Strong succeeds everywhere; the weak model fails t1 (the task the
+    learn phases distil a skill for) and passes the rest."""
+
+    def __init__(self):
+        self.calls = []
+
+    @property
+    def name(self):
+        return _FAKE
+
+    def load_tasks(self, tasks_spec):
+        if tasks_spec is None:
+            ids_ = list(TASK_IDS)
+        else:
+            unknown = [i for i in tasks_spec if i not in TASK_IDS]
+            if unknown:
+                raise ValueError(f"unknown task ids: {unknown}")
+            ids_ = list(tasks_spec)
+        return [Task(task_id=i, instruction=f"do {i}") for i in ids_]
+
+    def run(self, task, handle, skills_block, workdir):
+        self.calls.append({"task_id": task.task_id, "handle": handle,
+                           "skills_block": skills_block})
+        handle.client.complete(handle.name, "system", task.instruction)
+        if handle.role == "strong":
+            return _outcome(task.task_id, True)
+        return _outcome(task.task_id, task.task_id != "t1")
+
+    @property
+    def view_rules(self):
+        return ViewRules()
+
+    @property
+    def task_prompt_name(self):
+        return "FAKE_TASK"
+
+
+def _outcome(task_id, correctness):
+    return RunOutcome(
+        steps=[{"action": f"exec {task_id}", "observation": "ok"}],
+        correctness=correctness,
+    )
+
+
+def _install_plugin(monkeypatch, plugin):
+    fullname = f"expedistill.benchmarks.{plugin.name}"
+
+    class Loader(importlib.abc.Loader):
+        def create_module(self, spec):
+            return types.ModuleType(spec.name)
+
+        def exec_module(self, module):
+            register_plugin(plugin)
+
+    class Finder:
+        def find_spec(self, name, path=None, target=None):
+            if name == fullname:
+                return importlib.machinery.ModuleSpec(name, Loader())
+            return None
+
+    sys.modules.pop(fullname, None)
+    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
+    return plugin
+
+
+@pytest.fixture(autouse=True)
+def clean_registry():
+    _reset_registry()
+    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
+    yield
+    sys.modules.pop(_MODULE, None)
+    _reset_registry()
+    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
+
+
+# ---------------------------------------------------------------------------
+# The config, the sequence, the phase instances
+# ---------------------------------------------------------------------------
+
+def _phases(retry_rounds=3):
+    """The v4 phase definitions of the exam method (upgrade_v3_config's
+    image): [D, L] + [A, L] * retry_rounds + [C]."""
+    return {
+        "D": {"kind": "execute", "role": "baseline",
+              "tasks": "train", "delivery": {"name": "none"},
+              "execution": {"name": "real",
+                            "arms": ["executor_strong", "executor_weak"]}},
+        "L": {"kind": "learn",
+              "evidence": {"name": "segment", "K": 5},
+              "author": {"name": "distill_diagnose"},
+              "curate": {"name": "none", "token_budget": BIG}},
+        "A": {"kind": "execute", "role": "exam", "tasks": "train",
+              "delivery": {"name": "per_skill"},
+              "execution": {"name": "exam"}},
+        "C": {"kind": "execute", "role": "test", "tasks": "test",
+              "delivery": {"name": "whole_bank"},
+              "execution": {"name": "real"},
+              "compare": {"against": "D"}},
+    }
+
+
+def _sequence(retry_rounds=3):
+    return ["D", "L"] + ["A", "L"] * retry_rounds + ["C"]
+
+
+def _config(retry_rounds=3):
+    return ExperimentConfig(
+        benchmark=_FAKE, mode="full",
+        models={"executor_strong": "big-model", "executor_weak": "weak-7b"},
+        weak_profile="a weak model",
+        n_attempts_strong=1, n_attempts_weak=1,
+        sequence=_sequence(retry_rounds),
+        phases=_phases(retry_rounds))
+
+
+def _handles(examiner=(), answerer=(), judge=(), auditor=(),
+             author=(), rewriter=()):
+    handles = {
+        "executor_strong": make_fake_handle("strong"),
+        "executor_weak": make_fake_handle("weak"),
+        "examiner": make_fake_handle("examiner", list(examiner)),
+        "answerer": make_fake_handle("weak", list(answerer)),
+        "judge": make_fake_handle("judge", list(judge)),
+        "auditor": make_fake_handle("auditor", list(auditor)),
+        "author": make_fake_handle("author", list(author)),
+        "rewriter": make_fake_handle("rewriter", list(rewriter)),
+    }
+    return handles
+
+
+def _ctx(tmp_path, config, handles):
+    run_dir = tmp_path / "run"
+    return StageContext(
+        run_dir=run_dir, store=Store(run_dir), config=config,
+        usage=UsageRecorder(run_dir / "llm_requests" / "usage.jsonl"),
+        handles=handles, workdir_root=run_dir / "work",
+        run_settings=RunSettings())
+
+
+def _phase(config, index, task_ids=None):
+    name = config.sequence[index]
+    spec = config.phases[name]
+    label = f"p{index + 1:02d}:{name}"
+    ids_ = tuple(task_ids if task_ids is not None else TASK_IDS)
+    from expedistill.core.config import PhaseInstance
+    return PhaseInstance(index=index, name=name, label=label, spec=spec,
+                         task_ids=ids_)
+
+
+def _run(ctx, config, index):
+    spec = config.phases[config.sequence[index]]
+    driver = phase_execute if spec.kind == "execute" else phase_learn
+    return driver.run(ctx, _phase(config, index))
+
+
+# ---------------------------------------------------------------------------
+# The scripted models
+# ---------------------------------------------------------------------------
+
+def _exam_generation():
+    return json_script({
+        "question_text": "The service rejects connections. What next?",
+        "reference_answer": "Restart the service."})
+
+
+def _verdict(correct):
+    return json_script({"verdict": "correct" if correct else "incorrect",
+                        "error_description": ""})
+
+
+def _audit():
+    return json_script({"leaked": False, "reason": "clean"})
+
+
+def _distill():
+    return json_script({
+        "when_to_use": "When the service rejects connections.",
+        "steps": ["Run the status command on the service.",
+                  "Restart the service with its restart command."],
+        "verify": "The status command reports the service is running.",
+        "not_applicable_when": "The service already reports running.",
+    })
+
+
+def _revision():
+    # The REWRITE prompt's output contract (same keys the exam revise
+    # path's tests use): the rewritten text, the failure category and
+    # the rewrite reason.
+    return json_script({"skill_text": REVISED,
+                        "failure_category": "missing_step",
+                        "rewrite_reason": "spelled out verification"})
+
+
+def _seed_t1_subtask(ctx):
+    """The add path's source experience: one strong segment of t1 (the
+    segmentation product -- seeded because segmentation has no
+    phase-world call site yet)."""
+    task_id = ids.make_task_id(_FAKE, "t1")
+    trajectory_id = ids.make_trajectory_id(task_id, "strong", 0)
+    subtask_id = ids.make_subtask_id(trajectory_id, 0)
+    ctx.store.save(Subtask(
+        subtask_id=subtask_id, task_id=task_id,
+        trajectory_id=trajectory_id, source="strong",
+        trajectory_success=True, segment_index=0, step_range=(0, 1),
+        label="restart", description="restart the stuck service",
+        success=True), "subtasks")
+    return subtask_id
+
+
+def _load_skill(ctx, skill_id):
+    return ctx.store.load("skills", skill_id, Skill)
+
+
+# ---------------------------------------------------------------------------
+# The seam: a pending skill rides the artifact into the A phase and back
+# ---------------------------------------------------------------------------
+
+def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    config = _config(retry_rounds=1)
+    handles = _handles(
+        examiner=[_exam_generation()],
+        answerer=["bare answer", "skilled answer"],
+        judge=[_verdict(False), _verdict(True)],
+        auditor=[_audit()],
+        author=[_distill()])
+    ctx = _ctx(tmp_path, config, handles)
+
+    # D: the baseline (strong all-success, weak fails t1).
+    _run(ctx, config, 0)
+    # L1: the baseline-gap learn -- decide (add for t1), author, land.
+    subtask_id = _seed_t1_subtask(ctx)
+    first = _run(ctx, config, 1)
+
+    skill_id = ids.make_skill_id(subtask_id)
+    skill = _load_skill(ctx, skill_id)
+    assert skill.status == "pending" and skill.version == 1
+    assert first.summary["task_list"] == {"add": 1, "superseded_rows": 0}
+    # THE seam: the intermediate learn phase's artifact carries the
+    # PENDING member -- without it the A phase's universe is empty and
+    # the whole exam method silently measures nothing.
+    artifact = load_phase_bank(ctx.run_dir, "p02:L")
+    assert [row["skill_id"] for row in artifact] == [skill_id]
+    assert artifact[0]["status"] == "pending"
+
+    # A: a real exam phase over that artifact's pending member.
+    second = _run(ctx, config, 2)
+    exam_id = ids.make_exam_id(subtask_id)
+    assert second.summary["measured"] == [exam_id]
+    rows = _report_rows(ctx, "p03:A")
+    with_skill = next(row for row in rows if row.injected_skills)
+    assert with_skill.status == verdicts.STATUS_NORMAL
+    assert with_skill.success_count == 1
+
+    # L2: the learn phase over the A report accepts the skill.
+    third = _run(ctx, config, 3)
+
+    skill = _load_skill(ctx, skill_id)
+    assert skill.status == "accepted"
+    assert third.summary["task_list"] == {"keep": 1, "superseded_rows": 0}
+    # The last learn phase's artifact is the bank the C phase injects.
+    artifact = load_phase_bank(ctx.run_dir, "p04:L")
+    assert [row["status"] for row in artifact] == ["accepted"]
+    # Nothing ran on the executor beyond D's two arms.
+    assert all(call["handle"].role in ("strong", "weak") for call in
+               plugin.calls)
+
+
+def test_a_still_failing_skill_is_discarded_at_the_last_check(
+        tmp_path, monkeypatch):
+    _install_plugin(monkeypatch, PhasePlugin())
+    # One A pair: [D, L, A, L, C] -- the last learn phase has no
+    # check left, so the table deletes a still-failing skill.
+    config = _config(retry_rounds=1)
+    handles = _handles(
+        examiner=[_exam_generation()],
+        answerer=["bare answer", "skilled answer"],
+        judge=[_verdict(False), _verdict(False)],
+        auditor=[_audit()],
+        author=[_distill()])
+    ctx = _ctx(tmp_path, config, handles)
+
+    _run(ctx, config, 0)
+    subtask_id = _seed_t1_subtask(ctx)
+    _run(ctx, config, 1)
+    _run(ctx, config, 2)
+
+    result = _run(ctx, config, 3)
+
+    skill = _load_skill(ctx, ids.make_skill_id(subtask_id))
+    assert skill.status == "discarded"
+    assert skill.discard_reason == "retry_exhausted"
+    assert result.summary["task_list"] == {"delete": 1,
+                                           "superseded_rows": 0}
+    # The discarded member leaves the bank: the last learn phase's
+    # artifact is empty and the C phase would inject nothing.
+    assert load_phase_bank(ctx.run_dir, "p04:L") == []
+    # ... and C runs against an empty bank without raising.
+    final = _run(ctx, config, 4)
+    assert final.summary["role"] == "test"
+    assert final.summary["with_bank"]["tasks"] == 3
+
+
+def _report_rows(ctx, label):
+    from expedistill.core.contracts import AcceptanceReportRow
+    from expedistill.infra.store import read_jsonl
+    path = (phase_bank.phase_bank_dir(ctx.run_dir, label)
+            / "acceptance_report.jsonl")
+    return [AcceptanceReportRow(**row) for row in read_jsonl(path)]
+
+
+# ---------------------------------------------------------------------------
+# The two-round exam skeleton as one smoke: D L A L A L A L C
+# ---------------------------------------------------------------------------
+
+def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    config = _config(retry_rounds=3)   # [D, L, A, L, A, L, A, L, C]
+    handles = _handles(
+        examiner=[_exam_generation()],           # generated once, reused
+        answerer=["bare v1", "skilled v1",       # A1
+                  "bare v2", "skilled v2"],      # A2
+        judge=[_verdict(False), _verdict(False),  # A1: bare, with-skill
+               _verdict(False), _verdict(True)],  # A2: bare, with-skill
+        auditor=[_audit(), _audit()],            # A1 (v1), A2 (v2)
+        author=[_distill()],                    # L1's add
+        rewriter=[_revision()])                  # L2's revise
+    ctx = _ctx(tmp_path, config, handles)
+
+    # D + L1: the weak model fails t1, the learn phase adds one skill.
+    _run(ctx, config, 0)
+    subtask_id = _seed_t1_subtask(ctx)
+    skill_id = ids.make_skill_id(subtask_id)
+    _run(ctx, config, 1)
+    assert _load_skill(ctx, skill_id).status == "pending"
+
+    # A1 measures version 1: the skill does not help yet.
+    _run(ctx, config, 2)
+
+    # L2 revises (a check remains): version 2, still pending.
+    _run(ctx, config, 3)
+    revised = _load_skill(ctx, skill_id)
+    assert revised.version == 2 and revised.status == "pending"
+    assert revised.content == REVISED
+
+    # A2 re-measures the NEW version (the block changed: no rule-1
+    # reuse) on the SAME stored exam, and this time it passes.
+    second = _run(ctx, config, 4)
+    exam_id = ids.make_exam_id(subtask_id)
+    assert second.summary["measured"] == [exam_id]
+    assert second.summary["reused"] == []
+
+    # L3 accepts version 2.
+    _run(ctx, config, 5)
+    assert _load_skill(ctx, skill_id).status == "accepted"
+
+    # A3: nothing is pending any more -- the universe is empty and the
+    # phase measures nothing (the exam method's quiet round).
+    third = _run(ctx, config, 6)
+    assert third.summary["universe"] == []
+    assert _report_rows(ctx, "p07:A") == []
+
+    # L4 (the last learn phase) re-curates and C injects the accepted
+    # bank over the test set against D's weak arm.
+    _run(ctx, config, 7)
+    assert load_phase_bank(ctx.run_dir, "p08:L")[0]["status"] == "accepted"
+    final = _run(ctx, config, 8)
+
+    assert final.summary["role"] == "test"
+    assert final.summary["control_source"] == "D_reuse"
+    assert final.summary["with_bank"]["tasks"] == 3
+    # The with-bank arm really carried the skill's block.
+    with_bank_calls = [call for call in plugin.calls
+                       if call["skills_block"]]
+    assert with_bank_calls and all(
+        "Restart the service with its restart command" in call["skills_block"]
+        for call in with_bank_calls)
+    # The learn ledger's receipts, end to end: added, revised, accepted
+    # (+ the last learn phase's no-op over the already-accepted skill).
+    outcomes = []
+    from expedistill.infra.store import read_jsonl
+    for index in (1, 3, 5, 7):
+        path = (phase_bank.phase_bank_dir(ctx.run_dir, f"p{index + 1:02d}:L")
+                / learn_tasks.OUTCOMES_NAME)
+        outcomes.extend(row["outcome"] for row in read_jsonl(path))
+    assert outcomes == ["added", "revised", "accepted", "already_accepted"]

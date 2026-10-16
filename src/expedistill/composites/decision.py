@@ -54,6 +54,7 @@ from expedistill.core.models import MODEL_ROLES, Skill
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
 __all__ = [
+    "DEFAULT_COMPARE_RULE",
     "ADD",
     "ALL_HOLES",
     "BASELINE_GAP_REASON",
@@ -145,6 +146,11 @@ RETRY_EXHAUSTED = "retry_exhausted"
 #: only). Registering a new improve rule must consciously revisit this
 #: set -- an unconditional guard would short-circuit groups under a rule
 #: where a rate-1.0 baseline can still lose (pass@N-style rules).
+#: The compare family's default rule: the success rate must strictly
+#: improve on the control's. The phase drivers and the decision entry
+#: all fall back to THIS constant -- the name is spelled once.
+DEFAULT_COMPARE_RULE = "strict_rate_gain"
+
 STRICT_SHORT_CIRCUIT_RULES = frozenset({"strict_rate_gain",
                                         "first_success_gain"})
 
@@ -565,7 +571,7 @@ _UNIT_SHA_RE = re.compile(r"[0-9a-f]{8}")
 _PHASE_HEAD_RE = re.compile(r"p[0-9]+")
 
 
-def _parse_unit_id(unit_id: str) -> Tuple[str, str]:
+def parse_unit_id(unit_id: str) -> Tuple[str, str]:
     """(task_or_exam_id, role) out of a unit id, per core/contracts.py's
     frozen construction rule ``phase:benchmark:task:role:sha8``.
 
@@ -603,7 +609,7 @@ def _exam_target(row: AcceptanceReportRow) -> Tuple[str, str]:
     """The skill an exam-phase unit measures: the exam's own subtask's
     stage-3 skill, from the ID chain (the report's injected refs are
     evidence, not targeting -- the exam id is the address)."""
-    exam_id, _ = _parse_unit_id(row.unit_id)
+    exam_id, _ = parse_unit_id(row.unit_id)
     if not exam_id.endswith("/exam"):
         raise CodeBugError(
             f"exam-phase unit {row.unit_id!r} names {exam_id!r}, which is "
@@ -638,7 +644,7 @@ def _baseline_rows(*, control_kind: Optional[str],
         counts = {"valid": row.valid_count, "success": row.success_count}
         if not rule(counts, n_attempts_weak):
             continue
-        task_id, _ = _parse_unit_id(row.unit_id)
+        task_id, _ = parse_unit_id(row.unit_id)
         if task_id in covered:
             continue
         action = table_action(conclusion=CONCLUSION_BASELINE_GAP,
@@ -657,7 +663,7 @@ def decide_task_list(
     control_report: Optional[Sequence[AcceptanceReportRow]] = None,
     bank: Sequence[Skill],
     checks_left: int,
-    compare_rule: str = "strict_rate_gain",
+    compare_rule: str = DEFAULT_COMPARE_RULE,
     n_attempts_weak: int = 0,
     task_select_rule: str = "any_weak_failed",
 ) -> List[TaskListRow]:
@@ -746,12 +752,12 @@ def decide_task_list(
             # is about the student, and a D-phase control batch carries
             # the strong arm's rows too.
             continue
-        task_id, _ = _parse_unit_id(row.unit_id)
+        task_id, _ = parse_unit_id(row.unit_id)
         controls.setdefault(task_id, []).append(row)
 
     out: List[TaskListRow] = []
     for row in sorted(targets, key=lambda r: r.unit_id):
-        task_id, _ = _parse_unit_id(row.unit_id)
+        task_id, _ = parse_unit_id(row.unit_id)
         matched = controls.get(task_id, [])
         if not matched:
             raise CodeBugError(
@@ -807,7 +813,7 @@ def reuse_key(unit: ExecutionUnitRow) -> str:
     final test C never uses it -- it re-runs every time.
     """
     digest = hashlib.sha256(unit.skills_block.encode("utf-8")).hexdigest()
-    _, role = _parse_unit_id(unit.unit_id)
+    _, role = parse_unit_id(unit.unit_id)
     return f"{unit.task_ref}:{role}:{digest}"
 
 

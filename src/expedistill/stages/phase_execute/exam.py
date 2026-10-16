@@ -20,12 +20,12 @@ from expedistill.composites.acceptance_leak import (
     leak_verdict_for,
 )
 from expedistill.composites.acceptance_skill_status import (
-    _exam_attempts,
-    _find_bare,
+    exam_attempts,
+    find_bare,
 )
 from expedistill.composites.exam_grading import judge_budget_exhausted
 from expedistill.composites.exam_once import exam_once
-from expedistill.composites.reports import _run_record_from_attempt
+from expedistill.composites.reports import run_record_from_attempt
 from expedistill.core import ids
 from expedistill.core.config import (
     PHASE_ROLE_EXAM,
@@ -228,19 +228,21 @@ def _exam_report(ctx: StageContext, phase: PhaseInstance,
     """The A phase's report rows from the shared stores' on-disk state:
     one bare control row per exam plus one row per measured (skill,
     version) -- the frozen reader's shape, over THIS phase's universe,
-    with rule-1 reuse rows joined in."""
+    with rule-1 reuse rows joined in. The unit ids carry the run's real
+    benchmark -- the one source the units plan and the frozen report
+    reader already use, so rule 1's join matches on both ends."""
     rows: List[AcceptanceReportRow] = []
     for skill in pending:
         exam_id = ids.make_exam_id(skill.subtask_id)
         injected = [{"skill_id": skill.skill_id,
                      "version": skill.version}]
         unit_id = verdicts.make_unit_id(
-            phase_label=phase.label, benchmark="exam", task_ref=exam_id,
+            phase_label=phase.label, benchmark=ctx.config.benchmark, task_ref=exam_id,
             role="weak", skills_injected=injected)
         if not ctx.store.exists("exams", exam_id):
             rows.append(verdicts.summarize_unit(
                 unit_id=verdicts.make_unit_id(
-                    phase_label=phase.label, benchmark="exam",
+                    phase_label=phase.label, benchmark=ctx.config.benchmark,
                     task_ref=exam_id, role="weak", skills_injected=injected),
                 phase_label=phase.label, role="weak",
                 injected_skills=injected, runs=[],
@@ -248,14 +250,14 @@ def _exam_report(ctx: StageContext, phase: PhaseInstance,
                 cause=verdicts.CAUSE_EXAM_GENERATION_FAILED,
                 artifacts={"skill_id": skill.skill_id}))
             continue
-        attempts = _exam_attempts(ctx.store, exam_id)
+        attempts = exam_attempts(ctx.store, exam_id)
 
         # -- the bare control row ----------------------------------------
-        bare = _find_bare(attempts)
+        bare = find_bare(attempts)
         bare_runs: List[Dict[str, Any]] = []
         if bare is not None and bare.judge_verdict is not None:
             verdict, basis = verdicts.verdict_from_run(
-                _run_record_from_attempt(bare), rule_name=rule_name)
+                run_record_from_attempt(bare), rule_name=rule_name)
             bare_runs.append({"run": bare.attempt_id, "verdict": verdict,
                               "basis": basis})
         if bare_runs:
@@ -271,7 +273,7 @@ def _exam_report(ctx: StageContext, phase: PhaseInstance,
             bare_cause = verdicts.CAUSE_ZERO_EXECUTION
         rows.append(verdicts.summarize_unit(
             unit_id=verdicts.make_unit_id(
-                phase_label=phase.label, benchmark="exam",
+                phase_label=phase.label, benchmark=ctx.config.benchmark,
                 task_ref=exam_id, role="weak", skills_injected=None),
             phase_label=phase.label, role="weak", injected_skills=None,
             runs=bare_runs, status=bare_status, cause=bare_cause,
@@ -303,7 +305,7 @@ def _exam_report(ctx: StageContext, phase: PhaseInstance,
         runs: List[Dict[str, Any]] = []
         for attempt in judged:
             verdict, basis = verdicts.verdict_from_run(
-                _run_record_from_attempt(attempt), rule_name=rule_name)
+                run_record_from_attempt(attempt), rule_name=rule_name)
             runs.append({"run": attempt.attempt_id, "verdict": verdict,
                          "basis": basis})
         if runs:

@@ -14,9 +14,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks import tasks as tasks_block
-from expedistill.composites import shortfall, verdicts
+from expedistill.composites import verdicts
 from expedistill.composites.reports import (
-    _run_record_from_trajectory,
+    run_record_from_trajectory,
 )
 from expedistill.core import ids
 from expedistill.core.config import PhaseInstance
@@ -41,7 +41,6 @@ from expedistill.stages.phase_execute.phase_disk import (
 
 __all__ = [
     "_Plan",
-    "_accept_new_holes",
     "_arm_trajectories",
     "_dispatch_arm",
     "_plan_units",
@@ -219,7 +218,7 @@ def _unit_runs(store: Store, plan: _Plan, *, accepted: Set[str],
             trajectory = store.load("trajectories", trajectory_id,
                                     Trajectory)
             verdict, basis = verdicts.verdict_from_run(
-                _run_record_from_trajectory(trajectory),
+                run_record_from_trajectory(trajectory),
                 rule_name=rule_name)
         else:
             missing.append(trajectory_id)
@@ -254,9 +253,14 @@ def _unit_row_for(plan: _Plan, *, runs: List[Dict[str, Any]],
 
 def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
                    plans: Sequence[_Plan], store: Store, arm: str,
-                   rule_name: str, limit: int
+                   rule_name: str, limit: int, accepted: Set[str]
                    ) -> Tuple[List[AcceptanceReportRow], Set[str]]:
     """Dispatch, judge and re-dispatch one arm's units.
+
+    ``accepted`` is the CALLER's durable accepted-hole set (the baseline
+    phase passes the stage-1 record's): accepted holes are never
+    re-dispatched, never re-raised -- the durable-acceptance contract
+    every later call honours with or without the flag.
 
     Returns ``(rows, unaccepted_holes)``. The re-dispatch loop is the
     frozen rule 6: a unit whose dispatch died with nothing stored is
@@ -267,8 +271,6 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     phase raises for the operator's shortfall decision)."""
     state_path = _phase_dir(ctx, phase, arm) / REDISPATCH_NAME
     state = _redispatch_state(state_path)
-    accepted_path = _phase_dir(ctx, phase, arm) / shortfall.SHORTFALL_NAME
-    accepted = set(shortfall.read_unit_ids(accepted_path))
     open_budget = [plan for plan in plans
                    if state.get(plan.unit.unit_id,
                                 {}).get("passes", 0) < limit]
@@ -292,20 +294,6 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
         rows.append(_unit_row_for(plan, runs=runs, missing=len(missing),
                                   phase_label=phase.label))
     return rows, holes
-
-
-def _accept_new_holes(ctx: StageContext, phase: PhaseInstance, arm: str,
-                      holes: Set[str]) -> List[str]:
-    """Durably accept the arm's new holes when the run setting says so
-    (the old stages' rule): the record is written BEFORE the report
-    reads the shrunken sample, and every later call honours it with or
-    without the flag. Returns the full accepted set."""
-    accepted_path = _phase_dir(ctx, phase, arm) / shortfall.SHORTFALL_NAME
-    accepted = set(shortfall.read_unit_ids(accepted_path))
-    if holes and ctx.run_settings.allow_infra_shortfall:
-        accepted |= holes
-        shortfall.write_unit_ids(accepted_path, accepted)
-    return sorted(accepted)
 
 
 def _arm_trajectories(store: Store) -> List[Trajectory]:

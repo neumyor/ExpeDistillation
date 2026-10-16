@@ -21,14 +21,32 @@ driver rebuilds into the full frozen key with
 """
 
 import hashlib
-from collections.abc import Mapping
-from typing import Any, Dict, Optional, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, Dict, List, Optional, Union
 
 from expedistill.composites import verdicts
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill
 
-__all__ = ["make_row", "skill_reference", "task_ref", "unit_id"]
+__all__ = ["accepted_bank", "make_row", "skill_reference", "task_ref",
+           "unit_id"]
+
+
+def accepted_bank(bank: Sequence[Any]) -> List[Any]:
+    """The bank's accepted members, in the given order.
+
+    The phase artifacts carry every member (accepted and pending), but
+    the whole-bank and retrieval drivers inject the ACCEPTED set only:
+    that is what the run-level bank held before the phase artifacts
+    existed, and the 2026-10-16 review ruling pins the filter to that
+    pre-change behaviour. Pending members ride along in the artifact for
+    the A and B phases that test them -- never into a whole-bank or
+    retrieval injection. Bank rows (mappings) and Skill objects are
+    accepted the way ``blocks.retrieve`` accepts them.
+    """
+    return [member for member in bank
+            if (member.get("status", "pending") if isinstance(member, Mapping)
+                else member.status) == "accepted"]
 
 
 def skill_reference(record: Union[Skill, Mapping[str, Any]]) -> Dict[str, Any]:

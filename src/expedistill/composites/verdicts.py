@@ -35,10 +35,10 @@ wave's file ownership converge onto it when their owners land):
 4. the former ``acceptance.py``'s leak determination --
    ``acceptance_leak.py``, whose verdict maps onto the vocabulary here;
 5. the former ``live_acceptance.py``'s round judgment --
-   ``live_verdicts.py`` keeps K6's frozen verdicts-ledger protocol (E6
-   pins its rows) for the stages/ callers until Wave 2's phase drivers
-   replace it; the zero-execution terminals it writes are exactly the
-   keys of ``_STATUS_CAUSE_BY_TERMINAL`` below.
+   ``live_verdicts.py`` keeps K6's frozen verdicts-ledger protocol (its
+   rows are pinned) for the execute-phase driver's live role; the
+   zero-execution terminals it writes are exactly the keys of
+   ``_STATUS_CAUSE_BY_TERMINAL`` below.
 
 R4 (acceptance side): nothing in this module writes the skill bank --
 no ``discard_skill``, no status commit. Acceptance produces facts; the
@@ -272,8 +272,8 @@ def _exam_judge_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
 
 @VERDICT_RULES.register("tb_scorer")
 def _tb_scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
-    """The scorer rule over the facts TB's plugin reports (W2-A, wiring
-    list rule 3): the same verdicts as ``scorer`` with the run's own
+    """The scorer rule over the facts TB's plugin reports: the same
+    verdicts as ``scorer`` with the run's own
     provenance named in the basis, so a ruled-invalid run says WHICH
     fact killed it -- a pseudo zero (a reward whose verifier never ran,
     ``verifier_ran`` False), a run whose verifier evidence never came
@@ -309,8 +309,8 @@ def _tb_scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
 #: The default named rule per benchmark (R1: the verdict rules are named
 #: per benchmark; C11 lets the config name one explicitly, this table is
 #: the default binding). Every benchmark with a scorer scores through
-#: the scorer rule; TB's binding consumes its plugin's provenance facts
-#: (``tb_scorer``, W2-A); the exam benchmark (questions generated on
+#: the scorer rule; TB's binding consumes its plugin's provenance
+#: facts (``tb_scorer``); the exam benchmark (questions generated on
 #: the fly) is judged by the model judge.
 BENCHMARK_VERDICT_RULES = {
     "tb": "tb_scorer",

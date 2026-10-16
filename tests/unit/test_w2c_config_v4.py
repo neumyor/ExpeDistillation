@@ -347,6 +347,40 @@ class TestChecklist:
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_strong=1, n_attempts_weak=1)
 
+    def test_a_live_control_is_refused(self, live_v4):
+        # A live phase's report rows all carry the injected group, so a
+        # live phase is never a bare control: the checklist demands a
+        # baseline phase (the learn driver's check used to fire only
+        # after the live phase's executions were spent).
+        raw = copy.deepcopy(live_v4["phases"])
+        raw["B2"] = dict(raw["B"])
+        raw["B2"]["compare"] = {"against": "B"}
+        sequence = ["D", "L", "B", "L", "B2", "L", "C"]
+        with pytest.raises(ConfigError, match="baseline phase's bare"):
+            parse_phases(raw, sequence, n_attempts_strong=1,
+                         n_attempts_weak=2)
+
+    def test_a_live_phase_needs_a_control(self, live_v4):
+        # Without compare (or against fresh_bare) a live phase leaves
+        # the decision with no control row to compare against.
+        raw = copy.deepcopy(live_v4["phases"])
+        del raw["B"]["compare"]
+        with pytest.raises(ConfigError, match="without a control"):
+            parse_phases(raw, live_v4["sequence"],
+                         n_attempts_strong=1, n_attempts_weak=2)
+        raw["B"]["compare"] = {"against": FRESH_BARE}
+        with pytest.raises(ConfigError, match="without a control"):
+            parse_phases(raw, live_v4["sequence"],
+                         n_attempts_strong=1, n_attempts_weak=2)
+
+    def test_the_sequence_must_start_with_an_execute_phase(self, exam_v4):
+        raw = copy.deepcopy(exam_v4["phases"])
+        sequence = ["L", "D"] + exam_v4["sequence"]
+        with pytest.raises(ConfigError,
+                           match="must start with an execute phase"):
+            parse_phases(raw, sequence,
+                         n_attempts_strong=1, n_attempts_weak=1)
+
     def test_single_arm_depth_never_exceeds_the_control(self, live_v4):
         raw = copy.deepcopy(live_v4["phases"])
         raw["B"]["execution"]["n_attempts"] = 3
@@ -357,16 +391,6 @@ class TestChecklist:
         raw["B"]["execution"]["n_attempts"] = 2
         parse_phases(raw, live_v4["sequence"],
                      n_attempts_strong=1, n_attempts_weak=2)
-        # A live control with a smaller depth than the global caps the
-        # next live phase's depth.
-        raw["B"]["execution"]["n_attempts"] = 1
-        raw["B2"] = dict(raw["B"])
-        raw["B2"]["execution"] = {"name": "real", "n_attempts": 2}
-        raw["B2"]["compare"] = {"against": "B"}
-        sequence = ["D", "L", "B", "L", "B2", "L", "C"]
-        with pytest.raises(ConfigError, match="exceeds its control's"):
-            parse_phases(raw, sequence, n_attempts_strong=1,
-                         n_attempts_weak=2)
 
     def test_single_arm_depth_must_be_a_positive_int(self, live_v4):
         raw = copy.deepcopy(live_v4["phases"])

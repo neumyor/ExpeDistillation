@@ -73,4 +73,4 @@ def test_the_evidence_and_author_families_resolve_their_params():
                                        "retry_limit": 2}) == \
         SegmentationParams(K=5, retry_limit=2)
     assert resolve_params("author", {"name": "distill_diagnose"}) == \
-        AuthoringParams(exams=True)
+        AuthoringParams()

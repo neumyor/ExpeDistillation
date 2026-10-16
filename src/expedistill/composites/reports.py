@@ -67,8 +67,8 @@ from expedistill.composites.acceptance_leak import (
     find_leak_verdict,
 )
 from expedistill.composites.acceptance_skill_status import (
-    _exam_attempts,
-    _find_bare,
+    exam_attempts,
+    find_bare,
     _skill_records,
 )
 from expedistill.composites.skill_status import stage3_candidates
@@ -88,7 +88,7 @@ _KINDS = ("baseline", "exam", "live")
 _ROLES = ("strong", "weak")
 
 
-def _run_record_from_trajectory(traj: Trajectory) -> RunRecord:
+def run_record_from_trajectory(traj: Trajectory) -> RunRecord:
     """A stored Trajectory as the RunRecord acceptance judges (R2b: the
     ``verdict_from_trajectory`` bridge is gone; the record's interface
     view is the same facts -- the scorer verdict plus the run metrics the
@@ -109,7 +109,7 @@ def _run_record_from_trajectory(traj: Trajectory) -> RunRecord:
     )
 
 
-def _run_record_from_attempt(attempt) -> RunRecord:
+def run_record_from_attempt(attempt) -> RunRecord:
     """A judged exam Attempt as the RunRecord acceptance judges (R2b: the
     ``verdict_from_attempt`` bridge is gone; an exam has no scorer, so
     ``correctness`` is None by the frozen contract and the G5 judge's
@@ -235,7 +235,7 @@ def _baseline_unit_row(trajectories: List[Trajectory], task_id: str,
         traj = of_role.get(unit_trajectory_id)
         if traj is not None:
             verdict, basis = verdicts.verdict_from_run(
-                _run_record_from_trajectory(traj), rule_name=rule_name)
+                run_record_from_trajectory(traj), rule_name=rule_name)
         else:
             missing += 1
             verdict, basis = (verdicts.RUN_INVALID,
@@ -303,7 +303,7 @@ def _exam_unit_rows(store: Store, skill, exam_id: str, *, benchmark: str,
             cause=verdicts.CAUSE_EXAM_GENERATION_FAILED,
             artifacts={"skill_id": skill.skill_id})]
 
-    attempts = _exam_attempts(store, exam_id)
+    attempts = exam_attempts(store, exam_id)
     rows = [_exam_bare_row(attempts, exam_id, benchmark=benchmark,
                           phase_label=phase_label)]
 
@@ -335,7 +335,7 @@ def _exam_unit_rows(store: Store, skill, exam_id: str, *, benchmark: str,
             runs = []
             for attempt in judged:
                 verdict, basis = verdicts.verdict_from_run(
-                    _run_record_from_attempt(attempt),
+                    run_record_from_attempt(attempt),
                     rule_name=verdicts.default_verdict_rule("exam"))
                 runs.append({"run": attempt.attempt_id,
                              "verdict": verdict, "basis": basis})
@@ -377,11 +377,11 @@ def _exam_bare_row(attempts, exam_id: str, *, benchmark: str,
     except a bare answer whose judge budget died -- that is the exam
     pipeline's terminal failure (exam_generation_failed), never
     in-flight work."""
-    bare = _find_bare(attempts)
+    bare = find_bare(attempts)
     runs: List[Dict[str, Any]] = []
     if bare is not None:
         verdict, basis = verdicts.verdict_from_run(
-            _run_record_from_attempt(bare),
+            run_record_from_attempt(bare),
             rule_name=verdicts.default_verdict_rule("exam"))
         runs.append({"run": bare.attempt_id, "verdict": verdict,
                      "basis": basis})
@@ -416,7 +416,7 @@ def _live_rows(store: Store, *, benchmark: str, phase_label: str,
     row (dispatched) or a verdicts row (judged, including the
     zero-execution terminals) -- the same universe the former live
     reader derived."""
-    verdicts_path = lm._ledger_path(store, lm.VERDICTS_LEDGER)
+    verdicts_path = lm.ledger_path(store, lm.VERDICTS_LEDGER)
     audit_path = lm.round_dir(store, round_) / lm.INJECTION_AUDIT_NAME
     directory = lm.round_dir(store, round_)
 
@@ -439,7 +439,7 @@ def _live_rows(store: Store, *, benchmark: str, phase_label: str,
                          "version": skill.version}
                         for skill in pending.get(task_id, [])]
 
-        row = lm._first_row_from(verdicts_path, task_id, round_)
+        row = lm.first_row_from(verdicts_path, task_id, round_)
         terminal = row.get("verdict") if row is not None else None
         runs: List[Dict[str, Any]] = []
         if terminal is not None:
@@ -450,7 +450,7 @@ def _live_rows(store: Store, *, benchmark: str, phase_label: str,
                 for traj in lm._trajectories_from(directory, task_id,
                                                   round_):
                     verdict, basis = verdicts.verdict_from_run(
-                        _run_record_from_trajectory(traj),
+                        run_record_from_trajectory(traj),
                         rule_name=rule_name)
                     runs.append({"run": traj.trajectory_id,
                                  "verdict": verdict, "basis": basis})

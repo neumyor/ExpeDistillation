@@ -29,12 +29,10 @@ from expedistill.composites.live_measurement import (
     load_baseline,
     pending_groups,
     skip_ids_for,
-    survivors_and_block,
 )
 from expedistill.composites.live_verdicts import (
     finalize_group,
     judge_round,
-    no_op_guard,
 )
 from expedistill.core.ids import (
     make_merged_skill_id,
@@ -810,86 +808,13 @@ def test_clip_view_keeps_head_and_tail_under_budget():
     assert lm._clip_view("short view", 700) == "short view"   # no-op
 
 
-# no_op_guard
-# ---------------------------------------------------------------------------
-
-def test_no_op_guard_fires_on_identical_block(tmp_path):
-    store, skills = seeded_run(tmp_path)
-    append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / lm.ATTRIBUTIONS_LEDGER,
-                 {"schema": "live-attribution-v1", "task_id": TASK_ID,
-                  "round": 0, "diagnosis": "all keep",
-                  "skill_actions": [
-                      {"skill_id": s.skill_id, "version": 1,
-                       "action": "keep", "problem": ""} for s in skills],
-                  "injection_block_sha256": "frozen"})
-
-    assert no_op_guard(store, TASK_ID, 0) is True
-
-    assert all(s["status"] == "discarded"
-               and s["discard_reason"] == lv.LIVE_NO_IMPROVEMENT
-               for s in stored_skills(store).values())
-    # And no round 1 follows (the stage's dispatch set is empty).
-    assert survivors_and_block(store, TASK_ID) == ([], "")
-
-
-def test_no_op_guard_passes_when_the_block_changed(tmp_path):
-    store, skills = seeded_run(tmp_path)
-    # A revision landed (the phase world's shape): the content changed in
-    # place, so the survivors' current block no longer hashes to the
-    # round's frozen line.
-    stored = store.load("skills", skills[0].skill_id, Skill)
-    stored.content = MARKED_A_REVISED
-    stored.version = 2
-    store.save(stored, "skills")
-
-    assert no_op_guard(store, TASK_ID, 0) is False
-
-    assert all(s["status"] == "pending"
-               for s in stored_skills(store).values())
-
-
-def test_no_op_guard_reads_the_frozen_row_not_a_rederivation(tmp_path):
-    """Tamper the frozen line and the guard's answer flips with it: the
-    data source is the audit row's sha, never a re-render of round 0's
-    pre-revision state (which no longer exists)."""
-    store2 = Store(tmp_path / "tampered")
-    seed_baseline(store2, (False,) * N_ATTEMPTS)
-    seed_round(store2, 0, (False,) * N_ATTEMPTS)
-    store_group(store2, [MARKED_A, MARKED_A])
-    _, block = survivors_and_block(store2, TASK_ID)
-
-    # A frozen line that does NOT match the survivors' current block.
-    row = audit_row(store2, TASK_ID, 0)
-    row["injection_block_sha256"] = "0" * 64
-    freeze_audit(store2, 0, row=row)
-    assert no_op_guard(store2, TASK_ID, 0) is False
-
-    # The same store, frozen line matching the survivors: it fires even
-    # though the row's member list says something else entirely.
-    row["injection_block_sha256"] = lm._block_sha(block)
-    freeze_audit(store2, 0, row=row)
-    assert no_op_guard(store2, TASK_ID, 0) is True
-    assert all(s["status"] == "discarded"
-               and s["discard_reason"] == lv.LIVE_NO_IMPROVEMENT
-               for s in stored_skills(store2).values())
-
-
-def test_no_op_guard_empty_survivors_returns_false(tmp_path):
-    store, skills = seeded_run(tmp_path, contents=(MARKED_A, MARKED_A))
-    # Every member is terminal (deletes landed): there is no round 1 to
-    # skip, and an empty block can never equal a dispatched round's
-    # frozen line anyway.
-    for skill in skills:
-        discard_skill(store, store.load("skills", skill.skill_id, Skill),
-                      lv.LIVE_REVISION_DELETED)
-
-    assert no_op_guard(store, TASK_ID, 0) is False
-
-
-# ---------------------------------------------------------------------------
 # finalize_group
 # ---------------------------------------------------------------------------
+# (The no-op guard's shell and core are gone with their stage-4 caller:
+# the phase world realizes the same fact as rule 1's cross-phase reuse --
+# a revision that produced no new version leaves the block byte-identical
+# and the next live phase reuses the last verdict -- pinned by
+# tests/unit/test_w2a_phase_execute.py's live reuse test.)
 
 def verdicts_path(store):
     return (store.run_dir / "stage4_acceptance" / "live_run"

@@ -44,7 +44,14 @@ _STAGE6_DIR = "stage6_test"
 def _resolve_all(bank: Sequence[Skill], tasks: Sequence[Any],
                  params: RetrievalParams
                  ) -> Tuple[ExecutionUnitList, List[Dict[str, Any]]]:
-    """(rows, audit rows): the one retrieval pass both outputs share."""
+    """(rows, audit rows): the one retrieval pass both outputs share.
+
+    The ranking runs over the bank's ACCEPTED members only
+    (:func:`units.accepted_bank`): the phase artifacts carry pending
+    members too, but the curated accepted set is what "the bank" meant
+    before the artifacts existed, so that is what gets selected from.
+    """
+    bank = units.accepted_bank(bank)
     categories = derive_categories(bank)
     rows: ExecutionUnitList = []
     audit: List[Dict[str, Any]] = []

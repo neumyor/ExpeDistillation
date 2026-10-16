@@ -224,13 +224,13 @@ def test_the_r2b_bridges_are_gone():
 
 def test_reports_judge_stored_objects_through_verdict_from_run():
     from expedistill.composites import reports
-    record = reports._run_record_from_trajectory(_traj(True))
+    record = reports.run_record_from_trajectory(_traj(True))
     assert verdicts.verdict_from_run(
         record, rule_name="scorer")[0] == "success"
-    record = reports._run_record_from_trajectory(_traj(None))
+    record = reports.run_record_from_trajectory(_traj(None))
     assert verdicts.verdict_from_run(
         record, rule_name="scorer")[0] == "invalid"
-    record = reports._run_record_from_attempt(
+    record = reports.run_record_from_attempt(
         _attempt(judge_verdict=True, judge_reason="matches"))
     assert verdicts.verdict_from_run(
         record, rule_name="exam_judge") == ("success", "exam_judge: matches")

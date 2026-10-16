@@ -47,7 +47,7 @@ def _serial(attempt: Attempt) -> int:
     return ids.parse_attempt_id(attempt.attempt_id)[1]
 
 
-def _exam_attempts(store: Store, exam_id: str) -> List[Attempt]:
+def exam_attempts(store: Store, exam_id: str) -> List[Attempt]:
     """All stored attempts of one exam, in serial order."""
     attempts = []
     for attempt_id in store.ids("attempts"):
@@ -57,7 +57,7 @@ def _exam_attempts(store: Store, exam_id: str) -> List[Attempt]:
     return sorted(attempts, key=_serial)
 
 
-def _find_bare(attempts: List[Attempt]) -> Optional[Attempt]:
+def find_bare(attempts: List[Attempt]) -> Optional[Attempt]:
     """The judged bare attempt of the exam, if an interrupted run left one."""
     for attempt in attempts:
         if (attempt.purpose == "bare" and attempt.skill_id is None

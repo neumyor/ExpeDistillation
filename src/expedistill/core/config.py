@@ -150,7 +150,7 @@ class ConfigError(ValueError):
 # sequence (the exam method's ``[D, L] + [A, L] x 3 + [C]``). Local names
 # are restricted to a colon-free charset because the pipeline_log stage
 # value and every per-phase path key off the label ``pNN:<local name>``
-# (composites.decision._parse_unit_id and composites.phase_bank both
+# (composites.decision.parse_unit_id and composites.phase_bank both
 # refuse anything else, and a colon would break their parsing).
 #
 # Phase specs are DATACLASSES, not TypedDicts, for the same reason the
@@ -196,7 +196,7 @@ DEFAULT_INVALID_REDISPATCH_LIMIT = 1
 
 #: Phase local names: colon-free and directory-safe. The colon is the
 #: label separator, so it is the one character a name can never carry
-#: (decision._parse_unit_id splits on it; phase_bank maps it to ``_``).
+#: (decision.parse_unit_id splits on it; phase_bank maps it to ``_``).
 PHASE_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 #: The pipeline_log stage value of the freeze step: freeze is always
@@ -301,8 +301,8 @@ class PhaseInstance:
     value ``pNN:<name>`` and every per-phase path key, ``spec`` is the
     parsed definition, and ``task_ids`` is the frozen id list this phase
     runs over (the train or test list for an execute phase, empty for a
-    learn phase). This is the frozen hand-off contract between W2-C's
-    loop and W2-A's / W2-B's ``phase_execute.run`` / ``phase_learn.run``.
+    learn phase). This is the frozen hand-off contract between the
+    CLI's phase loop and the two phase drivers' ``run`` entry points.
     """
 
     index: int
@@ -497,11 +497,17 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
        the field values (test role <-> test tasks, exam role <-> exam
        execution, baseline <-> both arms, single-arm depth limits);
     4. ``compare.against`` names a phase that appears EARLIER in the
-       sequence, or is exactly ``fresh_bare``; a single-arm real phase's
-       ``n_attempts`` never exceeds its control's weak-model depth;
+       sequence, or is exactly ``fresh_bare``; the named control is a
+       baseline phase; a single-arm real phase's ``n_attempts`` never
+       exceeds its control's weak-model depth;
     5. ``curate.merge_check: exam`` requires an exam-role execute phase
        somewhere in the sequence (the merges' regression exams come from
-       the A phases).
+       the A phases);
+    6. the sequence starts with an execute phase (a learn phase first
+       would have nothing to learn from);
+    7. a live phase carries ``compare`` naming an earlier baseline phase
+       (its own report rows are all with-skill rows, so it has no
+       in-report control).
 
     Model roles and ``invalid_redispatch_limit`` are ExperimentConfig's
     own checks, not the sequence's.
@@ -553,19 +559,37 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
             raise ConfigError(
                 f"phases.{phase_name}.kind must be 'execute' or 'learn', "
                 f"got {kind!r}")
+    _check_first_phase_is_execute(raw_sequence, specs)
     _check_compare_targets(raw_sequence, specs)
+    _check_live_needs_a_control(raw_sequence, specs)
     _check_attempt_depths(raw_sequence, specs,
                           n_attempts_weak=n_attempts_weak)
     _check_merge_check_needs_exams(raw_sequence, specs)
     return specs
 
 
+def _check_first_phase_is_execute(raw_sequence: List[str],
+                                  specs: Dict[str, PhaseSpec]) -> None:
+    """Checklist item 6: the sequence starts with an execute phase. A
+    learn phase first would have no measurement to learn from -- a
+    failure the learn driver previously raised only at run time."""
+    first = specs[raw_sequence[0]]
+    if not isinstance(first, ExecutePhaseSpec):
+        raise ConfigError(
+            f"the sequence starts with {raw_sequence[0]!r} of kind "
+            f"{getattr(first, 'kind', None)!r}: a learn phase needs a "
+            "preceding execute phase to learn from, so the sequence must "
+            "start with an execute phase")
+
+
 def _check_compare_targets(raw_sequence: List[str],
                            specs: Dict[str, PhaseSpec]) -> None:
     """Checklist item 4, first half: ``against`` is an earlier sequence
-    name or exactly ``fresh_bare``, and the named control is a bare
-    measurement (baseline or live -- an exam or final-test phase is
-    never a control)."""
+    name or exactly ``fresh_bare``, and the named control is a BASELINE
+    phase. A baseline's weak bare arm is the only report whose rows are
+    bare measurements; a live phase's report rows all carry the
+    injected group, and comparing against one would read a with-skill
+    arm as the control."""
     for position, name in enumerate(raw_sequence):
         spec = specs[name]
         if not isinstance(spec, ExecutePhaseSpec) or spec.compare is None:
@@ -579,13 +603,34 @@ def _check_compare_targets(raw_sequence: List[str],
                 "not 'fresh_bare' and does not appear earlier in the "
                 f"sequence; earlier phases: {raw_sequence[:position]}")
         target = specs[against]
-        if not isinstance(target, ExecutePhaseSpec) or target.role not in (
-                PHASE_ROLE_BASELINE, PHASE_ROLE_LIVE):
+        if not isinstance(target, ExecutePhaseSpec) or \
+                target.role != PHASE_ROLE_BASELINE:
             raise ConfigError(
                 f"phases.{name}.compare.against is {against!r} with role "
-                f"{getattr(target, 'role', None)!r}: a control is a bare "
-                "measurement (baseline or live), never an exam or "
-                "final-test phase")
+                f"{getattr(target, 'role', None)!r}: a control is a "
+                "baseline phase's bare measurement, never an exam, live "
+                "or final-test phase")
+
+
+def _check_live_needs_a_control(raw_sequence: List[str],
+                                specs: Dict[str, PhaseSpec]) -> None:
+    """Checklist item 7: a live phase's report rows are all with-skill
+    rows, so its control must be a named earlier baseline phase. Without
+    ``compare`` (or with ``fresh_bare``) the decision would have no
+    control row to compare against -- a failure the learn driver
+    previously raised only after the live phase's executions were
+    spent."""
+    for name in raw_sequence:
+        spec = specs[name]
+        if not isinstance(spec, ExecutePhaseSpec) or \
+                spec.role != PHASE_ROLE_LIVE:
+            continue
+        if spec.compare is None or spec.compare.against == FRESH_BARE:
+            raise ConfigError(
+                f"phases.{name} is a live phase without a control: its "
+                "report rows all carry the injected group, so "
+                "compare.against must name an earlier baseline phase "
+                "(not fresh_bare and not nothing)")
 
 
 def _check_attempt_depths(raw_sequence: List[str],
@@ -596,8 +641,7 @@ def _check_attempt_depths(raw_sequence: List[str],
     same bound v3's check_live_run drew against the stage-1 weak
     baseline: executions beyond the control's depth have no control to
     compare against). The control is ``fresh_bare`` or a baseline phase
-    (both run the weak model ``n_attempts_weak`` times) or a live phase
-    (its own ``n_attempts``, default ``n_attempts_weak``)."""
+    -- both run the weak model ``n_attempts_weak`` times."""
     for name in raw_sequence:
         spec = specs[name]
         if not isinstance(spec, ExecutePhaseSpec):
@@ -609,18 +653,11 @@ def _check_attempt_depths(raw_sequence: List[str],
             raise ConfigError(
                 f"phases.{name}.execution.n_attempts must be a positive "
                 f"int, got {n_attempts!r}")
-        control_depth = n_attempts_weak
-        if spec.compare is not None and spec.compare.against != FRESH_BARE:
-            target = specs[spec.compare.against]
-            assert isinstance(target, ExecutePhaseSpec)
-            if target.role == PHASE_ROLE_LIVE:
-                control_depth = target.execution.get("n_attempts",
-                                                      n_attempts_weak)
-        if n_attempts > control_depth:
+        if n_attempts > n_attempts_weak:
             raise ConfigError(
                 f"phases.{name}.execution.n_attempts ({n_attempts}) "
                 f"exceeds its control's weak-model depth "
-                f"({control_depth}); the comparison would ask for "
+                f"({n_attempts_weak}); the comparison would ask for "
                 "executions the control never ran")
 
 

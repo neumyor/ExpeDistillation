@@ -9,7 +9,11 @@ the refusal names the situation instead of silently overflowing).
 R7 adds the per-phase entry (``produce_phase_bank``): the same as-is
 treatment with the artifact written into the phase directory
 (composites.phase_bank's layout) instead of the run root, so a learn
-phase ends with a loadable bank without any curation.
+phase ends with a loadable bank without any curation. The phase entry
+writes the accepted set only; the store's PENDING members are appended
+to the artifact by the entry module (methods/curation/phase_bank.py)
+after this driver returns -- the artifact carries all members, the
+curation treatment never sees a pending skill.
 """
 
 from pathlib import Path

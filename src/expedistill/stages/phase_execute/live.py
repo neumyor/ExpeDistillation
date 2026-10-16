@@ -66,11 +66,11 @@ def _round_of(ctx: StageContext, phase: PhaseInstance) -> int:
     sequence measures round ``k-1`` (the rounds are pinned to {0, 1})."""
     earlier_live = sum(1 for record in _earlier_phases(ctx, phase)
                        if record.get("role") == PHASE_ROLE_LIVE)
-    if earlier_live >= len(lm._ROUNDS):
+    if earlier_live >= len(lm.ROUNDS):
         raise ConfigError(
             f"phase {phase.label!r} would measure live round "
             f"{earlier_live}, but the rounds are pinned to "
-            f"{list(lm._ROUNDS)} (user ruling 8): a sequence carries at "
+            f"{list(lm.ROUNDS)} (user ruling 8): a sequence carries at "
             "most two live phases")
     return earlier_live
 
@@ -304,7 +304,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     by_id = {row.unit_id: row for row in report}
     for plan in plans:
         for row in report:
-            if (decision._parse_unit_id(row.unit_id)[0]
+            if (decision.parse_unit_id(row.unit_id)[0]
                     == plan.unit.task_ref
                     and row.unit_id != plan.unit.unit_id):
                 del by_id[row.unit_id]
@@ -357,16 +357,16 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
 
 def _round_has_row(store: Store, task_id: str, round_: int) -> bool:
     """Whether the group's round already carries a verdicts-ledger row."""
-    return lm._first_row_from(
-        lm._ledger_path(store, lm.VERDICTS_LEDGER), task_id,
+    return lm.first_row_from(
+        lm.ledger_path(store, lm.VERDICTS_LEDGER), task_id,
         round_) is not None
 
 
 def _round_terminal(store: Store, task_id: str,
                     round_: int) -> Optional[str]:
     """The group's round row terminal, if it wrote one."""
-    row = lm._first_row_from(
-        lm._ledger_path(store, lm.VERDICTS_LEDGER), task_id, round_)
+    row = lm.first_row_from(
+        lm.ledger_path(store, lm.VERDICTS_LEDGER), task_id, round_)
     return row.get("verdict") if row is not None else None
 
 

@@ -287,8 +287,7 @@ def _phase_driver(kind: str) -> Any:
     """The sequence entry's driver module: ``stages.phase_execute`` for an
     execute phase, ``stages.phase_learn`` for a learn phase.
 
-    Imported per call (and so never at module import): the two phase
-    drivers are Wave 2's other two agents' files, and a bad import must
+    Imported per call (and so never at module import): a bad import must
     name the phase that wanted it, not break every CLI invocation.
     ``importlib.import_module`` (not a ``from`` import) so a sys.modules
     entry wins: that entry is the tests' fake-driver seam

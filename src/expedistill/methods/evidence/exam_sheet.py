@@ -19,7 +19,7 @@ leak verdict is read back, never re-asked).
 
 from expedistill.composites import decision
 from expedistill.composites.acceptance_leak import find_leak_verdict
-from expedistill.composites.acceptance_skill_status import _exam_attempts
+from expedistill.composites.acceptance_skill_status import exam_attempts
 from expedistill.core.contracts import AcceptanceReportRow
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import CodeBugError
@@ -69,7 +69,7 @@ def collect_exam_evidence(store: Store, report_row: AcceptanceReportRow,
         source = judged[-1]
         error = source.judge_reason
     else:
-        attempts = _exam_attempts(store, exam_id)
+        attempts = exam_attempts(store, exam_id)
         with_skill = [attempt for attempt in attempts
                       if attempt.purpose == "acceptance"
                       and attempt.skill_id is not None

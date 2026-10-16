@@ -295,7 +295,13 @@ def _read_bank(store: Store,
     # what those accessors do.
     if dest is None:
         return store.bank()
-    return read_jsonl(_bank_path(store, dest))
+    # The phase artifact carries the pending members through unchanged
+    # (R7's full-membership ruling, 2026-10-16): they are not curation
+    # products, so every curation-side check below sees the accepted
+    # rows only. The entry (methods/curation/phase_bank.py) re-appends
+    # them after this call returns.
+    return [row for row in read_jsonl(_bank_path(store, dest))
+            if row.get("status") != "pending"]
 
 
 def _append_bank_row(store: Store, dest: Optional[Union[str, Path]],

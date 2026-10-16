@@ -172,8 +172,9 @@ src/expedistill/
                           exam_sheet（考卷答卷材料）
     author/               author 族：AuthoringParams + write 驱动
                           （写新 skill / 组修订 revise_group）
-    curation/             库整理驱动 agentbrew.py、none.py（消融：裸 accepted 集，
-                          预算仍是硬阀）+ phase_bank.py（R7 相位库入口）+ Params
+    curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
+                          预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
+                          成员，待定成员原样透传）+ Params
     delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
                           group_by_task.py、none.py + 各自的 Params
   stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）

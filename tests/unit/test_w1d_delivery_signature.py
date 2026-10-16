@@ -49,10 +49,12 @@ MARKED = "\n".join([
 ])
 
 
-def _skill(task_id: str, content: str = MARKED) -> Skill:
+def _skill(task_id: str, content: str = MARKED, status: str = "pending"
+           ) -> Skill:
     subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
     return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id])
+                 subtask_id=subtask_id, source_subtasks=[subtask_id],
+                 status=status)
 
 
 def _driver(name: str):
@@ -122,8 +124,8 @@ def test_whole_bank_rows_carry_the_bank_digest():
     # The fixed injection: the bank digest string (never a reference
     # list -- that would change the trajectory bookkeeping) and the
     # whole-bank D9 block, identical on every row.
-    bank = [_skill(make_task_id(BENCHMARK, "t1")),
-            _skill(make_task_id(BENCHMARK, "t2"))]
+    bank = [_skill(make_task_id(BENCHMARK, "t1"), status="accepted"),
+            _skill(make_task_id(BENCHMARK, "t2"), status="accepted")]
     driver = _driver("whole_bank")
     rows = driver.resolve(bank, [Task(task_id="t1", instruction="do t1"),
                                  Task(task_id="t2", instruction="do t2")],
@@ -190,12 +192,15 @@ def test_group_by_task_refuses_a_task_without_a_group():
 
 
 def _retrieval_bank_and_tasks():
+    # Accepted members: the retrieval driver ranks over the bank's
+    # accepted set only (the phase artifacts carry pending members too).
     bank = [_skill(make_task_id(BENCHMARK, "t1"),
                    "[When to use] The service rejects connections.\n"
-                   "Always read the log file first."),
+                   "Always read the log file first.", status="accepted"),
             _skill(make_task_id(BENCHMARK, "t2"),
                    "[When to use] The config check fails.\n"
-                   "Restart only after the config check.")]
+                   "Restart only after the config check.",
+                   status="accepted")]
     tasks = [Task(task_id="t2", instruction="debug the failing service"),
              Task(task_id="t1", instruction="read the log file")]
     return bank, tasks

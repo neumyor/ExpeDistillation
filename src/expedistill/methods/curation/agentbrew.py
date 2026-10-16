@@ -8,6 +8,9 @@ thin-wrapper shape the plan's P4 row pinned (K5's code stays put).
 R7 adds the per-phase entry (``produce_phase_bank``): K5 runs in dest
 mode, so the phase ends with its own loadable bank artifact while the
 run-level ``skill_bank.jsonl`` and the stage-5 journal stay untouched.
+K5 curates the accepted set only; the store's PENDING members are
+appended to the artifact by the entry module (methods/curation/
+phase_bank.py) after this driver returns.
 """
 
 from typing import Any, Dict, List

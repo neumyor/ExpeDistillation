@@ -14,34 +14,39 @@ is one learn phase of the frozen sequence; the per-target landing lives in
    list. The first learn phase after a baseline runs the baseline-gap
    path (current report empty, the D report as the control; the entry
    implements it, this driver only routes).
-2. **Evidence and author** (sections 2.5/2.6), **the D4 multi-version
-   merge** and the landing semantics are documented on
+2. **Evidence and author** (sections 2.5/2.6), **the multi-version
+   merge** (one skill can carry several report rows when the shared
+   answer store holds attempts of several versions; the highest
+   version's row decides) and the landing semantics are documented on
    ``learn_tasks.execute_rows``; the answer-sheet evidence of an exam
-   revise is assembled there too (a disclosed deviation: the evidence
-   family has no exam collector yet).
+   revise comes from the evidence family's collector
+   (``methods.evidence.exam_sheet``).
 3. **Curation** (section 2.7): every learn phase ends with its own bank
    artifact (R7). The sequence's LAST learn phase runs the configured
    curation (``methods.curation.phase_bank.produce`` -- agentbrew with
    its merge_check, or none); every intermediate learn phase writes the
-   as-is artifact (``produce_as_is``). The call sites pass the phase's
-   raw ``curate`` mapping per the frozen Wave 2 contract (W2-C's v4
-   flip; at the frozen commit those entries still resolve through the
-   v3 slots, so the mapping-first form is the known coordination point
-   with W2-C's second commit).
+   as-is artifact (``produce_as_is``). The artifact carries every
+   member, accepted and pending alike -- it is the only currency
+   between phases, and the next execute phase's universe (the pending
+   members) comes out of it. Both entries take the phase's own raw
+   ``curate`` mapping (the v4 config has no single curation slot).
 
 **The learn phase touches nothing but the skill store and its own phase
 directory.** Execution, judging, redispatch and shortfall are the execute
 phases' (R4: an execute phase never changes the bank; the reverse holds
 here -- a learn phase never runs a task).
 
-Resume equals an uninterrupted run: the decision re-derives (a pure
+Resume equals an uninterrupted run: a FINISHED phase is skipped whole
+(its summary with the bank entry is the commit point -- re-running it
+would double the outcome receipts and rewrite the artifact from the
+current store), an interrupted one re-derives the decision (a pure
 function of frozen on-disk reports and the previous phase's artifact),
-landed skills are read off the phase's ledgers and skipped, and only
-model calls whose results were never persisted are asked again (the
-standing K3/K4 exemption). An InfrastructureError is recorded per
-target and raised at the phase end AFTER the summary is written but
-BEFORE the bank artifact is produced (an incomplete learn phase must
-not publish a bank); the resume re-enters and finishes it.
+reads its landed skills off the phase's ledgers and skips them, and
+asks again only the model calls whose results were never persisted. An
+InfrastructureError is recorded per target and raised at the phase end
+AFTER the summary is written but BEFORE the bank artifact is produced
+(an incomplete learn phase must not publish a bank); the resume
+re-enters and finishes it.
 
 The phase's files all live in ``phases/<label>/``
 (composites.phase_bank's layout): the bank artifact and summary from
@@ -75,15 +80,11 @@ from expedistill.core.config import (
 from expedistill.core.contracts import AcceptanceReportRow
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
-from expedistill.infra.store import read_jsonl, write_json
+from expedistill.infra.store import read_json, read_jsonl, write_json
 from expedistill.methods.curation import phase_bank as curation_phase_bank
 from expedistill.stages import learn_tasks
 
 __all__ = ["run"]
-
-#: The compare rule the decision entry defaults to (decision's own
-#: default; named here so the config fallback is explicit at the site).
-_DEFAULT_COMPARE_RULE = "strict_rate_gain"
 
 #: The phase's summary file (the returned PhaseResult in JSON form).
 SUMMARY_NAME = "learn_summary.json"
@@ -102,8 +103,18 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             f"entry {phase.index} ({phase.name!r}); the frozen derivation "
             f"is {phase_label(phase.index, phase.name)!r}")
 
-    names, specs = _sequence(config, phase)
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
+    finished = _finished_summary(phase_dir)
+    if finished is not None:
+        # A crash AFTER this phase (or a --until-phase replay) must not
+        # re-run it: the landing's receipts would double in outcomes
+        # .jsonl and the bank artifact would be re-derived from the
+        # CURRENT store (a later learn phase's accepted skills would
+        # leak into this one's snapshot). The summary with its "bank"
+        # entry is the phase's commit point -- it is written last,
+        # after the artifact -- so it is the completion signal.
+        return PhaseResult(label=phase.label, summary=finished)
+    names, specs = _sequence(config, phase)
     phase_dir.mkdir(parents=True, exist_ok=True)
 
     (current_kind, current_rows, control_kind, control_rows,
@@ -142,28 +153,45 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
 
 
 # ---------------------------------------------------------------------------
+# The completion signal (replay idempotency)
+# ---------------------------------------------------------------------------
+
+def _finished_summary(phase_dir) -> Optional[Dict[str, Any]]:
+    """The phase's stored summary when the phase FINISHED (the summary
+    carries its "bank" entry -- the curation side writes the artifact
+    first and the summary last, so the entry is the commit point);
+    None when the phase never ran or stopped on infra failures (that
+    summary has no "bank" entry and the resume re-enters it)."""
+    path = phase_dir / SUMMARY_NAME
+    if not path.exists():
+        return None
+    summary = read_json(path)
+    return summary if isinstance(summary, dict) and "bank" in summary \
+        else None
+
+
+# ---------------------------------------------------------------------------
 # The sequence and the reports (the decision entry's inputs)
 # ---------------------------------------------------------------------------
 
 def _sequence(config: Any, phase: PhaseInstance) -> Tuple[List[str], dict]:
     """The frozen sequence and its parsed specs off the v4 config.
 
-    Reads ``config.sequence`` / ``config.phases`` -- the products W2-C's
-    v4 flip (schema 4) puts on ExperimentConfig. Anything missing is a
-    loud CodeBugError naming the coordination point, never an
-    AttributeError from the middle of a phase.
+    Reads ``config.sequence`` / ``config.phases`` -- the products every
+    loaded schema-4 config carries. A config object without them (or
+    with them empty) bypassed parse_phases: that is a wiring bug, named
+    here before any phase work starts.
     """
-    names = getattr(config, "sequence", None)
-    specs = getattr(config, "phases", None)
+    names = config.sequence
+    specs = config.phases
     if (not isinstance(names, list) or not names
             or not isinstance(specs, dict)):
         raise CodeBugError(
-            "phase_learn needs the schema-v4 config products "
+            "phase_learn needs the v4 config products "
             "config.sequence (a list of phase names) and config.phases "
             "(name -> parsed spec); got "
-            f"sequence={names!r}, phases={specs!r}. These fields land "
-            "with W2-C's v4 flip (core/config.py, R9) -- until then the "
-            "phase drivers cannot run against a real ExperimentConfig")
+            f"sequence={names!r}, phases={specs!r}: a directly "
+            "constructed config bypassed parse_phases")
     if not 0 <= phase.index < len(names):
         raise CodeBugError(
             f"phase index {phase.index} is outside the sequence of "
@@ -227,12 +255,12 @@ def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
     if spec.role == PHASE_ROLE_BASELINE:
         control_rows = _read_report(ctx, names, specs, current_pos)
         return (None, [], PHASE_ROLE_BASELINE, control_rows,
-                _DEFAULT_COMPARE_RULE)
+                decision.DEFAULT_COMPARE_RULE)
     current_rows = _read_report(ctx, names, specs, current_pos)
     compare = spec.compare
     rule = (compare.rule
             if compare is not None and compare.rule is not None
-            else _DEFAULT_COMPARE_RULE)
+            else decision.DEFAULT_COMPARE_RULE)
     if compare is None or compare.against == FRESH_BARE:
         return spec.role, current_rows, None, None, rule
     earlier = [position for position in range(current_pos)
@@ -244,11 +272,12 @@ def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
             "load-time checklist should have refused this")
     control_pos = earlier[-1]
     control_spec = specs[compare.against]
-    if control_spec.role not in (PHASE_ROLE_BASELINE, PHASE_ROLE_LIVE):
+    if control_spec.role != PHASE_ROLE_BASELINE:
         raise CodeBugError(
             f"the control phase {compare.against!r} has role "
-            f"{control_spec.role!r}; a control is a bare measurement "
-            "(baseline or live)")
+            f"{control_spec.role!r}; a control is a baseline phase's "
+            "weak bare arm (the config's load-time checklist should "
+            "have refused this shape)")
     control_rows = _read_report(ctx, names, specs, control_pos)
     return spec.role, current_rows, control_spec.role, control_rows, rule
 
@@ -282,7 +311,8 @@ def _live_round(names: Sequence[str], specs: dict, position: int) -> int:
     """The round a live phase measured in: its 0-based index among the
     sequence's live phases (the k-th live phase uses round k-1; the
     upgrade-mapped live sequence has exactly two, matching the pinned
-    round vocabulary). Coordination point with W2-A's phase_execute."""
+    round vocabulary). Must agree with the execute driver's live-role
+    round derivation (stages/phase_execute/live.py's _round_of)."""
     return sum(1 for earlier in range(position)
                if isinstance(specs[names[earlier]], ExecutePhaseSpec)
                and specs[names[earlier]].role == PHASE_ROLE_LIVE)

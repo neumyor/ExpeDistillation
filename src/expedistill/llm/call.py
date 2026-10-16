@@ -86,7 +86,7 @@ class ModelHandle:
     uncapped call lets a runaway reasoning trace burn the whole step
     budget); the stage pipeline does NOT rely on that default -- it wires
     the config's token budgets here via ``cfg.max_output_tokens_for(role)``
-    (see stages.pipeline._build_handles). A per-model override goes through
+    (see cli._build_handles). A per-model override goes through
     ``extra_body`` (wired from the config's ``model_options``): the client
     merges ``extra`` into the payload after the handle-level
     ``max_tokens``, so ``extra_body={"max_tokens": 128}`` wins over this

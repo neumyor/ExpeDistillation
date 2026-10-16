@@ -28,6 +28,7 @@ from expedistill.infra.reliability import (
 from expedistill.infra.store import Store, write_json
 from expedistill.inject import bank_reference
 from expedistill.methods import registry as method_registry
+from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute.engine import (
     _arm_trajectories,
@@ -96,7 +97,10 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     tasks_by_ref = _prefixed_task_map(ctx, [task.task_id for task in tasks])
     n_attempts = ctx.config.n_attempts_weak
     expected = _expected_units(ctx, tasks)
-    reference = bank_reference(bank)
+    # The injected bank is the accepted set (whole_bank / retrieval
+    # filter inside the drivers); the reference digests the same set
+    # the old stage-6 summary's bank_reference named.
+    reference = bank_reference(delivery_units.accepted_bank(bank))
     aux_metric, aux_scorer = aux_wiring(benchmark)
     against = (spec.compare.against if spec.compare is not None
                else FRESH_BARE)

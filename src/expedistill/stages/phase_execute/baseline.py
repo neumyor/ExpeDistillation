@@ -75,12 +75,17 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
     # The run-level store holds ONLY bare trajectories (the with-skill
     # arms of every other phase live in their own stores), so the bare
     # arms keep their historical home and no id ever collides.
+    # The accepted set comes from the stage-1 record and is passed INTO
+    # the arm run: an accepted hole is never re-dispatched and never
+    # re-raised, whatever later calls' flags say (the durable
+    # acceptance contract, stage 1's own rule).
     stage1_holes = set(shortfall.stage1_accepted_unit_ids(ctx.run_dir))
     holes: Set[str] = set()
     for role in ("strong", "weak"):
         _, arm_holes = _run_arm_units(
             ctx, phase, plans=plans_by_role[role], store=ctx.store,
-            arm=role, rule_name=rule_name, limit=limit)
+            arm=role, rule_name=rule_name, limit=limit,
+            accepted=set(stage1_holes))
         if arm_holes and ctx.run_settings.allow_infra_shortfall:
             # The durable record is the stage-1 path: load_baseline, the
             # report reader and the C control read it from there.
@@ -103,6 +108,7 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
 
     aux_metric, aux_scorer = aux_wiring(ctx.config.benchmark)
     arm_summaries: Dict[str, Dict[str, Any]] = {}
+    weak_metrics: Dict[str, Dict[str, Any]] = {}
     for role in ("strong", "weak"):
         plans = plans_by_role[role]
         trajectories = [traj for traj in _arm_trajectories(ctx.store)
@@ -111,6 +117,8 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
         expected = {plan.unit.task_ref: plan.n_attempts for plan in plans}
         metrics = metrics_block.compute_task_metrics(
             trajectories, expected=expected, aux_scorer=aux_scorer)
+        if role == "weak":
+            weak_metrics = metrics
         arm_summaries[role] = metrics_block.summarize(
             metrics, depths[role], aux_metric=aux_metric)
     every_hole = set(stage1_holes) | holes
@@ -119,13 +127,7 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
         "strong": arm_summaries["strong"],
         "weak": arm_summaries["weak"],
         "infra_shortfalls": sorted(
-            task_id for task_id, counts in metrics_block.compute_task_metrics(  # noqa: E501
-                [traj for traj in _arm_trajectories(ctx.store)
-                 if traj.model_role == "weak"
-                 and traj.trajectory_id not in stage1_holes],
-                expected={plan.unit.task_ref: plan.n_attempts
-                          for plan in plans_by_role["weak"]},
-                aux_scorer=aux_scorer).items()
+            task_id for task_id, counts in weak_metrics.items()
             if counts["valid"] < ctx.config.n_attempts_weak),
         "infra_missing": sorted(every_hole),
         "infra_accepted": sorted(stage1_holes),

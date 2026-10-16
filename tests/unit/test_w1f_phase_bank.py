@@ -174,22 +174,28 @@ def test_loading_a_missing_artifact_names_the_phase(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_produce_none_writes_a_loadable_phase_artifact(tmp_path):
+    # The artifact carries EVERY member: the accepted row verbatim and
+    # the pending member passing through unchanged (the 2026-10-16
+    # ruling -- the artifact is the only currency between phases, and
+    # a learn phase's new skills are pending). Discarded and merged
+    # members are not members.
     curate = _none_curate()
     ctx = _make_ctx(tmp_path)
     kept = _add_skill(ctx.store, 0, "keep me")
     _add_skill(ctx.store, 1, "deleted", status="discarded")
-    _add_skill(ctx.store, 2, "still pending", status="pending")
+    pending = _add_skill(ctx.store, 2, "still pending", status="pending")
 
     summary = phase_bank_entry.produce(ctx, curate, "p01:learn")
 
-    assert summary["members"] == [kept.skill_id]
-    assert summary["size"] == 1
+    assert summary["members"] == [kept.skill_id, pending.skill_id]
+    assert summary["size"] == 2
     assert summary["bank_reference"].startswith("bank:")
     rows = load_phase_bank(ctx.run_dir, "p01:learn")
-    assert [row["skill_id"] for row in rows] == [kept.skill_id]
+    assert [row["skill_id"] for row in rows] == summary["members"]
     # Full skill dicts: the member status and version travel with the row.
     assert rows[0]["status"] == "accepted"
     assert rows[0]["version"] == 1
+    assert rows[1]["status"] == "pending"
     assert load_phase_bank_summary(ctx.run_dir, "p01:learn") == summary
     # The run-level bank and the stage-5 journal are untouched (the
     # stage5_curation/ DIRECTORY itself is pre-created by the Store's
@@ -197,6 +203,69 @@ def test_produce_none_writes_a_loadable_phase_artifact(tmp_path):
     assert ctx.store.bank() == []
     assert not (ctx.run_dir / "stage5_curation"
                 / "curation_log.json").exists()
+
+
+def test_produce_none_pending_passthrough_is_idempotent(tmp_path):
+    # A second call (a resume) finds the pending member already in the
+    # artifact and lands on the same bytes; the pending content does
+    # not go through the token-budget valve (the valve guards the
+    # injectable accepted set).
+    curate = _none_curate(budget=10)
+    ctx = _make_ctx(tmp_path)
+    accepted = _add_skill(ctx.store, 0, "short")
+    pending = _add_skill(ctx.store, 1, "a pending member much longer "
+                                      "than the tiny budget", status="pending")
+
+    first = phase_bank_entry.produce(ctx, curate, "p01:learn")
+    path = phase_bank_path(ctx.run_dir, "p01:learn")
+    bytes_first = path.read_bytes()
+
+    second = phase_bank_entry.produce(ctx, curate, "p01:learn")
+
+    assert second == first
+    assert path.read_bytes() == bytes_first
+    assert first["members"] == [accepted.skill_id, pending.skill_id]
+
+
+def test_produce_as_is_carries_pending_members_too(tmp_path):
+    curate = _agentbrew_curate()
+    ctx = _make_ctx(tmp_path)
+    kept = _add_skill(ctx.store, 0, "one")
+    pending = _add_skill(ctx.store, 2, "still under test",
+                         status="pending")
+
+    summary = phase_bank_entry.produce_as_is(ctx, curate, "p01:learn")
+
+    assert summary["members"] == [kept.skill_id, pending.skill_id]
+    rows = load_phase_bank(ctx.run_dir, "p01:learn")
+    assert [row["status"] for row in rows] == ["accepted", "pending"]
+
+
+def test_produce_agentbrew_passes_pending_members_through(tmp_path):
+    # K5 curates the accepted set only; the pending member rides along
+    # AFTER the merged product, and a second call (K5's resume path
+    # reads the artifact) still lands on the same artifact.
+    curate = _agentbrew_curate()
+    ctx = _make_ctx(tmp_path, **_MERGE_SCRIPTS)
+    _add_skill(ctx.store, 0, "Check the log file first.")
+    _add_skill(ctx.store, 1, "Look at the log file before anything else.")
+    for index in range(2):
+        _add_exam(ctx.store, index)
+    pending = _add_skill(ctx.store, 2, "a skill still under exam",
+                         status="pending")
+
+    first = phase_bank_entry.produce(ctx, curate, "p01:learn")
+
+    assert first["members"] == ["bank/merge/0000", pending.skill_id]
+    rows = load_phase_bank(ctx.run_dir, "p01:learn")
+    assert [row["skill_id"] for row in rows] == first["members"]
+    assert rows[0]["status"] == "accepted"
+    assert rows[1]["status"] == "pending"
+
+    second = phase_bank_entry.produce(ctx, curate, "p01:learn")
+
+    assert second == first
+    assert load_phase_bank(ctx.run_dir, "p01:learn") == rows
 
 
 # ---------------------------------------------------------------------------

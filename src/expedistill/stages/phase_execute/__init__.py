@@ -1,44 +1,37 @@
-"""The execute-phase driver (R9/R8): delivery -> execution -> acceptance.
+"""The execute-phase driver: delivery -> execution -> acceptance.
 
-Plan R9 item 5: this driver replaces the four execution stages -- the
-baseline stage (stage1), the final-test stage (stage6) and, for the
-execute side of the old pipeline, the segmentation / generation stages
-(stage2/stage3, whose content is learn-phase work and moves to
-``stages/phase_learn.py``, Wave 2-B). One call runs ONE position of the
-frozen phase sequence (``run(ctx, phase) -> PhaseResult``, the frozen
-hand-off contract in core/config.py); the phase's role decides the shape:
+One call runs ONE position of the frozen phase sequence
+(``run(ctx, phase) -> PhaseResult``, the hand-off contract frozen in
+core/config.py); the phase's role decides the shape:
 
 * ``baseline`` (D): both bare arms (strong, weak) over the train set,
   stored in the RUN-LEVEL trajectory store -- every frozen consumer of
-  a bare baseline (live baseline loading, the report reader, the
-  C phase's reused control, the audit tooling) reads them there;
+  a bare baseline (live baseline loading, the report reader, the C
+  phase's reused control, the audit tooling) reads them there;
 * ``exam`` (A): one exam per pending bank skill -- the exam is
-  generated at execution time (the R8 ruling: the exam-generation call
-  moved here from the authoring phase), answered bare, audited for
-  leaks, then answered with the skill injected;
+  generated at execution time, answered bare, audited for leaks, then
+  answered with the skill injected;
 * ``live`` (B): one unit per task whose bank group is pending, the
   whole group injected, ``n_attempts`` real executions, judged through
   the frozen live verdicts-ledger protocol -- the k-th live phase of a
-  sequence measures round ``k-1`` (``live_verdicts.judge_round`` /
-  ``finalize_group``, exactly the old driver's call shape; the rounds
-  are pinned to {0, 1}, so a sequence carries at most two);
+  sequence measures round ``k-1``, and the rounds are pinned to {0, 1},
+  so a sequence carries at most two;
 * ``test`` (C): the with-bank arm over the test set against its control
   arm (the baseline phase's weak bare trajectories, or a fresh bare
   arm inside the phase), full re-run every time.
 
-The frozen internal order (plan R9 item 6, boundary doc section 4.3
-rule 3): control units run first and are accepted first; then the
-decision module's :func:`decision.control_perfect_skips_run` decides,
-per unit, whether the with-skill run is skipped (an all-success control
-under a strict-family compare rule cannot be improved on); only then do
-the with-skill units run and get accepted. On the live role the same
-fact takes the ledger's shape: the entry guard short-circuits the group
+The internal order is frozen (the boundaries doc, section 4.3 rule 3):
+control units run first and are accepted first; then the decision
+module's :func:`decision.control_perfect_skips_run` decides, per unit,
+whether the with-skill run is skipped (an all-success control under a
+strict-family compare rule cannot be improved on); only then do the
+with-skill units run and get accepted. On the live role the same fact
+takes the ledger's shape: the entry guard short-circuits the group
 through ``judge_round``'s zero-execution ``weak_already_knows`` terminal.
 The final test C calls neither the skip logic nor the redispatch loop:
-it re-runs everything on every call (boundary doc section 4.3 rule 1's
-last sentence).
+it re-runs everything on every call (rule 1's own exception).
 
-The other frozen companions, wired here (the Wave 1 review's list):
+The frozen companions, wired here:
 
 * rule 1 (unchanged units reuse the last acceptance): the resolved
   units and the acceptance report are persisted per phase
@@ -52,46 +45,45 @@ The other frozen companions, wired here (the Wave 1 review's list):
   phase-world shape: a revision that produced no new version leaves the
   block byte-identical, so the next live phase reuses the last verdict
   instead of re-measuring the same injection.
-* the invalid-redispatch loop (wiring list rule 6, config's
-  ``invalid_redispatch_limit``): a unit whose runs are all invalid (or
-  whose dispatch died with nothing stored) is re-dispatched up to the
-  limit; a still-invalid unit after the budget is spent reports
-  ``not_testable`` / ``invalid_redispatch_exhausted`` (or ``all_holes``
-  when every stored run came back without a scorer verdict -- the same
-  mapping the frozen report reader applies). The pass count is durable
-  per unit (``redispatch.json``), so a resumed phase continues the same
-  budget, and a unit whose budget is spent never re-enters K1.
+* the invalid-redispatch loop (the config's ``invalid_redispatch_limit``):
+  a unit whose runs are all invalid (or whose dispatch died with
+  nothing stored) is re-dispatched up to the limit; a still-invalid
+  unit after the budget is spent reports ``not_testable`` /
+  ``invalid_redispatch_exhausted`` (or ``all_holes`` when every stored
+  run came back without a scorer verdict -- the same mapping the frozen
+  report reader applies). The pass count is durable per unit
+  (``redispatch.json``), so a resumed phase continues the same budget,
+  and a unit whose budget is spent never re-enters K1.
 * unit ids: delivery fills the task ref and the sha8 of the canonical
   injected skills; this driver rebuilds the full frozen key with
-  :func:`verdicts.make_unit_id` (P2 closed -- one canonicalization
-  rule, one rebuild site).
+  :func:`verdicts.make_unit_id` (one canonicalization rule, one rebuild
+  site).
 * the bank: delivery receives the PREVIOUS learn phase's bank artifact
-  (:func:`phase_bank.load_phase_bank`, R7's cross-phase load), members
-  and versions included; before the first learn phase the run-level
-  frozen bank stands in. (The live group view keeps its store
-  derivation -- the same one the frozen audit line and the pending
-  universe are built from, so the ledger and the delivery cannot
-  disagree about what a group is.)
+  (:func:`phase_bank.load_phase_bank`), members and versions included;
+  before the first learn phase the run-level frozen bank stands in.
+  (The live group view keeps its store derivation -- the same one the
+  frozen audit line and the pending universe are built from, so the
+  ledger and the delivery cannot disagree about what a group is.)
 * judgment: every real run is judged through the acceptance module's
   frozen entry (:func:`verdicts.verdict_from_run`) under the phase's
   named rule (the config's ``acceptance`` field, else the benchmark's
   default binding -- ``tb_scorer`` for TB, the rule that consumes the
   ``verifier_ran`` / ``exception_type`` facts). The live round judgment
   stays the verdicts ledger's (``judge_round``): its row IS the resume
-  protocol and E6's pinned shape, and ``finalize_group`` is the ledger
-  protocol's commit step (the 2026-10-16 coordinator ruling: the phase
-  driver keeps calling both; "acceptance takes over the verdict
-  protocol" is a later optional consolidation, not this wave).
+  protocol, and ``finalize_group`` is the ledger protocol's commit step
+  -- the phase driver keeps calling both (the coordinator's 2026-10-16
+  ruling; folding the verdict protocol into acceptance is a later
+  optional consolidation, not this wave).
 
 R4 (the invariant this driver must not break): an execute phase makes
 no DIRECT bank calls -- no ``discard_skill`` / ``accept_skill`` anywhere
-in it. The two sanctioned exceptions are the frozen protocols'
-own commits: the live finalization sweep (the ledger protocol's commit,
+in it. The two sanctioned exceptions are the frozen protocols' own
+commits: the live finalization sweep (the ledger protocol's commit,
 above) and nothing else; every other phase leaves the bank
 byte-identical, pinned by tests/unit/test_w2a_phase_execute.py.
 
 Phase directory layout (this driver owns the execute-phase half; the
-learn-phase half is phase_bank's and W2-B's):
+learn-phase half is phase_bank's):
 
     <run_dir>/phases/<label>/
         phase.json                what ran here (label, index, role) --
@@ -110,8 +102,9 @@ learn-phase half is phase_bank's and W2-B's):
         units.jsonl               the resolved delivery rows, full
                                   frozen unit ids attached
         acceptance_report.jsonl   the phase's report rows (not the C
-                                  phase: its numbers go to the summary,
-                                  boundary doc section 3 rule 9)
+                                  phase: its numbers go to the summary
+                                  alone, the boundaries doc's rule that
+                                  test results never flow into learning)
         redispatch.json           per-unit re-dispatch bookkeeping
         <arm>/accepted_infra_shortfall.json   the durable accepted holes
         generation_failures.jsonl (exam phases) terminal exam-generation
@@ -161,7 +154,6 @@ from expedistill.stages.phase_execute.phase_disk import (
     UNITS_NAME,
     _phase_dir,
 )
-from expedistill.stages.phase_execute.resolve import _resolve_verdict_rule
 from expedistill.stages.phase_execute.baseline import _run_baseline
 from expedistill.stages.phase_execute.exam import _run_exam
 from expedistill.stages.phase_execute.final_test import _run_test
@@ -206,7 +198,11 @@ def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
     write_json(directory / PHASE_RECORD_NAME, {
         "label": phase.label, "index": phase.index, "name": phase.name,
         "role": spec.role}, indent=2)
-    _resolve_verdict_rule(spec, ctx.config.benchmark)
+    # No entry-level verdict-rule precheck: each role derives the rule
+    # it actually judges under (baseline and exam re-check theirs before
+    # any work; live judges through the compare rule, the test phase
+    # does not judge), so an unknown name fails inside its role, at the
+    # one derivation point.
     if spec.role == PHASE_ROLE_BASELINE:
         summary = _run_baseline(ctx, phase, spec)
     elif spec.role == PHASE_ROLE_EXAM:

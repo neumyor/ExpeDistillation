@@ -182,20 +182,18 @@ def _phase(sequence, phases, index):
 
 def _install_curation(monkeypatch):
     """Record which curation entry ran and with what mapping; delegate to
-    the real as-is writer so the artifact integration is exercised."""
+    the REAL entries so the artifact integration (the pending-member
+    passthrough included) is exercised."""
     calls = []
+    real_produce = curation_phase_bank.produce
     real_as_is = curation_phase_bank.produce_as_is
 
     def produce(ctx, curate, label):
         calls.append(("produce", curate, label))
-        dest = phase_bank_dir(ctx.run_dir, label)
-        dest.mkdir(parents=True, exist_ok=True)
-        return curation_none.write_as_is(ctx.store, dest, BIG)
+        return real_produce(ctx, curate, label)
 
     def produce_as_is(ctx, curate, label):
         calls.append(("produce_as_is", curate, label))
-        # The merged produce_as_is takes the phase's curate mapping (the
-        # W2-C frozen contract); delegate with it.
         return real_as_is(ctx, curate, label)
 
     monkeypatch.setattr(curation_phase_bank, "produce", produce)
@@ -393,7 +391,7 @@ def test_a_learn_phase_needs_the_v4_sequence_products(tmp_path):
     sequence, phases = _exam_sequence()
     ctx = _make_ctx(tmp_path, sequence, phases, handles={})
     ctx.config.sequence = None
-    with pytest.raises(CodeBugError, match="schema-v4 config products"):
+    with pytest.raises(CodeBugError, match="v4 config products"):
         phase_learn.run(ctx, _phase(sequence, phases, 1))
 
 
@@ -455,8 +453,50 @@ def test_the_first_learn_phase_adds_skills_for_failed_bare_tasks(
     # The intermediate branch: as-is, not the configured curation, and
     # the curate mapping travels with the call (W2-C's frozen contract).
     assert calls == [("produce_as_is", phases["L"].curate, "p02:L")]
-    assert load_phase_bank(ctx.run_dir, "p02:L") == []   # nothing accepted
-    assert result.summary["bank"]["members"] == []
+    # The artifact carries EVERY member: the new skill is pending, and
+    # the next A phase's universe comes out of this artifact.
+    rows = load_phase_bank(ctx.run_dir, "p02:L")
+    assert [row["skill_id"] for row in rows] == [SKILL_ID]
+    assert rows[0]["status"] == "pending"
+    assert result.summary["bank"]["members"] == [SKILL_ID]
+
+
+def test_a_finished_learn_phase_is_skipped_on_replay(tmp_path,
+                                                       monkeypatch):
+    # The replay-after-a-later-crash model: a COMPLETED learn phase is
+    # skipped whole. Re-running it would double the outcome receipts
+    # and rewrite the bank artifact from the CURRENT store (a later
+    # phase's accepted skills would leak into this one's snapshot).
+    sequence, phases = _exam_sequence()
+    handles = {"author": make_fake_handle("author", [_distill_script()]),
+               "rewriter": make_fake_handle("rewriter", [])}
+    ctx = _make_ctx(tmp_path, sequence, phases, handles)
+    _install_curation(monkeypatch)
+    _seed_baseline(ctx.store, weak_correctness=False)
+    _seed_segment(ctx.store)
+    phase = _phase(sequence, phases, 1)
+    first = phase_learn.run(ctx, phase)
+    artifact = (phase_bank_dir(ctx.run_dir, phase.label)
+                / "skill_bank.jsonl")
+    bytes_first = artifact.read_bytes()
+    outcomes_first = _outcomes(ctx.run_dir, phase.label)
+    calls_first = len(handles["author"].client.calls)
+
+    second = phase_learn.run(ctx, phase)
+
+    # Same summary, same artifact bytes, no receipt doubling -- and no
+    # model call was even made.
+    assert second.summary == first.summary
+    assert artifact.read_bytes() == bytes_first
+    assert _outcomes(ctx.run_dir, phase.label) == outcomes_first
+    assert len(handles["author"].client.calls) == calls_first
+    # A later phase accepting the skill does NOT leak into the replay.
+    skill = ctx.store.load("skills", SKILL_ID, Skill)
+    skill.status = "accepted"
+    ctx.store.save(skill, "skills")
+    third = phase_learn.run(ctx, phase)
+    assert third.summary == first.summary
+    assert artifact.read_bytes() == bytes_first
 
 
 def test_the_add_path_is_idempotent_across_a_crash(tmp_path, monkeypatch):
