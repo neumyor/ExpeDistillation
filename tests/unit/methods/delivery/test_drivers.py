@@ -14,8 +14,10 @@ pinned here through the frozen signature.
 
 import pytest
 
-from expedistill.benchmarks.base import Task
-from expedistill.composites.live_measurement import survivors_and_block
+from expedistill.composites.live_measurement import (
+    pending_groups,
+    survivors_and_block,
+)
 from expedistill.core.ids import (
     make_exam_id,
     make_skill_id,
@@ -47,16 +49,17 @@ def make_group_skill(task_id, content=MARKED):
                  subtask_id=subtask_id, source_subtasks=[subtask_id])
 
 
-def test_none_supplies_the_bare_scalar_kwargs():
-    # The bank and tasks are the family's operands and are ignored:
-    # there is nothing to select from. skills_injected is None (the
-    # bare control's record), never [] (retrieval's below-threshold
-    # task inside a with-bank arm).
+def test_none_supplies_the_bare_rows():
+    # The bank and tasks are the family's operands and the bank is
+    # ignored: there is nothing to select from. skills_injected is None
+    # (the bare control's record), never [] (retrieval's below-threshold
+    # task inside a with-bank arm). The Wave 1 legacy arm-level seam is
+    # gone (W2-A rewired the call sites); one row per task.
     delivery, params = resolve_fixed("delivery", "none")
-    method_kwargs, audit_rows = delivery.resolve(
-        None, params, ["bank-row"], ["task"])
-    assert method_kwargs == {"skills_injected": None, "skills_block": ""}
-    assert audit_rows is None
+    rows = delivery.resolve(None, ["task-a", "task-b"], params)
+    assert [(row.task_ref, row.skills_injected, row.skills_block)
+            for row in rows] == [
+        ("task-a", None, ""), ("task-b", None, "")]
 
 
 def test_per_skill_block_matches_the_k4_rendering():
@@ -79,15 +82,14 @@ def test_group_by_task_resolves_each_tasks_pending_group(tmp_path):
     store.save(make_group_skill(task_id), "skills")
 
     delivery, params = resolve_fixed("delivery", "group_by_task")
-    method_kwargs, audit_rows = delivery.resolve(None, params, store,
-                                                 BENCHMARK)
-    assert audit_rows is None
-    references, block = method_kwargs["skills_for_task"](
-        Task(task_id="t1", instruction="do t1"))
+    rows = delivery.resolve(pending_groups(store), [task_id], params)
     members, expected_block = survivors_and_block(store, task_id)
-    assert references == [{"skill_id": skill.skill_id, "version": skill.version}
-                          for skill in members]
-    assert block == expected_block
+    assert len(rows) == 1
+    assert rows[0].task_ref == task_id
+    assert rows[0].skills_injected == [
+        {"skill_id": skill.skill_id, "version": skill.version}
+        for skill in members]
+    assert rows[0].skills_block == expected_block
 
 
 def test_group_by_task_refuses_a_task_without_a_group(tmp_path):
@@ -95,7 +97,6 @@ def test_group_by_task_refuses_a_task_without_a_group(tmp_path):
     # label; a dispatched group is never empty.
     store = Store(tmp_path / "run")
     delivery, params = resolve_fixed("delivery", "group_by_task")
-    method_kwargs, _ = delivery.resolve(None, params, store, BENCHMARK)
     with pytest.raises(CodeBugError, match="no pending skill group"):
-        method_kwargs["skills_for_task"](Task(task_id="t1",
-                                              instruction="do t1"))
+        delivery.resolve(pending_groups(store),
+                         [make_task_id(BENCHMARK, "t1")], params)

@@ -114,7 +114,7 @@ K6's docstring spells out every crash window).
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import get_plugin
@@ -780,8 +780,10 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
 
     The resolver comes from the delivery registry (methods modules never
     import each other; the registry is the only seam): the group_by_task
-    driver wraps K6's ``survivors_and_block``, the same derivation the
-    frozen audit line carries."""
+    driver resolves the round's task groups once here, through the
+    frozen ``resolve(bank, tasks, params)`` signature, and K1 reads the
+    finished rows -- the same derivation K6's frozen audit line carries
+    (``survivors_and_block`` under the group view)."""
     config = ctx.config
     benchmark = config.benchmark
     stage1_holes = shortfall.stage1_accepted_unit_ids(ctx.run_dir)
@@ -791,8 +793,14 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
         skip_unit_ids.update(
             lm.skip_ids_for(stage1_holes, accepted, task_id))
     delivery, delivery_params = resolve_fixed("delivery", "group_by_task")
-    method_kwargs, _ = delivery.resolve(ctx, delivery_params, store,
-                                        benchmark)
+    rows = delivery.resolve(lm.pending_groups(store), list(task_ids),
+                            delivery_params)
+    by_ref = {row.task_ref: (row.skills_injected, row.skills_block)
+              for row in rows}
+
+    def skills_for_task(task: Any) -> Tuple[Any, str]:
+        return by_ref[ids.make_task_id(benchmark, task.task_id)]
+
     batch_execute(
         store=Store(lm.round_dir(store, round_)),
         benchmark=benchmark,
@@ -801,7 +809,7 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
         model_name=config.models["executor_weak"],
         handle=ctx.handle("executor_weak"),
         n_attempts=n_attempts,
-        skills_for_task=method_kwargs["skills_for_task"],
+        skills_for_task=skills_for_task,
         workdir_root=Path(ctx.workdir_root) / "stage4_live"
         / f"round{round_:02d}",
         usage=ctx.usage,

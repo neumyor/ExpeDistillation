@@ -21,14 +21,11 @@ group is a CodeBugError: an empty injection would be a bare run under
 the with-skills label.
 """
 
-from typing import Any, Dict, Mapping, Sequence, Tuple
+from typing import Any, Mapping, Sequence
 
-from expedistill.composites.live_measurement import pending_groups
-from expedistill.core import ids
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
-from expedistill.infra.store import Store
 from expedistill.inject import format_skills_block
 from expedistill.methods.delivery import GroupByTaskParams
 from expedistill.methods.delivery import units
@@ -36,7 +33,7 @@ from expedistill.methods.delivery import units
 __all__ = ["resolve"]
 
 
-def _resolve(bank: Mapping[str, Sequence[Skill]], tasks: Any,
+def resolve(bank: Mapping[str, Sequence[Skill]], tasks: Any,
              params: GroupByTaskParams) -> ExecutionUnitList:
     """One row per task: its whole pending group's references + block."""
     rows = []
@@ -53,31 +50,3 @@ def _resolve(bank: Mapping[str, Sequence[Skill]], tasks: Any,
     return rows
 
 
-def _legacy_resolve(ctx: Any, params: GroupByTaskParams, store: Store,
-                    benchmark: str) -> Tuple[Dict[str, Any], None]:
-    """(K1 with-group kwargs, None): the per-task group resolver.
-
-    Delegates to the frozen signature per call: the resolver reads the
-    store only at call time (once per task and attempt inside K1), so
-    one resolution serves a whole round's dispatch and re-reads the
-    survivors the round is actually about.
-    """
-    def skills_for_task(task: Any) -> Tuple[Any, str]:
-        rows = _resolve(
-            pending_groups(store),
-            [ids.make_task_id(benchmark, task.task_id)], params)
-        row = rows[0]
-        return row.skills_injected, row.skills_block
-    return {"skills_for_task": skills_for_task}, None
-
-
-def resolve(*args: Any, **kwargs: Any) -> ExecutionUnitList:
-    """resolve(bank, tasks, params) -> ExecutionUnitList  [frozen, R5].
-
-    Wave 1 compat (removed in Wave 2, when the phase drivers replace the
-    call sites): the module seam also accepts the live driver's legacy
-    ``resolve(ctx, params, store, benchmark)`` and returns the K1
-    per-task group resolver.
-    """
-    return units.dispatch(GroupByTaskParams, args, kwargs,
-                          _legacy_resolve, _resolve)

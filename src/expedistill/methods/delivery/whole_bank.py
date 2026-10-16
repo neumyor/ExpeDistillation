@@ -16,7 +16,7 @@ One row per task, every row the same fixed (bank digest, D9 block)
 pair.
 """
 
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Sequence
 
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.inject import bank_reference, format_skills_block
@@ -25,12 +25,8 @@ from expedistill.methods.delivery import units
 
 __all__ = ["resolve"]
 
-#: Stands in for a task when the legacy arm-level call passes an empty
-#: task set: the bank pair is task-independent, so any ref yields it.
-_NO_TASK = ""
 
-
-def _resolve(bank: Sequence[Any], tasks: Any,
+def resolve(bank: Sequence[Any], tasks: Any,
              params: WholeBankParams) -> ExecutionUnitList:
     """One row per task: the whole bank, one fixed injection."""
     injected = bank_reference(bank)
@@ -39,25 +35,3 @@ def _resolve(bank: Sequence[Any], tasks: Any,
             for task in tasks]
 
 
-def _legacy_resolve(ctx: Any, params: WholeBankParams, bank: Sequence[Any],
-                    test_tasks: Any) -> Tuple[Dict[str, Any], None]:
-    """(K1 with-bank kwargs, None): the arm-level scalar pair.
-
-    Delegates to the frozen signature: the injection is task-
-    independent, so the arm-level kwargs are one row's values.
-    """
-    row = _resolve(bank, list(test_tasks) or [_NO_TASK], params)[0]
-    return ({"skills_injected": row.skills_injected,
-             "skills_block": row.skills_block}, None)
-
-
-def resolve(*args: Any, **kwargs: Any) -> ExecutionUnitList:
-    """resolve(bank, tasks, params) -> ExecutionUnitList  [frozen, R5].
-
-    Wave 1 compat (removed in Wave 2, when the phase drivers replace the
-    call sites): the module seam also accepts stage 6's legacy
-    ``resolve(ctx, params, bank, test_tasks)`` and returns the arm-level
-    K1 scalar kwargs.
-    """
-    return units.dispatch(WholeBankParams, args, kwargs,
-                          _legacy_resolve, _resolve)

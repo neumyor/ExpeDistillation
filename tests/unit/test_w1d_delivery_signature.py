@@ -2,10 +2,10 @@
 
 ``resolve(bank, tasks, params) -> ExecutionUnitList`` -- asserted per
 driver, positionally and by keyword, for every registered delivery
-family entry. The legacy module seam (the pre-R5 shapes stage 6 and the
-live driver still call) is pinned separately by
-tests/unit/methods/delivery/test_drivers.py and the stage/composite
-tests; here one test also checks the seam delegates to the frozen rows.
+family entry. The Wave 1 legacy module seam was removed with the Wave 2
+phase drivers' call-site rewrite (W2-A); the frozen form is the only
+form. (tests/unit/methods/delivery/test_drivers.py pins the drivers'
+operands.)
 
 Decision doc: docs/decisions/execute_learn_repair_plan_20261016.md, R5.
 """
@@ -231,10 +231,11 @@ def test_retrieval_below_threshold_keeps_the_empty_list_semantics():
     assert units.unit_id("t1", []) != units.unit_id("t1", None)
 
 
-def test_retrieval_audit_side_channel_and_legacy_delegation():
+def test_retrieval_audit_side_channel():
     # The audit is the side channel (R5): audit_rows recomputes exactly
-    # what the legacy seam hands write_audit, and the legacy per-task
-    # resolver returns the frozen rows' values.
+    # what resolve resolved, one canonical row per task, and the write
+    # stays write_audit's job. (The Wave 1 legacy delegation seam was
+    # removed with the phase drivers' call-site rewrite, W2-A.)
     bank, tasks = _retrieval_bank_and_tasks()
     params = RetrievalParams(top_k=1, max_categories=2, min_score=0.0)
     driver = _driver("retrieval")
@@ -245,12 +246,6 @@ def test_retrieval_audit_side_channel_and_legacy_delegation():
     assert all(set(row) == {"task_id", "routed", "scores", "selected",
                             "threshold_passed", "categories"}
                for row in audit)
-    method_kwargs, legacy_audit = driver.resolve(None, params, bank, tasks)
-    assert legacy_audit == audit
-    for task in tasks:
-        row = next(r for r in rows if r.task_ref == task.task_id)
-        assert method_kwargs["skills_for_task"](task) == (
-            row.skills_injected, row.skills_block)
 
 
 def test_unit_id_digest_rules():

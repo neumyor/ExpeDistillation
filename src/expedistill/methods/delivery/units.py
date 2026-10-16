@@ -4,8 +4,9 @@ R5 (docs/decisions/execute_learn_repair_plan_20261016.md) freezes ONE
 driver signature, ``resolve(bank, tasks, params) -> ExecutionUnitList``.
 The five drivers differ in what ``bank`` and ``tasks`` mean (each
 module's docstring owns its operands' contract) but build their rows
-the same way, so the row plumbing and the Wave 1 call-form dispatch
-live here once.
+the same way, so the row plumbing lives here once. The Wave 1 call-form
+dispatch is gone: the phase drivers (stages/phase_execute.py) call the
+frozen form only.
 
 ``unit_id`` is the DELIVERY-side view of the join key. The frozen
 construction rule (core/contracts.py) needs phase_label, benchmark and
@@ -15,7 +16,7 @@ sha256 over the canonical form of ``skills_injected``. The
 canonicalization rule itself is NOT defined here: it is frozen with the
 acceptance module (composites.verdicts.canonical_skills, R1 / P2), and
 this helper applies it so the sha8 already matches the one the phase
-driver (Wave 2) rebuilds into the full frozen key with
+driver rebuilds into the full frozen key with
 ``verdicts.make_unit_id``.
 """
 
@@ -27,8 +28,7 @@ from expedistill.composites import verdicts
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill
 
-__all__ = ["dispatch", "make_row", "skill_reference", "task_ref",
-           "unit_id"]
+__all__ = ["make_row", "skill_reference", "task_ref", "unit_id"]
 
 
 def skill_reference(record: Union[Skill, Mapping[str, Any]]) -> Dict[str, Any]:
@@ -82,34 +82,3 @@ def make_row(ref: str, skills_injected: Any, skills_block: str,
         skills_block=skills_block,
         aux={} if aux is None else aux,
     )
-
-
-def dispatch(params_class: Any, args: tuple, kwargs: dict, legacy: Any,
-             resolve_units: Any) -> Any:
-    """Route one driver ``resolve`` call to the frozen or the legacy form.
-
-    The registry hands every caller the driver MODULE, and the modules
-    whose legacy form still has callers (stage 6, the live driver) serve
-    both forms through here until Wave 2 rewires the call sites; a driver
-    with no legacy caller (per_skill) exposes only the frozen signature.
-    The forms are told apart structurally, never by sniffing operand
-    values: in every legacy shape the params object sits in the SECOND
-    position, in the frozen shape it sits in the THIRD.
-    """
-    if kwargs:
-        if args or set(kwargs) != {"bank", "tasks", "params"}:
-            raise TypeError(
-                "resolve(bank, tasks, params) takes no positional "
-                "argument next to the keyword form")
-        return resolve_units(kwargs["bank"], kwargs["tasks"],
-                              kwargs["params"])
-    if len(args) in (3, 4) and isinstance(args[1], params_class):
-        return legacy(*args)
-    if len(args) == 3:
-        bank, tasks, params = args
-        return resolve_units(bank, tasks, params)
-    raise TypeError(
-        "resolve expects the frozen signature resolve(bank, tasks, "
-        "params); the Wave 1 compat shapes are resolve(ctx, params, "
-        "bank, tasks) / resolve(ctx, params, <operand>); got "
-        f"{len(args)} positional argument(s)")

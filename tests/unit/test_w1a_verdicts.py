@@ -178,7 +178,11 @@ def test_unknown_rule_name_is_a_config_error():
 
 
 def test_rules_are_named_per_benchmark():
-    for benchmark in ("tb", "searchqa", "alfworld"):
+    # tb binds tb_scorer since W2-A (wiring list rule 3: the rule that
+    # consumes the plugin's verifier_ran / exception_type facts); the
+    # other scored benchmarks keep the plain scorer rule.
+    assert verdicts.default_verdict_rule("tb") == "tb_scorer"
+    for benchmark in ("searchqa", "alfworld"):
         assert verdicts.default_verdict_rule(benchmark) == "scorer"
     assert verdicts.default_verdict_rule("exam") == "exam_judge"
     with pytest.raises(ConfigError, match="no default verdict rule"):
