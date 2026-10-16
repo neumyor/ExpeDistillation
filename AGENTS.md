@@ -89,7 +89,10 @@ src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     ids.py                确定性 ID 规则
-    config.py             实验配置结构、模型角色表
+    config.py             实验配置结构（schema v4：sequence + phases）、模型角色表、
+                          v2→v3→v4 升级纯函数
+    contracts.py          执行—学习循环的四个交接数据类（执行单元行 / 运行记录 /
+                          验收报告行 / 任务清单行，R0 冻结的接口形状）
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
   infra/                  第 1 层：与业务无关的运行支撑
     store.py              B3 对象存储（原子写、按 ID 读、判断单元是否完成）
@@ -100,11 +103,12 @@ src/expedistill/
     usage.py              B7 用量跨进程累加
   prompts/                第 1 层：B2 prompt 注册表
     registry.py           登记、取用、计算 digest
+    llm.py                 B1 自己的协议 prompt（默认 system 消息等）
     segment.py            G1 切段
     author.py             G2 提炼 / 诊断、G6 改写
     exam.py               G3 出考题、G4 作答、G5 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
-    attribution.py        G10 live 归因、G11 live 修订（live_run 验收；v3 起进
+    attribution.py        G10 live 归因、G11 live 修订（v3 起进
                           __init__ 的 import 清单——全量冻结，manifest 冻结全部
                           已注册方法 prompt 的 digest）
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
@@ -115,6 +119,8 @@ src/expedistill/
     fake.py               测试用假模型（按脚本返回固定内容）
   benchmarks/             第 3 层：benchmark 插件
     base.py               插件接口：load_tasks / run / view_rules / task_prompt
+    react_loop.py         本地 benchmark 共用的逐步 ReAct 执行循环
+    aux.py                辅助指标的插件接线（声明与打分器包装）
     registry.py           按名字取插件
     tb/                   TB runner（远程 Harbor）+ 任务加载 + 截断规则 + 执行 prompt
     searchqa/             适配外层 benchmark/searchqa-eval/
@@ -155,7 +161,9 @@ src/expedistill/
                           decide_task_list 与 4.2/4.3 规则表；discard_reason
                           词表与 strict 短路规则集的定义处
     reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件
-    shortfall.py          接受洞的落盘记录（D 相位与旧 stage1 共用路径）
+    shortfall.py          接受空洞的落盘记录（摸底相位的记录在 run 根的
+                          stage1_baseline/ 下，live 基线加载与 C 相位的
+                          复用对照都读它）
     skill_status.py       skill 状态提交（accept/discard）的唯一入口
     verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
                           统一报告行
@@ -169,7 +177,9 @@ src/expedistill/
                           ExamExecutionParams（无驱动，相位驱动直接消费）
     evidence/             evidence 族：SegmentationParams + 三个采集器
                           add_path（加分路径）、live_group（G10 事实）、
-                          exam_sheet（考卷答卷材料）
+                          exam_sheet（考卷答卷材料）+ segmentation.py
+                          （segment 方法驱动：add 行的 K2 切段接线，只切
+                          强角色轨迹）+ package.py（证据包形状与只报事实守卫）
     author/               author 族：AuthoringParams + write 驱动
                           （写新 skill / 组修订 revise_group）
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
@@ -186,7 +196,8 @@ src/expedistill/
                           个模块（D 基线 / A 考试 / B live / C 终测）
     phase_learn.py        learn 相位驱动（R9）：决策 → 证据 → 写作 → 整理
     learn_tasks.py        learn 相位的逐行落地（keep/delete/revise/add 与
-                          断点续跑账本）
+                          断点续跑账本；add 行先经 evidence 族的 segment 驱动
+                          切段——相位世界没有独立的切段相位）
     context.py            StageContext / RunSettings（相位驱动的公共上下文）
     assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run；
                           上移到本层是为了复用 stage0 的 build_manifest（组合层
@@ -195,7 +206,7 @@ src/expedistill/
                           （run_experiment 逐个派发 sequence 条目）
 ```
 
-积木编号与文件的对应以 README 第一节为准；新增积木时两处同时更新。
+积木编号与文件的对应以 README 第三节为准；新增积木时两处同时更新。
 
 ### 分层规则
 
@@ -256,6 +267,8 @@ scripts/
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
               freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
               convert_v2_configs.py：一次性 schema v2→v3 配置转换（写新文件名）
+              convert_v3_configs.py：一次性 schema v3→v4 配置转换（写新文件名；
+                                  显式传入 v2 文件时在内存里链式走 v2→v3→v4）
               launch_tb21_live_run.py：正式实验的 detached 启动器
   remote/     远程（node29）相关：部署代码、同步产物、查看进度、停止任务
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
@@ -282,9 +295,11 @@ scripts/
 ```
 configs/
   experiments/   每个实验一份配置：benchmark、模式（split / full）、模型角色表、
-                 采样次数、methods 五槽位的全部方法参数、具名规则的名字；
-                 schema_version 3（v2 文件是冻结的历史记录，转换走
-                 scripts/run/convert_v2_configs.py，结果写新文件名）
+                 采样次数、相位序列（sequence + phases，方法参数全部在相位
+                 定义里）、无效重派预算、具名规则的名字；
+                 schema_version 4（v1/v2/v3 文件是冻结的历史记录，转换走
+                 scripts/run/convert_v2_configs.py 与 convert_v3_configs.py，
+                 结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
 ```
 
@@ -301,7 +316,7 @@ configs/
    维护分支（命名惯例 `run/<run 目录名>`，热修 cherry-pick 到它上面）+
    独立 venv（editable `.pth` 只指向该 venv 自己的 src）——schema 升版等
    破坏续跑的改动在 stage 0 会被明确拒载并指向该规则；
-2. run 目录内部布局见 README 第二节；run 开始时写 manifest，之后每次启动都与
+2. run 目录内部布局见 README 第四节；run 开始时写 manifest，之后每次启动都与
    manifest 逐字段比对，不一致直接拒绝（`infra/manifest.py`）；
 3. **逐单元落盘、可续跑**：一次执行、一次切段、一次作答都是一个单元，完成
    一个写一个（原子写：先写临时文件再改名）。再次启动时按确定 ID 跳过已完成单元；
@@ -326,9 +341,8 @@ configs/
    执行，返回统一结果 `RunOutcome{steps, correctness, meta}`——`correctness`
    为 `True`（判分器判对）/ `False`（判错）/ `None`（没拿到判分结果）；
    基础设施失败（沙箱超时、断网等）抛 `InfrastructureError`，由 K1 重试；
-   Trajectory 的 ID、角色等簿记字段由
-   E1 组装）、`view_rules`（截断规则）、`task_prompt`（执行 prompt，
-   登记进 prompt 注册表）；
+   Trajectory 的 ID、角色等簿记字段由 E1 组装）、`view_rules`（截断规则）、
+   `task_prompt`（执行 prompt，登记进 prompt 注册表）；
 2. 在 `benchmarks/registry.py` 登记名字；
 3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
    真实执行冒烟（标 `live`）；
@@ -337,10 +351,10 @@ configs/
 
 ### 新增一块积木
 
-1. 先在 README 第一节的积木表里登记编号、输入输出；
+1. 先在 README 第三节的积木表里登记编号、输入输出；
 2. 放进对应目录的文件；调模型的话同时在 `prompts/` 登记 prompt；
 3. 写单元测试（调模型的用 `llm/fake.py`）；
-4. 在 README 1.5 的"阶段 → 积木组装"表里写明哪个阶段用它。
+4. 在 README 3.5 的"相位 → 积木组装"表里写明哪个相位用它。
 
 ### 新增或修改 prompt
 
@@ -352,7 +366,7 @@ configs/
 ### 修改数据对象
 
 1. 五个对象的字段只在 `core/models.py` 定义，其他地方不得自造字段；
-2. 加字段、改字段含义都要升 `schema_version`，并在 README 第二节同步；
+2. 加字段、改字段含义都要升 `schema_version`，并在 README 第四节同步；
 3. 读旧版本对象时要么能正确迁移，要么明确报错，不能静默读成默认值。
 
 ## 八、测试 tests/

@@ -9,6 +9,41 @@ ALFWorld 义务清单；供首个 live_run 实验（候选配置
 
 ---
 
+## 0.5 相位世界对应说明（2026-10-16 补注，R10 文档同步）
+
+本手册写在"阶段 0–6"的旧世界里。2026-10-16 的执行—学习重构（schema v4，
+`docs/decisions/execute_learn_module_boundaries_20261016.md` 与 README）把
+"阶段 4 的 live_run 模式"换成了**相位序列** `D L B L B L C`（D 摸底、B 实战
+验收、L 学习、C 终测；v4 配置见
+`configs/experiments/tb21_split_live_run_v3_v4.yaml`）。阅读本手册时按
+下表换算，其余内容（运维经验、检查纪律）继续有效：
+
+| 手册里的旧说法 | 相位世界的对应 |
+|---|---|
+| stage-1 弱臂裸跑（基线） | 序列第 0 项的 baseline 相位（D），轨迹与已接受空洞仍在 `stage1_baseline/` 下 |
+| 阶段 4 live_run 模式 | 序列里的 B 相位（live 角色），轮次固定为 {0, 1}：第 k 个 B 相位测第 k-1 轮 |
+| `methods.acceptance` 槽位（n_attempts / improvement / max_injection_tokens） | B 相位的 `execution`（n_attempts、max_injection_tokens）与 `compare`（against: D、rule: improvement 名） |
+| G10 归因 / G11 修订发生在阶段 4 | 发生在 B 相位**之后**的学习相位（L）：找证据（`methods/evidence/live_group`）→ 写作（`methods/author` 的组修订），回执写进该 L 相位目录的 `outcomes.jsonl`（旧 `attributions.jsonl` 已由它接替） |
+| `stage4_summary.json` 的 live 形状 | B 相位目录的 `phase_summary.json`（逐组明细字段名沿用旧形状） |
+| 重跑"阶段 1"补空洞 | 同一条命令续跑即可：D 相位按磁盘上已有的轨迹跳过、只补缺失单元 |
+| `--until-stage` | `--until-phase N`（N 从 0 数，含义见 README 第六节） |
+
+**继续原样有效的节**：§2 shortfall 预注册正本（接受标准与按轮记录）、
+§2.5 G10/G11 视图输入预算、§3 的 pilot 检查方法（逐项核对路径按上表换算）、
+§5 的停机语义与处置、§6 ALFWorld 义务清单、§8 的审计纪律
+（`scripts/audit/audit_live_run.py` 的账本读取在 Wave 3 同步到相位目录）。
+**已过时的节**：§1 第 3 条的"methods 五槽位校验"（v4 起是逐相位的加载期
+检查清单）、§4 的进度查看命令里的 `stage4_summary.json` 路径（改读
+`phases/` 下各相位目录的摘要文件）、§7 的"升 v3"遗留事项（已于 2026-10-16
+随 v4 完成并超越）。**待同步**：`scripts/audit/audit_live_run.py` 目前仍读
+阶段世界的账本布局（`attributions.jsonl` 等），相位世界的对账（学习相位的
+`outcomes.jsonl`、相位目录）随修复项 R10 的审计脚本迁移更新，迁移完成前
+对相位世界的 run 跑它以 verdicts / 轮仓部分的结果为准。
+
+---
+
+## 0. 适用范围与身份声明
+
 ## 0. 适用范围与身份声明
 
 本手册服务 stage-4 live_run 模式的正式 run 与 pilot。方法的完整定义在
