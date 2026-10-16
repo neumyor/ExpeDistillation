@@ -46,6 +46,7 @@ def _load_raw(name):
 #: n_attempts_strong / n_attempts_weak, never per-phase).
 D_PHASE = {
     "kind": "execute",
+    "role": "baseline",
     "tasks": "train",
     "delivery": {"name": "none"},
     "execution": {"name": "real",
@@ -57,6 +58,7 @@ D_PHASE = {
 #: phase itself has no parameters).
 A_PHASE = {
     "kind": "execute",
+    "role": "exam",
     "delivery": {"name": "per_skill"},
     "execution": {"name": "exam"},
 }
@@ -72,12 +74,12 @@ EXPECTED = [
      {
          "D": D_PHASE,
          "A": A_PHASE,
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.05},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -88,11 +90,11 @@ EXPECTED = [
      {
          "D": D_PHASE,
          "A": A_PHASE,
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "whole_bank"},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -103,11 +105,11 @@ EXPECTED = [
      {
          "D": D_PHASE,
          "A": A_PHASE,
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "whole_bank"},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -120,11 +122,11 @@ EXPECTED = [
          "A": A_PHASE,
          # full mode: no held-out test set, so C reuses D's weak bare
          # arm (and its accepted holes) instead of running a fresh one.
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "whole_bank"},
                "execution": {"name": "real"},
                "compare": {"against": "D"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -137,17 +139,17 @@ EXPECTED = [
          # live_run's acceptance params move into B; its merges are
          # proven by the round-1 group re-execution, not regression
          # exams (merge_check: none -- the disclosed identity change).
-         "B": {"kind": "execute",
+         "B": {"kind": "execute", "role": "live",
                "delivery": {"name": "group_by_task"},
                "execution": {"name": "real", "n_attempts": 3,
                              "max_injection_tokens": None},
                "compare": {"against": "D", "rule": "strict_rate_gain"}},
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.02},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "none",
@@ -158,12 +160,12 @@ EXPECTED = [
      {
          "D": D_PHASE,
          "A": A_PHASE,
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.02},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -174,12 +176,12 @@ EXPECTED = [
      {
          "D": D_PHASE,
          "A": A_PHASE,
-         "C": {"kind": "execute", "tasks": "test",
+         "C": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.02},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn",
+         "L": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -202,6 +204,9 @@ class TestUpgradeV3ConfigShapes:
         assert v4["sequence"] == sequence
         assert v4["phases"] == phases
         assert set(v4["phases"]) == set(sequence)
+        # The v4-only global is emitted at its default so a converted
+        # identity never depends on the default's value.
+        assert v4["invalid_redispatch_limit"] == 1
 
     @pytest.mark.parametrize("name,sequence,phases", EXPECTED, ids=_IDS)
     def test_globals_pass_through_untouched(self, name, sequence, phases):
@@ -209,9 +214,10 @@ class TestUpgradeV3ConfigShapes:
         v4 = upgrade_v3_config(raw)
         # Zero loss, zero invention: the output keeps every key the
         # mapping does not own verbatim, drops exactly ``methods``, adds
-        # exactly ``sequence``/``phases`` and rewrites only
-        # ``schema_version``.
-        assert set(v4) == (set(raw) - {"methods"}) | {"sequence", "phases"}
+        # exactly ``sequence``/``phases``/``invalid_redispatch_limit``
+        # and rewrites only ``schema_version``.
+        assert set(v4) == (set(raw) - {"methods"}) | {
+            "sequence", "phases", "invalid_redispatch_limit"}
         for key in set(raw) - {"methods", "schema_version"}:
             assert v4[key] == raw[key], key
 
@@ -234,17 +240,17 @@ class TestUpgradeV3ConfigShapes:
         exam = upgrade_v3_config(_load_raw("tb21_split_v2_v3.yaml"))
         assert list(exam["phases"]) == ["D", "L", "A", "C"]
         assert list(exam["phases"]["D"]) == [
-            "kind", "tasks", "delivery", "execution"]
+            "kind", "role", "tasks", "delivery", "execution"]
         assert list(exam["phases"]["A"]) == [
-            "kind", "delivery", "execution"]
+            "kind", "role", "delivery", "execution"]
         assert list(exam["phases"]["C"]) == [
-            "kind", "tasks", "delivery", "execution", "compare"]
+            "kind", "role", "tasks", "delivery", "execution", "compare"]
         assert list(exam["phases"]["L"]) == [
-            "kind", "evidence", "author", "curate"]
+            "kind", "role", "evidence", "author", "curate"]
         live = upgrade_v3_config(_load_raw("tb21_split_live_run_v3.yaml"))
         assert list(live["phases"]) == ["D", "L", "B", "C"]
         assert list(live["phases"]["B"]) == [
-            "kind", "delivery", "execution", "compare"]
+            "kind", "role", "delivery", "execution", "compare"]
 
     def test_input_mapping_untouched(self):
         raw = _load_raw("tb21_split_v2_v3.yaml")

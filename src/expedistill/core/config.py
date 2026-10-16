@@ -53,9 +53,11 @@ dependency in.
 """
 
 import copy
+import dataclasses
 import json
+import re
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 #: Experiment modes (README stage 0). ``split`` divides the task set into
 #: train/test; ``full`` distills on everything and re-runs with the bank.
@@ -143,6 +145,521 @@ class ConfigError(ValueError):
     pipeline.py wraps load_config's ValueErrors into infra's ConfigError for
     the CLI, and callers matching ValueError keep matching.
     """
+
+
+# ---------------------------------------------------------------------------
+# SCHEMA v4: the phase vocabulary and the parsed phase specs (R9/R8)
+# ---------------------------------------------------------------------------
+#
+# One method is a SEQUENCE of phases (repair plan R9): the config names a
+# list of phase LOCAL names and, for each name, a phase definition under
+# ``phases``; the same definition may occupy several positions in the
+# sequence (the exam method's ``[D, L] + [A, L] x 3 + [C]``). Local names
+# are restricted to a colon-free charset because the pipeline_log stage
+# value and every per-phase path key off the label ``pNN:<local name>``
+# (composites.decision._parse_unit_id and composites.phase_bank both
+# refuse anything else, and a colon would break their parsing).
+#
+# Phase specs are DATACLASSES, not TypedDicts, for the same reason the
+# rest of core's records are: ``__post_init__`` is where the load-time
+# checklist lives (a TypedDict validates nothing at runtime), the frozen
+# manifest serialises them through ``dataclasses.fields`` exactly like
+# every other ExperimentConfig field, and frozen=True keeps a parsed
+# config from being mutated after the manifest comparison.
+
+#: R8's explicit phase roles. The decision entry (composites.decision)
+#: receives exactly these words as ``current_kind`` / ``control_kind``;
+# the cross-layer equality is pinned in tests/unit/test_w2c_config_v4.py.
+PHASE_ROLE_BASELINE = "baseline"  # D: the two-arm bare baseline
+PHASE_ROLE_EXAM = "exam"          # A: paper acceptance, one skill per exam
+PHASE_ROLE_LIVE = "live"         # B: live acceptance, a task's whole group
+PHASE_ROLE_TEST = "test"         # C: the final test -- never reaches decision
+PHASE_ROLE_LEARN = "learn"       # L: a learn phase
+
+#: The roles an execute phase may declare (a learn phase is always
+#: ``learn`` -- its content methods are the evidence/author/curate keys).
+EXECUTE_PHASE_ROLES = (PHASE_ROLE_BASELINE, PHASE_ROLE_EXAM,
+                       PHASE_ROLE_LIVE, PHASE_ROLE_TEST)
+
+#: What an execute phase runs over: the frozen train or test id list.
+PHASE_TASK_SETS = ("train", "test")
+
+#: The execution family's names: ``real`` (a benchmark run) or ``exam``
+#: (questions are generated at execution time; grading belongs to
+#: acceptance). The registry's execution entries resolve these.
+EXECUTION_NAMES = ("real", "exam")
+
+#: The control a ``compare`` may name: an earlier phase's local name, or
+#: a bare arm run fresh inside this phase.
+FRESH_BARE = "fresh_bare"
+
+#: How many times the phase driver may re-dispatch one unit the verdict
+#: ruled invalid (R9/R1's redispatch loop; after the limit the unit
+#: stays a hole with cause ``invalid_redispatch_exhausted``). A method
+#: parameter, not an operational knob: accepting holes changes what is
+#: measured. The default is one redispatch; upgrade_v3_config emits it
+#: so a converted config's identity never depends on this default.
+DEFAULT_INVALID_REDISPATCH_LIMIT = 1
+
+#: Phase local names: colon-free and directory-safe. The colon is the
+#: label separator, so it is the one character a name can never carry
+#: (decision._parse_unit_id splits on it; phase_bank maps it to ``_``).
+PHASE_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+#: The pipeline_log stage value of the freeze step: freeze is always
+#: ``p00`` and every sequence phase's number is its 0-based sequence
+#: index plus one (the frozen derivation in tests/golden/semantics.py:
+#: ``phases/p{index + 1:02d}_<name>``; D, the first sequence entry, is
+#: ``p01_D``).
+FREEZE_LABEL = "p00:freeze"
+
+
+def phase_label(index: int, name: str) -> str:
+    """The pipeline_log stage value of sequence entry ``index`` (0-based):
+    ``pNN:<local name>`` with ``NN = index + 1`` (p00 is the freeze step)."""
+    return f"p{index + 1:02d}:{name}"
+
+
+@dataclass(frozen=True)
+class CompareSpec:
+    """An execute phase's control: which earlier measurement the decision
+    compares against, and the named comparison rule (blocks/rules.py's
+    acceptance-improve registry; ``None`` is the rule family's default)."""
+
+    against: str
+    rule: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ExecutePhaseSpec:
+    """One execute phase (delivery -> execution -> acceptance).
+
+    ``delivery`` / ``execution`` keep the RAW method mappings (a
+    ``name`` key plus that method's parameters): core owns the shape,
+    the methods layer's contracts validate the parameters at resolution
+    (stage 0 resolves every family of every phase before anything
+    freezes). ``tasks`` picks the frozen train/test id list; ``compare``
+    is optional; ``acceptance`` names the verdict rule (C11) and
+    ``None`` is the benchmark's default (composites.verdicts.
+    BENCHMARK_VERDICT_RULES).
+    """
+
+    role: str
+    tasks: str = "train"
+    delivery: Dict[str, Any] = field(default_factory=dict)
+    execution: Dict[str, Any] = field(default_factory=dict)
+    compare: Optional[CompareSpec] = None
+    acceptance: Optional[str] = None
+    kind: str = "execute"
+
+    def __post_init__(self) -> None:
+        if self.kind != "execute":
+            raise ConfigError(
+                f"an execute phase's kind must be 'execute', got "
+                f"{self.kind!r}")
+        if self.role not in EXECUTE_PHASE_ROLES:
+            raise ConfigError(
+                f"an execute phase's role must be one of "
+                f"{list(EXECUTE_PHASE_ROLES)}, got {self.role!r}")
+        if self.tasks not in PHASE_TASK_SETS:
+            raise ConfigError(
+                f"an execute phase's tasks must be one of "
+                f"{list(PHASE_TASK_SETS)}, got {self.tasks!r}")
+
+
+@dataclass(frozen=True)
+class LearnPhaseSpec:
+    """One learn phase (decision -> evidence -> author -> curate).
+
+    Learn phases are not registry entries (plan R8); their three content
+    families resolve through the registry like any other: ``evidence``
+    (the add path's cutting budget), ``author`` (the writing method) and
+    ``curate`` (agentbrew with merge_check, or none). Curation runs only
+    at the sequence's LAST learn phase -- the driver branches on the
+    sequence position, not on this spec.
+    """
+
+    evidence: Dict[str, Any] = field(default_factory=dict)
+    author: Dict[str, Any] = field(default_factory=dict)
+    curate: Dict[str, Any] = field(default_factory=dict)
+    kind: str = "learn"
+    role: str = PHASE_ROLE_LEARN
+
+    def __post_init__(self) -> None:
+        if self.kind != "learn":
+            raise ConfigError(
+                f"a learn phase's kind must be 'learn', got {self.kind!r}")
+        if self.role != PHASE_ROLE_LEARN:
+            raise ConfigError(
+                f"a learn phase's role is always {PHASE_ROLE_LEARN!r}, "
+                f"got {self.role!r}")
+
+
+#: A phase definition: what ``config.phases`` maps a local name to.
+PhaseSpec = Union[ExecutePhaseSpec, LearnPhaseSpec]
+
+
+@dataclass(frozen=True)
+class PhaseInstance:
+    """One POSITION of the sequence, as the phase driver receives it.
+
+    Built by the CLI's phase loop (cli.py, R9's skeleton): ``index`` is
+    the 0-based sequence position, ``label`` is the pipeline_log stage
+    value ``pNN:<name>`` and every per-phase path key, ``spec`` is the
+    parsed definition, and ``task_ids`` is the frozen id list this phase
+    runs over (the train or test list for an execute phase, empty for a
+    learn phase). This is the frozen hand-off contract between W2-C's
+    loop and W2-A's / W2-B's ``phase_execute.run`` / ``phase_learn.run``.
+    """
+
+    index: int
+    name: str
+    label: str
+    spec: PhaseSpec
+    task_ids: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PhaseResult:
+    """What a phase driver returns to the loop: the phase's JSON-safe
+    summary (the ledger line's ``summary``). Drivers may carry more in
+    the summary dict; ``label`` is echoed so the loop can assert the
+    driver answered for the phase it was asked about."""
+
+    label: str
+    summary: Dict[str, Any]
+
+
+#: The field sets the two kinds accept (checked by parse_phases: a key
+#: outside the kind's set is a typo or a version mismatch, never a
+#: silent drop -- the same discipline as the unknown top-level key).
+_EXECUTE_FIELDS = frozenset({"kind", "role", "tasks", "delivery", "execution",
+                             "compare", "acceptance"})
+_LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author", "curate"})
+
+#: The baseline phase's two arms: fixed by design (the strong arm feeds
+#: the add path, the weak arm is every later comparison's control).
+_BASELINE_ARMS = ("executor_strong", "executor_weak")
+
+
+def _method_mapping(raw: Any, where: str) -> Dict[str, Any]:
+    """One nested method mapping: a dict naming its method. The deep
+    validation belongs to the family's contract in the methods layer
+    (resolution, stage 0); here only the shape and the ``name`` are
+    checked, the same split as v3's ``_validate_methods``."""
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"{where} must be a mapping of the method's parameter names "
+            f"to values, got {type(raw).__name__}")
+    name = raw.get("name")
+    if not isinstance(name, str) or not name:
+        raise ConfigError(f"{where} needs a non-empty 'name'")
+    return dict(raw)
+
+
+def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
+    """One execute phase definition: shape, role consistency and the
+    execution mapping's R9 rules (the plan's field table)."""
+    unknown = sorted(set(raw) - _EXECUTE_FIELDS)
+    if unknown:
+        raise ConfigError(
+            f"phases.{name} is kind 'execute' but carries key(s) {unknown}; "
+            f"an execute phase accepts {sorted(_EXECUTE_FIELDS)}")
+    role = raw.get("role")
+    if role not in EXECUTE_PHASE_ROLES:
+        raise ConfigError(
+            f"phases.{name}.role must be one of {list(EXECUTE_PHASE_ROLES)}"
+            f" (R8: the role is declared, never inferred), got {role!r}")
+    tasks = raw.get("tasks", "train")
+    if tasks not in PHASE_TASK_SETS:
+        raise ConfigError(
+            f"phases.{name}.tasks must be one of {list(PHASE_TASK_SETS)}, "
+            f"got {tasks!r}")
+    # The test role and the test task set are one fact, not two: a
+    # final-test phase on the train set would leak test results into
+    # learning (boundary doc section 3 rule 9), and a train-measuring
+    # phase on the test set would measure on the held-out tasks.
+    if (role == PHASE_ROLE_TEST) != (tasks == "test"):
+        raise ConfigError(
+            f"phases.{name} mixes role {role!r} with tasks {tasks!r}: the "
+            "test role runs the test set and only the test role does")
+    delivery = _method_mapping(raw.get("delivery"),
+                               f"phases.{name}.delivery")
+    execution = _method_mapping(raw.get("execution"),
+                                f"phases.{name}.execution")
+    exec_name = execution["name"]
+    if exec_name not in EXECUTION_NAMES:
+        raise ConfigError(
+            f"phases.{name}.execution name {exec_name!r} is not one of "
+            f"{list(EXECUTION_NAMES)}")
+    # The exam execution is what the exam ROLE measures with; every
+    # other role runs the benchmark for real.
+    expected_exec = (EXECUTION_NAMES[1] if role == PHASE_ROLE_EXAM
+                     else EXECUTION_NAMES[0])
+    if exec_name != expected_exec:
+        raise ConfigError(
+            f"phases.{name} declares role {role!r} but execution name "
+            f"{exec_name!r}; that role runs {expected_exec!r}")
+    if "n_attempts" in execution and role == PHASE_ROLE_EXAM:
+        raise ConfigError(
+            f"phases.{name}.execution carries n_attempts but an exam phase "
+            "has no sampling depth -- the weak model answers once")
+    if role == PHASE_ROLE_BASELINE:
+        # The two-arm phase: both arms, no per-arm depth (the global
+        # n_attempts_strong / n_attempts_weak decide the two depths).
+        arms = execution.get("arms")
+        if not (isinstance(arms, list) and tuple(arms) == _BASELINE_ARMS):
+            raise ConfigError(
+                f"phases.{name}.execution.arms must be exactly "
+                f"{list(_BASELINE_ARMS)} (a baseline phase runs both arms; "
+                "their depths come from the global n_attempts_strong / "
+                "n_attempts_weak)")
+        if "n_attempts" in execution:
+            raise ConfigError(
+                f"phases.{name}.execution carries n_attempts but a "
+                "baseline phase's depths come from the global "
+                "n_attempts_strong / n_attempts_weak")
+    elif "arms" in execution:
+        raise ConfigError(
+            f"phases.{name}.execution carries arms but only a baseline "
+            "phase is two-armed; every other execute phase runs the weak "
+            "model")
+    compare_raw = raw.get("compare")
+    compare: Optional[CompareSpec] = None
+    if compare_raw is not None:
+        if not isinstance(compare_raw, dict):
+            raise ConfigError(
+                f"phases.{name}.compare must be a mapping with 'against' "
+                f"(and optionally 'rule'), got {compare_raw!r}")
+        unknown = sorted(set(compare_raw) - {"against", "rule"})
+        if unknown:
+            raise ConfigError(
+                f"phases.{name}.compare has unknown key(s) {unknown}")
+        against = compare_raw.get("against")
+        if not isinstance(against, str) or not against:
+            raise ConfigError(
+                f"phases.{name}.compare.against must be a phase name or "
+                f"{FRESH_BARE!r}, got {against!r}")
+        rule = compare_raw.get("rule")
+        if rule is not None and (not isinstance(rule, str) or not rule):
+            raise ConfigError(
+                f"phases.{name}.compare.rule must be a named rule or null, "
+                f"got {rule!r}")
+        compare = CompareSpec(against=against, rule=rule)
+    acceptance = raw.get("acceptance")
+    if acceptance is not None and (not isinstance(acceptance, str)
+                                    or not acceptance):
+        raise ConfigError(
+            f"phases.{name}.acceptance must name a verdict rule or be "
+            f"absent (the benchmark's default), got {acceptance!r}")
+    return ExecutePhaseSpec(
+        role=role, tasks=tasks, delivery=delivery, execution=execution,
+        compare=compare, acceptance=acceptance, kind="execute")
+
+
+def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
+    """One learn phase definition: shape only -- the content families'
+    parameters validate at resolution (the methods layer's contracts)."""
+    unknown = sorted(set(raw) - _LEARN_FIELDS)
+    if unknown:
+        raise ConfigError(
+            f"phases.{name} is kind 'learn' but carries key(s) {unknown}; "
+            f"a learn phase accepts {sorted(_LEARN_FIELDS)}")
+    evidence = _method_mapping(raw.get("evidence"), f"phases.{name}.evidence")
+    author = _method_mapping(raw.get("author"), f"phases.{name}.author")
+    if "exams" in author:
+        # The v3 authoring switch has no v4 image: upgrade_v3_config
+        # refuses every combination but the one legal ablation pair, so
+        # a v4 config that names it is a hand edit gone wrong.
+        raise ConfigError(
+            f"phases.{name}.author carries 'exams', a v3 authoring switch "
+            "with no v4 image: exam generation is implied by every "
+            "sequence's A phases (upgrade_v3_config maps the one legal "
+            "ablation pair to a sequence without any)")
+    curate = _method_mapping(raw.get("curate"), f"phases.{name}.curate")
+    role = raw.get("role", PHASE_ROLE_LEARN)
+    if role != PHASE_ROLE_LEARN:
+        raise ConfigError(
+            f"phases.{name}.role must be {PHASE_ROLE_LEARN!r} for a learn "
+            f"phase, got {role!r}")
+    return LearnPhaseSpec(evidence=evidence, author=author, curate=curate,
+                         kind="learn", role=PHASE_ROLE_LEARN)
+
+
+def parse_phases(raw_phases: Any, raw_sequence: Any, *,
+                 n_attempts_strong: int,
+                 n_attempts_weak: int) -> Dict[str, PhaseSpec]:
+    """Validate the v4 ``sequence`` / ``phases`` pair and return the
+    parsed specs, keyed by local name (the sequence may repeat a name;
+    the definitions are one per name).
+
+    The load-time checklist (plan R9 item 4), each check a ConfigError:
+
+    1. the sequence is a non-empty list of local names over the
+       colon-free charset, and every name has a definition (a definition
+       the sequence never uses is refused too -- it would freeze method
+       identity no phase ever runs);
+    2. each definition's field set matches its ``kind``;
+    3. the declared role is one of the five (R8) and consistent with
+       the field values (test role <-> test tasks, exam role <-> exam
+       execution, baseline <-> both arms, single-arm depth limits);
+    4. ``compare.against`` names a phase that appears EARLIER in the
+       sequence, or is exactly ``fresh_bare``; a single-arm real phase's
+       ``n_attempts`` never exceeds its control's weak-model depth;
+    5. ``curate.merge_check: exam`` requires an exam-role execute phase
+       somewhere in the sequence (the merges' regression exams come from
+       the A phases).
+
+    Model roles and ``invalid_redispatch_limit`` are ExperimentConfig's
+    own checks, not the sequence's.
+    """
+    if not isinstance(raw_sequence, list) or not raw_sequence:
+        raise ConfigError(
+            "sequence must be a non-empty list of phase names, got "
+            f"{raw_sequence!r}")
+    for position, entry in enumerate(raw_sequence):
+        if not isinstance(entry, str) or not PHASE_NAME_RE.fullmatch(entry):
+            raise ConfigError(
+                f"sequence entry {position} is {entry!r}: a phase name is "
+                "1+ characters over letters, digits, '.', '_', '-' "
+                "(never a colon -- the label 'pNN:<name>' and the phase "
+                "directories parse on it)")
+    if not isinstance(raw_phases, dict) or not raw_phases:
+        raise ConfigError(
+            "phases must be a non-empty mapping of phase name -> "
+            f"definition, got {raw_phases!r}")
+    for phase_name in raw_phases:
+        if not isinstance(phase_name, str) or not PHASE_NAME_RE.fullmatch(
+                phase_name):
+            raise ConfigError(
+                f"phases key {phase_name!r} is not a legal phase name "
+                "(1+ characters over letters, digits, '.', '_', '-')")
+    unknown = [entry for entry in raw_sequence if entry not in raw_phases]
+    if unknown:
+        raise ConfigError(
+            f"sequence names phase(s) {unknown} with no definition under "
+            f"'phases'; defined: {sorted(raw_phases)}")
+    unused = sorted(set(raw_phases) - set(raw_sequence))
+    if unused:
+        raise ConfigError(
+            f"phases defines {unused} but the sequence never runs "
+            "them; a definition no phase runs would freeze method "
+            "identity nothing measures")
+    specs: Dict[str, PhaseSpec] = {}
+    for phase_name, raw in raw_phases.items():
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"phases.{phase_name} must be a mapping, got "
+                f"{type(raw).__name__}")
+        kind = raw.get("kind")
+        if kind == "execute":
+            specs[phase_name] = _parse_execute_phase(phase_name, raw)
+        elif kind == "learn":
+            specs[phase_name] = _parse_learn_phase(phase_name, raw)
+        else:
+            raise ConfigError(
+                f"phases.{phase_name}.kind must be 'execute' or 'learn', "
+                f"got {kind!r}")
+    _check_compare_targets(raw_sequence, specs)
+    _check_attempt_depths(raw_sequence, specs,
+                          n_attempts_weak=n_attempts_weak)
+    _check_merge_check_needs_exams(raw_sequence, specs)
+    return specs
+
+
+def _check_compare_targets(raw_sequence: List[str],
+                           specs: Dict[str, PhaseSpec]) -> None:
+    """Checklist item 4, first half: ``against`` is an earlier sequence
+    name or exactly ``fresh_bare``, and the named control is a bare
+    measurement (baseline or live -- an exam or final-test phase is
+    never a control)."""
+    for position, name in enumerate(raw_sequence):
+        spec = specs[name]
+        if not isinstance(spec, ExecutePhaseSpec) or spec.compare is None:
+            continue
+        against = spec.compare.against
+        if against == FRESH_BARE:
+            continue
+        if against not in raw_sequence[:position]:
+            raise ConfigError(
+                f"phases.{name}.compare.against is {against!r}, which is "
+                "not 'fresh_bare' and does not appear earlier in the "
+                f"sequence; earlier phases: {raw_sequence[:position]}")
+        target = specs[against]
+        if not isinstance(target, ExecutePhaseSpec) or target.role not in (
+                PHASE_ROLE_BASELINE, PHASE_ROLE_LIVE):
+            raise ConfigError(
+                f"phases.{name}.compare.against is {against!r} with role "
+                f"{getattr(target, 'role', None)!r}: a control is a bare "
+                "measurement (baseline or live), never an exam or "
+                "final-test phase")
+
+
+def _check_attempt_depths(raw_sequence: List[str],
+                          specs: Dict[str, PhaseSpec],
+                          *, n_attempts_weak: int) -> None:
+    """Checklist item 4, second half: a single-arm real phase's explicit
+    ``n_attempts`` never exceeds its control's weak-model depth (the
+    same bound v3's check_live_run drew against the stage-1 weak
+    baseline: executions beyond the control's depth have no control to
+    compare against). The control is ``fresh_bare`` or a baseline phase
+    (both run the weak model ``n_attempts_weak`` times) or a live phase
+    (its own ``n_attempts``, default ``n_attempts_weak``)."""
+    for name in raw_sequence:
+        spec = specs[name]
+        if not isinstance(spec, ExecutePhaseSpec):
+            continue
+        n_attempts = spec.execution.get("n_attempts")
+        if n_attempts is None:
+            continue
+        if not _is_positive_int(n_attempts):
+            raise ConfigError(
+                f"phases.{name}.execution.n_attempts must be a positive "
+                f"int, got {n_attempts!r}")
+        control_depth = n_attempts_weak
+        if spec.compare is not None and spec.compare.against != FRESH_BARE:
+            target = specs[spec.compare.against]
+            assert isinstance(target, ExecutePhaseSpec)
+            if target.role == PHASE_ROLE_LIVE:
+                control_depth = target.execution.get("n_attempts",
+                                                      n_attempts_weak)
+        if n_attempts > control_depth:
+            raise ConfigError(
+                f"phases.{name}.execution.n_attempts ({n_attempts}) "
+                f"exceeds its control's weak-model depth "
+                f"({control_depth}); the comparison would ask for "
+                "executions the control never ran")
+
+
+def _check_merge_check_needs_exams(raw_sequence: List[str],
+                                   specs: Dict[str, PhaseSpec]) -> None:
+    """Checklist item 5: ``curate.merge_check: exam`` proves every kept
+    merge on regression exams, and those exams only exist when the
+    sequence has an exam-role execute phase (the upgrade maps live_run
+    configs to merge_check 'none' for exactly this reason)."""
+    has_exam_phase = any(
+        isinstance(specs[name], ExecutePhaseSpec)
+        and specs[name].role == PHASE_ROLE_EXAM for name in raw_sequence)
+    for name in raw_sequence:
+        spec = specs[name]
+        if not isinstance(spec, LearnPhaseSpec):
+            continue
+        if spec.curate.get("name") == "agentbrew" and \
+                spec.curate.get("merge_check") == "exam" and \
+                not has_exam_phase:
+            raise ConfigError(
+                f"phases.{name}.curate asks merge_check 'exam' but the "
+                "sequence has no exam execute phase: the merges would be "
+                "proved on regression exams nothing generates (a "
+                "live-only sequence uses merge_check 'none' -- merges "
+                "are proven by the round-1 group re-execution)")
+
+
+def phase_spec_to_raw(spec: PhaseSpec) -> Dict[str, Any]:
+    """The freezable form of one parsed phase spec: the same shape
+    ``parse_phases`` accepts, so ``to_dict`` -> ``from_dict`` round-trips
+    (the manifest comparison depends on that)."""
+    return dataclasses.asdict(spec)
 
 
 def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:
@@ -629,6 +1146,11 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     core, whose loader learns ``sequence``/``phases``), so the output
     does not load yet and the converter writes it under new file names.
 
+    The emitted shapes are exactly what schema v4's ``parse_phases``
+    accepts: every phase declares its R8 role (D baseline, A exam, B
+    live, C test, L learn), and the v4-only global
+    ``invalid_redispatch_limit`` is emitted at its default.
+
     Deliberate identity changes, disclosed here and in the converter's
     diff output:
 
@@ -795,6 +1317,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     phases: Dict[str, Any] = {
         "D": {
             "kind": "execute",
+            "role": PHASE_ROLE_BASELINE,
             "tasks": "train",
             "delivery": {"name": "none"},
             "execution": {"name": "real",
@@ -802,6 +1325,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
         },
         "L": {
             "kind": "learn",
+            "role": PHASE_ROLE_LEARN,
             "evidence": evidence,
             "author": {"name": "distill_diagnose"},
             "curate": curate,
@@ -820,6 +1344,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 f"{retry_limit!r}")
         phases["A"] = {
             "kind": "execute",
+            "role": PHASE_ROLE_EXAM,
             "delivery": {"name": "per_skill"},
             "execution": {"name": "exam"},
         }
@@ -835,6 +1360,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
                     f"required parameter {key!r}")
         phases["B"] = {
             "kind": "execute",
+            "role": PHASE_ROLE_LIVE,
             "delivery": {"name": "group_by_task"},
             "execution": {
                 "name": "real",
@@ -847,6 +1373,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
         sequence = ["D", "L", "B", "L", "B", "L", "C"]
     phases["C"] = {
         "kind": "execute",
+        "role": PHASE_ROLE_TEST,
         "tasks": "test",
         "delivery": delivery,
         "execution": {"name": "real"},
@@ -857,6 +1384,10 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     }
     v4["sequence"] = sequence
     v4["phases"] = phases
+    # The v4-only global the v3 file cannot name: emit the default so the
+    # converted identity is complete (complete-don't-reject) and a later
+    # default change never silently re-identifies a converted config.
+    v4["invalid_redispatch_limit"] = DEFAULT_INVALID_REDISPATCH_LIMIT
     v4["schema_version"] = 4
     return v4
 
