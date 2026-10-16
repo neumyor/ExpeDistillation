@@ -214,11 +214,14 @@ def test_exam_report_row_over_a_judged_round(tmp_path):
     assert row["bare_verdict"] is False
     assert row["leak_verdict"] is None
     # P7b: the pending revision's source is the latest judged with-skill
-    # attempt, with the pointer back to it.
+    # attempt, with the pointer back to it -- and the version the answer
+    # was given on, so the L phase can match its "this version's attempt".
     assert row["attempt"] == {"attempt_id": failed.attempt_id,
                               "verdict": False,
                               "judge_reason": failed.judge_reason,
-                              "weak_answer": "restart it"}
+                              "weak_answer": "restart it",
+                              "skill_version": 1,
+                              "retry_round": 0}
     assert row["rewrite_exhausted"] == 0
 
 
@@ -250,6 +253,62 @@ def test_exam_report_leak_row_and_exhausted_rewrites(tmp_path):
     # A round-0 leak has no with-skill attempt: the source falls back to
     # the bare attempt (P7b's rule).
     assert row["attempt"]["attempt_id"].endswith("/att00")
+
+
+def test_exam_report_attempt_names_the_version_it_answered(tmp_path):
+    """Review C-1: the attempt must say WHICH version it answered.
+
+    The crash window between the L-phase rewrite landing and the next
+    A-phase answer leaves the attempt of the OLD version judged False
+    while the stored skill is already the rewritten one. Without
+    ``skill_version`` on the attempt, that state looked exactly like
+    "wrong answer on the stored version", and a resumed L phase would
+    have revised the already-revised skill a second time (version +2).
+    """
+    store = Store(tmp_path / "run")
+    skill, exam = make_pair()
+    # The ledger shape _rewrite_round leaves behind: the stored skill is
+    # v2 with one rewrite_history entry, but the only judged attempt is
+    # still v1's failure.
+    skill.version = 2
+    skill.rewrite_history.append({
+        "content": skill.content,
+        "error_category": "missed_step",
+        "reason": "the answer skips the restart step",
+    })
+    store.save(skill, "skills")
+    store.save(exam, "exams")
+    store.save(make_attempt(exam, 0, purpose="bare", judge_verdict=False),
+               "attempts")
+    v1_failed = make_attempt(exam, 1, purpose="acceptance",
+                             skill_id=skill.skill_id, skill_version=1,
+                             judge_verdict=False)
+    store.save(v1_failed, "attempts")
+
+    row = exam_report(store)["skills"][0]
+
+    # The row head is the stored version; the attempt names the version
+    # it answered -- "revision landed, re-answer not yet run" is no
+    # longer the same shape as "wrong answer on the stored version".
+    assert row["version"] == 2
+    assert row["attempt"] == {"attempt_id": v1_failed.attempt_id,
+                              "verdict": False,
+                              "judge_reason": v1_failed.judge_reason,
+                              "weak_answer": "some answer",
+                              "skill_version": 1,
+                              "retry_round": 0}
+
+    # Once v2's answer lands and passes, the row says so: the L phase's
+    # "passed on the stored version -> keep" is decidable from the row.
+    store.save(make_attempt(exam, 2, purpose="acceptance",
+                            skill_id=skill.skill_id, skill_version=2,
+                            judge_verdict=True), "attempts")
+
+    row = exam_report(store)["skills"][0]
+
+    assert row["version"] == 2
+    assert row["attempt"]["skill_version"] == 2
+    assert row["attempt"]["verdict"] is True
 
 
 def test_exam_report_skips_candidates_without_exams(tmp_path):

@@ -136,8 +136,11 @@ def exam_report(store: Store) -> Dict[str, Any]:
     * ``attempt``: the source the pending revision would rewrite from
       (P7b, ``composites.decision.exam_voided_rewrite_source``): the
       most recent judged with-skill attempt, else the bare attempt --
-      ``{"attempt_id", "verdict", "judge_reason", "weak_answer"}``, the
-      id being the source pointer -- or None;
+      ``{"attempt_id", "verdict", "judge_reason", "weak_answer",
+      "skill_version", "retry_round"}``, the id being the source
+      pointer -- or None. The L phase matches its "this version's
+      attempt" on (skill_id, skill_version): an attempt of an older
+      version is not this round's basis (review C-1);
     * ``rewrite_exhausted``: how many of the skill's rounds were
       consumed by an exhausted G6 budget (the REWRITE_FAILURE_LEDGER's
       ``exhausted`` rows -- the same count K4's round accounting uses).
@@ -158,7 +161,9 @@ def exam_report(store: Store) -> Dict[str, Any]:
             attempt = {"attempt_id": source.attempt_id,
                        "verdict": source.judge_verdict,
                        "judge_reason": source.judge_reason,
-                       "weak_answer": source.weak_answer}
+                       "weak_answer": source.weak_answer,
+                       "skill_version": source.skill_version,
+                       "retry_round": source.retry_round}
         exhausted = [record for record in _skill_records(
                          store, REWRITE_FAILURE_LEDGER, skill.skill_id)
                      if record.get("exhausted")]

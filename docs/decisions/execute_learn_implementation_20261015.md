@@ -70,7 +70,7 @@
 | 读取器 | 读什么 | 产出（内存 dict 行） |
 |---|---|---|
 | baseline_report | D 相位的轨迹仓 + shortfall | 每任务 {task_id, 各 role 成功数/总数}；F 集由 task_select 规则派生 |
-| exam_report | 共享 attempts 仓 + leak_verdicts + 技能终态 | 每技能 {skill_id, version, bare_verdict, leak_verdict, 本相位 attempt(verdict, judge_reason, weak_answer, 来源 attempt 指针), 改写结果(exhausted 计数), terminal}（P7b：G6 改写需要 weak_answer 与来源选取规则——泄露轮取最近带技能 attempt，无则裸答） |
+| exam_report | 共享 attempts 仓 + leak_verdicts + 技能终态 | 每技能 {skill_id, version, bare_verdict, leak_verdict, 本相位 attempt(verdict, judge_reason, weak_answer, skill_version, retry_round, 来源 attempt 指针), 改写结果(exhausted 计数), terminal}（P7b：G6 改写需要 weak_answer 与来源选取规则——泄露轮取最近带技能 attempt，无则裸答） |
 | live_report | verdicts / attributions / injection_audit 账本 + 轮仓 | 每任务组 {task_id, members(版本), baseline, 本轮结果, verdict, attribution 计划}。**不含"与上轮冻结行字节等价"字段**（P7a：no-op guard 的比较时点是修订落地后、渲染块对冻结行，由守卫自身在编排时点算，读取器在决策时点算恒为真） |
 
 **决策规则清单**（D10，M3 验收基线；实现在 `composites/decision.py`（同层，I3），按报告种类分发，**不建决策注册表**）：
@@ -176,7 +176,7 @@ phases:
 | E2 | 逐技能/逐组终态判定与 discard_reason | 映射：v3"未出生"↔ v4 discarded(model_output_error)；K4 内部丢弃 ↔ L 相位丢弃（理由同名）。**覆盖面声明（P6）**：金夹具全为"全接受零弃"，全部弃用分支在 golden 上恒空真——分支钉住由 M4 验收承担：以 tests/composites/test_acceptance.py 与 test_live_acceptance.py 的现有失败/泄题/耗尽/no-op 场景为基准，v4 代码在同样场景断言逐技能终态、discard_reason、账本行与 v3 语义一致 |
 | E3 | C 相位测试 summary 逐字段（with_bank/bare/delta/aux/control_source）+ **retrieval_audit.jsonl 审计行**（I4） | 对旧 stage6 summary |
 | E4 | 模型调用多重集：**(role, prompt 名, 渲染请求文本)**（T9：fixture 里只有渲染 messages） | exam 相等；live 见白名单 |
-| E5 | v4 内 8 组合 × 3 崩溃续跑变体全部等价 | 沿用 assert_resume_equivalent 语义 |
+| E5 | v4 内 8 组合 × 3 崩溃续跑变体全部等价 | 沿用 assert_resume_equivalent 语义；崩溃续跑变体必须含"修订已落库、重答未发生"窗口（评审 C-1） |
 | E6 | **live 测量账本逐行**（I4）：verdicts 行多重集（round 字段 → 相位序号映射）+ attribution 计划行 | 防"判据计数漂移但 better 布尔不变"绕过 |
 
 **live 白名单**（可自动判定，I6/s-4）：① v4 live 调用多重集**恰等于** v3 live 删光全部 (examiner, EXAM_GEN) 调用（金夹具实测 live v3 组合有 6/3 次该调用），其余任何差 = 失败；② merge_check: none 不撤销合并在金矩阵**不可观测**（假模型 G7 恒空、无合并无回归），由 M3 的 merge_check:none 单测 + 真实 run 披露承担。D 相位 shortfall 在矩阵不可达，由续跑套件与真实 run 审计钉住。
