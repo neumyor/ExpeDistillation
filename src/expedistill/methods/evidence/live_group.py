@@ -30,6 +30,7 @@ from typing import Any, List, Optional, Union
 
 from expedistill.blocks.attribution import attribute_failure
 from expedistill.blocks.view import render_trajectory_view
+from expedistill.composites.decision import REVISE
 from expedistill.composites.live_attribution import (
     _LIVE_VIEWS_BUDGET_CHARS,
     _clip_view,
@@ -88,7 +89,7 @@ def collect_group_evidence(
     are pinned as segments with their step ranges, so the author can
     point at the exact runs the facts came from.
     """
-    if task_row.action != "revise":
+    if task_row.action != REVISE:
         raise ValueError(
             "collect_group_evidence needs a task list row with action "
             f"'revise', got {task_row.action!r} on target "

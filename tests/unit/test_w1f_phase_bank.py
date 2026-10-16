@@ -117,16 +117,31 @@ _MERGE_SCRIPTS = dict(
 
 def test_phase_dir_maps_the_r9_label_to_a_directory(tmp_path):
     assert phase_bank_dir(tmp_path, "p01:learn") == tmp_path / "phases" / "p01_learn"
-    assert phase_bank_dir(tmp_path, "p00_freeze") == tmp_path / "phases" / "p00_freeze"
+    assert phase_bank_dir(tmp_path, "p00:freeze") == tmp_path / "phases" / "p00_freeze"
     assert phase_bank_path(tmp_path, "p02:x") == (tmp_path / "phases" / "p02_x"
                                                  / "skill_bank.jsonl")
 
 
 @pytest.mark.parametrize("label", ["", "..", ".", "a/b", "a b", "p1:name!",
-                                   "p1:\\", "p1\n"])
+                                   "p1:\\", "p1\n", "p1", "p1:",
+                                   "p1:a:b", "x1:learn", "p1_a"])
 def test_unsafe_phase_labels_are_refused(tmp_path, label):
-    with pytest.raises(InfraConfigError, match="directory-safe"):
+    # The label must be exactly 'pNN:<name>' (D3): a bare 'pNN' or the
+    # colonless 'p1_a' would collide with the legal 'p1:a' once the
+    # colon is mapped, so both are refused up front.
+    with pytest.raises(InfraConfigError, match="pNN:<name>"):
         phase_bank_dir(tmp_path, label)
+
+
+def test_the_colon_rewrite_cannot_collide_two_labels(tmp_path):
+    # 'p1:a' and a hypothetical colonless 'p1_a' label map to the same
+    # directory name only if both were legal; only the first is, and
+    # two distinct legal labels never share a directory.
+    assert phase_bank_dir(tmp_path, "p1:a") == tmp_path / "phases" / "p1_a"
+    assert phase_bank_dir(tmp_path, "p1:a_a") == (tmp_path / "phases"
+                                                  / "p1_a_a")
+    assert phase_bank_dir(tmp_path, "p2:a") != phase_bank_dir(tmp_path,
+                                                              "p1:a")
 
 
 def test_loading_a_missing_artifact_names_the_phase(tmp_path):

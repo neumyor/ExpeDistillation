@@ -15,6 +15,7 @@ calls: segmentation itself is the evidence family's ``segment`` method
 from typing import Any, List
 
 from expedistill.blocks.select import select_subtasks
+from expedistill.composites.decision import ADD
 from expedistill.blocks.view import render_steps_view
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Subtask, Trajectory
@@ -45,7 +46,7 @@ def collect_add_evidence(
     (``distill``); the package's segments pin the subtask ids and step
     ranges so the author's output stays traceable to its evidence.
     """
-    if task_row.action != "add":
+    if task_row.action != ADD:
         raise ValueError(
             "collect_add_evidence needs a task list row with action "
             f"'add', got {task_row.action!r} on target "

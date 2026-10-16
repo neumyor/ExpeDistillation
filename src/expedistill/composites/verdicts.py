@@ -103,28 +103,27 @@ RUN_VERDICTS = (RUN_SUCCESS, RUN_FAILURE, RUN_INVALID)
 #: its counts alone; ``not_testable`` means no valid run exists and the
 #: cause says why; ``not_run_control_perfect`` means the control was
 #: already perfect so the with-skill run was skipped ("no headroom").
-STATUS_NORMAL = "normal"
-STATUS_NOT_TESTABLE = "not_testable"
-STATUS_NOT_RUN_CONTROL_PERFECT = "not_run_control_perfect"
+#: Defined once in composites.decision (core/contracts.py names that
+#: module as the status/cause definition site, next to the discard
+#: vocabulary) and re-exported under the acceptance-side names, so the
+#: two modules cannot drift (D1; the re-exports are pinned by test).
+STATUS_NORMAL = decision.ROW_NORMAL
+STATUS_NOT_TESTABLE = decision.ROW_NOT_TESTABLE
+STATUS_NOT_RUN_CONTROL_PERFECT = decision.ROW_NOT_RUN_CONTROL_PERFECT
 UNIT_STATUSES = (STATUS_NORMAL, STATUS_NOT_TESTABLE,
                  STATUS_NOT_RUN_CONTROL_PERFECT)
 
-#: Why a unit is ``not_testable`` (the fixed cause set, R0). These values
-#: are the ONLY legal causes on a not_testable row.
-CAUSE_LEAK = "leak"
-CAUSE_INJECTION_OVERFLOW = "injection_overflow"
-CAUSE_EXAM_GENERATION_FAILED = "exam_generation_failed"
-CAUSE_INVALID_REDISPATCH_EXHAUSTED = "invalid_redispatch_exhausted"
-CAUSE_ALL_HOLES = "all_holes"
-CAUSE_ZERO_EXECUTION = "zero_execution"
-NOT_TESTABLE_CAUSES = frozenset({
-    CAUSE_LEAK,
-    CAUSE_INJECTION_OVERFLOW,
-    CAUSE_EXAM_GENERATION_FAILED,
-    CAUSE_INVALID_REDISPATCH_EXHAUSTED,
-    CAUSE_ALL_HOLES,
-    CAUSE_ZERO_EXECUTION,
-})
+#: Why a unit is ``not_testable`` (the fixed cause set, R0): the same
+#: single definition as above, re-exported. These values are the ONLY
+#: legal causes on a not_testable row.
+CAUSE_LEAK = decision.CAUSE_LEAK
+CAUSE_INJECTION_OVERFLOW = decision.CAUSE_INJECTION_OVERFLOW
+CAUSE_EXAM_GENERATION_FAILED = decision.CAUSE_EXAM_GENERATION_FAILED
+CAUSE_INVALID_REDISPATCH_EXHAUSTED = \
+    decision.CAUSE_INVALID_REDISPATCH_EXHAUSTED
+CAUSE_ALL_HOLES = decision.CAUSE_ALL_HOLES
+CAUSE_ZERO_EXECUTION = decision.CAUSE_ZERO_EXECUTION
+NOT_TESTABLE_CAUSES = decision.NOT_TESTABLE_CAUSES
 
 #: The cause on a ``not_run_control_perfect`` row: the baseline was
 #: all-success under a strict-family rule, so the with-skill run was
@@ -322,8 +321,13 @@ def verdict_from_trajectory(trajectory) -> Tuple[str, str]:
 
 
 def verdict_from_attempt(attempt) -> Tuple[str, str]:
-    """One judged exam attempt's run verdict. Grading itself (the G5
-    model judge under its crash-persistent budget) is
+    """One judged exam attempt's run verdict -- the R2b BRIDGE, not a
+    rule (the sibling of :func:`verdict_from_trajectory` above): today's
+    Attempt still carries the concluded judge_verdict the judge wrote,
+    so the verdict is the mechanical mapping of that output. Deleted in
+    R2b, when ``correctness: Optional[bool]`` replaces the run-verdict
+    vocabulary and ``verdict_from_run`` takes over. Grading itself (the
+    G5 model judge under its crash-persistent budget) is
     :func:`grade_attempt` / ``exam_grading``; this only reads a judge's
     output. An unjudged attempt is in-flight work and a CodeBugError
     here -- callers skip it, never report it."""

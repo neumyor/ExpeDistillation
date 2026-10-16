@@ -152,7 +152,12 @@ def test_live_skipped_run_consumes_not_run_control_perfect():
     assert out[0].reason == decision.WEAK_ALREADY_KNOWS
 
 
-def test_live_zero_execution_marker_deletes_as_weak_already_knows():
+def test_live_zero_execution_row_produces_no_task_row():
+    # B1's one-meaning rule: zero_execution is a visibility fact (no
+    # completed run to report yet), so the row decides nothing and the
+    # entry emits no task-list row for it. The weak_already_knows
+    # short-circuit travels only as not_run_control_perfect (pinned
+    # above), never as a zero_execution cause.
     out = decide_task_list(
         current_kind=decision.PHASE_LIVE,
         current_report=_live_rows(valid=0, success=0,
@@ -161,8 +166,25 @@ def test_live_zero_execution_marker_deletes_as_weak_already_knows():
         control_kind=decision.PHASE_BASELINE,
         control_report=_d_report(task_valid=2, task_success=2),
         bank=_bank(), checks_left=1)
-    assert out[0].action == decision.DELETE
-    assert out[0].reason == decision.WEAK_ALREADY_KNOWS
+    assert out == []
+
+
+def test_deciding_against_an_in_flight_bare_control_is_a_wiring_bug():
+    # B1's danger path, end to end through the entry: the with-skill
+    # answer is judged right while the exam's bare control has not been
+    # answered yet (zero_execution). Deciding now is the caller's bug
+    # -- a CodeBugError, never a weak_already_knows delete of a skill
+    # whose measurement just passed.
+    rows = [
+        _row(unit_id=_EXAM_UNIT,
+             injected=[{"skill_id": _SKILL, "version": 2}]),
+        _row(unit_id=_BARE_EXAM_UNIT, injected=None, valid=0, success=0,
+             status=decision.ROW_NOT_TESTABLE,
+             cause=decision.CAUSE_ZERO_EXECUTION),
+    ]
+    with pytest.raises(CodeBugError, match="in flight"):
+        decide_task_list(current_kind=decision.PHASE_EXAM,
+                         current_report=rows, bank=_bank(), checks_left=1)
 
 
 def test_live_leaked_unit_revises_then_deletes_on_the_last_check():
@@ -197,16 +219,40 @@ def test_live_target_without_a_control_is_a_wiring_bug():
             control_report=_d_report(), bank=_bank(), checks_left=1)
 
 
-def test_live_empty_injection_under_a_with_skill_label_is_a_bug():
-    bad = [_row(unit_id="p01:B:tb:tb:t1:weak:55555555", injected=[])]
-    with pytest.raises(CodeBugError, match="injects nothing"):
-        decide_task_list(current_kind=decision.PHASE_LIVE,
-                         current_report=bad, bank=_bank(), checks_left=1)
+def test_retrieval_miss_rows_are_controls_never_targets():
+    # P1: skills_injected=[] (a retrieval that reached no threshold) is
+    # R5's frozen legal value, and it is the same measurement as a bare
+    # run (reuse_key's semantics) -- so it joins the in-phase controls
+    # instead of raising, produces no action row of its own, and serves
+    # as the control for the same task's target row.
+    rows = [
+        _row(unit_id="p01:B:tb:tb:t1:weak:55555555",
+             injected=[{"skill_id": _SKILL, "version": 1}],
+             valid=1, success=1),
+        _row(unit_id="p01:B:tb:tb:t1:weak:66666666", injected=[],
+             valid=2, success=0),
+    ]
+    out = decide_task_list(current_kind=decision.PHASE_LIVE,
+                           current_report=rows, bank=_bank(),
+                           checks_left=1)
+    # One target row, kept against the [] control's 0/2 -- and nothing
+    # for the [] row itself.
+    assert out == [decision.TaskListRow(
+        target_kind="group", target_id="tb:t1", action=decision.KEEP,
+        reason="improved",
+        basis_unit="p01:B:tb:tb:t1:weak:55555555")]
+    assert decide_task_list(
+        current_kind=decision.PHASE_LIVE,
+        current_report=[rows[1]], bank=_bank(), checks_left=1) == []
 
 
 def test_malformed_unit_ids_fail_loudly():
+    # The third id is a bare "pNN" phase label (no ":<name>" colon): it
+    # eats the benchmark slot, which the parser now refuses instead of
+    # silently mis-slicing the task id (D2).
     for bad_id in ("not-a-unit-id", "p01:A:tb:t1:weak:not-hex!",
-                   "x01:A:tb:t1:weak:aaaaaaaa"):
+                   "x01:A:tb:t1:weak:aaaaaaaa",
+                   "p01:tb:tb:t1:weak:aaaaaaaa"):
         with pytest.raises(CodeBugError, match="malformed unit id"):
             decide_task_list(
                 current_kind=decision.PHASE_LIVE,

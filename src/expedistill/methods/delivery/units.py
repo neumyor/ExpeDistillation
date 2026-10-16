@@ -11,17 +11,19 @@ live here once.
 construction rule (core/contracts.py) needs phase_label, benchmark and
 role -- none of which the frozen signature carries -- so delivery fills
 the parts it owns: the task ref plus the first eight hex chars of the
-sha256 over the canonical form of ``skills_injected``. The phase driver
-(Wave 2) rebuilds the full frozen key once the acceptance-side
-canonicalization (R1) is frozen; this helper is the single place that
-rule gets rebased.
+sha256 over the canonical form of ``skills_injected``. The
+canonicalization rule itself is NOT defined here: it is frozen with the
+acceptance module (composites.verdicts.canonical_skills, R1 / P2), and
+this helper applies it so the sha8 already matches the one the phase
+driver (Wave 2) rebuilds into the full frozen key with
+``verdicts.make_unit_id``.
 """
 
 import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any, Dict, Optional, Union
 
+from expedistill.composites import verdicts
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill
 
@@ -57,14 +59,15 @@ def task_ref(task: Any) -> str:
 def unit_id(ref: str, skills_injected: Any) -> str:
     """The delivery-side unit id: ``<task_ref>:<8 hex>``.
 
-    The digest is over the canonical JSON of ``skills_injected`` (see
-    the module docstring for how this relates to the frozen join key).
-    The two empty-value semantics stay distinct keys by construction:
-    ``None`` (a control unit) and ``[]`` (a retrieval that reached no
-    threshold) canonicalize differently.
+    The digest follows the acceptance module's frozen canonicalization
+    (``verdicts.canonical_skills`` -- the single place that rule lives,
+    core/contracts.py), so this sha8 is the one the full frozen key will
+    carry once the phase driver rebuilds it. The two empty-value
+    semantics stay distinct keys by construction: ``None`` (a control
+    unit) and ``[]`` (a retrieval that reached no threshold)
+    canonicalize differently.
     """
-    canonical = json.dumps(skills_injected, sort_keys=True,
-                           separators=(",", ":"))
+    canonical = verdicts.canonical_skills(skills_injected)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
     return f"{ref}:{digest}"
 
@@ -85,12 +88,13 @@ def dispatch(params_class: Any, args: tuple, kwargs: dict, legacy: Any,
              resolve_units: Any) -> Any:
     """Route one driver ``resolve`` call to the frozen or the legacy form.
 
-    The registry hands every caller the driver MODULE, and the module's
-    single entry point must serve both forms until Wave 2 rewires the
-    call sites (stage 6, the live driver). The forms are told apart
-    structurally, never by sniffing operand values: in every legacy
-    shape the params object sits in the SECOND position, in the frozen
-    shape it sits in the THIRD.
+    The registry hands every caller the driver MODULE, and the modules
+    whose legacy form still has callers (stage 6, the live driver) serve
+    both forms through here until Wave 2 rewires the call sites; a driver
+    with no legacy caller (per_skill) exposes only the frozen signature.
+    The forms are told apart structurally, never by sniffing operand
+    values: in every legacy shape the params object sits in the SECOND
+    position, in the frozen shape it sits in the THIRD.
     """
     if kwargs:
         if args or set(kwargs) != {"bank", "tasks", "params"}:

@@ -37,7 +37,7 @@ from typing import Any, Callable, List, Optional, Union
 
 from expedistill.blocks.attribution import revise_skill
 from expedistill.blocks.author import rewrite_skill, skill_markers, write_skill
-from expedistill.composites.decision import LIVE_REVISION_DELETED
+from expedistill.composites.decision import ADD, LIVE_REVISION_DELETED, REVISE
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import (
@@ -229,7 +229,7 @@ def revise_group(
     reason is live_revision_deleted (R6 item 3: the revision-flow
     delete is the author's own).
     """
-    if task_row.action != "revise":
+    if task_row.action != REVISE:
         raise ValueError(
             "revise_group needs a task list row with action 'revise', "
             f"got {task_row.action!r} on target {task_row.target_id!r}")
@@ -284,7 +284,7 @@ def write_new(
     dispositions the unit (the stage-3 rule -- terminal within the
     run directory, never a partial save). Nothing is stored here.
     """
-    if task_row.action != "add":
+    if task_row.action != ADD:
         raise ValueError(
             "write_new needs a task list row with action 'add', got "
             f"{task_row.action!r} on target {task_row.target_id!r}")

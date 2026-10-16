@@ -16,10 +16,13 @@ only this artifact is per-phase:
     <run_dir>/phases/<phase_label>/bank_summary.json   members/size/digest
     <run_dir>/phases/<phase_label>/curation_log.json   K5 journal (agentbrew)
 
-``phase_label`` is the phase driver's label (plan R9: ``pNN:<name>``).
-The colon is the one non-directory character allowed and maps to ``_``
-(the R9 phase-directory naming); every other character must already be
-directory-safe, so a label can never escape its phase directory.
+``phase_label`` is the phase driver's label (plan R9: ``pNN:<name>`` --
+exactly one colon, right after the ``pNN`` head). The colon is the one
+non-directory character allowed and maps to ``_`` (the R9
+phase-directory naming); on the frozen label shape that rewrite is
+injective, and every other character must already be directory-safe, so
+a label can never escape its phase directory nor collide with another
+label's.
 
 This module owns the layout and the LOADING side only. The producing
 side is the curation drivers (``methods/curation/``): ``agentbrew``
@@ -30,6 +33,7 @@ at the sequence's last learn phase; the intermediate phases produce the
 as-is artifact) belongs to the phase driver (Wave 2, plan R9).
 """
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
@@ -56,26 +60,32 @@ SUMMARY_NAME = "bank_summary.json"
 
 #: R9's ``pNN:<name>`` colon maps to the directory separator character.
 _COLON = str.maketrans({":": "_"})
-_SAFE = set(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+#: The frozen label shape (R9): ``pNN:<name>`` with EXACTLY ONE colon,
+#: right after the ``pNN`` head, and a name over the directory-safe
+#: alphabet. The colon->underscore rewrite is injective on this shape,
+#: so two labels can never collide on one directory (``p1:a`` and the
+#: colonless ``p1_a`` are different labels, and only the first is
+#: legal -- D3).
+_PHASE_LABEL_RE = re.compile(r"p[0-9]+:[A-Za-z0-9._-]+")
 
 
 def phase_bank_dir(run_dir: Union[str, Path], phase_label: str) -> Path:
     """The phase's directory: ``<run>/phases/<label, colon mapped to _>``.
 
-    A label with characters outside the directory-safe set (or a name a
-    path would treat specially, like ``..``) is refused with ConfigError
-    rather than silently mangled: a label that cannot name a directory is
-    a construction bug in the caller, and a quiet rewrite could collide
-    two phases into one directory.
+    A label outside the frozen ``pNN:<name>`` shape (wrong head, no
+    colon, more than one colon, or a name with characters outside the
+    directory-safe set) is refused with ConfigError rather than silently
+    mangled: a label that cannot name a directory is a construction bug
+    in the caller, and a quiet rewrite could collide two phases into one
+    directory.
     """
-    name = phase_label.translate(_COLON)
-    if (not name or name.startswith(".")
-            or any(ch not in _SAFE for ch in name)):
+    if not _PHASE_LABEL_RE.fullmatch(phase_label):
         raise ConfigError(
-            f"phase label {phase_label!r} is not a directory-safe phase "
-            "label; allowed are letters, digits, '.', '_', '-', and the "
-            "R9 'pNN:<name>' colon")
+            f"phase label {phase_label!r} is not a 'pNN:<name>' phase "
+            "label (R9: exactly one colon, right after the pNN head; "
+            "allowed name characters are letters, digits, '.', '_', '-')")
+    name = phase_label.translate(_COLON)
     return Path(run_dir) / PHASES_DIR / name
 
 

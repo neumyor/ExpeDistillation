@@ -17,9 +17,8 @@ same layer-1 renderer K4 uses, so acceptance-time and test-time
 injection stay one rendering by construction.
 """
 
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Sequence
 
-from expedistill.core import ids
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
@@ -44,9 +43,16 @@ def _subtask_of_exam(ref: str) -> str:
     return ref[:-len(_EXAM_SUFFIX)]
 
 
-def _resolve(bank: Sequence[Skill], tasks: Any,
-             params: PerSkillParams) -> ExecutionUnitList:
-    """One row per exam ref: the single skill that subtask distils."""
+def resolve(bank: Sequence[Skill], tasks: Any,
+            params: PerSkillParams) -> ExecutionUnitList:
+    """resolve(bank, tasks, params) -> ExecutionUnitList  [frozen, R5]:
+    one row per exam ref, the single skill that subtask distils.
+
+    The frozen signature only: the legacy ``resolve(ctx, params, skill)``
+    compat shape never had a production caller (K4 keeps rendering
+    through ``inject.format_skills_block`` directly) and was removed
+    rather than kept as dead dispatch machinery.
+    """
     by_subtask = {skill.subtask_id: skill for skill in bank}
     rows = []
     for task in tasks:
@@ -61,27 +67,3 @@ def _resolve(bank: Sequence[Skill], tasks: Any,
             ref, [units.skill_reference(skill)],
             format_skills_block([skill])))
     return rows
-
-
-def _legacy_resolve(ctx: Any, params: PerSkillParams, skill: Skill
-                    ) -> Tuple[Dict[str, str], None]:
-    """(K3 with-skill kwargs, None): the single skill's D9 block.
-
-    The kwargs shape today's exam driver consumes (M2 wired no caller:
-    K4 keeps rendering through ``inject.format_skills_block`` directly
-    until the exam execution driver exists).
-    """
-    row = _resolve([skill], [ids.make_exam_id(skill.subtask_id)], params)[0]
-    return ({"skills_block": row.skills_block}, None)
-
-
-def resolve(*args: Any, **kwargs: Any) -> ExecutionUnitList:
-    """resolve(bank, tasks, params) -> ExecutionUnitList  [frozen, R5].
-
-    Wave 1 compat (removed in Wave 2, when the phase drivers replace the
-    call sites): the module seam also accepts the contract-test legacy
-    ``resolve(ctx, params, skill)`` and returns the K3 with-skill
-    kwargs.
-    """
-    return units.dispatch(PerSkillParams, args, kwargs,
-                          _legacy_resolve, _resolve)

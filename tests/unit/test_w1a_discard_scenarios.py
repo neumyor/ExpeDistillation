@@ -16,6 +16,8 @@ discard leaves behind and asserts two things:
 
 from pathlib import Path
 
+import pytest
+
 from expedistill.composites import (
     live_measurement as lm,
     live_verdicts as lv,
@@ -36,6 +38,7 @@ from expedistill.core.ids import (
     make_trajectory_id,
 )
 from expedistill.core.models import Attempt, Exam, Skill, Step, Trajectory
+from expedistill.infra.reliability import CodeBugError
 from expedistill.infra.store import Store, append_jsonl
 
 BENCHMARK = "tb"
@@ -180,10 +183,13 @@ def test_scenario_last_round_wrong_answer_is_retry_exhausted(tmp_path):
                                      decision.RETRY_EXHAUSTED)
 
 
-def test_scenario_judge_budget_died_is_zero_execution(tmp_path):
+def test_scenario_judge_budget_died_is_exam_generation_failed(tmp_path):
     """The judge's repair budget exhausted (model_output_error on the
     measurement): the attempt stays unjudged with its persistent failure
-    marker, so the version row has no completed run to report."""
+    marker, so the exam pipeline terminally failed to produce this run's
+    measurement -- the version row reports exam_generation_failed (B1:
+    a terminal pipeline failure is not the zero_execution visibility
+    fact), and decision deletes it as model_output_error."""
     store = Store(tmp_path / "run")
     skill, exam = make_pair()
     store.save(skill, "skills")
@@ -197,8 +203,71 @@ def test_scenario_judge_budget_died_is_zero_execution(tmp_path):
     version = version_row(exam_rows(store), 1)
 
     assert version.status == "not_testable"
-    assert version.cause == "zero_execution"
+    assert version.cause == "exam_generation_failed"
     assert version.runs == []  # an unjudged attempt is in-flight, not a run
+    # The decision side fires model_output_error from the fact alone.
+    action = decision.table_action(
+        conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=version.cause,
+        checks_left=0, phase_kind=decision.PHASE_EXAM)
+    assert action == decision.Action(decision.DELETE,
+                                     decision.MODEL_OUTPUT_ERROR)
+
+
+def test_scenario_judge_in_flight_is_zero_execution(tmp_path):
+    """The judge's budget merely survived a crash (fewer stored tries
+    than the budget): the answer is still in-flight work, so the row
+    keeps the zero_execution visibility fact -- and B1's one-meaning
+    rule makes the decision entry skip such a row (no action) instead
+    of reading weak_already_knows into it."""
+    store = Store(tmp_path / "run")
+    skill, exam = make_pair()
+    store.save(skill, "skills")
+    store.save(exam, "exams")
+    unjudged = make_attempt(exam, 1, purpose="acceptance",
+                            skill_id=skill.skill_id, skill_version=1,
+                            judge_verdict=None,
+                            judge_reason="judge_failed_tries=1; crash")
+    store.save(unjudged, "attempts")
+    store.save(make_attempt(exam, 0, purpose="bare", judge_verdict=False),
+               "attempts")
+
+    version = version_row(exam_rows(store), 1)
+
+    assert version.status == "not_testable"
+    assert version.cause == "zero_execution"
+    rows = decision.decide_task_list(
+        current_kind=decision.PHASE_EXAM, current_report=exam_rows(store),
+        bank=[skill], checks_left=1)
+    assert rows == []
+
+
+def test_scenario_deciding_over_an_in_flight_control_is_a_bug(tmp_path):
+    """B1's danger path, end to end from the on-disk state: the
+    with-skill answer is judged RIGHT while the exam's bare control has
+    not been answered yet (zero_execution, valid=0). Handing that
+    report to the decision entry is the caller's bug -- a CodeBugError,
+    never the weak_already_knows delete the old cause mapping produced
+    for a skill whose measurement just passed."""
+    store = Store(tmp_path / "run")
+    skill, exam = make_pair()
+    store.save(skill, "skills")
+    store.save(exam, "exams")
+    store.save(make_attempt(exam, 1, purpose="acceptance",
+                            skill_id=skill.skill_id, skill_version=1,
+                            judge_verdict=True, judge_reason="matches"),
+               "attempts")
+
+    rows = exam_rows(store)
+    version = version_row(rows, 1)
+    bare = rows[0]
+
+    assert version.status == "normal" and version.success_count == 1
+    assert bare.status == "not_testable"
+    assert bare.cause == "zero_execution" and bare.valid_count == 0
+    with pytest.raises(CodeBugError, match="in flight"):
+        decision.decide_task_list(
+            current_kind=decision.PHASE_EXAM, current_report=rows,
+            bank=[skill], checks_left=1)
 
 
 def test_scenario_rewrite_budget_died_keeps_the_stored_version(tmp_path):
@@ -244,6 +313,37 @@ def test_scenario_exam_generation_died_is_generation_failed(tmp_path):
     assert len(rows) == 1
     assert rows[0].status == "not_testable"
     assert rows[0].cause == "exam_generation_failed"
+
+
+# ---------------------------------------------------------------------------
+# baseline-side discards (the D-phase reader's terminal states)
+# ---------------------------------------------------------------------------
+
+def test_scenario_redispatch_budget_died_is_invalid_redispatch_exhausted(
+        tmp_path):
+    """The infra redispatch budget exhausted (P4's pollution source): the
+    weak baseline row of a task whose dispatches never completed is
+    not_testable with the phase-neutral invalid_redispatch_exhausted
+    cause, and the table deletes with the SAME phase-neutral reason in
+    an exam phase -- never K6's live_undetermined."""
+    store = Store(tmp_path / "run")
+    task_id = make_task_id(BENCHMARK, "t9")
+    store.save(make_traj(0, "success", task_id, role="strong"),
+               "trajectories")
+
+    report = acceptance_report(store, kind="baseline", benchmark=BENCHMARK,
+                               phase_label="p0:d",
+                               n_attempts_strong=N_ATTEMPTS,
+                               n_attempts_weak=N_ATTEMPTS)
+    weak = next(row for row in report if row.role == "weak")
+
+    assert weak.status == "not_testable"
+    assert weak.cause == "invalid_redispatch_exhausted"
+    action = decision.table_action(
+        conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=weak.cause,
+        checks_left=0, phase_kind=decision.PHASE_EXAM)
+    assert action == decision.Action(decision.DELETE,
+                                     decision.INVALID_REDISPATCH_EXHAUSTED)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +421,16 @@ def test_scenario_injection_overflow_never_dispatched(tmp_path):
     assert row.status == "not_testable"
     assert row.cause == "injection_overflow"
     assert row.runs == []
+    # The legacy K6 terminal deletes with its own live_* name; the
+    # phase-world table deletes with the phase-neutral cause name (P4).
+    assert decision.live_final_action(
+        [{"task_id": TASK_ID, "round": 0,
+          "verdict": lv.LIVE_INJECTION_OVERFLOW}], [0]) == decision.Action(
+        decision.DELETE, decision.LIVE_INJECTION_OVERFLOW)
+    assert decision.table_action(
+        conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=row.cause,
+        checks_left=0, phase_kind=decision.PHASE_LIVE) == decision.Action(
+        decision.DELETE, decision.INJECTION_OVERFLOW)
 
 
 def test_scenario_all_accepted_holes_is_undetermined(tmp_path):
@@ -336,6 +446,15 @@ def test_scenario_all_accepted_holes_is_undetermined(tmp_path):
     assert row.status == "not_testable"
     assert row.cause == "all_holes"
     assert row.runs == []
+    # Same two-sided pin as the overflow scenario above.
+    assert decision.live_final_action(
+        [{"task_id": TASK_ID, "round": 0,
+          "verdict": lv.LIVE_UNDETERMINED}], [0]) == decision.Action(
+        decision.DELETE, decision.LIVE_UNDETERMINED)
+    assert decision.table_action(
+        conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=row.cause,
+        checks_left=0, phase_kind=decision.PHASE_LIVE) == decision.Action(
+        decision.DELETE, decision.ALL_HOLES)
 
 
 def test_scenario_last_round_miss_feeds_the_comparison(tmp_path):
@@ -415,6 +534,9 @@ def test_every_discard_reason_has_a_scenario_pin():
         decision.MODEL_OUTPUT_ERROR,
         decision.LEAK_AUDIT,
         decision.RETRY_EXHAUSTED,
+        decision.INJECTION_OVERFLOW,
+        decision.INVALID_REDISPATCH_EXHAUSTED,
+        decision.ALL_HOLES,
     }
     pinned = {
         # scenario -> the reason its decision rule names
@@ -425,8 +547,11 @@ def test_every_discard_reason_has_a_scenario_pin():
         "rewrite_budget_died": decision.MODEL_OUTPUT_ERROR,
         "exam_generation_died": decision.MODEL_OUTPUT_ERROR,
         "baseline_short_circuit": decision.WEAK_ALREADY_KNOWS,
-        "injection_overflow": decision.LIVE_INJECTION_OVERFLOW,
-        "all_accepted_holes": decision.LIVE_UNDETERMINED,
+        "redispatch_died": decision.INVALID_REDISPATCH_EXHAUSTED,
+        "injection_overflow": decision.INJECTION_OVERFLOW,
+        "all_accepted_holes": decision.ALL_HOLES,
+        "overflow_terminal": decision.LIVE_INJECTION_OVERFLOW,
+        "undetermined_terminal": decision.LIVE_UNDETERMINED,
         "last_round_miss": decision.LIVE_NO_IMPROVEMENT,
         "no_op_rewrite": decision.LIVE_NO_IMPROVEMENT,
     }

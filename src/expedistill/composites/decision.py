@@ -130,6 +130,7 @@ from expedistill.infra.reliability import CodeBugError, ConfigError
 
 __all__ = [
     "ADD",
+    "ALL_HOLES",
     "BASELINE_GAP_REASON",
     "CAUSE_ALL_HOLES",
     "CAUSE_EXAM_GENERATION_FAILED",
@@ -145,6 +146,8 @@ __all__ = [
     "CONCLUSION_NOT_TESTABLE",
     "DELETE",
     "FinalTestReportRejected",
+    "INJECTION_OVERFLOW",
+    "INVALID_REDISPATCH_EXHAUSTED",
     "KEEP",
     "LEAK_AUDIT",
     "LIVE_INJECTION_OVERFLOW",
@@ -234,8 +237,10 @@ class Action:
     """One rule's verdict: what the caller does next.
 
     ``kind`` is one of ``KEEP`` / ``DELETE`` / ``REVISE`` (the unified
-    table also yields ``ADD``); ``reason`` is the Skill.discard_reason
-    when the kind is ``DELETE``, else None.
+    table also yields ``ADD``); ``reason`` says why: the
+    ``Skill.discard_reason`` vocabulary when the kind is ``DELETE``,
+    otherwise the conclusion that produced the action (``improved`` /
+    ``no_gain`` / the not-testable cause) or None.
     """
 
     kind: str
@@ -437,8 +442,13 @@ ROW_NOT_RUN_CONTROL_PERFECT = "not_run_control_perfect"
 
 #: The fixed ``cause`` set R0 places in this module (core/contracts.py
 #: names composites.decision as its definition site): why a row is
-#: ``not_testable`` (or, for ``zero_execution``, the weak_already_knows
-#: short-circuit's zero-run marker).
+#: ``not_testable``. ``zero_execution`` has ONE meaning (B1's ruling):
+#: the row has no completed run to report yet -- an unanswered bare
+#: answer, a stored version not answered this phase, a dispatched but
+#: unjudged live round. It is a visibility fact, never the
+#: weak_already_knows short-circuit: that fact travels only as the
+#: ``not_run_control_perfect`` status with the ``weak_already_knows``
+#: cause.
 CAUSE_LEAK = "leak"
 CAUSE_INJECTION_OVERFLOW = "injection_overflow"
 CAUSE_EXAM_GENERATION_FAILED = "exam_generation_failed"
@@ -467,17 +477,27 @@ CONCLUSION_BASELINE_GAP = "baseline_gap"
 #: The baseline row's task-list reason: what makes a task an add.
 BASELINE_GAP_REASON = "weak_fails_and_no_skill"
 
+#: Phase-neutral discard reasons (the discard_reason vocabulary) for the
+#: not-testable causes whose fact does not depend on the phase: the
+#: cause's own name (P4). The live_* names stay with K6's terminal
+#: vocabulary -- a baseline control whose redispatch died must not delete
+#: an exam-phase skill as "live_undetermined".
+ALL_HOLES = CAUSE_ALL_HOLES
+INJECTION_OVERFLOW = CAUSE_INJECTION_OVERFLOW
+INVALID_REDISPATCH_EXHAUSTED = CAUSE_INVALID_REDISPATCH_EXHAUSTED
+
 #: Why a not-testable unit is deleted, per cause (the discard_reason
 #: vocabulary). ``leak`` reaches this table only through its revise
-#: split; ``zero_execution`` is the weak_already_knows short-circuit's
-#: zero-run marker, so its delete keeps that reason.
+#: split. ``zero_execution`` is deliberately ABSENT (B1): a row with no
+#: completed run yet is a visibility row, never a delete --
+#: :func:`decide_task_list` skips such rows, and the table refuses the
+#: cause loudly if it ever sees one.
 _CAUSE_DELETE_REASONS = {
     CAUSE_LEAK: LEAK_AUDIT,
-    CAUSE_INJECTION_OVERFLOW: LIVE_INJECTION_OVERFLOW,
+    CAUSE_INJECTION_OVERFLOW: INJECTION_OVERFLOW,
     CAUSE_EXAM_GENERATION_FAILED: MODEL_OUTPUT_ERROR,
-    CAUSE_INVALID_REDISPATCH_EXHAUSTED: LIVE_UNDETERMINED,
-    CAUSE_ALL_HOLES: LIVE_UNDETERMINED,
-    CAUSE_ZERO_EXECUTION: WEAK_ALREADY_KNOWS,
+    CAUSE_INVALID_REDISPATCH_EXHAUSTED: INVALID_REDISPATCH_EXHAUSTED,
+    CAUSE_ALL_HOLES: ALL_HOLES,
 }
 
 
@@ -597,9 +617,14 @@ def compare_conclusion(*, row: AcceptanceReportRow, control_valid: int,
     * ``not_testable`` -> the not-testable conclusion with the row's
       cause (the fixed vocabulary above; an unknown cause is a
       CodeBugError -- the set is frozen, a new value needs this module);
-    * an unmeasurable control (no valid run) -> not testable, carrying
-      the CONTROL's cause as the reason there is nothing to compare
-      against;
+    * an in-flight control (no valid run, cause ``zero_execution``) ->
+      CodeBugError: the control has not been measured yet, so deciding
+      now is the caller's bug, never a delete (B1's one-meaning rule --
+      an unmeasured control is not "no headroom" and not
+      weak_already_knows);
+    * an unmeasurable control (no valid run, any other cause) -> not
+      testable, carrying the CONTROL's cause as the reason there is
+      nothing to compare against;
     * an all-success control under a strict-family rule -> no headroom
       (the same criterion as rule 3's skip);
     * otherwise the compare rule decides improved vs no gain.
@@ -624,6 +649,13 @@ def compare_conclusion(*, row: AcceptanceReportRow, control_valid: int,
             f"unit {row.unit_id!r} reports status normal with no valid "
             "run; acceptance must report not_testable instead")
     if control_valid == 0:
+        if control_cause == CAUSE_ZERO_EXECUTION:
+            raise CodeBugError(
+                f"the control of unit {row.unit_id!r} is still in flight "
+                "(no valid run, cause zero_execution): deciding against "
+                "an unmeasured control is a wiring bug -- the caller must "
+                "wait for the control's completed runs, never delete off "
+                "it")
         if control_cause not in NOT_TESTABLE_CAUSES:
             raise CodeBugError(
                 f"the control of unit {row.unit_id!r} has no valid run "
@@ -705,7 +737,11 @@ def _parse_unit_id(unit_id: str) -> Tuple[str, str]:
     carry their benchmark prefix (``tb:t1``) and exam ids carry a whole
     trajectory chain, while the phase label is ``pNN:<local>`` (one
     colon) and the benchmark carries none -- so the task id is everything
-    between the third colon and the role. Anything malformed is a
+    between the third colon and the role. The task slot must itself
+    carry its benchmark prefix (a colon): a bare ``pNN`` phase label
+    (no ``:<name>``) eats the benchmark slot and leaves the task slot
+    colonless, and that mis-slice is refused here instead of silently
+    returning a wrong task id (D2). Anything malformed is a
     CodeBugError: the id is contract, and a report that disagrees with
     it is a wiring bug, never data to guess with.
 
@@ -720,6 +756,7 @@ def _parse_unit_id(unit_id: str) -> Tuple[str, str]:
     prefix = head.split(":", 3)
     if (len(prefix) != 4
             or not _PHASE_HEAD_RE.fullmatch(prefix[0])
+            or ":" not in prefix[3]
             or role not in MODEL_ROLES
             or not _UNIT_SHA_RE.fullmatch(sha)):
         raise CodeBugError(f"malformed unit id {unit_id!r}")
@@ -813,9 +850,15 @@ def decide_task_list(
       ``target_kind="skill"``) or the task's whole group (live kind:
       ``target_kind="group"``, the task names the group) -- and the
       report's own no-injection rows plus ``control_report``'s weak rows
-      are the controls, matched by task. A target with no control is a
-      CodeBugError: the phase config names the control source, so a
-      missing one is wiring, not data.
+      are the controls, matched by task. ``skills_injected=[]`` (a
+      retrieval that reached no threshold, R5's frozen legal value) is
+      the same measurement as a bare run (:func:`reuse_key`'s existing
+      semantics), so it joins the controls and never raises and never
+      acts. A target with no control is a CodeBugError: the phase
+      config names the control source, so a missing one is wiring, not
+      data. A target row whose cause is ``zero_execution`` produces no
+      row at all (B1: a visibility row has no completed run to decide
+      from; the caller re-decides once its runs land).
     * ``checks_left`` is the "a later check remains" column, computed by
       :func:`remaining_checks` from the frozen phase sequence.
     * ``compare_rule`` selects the comparison by name; unknown names are
@@ -855,11 +898,13 @@ def decide_task_list(
 
     # Targets are the rows that injected skills; a no-injection row of
     # the same report is an in-phase control (the bare exam answer; a
-    # control unit may be run in-phase, boundary doc section 1.3).
-    targets = [row for row in rows if row.injected_skills is not None]
+    # control unit may be run in-phase, boundary doc section 1.3). []
+    # (a retrieval that reached no threshold) is the same measurement as
+    # a bare run, so it sits with the controls (P1).
+    targets = [row for row in rows if row.injected_skills]
     controls: Dict[str, List[AcceptanceReportRow]] = {}
     for row in list(control_report or ()) + [
-            row for row in rows if row.injected_skills is None]:
+            row for row in rows if not row.injected_skills]:
         if row.role != "weak":
             # The control is the weak model's bare result: the question
             # is about the student, and a D-phase control batch carries
@@ -870,11 +915,6 @@ def decide_task_list(
 
     out: List[TaskListRow] = []
     for row in sorted(targets, key=lambda r: r.unit_id):
-        if not row.injected_skills:
-            raise CodeBugError(
-                f"unit {row.unit_id!r} is a with-skill unit that injects "
-                "nothing; delivery produced a bare run under a with-skill "
-                "label in an acceptance phase")
         task_id, _ = _parse_unit_id(row.unit_id)
         matched = controls.get(task_id, [])
         if not matched:
@@ -890,6 +930,13 @@ def decide_task_list(
             row=row, control_valid=control_valid,
             control_success=control_success, control_cause=control_cause,
             compare_rule=compare_rule)
+        if (row.status == ROW_NOT_TESTABLE
+                and row.cause == CAUSE_ZERO_EXECUTION):
+            # B1's one-meaning rule: zero_execution is a visibility
+            # fact (no completed run to report yet), so the row decides
+            # nothing -- the weak_already_knows short-circuit travels
+            # only as not_run_control_perfect.
+            continue
         action = table_action(conclusion=conclusion, cause=cause,
                               checks_left=checks_left,
                               phase_kind=current_kind)

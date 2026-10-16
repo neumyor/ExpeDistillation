@@ -83,28 +83,48 @@ def test_not_testable_leak_deletes_on_the_last_check():
 
 
 @pytest.mark.parametrize("cause,reason", [
-    (decision.CAUSE_INJECTION_OVERFLOW, decision.LIVE_INJECTION_OVERFLOW),
+    (decision.CAUSE_INJECTION_OVERFLOW, decision.INJECTION_OVERFLOW),
     (decision.CAUSE_EXAM_GENERATION_FAILED, decision.MODEL_OUTPUT_ERROR),
-    (decision.CAUSE_INVALID_REDISPATCH_EXHAUSTED, decision.LIVE_UNDETERMINED),
-    (decision.CAUSE_ALL_HOLES, decision.LIVE_UNDETERMINED),
+    (decision.CAUSE_INVALID_REDISPATCH_EXHAUSTED,
+     decision.INVALID_REDISPATCH_EXHAUSTED),
+    (decision.CAUSE_ALL_HOLES, decision.ALL_HOLES),
 ])
 def test_not_testable_other_causes_delete_either_way(cause, reason):
+    # P4: the delete reasons of these phase-neutral causes are the
+    # causes' own names in every phase -- the live_* names stay with
+    # K6's terminal vocabulary, so a baseline control whose redispatch
+    # died can never delete an exam-phase skill as "live_undetermined".
     for checks_left in (0, 1):
-        assert decision.table_action(
-            conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=cause,
-            checks_left=checks_left,
-            phase_kind=decision.PHASE_LIVE) == decision.Action(
-            decision.DELETE, reason)
+        for kind in (decision.PHASE_EXAM, decision.PHASE_LIVE):
+            assert decision.table_action(
+                conclusion=decision.CONCLUSION_NOT_TESTABLE, cause=cause,
+                checks_left=checks_left,
+                phase_kind=kind) == decision.Action(decision.DELETE, reason)
 
 
-def test_not_testable_zero_execution_deletes_as_weak_already_knows():
-    # The weak_already_knows short-circuit's zero-run marker: the baseline
-    # was all-success, so the delete keeps that historical reason.
-    assert decision.table_action(
-        conclusion=decision.CONCLUSION_NOT_TESTABLE,
-        cause=decision.CAUSE_ZERO_EXECUTION, checks_left=1,
-        phase_kind=decision.PHASE_LIVE) == decision.Action(
-        decision.DELETE, decision.WEAK_ALREADY_KNOWS)
+def test_not_testable_zero_execution_has_no_delete_reason():
+    # B1's one-meaning rule: zero_execution is a visibility fact (no
+    # completed run to report yet), never a delete reason. The entry
+    # skips such rows; the table itself refuses the cause loudly, so a
+    # future caller cannot resurrect weak_already_knows through it.
+    with pytest.raises(CodeBugError, match="unknown not-testable cause"):
+        decision.table_action(
+            conclusion=decision.CONCLUSION_NOT_TESTABLE,
+            cause=decision.CAUSE_ZERO_EXECUTION, checks_left=1,
+            phase_kind=decision.PHASE_LIVE)
+
+
+def test_deciding_against_an_in_flight_control_is_a_wiring_bug():
+    # B1's danger path: the with-skill arm is measured while the control
+    # is still in flight (zero_execution). Deciding then is the
+    # caller's bug -- the unmeasured control must never yield
+    # weak_already_knows (or any other conclusion).
+    with pytest.raises(CodeBugError, match="in flight"):
+        decision.compare_conclusion(
+            row=_row(valid=1, success=1), control_valid=0,
+            control_success=0,
+            control_cause=decision.CAUSE_ZERO_EXECUTION,
+            compare_rule="strict_rate_gain")
 
 
 def test_baseline_gap_adds_either_way():

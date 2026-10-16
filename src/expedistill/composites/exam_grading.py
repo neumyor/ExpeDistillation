@@ -51,6 +51,16 @@ def _judge_failures(attempt: Attempt) -> int:
     return int(match.group(1)) if match else 0
 
 
+def judge_budget_exhausted(attempt: Attempt) -> bool:
+    """True when an unjudged attempt's persistent judge budget is spent
+    (a judged attempt never is): the exam pipeline terminally failed to
+    produce this run's measurement. The report reader maps such a row to
+    ``not_testable``/``exam_generation_failed`` -- an unjudged attempt
+    whose budget merely survived a crash (fewer stored tries) is
+    in-flight work, ``zero_execution``, not a terminal failure."""
+    return _judge_failures(attempt) >= _BLOCK_REPAIR_ATTEMPTS
+
+
 def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
                                  judge_handle: ModelHandle, usage: Any,
                                  run_dir: Optional[Union[str, Path]]
@@ -62,7 +72,7 @@ def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
     ``exam_once`` goes through that entry -- the judge is acceptance's,
     only the wiring is execution-side."""
     failures = _judge_failures(attempt)
-    if failures >= _BLOCK_REPAIR_ATTEMPTS:
+    if judge_budget_exhausted(attempt):
         raise ModelOutputError(
             f"JUDGE: repair budget already exhausted for {attempt.attempt_id} "
             f"({failures} failed tries stored)")

@@ -24,8 +24,10 @@ former readers read and hands each found run to the verdict core:
   one control row per exam (the judged bare answer) plus one row per
   (skill, version) the exam measurement touched -- judged with-skill
   attempts as ``runs``, a leaked version as ``not_testable``/``leak`` with
-  its measurement void, a candidate whose exam never landed as
-  ``not_testable``/``exam_generation_failed``;
+  its measurement void, a candidate whose exam never landed, or whose
+  answer's judge budget died, as ``not_testable``/``exam_generation_failed``
+  (the exam pipeline's terminal failure), and a merely unanswered sheet
+  as the ``not_testable``/``zero_execution`` visibility fact;
 * ``kind="live"`` -- the B phase over the verdicts / injection-audit
   ledgers and the round stores: one row per (group, round); the frozen
   verdict row's zero-execution terminals map onto the status/cause
@@ -56,6 +58,7 @@ is public since R1 (``acceptance_leak.find_leak_verdict``).
 from typing import Any, Dict, List, Optional
 
 from expedistill.composites import verdicts
+from expedistill.composites import exam_grading
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import shortfall
 from expedistill.composites.acceptance_leak import (
@@ -280,7 +283,17 @@ def _exam_unit_rows(store: Store, skill, exam_id: str, *, benchmark: str,
                              "verdict": verdict, "basis": basis})
             if runs:
                 status, cause = verdicts.STATUS_NORMAL, ""
+            elif any(exam_grading.judge_budget_exhausted(attempt)
+                     for attempt in with_skill
+                     if attempt.skill_version == version):
+                # The judge's repair budget died: the exam pipeline
+                # terminally failed to produce this run's measurement
+                # (decision deletes it as model_output_error).
+                status, cause = (verdicts.STATUS_NOT_TESTABLE,
+                                 verdicts.CAUSE_EXAM_GENERATION_FAILED)
             else:
+                # No completed run yet (nothing answered, or a judge
+                # still inside its budget): a visibility fact.
                 status, cause = (verdicts.STATUS_NOT_TESTABLE,
                                  verdicts.CAUSE_ZERO_EXECUTION)
         rows.append(verdicts.summarize_unit(
@@ -302,7 +315,10 @@ def _serial_of(attempt) -> int:
 def _exam_bare_row(attempts, exam_id: str, *, benchmark: str,
                    phase_label: str) -> AcceptanceReportRow:
     """The exam's bare control row: the judged bare answer as its one
-    run (none yet -> not_testable/zero_execution)."""
+    run. No completed run yet is the zero_execution visibility fact,
+    except a bare answer whose judge budget died -- that is the exam
+    pipeline's terminal failure (exam_generation_failed), never
+    in-flight work."""
     bare = _find_bare(attempts)
     runs: List[Dict[str, Any]] = []
     if bare is not None:
@@ -311,6 +327,11 @@ def _exam_bare_row(attempts, exam_id: str, *, benchmark: str,
                      "basis": basis})
     if runs:
         status, cause = verdicts.STATUS_NORMAL, ""
+    elif any(exam_grading.judge_budget_exhausted(attempt)
+             for attempt in attempts
+             if attempt.purpose == "bare" and attempt.skill_id is None):
+        status, cause = (verdicts.STATUS_NOT_TESTABLE,
+                         verdicts.CAUSE_EXAM_GENERATION_FAILED)
     else:
         status, cause = (verdicts.STATUS_NOT_TESTABLE,
                          verdicts.CAUSE_ZERO_EXECUTION)

@@ -58,6 +58,23 @@ def test_weak_already_knows_is_decisions_one_definition():
     assert verdicts.CAUSE_WEAK_ALREADY_KNOWS == "weak_already_knows"
 
 
+def test_status_and_cause_sets_are_decisions_one_definition():
+    """D1: the status/cause fixed sets are defined ONCE (in decision,
+    where core/contracts.py places them) and re-exported under the
+    acceptance-side names here; the re-exports are pinned by identity so
+    neither module can silently grow a second copy."""
+    assert verdicts.NOT_TESTABLE_CAUSES is decision.NOT_TESTABLE_CAUSES
+    for name in ("CAUSE_LEAK", "CAUSE_INJECTION_OVERFLOW",
+                 "CAUSE_EXAM_GENERATION_FAILED",
+                 "CAUSE_INVALID_REDISPATCH_EXHAUSTED", "CAUSE_ALL_HOLES",
+                 "CAUSE_ZERO_EXECUTION"):
+        assert getattr(verdicts, name) is getattr(decision, name), name
+    assert verdicts.STATUS_NORMAL is decision.ROW_NORMAL
+    assert verdicts.STATUS_NOT_TESTABLE is decision.ROW_NOT_TESTABLE
+    assert (verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
+            is decision.ROW_NOT_RUN_CONTROL_PERFECT)
+
+
 def test_status_cause_for_terminal_covers_todays_terminals():
     assert verdicts.status_cause_for_terminal(
         decision.WEAK_ALREADY_KNOWS) == (
