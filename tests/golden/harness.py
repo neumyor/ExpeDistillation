@@ -4,9 +4,9 @@ multi_method_framework_20261015.md section 7).
 
 What this pins. For every combination of the three mode axes -- acceptance
 {exam, live_run} x delivery {whole_bank, retrieval} x experiment mode
-{full, split} -- the whole pipeline runs over a stub benchmark with
+{full, split} -- the whole phase sequence runs over a stub benchmark with
 FakeClients, and EVERY durable artifact of the run directory is snapshotted:
-the manifest, stage summaries, object stores, ledgers, skill bank,
+the manifest, phase summaries, object stores, ledgers, skill bank,
 injection audit, llm request dumps. A refactor step passes P-0/P-1a only
 if it reproduces these snapshots byte-for-byte (after the volatile-field
 normalisation below).
@@ -32,6 +32,13 @@ the run directory's absolute path is elided from any string;
 documented reader semantics -- a resumed run legitimately appends fresh
 lines). Nothing else may ever differ; a genuine post-crash difference is a
 finding, not noise to hide.
+
+Wave 4 rebuild (the phase world): the harness drives the v4 sequence loop
+(``cli.run_experiment`` -- freeze, then one phase per sequence entry) and
+derives every combo's config through ``upgrade_v3_config`` from the same
+v3 mapping the old harness froze, so the matrix keeps pinning the
+upgrade's own output. The pNN labels the ledger and the ``phases/`` tree
+carry are the semantics module's frozen derivation.
 """
 
 from __future__ import annotations
@@ -53,9 +60,13 @@ from expedistill.benchmarks.base import (
     Task,
     ViewRules,
 )
-from expedistill.core.config import ExperimentConfig, save_config
+from expedistill.cli import run_experiment
+from expedistill.core.config import (
+    ExperimentConfig,
+    save_config,
+    upgrade_v3_config,
+)
 from expedistill.llm.fake import FakeClient, json_script
-from expedistill.stages.pipeline import run_pipeline
 
 #: The stub benchmark name; served through the real import machinery so
 #: every stage resolves it exactly like a checked-in plugin.
@@ -158,8 +169,12 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
     checked-in plugin), and register the stub's task prompt -- the live
     stage renders it into the G10 input, so unlike the unit-test stubs the
     golden matrix's FAKE_TASK must be a real B2 entry (mirrors what every
-    checked-in plugin does). Usable under pytest and standalone."""
+    checked-in plugin does). Also registers the stub benchmark's verdict
+    rule binding (``scorer`` -- the phase world's D phase and report
+    reader judge through the benchmark's default named rule), the same
+    runtime seam the unit suites use. Usable under pytest and standalone."""
     from expedistill.benchmarks.registry import _reset_registry, register_plugin
+    from expedistill.composites import verdicts
     from expedistill.prompts import PROMPTS, PromptSpec
 
     class Loader(importlib.abc.Loader):
@@ -183,6 +198,7 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
         name="FAKE_TASK",
         template="Solve the task: {instruction}\n{skills_block}\n{history}",
         description="golden-matrix stub task prompt")
+    verdicts.BENCHMARK_VERDICT_RULES.setdefault(FAKE_BENCH, "scorer")
     try:
         yield plugin
     finally:
@@ -192,6 +208,7 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
             PROMPTS.pop("FAKE_TASK", None)
         else:
             PROMPTS["FAKE_TASK"] = previous_prompt
+        verdicts.BENCHMARK_VERDICT_RULES.pop(FAKE_BENCH, None)
         _reset_registry()
 
 
@@ -326,7 +343,7 @@ class SimulatedCrash(RuntimeError):
 
     A plain RuntimeError on purpose: no stage retries it and no disposition
     swallows it (only InfrastructureError is retried), so it escapes
-    run_pipeline exactly like a process death, and the harness resumes.
+    run_experiment exactly like a process death, and the harness resumes.
     """
 
 
@@ -363,32 +380,46 @@ class CrashAfter:
 # ---------------------------------------------------------------------------
 
 def write_config(path: Path, combo: Dict[str, str]) -> Path:
-    """Write the combo's experiment config (protocol v2 rule names,
-    live_run at weak depth 2 / exam at depth 1, retrieval's top-1 gate)."""
+    """Write the combo's experiment config: the same v3 mapping the old
+    harness froze (protocol v2 rule names, live_run at weak depth 2 /
+    exam at depth 1, retrieval's top-1 gate, the v3 curation defaults),
+    mapped onto the v4 phase sequence by ``upgrade_v3_config`` -- the
+    matrix pins the upgrade's own output, not a hand-written sequence."""
     acceptance = combo["acceptance"]
-    methods: Dict[str, Dict[str, Any]] = {"segmentation": {"K": 1}}
-    if acceptance == "live_run":
-        methods["acceptance"] = {"name": "live_run", "n_attempts": 2,
-                                 "improvement": "strict_rate_gain"}
-    if combo["delivery"] == "retrieval":
-        methods["delivery"] = {"name": "retrieval", "top_k": 1,
-                              "max_categories": 1, "min_score": 0.02}
-    config = ExperimentConfig(
-        benchmark=FAKE_BENCH,
-        mode=combo["mode"],
-        models={"executor_strong": "strong-model",
-                "executor_weak": "weak-model"},
-        weak_profile="The weak model misses intermediate steps.",
-        n_attempts_strong=1,
-        n_attempts_weak=2 if acceptance == "live_run" else 1,
-        methods=methods,
-        rules={"task_select": "any_weak_failed",
-               "segment_select": "strong_success_weak_failed",
-               "trajectory_select": "strong2_weak2"},
-        token_budgets={"default_max_output_tokens": 65536},
-        split={"train": ["t1"], "test": ["t2"]} if combo["mode"] == "split"
-        else None,
-    )
+    methods: Dict[str, Dict[str, Any]] = {
+        "segmentation": {"K": 1},
+        "authoring": {"exams": True},
+        "acceptance": ({"name": "live_run", "n_attempts": 2,
+                        "improvement": "strict_rate_gain"}
+                       if acceptance == "live_run"
+                       else {"name": "exam"}),
+        # The v3 loader's own defaults for the slots the old harness left
+        # absent (upgrade_v3_config completes them the same way).
+        "curation": {"name": "agentbrew", "token_budget": 4096,
+                     "rounds": 3},
+        "delivery": ({"name": "retrieval", "top_k": 1,
+                      "max_categories": 1, "min_score": 0.02}
+                     if combo["delivery"] == "retrieval"
+                     else {"name": "whole_bank"}),
+    }
+    v3 = {
+        "benchmark": FAKE_BENCH,
+        "mode": combo["mode"],
+        "models": {"executor_strong": "strong-model",
+                   "executor_weak": "weak-model"},
+        "weak_profile": "The weak model misses intermediate steps.",
+        "n_attempts_strong": 1,
+        "n_attempts_weak": 2 if acceptance == "live_run" else 1,
+        "methods": methods,
+        "rules": {"task_select": "any_weak_failed",
+                  "segment_select": "strong_success_weak_failed",
+                  "trajectory_select": "strong2_weak2"},
+        "token_budgets": {"default_max_output_tokens": 65536},
+        "split": ({"train": ["t1"], "test": ["t2"]}
+                  if combo["mode"] == "split" else None),
+        "schema_version": 3,
+    }
+    config = ExperimentConfig.from_dict(upgrade_v3_config(v3))
     save_config(config, str(path))
     return path
 
@@ -398,10 +429,11 @@ def write_config(path: Path, combo: Dict[str, str]) -> Path:
 # ---------------------------------------------------------------------------
 
 def run_straight(config_path: Path, run_dir: Path) -> int:
-    """One uninterrupted pipeline run; returns the model call count."""
+    """One uninterrupted run of the whole phase sequence; returns the
+    model call count."""
     log = _ClientLog()
-    run_pipeline(config_path=Path(config_path), run_dir=Path(run_dir),
-                 make_client=log.make_client)
+    run_experiment(config_path=Path(config_path), run_dir=Path(run_dir),
+                   make_client=log.make_client)
     return log.call_count
 
 
@@ -410,8 +442,8 @@ def run_crash_and_resume(config_path: Path, run_dir: Path,
     """Crash before call ``crash_at``, then resume with the same command."""
     budget = CrashAfter(crash_at)
     try:
-        run_pipeline(config_path=Path(config_path), run_dir=Path(run_dir),
-                     make_client=budget.make_client)
+        run_experiment(config_path=Path(config_path), run_dir=Path(run_dir),
+                       make_client=budget.make_client)
         raise AssertionError(
             f"crash point {crash_at} never fired ({budget.seen} calls seen)")
     except SimulatedCrash:

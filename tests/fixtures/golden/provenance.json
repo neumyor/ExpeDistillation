@@ -1,69 +1,69 @@
 {
-  "base_commit": "7fadee29c62e5542f4a0533da3e53f98e07f3f89",
+  "base_commit": "686121f0c14b8d47961218d2fb7a8e73dca542ab",
   "combos": {
     "exam-retrieval-full": {
       "crash_points": [
-        10,
-        20,
-        32
+        5,
+        11,
+        17
       ],
-      "model_calls": 34
+      "model_calls": 18
     },
     "exam-retrieval-split": {
       "crash_points": [
+        3,
         5,
-        11,
-        17
+        8
       ],
-      "model_calls": 18
+      "model_calls": 9
     },
     "exam-whole_bank-full": {
       "crash_points": [
-        10,
-        20,
-        32
-      ],
-      "model_calls": 34
-    },
-    "exam-whole_bank-split": {
-      "crash_points": [
         5,
         11,
         17
       ],
       "model_calls": 18
     },
+    "exam-whole_bank-split": {
+      "crash_points": [
+        3,
+        5,
+        8
+      ],
+      "model_calls": 9
+    },
     "live_run-retrieval-full": {
       "crash_points": [
-        8,
-        17,
-        27
+        3,
+        6,
+        9
       ],
-      "model_calls": 28
+      "model_calls": 10
     },
     "live_run-retrieval-split": {
       "crash_points": [
-        4,
-        9,
-        14
+        2,
+        3,
+        4
       ],
-      "model_calls": 15
+      "model_calls": 5
     },
     "live_run-whole_bank-full": {
       "crash_points": [
-        8,
-        17,
-        27
+        3,
+        6,
+        9
       ],
-      "model_calls": 28
+      "model_calls": 10
     },
     "live_run-whole_bank-split": {
       "crash_points": [
-        4,
-        9,
-        14
+        2,
+        3,
+        4
       ],
-      "model_calls": 15
+      "model_calls": 5
     }
   },
   "crash_fractions": [
@@ -71,5 +71,5 @@
     0.6,
     0.95
   ],
-  "generated_on": "2026-10-16"
+  "generated_on": "2026-10-17"
 }

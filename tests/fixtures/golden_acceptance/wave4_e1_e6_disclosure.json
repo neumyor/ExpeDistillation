@@ -1,0 +1,2228 @@
+{
+  "archived_baseline_source": "tests/fixtures/golden_semantic_baseline (commit 69904f7)",
+  "combos": {
+    "exam-retrieval-full": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 2 row(s) missing, 0 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 2 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}; E2.leak_verdicts: 2 row(s) missing, 0 extra; first missing: {\"leaked\": false, \"reason\": \"generic advice\", \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"skill_version\": 1}",
+          "passed": false
+        },
+        "E3": {
+          "diff": "E3.retrieval_audit: 2 row(s) missing, 2 extra; first missing: {\"categories\": {\"state inspection\": \"state inspection\"}, \"routed\": [\"state inspection\"], \"scores\": [{\"score\": 0.6028448823562184, \"skill_id\": \"traj/fakebench:t1...; first extra: {\"categories\": {\"state inspection\": \"state inspection\"}, \"routed\": [\"state inspection\"], \"scores\": [{\"score\": 0.6307059974731639, \"skill_id\": \"traj/fakebench:t1...",
+          "passed": false
+        },
+        "E4": {
+          "diff": "E4.calls: 18 row(s) missing, 2 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...",
+          "passed": false
+        },
+        "E6": {
+          "diff": null,
+          "passed": true
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "leak_verdicts": {
+            "extra": [],
+            "missing": [
+              {
+                "leaked": false,
+                "reason": "generic advice",
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "skill_version": 1
+              },
+              {
+                "leaked": false,
+                "reason": "generic advice",
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "skill_version": 1
+              }
+            ]
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E3": {
+          "retrieval_audit": {
+            "extra": [
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6307059974731639,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6307059974731639,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 1
+                  }
+                ],
+                "task_id": "t1",
+                "threshold_passed": true
+              },
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6307059974731639,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6307059974731639,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 1
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ],
+            "missing": [
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6028448823562184,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6028448823562184,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.3645727818975449,
+                    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.3645727818975449,
+                    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 1
+                  }
+                ],
+                "task_id": "t1",
+                "threshold_passed": true
+              },
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6028448823562184,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6028448823562184,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.3645727818975449,
+                    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.3645727818975449,
+                    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 1
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "3662fef13be91d19f46cb76aaf4bdf29c9fba98be4fd589364a52c2d9ef3e3f3",
+              "role": "curator"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "9b57870299eb005b497fe9394a601c30976fdb881121f4982983d9922a9478f9",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "33be60959c6bced3fc83df323893672ce9c9547f65c7997133e45d978152fb4a",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "33be60959c6bced3fc83df323893672ce9c9547f65c7997133e45d978152fb4a",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "cc10a78ee95b7165dc1243fefef988abf5f9174e0cfd2d5e0c79bf29fc8407fd",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "cc10a78ee95b7165dc1243fefef988abf5f9174e0cfd2d5e0c79bf29fc8407fd",
+              "role": "answerer"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "8c2b70bc71baa483817e282f1e4021597affb7048c543acd67743bace6dea66f",
+              "role": "curator"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "5dfe35e6820757d0a4e8491897b2f838c548d9c37680a56ac6c6cce5577863bd",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "5dfe35e6820757d0a4e8491897b2f838c548d9c37680a56ac6c6cce5577863bd",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "cc0b9f78b1447a9b98aec9c065d2d5adb71700b2c4318e770a03a6817726fac9",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "cc0b9f78b1447a9b98aec9c065d2d5adb71700b2c4318e770a03a6817726fac9",
+              "role": "judge"
+            },
+            {
+              "prompt": "LEAK_AUDIT_JUDGE",
+              "request_text_prefix": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected sta",
+              "request_text_sha256": "7e0362cba13275aad3efbcf440a02fbb198413aaf150d8f4678c07ada9f0c6d8",
+              "role": "auditor"
+            },
+            {
+              "prompt": "LEAK_AUDIT_JUDGE",
+              "request_text_prefix": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected sta",
+              "request_text_sha256": "7e0362cba13275aad3efbcf440a02fbb198413aaf150d8f4678c07ada9f0c6d8",
+              "role": "auditor"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t2 (final sta",
+              "request_text_sha256": "6bbcb2d535d73d21d15eea1f5a10ec9b401d89533a2060d2de052fa61070ed67",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "a5d29c1209dace750c34131ee2688b20a3433980d301cf9e737b4c8ba43873eb",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        }
+      }
+    },
+    "exam-retrieval-split": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 2 row(s) missing, 1 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...; first extra: {\"content\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verif...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 1 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}; E2.leak_verdicts: 1 row(s) missing, 0 extra; first missing: {\"leaked\": false, \"reason\": \"generic advice\", \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"skill_version\": 1}",
+          "passed": false
+        },
+        "E3": {
+          "diff": "E3.retrieval_audit: 1 row(s) missing, 1 extra; changed row (task_id='t2'): E3.retrieval_audit.categories.state inspection: only in golden",
+          "passed": false
+        },
+        "E4": {
+          "diff": "E4.calls: 10 row(s) missing, 1 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"SIMILARITY\", \"request_text\": \"You are curating a bank of skills written for a weak model. Find\\nnear-duplicate groups and conflicting pairs in the l...",
+          "passed": false
+        },
+        "E6": {
+          "diff": null,
+          "passed": true
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": null,
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "leak_verdicts": {
+            "extra": [],
+            "missing": [
+              {
+                "leaked": false,
+                "reason": "generic advice",
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "skill_version": 1
+              }
+            ]
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E3": {
+          "retrieval_audit": {
+            "extra": [
+              {
+                "categories": {
+                  "traj/fakebench:t1/strong/00/seg00/skill": "traj/fakebench:t1/strong/00/seg00/skill"
+                },
+                "routed": [
+                  "traj/fakebench:t1/strong/00/seg00/skill"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6307059974731639,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 1
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ],
+            "missing": [
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6079887864466748,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.3894345846047039,
+                    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 1
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "6a5dc760f5c0383fbf54fe13e060e139d0d8140dd5556eaa2553801b83ad8ed8",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "33be60959c6bced3fc83df323893672ce9c9547f65c7997133e45d978152fb4a",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "cc10a78ee95b7165dc1243fefef988abf5f9174e0cfd2d5e0c79bf29fc8407fd",
+              "role": "answerer"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "df5f9fa7722557a78fca0d7423c97e9f226b1b16daec06b19738e731e8dca95c",
+              "role": "curator"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "5dfe35e6820757d0a4e8491897b2f838c548d9c37680a56ac6c6cce5577863bd",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "cc0b9f78b1447a9b98aec9c065d2d5adb71700b2c4318e770a03a6817726fac9",
+              "role": "judge"
+            },
+            {
+              "prompt": "LEAK_AUDIT_JUDGE",
+              "request_text_prefix": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected sta",
+              "request_text_sha256": "7e0362cba13275aad3efbcf440a02fbb198413aaf150d8f4678c07ada9f0c6d8",
+              "role": "auditor"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "5587311af2524e441d7495a13847da8f04de5c3f792021eefe8c8200ac12f408",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        }
+      }
+    },
+    "exam-whole_bank-full": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 2 row(s) missing, 0 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 2 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}; E2.leak_verdicts: 2 row(s) missing, 0 extra; first missing: {\"leaked\": false, \"reason\": \"generic advice\", \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"skill_version\": 1}",
+          "passed": false
+        },
+        "E3": {
+          "diff": null,
+          "passed": true
+        },
+        "E4": {
+          "diff": "E4.calls: 18 row(s) missing, 2 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...",
+          "passed": false
+        },
+        "E6": {
+          "diff": null,
+          "passed": true
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "leak_verdicts": {
+            "extra": [],
+            "missing": [
+              {
+                "leaked": false,
+                "reason": "generic advice",
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "skill_version": 1
+              },
+              {
+                "leaked": false,
+                "reason": "generic advice",
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "skill_version": 1
+              }
+            ]
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "3662fef13be91d19f46cb76aaf4bdf29c9fba98be4fd589364a52c2d9ef3e3f3",
+              "role": "curator"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "9b57870299eb005b497fe9394a601c30976fdb881121f4982983d9922a9478f9",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "33be60959c6bced3fc83df323893672ce9c9547f65c7997133e45d978152fb4a",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "33be60959c6bced3fc83df323893672ce9c9547f65c7997133e45d978152fb4a",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "cc10a78ee95b7165dc1243fefef988abf5f9174e0cfd2d5e0c79bf29fc8407fd",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "cc10a78ee95b7165dc1243fefef988abf5f9174e0cfd2d5e0c79bf29fc8407fd",
+              "role": "answerer"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "8c2b70bc71baa483817e282f1e4021597affb7048c543acd67743bace6dea66f",
+              "role": "curator"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "5dfe35e6820757d0a4e8491897b2f838c548d9c37680a56ac6c6cce5577863bd",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "5dfe35e6820757d0a4e8491897b2f838c548d9c37680a56ac6c6cce5577863bd",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "cc0b9f78b1447a9b98aec9c065d2d5adb71700b2c4318e770a03a6817726fac9",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "cc0b9f78b1447a9b98aec9c065d2d5adb71700b2c4318e770a03a6817726fac9",
+              "role": "judge"
+            },
+            {
+              "prompt": "LEAK_AUDIT_JUDGE",
+              "request_text_prefix": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected sta",
+              "request_text_sha256": "7e0362cba13275aad3efbcf440a02fbb198413aaf150d8f4678c07ada9f0c6d8",
+              "role": "auditor"
+            },
+            {
+              "prompt": "LEAK_AUDIT_JUDGE",
+              "request_text_prefix": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected sta",
+              "request_text_sha256": "7e0362cba13275aad3efbcf440a02fbb198413aaf150d8f4678c07ada9f0c6d8",
+              "role": "auditor"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t2 (final sta",
+              "request_text_sha256": "6bbcb2d535d73d21d15eea1f5a10ec9b401d89533a2060d2de052fa61070ed67",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "a5d29c1209dace750c34131ee2688b20a3433980d301cf9e737b4c8ba43873eb",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        }
+      }
+    },
+    "exam-whole_bank-split": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 2 row(s) missing, 1 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...; first extra: {\"content\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verif...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 1 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}; E2.leak_verdicts: 1 row(s) missing, 0 extra; first missing: {\"leaked\": false, \"reason\": \"generic advice\", \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"skill_version\": 1}",
+          "passed": false
+        },
+        "E3": {
+          "diff": null,
+          "passed": true
+        },
+        "E4": {
+          "diff": "E4.calls: 10 row(s) missing, 1 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"SIMILARITY\", \"request_text\": \"You are curating a bank of skills written for a weak model. Find\\nnear-duplicate groups and conflicting pairs in the l...",
+          "passed": false
+        },
+        "E6": {
+          "diff": null,
+          "passed": true
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": null,
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+              "discard_reason": null,
+              "final_version": 1,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "leak_verdicts": {
+            "extra": [],
+            "missing": [
+              {
+                "leaked": false,
+                "reason": "generic advice",
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "skill_version": 1
+              }
+            ]
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "6a5dc760f5c0383fbf54fe13e060e139d0d8140dd5556eaa2553801b83ad8ed8",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "33be60959c6bced3fc83df323893672ce9c9547f65c7997133e45d978152fb4a",
+              "role": "answerer"
+            },
+            {
+              "prompt": "ANSWER",
+              "request_text_prefix": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anythi",
+              "request_text_sha256": "cc10a78ee95b7165dc1243fefef988abf5f9174e0cfd2d5e0c79bf29fc8407fd",
+              "role": "answerer"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "df5f9fa7722557a78fca0d7423c97e9f226b1b16daec06b19738e731e8dca95c",
+              "role": "curator"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "5dfe35e6820757d0a4e8491897b2f838c548d9c37680a56ac6c6cce5577863bd",
+              "role": "judge"
+            },
+            {
+              "prompt": "JUDGE",
+              "request_text_prefix": "Grade an exam answer.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything el",
+              "request_text_sha256": "cc0b9f78b1447a9b98aec9c065d2d5adb71700b2c4318e770a03a6817726fac9",
+              "role": "judge"
+            },
+            {
+              "prompt": "LEAK_AUDIT_JUDGE",
+              "request_text_prefix": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected sta",
+              "request_text_sha256": "7e0362cba13275aad3efbcf440a02fbb198413aaf150d8f4678c07ada9f0c6d8",
+              "role": "auditor"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "5587311af2524e441d7495a13847da8f04de5c3f792021eefe8c8200ac12f408",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        }
+      }
+    },
+    "live_run-retrieval-full": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 4 row(s) missing, 0 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 4 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}",
+          "passed": false
+        },
+        "E3": {
+          "diff": "E3.retrieval_audit: 2 row(s) missing, 2 extra; first missing: {\"categories\": {\"state inspection\": \"state inspection\"}, \"routed\": [\"state inspection\"], \"scores\": [{\"score\": 0.6099964477843459, \"skill_id\": \"traj/fakebench:t1...; first extra: {\"categories\": {\"state inspection\": \"state inspection\"}, \"routed\": [\"state inspection\"], \"scores\": [{\"score\": 0.6525471301058229, \"skill_id\": \"traj/fakebench:t1...",
+          "passed": false
+        },
+        "E4": {
+          "diff": "E4.calls (live whitelist: fresh must equal the baseline without examiner/EXAM_GEN calls): 16 row(s) missing, 4 extra; first missing: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...; first extra: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...",
+          "passed": false
+        },
+        "E6": {
+          "diff": "E6.attributions (aligned traces: task/round/skill/version; diagnosis, per-skill problem and injection sha are no longer persisted by the W2-B learn ledgers): 4 row(s) missing, 0 extra; first missing: {\"round\": 0, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"task_id\": \"fakebench:t1\", \"version\": 1}",
+          "passed": false
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "groups": {
+            "extra": [],
+            "missing": []
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E3": {
+          "retrieval_audit": {
+            "extra": [
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6525471301058229,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6525471301058229,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 2
+                  }
+                ],
+                "task_id": "t1",
+                "threshold_passed": true
+              },
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6525471301058229,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6525471301058229,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 2
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ],
+            "missing": [
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6099964477843459,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6099964477843459,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t1/weak/01/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t2/weak/01/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 2
+                  }
+                ],
+                "task_id": "t1",
+                "threshold_passed": true
+              },
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6099964477843459,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.6099964477843459,
+                    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t1/weak/01/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.4109253333806067,
+                    "skill_id": "traj/fakebench:t2/weak/01/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 2
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "b032c2e72ccc9dfd89928560f12dbb54352bf142fae371275f176f79258e6382",
+              "role": "curator"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "7005caf60797b531cf238c4121e4aeb74af5d1fde3b81b858c120d8881593594",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "64d9cb88a2984de5f0ec6bd8263f4f8e8fde138207fa49731863c8c3c840fa5b",
+              "role": "author"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "d72727758ab1c1268a3d39d42cc16d49c03d07088c14850e537112972136b3b8",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "fed68bab7bfa0d1577dc016293085613d67c05653d1a3fe27e3377149c3716d1",
+              "role": "curator"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "738c033a4eae550177e81d11e9a6fbc4a73dac82bfd2264903e70014188f9047",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "1a9886ba70ee67d204528dd2d1d3548ec80652f45af5e1e5bd2daad7fe90bee0",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "1660d80f3f3b23ce923157c89044b510676ac8e2e24d8380113d6f31d9fe0e32",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "1660d80f3f3b23ce923157c89044b510676ac8e2e24d8380113d6f31d9fe0e32",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t2 (final sta",
+              "request_text_sha256": "6bbcb2d535d73d21d15eea1f5a10ec9b401d89533a2060d2de052fa61070ed67",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t2 (final sta",
+              "request_text_sha256": "6bbcb2d535d73d21d15eea1f5a10ec9b401d89533a2060d2de052fa61070ed67",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "29914f3752ee90badaccc0717f3c3ccc6ea4d75f12e6028f9ee1f80b3dde7f74",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        },
+        "E6": {
+          "attribution_traces": {
+            "extra": [],
+            "missing": [
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "task_id": "fakebench:t2",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+                "task_id": "fakebench:t2",
+                "version": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    "live_run-retrieval-split": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 3 row(s) missing, 1 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...; first extra: {\"content\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verif...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 2 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}",
+          "passed": false
+        },
+        "E3": {
+          "diff": "E3.retrieval_audit: 1 row(s) missing, 1 extra; changed row (task_id='t2'): E3.retrieval_audit.categories.state inspection: only in golden",
+          "passed": false
+        },
+        "E4": {
+          "diff": "E4.calls (live whitelist: fresh must equal the baseline without examiner/EXAM_GEN calls): 9 row(s) missing, 2 extra; first missing: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...; first extra: {\"prompt\": \"LIVE_RUN_ATTRIBUTION\", \"request_text\": \"You are the attribution step of a live acceptance round. A weak model\\nexecuted the SAME task twice: first b...",
+          "passed": false
+        },
+        "E6": {
+          "diff": "E6.attributions (aligned traces: task/round/skill/version; diagnosis, per-skill problem and injection sha are no longer persisted by the W2-B learn ledgers): 2 row(s) missing, 0 extra; first missing: {\"round\": 0, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"task_id\": \"fakebench:t1\", \"version\": 1}",
+          "passed": false
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": null,
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "groups": {
+            "extra": [],
+            "missing": []
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E3": {
+          "retrieval_audit": {
+            "extra": [
+              {
+                "categories": {
+                  "traj/fakebench:t1/strong/00/seg00/skill": "traj/fakebench:t1/strong/00/seg00/skill"
+                },
+                "routed": [
+                  "traj/fakebench:t1/strong/00/seg00/skill"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6525471301058229,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 2
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ],
+            "missing": [
+              {
+                "categories": {
+                  "state inspection": "state inspection"
+                },
+                "routed": [
+                  "state inspection"
+                ],
+                "scores": [
+                  {
+                    "score": 0.6166122213613178,
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.43000134488187297,
+                    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
+                  },
+                  {
+                    "score": 0.43000134488187297,
+                    "skill_id": "traj/fakebench:t1/weak/01/seg00/skill"
+                  }
+                ],
+                "selected": [
+                  {
+                    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+                    "version": 2
+                  }
+                ],
+                "task_id": "t2",
+                "threshold_passed": true
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "7005caf60797b531cf238c4121e4aeb74af5d1fde3b81b858c120d8881593594",
+              "role": "author"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "f742b2469e035a6e6321637650eb5134679656687114cb06763e37ea58c07e70",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "cdaf739ec7c308c5066a776e130f09a25a5fab3d426e2cb7378ba1e27eb9c6a0",
+              "role": "curator"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "738c033a4eae550177e81d11e9a6fbc4a73dac82bfd2264903e70014188f9047",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "416c7ed27736edd2d99eb0a2fb744c6aae346db9c7314cc5fc852ba892062cc7",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        },
+        "E6": {
+          "attribution_traces": {
+            "extra": [],
+            "missing": [
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    "live_run-whole_bank-full": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 4 row(s) missing, 0 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 4 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}",
+          "passed": false
+        },
+        "E3": {
+          "diff": null,
+          "passed": true
+        },
+        "E4": {
+          "diff": "E4.calls (live whitelist: fresh must equal the baseline without examiner/EXAM_GEN calls): 16 row(s) missing, 4 extra; first missing: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...; first extra: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...",
+          "passed": false
+        },
+        "E6": {
+          "diff": "E6.attributions (aligned traces: task/round/skill/version; diagnosis, per-skill problem and injection sha are no longer persisted by the W2-B learn ledgers): 4 row(s) missing, 0 extra; first missing: {\"round\": 0, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"task_id\": \"fakebench:t1\", \"version\": 1}",
+          "passed": false
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "groups": {
+            "extra": [],
+            "missing": []
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "b032c2e72ccc9dfd89928560f12dbb54352bf142fae371275f176f79258e6382",
+              "role": "curator"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "7005caf60797b531cf238c4121e4aeb74af5d1fde3b81b858c120d8881593594",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "64d9cb88a2984de5f0ec6bd8263f4f8e8fde138207fa49731863c8c3c840fa5b",
+              "role": "author"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "d72727758ab1c1268a3d39d42cc16d49c03d07088c14850e537112972136b3b8",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "fed68bab7bfa0d1577dc016293085613d67c05653d1a3fe27e3377149c3716d1",
+              "role": "curator"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "738c033a4eae550177e81d11e9a6fbc4a73dac82bfd2264903e70014188f9047",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "1a9886ba70ee67d204528dd2d1d3548ec80652f45af5e1e5bd2daad7fe90bee0",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "1660d80f3f3b23ce923157c89044b510676ac8e2e24d8380113d6f31d9fe0e32",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "1660d80f3f3b23ce923157c89044b510676ac8e2e24d8380113d6f31d9fe0e32",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t2 (final sta",
+              "request_text_sha256": "6bbcb2d535d73d21d15eea1f5a10ec9b401d89533a2060d2de052fa61070ed67",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t2 (final sta",
+              "request_text_sha256": "6bbcb2d535d73d21d15eea1f5a10ec9b401d89533a2060d2de052fa61070ed67",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "29914f3752ee90badaccc0717f3c3ccc6ea4d75f12e6028f9ee1f80b3dde7f74",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        },
+        "E6": {
+          "attribution_traces": {
+            "extra": [],
+            "missing": [
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+                "task_id": "fakebench:t2",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+                "task_id": "fakebench:t2",
+                "version": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    "live_run-whole_bank-split": {
+      "criteria": {
+        "E1": {
+          "diff": "E1.bank_rows: 3 row(s) missing, 1 extra; first missing: {\"content\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the ...; first extra: {\"content\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verif...",
+          "passed": false
+        },
+        "E2": {
+          "diff": "E2.terminal_states: 2 row(s) missing, 0 extra; first missing: {\"discard_reason\": null, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"status\": \"accepted\"}",
+          "passed": false
+        },
+        "E3": {
+          "diff": null,
+          "passed": true
+        },
+        "E4": {
+          "diff": "E4.calls (live whitelist: fresh must equal the baseline without examiner/EXAM_GEN calls): 9 row(s) missing, 2 extra; first missing: {\"prompt\": \"GROUP\", \"request_text\": \"You are curating a bank of skills written for a weak model. Assign each\\nskill to exactly one capability group. Each entry ...; first extra: {\"prompt\": \"LIVE_RUN_ATTRIBUTION\", \"request_text\": \"You are the attribution step of a live acceptance round. A weak model\\nexecuted the SAME task twice: first b...",
+          "passed": false
+        },
+        "E6": {
+          "diff": "E6.attributions (aligned traces: task/round/skill/version; diagnosis, per-skill problem and injection sha are no longer persisted by the W2-B learn ledgers): 2 row(s) missing, 0 extra; first missing: {\"round\": 0, \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"task_id\": \"fakebench:t1\", \"version\": 1}",
+          "passed": false
+        }
+      },
+      "full_diffs": {
+        "E1": {
+          "extra": [
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": null,
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ],
+          "missing": [
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+              "status": "accepted"
+            },
+            {
+              "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+              "discard_reason": null,
+              "final_version": 2,
+              "group": "state inspection",
+              "merged_from": [],
+              "rewrite_history": [
+                {
+                  "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+                  "error_category": "wrong_trigger",
+                  "reason": "made the trigger condition concrete"
+                }
+              ],
+              "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+              "status": "accepted"
+            }
+          ]
+        },
+        "E2": {
+          "groups": {
+            "extra": [],
+            "missing": []
+          },
+          "terminal_states": {
+            "extra": [],
+            "missing": [
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "status": "accepted"
+              },
+              {
+                "discard_reason": null,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "status": "accepted"
+              }
+            ]
+          }
+        },
+        "E4": {
+          "extra": [
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "7005caf60797b531cf238c4121e4aeb74af5d1fde3b81b858c120d8881593594",
+              "role": "author"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "f742b2469e035a6e6321637650eb5134679656687114cb06763e37ea58c07e70",
+              "role": "curator"
+            }
+          ],
+          "missing": [
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "EXAM_GEN",
+              "request_text_prefix": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole",
+              "request_text_sha256": "91dc01f65895e786259e75f7e76d9c70d499c8480dec32911170edf007eaaf55",
+              "role": "examiner"
+            },
+            {
+              "prompt": "GROUP",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entr",
+              "request_text_sha256": "cdaf739ec7c308c5066a776e130f09a25a5fab3d426e2cb7378ba1e27eb9c6a0",
+              "role": "curator"
+            },
+            {
+              "prompt": "LIVE_RUN_ATTRIBUTION",
+              "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
+              "request_text_sha256": "738c033a4eae550177e81d11e9a6fbc4a73dac82bfd2264903e70014188f9047",
+              "role": "author"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "LIVE_SKILL_REVISION",
+              "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
+              "request_text_sha256": "d4e09cdb3ba7b58152fff33fec4c358c42c797eb02db434a1c9ca370455e95fa",
+              "role": "rewriter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SEGMENT",
+              "request_text_prefix": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final sta",
+              "request_text_sha256": "0e304412525e503e7f5569f57a8de3257ed26baebd0ea048f41fdba604e0c7ab",
+              "role": "segmenter"
+            },
+            {
+              "prompt": "SIMILARITY",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
+              "request_text_sha256": "416c7ed27736edd2d99eb0a2fb744c6aae346db9c7314cc5fc852ba892062cc7",
+              "role": "curator"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            },
+            {
+              "prompt": "SKILL_DIAGNOSE",
+              "request_text_prefix": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it",
+              "request_text_sha256": "a39250fd0d9b5924be9bb9b63a17f25626a642eef238f7b910c7c057a8e4ca5e",
+              "role": "author"
+            }
+          ]
+        },
+        "E6": {
+          "attribution_traces": {
+            "extra": [],
+            "missing": [
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              },
+              {
+                "round": 0,
+                "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+                "task_id": "fakebench:t1",
+                "version": 1
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "golden_matrix_base_commit": "686121f0c14b8d47961218d2fb7a8e73dca542ab",
+  "root_causes": {
+    "LAYOUT": "The phase-world artifact locations (C summary, per-phase bank, A-phase generation failures, learn ledgers) are aligned onto the canonical names by v4_layout -- the alignment itself is the disclosure; these paths never reach the comparators.",
+    "R6_STRONG_ONLY_ADD_PATH": "Repair plan R6 (docs/decisions/execute_learn_repair_plan_20261016.md): the add path's evidence is the D phase's STRONG trajectories only -- the weak arm's diagnose skills of the 69904f7 world have no phase-world producer, so the bank is smaller and everything derived from it differs (E1/E2 rows, leak verdicts, retrieval categories, every E4 call embedding a skills listing, the G10/G11 work per group, the injection token counts).",
+    "R8_EXAM_GENERATION_IN_A": "The R8 ruling moved exam generation into the A phase; the live sequence has no A phase, so its EXAM_GEN calls are gone (whitelist 1, pre-registered).",
+    "R9_LABELS": "R9's pNN phase labels: control_source is '<phase>_reuse' (D_reuse) where the stage world wrote 'stage1_reuse'; the alias table canonicalises both.",
+    "W2B_LEARN_LEDGERS": "W2-B replaced attributions.jsonl with the learn phase's task_list/revisions/outcomes ledgers; E6 compares the aligned (task, round, skill, version) traces, and the fields the ledgers no longer persist are disclosed at the comparator."
+  },
+  "what": "Wave 4 golden regeneration: the E1-E6 semantic comparison of the phase world's regenerated golden matrix against the archived 69904f7 baseline bundle. Red criteria are DISCLOSED differences with their complete enumerations; the standing test pins this file byte for byte, so any drift beyond (or a regression of) the disclosed set fails the suite."
+}

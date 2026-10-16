@@ -14,56 +14,6 @@
           "end": 1,
           "label": "whole",
           "start": 0,
-          "success": false
-        }
-      ],
-      "prompt_name": "SEGMENT",
-      "request_id": "<request_id>",
-      "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
-      "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": false}]\n```",
-      "role": "segmenter",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": [
-        {
-          "description": "do the whole task",
-          "end": 1,
-          "label": "whole",
-          "start": 0,
-          "success": false
-        }
-      ],
-      "prompt_name": "SEGMENT",
-      "request_id": "<request_id>",
-      "request_text": "You are given the view of one agent trajectory below. Split it into subtasks.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nEach subtask is one semantically coherent unit of behavior: the complete process\nof achieving one goal (for example, \"authenticate with a service\"). Split the\ntrajectory into at most 1 such subtasks.\n\nRules:\n- The subtasks must cover the whole trajectory in order, without gaps and without\n  overlaps: the first subtask starts at step 0, the last one ends at the final\n  step, and consecutive subtasks touch (the end index of one is the start index\n  of the next; end indices are exclusive).\n- Use at most 1 subtasks, and every subtask must contain at least one step.\n- Do not restate the content of the steps. Describe each subtask at the level of\n  what it is trying to achieve, so the step content and the segment description\n  stay separate.\n- \"success\" says whether that subtask's own goal was achieved by the end of the\n  segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per subtask in order, with exactly these\nfields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short name, a few words>\",\n    \"description\": \"<one or two sentences: what this segment is doing>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
-      "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": false}]\n```",
-      "role": "segmenter",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": [
-        {
-          "description": "do the whole task",
-          "end": 1,
-          "label": "whole",
-          "start": 0,
           "success": true
         }
       ],
@@ -89,7 +39,7 @@
       },
       "prompt_name": "SIMILARITY",
       "request_id": "<request_id>",
-      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the listing below. Each entry\nstarts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/00/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/01/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n\n- similar_groups: groups of skills that teach the same thing (same advice, same\n  trigger conditions). Group only skills that could be merged into one skill;\n  every group has at least two skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n\nOnly group or pair skills of the same kind: procedure skills (whose content\ncontains the '[When to use]' section header) with procedure skills, failure\nreferences (whose content contains the '[Trigger]' section header) with\nfailure references -- in similar_groups AND in conflicts.\n\nJudge by literal meaning, not surface wording: skills about the same behavior\nwith different examples still belong to one group. Do not force anything:\nreturn empty lists when there is nothing to merge and no conflicts.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...]}\n",
+      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the listing below. Each entry\nstarts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.\n\n- similar_groups: groups of skills that teach the same thing (same advice, same\n  trigger conditions). Group only skills that could be merged into one skill;\n  every group has at least two skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n\nOnly group or pair skills of the same kind: procedure skills (whose content\ncontains the '[When to use]' section header) with procedure skills, failure\nreferences (whose content contains the '[Trigger]' section header) with\nfailure references -- in similar_groups AND in conflicts.\n\nJudge by literal meaning, not surface wording: skills about the same behavior\nwith different examples still belong to one group. Do not force anything:\nreturn empty lists when there is nothing to merge and no conflicts.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...]}\n",
       "response_text": "```json\n{\"similar_groups\": [], \"conflicts\": []}\n```",
       "role": "curator",
       "status": "ok",
@@ -110,116 +60,14 @@
             "action": "revise",
             "problem": "the trigger condition is too vague to recognize during real execution",
             "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
-          },
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
-          },
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t1/weak/01/seg00/skill"
           }
         ]
       },
       "prompt_name": "LIVE_RUN_ATTRIBUTION",
       "request_id": "<request_id>",
-      "request_text": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the baseline), then with a group of\nskills injected into its execution prompt. The run with skills did NOT do\nbetter than the baseline. Diagnose why, and decide what happens to each\nskill.\n\nTASK (the execution prompt the weak model actually saw):\nSolve the task: inspect the reported state of the service for task one\n\n\n\nBASELINE (the weak model's bare attempts at the same task, one status line\nper attempt):\nattempt 0: failure\nattempt 1: failure\n\nRUN WITH SKILLS (every attempt of this round, successful and failed ones\nalike):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nSKILLS (the group that was injected; each skill's id, then its full text):\nskill_id: traj/fakebench:t1/strong/00/seg00/skill\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nskill_id: traj/fakebench:t1/weak/00/seg00/skill\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nskill_id: traj/fakebench:t1/weak/01/seg00/skill\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nTHE MODEL THAT EXECUTED THE TASK (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Diagnose. Compare the baseline with the run-with-skills and say why the\n   real execution did not get better. 1 to 3 sentences, concrete: name the\n   skill that misfired or went unused, what the weak model did instead, and\n   where the injected text changed its behavior for the worse. Do not\n   restate the attempt counts; say what actually happened.\n\n2. Decide, per skill. Emit exactly one action for EVERY skill in the group,\n   each skill exactly once, identified by its skill_id exactly as listed:\n   - \"keep\": the skill is not part of the problem.\n   - \"revise\": the skill is part of the problem and fixable. The problem\n     must be concrete and about the skill AS WRITTEN: a trigger the weak\n     model cannot recognize during real execution, a step it cannot carry\n     out, an ordering that misleads it, a case the skill leaves uncovered.\n   - \"delete\": the skill is harmful or useless in this group. The problem\n     must say why, concretely.\n\n   Revision discipline, binding on every \"revise\" problem: the fix must be\n   phrased as a TRANSFERABLE skill -- general patterns and command forms\n   with generic placeholders (for example <config-file>, <port>), never\n   this task's file names, concrete values, or entity names. Every library\n   skill is retrieved and injected into OTHER tasks, where this task's\n   specifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"diagnosis\": \"<1 to 3 sentences: why the real execution did not get better>\",\n  \"skill_actions\": [\n    {\"skill_id\": \"<the skill's id, exactly as listed>\",\n      \"action\": \"<keep|revise|delete>\",\n      \"problem\": \"<empty string for keep; for revise/delete the concrete\n      problem, phrased transferably>\"}\n  ]}\n",
-      "response_text": "```json\n{\"diagnosis\": \"the skill's trigger is too vague to recognize\", \"skill_actions\": [{\"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}, {\"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}, {\"skill_id\": \"traj/fakebench:t1/weak/01/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}]}\n```",
+      "request_text": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the baseline), then with a group of\nskills injected into its execution prompt. The run with skills did NOT do\nbetter than the baseline. Diagnose why, and decide what happens to each\nskill.\n\nTASK (the execution prompt the weak model actually saw):\nSolve the task: inspect the reported state of the service for task one\n\n\n\nBASELINE (the weak model's bare attempts at the same task, one status line\nper attempt):\nattempt 0: failure\nattempt 1: failure\n\nRUN WITH SKILLS (every attempt of this round, successful and failed ones\nalike):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nSKILLS (the group that was injected; each skill's id, then its full text):\nskill_id: traj/fakebench:t1/strong/00/seg00/skill\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nTHE MODEL THAT EXECUTED THE TASK (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Diagnose. Compare the baseline with the run-with-skills and say why the\n   real execution did not get better. 1 to 3 sentences, concrete: name the\n   skill that misfired or went unused, what the weak model did instead, and\n   where the injected text changed its behavior for the worse. Do not\n   restate the attempt counts; say what actually happened.\n\n2. Decide, per skill. Emit exactly one action for EVERY skill in the group,\n   each skill exactly once, identified by its skill_id exactly as listed:\n   - \"keep\": the skill is not part of the problem.\n   - \"revise\": the skill is part of the problem and fixable. The problem\n     must be concrete and about the skill AS WRITTEN: a trigger the weak\n     model cannot recognize during real execution, a step it cannot carry\n     out, an ordering that misleads it, a case the skill leaves uncovered.\n   - \"delete\": the skill is harmful or useless in this group. The problem\n     must say why, concretely.\n\n   Revision discipline, binding on every \"revise\" problem: the fix must be\n   phrased as a TRANSFERABLE skill -- general patterns and command forms\n   with generic placeholders (for example <config-file>, <port>), never\n   this task's file names, concrete values, or entity names. Every library\n   skill is retrieved and injected into OTHER tasks, where this task's\n   specifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"diagnosis\": \"<1 to 3 sentences: why the real execution did not get better>\",\n  \"skill_actions\": [\n    {\"skill_id\": \"<the skill's id, exactly as listed>\",\n      \"action\": \"<keep|revise|delete>\",\n      \"problem\": \"<empty string for keep; for revise/delete the concrete\n      problem, phrased transferably>\"}\n  ]}\n",
+      "response_text": "```json\n{\"diagnosis\": \"the skill's trigger is too vague to recognize\", \"skill_actions\": [{\"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}]}\n```",
       "role": "author",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "do_instead": [
-          "inspect the reported state",
-          "run the command that matches the state"
-        ],
-        "not_applicable_when": "the state was already inspected",
-        "trigger": "acting on a report without inspecting it first",
-        "why_it_fails": "the action does not match the actual state."
-      },
-      "prompt_name": "SKILL_DIAGNOSE",
-      "request_id": "<request_id>",
-      "request_text": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it went wrong. The weak model will\nread it to recognize the same kind of mistake and avoid it.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING (context summary):\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in three passes:\n1. Diagnose: find where the weak model started going wrong -- which step or\n   decision, and what kind of mistake it made there (a wrong command, a\n   skipped check, a misread observation, a repeated failing action, ...).\n   Name the missing capability at the weak model's level, not a vague\n   \"logical error\".\n2. Adapt: read the weak model profile. It is the capability boundary of your\n   reader: every corrective step must be an action this exact model can carry\n   out as written -- vocabulary it knows, tool syntax it handles, one action\n   per step. Where the profile names a weakness that caused or worsened this\n   failure, the fix must guard against it.\n3. Write the reference in four sections:\n   - trigger: the failure signature -- what the weak model is doing when this\n     mistake is happening. Concrete and observable, phrased so the model can\n     recognize it in its own behavior.\n   - why_it_fails: one or two sentences: what goes wrong and why.\n   - do_instead: an ordered checklist of concrete actions, the correct\n     procedure for this kind of subtask. One action per item, imperative\n     voice, WITHOUT its own numbering; the exact command FORM with generic\n     placeholders where the subtask shows one.\n   - not_applicable_when: when this reference does NOT apply.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the reference must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"trigger\": \"<one or two sentences>\",\n  \"why_it_fails\": \"<one or two sentences>\",\n  \"do_instead\": [\"<one action>\", \"<one action>\", ...],\n  \"not_applicable_when\": \"<one sentence>\"}\n",
-      "response_text": "```json\n{\"trigger\": \"acting on a report without inspecting it first\", \"why_it_fails\": \"the action does not match the actual state.\", \"do_instead\": [\"inspect the reported state\", \"run the command that matches the state\"], \"not_applicable_when\": \"the state was already inspected\"}\n```",
-      "role": "author",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "do_instead": [
-          "inspect the reported state",
-          "run the command that matches the state"
-        ],
-        "not_applicable_when": "the state was already inspected",
-        "trigger": "acting on a report without inspecting it first",
-        "why_it_fails": "the action does not match the actual state."
-      },
-      "prompt_name": "SKILL_DIAGNOSE",
-      "request_id": "<request_id>",
-      "request_text": "You are writing a failure reference for a weaker model, based on ONE subtask\nof the weak model's own trajectory where it went wrong. The weak model will\nread it to recognize the same kind of mistake and avoid it.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING (context summary):\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in three passes:\n1. Diagnose: find where the weak model started going wrong -- which step or\n   decision, and what kind of mistake it made there (a wrong command, a\n   skipped check, a misread observation, a repeated failing action, ...).\n   Name the missing capability at the weak model's level, not a vague\n   \"logical error\".\n2. Adapt: read the weak model profile. It is the capability boundary of your\n   reader: every corrective step must be an action this exact model can carry\n   out as written -- vocabulary it knows, tool syntax it handles, one action\n   per step. Where the profile names a weakness that caused or worsened this\n   failure, the fix must guard against it.\n3. Write the reference in four sections:\n   - trigger: the failure signature -- what the weak model is doing when this\n     mistake is happening. Concrete and observable, phrased so the model can\n     recognize it in its own behavior.\n   - why_it_fails: one or two sentences: what goes wrong and why.\n   - do_instead: an ordered checklist of concrete actions, the correct\n     procedure for this kind of subtask. One action per item, imperative\n     voice, WITHOUT its own numbering; the exact command FORM with generic\n     placeholders where the subtask shows one.\n   - not_applicable_when: when this reference does NOT apply.\n\nWriting discipline:\n- short, simple sentences; one instruction per sentence;\n- imperative and concrete. Banned phrases the weak model cannot\n  operationalize: \"deeply understand\", \"deeply analyze\", \"carefully\n  consider\", \"be aware of\", \"make sure\", \"keep in mind\". Write the action to\n  take instead of any of them;\n- no references to this specific task, its file names, or its concrete\n  values: the reference must transfer to other tasks of the same kind.\n\nOutput ONLY JSON with exactly these fields:\n{\"trigger\": \"<one or two sentences>\",\n  \"why_it_fails\": \"<one or two sentences>\",\n  \"do_instead\": [\"<one action>\", \"<one action>\", ...],\n  \"not_applicable_when\": \"<one sentence>\"}\n",
-      "response_text": "```json\n{\"trigger\": \"acting on a report without inspecting it first\", \"why_it_fails\": \"the action does not match the actual state.\", \"do_instead\": [\"inspect the reported state\", \"run the command that matches the state\"], \"not_applicable_when\": \"the state was already inspected\"}\n```",
-      "role": "author",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "failure_category": "wrong_trigger",
-        "revision_reason": "made the trigger condition concrete",
-        "skill_text": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting."
-      },
-      "prompt_name": "LIVE_SKILL_REVISION",
-      "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite the skill.\n\nSKILL (current version):\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Rewrite the skill to fix the classified problem and the attribution\n   report. Change the wording, granularity, or trigger conditions of the\n   skill -- not its underlying idea. The rewritten skill must keep the same\n   four bracket sections as the original skill ([When to use]/[Steps]/\n   [Verify]/[Do not use when] for a procedure skill, [Trigger]/\n   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):\n   rewrite each section's content, never collapse them into prose.\n   Reproduce the bracketed section headers exactly as written, each on its\n   own line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders (for example <config-file>, <port>). Library\nskills are retrieved and injected into OTHER tasks, where this task's\nspecifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why>\"}\n",
-      "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\"}\n```",
-      "role": "rewriter",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "failure_category": "wrong_trigger",
-        "revision_reason": "made the trigger condition concrete",
-        "skill_text": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting."
-      },
-      "prompt_name": "LIVE_SKILL_REVISION",
-      "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite the skill.\n\nSKILL (current version):\n[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nTHE MODEL THAT WILL READ THE SKILL (weak model profile):\nThe weak model misses intermediate steps.\n\nWork in two steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Rewrite the skill to fix the classified problem and the attribution\n   report. Change the wording, granularity, or trigger conditions of the\n   skill -- not its underlying idea. The rewritten skill must keep the same\n   four bracket sections as the original skill ([When to use]/[Steps]/\n   [Verify]/[Do not use when] for a procedure skill, [Trigger]/\n   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):\n   rewrite each section's content, never collapse them into prose.\n   Reproduce the bracketed section headers exactly as written, each on its\n   own line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders (for example <config-file>, <port>). Library\nskills are retrieved and injected into OTHER tasks, where this task's\nspecifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why>\"}\n",
-      "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[Trigger] acting on a report without inspecting it first\\n[Why it fails] the action does not match the actual state.\\n[Do instead]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\"}\n```",
-      "role": "rewriter",
       "status": "ok",
       "system": "You are a helpful assistant. Follow the instructions exactly."
     },
@@ -253,29 +101,6 @@
       "model": "strong-model",
       "out_tokens": null,
       "parsed": {
-        "groups": {
-          "traj/fakebench:t1/strong/00/seg00/skill": "state inspection",
-          "traj/fakebench:t1/weak/00/seg00/skill": "state inspection",
-          "traj/fakebench:t1/weak/01/seg00/skill": "state inspection"
-        }
-      },
-      "prompt_name": "GROUP",
-      "request_id": "<request_id>",
-      "request_text": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/00/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n- traj/fakebench:t1/weak/01/seg00/skill: [Trigger] acting on a report without inspecting it first [Why it fails] the action does not match the actual state. [Do instead] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected REVISED-BY-G11: name the concrete state before acting.\n\nGroup by WHAT KIND of ability the skill teaches, not by where it came from. Use\nshort, consistent group names (two to four words, for example \"file inspection\"\nor \"error recovery\"), and reuse the same name for skills of the same capability.\nEvery skill id in the listing must appear exactly once.\n\nOutput ONLY JSON with exactly these fields:\n{\"groups\": {\"skill_id\": \"<group_name>\", ...}}\n",
-      "response_text": "```json\n{\"groups\": {\"traj/fakebench:t1/strong/00/seg00/skill\": \"state inspection\", \"traj/fakebench:t1/weak/00/seg00/skill\": \"state inspection\", \"traj/fakebench:t1/weak/01/seg00/skill\": \"state inspection\"}}\n```",
-      "role": "curator",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
         "not_applicable_when": "no state was reported",
         "steps": [
           "inspect the reported state",
@@ -291,185 +116,13 @@
       "role": "author",
       "status": "ok",
       "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
-        "reference_answer": "Inspect the reported state first, then take the matching corrective action."
-      },
-      "prompt_name": "EXAM_GEN",
-      "request_id": "<request_id>",
-      "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
-      "response_text": "```json\n{\"question_text\": \"A service reports an unexpected state and stops. What should be done before anything else, and why?\", \"reference_answer\": \"Inspect the reported state first, then take the matching corrective action.\"}\n```",
-      "role": "examiner",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
-        "reference_answer": "Inspect the reported state first, then take the matching corrective action."
-      },
-      "prompt_name": "EXAM_GEN",
-      "request_id": "<request_id>",
-      "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
-      "response_text": "```json\n{\"question_text\": \"A service reports an unexpected state and stops. What should be done before anything else, and why?\", \"reference_answer\": \"Inspect the reported state first, then take the matching corrective action.\"}\n```",
-      "role": "examiner",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
-        "reference_answer": "Inspect the reported state first, then take the matching corrective action."
-      },
-      "prompt_name": "EXAM_GEN",
-      "request_id": "<request_id>",
-      "request_text": "Write one exam question that tests whether a model has the ability exercised\nby the subtask below.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nThe exam is a TEXT question answering exam: present a situation (for example, an\nobservation a model might face, or a description of a state), and ask what should\nbe done and why.\n\nRequirements:\n- The question must test the ABILITY this subtask exercised, not the original\n  task itself. Change the surface details (a different setting, different\n  concrete objects, different names) so that remembering the subtask's steps is\n  not enough to answer and the answer cannot be memorized.\n- The situation must be self-contained: a reader who has never seen the subtask\n  can understand and answer the question.\n- Do not mention that this question comes from a trajectory, a subtask, or an\n  exam generation process.\n\nOutput ONLY JSON with exactly these fields:\n{\"question_text\": \"<the situation and the question, self-contained>\",\n  \"reference_answer\": \"<what should be done and why; a grading reference that is\n  never shown to the model being examined>\"}\n",
-      "response_text": "```json\n{\"question_text\": \"A service reports an unexpected state and stops. What should be done before anything else, and why?\", \"reference_answer\": \"Inspect the reported state first, then take the matching corrective action.\"}\n```",
-      "role": "examiner",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
     }
   ],
   "llm_requests/usage.jsonl": [
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 313,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "EXAM_GEN",
-      "request_id": "<request_id>",
-      "role": "examiner",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 313,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "EXAM_GEN",
-      "request_id": "<request_id>",
-      "role": "examiner",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 313,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "EXAM_GEN",
-      "request_id": "<request_id>",
-      "role": "examiner",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 388,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 388,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 388,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 406,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "GROUP",
-      "request_id": "<request_id>",
-      "role": "curator",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 561,
+        "estimated_in": 387,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -485,6 +138,22 @@
     {
       "in_tokens": null,
       "meta": {
+        "estimated_in": 388,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
         "estimated_in": 601,
         "finish_reason": null,
         "format_retries": 0,
@@ -493,38 +162,6 @@
       "model": "strong-model",
       "out_tokens": null,
       "prompt": "SKILL_DISTILL",
-      "request_id": "<request_id>",
-      "role": "author",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 646,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_DIAGNOSE",
-      "request_id": "<request_id>",
-      "role": "author",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 646,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_DIAGNOSE",
       "request_id": "<request_id>",
       "role": "author",
       "status": "ok",
@@ -549,39 +186,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 690,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "LIVE_SKILL_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 690,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "LIVE_SKILL_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 919,
+        "estimated_in": 769,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -603,30 +208,7 @@
     "benchmark": "fakebench",
     "config": {
       "benchmark": "fakebench",
-      "methods": {
-        "acceptance": {
-          "improvement": "strict_rate_gain",
-          "n_attempts": 2,
-          "name": "live_run"
-        },
-        "authoring": {
-          "exams": true
-        },
-        "curation": {
-          "name": "agentbrew",
-          "rounds": 3,
-          "token_budget": 4096
-        },
-        "delivery": {
-          "max_categories": 1,
-          "min_score": 0.02,
-          "name": "retrieval",
-          "top_k": 1
-        },
-        "segmentation": {
-          "K": 1
-        }
-      },
+      "invalid_redispatch_limit": 1,
       "mode": "split",
       "model_options": {},
       "models": {
@@ -643,6 +225,80 @@
       },
       "n_attempts_strong": 1,
       "n_attempts_weak": 2,
+      "phases": {
+        "B": {
+          "acceptance": null,
+          "compare": {
+            "against": "D",
+            "rule": "strict_rate_gain"
+          },
+          "delivery": {
+            "name": "group_by_task"
+          },
+          "execution": {
+            "max_injection_tokens": null,
+            "n_attempts": 2,
+            "name": "real"
+          },
+          "kind": "execute",
+          "role": "live",
+          "tasks": "train"
+        },
+        "C": {
+          "acceptance": null,
+          "compare": {
+            "against": "fresh_bare",
+            "rule": null
+          },
+          "delivery": {
+            "max_categories": 1,
+            "min_score": 0.02,
+            "name": "retrieval",
+            "top_k": 1
+          },
+          "execution": {
+            "name": "real"
+          },
+          "kind": "execute",
+          "role": "test",
+          "tasks": "test"
+        },
+        "D": {
+          "acceptance": null,
+          "compare": null,
+          "delivery": {
+            "name": "none"
+          },
+          "execution": {
+            "arms": [
+              "executor_strong",
+              "executor_weak"
+            ],
+            "name": "real"
+          },
+          "kind": "execute",
+          "role": "baseline",
+          "tasks": "train"
+        },
+        "L": {
+          "author": {
+            "name": "distill_diagnose"
+          },
+          "curate": {
+            "merge_check": "none",
+            "name": "agentbrew",
+            "rounds": 3,
+            "token_budget": 4096
+          },
+          "evidence": {
+            "K": 1,
+            "name": "segment",
+            "retry_limit": 2
+          },
+          "kind": "learn",
+          "role": "learn"
+        }
+      },
       "prompts_digests": {
         "ANSWER": "35bc0de88ed2152f1605c01da693cddf976733995950f10919dd146bc6113f42",
         "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
@@ -666,7 +322,16 @@
         "task_select": "any_weak_failed",
         "trajectory_select": "strong2_weak2"
       },
-      "schema_version": 3,
+      "schema_version": 4,
+      "sequence": [
+        "D",
+        "L",
+        "B",
+        "L",
+        "B",
+        "L",
+        "C"
+      ],
       "split": {
         "test": [
           "t2"
@@ -728,214 +393,485 @@
     },
     "tasks_digest": "acc365b23957040e3bcf2982fdd1e0ee48767f5f65259e071af281aca036fec3"
   },
-  "pipeline_log.jsonl": [
+  "phases/p01_D/acceptance_report.jsonl": [
     {
-      "stage": "stage0_freeze",
-      "summary": {
-        "reserved": [],
-        "tasks": 2,
-        "test": [
-          "t2"
-        ],
-        "train": [
-          "t1"
+      "artifacts": {
+        "trajectory_ids": [
+          "traj/fakebench:t1/strong/00"
         ]
-      }
-    },
-    {
-      "stage": "stage1_baseline",
-      "summary": {
-        "F": [
-          "fakebench:t1"
-        ],
-        "complete": true,
-        "infra_accepted": [],
-        "infra_missing": [],
-        "infra_shortfall_accepted": false,
-        "infra_shortfalls": [],
-        "strong": {
-          "metrics": {
-            "fakebench:t1": {
-              "attempts": 1,
-              "infra": 0,
-              "success": 1,
-              "valid": 1
-            }
-          },
-          "summary": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "infra_tasks": [],
-            "pass_at_n": 1.0,
-            "tasks": 1
-          }
-        },
-        "weak": {
-          "metrics": {
-            "fakebench:t1": {
-              "attempts": 2,
-              "infra": 0,
-              "success": 0,
-              "valid": 2
-            }
-          },
-          "summary": {
-            "aux": null,
-            "avg_at_n": 0.0,
-            "avg_at_n_conservative": 0.0,
-            "infra_tasks": [],
-            "pass_at_n": 0.0,
-            "tasks": 1
-          }
+      },
+      "cause": "",
+      "injected_skills": null,
+      "phase_label": "p01:D",
+      "role": "strong",
+      "runs": [
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/strong/00",
+          "verdict": "success"
         }
-      }
+      ],
+      "status": "normal",
+      "success_count": 1,
+      "unit_id": "p01:D:fakebench:fakebench:t1:strong:140bedbf",
+      "valid_count": 1
     },
     {
-      "stage": "stage2_segmentation",
-      "summary": {
-        "empty_skipped": [],
-        "infra_failed": [],
-        "segmented": 3,
-        "skipped": 0,
-        "total_subtasks": 3
-      }
-    },
-    {
-      "stage": "stage3_generation",
-      "summary": {
-        "exam_missing_advanced": [],
-        "generated": [
-          "traj/fakebench:t1/strong/00/seg00",
-          "traj/fakebench:t1/weak/00/seg00",
-          "traj/fakebench:t1/weak/01/seg00"
-        ],
-        "infra_failed": [],
-        "model_output_failed": [],
-        "selected": [
-          "traj/fakebench:t1/strong/00/seg00",
-          "traj/fakebench:t1/weak/00/seg00",
-          "traj/fakebench:t1/weak/01/seg00"
+      "artifacts": {
+        "trajectory_ids": [
+          "traj/fakebench:t1/weak/00",
+          "traj/fakebench:t1/weak/01"
         ]
-      }
-    },
-    {
-      "stage": "stage4_acceptance",
-      "summary": {
-        "accepted": 3,
-        "discarded": {},
-        "group_details": {
-          "fakebench:t1": {
-            "discard_reasons": {},
-            "outcome": "accepted",
-            "round0": {
-              "aux": null,
-              "baseline": {
-                "success": 0,
-                "valid": 2
-              },
-              "better": false,
-              "injection_tokens": 186,
-              "judged_with_shortfall": false,
-              "live": {
-                "success": 0,
-                "valid": 2
-              },
-              "verdict": null
-            },
-            "round1": {
-              "aux": null,
-              "baseline": {
-                "success": 0,
-                "valid": 2
-              },
-              "better": true,
-              "injection_tokens": 228,
-              "judged_with_shortfall": false,
-              "live": {
-                "success": 2,
-                "valid": 2
-              },
-              "verdict": null
-            }
-          }
+      },
+      "cause": "",
+      "injected_skills": null,
+      "phase_label": "p01:D",
+      "role": "weak",
+      "runs": [
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/weak/00",
+          "verdict": "failure"
         },
-        "improvement_rule": "strict_rate_gain",
-        "infra_accepted": {
-          "round00": [],
-          "round01": []
-        },
-        "infra_failed": [],
-        "infra_missing": {
-          "round00": [],
-          "round01": []
-        },
-        "infra_shortfall_accepted": false,
-        "mode": "live_run",
-        "processed_this_call": "<processed_this_call>"
-      }
-    },
-    {
-      "stage": "stage5_curation",
-      "summary": {
-        "bank_reference": "bank:385c6a81122e",
-        "members": [
-          "traj/fakebench:t1/strong/00/seg00/skill",
-          "traj/fakebench:t1/weak/00/seg00/skill",
-          "traj/fakebench:t1/weak/01/seg00/skill"
-        ],
-        "size": 3
-      }
-    },
-    {
-      "stage": "stage6_test",
-      "summary": {
-        "bank_reference": "bank:385c6a81122e",
-        "complete": true,
-        "control": {
-          "aux": null,
-          "avg_at_n": 0.0,
-          "avg_at_n_conservative": 0.0,
-          "infra_tasks": [],
-          "pass_at_n": 0.0,
-          "tasks": 1
-        },
-        "control_source": "fresh_bare_run",
-        "delta": {
-          "aux": null,
-          "avg_at_n": 1.0,
-          "avg_at_n_conservative": 1.0,
-          "pass_at_n": 1.0
-        },
-        "infra_accepted": {
-          "control": [],
-          "with_bank": []
-        },
-        "infra_missing": {
-          "control": [],
-          "with_bank": []
-        },
-        "infra_shortfall_accepted": false,
-        "mode": "split",
-        "with_bank": {
-          "aux": null,
-          "avg_at_n": 1.0,
-          "avg_at_n_conservative": 1.0,
-          "infra_tasks": [],
-          "pass_at_n": 1.0,
-          "tasks": 1
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/weak/01",
+          "verdict": "failure"
         }
-      }
+      ],
+      "status": "normal",
+      "success_count": 0,
+      "unit_id": "p01:D:fakebench:fakebench:t1:weak:140bedbf",
+      "valid_count": 2
     }
   ],
-  "pipeline_log.jsonl.lock": {
+  "phases/p01_D/phase.json": {
+    "index": 0,
+    "label": "p01:D",
+    "name": "D",
+    "role": "baseline"
+  },
+  "phases/p01_D/phase_summary.json": {
+    "complete": true,
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "infra_shortfalls": [],
+    "report_rows": 2,
+    "role": "baseline",
+    "strong": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "infra_tasks": [],
+      "pass_at_n": 1.0,
+      "tasks": 1
+    },
+    "weak": {
+      "aux": null,
+      "avg_at_n": 0.0,
+      "avg_at_n_conservative": 0.0,
+      "infra_tasks": [],
+      "pass_at_n": 0.0,
+      "tasks": 1
+    }
+  },
+  "phases/p01_D/strong/redispatch.json": {
+    "p01:D:fakebench:fakebench:t1:strong:140bedbf": {
+      "passes": 0
+    }
+  },
+  "phases/p01_D/units.jsonl": [
+    {
+      "aux": {},
+      "skills_block": "",
+      "skills_injected": null,
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:D:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    {
+      "aux": {},
+      "skills_block": "",
+      "skills_injected": null,
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:D:fakebench:fakebench:t1:weak:140bedbf"
+    }
+  ],
+  "phases/p01_D/weak/redispatch.json": {
+    "p01:D:fakebench:fakebench:t1:weak:140bedbf": {
+      "passes": 0
+    }
+  },
+  "phases/p02_L/bank_summary.json": {
+    "bank_reference": "bank:5574d0e60e26",
+    "members": [
+      "traj/fakebench:t1/strong/00/seg00/skill"
+    ],
+    "size": 1
+  },
+  "phases/p02_L/learn_summary.json": {
+    "bank": {
+      "bank_reference": "bank:5574d0e60e26",
+      "members": [
+        "traj/fakebench:t1/strong/00/seg00/skill"
+      ],
+      "size": 1
+    },
+    "checks_left": 2,
+    "compare_rule": "strict_rate_gain",
+    "current_phase": "D",
+    "outcomes": {
+      "added": 1
+    },
+    "role": "learn",
+    "task_list": {
+      "add": 1,
+      "superseded_rows": 0
+    }
+  },
+  "phases/p02_L/outcomes.jsonl": [
+    {
+      "action": "add",
+      "outcome": "added",
+      "phase_label": "p02:L",
+      "schema": "learn-outcome-v1",
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_id": "fakebench:t1",
+      "target_kind": "task",
+      "version": 1
+    }
+  ],
+  "phases/p02_L/outcomes.jsonl.lock": {
     "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
-  "skill_bank.jsonl": [
+  "phases/p02_L/skill_bank.jsonl": [
+    {
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+      "discard_reason": null,
+      "group": null,
+      "merged_from": [],
+      "rewrite_history": [],
+      "schema_version": 2,
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t1/strong/00/seg00"
+      ],
+      "status": "pending",
+      "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+      "version": 1
+    }
+  ],
+  "phases/p02_L/task_list.jsonl": [
+    {
+      "action": "add",
+      "basis_unit": "p01:D:fakebench:fakebench:t1:weak:140bedbf",
+      "phase_label": "p02:L",
+      "reason": "weak_fails_and_no_skill",
+      "schema": "learn-task-list-v1",
+      "target_id": "fakebench:t1",
+      "target_kind": "task"
+    }
+  ],
+  "phases/p03_B/acceptance_report.jsonl": [
+    {
+      "artifacts": {
+        "round_dir": "<RUN_DIR>/stage4_acceptance/live_run/round00",
+        "trajectory_ids": [
+          "traj/fakebench:t1/weak/00",
+          "traj/fakebench:t1/weak/01"
+        ]
+      },
+      "cause": "",
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 1
+        }
+      ],
+      "phase_label": "p03:B",
+      "role": "weak",
+      "runs": [
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/weak/00",
+          "verdict": "failure"
+        },
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/weak/01",
+          "verdict": "failure"
+        }
+      ],
+      "status": "normal",
+      "success_count": 0,
+      "unit_id": "p03:B:fakebench:fakebench:t1:weak:78dcc25c",
+      "valid_count": 2
+    }
+  ],
+  "phases/p03_B/phase.json": {
+    "index": 2,
+    "label": "p03:B",
+    "name": "B",
+    "role": "live"
+  },
+  "phases/p03_B/phase_summary.json": {
+    "complete": true,
+    "dispatched": [
+      "fakebench:t1"
+    ],
+    "improvement_rule": "strict_rate_gain",
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "n_attempts": 2,
+    "report_rows": 1,
+    "role": "live",
+    "round": 0,
+    "skipped_control_perfect": [],
+    "skipped_injection_overflow": [],
+    "skipped_reused": [],
+    "units": [
+      "p03:B:fakebench:fakebench:t1:weak:78dcc25c"
+    ]
+  },
+  "phases/p03_B/units.jsonl": [
+    {
+      "aux": {},
+      "skills_block": "## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 1
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p03:B:fakebench:fakebench:t1:weak:78dcc25c"
+    }
+  ],
+  "phases/p04_L/bank_summary.json": {
+    "bank_reference": "bank:5e6c17bed1df",
+    "members": [
+      "traj/fakebench:t1/strong/00/seg00/skill"
+    ],
+    "size": 1
+  },
+  "phases/p04_L/learn_summary.json": {
+    "bank": {
+      "bank_reference": "bank:5e6c17bed1df",
+      "members": [
+        "traj/fakebench:t1/strong/00/seg00/skill"
+      ],
+      "size": 1
+    },
+    "checks_left": 1,
+    "compare_rule": "strict_rate_gain",
+    "current_phase": "B",
+    "outcomes": {
+      "revised": 1
+    },
+    "role": "learn",
+    "task_list": {
+      "revise": 1,
+      "superseded_rows": 0
+    }
+  },
+  "phases/p04_L/outcomes.jsonl": [
+    {
+      "action": "revise",
+      "outcome": "revised",
+      "phase_label": "p04:L",
+      "schema": "learn-outcome-v1",
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_id": "fakebench:t1",
+      "target_kind": "group",
+      "version": 2
+    }
+  ],
+  "phases/p04_L/outcomes.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "phases/p04_L/revisions.jsonl": [
+    {
+      "from_version": 1,
+      "phase_label": "p04:L",
+      "schema": "learn-revision-v1",
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_id": "fakebench:t1",
+      "target_kind": "group"
+    }
+  ],
+  "phases/p04_L/revisions.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "phases/p04_L/skill_bank.jsonl": [
     {
       "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
       "discard_reason": null,
-      "group": "state inspection",
+      "group": null,
+      "merged_from": [],
+      "rewrite_history": [
+        {
+          "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+          "error_category": "wrong_trigger",
+          "reason": "made the trigger condition concrete"
+        }
+      ],
+      "schema_version": 2,
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "source_subtasks": [
+        "traj/fakebench:t1/strong/00/seg00"
+      ],
+      "status": "pending",
+      "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+      "version": 2
+    }
+  ],
+  "phases/p04_L/task_list.jsonl": [
+    {
+      "action": "revise",
+      "basis_unit": "p03:B:fakebench:fakebench:t1:weak:78dcc25c",
+      "phase_label": "p04:L",
+      "reason": "no_gain",
+      "schema": "learn-task-list-v1",
+      "target_id": "fakebench:t1",
+      "target_kind": "group"
+    }
+  ],
+  "phases/p05_B/acceptance_report.jsonl": [
+    {
+      "artifacts": {
+        "round_dir": "<RUN_DIR>/stage4_acceptance/live_run/round01",
+        "trajectory_ids": [
+          "traj/fakebench:t1/weak/00",
+          "traj/fakebench:t1/weak/01"
+        ]
+      },
+      "cause": "",
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "phase_label": "p05:B",
+      "role": "weak",
+      "runs": [
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/weak/00",
+          "verdict": "success"
+        },
+        {
+          "basis": "scorer: the benchmark's own scorer",
+          "run": "traj/fakebench:t1/weak/01",
+          "verdict": "success"
+        }
+      ],
+      "status": "normal",
+      "success_count": 2,
+      "unit_id": "p05:B:fakebench:fakebench:t1:weak:ede31c24",
+      "valid_count": 2
+    }
+  ],
+  "phases/p05_B/phase.json": {
+    "index": 4,
+    "label": "p05:B",
+    "name": "B",
+    "role": "live"
+  },
+  "phases/p05_B/phase_summary.json": {
+    "complete": true,
+    "dispatched": [
+      "fakebench:t1"
+    ],
+    "improvement_rule": "strict_rate_gain",
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "n_attempts": 2,
+    "report_rows": 1,
+    "role": "live",
+    "round": 1,
+    "skipped_control_perfect": [],
+    "skipped_injection_overflow": [],
+    "skipped_reused": [],
+    "units": [
+      "p05:B:fakebench:fakebench:t1:weak:ede31c24"
+    ]
+  },
+  "phases/p05_B/units.jsonl": [
+    {
+      "aux": {},
+      "skills_block": "## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p05:B:fakebench:fakebench:t1:weak:ede31c24"
+    }
+  ],
+  "phases/p06_L/bank_summary.json": {
+    "bank_reference": "bank:5e6c17bed1df",
+    "members": [
+      "traj/fakebench:t1/strong/00/seg00/skill"
+    ],
+    "size": 1
+  },
+  "phases/p06_L/curation_log.json": {
+    "bank_tokens": 74,
+    "final_member_ids": [
+      "traj/fakebench:t1/strong/00/seg00/skill"
+    ],
+    "input_skill_ids": [
+      "traj/fakebench:t1/strong/00/seg00/skill"
+    ],
+    "merge_records": [],
+    "merges": {
+      "attempted": 0,
+      "kept": 0,
+      "reverted": 0,
+      "skipped": 0
+    },
+    "rounds": [
+      {
+        "conflicts": [],
+        "dispatch": null,
+        "done": true,
+        "grouping": null,
+        "round": 1,
+        "similar_groups": [],
+        "stop": true
+      }
+    ],
+    "rounds_executed": 1,
+    "schema": "curation-log-v3"
+  },
+  "phases/p06_L/learn_summary.json": {
+    "bank": {
+      "bank_reference": "bank:5e6c17bed1df",
+      "members": [
+        "traj/fakebench:t1/strong/00/seg00/skill"
+      ],
+      "size": 1
+    },
+    "checks_left": 0,
+    "compare_rule": "strict_rate_gain",
+    "current_phase": "B",
+    "outcomes": {},
+    "role": "learn",
+    "task_list": {
+      "keep": 1,
+      "superseded_rows": 0
+    }
+  },
+  "phases/p06_L/skill_bank.jsonl": [
+    {
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+      "discard_reason": null,
+      "group": null,
       "merged_from": [],
       "rewrite_history": [
         {
@@ -952,741 +888,28 @@
       "status": "accepted",
       "subtask_id": "traj/fakebench:t1/strong/00/seg00",
       "version": 2
-    },
-    {
-      "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
-      "discard_reason": null,
-      "group": "state inspection",
-      "merged_from": [],
-      "rewrite_history": [
-        {
-          "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
-          "error_category": "wrong_trigger",
-          "reason": "made the trigger condition concrete"
-        }
-      ],
-      "schema_version": 2,
-      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-      "source_subtasks": [
-        "traj/fakebench:t1/weak/00/seg00"
-      ],
-      "status": "accepted",
-      "subtask_id": "traj/fakebench:t1/weak/00/seg00",
-      "version": 2
-    },
-    {
-      "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
-      "discard_reason": null,
-      "group": "state inspection",
-      "merged_from": [],
-      "rewrite_history": [
-        {
-          "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
-          "error_category": "wrong_trigger",
-          "reason": "made the trigger condition concrete"
-        }
-      ],
-      "schema_version": 2,
-      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-      "source_subtasks": [
-        "traj/fakebench:t1/weak/01/seg00"
-      ],
-      "status": "accepted",
-      "subtask_id": "traj/fakebench:t1/weak/01/seg00",
-      "version": 2
     }
   ],
-  "skill_bank.jsonl.lock": {
+  "phases/p06_L/skill_bank.jsonl.lock": {
     "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
-  "stage0_summary.json": {
-    "reserved": [],
-    "tasks": 2,
-    "test": [
-      "t2"
-    ],
-    "train": [
-      "t1"
-    ]
-  },
-  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fstrong%2F00.json": {
-    "attempt_index": 0,
-    "benchmark": "fakebench",
-    "correctness": true,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fstrong%2F00"
-    },
-    "model_name": "strong-model",
-    "model_role": "strong",
-    "schema_version": 2,
-    "skills_injected": null,
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/strong/00"
-  },
-  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
+  "phases/p06_L/task_list.jsonl": [
+    {
+      "action": "keep",
+      "basis_unit": "p05:B:fakebench:fakebench:t1:weak:ede31c24",
+      "phase_label": "p06:L",
+      "reason": "improved",
+      "schema": "learn-task-list-v1",
+      "target_id": "fakebench:t1",
+      "target_kind": "group"
+    }
+  ],
+  "phases/p07_C/control/store/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
     "attempt_index": 0,
     "benchmark": "fakebench",
     "correctness": false,
     "meta": {
-      "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fweak%2F00"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": null,
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/00"
-  },
-  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
-    "attempt_index": 1,
-    "benchmark": "fakebench",
-    "correctness": false,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage1/traj%2Ffakebench%3At1%2Fweak%2F01"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": null,
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/01"
-  },
-  "stage1_summary.json": {
-    "F": [
-      "fakebench:t1"
-    ],
-    "complete": true,
-    "infra_accepted": [],
-    "infra_missing": [],
-    "infra_shortfall_accepted": false,
-    "infra_shortfalls": [],
-    "strong": {
-      "metrics": {
-        "fakebench:t1": {
-          "attempts": 1,
-          "infra": 0,
-          "success": 1,
-          "valid": 1
-        }
-      },
-      "summary": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "infra_tasks": [],
-        "pass_at_n": 1.0,
-        "tasks": 1
-      }
-    },
-    "weak": {
-      "metrics": {
-        "fakebench:t1": {
-          "attempts": 2,
-          "infra": 0,
-          "success": 0,
-          "valid": 2
-        }
-      },
-      "summary": {
-        "aux": null,
-        "avg_at_n": 0.0,
-        "avg_at_n_conservative": 0.0,
-        "infra_tasks": [],
-        "pass_at_n": 0.0,
-        "tasks": 1
-      }
-    }
-  },
-  "stage2_segments/subtasks/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00.json": {
-    "context_summary": "",
-    "description": "do the whole task",
-    "label": "whole",
-    "schema_version": 1,
-    "segment_index": 0,
-    "source": "strong",
-    "step_range": [
-      0,
-      1
-    ],
-    "subtask_id": "traj/fakebench:t1/strong/00/seg00",
-    "success": true,
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/strong/00",
-    "trajectory_success": true
-  },
-  "stage2_segments/subtasks/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00.json": {
-    "context_summary": "",
-    "description": "do the whole task",
-    "label": "whole",
-    "schema_version": 1,
-    "segment_index": 0,
-    "source": "weak",
-    "step_range": [
-      0,
-      1
-    ],
-    "subtask_id": "traj/fakebench:t1/weak/00/seg00",
-    "success": false,
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/00",
-    "trajectory_success": false
-  },
-  "stage2_segments/subtasks/traj%2Ffakebench%3At1%2Fweak%2F01%2Fseg00.json": {
-    "context_summary": "",
-    "description": "do the whole task",
-    "label": "whole",
-    "schema_version": 1,
-    "segment_index": 0,
-    "source": "weak",
-    "step_range": [
-      0,
-      1
-    ],
-    "subtask_id": "traj/fakebench:t1/weak/01/seg00",
-    "success": false,
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/01",
-    "trajectory_success": false
-  },
-  "stage2_summary.json": {
-    "empty_skipped": [],
-    "infra_failed": [],
-    "segmented": 3,
-    "skipped": 0,
-    "total_subtasks": 3
-  },
-  "stage3_generation/exams/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fexam.json": {
-    "exam_id": "traj/fakebench:t1/strong/00/seg00/exam",
-    "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
-    "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 2,
-    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-    "subtask_id": "traj/fakebench:t1/strong/00/seg00"
-  },
-  "stage3_generation/exams/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fexam.json": {
-    "exam_id": "traj/fakebench:t1/weak/00/seg00/exam",
-    "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
-    "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 2,
-    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-    "subtask_id": "traj/fakebench:t1/weak/00/seg00"
-  },
-  "stage3_generation/exams/traj%2Ffakebench%3At1%2Fweak%2F01%2Fseg00%2Fexam.json": {
-    "exam_id": "traj/fakebench:t1/weak/01/seg00/exam",
-    "question_text": "A service reports an unexpected state and stops. What should be done before anything else, and why?",
-    "reference_answer": "Inspect the reported state first, then take the matching corrective action.",
-    "schema_version": 2,
-    "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-    "subtask_id": "traj/fakebench:t1/weak/01/seg00"
-  },
-  "stage3_generation/skills/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fskill.json": {
-    "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
-    "discard_reason": null,
-    "group": "state inspection",
-    "merged_from": [],
-    "rewrite_history": [
-      {
-        "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
-        "error_category": "wrong_trigger",
-        "reason": "made the trigger condition concrete"
-      }
-    ],
-    "schema_version": 2,
-    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-    "source_subtasks": [
-      "traj/fakebench:t1/strong/00/seg00"
-    ],
-    "status": "accepted",
-    "subtask_id": "traj/fakebench:t1/strong/00/seg00",
-    "version": 2
-  },
-  "stage3_generation/skills/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fskill.json": {
-    "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
-    "discard_reason": null,
-    "group": "state inspection",
-    "merged_from": [],
-    "rewrite_history": [
-      {
-        "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
-        "error_category": "wrong_trigger",
-        "reason": "made the trigger condition concrete"
-      }
-    ],
-    "schema_version": 2,
-    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-    "source_subtasks": [
-      "traj/fakebench:t1/weak/00/seg00"
-    ],
-    "status": "accepted",
-    "subtask_id": "traj/fakebench:t1/weak/00/seg00",
-    "version": 2
-  },
-  "stage3_generation/skills/traj%2Ffakebench%3At1%2Fweak%2F01%2Fseg00%2Fskill.json": {
-    "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
-    "discard_reason": null,
-    "group": "state inspection",
-    "merged_from": [],
-    "rewrite_history": [
-      {
-        "content": "[Trigger] acting on a report without inspecting it first\n[Why it fails] the action does not match the actual state.\n[Do instead]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
-        "error_category": "wrong_trigger",
-        "reason": "made the trigger condition concrete"
-      }
-    ],
-    "schema_version": 2,
-    "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-    "source_subtasks": [
-      "traj/fakebench:t1/weak/01/seg00"
-    ],
-    "status": "accepted",
-    "subtask_id": "traj/fakebench:t1/weak/01/seg00",
-    "version": 2
-  },
-  "stage3_generation/stage3_summary.json": {
-    "exam_missing_advanced": [],
-    "generated": [
-      "traj/fakebench:t1/strong/00/seg00",
-      "traj/fakebench:t1/weak/00/seg00",
-      "traj/fakebench:t1/weak/01/seg00"
-    ],
-    "infra_failed": [],
-    "model_output_failed": [],
-    "selected": [
-      "traj/fakebench:t1/strong/00/seg00",
-      "traj/fakebench:t1/weak/00/seg00",
-      "traj/fakebench:t1/weak/01/seg00"
-    ]
-  },
-  "stage4_acceptance/live_run/attributions.jsonl": [
-    {
-      "diagnosis": "the skill's trigger is too vague to recognize",
-      "injection_block_sha256": "7249a604c3dc943c07e19ce348a378efd146ed63c5bd43ad26395a79633342c9",
-      "round": 0,
-      "schema": "live-attribution-v1",
-      "skill_actions": [
-        {
-          "action": "revise",
-          "problem": "the trigger condition is too vague to recognize during real execution",
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 1
-        },
-        {
-          "action": "revise",
-          "problem": "the trigger condition is too vague to recognize during real execution",
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-          "version": 1
-        },
-        {
-          "action": "revise",
-          "problem": "the trigger condition is too vague to recognize during real execution",
-          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-          "version": 1
-        }
-      ],
-      "task_id": "fakebench:t1"
-    }
-  ],
-  "stage4_acceptance/live_run/attributions.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
-  "stage4_acceptance/live_run/round00/injection_audit.jsonl": [
-    {
-      "injection_block_sha256": "7249a604c3dc943c07e19ce348a378efd146ed63c5bd43ad26395a79633342c9",
-      "injection_tokens": 186,
-      "members": [
-        {
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 1
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-          "version": 1
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-          "version": 1
-        }
-      ],
-      "round": 0,
-      "schema": "injection-audit-v1",
-      "task_id": "fakebench:t1"
-    }
-  ],
-  "stage4_acceptance/live_run/round00/injection_audit.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
-  "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
-    "attempt_index": 0,
-    "benchmark": "fakebench",
-    "correctness": false,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage4_live/round00/traj%2Ffakebench%3At1%2Fweak%2F00"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": [
-      {
-        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-        "version": 1
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-        "version": 1
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-        "version": 1
-      }
-    ],
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/00"
-  },
-  "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
-    "attempt_index": 1,
-    "benchmark": "fakebench",
-    "correctness": false,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage4_live/round00/traj%2Ffakebench%3At1%2Fweak%2F01"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": [
-      {
-        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-        "version": 1
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-        "version": 1
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-        "version": 1
-      }
-    ],
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/01"
-  },
-  "stage4_acceptance/live_run/round01/injection_audit.jsonl": [
-    {
-      "injection_block_sha256": "df709eb11e8f08fca685cfeffd04ac5be40b5d24e0c0982313dc944655df9f93",
-      "injection_tokens": 228,
-      "members": [
-        {
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 2
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-          "version": 2
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-          "version": 2
-        }
-      ],
-      "round": 1,
-      "schema": "injection-audit-v1",
-      "task_id": "fakebench:t1"
-    }
-  ],
-  "stage4_acceptance/live_run/round01/injection_audit.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
-  "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
-    "attempt_index": 0,
-    "benchmark": "fakebench",
-    "correctness": true,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage4_live/round01/traj%2Ffakebench%3At1%2Fweak%2F00"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": [
-      {
-        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-        "version": 2
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-        "version": 2
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-        "version": 2
-      }
-    ],
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/00"
-  },
-  "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
-    "attempt_index": 1,
-    "benchmark": "fakebench",
-    "correctness": true,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage4_live/round01/traj%2Ffakebench%3At1%2Fweak%2F01"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": [
-      {
-        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-        "version": 2
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-        "version": 2
-      },
-      {
-        "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-        "version": 2
-      }
-    ],
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t1",
-    "trajectory_id": "traj/fakebench:t1/weak/01"
-  },
-  "stage4_acceptance/live_run/verdicts.jsonl": [
-    {
-      "aux": null,
-      "baseline": {
-        "success": 0,
-        "valid": 2
-      },
-      "better": false,
-      "injection_tokens": 186,
-      "judged_with_shortfall": false,
-      "live": {
-        "success": 0,
-        "valid": 2
-      },
-      "round": 0,
-      "rule": "strict_rate_gain",
-      "schema": "live-verdict-v1",
-      "task_id": "fakebench:t1"
-    },
-    {
-      "aux": null,
-      "baseline": {
-        "success": 0,
-        "valid": 2
-      },
-      "better": true,
-      "injection_tokens": 228,
-      "judged_with_shortfall": false,
-      "live": {
-        "success": 2,
-        "valid": 2
-      },
-      "round": 1,
-      "rule": "strict_rate_gain",
-      "schema": "live-verdict-v1",
-      "task_id": "fakebench:t1"
-    }
-  ],
-  "stage4_acceptance/live_run/verdicts.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
-  "stage4_acceptance/stage4_summary.json": {
-    "accepted": 3,
-    "discarded": {},
-    "group_details": {
-      "fakebench:t1": {
-        "discard_reasons": {},
-        "outcome": "accepted",
-        "round0": {
-          "aux": null,
-          "baseline": {
-            "success": 0,
-            "valid": 2
-          },
-          "better": false,
-          "injection_tokens": 186,
-          "judged_with_shortfall": false,
-          "live": {
-            "success": 0,
-            "valid": 2
-          },
-          "verdict": null
-        },
-        "round1": {
-          "aux": null,
-          "baseline": {
-            "success": 0,
-            "valid": 2
-          },
-          "better": true,
-          "injection_tokens": 228,
-          "judged_with_shortfall": false,
-          "live": {
-            "success": 2,
-            "valid": 2
-          },
-          "verdict": null
-        }
-      }
-    },
-    "improvement_rule": "strict_rate_gain",
-    "infra_accepted": {
-      "round00": [],
-      "round01": []
-    },
-    "infra_failed": [],
-    "infra_missing": {
-      "round00": [],
-      "round01": []
-    },
-    "infra_shortfall_accepted": false,
-    "mode": "live_run",
-    "processed_this_call": "<processed_this_call>"
-  },
-  "stage5_curation/curation_log.json": {
-    "bank_tokens": 233,
-    "final_member_ids": [
-      "traj/fakebench:t1/strong/00/seg00/skill",
-      "traj/fakebench:t1/weak/00/seg00/skill",
-      "traj/fakebench:t1/weak/01/seg00/skill"
-    ],
-    "input_skill_ids": [
-      "traj/fakebench:t1/strong/00/seg00/skill",
-      "traj/fakebench:t1/weak/00/seg00/skill",
-      "traj/fakebench:t1/weak/01/seg00/skill"
-    ],
-    "merge_records": [],
-    "merges": {
-      "attempted": 0,
-      "kept": 0,
-      "reverted": 0,
-      "skipped": 0
-    },
-    "rounds": [
-      {
-        "conflicts": [],
-        "dispatch": [],
-        "done": true,
-        "grouping": {
-          "traj/fakebench:t1/strong/00/seg00/skill": "state inspection",
-          "traj/fakebench:t1/weak/00/seg00/skill": "state inspection",
-          "traj/fakebench:t1/weak/01/seg00/skill": "state inspection"
-        },
-        "round": 1,
-        "similar_groups": [],
-        "stop": true
-      }
-    ],
-    "rounds_executed": 1,
-    "schema": "curation-log-v3"
-  },
-  "stage5_curation/stage5_summary.json": {
-    "bank_reference": "bank:385c6a81122e",
-    "members": [
-      "traj/fakebench:t1/strong/00/seg00/skill",
-      "traj/fakebench:t1/weak/00/seg00/skill",
-      "traj/fakebench:t1/weak/01/seg00/skill"
-    ],
-    "size": 3
-  },
-  "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
-    "attempt_index": 0,
-    "benchmark": "fakebench",
-    "correctness": true,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At2%2Fweak%2F00"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": [
-      {
-        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-        "version": 2
-      }
-    ],
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t2",
-    "trajectory_id": "traj/fakebench:t2/weak/00"
-  },
-  "stage6_test/bank/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
-    "attempt_index": 1,
-    "benchmark": "fakebench",
-    "correctness": true,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage6_bank/traj%2Ffakebench%3At2%2Fweak%2F01"
-    },
-    "model_name": "weak-model",
-    "model_role": "weak",
-    "schema_version": 2,
-    "skills_injected": [
-      {
-        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-        "version": 2
-      }
-    ],
-    "steps": [
-      {
-        "action": "run",
-        "observation": "the environment state"
-      }
-    ],
-    "task_id": "fakebench:t2",
-    "trajectory_id": "traj/fakebench:t2/weak/01"
-  },
-  "stage6_test/bare/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
-    "attempt_index": 0,
-    "benchmark": "fakebench",
-    "correctness": false,
-    "meta": {
-      "workdir": "<RUN_DIR>/work/stage6_bare/traj%2Ffakebench%3At2%2Fweak%2F00"
+      "workdir": "<RUN_DIR>/work/p07_C/control/traj%2Ffakebench%3At2%2Fweak%2F00"
     },
     "model_name": "weak-model",
     "model_role": "weak",
@@ -1701,12 +924,12 @@
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/00"
   },
-  "stage6_test/bare/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
+  "phases/p07_C/control/store/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
     "attempt_index": 1,
     "benchmark": "fakebench",
     "correctness": false,
     "meta": {
-      "workdir": "<RUN_DIR>/work/stage6_bare/traj%2Ffakebench%3At2%2Fweak%2F01"
+      "workdir": "<RUN_DIR>/work/p07_C/control/traj%2Ffakebench%3At2%2Fweak%2F01"
     },
     "model_name": "weak-model",
     "model_role": "weak",
@@ -1721,40 +944,14 @@
     "task_id": "fakebench:t2",
     "trajectory_id": "traj/fakebench:t2/weak/01"
   },
-  "stage6_test/retrieval_audit.jsonl": [
-    {
-      "categories": {
-        "state inspection": "state inspection"
-      },
-      "routed": [
-        "state inspection"
-      ],
-      "scores": [
-        {
-          "score": 0.6166122213613178,
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
-        },
-        {
-          "score": 0.43000134488187297,
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
-        },
-        {
-          "score": 0.43000134488187297,
-          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill"
-        }
-      ],
-      "selected": [
-        {
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 2
-        }
-      ],
-      "task_id": "t2",
-      "threshold_passed": true
-    }
-  ],
-  "stage6_test/stage6_summary.json": {
-    "bank_reference": "bank:385c6a81122e",
+  "phases/p07_C/phase.json": {
+    "index": 6,
+    "label": "p07:C",
+    "name": "C",
+    "role": "test"
+  },
+  "phases/p07_C/phase_summary.json": {
+    "bank_reference": "bank:5e6c17bed1df",
     "complete": true,
     "control": {
       "aux": null,
@@ -1781,6 +978,7 @@
     },
     "infra_shortfall_accepted": false,
     "mode": "split",
+    "role": "test",
     "with_bank": {
       "aux": null,
       "avg_at_n": 1.0,
@@ -1789,5 +987,578 @@
       "pass_at_n": 1.0,
       "tasks": 1
     }
-  }
+  },
+  "phases/p07_C/units.jsonl": [
+    {
+      "aux": {},
+      "skills_block": "## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported REVISED-BY-G11: name the concrete state before acting.",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:C:fakebench:fakebench:t2:weak:ede31c24"
+    }
+  ],
+  "phases/p07_C/with_bank/store/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "correctness": true,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p07_C/with_bank/traj%2Ffakebench%3At2%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": [
+      {
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "version": 2
+      }
+    ],
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t2",
+    "trajectory_id": "traj/fakebench:t2/weak/00"
+  },
+  "phases/p07_C/with_bank/store/stage1_baseline/trajectories/traj%2Ffakebench%3At2%2Fweak%2F01.json": {
+    "attempt_index": 1,
+    "benchmark": "fakebench",
+    "correctness": true,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p07_C/with_bank/traj%2Ffakebench%3At2%2Fweak%2F01"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": [
+      {
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "version": 2
+      }
+    ],
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t2",
+    "trajectory_id": "traj/fakebench:t2/weak/01"
+  },
+  "pipeline_log.jsonl": [
+    {
+      "stage": "p00:freeze",
+      "summary": {
+        "reserved": [],
+        "tasks": 2,
+        "test": [
+          "t2"
+        ],
+        "train": [
+          "t1"
+        ]
+      }
+    },
+    {
+      "stage": "p01:D",
+      "summary": {
+        "complete": true,
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "infra_shortfalls": [],
+        "report_rows": 2,
+        "role": "baseline",
+        "strong": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "infra_tasks": [],
+          "pass_at_n": 1.0,
+          "tasks": 1
+        },
+        "weak": {
+          "aux": null,
+          "avg_at_n": 0.0,
+          "avg_at_n_conservative": 0.0,
+          "infra_tasks": [],
+          "pass_at_n": 0.0,
+          "tasks": 1
+        }
+      }
+    },
+    {
+      "stage": "p02:L",
+      "summary": {
+        "bank": {
+          "bank_reference": "bank:5574d0e60e26",
+          "members": [
+            "traj/fakebench:t1/strong/00/seg00/skill"
+          ],
+          "size": 1
+        },
+        "checks_left": 2,
+        "compare_rule": "strict_rate_gain",
+        "current_phase": "D",
+        "outcomes": {
+          "added": 1
+        },
+        "role": "learn",
+        "task_list": {
+          "add": 1,
+          "superseded_rows": 0
+        }
+      }
+    },
+    {
+      "stage": "p03:B",
+      "summary": {
+        "complete": true,
+        "dispatched": [
+          "fakebench:t1"
+        ],
+        "improvement_rule": "strict_rate_gain",
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "n_attempts": 2,
+        "report_rows": 1,
+        "role": "live",
+        "round": 0,
+        "skipped_control_perfect": [],
+        "skipped_injection_overflow": [],
+        "skipped_reused": [],
+        "units": [
+          "p03:B:fakebench:fakebench:t1:weak:78dcc25c"
+        ]
+      }
+    },
+    {
+      "stage": "p04:L",
+      "summary": {
+        "bank": {
+          "bank_reference": "bank:5e6c17bed1df",
+          "members": [
+            "traj/fakebench:t1/strong/00/seg00/skill"
+          ],
+          "size": 1
+        },
+        "checks_left": 1,
+        "compare_rule": "strict_rate_gain",
+        "current_phase": "B",
+        "outcomes": {
+          "revised": 1
+        },
+        "role": "learn",
+        "task_list": {
+          "revise": 1,
+          "superseded_rows": 0
+        }
+      }
+    },
+    {
+      "stage": "p05:B",
+      "summary": {
+        "complete": true,
+        "dispatched": [
+          "fakebench:t1"
+        ],
+        "improvement_rule": "strict_rate_gain",
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "n_attempts": 2,
+        "report_rows": 1,
+        "role": "live",
+        "round": 1,
+        "skipped_control_perfect": [],
+        "skipped_injection_overflow": [],
+        "skipped_reused": [],
+        "units": [
+          "p05:B:fakebench:fakebench:t1:weak:ede31c24"
+        ]
+      }
+    },
+    {
+      "stage": "p06:L",
+      "summary": {
+        "bank": {
+          "bank_reference": "bank:5e6c17bed1df",
+          "members": [
+            "traj/fakebench:t1/strong/00/seg00/skill"
+          ],
+          "size": 1
+        },
+        "checks_left": 0,
+        "compare_rule": "strict_rate_gain",
+        "current_phase": "B",
+        "outcomes": {},
+        "role": "learn",
+        "task_list": {
+          "keep": 1,
+          "superseded_rows": 0
+        }
+      }
+    },
+    {
+      "stage": "p07:C",
+      "summary": {
+        "bank_reference": "bank:5e6c17bed1df",
+        "complete": true,
+        "control": {
+          "aux": null,
+          "avg_at_n": 0.0,
+          "avg_at_n_conservative": 0.0,
+          "infra_tasks": [],
+          "pass_at_n": 0.0,
+          "tasks": 1
+        },
+        "control_source": "fresh_bare_run",
+        "delta": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "pass_at_n": 1.0
+        },
+        "infra_accepted": {
+          "control": [],
+          "with_bank": []
+        },
+        "infra_missing": {
+          "control": [],
+          "with_bank": []
+        },
+        "infra_shortfall_accepted": false,
+        "mode": "split",
+        "role": "test",
+        "with_bank": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "infra_tasks": [],
+          "pass_at_n": 1.0,
+          "tasks": 1
+        }
+      }
+    }
+  ],
+  "pipeline_log.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stage0_summary.json": {
+    "reserved": [],
+    "tasks": 2,
+    "test": [
+      "t2"
+    ],
+    "train": [
+      "t1"
+    ]
+  },
+  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fstrong%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "correctness": true,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p01_D/strong/traj%2Ffakebench%3At1%2Fstrong%2F00"
+    },
+    "model_name": "strong-model",
+    "model_role": "strong",
+    "schema_version": 2,
+    "skills_injected": null,
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/strong/00"
+  },
+  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "correctness": false,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p01_D/weak/traj%2Ffakebench%3At1%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": null,
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/00"
+  },
+  "stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "attempt_index": 1,
+    "benchmark": "fakebench",
+    "correctness": false,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p01_D/weak/traj%2Ffakebench%3At1%2Fweak%2F01"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": null,
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/01"
+  },
+  "stage2_segments/subtasks/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00.json": {
+    "context_summary": "",
+    "description": "do the whole task",
+    "label": "whole",
+    "schema_version": 1,
+    "segment_index": 0,
+    "source": "strong",
+    "step_range": [
+      0,
+      1
+    ],
+    "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+    "success": true,
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/strong/00",
+    "trajectory_success": true
+  },
+  "stage3_generation/skills/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fskill.json": {
+    "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\nREVISED-BY-G11: name the concrete state before acting.",
+    "discard_reason": null,
+    "group": null,
+    "merged_from": [],
+    "rewrite_history": [
+      {
+        "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+        "error_category": "wrong_trigger",
+        "reason": "made the trigger condition concrete"
+      }
+    ],
+    "schema_version": 2,
+    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+    "source_subtasks": [
+      "traj/fakebench:t1/strong/00/seg00"
+    ],
+    "status": "accepted",
+    "subtask_id": "traj/fakebench:t1/strong/00/seg00",
+    "version": 2
+  },
+  "stage4_acceptance/live_run/round00/injection_audit.jsonl": [
+    {
+      "injection_block_sha256": "4ca8045027cf26bbdc4d39e5fe9281dc8987f5f4a28484d54da6998324dc4a83",
+      "injection_tokens": 60,
+      "members": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 1
+        }
+      ],
+      "round": 0,
+      "schema": "injection-audit-v1",
+      "task_id": "fakebench:t1"
+    }
+  ],
+  "stage4_acceptance/live_run/round00/injection_audit.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "correctness": false,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p03_B/round00/traj%2Ffakebench%3At1%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": [
+      {
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "version": 1
+      }
+    ],
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/00"
+  },
+  "stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "attempt_index": 1,
+    "benchmark": "fakebench",
+    "correctness": false,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p03_B/round00/traj%2Ffakebench%3At1%2Fweak%2F01"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": [
+      {
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "version": 1
+      }
+    ],
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/01"
+  },
+  "stage4_acceptance/live_run/round01/injection_audit.jsonl": [
+    {
+      "injection_block_sha256": "47887f641799bb6b83f32cfacc2ad9832dc09a3d6c972964a7d88b76e5780e21",
+      "injection_tokens": 74,
+      "members": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "round": 1,
+      "schema": "injection-audit-v1",
+      "task_id": "fakebench:t1"
+    }
+  ],
+  "stage4_acceptance/live_run/round01/injection_audit.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "attempt_index": 0,
+    "benchmark": "fakebench",
+    "correctness": true,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p05_B/round01/traj%2Ffakebench%3At1%2Fweak%2F00"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": [
+      {
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "version": 2
+      }
+    ],
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/00"
+  },
+  "stage4_acceptance/live_run/round01/stage1_baseline/trajectories/traj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "attempt_index": 1,
+    "benchmark": "fakebench",
+    "correctness": true,
+    "meta": {
+      "workdir": "<RUN_DIR>/work/p05_B/round01/traj%2Ffakebench%3At1%2Fweak%2F01"
+    },
+    "model_name": "weak-model",
+    "model_role": "weak",
+    "schema_version": 2,
+    "skills_injected": [
+      {
+        "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+        "version": 2
+      }
+    ],
+    "steps": [
+      {
+        "action": "run",
+        "observation": "the environment state"
+      }
+    ],
+    "task_id": "fakebench:t1",
+    "trajectory_id": "traj/fakebench:t1/weak/01"
+  },
+  "stage4_acceptance/live_run/verdicts.jsonl": [
+    {
+      "aux": null,
+      "baseline": {
+        "success": 0,
+        "valid": 2
+      },
+      "better": false,
+      "injection_tokens": 60,
+      "judged_with_shortfall": false,
+      "live": {
+        "success": 0,
+        "valid": 2
+      },
+      "round": 0,
+      "rule": "strict_rate_gain",
+      "schema": "live-verdict-v1",
+      "task_id": "fakebench:t1"
+    },
+    {
+      "aux": null,
+      "baseline": {
+        "success": 0,
+        "valid": 2
+      },
+      "better": true,
+      "injection_tokens": 74,
+      "judged_with_shortfall": false,
+      "live": {
+        "success": 2,
+        "valid": 2
+      },
+      "round": 1,
+      "rule": "strict_rate_gain",
+      "schema": "live-verdict-v1",
+      "task_id": "fakebench:t1"
+    }
+  ],
+  "stage4_acceptance/live_run/verdicts.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stage6_test/retrieval_audit.jsonl": [
+    {
+      "categories": {
+        "traj/fakebench:t1/strong/00/seg00/skill": "traj/fakebench:t1/strong/00/seg00/skill"
+      },
+      "routed": [
+        "traj/fakebench:t1/strong/00/seg00/skill"
+      ],
+      "scores": [
+        {
+          "score": 0.6525471301058229,
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
+        }
+      ],
+      "selected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "task_id": "t2",
+      "threshold_passed": true
+    }
+  ]
 }
