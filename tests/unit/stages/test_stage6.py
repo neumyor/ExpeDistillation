@@ -35,6 +35,7 @@ from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.inject import bank_reference
 from expedistill.llm.fake import make_fake_handle
 from expedistill.methods.delivery import retrieval
+from expedistill.composites.decision import final_test_delta
 from expedistill.stages import stage6_test
 from dataclasses import replace
 from expedistill.stages.context import RunSettings, StageContext
@@ -626,7 +627,7 @@ def test_delta_conservative_defined_when_conditional_is_none():
                  "pass_at_n": 0.5}
     control = {"avg_at_n": None, "avg_at_n_conservative": 0.0,
                "pass_at_n": 0.0}
-    delta = stage6_test._delta(with_bank, control)
+    delta = final_test_delta(with_bank, control)
     assert delta["avg_at_n"] is None
     assert delta["avg_at_n_conservative"] == pytest.approx(0.5)
     assert delta["pass_at_n"] == pytest.approx(0.5)
@@ -756,7 +757,7 @@ def test_aux_delta_conditional_none_when_an_arm_has_no_valid_trial():
                "pass_at_n": 0.0,
                "aux": {"metric": "fake_aux", "avg_at_n": None,
                        "avg_at_n_conservative": 0.0}}
-    delta = stage6_test._delta(with_bank, control)
+    delta = final_test_delta(with_bank, control)
     assert delta["avg_at_n"] is None
     assert delta["aux"]["avg_at_n"] is None
     assert delta["aux"]["avg_at_n_conservative"] == pytest.approx(0.5)
