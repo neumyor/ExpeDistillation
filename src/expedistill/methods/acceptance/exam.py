@@ -1,7 +1,7 @@
 """The exam acceptance driver: one skill at a time, a K3 text exam per
 (skill, exam) pair -- the frozen v1 protocol (README section 3, stage 4).
 
-The K4 loop itself is ``composites.acceptance.accept_skill`` (which owns
+The K4 loop itself is ``composites.acceptance_submit.accept_skill`` (which owns
 the per-skill disk IO and resume); this driver enumerates the stored
 pending stage-3 candidates (id == ``make_skill_id(subtask_id)``;
 stage-5 merged skills are K5's) in ``skill_id`` order, resolves each
@@ -45,7 +45,7 @@ worker, not in K4:
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from expedistill.composites.acceptance import accept_skill
+from expedistill.composites.acceptance_submit import accept_skill
 from expedistill.composites.decision import (
     MODEL_OUTPUT_ERROR,
     exam_measurement_exhausted_action,

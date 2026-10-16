@@ -23,8 +23,9 @@ whose result was still in flight (not yet persisted) at the crash:
 
 import pytest
 
-import expedistill.composites.acceptance as acceptance_mod
-from expedistill.composites.acceptance import accept_skill
+import expedistill.composites.acceptance_leak as acceptance_leak_mod
+import expedistill.composites.acceptance_submit as acceptance_submit_mod
+from expedistill.composites.acceptance_submit import accept_skill
 from expedistill.core.ids import (
     make_attempt_id,
     make_exam_id,
@@ -353,8 +354,9 @@ def _count_writes(tmp_path, monkeypatch, name):
     crasher = _IOCrasher(store, target=-1, when="before")
     store.save = crasher.save(Store.save.__get__(store))
     with monkeypatch.context() as patch:
-        patch.setattr(acceptance_mod, "append_jsonl",
-                      crasher.append(acceptance_mod.append_jsonl))
+        wrapped = crasher.append(acceptance_leak_mod.append_jsonl)
+        patch.setattr(acceptance_leak_mod, "append_jsonl", wrapped)
+        patch.setattr(acceptance_submit_mod, "append_jsonl", wrapped)
         result, _, _ = run_once(store, scenario, scenario[4])
     assert result is not None
     return crasher.count
@@ -395,8 +397,9 @@ def test_crash_at_every_write_resumes_identically(tmp_path, monkeypatch,
     original_save = store.save
     store.save = crasher.save(original_save)
     with monkeypatch.context() as patch:
-        patch.setattr(acceptance_mod, "append_jsonl",
-                      crasher.append(acceptance_mod.append_jsonl))
+        wrapped = crasher.append(acceptance_leak_mod.append_jsonl)
+        patch.setattr(acceptance_leak_mod, "append_jsonl", wrapped)
+        patch.setattr(acceptance_submit_mod, "append_jsonl", wrapped)
         result, handles, _ = run_once(store, scenario, scenario[4])
     store.save = original_save
     assert result is None   # the crash fired
@@ -542,7 +545,7 @@ def test_crash_between_verdict_save_and_round_continuation(tmp_path,
 
     # Crash right after the first verdict append (v1 leaked).
     state = {"done": False}
-    original_append = acceptance_mod.append_jsonl
+    original_append = acceptance_leak_mod.append_jsonl
 
     def append(path, record):
         out = original_append(path, record)
@@ -551,7 +554,7 @@ def test_crash_between_verdict_save_and_round_continuation(tmp_path,
             raise Crash("crash after the v1 verdict line")
         return out
 
-    monkeypatch.setattr(acceptance_mod, "append_jsonl", append)
+    monkeypatch.setattr(acceptance_leak_mod, "append_jsonl", append)
     result, handles, _ = run_once(store, scenario, scenario[4])
     monkeypatch.undo()
     assert result is None

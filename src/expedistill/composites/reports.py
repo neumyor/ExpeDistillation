@@ -26,13 +26,13 @@ from typing import Any, Dict, List
 from expedistill.blocks import metrics as metrics_block
 from expedistill.blocks.rules import get_task_select
 from expedistill.composites import decision
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import live_measurement as lm
 from expedistill.composites import shortfall
-from expedistill.composites.acceptance import (
+from expedistill.composites.acceptance_leak import _find_leak_verdict
+from expedistill.composites.acceptance_skill_status import (
     REWRITE_FAILURE_LEDGER,
     _exam_attempts,
     _find_bare,
-    _find_leak_verdict,
     _last_with_skill,
     _skill_records,
 )
@@ -208,18 +208,18 @@ def live_report(store: Store, *, round_: int) -> Dict[str, Any]:
       the already-landed plan a resumed learn phase must not re-ask --
       or None.
     """
-    verdicts_path = la._ledger_path(store, la.VERDICTS_LEDGER)
-    attributions_path = la._ledger_path(store, la.ATTRIBUTIONS_LEDGER)
-    audit_path = la.round_dir(store, round_) / la.INJECTION_AUDIT_NAME
+    verdicts_path = lm._ledger_path(store, lm.VERDICTS_LEDGER)
+    attributions_path = lm._ledger_path(store, lm.ATTRIBUTIONS_LEDGER)
+    audit_path = lm.round_dir(store, round_) / lm.INJECTION_AUDIT_NAME
 
     universe = {row["task_id"] for row in read_jsonl(verdicts_path)
                 if row.get("round") == round_}
     universe |= {row["task_id"] for row in read_jsonl(audit_path)}
 
-    pending = la.pending_groups(store)
+    pending = lm.pending_groups(store)
     rows = []
     for task_id in sorted(universe):
-        audit = la._audit_row_from(audit_path, round_, task_id)
+        audit = lm._audit_row_from(audit_path, round_, task_id)
         if audit is not None:
             members = [{"skill_id": member["skill_id"],
                         "version": member["version"]}
@@ -227,14 +227,14 @@ def live_report(store: Store, *, round_: int) -> Dict[str, Any]:
         else:
             members = [{"skill_id": skill.skill_id, "version": skill.version}
                        for skill in pending.get(task_id, [])]
-        row = la._first_row_from(verdicts_path, task_id, round_)
-        directory = la.round_dir(store, round_)
+        row = lm._first_row_from(verdicts_path, task_id, round_)
+        directory = lm.round_dir(store, round_)
         result: List[str] = []
         if row is None or "verdict" not in row:
             # A judged round has a round store; a zero-execution terminal
             # has none (the group never entered K1).
             if directory.exists():
-                result = [traj.status for traj in la._trajectories_from(
+                result = [traj.status for traj in lm._trajectories_from(
                     directory, task_id, round_)]
         rows.append({
             "task_id": task_id,
@@ -243,7 +243,7 @@ def live_report(store: Store, *, round_: int) -> Dict[str, Any]:
             "result": result,
             "better": row["better"] if row is not None else None,
             "verdict": row.get("verdict") if row is not None else None,
-            "attribution": la._first_row_from(attributions_path, task_id,
+            "attribution": lm._first_row_from(attributions_path, task_id,
                                               round_),
         })
     return {"round": round_, "groups": rows}

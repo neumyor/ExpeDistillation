@@ -28,7 +28,10 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import (
+    live_measurement as lm,
+    live_verdicts as lv,
+)
 from expedistill.composites.skill_status import discard_skill
 from expedistill.core.config import ExperimentConfig
 from expedistill.core.ids import (
@@ -282,7 +285,7 @@ def live_dir(store):
 
 
 def verdicts(store):
-    return read_jsonl(live_dir(store) / la.VERDICTS_LEDGER)
+    return read_jsonl(live_dir(store) / lm.VERDICTS_LEDGER)
 
 
 def verdict_of(store, task_id, round_):
@@ -381,9 +384,9 @@ def test_revision_then_round1_pass_accepts(tmp_path, monkeypatch):
 
     # -- the summary's full shape, pinned once ---------------------------
     audit0 = read_jsonl(live_dir(store) / "round00"
-                        / la.INJECTION_AUDIT_NAME)[0]
+                        / lm.INJECTION_AUDIT_NAME)[0]
     audit1 = read_jsonl(live_dir(store) / "round01"
-                        / la.INJECTION_AUDIT_NAME)[0]
+                        / lm.INJECTION_AUDIT_NAME)[0]
     assert summary == {
         "accepted": 1,
         "discarded": {},
@@ -602,7 +605,7 @@ def test_shortfall_acceptance_judges_holes_and_undetermines_all_hole_groups(
 
     # t1: nothing was executed, so there is no live denominator.
     t1_verdict = verdict_of(ctx.store, TASK1, 0)
-    assert t1_verdict["verdict"] == la.LIVE_UNDETERMINED
+    assert t1_verdict["verdict"] == lv.LIVE_UNDETERMINED
     assert t1_verdict["judged_with_shortfall"] is True
     # t2: judged on the remaining valid sample, flagged with the shortfall.
     t2_verdict = verdict_of(ctx.store, TASK2, 0)
@@ -613,7 +616,7 @@ def test_shortfall_acceptance_judges_holes_and_undetermines_all_hole_groups(
         skill = ctx.store.load("skills", skill_id, Skill)
         if skill.subtask_id.startswith(f"traj/{TASK1}"):
             assert (skill.status, skill.discard_reason) == (
-                "discarded", la.LIVE_UNDETERMINED)
+                "discarded", lv.LIVE_UNDETERMINED)
         else:
             assert skill.status == "accepted"
     # The durable per-round record, written before the judgments.
@@ -641,8 +644,8 @@ def test_a_previously_accepted_hole_is_skipped_and_judges_with_shortfall(
     write_json(live_dir(store) / "round00"
                / stage4_live_run.SHORTFALL_NAME,
                {"unit_ids": [unit(TASK1, 1)]}, indent=2)
-    append_jsonl(live_dir(store) / "round00" / la.INJECTION_AUDIT_NAME,
-                 la.audit_row(store, TASK1, 0))
+    append_jsonl(live_dir(store) / "round00" / lm.INJECTION_AUDIT_NAME,
+                 lm.audit_row(store, TASK1, 0))
 
     summary = run_live(ctx)
 
@@ -675,15 +678,15 @@ def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
     round_store = Store(live_dir(store) / "round00")
     for attempt in range(N_ATTEMPTS):
         round_store.save(make_traj(attempt, "failure"), "trajectories")
-    audit = la.audit_row(store, TASK1, 0)
-    append_jsonl(live_dir(store) / "round00" / la.INJECTION_AUDIT_NAME,
+    audit = lm.audit_row(store, TASK1, 0)
+    append_jsonl(live_dir(store) / "round00" / lm.INJECTION_AUDIT_NAME,
                  audit)
-    _, baseline_counts = la.load_baseline(store, TASK1, N_ATTEMPTS)
-    la.judge_round(store=store, task_id=TASK1, round_=0,
+    _, baseline_counts = lm.load_baseline(store, TASK1, N_ATTEMPTS)
+    lv.judge_round(store=store, task_id=TASK1, round_=0,
                    rule_name="strict_rate_gain",
                    baseline_counts=baseline_counts,
                    n_attempts=N_ATTEMPTS, skip_ids=[])
-    append_jsonl(live_dir(store) / la.ATTRIBUTIONS_LEDGER, {
+    append_jsonl(live_dir(store) / lm.ATTRIBUTIONS_LEDGER, {
         "schema": "live-attribution-v1", "task_id": TASK1, "round": 0,
         "diagnosis": "the group did not help",
         "skill_actions": [
@@ -691,7 +694,7 @@ def test_a_crash_mid_noop_discard_is_completed_not_redispatched(
              "problem": ""} for skill in skills],
         "injection_block_sha256": audit["injection_block_sha256"],
     })
-    discard_skill(store, skills[1], la.LIVE_NO_IMPROVEMENT)
+    discard_skill(store, skills[1], lv.LIVE_NO_IMPROVEMENT)
 
     summary = run_live(ctx)
 

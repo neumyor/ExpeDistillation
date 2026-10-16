@@ -117,7 +117,11 @@ from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.rules import get_acceptance_improve
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import (
+    live_attribution as lat,
+    live_measurement as lm,
+    live_verdicts as lv,
+)
 from expedistill.composites import shortfall
 from expedistill.composites.decision import (
     live_injection_overflows,
@@ -156,7 +160,7 @@ SHORTFALL_NAME = shortfall.SHORTFALL_NAME
 # ---------------------------------------------------------------------------
 
 def _ledger_path(store: Store, name: str) -> Path:
-    return store.run_dir / la.LIVE_DIR_NAME / name
+    return store.run_dir / lm.LIVE_DIR_NAME / name
 
 
 def _verdict_rows(store: Store, task_id: str) -> Dict[int, Dict[str, Any]]:
@@ -164,7 +168,7 @@ def _verdict_rows(store: Store, task_id: str) -> Dict[int, Dict[str, Any]]:
     sticks (K6's append-once discipline; a hand-added duplicate fails
     judge_round's recompute check instead of switching verdicts here)."""
     rows: Dict[int, Dict[str, Any]] = {}
-    for row in read_jsonl(_ledger_path(store, la.VERDICTS_LEDGER)):
+    for row in read_jsonl(_ledger_path(store, lm.VERDICTS_LEDGER)):
         if row.get("task_id") == task_id and row.get("round") not in rows:
             rows[row["round"]] = row
     return rows
@@ -175,7 +179,7 @@ def _attribution_row(store: Store, task_id: str,
     """The group's stored attribution row of one round, or None (no row =
     the plan never landed, so G10 is asked again -- its result was never
     persisted, the standing resume exemption)."""
-    for row in read_jsonl(_ledger_path(store, la.ATTRIBUTIONS_LEDGER)):
+    for row in read_jsonl(_ledger_path(store, lm.ATTRIBUTIONS_LEDGER)):
         if (row.get("task_id") == task_id
                 and row.get("round") == round_):
             return row
@@ -186,8 +190,8 @@ def _frozen_audit_row(store: Store, round_: int,
                        task_id: str) -> Optional[Dict[str, Any]]:
     """The group's frozen injection-audit row of one round, or None when
     the round was never dispatched for it."""
-    for row in read_jsonl(la.round_dir(store, round_)
-                          / la.INJECTION_AUDIT_NAME):
+    for row in read_jsonl(lm.round_dir(store, round_)
+                          / lm.INJECTION_AUDIT_NAME):
         if row.get("task_id") == task_id:
             return row
     return None
@@ -225,7 +229,7 @@ def _stored_units(store: Store, task_id: str,
                   round_: int) -> Set[str]:
     """The unit ids one round's store holds for one task (empty when the
     round directory was never created)."""
-    directory = la.round_dir(store, round_)
+    directory = lm.round_dir(store, round_)
     if not directory.exists():
         return set()
     round_store = Store(directory)
@@ -253,7 +257,7 @@ def _round_holes(store: Store, task_ids: Sequence[str], round_: int,
     accepted), sorted -- the units a resume retries or the flag accepts."""
     holes: Set[str] = set()
     for task_id in task_ids:
-        skip = set(la.skip_ids_for(stage1_holes, accepted, task_id))
+        skip = set(lm.skip_ids_for(stage1_holes, accepted, task_id))
         holes.update(unit for unit in _expected_units(task_id, n_attempts)
                      if unit not in skip)
     holes -= _union_of_stored(store, task_ids, round_)
@@ -313,7 +317,7 @@ def _complete_no_op(store: Store, task_id: str) -> bool:
     miss) writes its verdict row BEFORE finalize commits anything, and
     such a group is terminal and out of the pending universe anyway.
     """
-    if la.no_op_guard(store, task_id, 0):
+    if lv.no_op_guard(store, task_id, 0):
         return True
     if 1 in _verdict_rows(store, task_id):
         # Unreachable through the stage (the sweep finalized any decided
@@ -323,12 +327,12 @@ def _complete_no_op(store: Store, task_id: str) -> bool:
         return False
     members = _group_members(store, task_id)
     if not any(skill.status == "discarded"
-               and skill.discard_reason == la.LIVE_NO_IMPROVEMENT
+               and skill.discard_reason == lv.LIVE_NO_IMPROVEMENT
                for skill in members):
         return False
     for skill in members:
         if skill.status == "pending":
-            discard_skill(store, skill, la.LIVE_NO_IMPROVEMENT)
+            discard_skill(store, skill, lv.LIVE_NO_IMPROVEMENT)
     return True
 
 
@@ -419,15 +423,15 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
     recorder = UnitFailureRecorder(ctx.run_dir)
 
     # -- finalization sweep: finish any commit a crash left hanging -----
-    for task_id in sorted(la.pending_groups(store)):
-        la.finalize_group(store, task_id)
+    for task_id in sorted(lm.pending_groups(store)):
+        lv.finalize_group(store, task_id)
 
     # -- entry guards: baselines before a single execution is spent -----
-    universe = sorted(la.pending_groups(store))
+    universe = sorted(lm.pending_groups(store))
     tasks_by_id = _task_objects(ctx, universe)
     baselines: Dict[str, Dict[str, int]] = {}
     for task_id in universe:
-        _, baseline_counts = la.load_baseline(
+        _, baseline_counts = lm.load_baseline(
             store, task_id, n_attempts, aux_scorer=aux_scorer)
         baselines[task_id] = baseline_counts
         if (0 not in _verdict_rows(store, task_id)
@@ -436,23 +440,23 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
                 # still gets executed.
                 and live_zero_execution_short_circuit(
                     rule_name=rule_name, baseline_counts=baseline_counts)):
-            la.judge_round(
+            lv.judge_round(
                 store=store, task_id=task_id, round_=0, rule_name=rule_name,
                 baseline_counts=baseline_counts, n_attempts=n_attempts,
-                skip_ids=[], terminal=la.WEAK_ALREADY_KNOWS,
+                skip_ids=[], terminal=lv.WEAK_ALREADY_KNOWS,
                 max_injection_tokens=max_injection_tokens)
-            la.finalize_group(store, task_id)
+            lv.finalize_group(store, task_id)
 
     infra_failed: Set[str] = set()
 
     # ======================= round 0 ==================================
-    groups0 = sorted(la.pending_groups(store))
+    groups0 = sorted(lm.pending_groups(store))
     unjudged0 = [task_id for task_id in groups0
                  if 0 not in _verdict_rows(store, task_id)]
-    accepted0 = shortfall.read_unit_ids(la.round_dir(store, 0) / SHORTFALL_NAME)
+    accepted0 = shortfall.read_unit_ids(lm.round_dir(store, 0) / SHORTFALL_NAME)
 
     def skip0_for(task_id: str) -> List[str]:
-        return la.skip_ids_for(stage1_holes, accepted0, task_id)
+        return lm.skip_ids_for(stage1_holes, accepted0, task_id)
 
     dispatch0: List[str] = []
     for task_id in unjudged0:
@@ -463,7 +467,7 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             # judged group's members have moved (revisions), so only the
             # judging path may read the frozen line.
             continue
-        row = la.audit_row(store, task_id, 0)
+        row = lm.audit_row(store, task_id, 0)
         frozen = _frozen_audit_row(store, 0, task_id)
         if frozen is not None:
             if _canonical_line(frozen) != _canonical_line(row):
@@ -477,19 +481,19 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
         else:
             # First write, before the dispatch (ruling A10): the audit
             # names the exact injection this dispatch is about to render.
-            append_jsonl(la.round_dir(store, 0) / la.INJECTION_AUDIT_NAME,
+            append_jsonl(lm.round_dir(store, 0) / lm.INJECTION_AUDIT_NAME,
                          row)
         if live_injection_overflows(
                 max_injection_tokens=max_injection_tokens,
                 injection_tokens=row["injection_tokens"]):
             # Zero executions wasted: the overflow verdict carries the
             # audit row's own evidence and the group never enters K1.
-            la.judge_round(
+            lv.judge_round(
                 store=store, task_id=task_id, round_=0, rule_name=rule_name,
                 baseline_counts=baselines[task_id], n_attempts=n_attempts,
-                skip_ids=[], terminal=la.LIVE_INJECTION_OVERFLOW,
+                skip_ids=[], terminal=lv.LIVE_INJECTION_OVERFLOW,
                 max_injection_tokens=max_injection_tokens)
-            la.finalize_group(store, task_id)
+            lv.finalize_group(store, task_id)
             continue
         dispatch0.append(task_id)
 
@@ -529,7 +533,7 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
         recorded, and the stage raises at its end); anything escaping is
         fatal to the batch by run_units' rule."""
         try:
-            verdict = la.judge_round(
+            verdict = lv.judge_round(
                 store=store, task_id=task_id, round_=0, rule_name=rule_name,
                 baseline_counts=baselines[task_id], n_attempts=n_attempts,
                 skip_ids=skip0_for(task_id), aux_scorer=aux_scorer,
@@ -537,9 +541,9 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             if verdict.get("better") or verdict.get("verdict") is not None:
                 # better -> accept; live_undetermined (all holes) ->
                 # discard: the verdict row is the decision either way.
-                la.finalize_group(store, task_id)
+                lv.finalize_group(store, task_id)
                 return ("processed", task_id)
-            plan = la.attribute_group(
+            plan = lat.attribute_group(
                 store=store, task_id=task_id, round_=0,
                 n_attempts=n_attempts,
                 task_instruction=_task_instruction(
@@ -552,7 +556,7 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
                 # discards landed inside (the discard is the truth, the
                 # failure line its receipt).
                 return ("processed", task_id)
-            revisions = la.apply_revisions(
+            revisions = lat.apply_revisions(
                 store=store, task_id=task_id, round_=0,
                 rewriter_handle=ctx.handle("rewriter"),
                 weak_profile=config.weak_profile,
@@ -562,7 +566,7 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
                 return ("infra_failed", task_id)
             return ("awaiting_round1", task_id)
         except InfrastructureError as exc:
-            recorder.record(task_id, la.FAILURE_STAGE, exc, exc)
+            recorder.record(task_id, lat.FAILURE_STAGE, exc, exc)
             return ("infra_failed", task_id)
 
     for kind, task_id in run_units(round0_unit, sorted(set(units0)),
@@ -571,7 +575,7 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             infra_failed.add(task_id)
 
     # ======================= round 1 ==================================
-    groups1 = sorted(la.pending_groups(store))
+    groups1 = sorted(lm.pending_groups(store))
     candidates1: List[str] = []
     for task_id in groups1:
         rows = _verdict_rows(store, task_id)
@@ -583,10 +587,10 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
             continue
         candidates1.append(task_id)
 
-    accepted1 = shortfall.read_unit_ids(la.round_dir(store, 1) / SHORTFALL_NAME)
+    accepted1 = shortfall.read_unit_ids(lm.round_dir(store, 1) / SHORTFALL_NAME)
 
     def skip1_for(task_id: str) -> List[str]:
-        return la.skip_ids_for(stage1_holes, accepted1, task_id)
+        return lm.skip_ids_for(stage1_holes, accepted1, task_id)
 
     guard_passed1: List[str] = []
     dispatch1: List[str] = []
@@ -596,7 +600,7 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
         guard_passed1.append(task_id)
         if _round_complete(store, task_id, 1, n_attempts, skip1_for(task_id)):
             continue  # a previous call's round-1 batch already filled it
-        row = la.audit_row(store, task_id, 1)
+        row = lm.audit_row(store, task_id, 1)
         frozen = _frozen_audit_row(store, 1, task_id)
         if frozen is not None:
             if _canonical_line(frozen) != _canonical_line(row):
@@ -607,17 +611,17 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
                     f"{_canonical_line(row)}; the survivors changed under "
                     "the frozen line -- refusing to re-dispatch")
         else:
-            append_jsonl(la.round_dir(store, 1) / la.INJECTION_AUDIT_NAME,
+            append_jsonl(lm.round_dir(store, 1) / lm.INJECTION_AUDIT_NAME,
                          row)
         if live_injection_overflows(
                 max_injection_tokens=max_injection_tokens,
                 injection_tokens=row["injection_tokens"]):
-            la.judge_round(
+            lv.judge_round(
                 store=store, task_id=task_id, round_=1, rule_name=rule_name,
                 baseline_counts=baselines[task_id], n_attempts=n_attempts,
-                skip_ids=[], terminal=la.LIVE_INJECTION_OVERFLOW,
+                skip_ids=[], terminal=lv.LIVE_INJECTION_OVERFLOW,
                 max_injection_tokens=max_injection_tokens)
-            la.finalize_group(store, task_id)
+            lv.finalize_group(store, task_id)
             continue
         dispatch1.append(task_id)
 
@@ -644,15 +648,15 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
         row decides (better -> accept, miss -> live_no_improvement, all
         holes -> live_undetermined) and the sweep body commits it."""
         try:
-            la.judge_round(
+            lv.judge_round(
                 store=store, task_id=task_id, round_=1, rule_name=rule_name,
                 baseline_counts=baselines[task_id], n_attempts=n_attempts,
                 skip_ids=skip1_for(task_id), aux_scorer=aux_scorer,
                 max_injection_tokens=max_injection_tokens)
-            la.finalize_group(store, task_id)
+            lv.finalize_group(store, task_id)
             return ("processed", task_id)
         except InfrastructureError as exc:
-            recorder.record(task_id, la.FAILURE_STAGE, exc, exc)
+            recorder.record(task_id, lat.FAILURE_STAGE, exc, exc)
             return ("infra_failed", task_id)
 
     for kind, task_id in run_units(round1_unit, units1, ctx.run_settings.workers):
@@ -662,13 +666,13 @@ def run(ctx: Any, params: LiveRunParams) -> Dict[str, Any]:
     # ======================= summary ==================================
     candidates = stage3_candidates(store)
     summary = tally_verdicts(store, candidates)
-    pending_now = la.pending_groups(store)
+    pending_now = lm.pending_groups(store)
     processed = sum(1 for task_id in universe if not pending_now.get(task_id))
 
     detail_tasks = sorted(
         set(universe)
         | {row["task_id"] for row in read_jsonl(
-            _ledger_path(store, la.VERDICTS_LEDGER))})
+            _ledger_path(store, lm.VERDICTS_LEDGER))})
     group_details: Dict[str, Any] = {}
     for task_id in detail_tasks:
         rows = _verdict_rows(store, task_id)
@@ -764,16 +768,16 @@ def _dispatch_round(ctx: Any, store: Store, *, round_: int,
     config = ctx.config
     benchmark = config.benchmark
     stage1_holes = shortfall.stage1_accepted_unit_ids(ctx.run_dir)
-    accepted = shortfall.read_unit_ids(la.round_dir(store, round_) / SHORTFALL_NAME)
+    accepted = shortfall.read_unit_ids(lm.round_dir(store, round_) / SHORTFALL_NAME)
     skip_unit_ids: Set[str] = set()
     for task_id in task_ids:
         skip_unit_ids.update(
-            la.skip_ids_for(stage1_holes, accepted, task_id))
+            lm.skip_ids_for(stage1_holes, accepted, task_id))
     delivery, delivery_params = resolve_fixed("delivery", "group_by_task")
     method_kwargs, _ = delivery.resolve(ctx, delivery_params, store,
                                         benchmark)
     batch_execute(
-        store=Store(la.round_dir(store, round_)),
+        store=Store(lm.round_dir(store, round_)),
         benchmark=benchmark,
         tasks=[tasks_by_id[task_id] for task_id in task_ids],
         role="weak",
@@ -803,11 +807,11 @@ def _accept_shortfall(ctx: Any, store: Store, *, round_: int,
     Acceptance is a per-run decision recorded per round (module
     docstring) -- a later call honours it with or without the flag because
     every skip set and completeness test reads this record from disk."""
-    accepted = set(shortfall.read_unit_ids(la.round_dir(store, round_) / SHORTFALL_NAME))
+    accepted = set(shortfall.read_unit_ids(lm.round_dir(store, round_) / SHORTFALL_NAME))
     holes = _round_holes(store, task_ids, round_, n_attempts, stage1_holes,
                          sorted(accepted))
     if holes and ctx.run_settings.allow_infra_shortfall:
         accepted.update(holes)
         shortfall.write_unit_ids(
-            la.round_dir(store, round_) / SHORTFALL_NAME, accepted)
+            lm.round_dir(store, round_) / SHORTFALL_NAME, accepted)
     return sorted(accepted)

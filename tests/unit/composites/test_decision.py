@@ -8,7 +8,9 @@ in composites/decision.py's module docstring).
 """
 
 from expedistill.composites import decision
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import (
+    live_verdicts as lv,
+)
 from expedistill.composites.decision import Action
 from expedistill.core.models import Attempt
 
@@ -158,10 +160,10 @@ def test_attribution_exhaustion_rule():
 # ---------------------------------------------------------------------------
 
 def test_vocabulary_is_the_one_definition():
-    assert decision.WEAK_ALREADY_KNOWS is la.WEAK_ALREADY_KNOWS
-    assert decision.LIVE_INJECTION_OVERFLOW is la.LIVE_INJECTION_OVERFLOW
-    assert decision.LIVE_UNDETERMINED is la.LIVE_UNDETERMINED
-    assert decision.LIVE_NO_IMPROVEMENT is la.LIVE_NO_IMPROVEMENT
-    assert decision.LIVE_REVISION_DELETED is la.LIVE_REVISION_DELETED
-    assert decision.MODEL_OUTPUT_ERROR is la.MODEL_OUTPUT_ERROR
-    assert decision.STRICT_SHORT_CIRCUIT_RULES is la._ALL_SUCCESS_SAFE_RULES
+    assert decision.WEAK_ALREADY_KNOWS is lv.WEAK_ALREADY_KNOWS
+    assert decision.LIVE_INJECTION_OVERFLOW is lv.LIVE_INJECTION_OVERFLOW
+    assert decision.LIVE_UNDETERMINED is lv.LIVE_UNDETERMINED
+    assert decision.LIVE_NO_IMPROVEMENT is lv.LIVE_NO_IMPROVEMENT
+    assert decision.LIVE_REVISION_DELETED is lv.LIVE_REVISION_DELETED
+    assert decision.MODEL_OUTPUT_ERROR is lv.MODEL_OUTPUT_ERROR
+    assert decision.STRICT_SHORT_CIRCUIT_RULES is lv._ALL_SUCCESS_SAFE_RULES

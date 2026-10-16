@@ -40,7 +40,9 @@ needed -- finalize reads ledgers and the store only.
 
 import pytest
 
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import (
+    live_verdicts as lv,
+)
 from expedistill.composites.skill_status import discard_skill
 from expedistill.core.ids import (
     make_skill_id,
@@ -138,7 +140,7 @@ def assert_decision(tmp_path, rounds, rows, outcome, reason):
     for record in rows:
         append_jsonl(path, record)
 
-    result = la._finalize_group(store, TASK_ID, verdicts_path=path,
+    result = lv._finalize_group(store, TASK_ID, verdicts_path=path,
                                 rounds=rounds)
 
     committed = (sorted(skill.skill_id for skill in group)
@@ -163,7 +165,7 @@ def assert_decision(tmp_path, rounds, rows, outcome, reason):
     # no-op on the store.
     snapshot = {skill.skill_id: store.load("skills", skill.skill_id, Skill)
                 for skill in group}
-    assert la._finalize_group(store, TASK_ID, verdicts_path=path,
+    assert lv._finalize_group(store, TASK_ID, verdicts_path=path,
                               rounds=rounds) == {
         "outcome": outcome, "reason": reason, "committed": []}
     for skill_id, before in snapshot.items():
@@ -186,16 +188,16 @@ ONE_ROW_CASES = [
                  id="r0-better"),
     pytest.param([(0, False)], "pending", None,
                  id="r0-miss"),
-    pytest.param([(0, la.WEAK_ALREADY_KNOWS)], "discarded",
-                 la.WEAK_ALREADY_KNOWS,
+    pytest.param([(0, lv.WEAK_ALREADY_KNOWS)], "discarded",
+                 lv.WEAK_ALREADY_KNOWS,
                  id="r0-verdict"),
     # D3: round 1 is the last label -- better accepts, a miss discards.
     pytest.param([(1, True)], "accepted", None,
                  id="r1-better"),
-    pytest.param([(1, False)], "discarded", la.LIVE_NO_IMPROVEMENT,
+    pytest.param([(1, False)], "discarded", lv.LIVE_NO_IMPROVEMENT,
                  id="r1-miss"),
-    pytest.param([(1, la.LIVE_INJECTION_OVERFLOW)], "discarded",
-                 la.LIVE_INJECTION_OVERFLOW,
+    pytest.param([(1, lv.LIVE_INJECTION_OVERFLOW)], "discarded",
+                 lv.LIVE_INJECTION_OVERFLOW,
                  id="r1-verdict"),
     # D6: round 2 is outside the pinned set. Its judged rows never join
     # the round decision ...
@@ -204,16 +206,16 @@ ONE_ROW_CASES = [
     pytest.param([(2, False)], "pending", None,
                  id="r2-miss"),
     # ... but D1's scan ignores round labels, so its verdict still fires.
-    pytest.param([(2, la.LIVE_UNDETERMINED)], "discarded",
-                 la.LIVE_UNDETERMINED,
+    pytest.param([(2, lv.LIVE_UNDETERMINED)], "discarded",
+                 lv.LIVE_UNDETERMINED,
                  id="r2-verdict"),
     # D6, same two-sided rule for rows carrying no round key at all.
     pytest.param([(None, True)], "pending", None,
                  id="no-round-better"),
     pytest.param([(None, False)], "pending", None,
                  id="no-round-miss"),
-    pytest.param([(None, la.LIVE_UNDETERMINED)], "discarded",
-                 la.LIVE_UNDETERMINED,
+    pytest.param([(None, lv.LIVE_UNDETERMINED)], "discarded",
+                 lv.LIVE_UNDETERMINED,
                  id="no-round-verdict"),
 ]
 
@@ -233,10 +235,10 @@ BOTH_ROUND_CASES = [
     # miss" and "round 0 miss + round 1 miss" both discard; the
     # survivors' round-1 miss buries the earlier verdicts).
     pytest.param([(0, True), (1, False)], "discarded",
-                 la.LIVE_NO_IMPROVEMENT,
+                 lv.LIVE_NO_IMPROVEMENT,
                  id="r0-better-r1-miss"),
     pytest.param([(0, False), (1, False)], "discarded",
-                 la.LIVE_NO_IMPROVEMENT,
+                 lv.LIVE_NO_IMPROVEMENT,
                  id="r0-miss-r1-miss"),
     pytest.param([(0, False), (1, True)], "accepted", None,
                  id="r0-miss-r1-better"),
@@ -258,18 +260,18 @@ VERDICT_ORDER_CASES = [
     # D1 runs before any round decision and follows append order: a
     # verdict row decides even when a better row precedes it (review A:
     # "terminal rows out of order").
-    pytest.param([(0, la.WEAK_ALREADY_KNOWS), (1, True)], "discarded",
-                 la.WEAK_ALREADY_KNOWS,
+    pytest.param([(0, lv.WEAK_ALREADY_KNOWS), (1, True)], "discarded",
+                 lv.WEAK_ALREADY_KNOWS,
                  id="verdict-then-better"),
-    pytest.param([(1, True), (0, la.WEAK_ALREADY_KNOWS)], "discarded",
-                 la.WEAK_ALREADY_KNOWS,
+    pytest.param([(1, True), (0, lv.WEAK_ALREADY_KNOWS)], "discarded",
+                 lv.WEAK_ALREADY_KNOWS,
                  id="better-then-verdict"),
     # Two verdict rows: the FIRST in append order is the judgment.
-    pytest.param([(0, la.WEAK_ALREADY_KNOWS), (1, la.LIVE_INJECTION_OVERFLOW)],
-                 "discarded", la.WEAK_ALREADY_KNOWS,
+    pytest.param([(0, lv.WEAK_ALREADY_KNOWS), (1, lv.LIVE_INJECTION_OVERFLOW)],
+                 "discarded", lv.WEAK_ALREADY_KNOWS,
                  id="two-verdicts"),
-    pytest.param([(1, la.LIVE_INJECTION_OVERFLOW), (0, la.WEAK_ALREADY_KNOWS)],
-                 "discarded", la.LIVE_INJECTION_OVERFLOW,
+    pytest.param([(1, lv.LIVE_INJECTION_OVERFLOW), (0, lv.WEAK_ALREADY_KNOWS)],
+                 "discarded", lv.LIVE_INJECTION_OVERFLOW,
                  id="two-verdicts-reversed"),
 ]
 
@@ -287,7 +289,7 @@ FIRST_ROW_CASES = [
     # D5: the decisive round's FIRST row is its judgment -- a later row
     # of the same round never overwrites it.
     pytest.param([(1, False), (1, True)], "discarded",
-                 la.LIVE_NO_IMPROVEMENT,
+                 lv.LIVE_NO_IMPROVEMENT,
                  id="r1-miss-then-better"),
     pytest.param([(1, True), (1, False)], "accepted", None,
                  id="r1-better-then-miss"),
@@ -316,33 +318,33 @@ INTERLEAVED_CASES = [
     pytest.param([(2, True), (0, True)], "accepted", None,
                  id="r2-better-r0-better"),
     pytest.param([(1, False), (2, True)], "discarded",
-                 la.LIVE_NO_IMPROVEMENT,
+                 lv.LIVE_NO_IMPROVEMENT,
                  id="r1-miss-r2-better"),
     # D2: round 1 is the latest label with rows, whatever else is
     # interleaved.
     pytest.param([(0, True), (2, False), (1, True)], "accepted", None,
                  id="r0-b-r2-m-r1-b"),
     pytest.param([(0, False), (2, False), (1, False)], "discarded",
-                 la.LIVE_NO_IMPROVEMENT,
+                 lv.LIVE_NO_IMPROVEMENT,
                  id="r0-m-r2-m-r1-m"),
     # D1 beats the round decision from any position, whatever the row's
     # round label.
-    pytest.param([(2, la.LIVE_UNDETERMINED), (0, True), (1, True)],
-                 "discarded", la.LIVE_UNDETERMINED,
+    pytest.param([(2, lv.LIVE_UNDETERMINED), (0, True), (1, True)],
+                 "discarded", lv.LIVE_UNDETERMINED,
                  id="r2-verdict-first"),
-    pytest.param([(0, True), (2, la.LIVE_UNDETERMINED), (1, True)],
-                 "discarded", la.LIVE_UNDETERMINED,
+    pytest.param([(0, True), (2, lv.LIVE_UNDETERMINED), (1, True)],
+                 "discarded", lv.LIVE_UNDETERMINED,
                  id="r2-verdict-middle"),
     # No-round-key rows: ignored by the round decision, still fire D1.
     pytest.param([(None, True), (0, False), (1, True)], "accepted", None,
                  id="no-round-row-ignored"),
-    pytest.param([(None, la.LIVE_UNDETERMINED), (1, True)], "discarded",
-                 la.LIVE_UNDETERMINED,
+    pytest.param([(None, lv.LIVE_UNDETERMINED), (1, True)], "discarded",
+                 lv.LIVE_UNDETERMINED,
                  id="no-round-verdict-fires"),
     # Length 4 (D2 + D5): a round-1 miss is terminal for the group --
     # an appended round-0 better row cannot rescue it.
     pytest.param([(0, False), (2, False), (1, False), (0, True)],
-                 "discarded", la.LIVE_NO_IMPROVEMENT,
+                 "discarded", lv.LIVE_NO_IMPROVEMENT,
                  id="r1-miss-sticks"),
 ]
 
@@ -366,14 +368,14 @@ THREE_ROUND_CASES = [
     # Round 2 is the last label: D3.
     pytest.param([(2, True)], "accepted", None,
                  id="r2-better-last"),
-    pytest.param([(2, False)], "discarded", la.LIVE_NO_IMPROVEMENT,
+    pytest.param([(2, False)], "discarded", lv.LIVE_NO_IMPROVEMENT,
                  id="r2-miss-last"),
-    pytest.param([(2, la.LIVE_UNDETERMINED)], "discarded",
-                 la.LIVE_UNDETERMINED,
+    pytest.param([(2, lv.LIVE_UNDETERMINED)], "discarded",
+                 lv.LIVE_UNDETERMINED,
                  id="r2-verdict-last"),
     # D2: the latest label owning a row decides.
     pytest.param([(0, True), (2, False)], "discarded",
-                 la.LIVE_NO_IMPROVEMENT,
+                 lv.LIVE_NO_IMPROVEMENT,
                  id="r0-b-r2-m"),
     pytest.param([(0, False), (1, True)], "accepted", None,
                  id="r0-m-r1-b"),
@@ -404,14 +406,14 @@ SINGLE_ROUND_CASES = [
     # above: under (0, 1) the same row decides nothing (D4).
     pytest.param([(0, True)], "accepted", None,
                  id="r0-better-last"),
-    pytest.param([(0, False)], "discarded", la.LIVE_NO_IMPROVEMENT,
+    pytest.param([(0, False)], "discarded", lv.LIVE_NO_IMPROVEMENT,
                  id="r0-miss-last"),
     # Round 1 is now outside the set (D6): its rows decide nothing,
     # except through D1's label-blind verdict scan.
     pytest.param([(1, False)], "pending", None,
                  id="r1-miss-out-of-set"),
-    pytest.param([(1, la.LIVE_INJECTION_OVERFLOW)], "discarded",
-                 la.LIVE_INJECTION_OVERFLOW,
+    pytest.param([(1, lv.LIVE_INJECTION_OVERFLOW)], "discarded",
+                 lv.LIVE_INJECTION_OVERFLOW,
                  id="r1-verdict-fires"),
 ]
 
@@ -435,7 +437,7 @@ def test_rows_of_other_tasks_never_decide_this_group(tmp_path):
     append_jsonl(path, ledger_row(1, False, task_id=OTHER_TASK_ID))
     append_jsonl(path, ledger_row(0, True))
 
-    result = la._finalize_group(store, TASK_ID, verdicts_path=path,
+    result = lv._finalize_group(store, TASK_ID, verdicts_path=path,
                                 rounds=ROUNDS)
 
     assert result == {"outcome": "accepted", "reason": None,
@@ -444,7 +446,7 @@ def test_rows_of_other_tasks_never_decide_this_group(tmp_path):
 
 @pytest.mark.parametrize("judgment, outcome, reason", [
     pytest.param(True, "accepted", None, id="accepted"),
-    pytest.param(False, "discarded", la.LIVE_NO_IMPROVEMENT,
+    pytest.param(False, "discarded", lv.LIVE_NO_IMPROVEMENT,
                 id="discarded"),
 ])
 def test_commit_touches_pending_members_only(tmp_path, judgment, outcome,
@@ -454,11 +456,11 @@ def test_commit_touches_pending_members_only(tmp_path, judgment, outcome,
     # sweep commits the pending member and lists it alone.
     store = Store(tmp_path / "run")
     group = seed_group(store)
-    discard_skill(store, group[1], la.LIVE_REVISION_DELETED)
+    discard_skill(store, group[1], lv.LIVE_REVISION_DELETED)
     path = tmp_path / "verdicts.jsonl"
     append_jsonl(path, ledger_row(1, judgment))
 
-    result = la._finalize_group(store, TASK_ID, verdicts_path=path,
+    result = lv._finalize_group(store, TASK_ID, verdicts_path=path,
                                 rounds=ROUNDS)
 
     assert result == {"outcome": outcome, "reason": reason,
@@ -467,4 +469,4 @@ def test_commit_touches_pending_members_only(tmp_path, judgment, outcome,
     assert (survivor.status, survivor.discard_reason) == (outcome, reason)
     terminal = store.load("skills", group[1].skill_id, Skill)
     assert (terminal.status, terminal.discard_reason) == (
-        "discarded", la.LIVE_REVISION_DELETED)
+        "discarded", lv.LIVE_REVISION_DELETED)

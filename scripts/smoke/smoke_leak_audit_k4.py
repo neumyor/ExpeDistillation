@@ -36,7 +36,8 @@ from pathlib import Path
 
 from expedistill.core import ids
 from expedistill.core.models import Exam, Skill
-from expedistill.composites.acceptance import LEAK_VERDICTS_LEDGER, accept_skill
+from expedistill.composites.acceptance_leak import LEAK_VERDICTS_LEDGER
+from expedistill.composites.acceptance_submit import accept_skill
 from expedistill.infra.runlock import RunLock
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder

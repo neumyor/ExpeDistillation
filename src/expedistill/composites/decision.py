@@ -20,7 +20,8 @@ Boolean predicates answer yes/no criteria directly.
 
 Checklist landing, item by item (exam 8 + live 9):
 
-exam (K4 = composites/acceptance.py; driver = methods/acceptance/exam.py):
+exam (K4 = composites/acceptance_submit.py; driver =
+methods/acceptance/exam.py):
 
 * bare answer correct -> delete(weak_already_knows):
   ``exam_bare_answer_action`` (K4's precheck).
@@ -50,7 +51,7 @@ exam (K4 = composites/acceptance.py; driver = methods/acceptance/exam.py):
   (a resumed round continues the same budget); splitting them would
   break the resume protocol's round accounting.
 
-live (K6 = composites/live_acceptance.py; driver =
+live (K6 = composites/live_verdicts.py and its two siblings; driver =
 methods/acceptance/live_run.py):
 
 * group improved -> keep: ``live_final_action`` (the finalization
@@ -141,7 +142,7 @@ REVISE = "revise"
 #: all-success); ``live_no_improvement`` is dual (no-op guard vs
 #: last-round miss) and the verdicts row's round tells them apart.
 #: Defined here since M3 so K4, K6 and this module share one
-#: definition (live_acceptance re-exports them unchanged).
+#: definition (composites.live_verdicts re-exports them unchanged).
 WEAK_ALREADY_KNOWS = "weak_already_knows"
 LIVE_INJECTION_OVERFLOW = "live_injection_overflow"
 LIVE_UNDETERMINED = "live_undetermined"

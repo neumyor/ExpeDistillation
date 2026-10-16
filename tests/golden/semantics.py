@@ -640,7 +640,7 @@ class RevisionWindowCrash(BenchmarkPlugin):
     revision marker.
 
     The block is a pure derivation from the skills store
-    (``live_acceptance.survivors_and_block``), so marker-in-block means
+    (``live_measurement.survivors_and_block``), so marker-in-block means
     the revision IS persisted -- and the task execution it belongs to is
     the pending re-answer. The K1 dispatch stops at the first raise, so
     nothing of the re-answer round persists (verified by the standing

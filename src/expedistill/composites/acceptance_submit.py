@@ -1,5 +1,14 @@
 """K4 acceptance: prove one skill actually teaches the weak model (layer 5).
 
+The loop-and-commit part of the former composites/acceptance.py, split
+out mechanically in R0 (docs/decisions/execute_learn_repair_plan_20261016.md):
+the K4 acceptance loop ``accept_skill`` and the helpers that close each of
+its rounds with an outcome -- the G6 rewrite (with its crash-persistent
+repair budget) and the deterministic error description for an audit-voided
+rewrite. The leak verdicts it consults are
+composites/acceptance_leak.py's; the stored-record state lookups are
+composites/acceptance_skill_status.py's.
+
 README stage 4 / composite row K4: one bare answer first; only a skill whose
 bare answer is WRONG and whose with-skill answer is CORRECT is accepted. The
 loop is [with-skill exam (K3) -> rewrite (G6) -> leak audit (D8)] with at most
@@ -13,14 +22,6 @@ resume for the flow; the pieces it wires (K3 via ``exam_once``, G6, D8, D9)
 stay single-purpose. The per-round verdict rules (the bare-answer, leak and
 wrong-answer decisions and their last-round splits) are named rules in
 ``composites.decision`` since M3; this module keeps every read and write.
-
-Leak-verdict ledger ``stage4_acceptance/leak_verdicts.jsonl``: one JSON row
-``{"skill_id": str, "skill_version": int, "leaked": bool, "reason": str}``
-per (skill, version), the FIRST verdict the judge gave for that version.
-The row is appended BEFORE the round acts on the verdict. The judge is
-nondeterministic, so first verdict sticks: a resumed run looks the verdict
-up and never asks the judge again for the same (skill, version) -- resume
-must equal an uninterrupted run, which a re-ask could not guarantee.
 
 Round accounting: rounds are numbered 0..retry_limit inclusive, so a run makes
 at most retry_limit+1 with-skill attempts and retry_limit rewrites. Every
@@ -79,31 +80,31 @@ unit means for the stage is the caller's job (stage 4 records it, see
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
-from expedistill.blocks.audit import audit_leak
 from expedistill.blocks.author import rewrite_skill
 from expedistill.composites import decision
+from expedistill.composites.acceptance_leak import leak_verdict_for
+from expedistill.composites.acceptance_skill_status import (
+    REWRITE_FAILURE_LEDGER,
+    _exam_attempts,
+    _find_accepted,
+    _find_bare,
+    _find_round_attempt,
+    _last_with_skill,
+    _ledger_path,
+    _next_round,
+    _skill_records,
+)
 from expedistill.composites.exam_once import exam_once
 from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
-from expedistill.infra.store import Store, append_jsonl, read_jsonl
+from expedistill.infra.store import Store, append_jsonl
 from expedistill.inject.skills import format_skills_block
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["LEAK_VERDICTS_LEDGER", "REWRITE_FAILURE_LEDGER", "accept_skill"]
-
-#: Ledger of leak-audit verdicts, written into stage4_acceptance/ next to
-#: the attempts: one row per (skill, version), the first verdict the judge
-#: gave for it (schema in the module docstring). It doubles as the discard
-#: bookkeeping: every leaked=true row is a voided version.
-LEAK_VERDICTS_LEDGER = "leak_verdicts.jsonl"
-
-#: Ledger of failed G6 tries, next to LEAK_VERDICTS_LEDGER. One line per try
-#: that raised ModelOutputError; the try that exhausts the budget carries
-#: ``exhausted: true`` and is what marks its round as consumed.
-REWRITE_FAILURE_LEDGER = "rewrite_failures.jsonl"
+__all__ = ["accept_skill"]
 
 #: Repair budget for one rewrite call. call_model already repairs malformed
 #: JSON per request; this is the composite-level budget for the whole G6 call.
@@ -113,105 +114,6 @@ _REWRITE_ATTEMPTS = 2
 
 #: Prefix of the error description synthesized for an audit-voided rewrite.
 _VOID_NOTE = "The previous skill version was voided by the leak audit: "
-
-
-def _ledger_path(store: Store, name: str = LEAK_VERDICTS_LEDGER) -> Path:
-    # stage4_acceptance/ is the parent of the attempts directory.
-    return Path(store.dir_for("attempts")).parent / name
-
-
-def _skill_records(store: Store, name: str, skill_id: str
-                   ) -> List[Dict[str, Any]]:
-    """This skill's lines of one stage-4 ledger, in append order."""
-    return [record for record in read_jsonl(_ledger_path(store, name))
-            if record.get("skill_id") == skill_id]
-
-
-def _find_leak_verdict(store: Store, skill_id: str,
-                       skill_version: int) -> Optional[Dict[str, Any]]:
-    """The stored judge verdict for one (skill, version), if any.
-
-    The first matching row wins; only one row per (skill, version) is ever
-    appended, but reading the first keeps the lookup honest even if a
-    hand-edited ledger ever holds duplicates.
-    """
-    for record in _skill_records(store, LEAK_VERDICTS_LEDGER, skill_id):
-        if record.get("skill_version") == skill_version:
-            return record
-    return None
-
-
-def _serial(attempt: Attempt) -> int:
-    # The numeric serial, never the id string: serials >= 100 widen the id,
-    # and "att100" sorts before "att99" as text.
-    return ids.parse_attempt_id(attempt.attempt_id)[1]
-
-
-def _exam_attempts(store: Store, exam_id: str) -> List[Attempt]:
-    """All stored attempts of one exam, in serial order."""
-    attempts = []
-    for attempt_id in store.ids("attempts"):
-        attempt = store.load("attempts", attempt_id, Attempt)
-        if attempt.exam_id == exam_id:
-            attempts.append(attempt)
-    return sorted(attempts, key=_serial)
-
-
-def _find_bare(attempts: List[Attempt]) -> Optional[Attempt]:
-    """The judged bare attempt of the exam, if an interrupted run left one."""
-    for attempt in attempts:
-        if (attempt.purpose == "bare" and attempt.skill_id is None
-                and attempt.judge_verdict is not None):
-            return attempt
-    return None
-
-
-def _find_accepted(attempts: List[Attempt], skill_id: str,
-                   skill_version: int) -> Optional[Attempt]:
-    """A judged acceptance attempt that passed ON this version.
-
-    The version must match: a passing attempt on another version says
-    nothing about the stored content, and accepting on it would let text
-    that was never examined into the bank.
-    """
-    for attempt in attempts:
-        if (attempt.purpose == "acceptance" and attempt.skill_id == skill_id
-                and attempt.skill_version == skill_version
-                and attempt.judge_verdict is True):
-            return attempt
-    return None
-
-
-def _find_round_attempt(attempts: List[Attempt], skill_id: str,
-                        skill_version: int, retry_round: int
-                        ) -> Optional[Attempt]:
-    """The judged with-skill attempt for one (version, round) pair, if an
-    interrupted run stored it between the exam and the rewrite."""
-    for attempt in attempts:
-        if (attempt.purpose == "acceptance" and attempt.skill_id == skill_id
-                and attempt.skill_version == skill_version
-                and attempt.retry_round == retry_round
-                and attempt.judge_verdict is not None):
-            return attempt
-    return None
-
-
-def _last_with_skill(attempts: List[Attempt], skill_id: str,
-                     before_round: int) -> Optional[Attempt]:
-    """The most recent judged with-skill attempt of an already completed
-    round (rewrite context on resume).
-
-    Only rounds before ``before_round`` count: the resumed round's own
-    attempt, if stored, is found again by the loop. Round is the primary
-    order; the attempt serial breaks ties.
-    """
-    judged = [a for a in attempts
-              if a.purpose == "acceptance" and a.skill_id == skill_id
-              and a.retry_round < before_round
-              and a.judge_verdict is not None]
-    if not judged:
-        return None
-    return max(judged, key=lambda a: (a.retry_round, _serial(a)))
 
 
 def _void_error_description(source_attempt: Attempt, report: str) -> str:
@@ -277,14 +179,6 @@ def _rewrite_round(store: Store, skill: Skill, exam: Exam, retry_round: int,
         store.save(skill, "skills")
         return True
     return False
-
-
-def _next_round(store: Store, skill: Skill) -> int:
-    """Rounds already closed by a rewrite outcome (module docstring)."""
-    exhausted = [record for record in _skill_records(
-                     store, REWRITE_FAILURE_LEDGER, skill.skill_id)
-                 if record.get("exhausted")]
-    return (skill.version - 1) + len(exhausted)
 
 
 def accept_skill(
@@ -368,16 +262,11 @@ def accept_skill(
         # the round acts on it. A stored verdict (an interrupted run, or a
         # later round on an unchanged version) is reused as is: first
         # verdict sticks.
-        verdict = _find_leak_verdict(store, working.skill_id,
-                                     working.version)
-        if verdict is None:
-            leaked, reason = audit_leak(
-                working.content, exam.question_text, exam.reference_answer,
-                auditor_handle, usage=usage, run_dir=run_dir)
-            verdict = {"skill_id": working.skill_id,
-                       "skill_version": working.version,
-                       "leaked": leaked, "reason": reason}
-            append_jsonl(_ledger_path(store, LEAK_VERDICTS_LEDGER), verdict)
+        verdict = leak_verdict_for(
+            store=store, skill_id=working.skill_id,
+            skill_version=working.version, skill_content=working.content,
+            exam=exam, auditor_handle=auditor_handle, usage=usage,
+            run_dir=run_dir)
         if verdict["leaked"]:
             action = decision.exam_leak_action(last_round=last_round)
             if action.kind == decision.DELETE:

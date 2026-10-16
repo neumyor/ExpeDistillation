@@ -137,11 +137,20 @@ src/expedistill/
   composites/             第 5 层：组合积木（负责落盘与续跑）
     batch_execute.py      K1
     segment_checked.py    K2
-    exam_once.py          K3
-    acceptance.py         K4
+    exam_answering.py     K3 作答部分（R0 拆分：序列号、同题锁、作答落盘）
+    exam_grading.py       K3 判卷部分（R0 拆分：跨崩溃持续的判卷修复预算）
+    exam_once.py          K3 薄接线：作答 + 判卷拼成一条 Attempt
+    acceptance_leak.py    K4 泄题判定（R0 拆分：D8 判定与 leak_verdicts 账本）
+    acceptance_skill_status.py  K4 技能状态判定（R0 拆分：从存量记录读出
+                          skill 状态与轮次）
+    acceptance_submit.py  K4 提交助手（R0 拆分：accept_skill 循环与 G6 改写
+                          落盘）
     curation.py           K5
-    live_acceptance.py    K6 live-run 验收（阶段 4 的 live_run 模式；逐组阶段函数库，
-                          轮序编排归 methods/acceptance/live_run.py）
+    live_measurement.py   K6 测量部分（R0 拆分：live_run 路径与账本名、组推导、
+                          基线读取、注入审计行、幸存组推导）
+    live_verdicts.py      K6 判定部分（R0 拆分：轮判定、no-op 守卫、组终态提交；
+                          discard_reason 词表的 K6 侧再导出在此）
+    live_attribution.py   K6 归因部分（R0 拆分：G10 归因、G11 修订应用）
     decision.py           决策规则（M3 起的纯函数）：K4/K6/验收驱动判定清单的落点；
                           discard_reason 词表与 strict 短路规则集的定义处
     reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件

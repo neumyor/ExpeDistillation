@@ -12,13 +12,15 @@ well: a section-dropping rewrite rides the existing ModelOutputError repair
 path, and an unmarked original is never marker-checked.
 """
 
-from expedistill.composites.acceptance import (
-    LEAK_VERDICTS_LEDGER,
+from expedistill.composites.acceptance_leak import LEAK_VERDICTS_LEDGER
+from expedistill.composites.acceptance_skill_status import (
     REWRITE_FAILURE_LEDGER,
-    accept_skill,
 )
+from expedistill.composites.acceptance_submit import accept_skill
 from expedistill.composites.skill_status import discard_skill
-from expedistill.composites import acceptance as acceptance_mod
+from expedistill.composites import (
+    acceptance_skill_status as acceptance_mod,
+)
 from expedistill.core.ids import (
     make_attempt_id,
     make_exam_id,

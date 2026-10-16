@@ -12,10 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import (
+    live_measurement as lm,
+    live_verdicts as lv,
+)
 from expedistill.composites import shortfall
-from expedistill.composites.acceptance import (
-    LEAK_VERDICTS_LEDGER,
+from expedistill.composites.acceptance_leak import LEAK_VERDICTS_LEDGER
+from expedistill.composites.acceptance_skill_status import (
     REWRITE_FAILURE_LEDGER,
 )
 from expedistill.composites.reports import (
@@ -128,8 +131,8 @@ def round_dir(store, round_):
 
 
 def freeze_audit(store, task_id, round_=0):
-    row = la.audit_row(store, task_id, round_)
-    append_jsonl(round_dir(store, round_) / la.INJECTION_AUDIT_NAME, row)
+    row = lm.audit_row(store, task_id, round_)
+    append_jsonl(round_dir(store, round_) / lm.INJECTION_AUDIT_NAME, row)
     return row
 
 
@@ -339,8 +342,8 @@ def judged_round(tmp_path, *, task_id=TASK_ID,
         store.save(skill, "skills")
     freeze_audit(store, task_id)
     seed_round(store, task_id, 0, live)
-    _, baseline_counts = la.load_baseline(store, task_id, N_ATTEMPTS)
-    la.judge_round(store=store, task_id=task_id, round_=0,
+    _, baseline_counts = lm.load_baseline(store, task_id, N_ATTEMPTS)
+    lv.judge_round(store=store, task_id=task_id, round_=0,
                    rule_name=RULE, baseline_counts=baseline_counts,
                    n_attempts=N_ATTEMPTS, skip_ids=[])
     return store, skills, baseline_counts
@@ -374,7 +377,7 @@ def test_live_report_carries_the_landed_attribution_plan(tmp_path):
                            "problem": "missed the verify step"}],
         "injection_block_sha256": "deadbeef",
     }
-    append_jsonl(la._ledger_path(store, la.ATTRIBUTIONS_LEDGER), plan)
+    append_jsonl(lm._ledger_path(store, lm.ATTRIBUTIONS_LEDGER), plan)
 
     row = live_report(store, round_=0)["groups"][0]
 
@@ -386,13 +389,13 @@ def test_live_report_zero_execution_row(tmp_path):
     seed_task(store, OTHER_TASK_ID, ("success",) * N_ATTEMPTS)
     for segment in range(2):
         store.save(group_skill(OTHER_TASK_ID, segment), "skills")
-    _, baseline_counts = la.load_baseline(store, OTHER_TASK_ID, N_ATTEMPTS)
+    _, baseline_counts = lm.load_baseline(store, OTHER_TASK_ID, N_ATTEMPTS)
     # The entry guard's zero-execution terminal: no dispatch, no audit
     # row, no round store -- only the verdict row.
-    la.judge_round(store=store, task_id=OTHER_TASK_ID, round_=0,
+    lv.judge_round(store=store, task_id=OTHER_TASK_ID, round_=0,
                    rule_name=RULE, baseline_counts=baseline_counts,
                    n_attempts=N_ATTEMPTS, skip_ids=[],
-                   terminal=la.WEAK_ALREADY_KNOWS)
+                   terminal=lv.WEAK_ALREADY_KNOWS)
 
     rows = {row["task_id"]: row for row in live_report(store,
                                                        round_=0)["groups"]}
@@ -415,7 +418,7 @@ def test_live_report_zero_execution_row(tmp_path):
 def test_readers_write_nothing(tmp_path):
     store, _, _ = judged_round(tmp_path)
     # A landed plan row, so live_report reads every ledger it names.
-    append_jsonl(la._ledger_path(store, la.ATTRIBUTIONS_LEDGER), {
+    append_jsonl(lm._ledger_path(store, lm.ATTRIBUTIONS_LEDGER), {
         "schema": "live-attribution-v1", "task_id": TASK_ID, "round": 0,
         "diagnosis": "d", "skill_actions": [],
         "injection_block_sha256": "deadbeef",

@@ -10,7 +10,7 @@ but a direct test keeps the whole family's resolve shape honest.
 import pytest
 
 from expedistill.benchmarks.base import Task
-from expedistill.composites.live_acceptance import survivors_and_block
+from expedistill.composites.live_measurement import survivors_and_block
 from expedistill.core.ids import (
     make_skill_id,
     make_subtask_id,

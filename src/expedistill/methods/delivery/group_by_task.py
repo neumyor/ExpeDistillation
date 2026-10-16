@@ -13,7 +13,7 @@ round-0 group is its own survivor set.
 
 from typing import Any, Dict, List, Tuple
 
-from expedistill.composites.live_acceptance import survivors_and_block
+from expedistill.composites.live_measurement import survivors_and_block
 from expedistill.core import ids
 from expedistill.infra.reliability import CodeBugError
 from expedistill.infra.store import Store

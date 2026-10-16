@@ -25,16 +25,24 @@ from pathlib import Path
 
 import pytest
 
-from expedistill.composites import live_acceptance as la
-from expedistill.composites.live_acceptance import (
+from expedistill.composites import (
+    live_attribution as lat,
+    live_measurement as lm,
+    live_verdicts as lv,
+)
+from expedistill.composites.live_attribution import (
     apply_revisions,
     attribute_group,
+)
+from expedistill.composites.live_measurement import (
     audit_row,
+    load_baseline,
+    survivors_and_block,
+)
+from expedistill.composites.live_verdicts import (
     finalize_group,
     judge_round,
-    load_baseline,
     no_op_guard,
-    survivors_and_block,
 )
 from expedistill.core.ids import (
     make_skill_id,
@@ -230,7 +238,7 @@ def _dispatch_round(store, round_, statuses):
     a re-derivation against it byte for byte when re-dispatching), then
     let K1 run -- which the fixture stands in for by seeding the round
     store with the scenario's trajectories."""
-    path = round_dir(store, round_) / la.INJECTION_AUDIT_NAME
+    path = round_dir(store, round_) / lm.INJECTION_AUDIT_NAME
     row = audit_row(store, TASK_ID, round_)
     if path.exists():
         wanted = json.dumps(row, ensure_ascii=False, sort_keys=True)
@@ -242,7 +250,11 @@ def _dispatch_round(store, round_, statuses):
                     raise Crash(f"audit drift at round {round_}")
                 break
     else:
-        la.append_jsonl(path, row)
+        # Written through live_verdicts' name on purpose: the
+        # crash tests wrap append_jsonl on the verdicts and
+        # attribution modules, and the audit freeze must be
+        # counted with them.
+        lv.append_jsonl(path, row)
     rs = round_store(store, round_)
     for attempt, status in enumerate(statuses):
         if not rs.exists("trajectories",
@@ -254,14 +266,14 @@ def _flow(store, handles, scenario):
     """Drive one group through the live phases; raises Crash when a
     crash injection fires."""
     finalize_group(store, TASK_ID)               # the finalization sweep
-    if not la._pending_group(store, TASK_ID):
+    if not lm._pending_group(store, TASK_ID):
         return                                   # already terminal
     _, counts = load_baseline(store, TASK_ID, N_ATTEMPTS)
     if (counts["success"] == counts["valid"]
-            and RULE in la._ALL_SUCCESS_SAFE_RULES):
+            and RULE in lv._ALL_SUCCESS_SAFE_RULES):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts, n_attempts=N_ATTEMPTS,
-                    skip_ids=[], terminal=la.WEAK_ALREADY_KNOWS)
+                    skip_ids=[], terminal=lv.WEAK_ALREADY_KNOWS)
         finalize_group(store, TASK_ID)
         return
     if not _round_complete(store, 0):
@@ -330,15 +342,15 @@ def snapshot(store):
     return {
         "skills": {skill_id: store.load("skills", skill_id, Skill).to_dict()
                    for skill_id in store.ids("skills")},
-        "verdicts": read_jsonl(live / la.VERDICTS_LEDGER),
-        "attributions": read_jsonl(live / la.ATTRIBUTIONS_LEDGER),
+        "verdicts": read_jsonl(live / lm.VERDICTS_LEDGER),
+        "attributions": read_jsonl(live / lm.ATTRIBUTIONS_LEDGER),
         "attribution_failures": read_jsonl(
-            live / la.ATTRIBUTION_FAILURES_LEDGER),
-        "revision_failures": read_jsonl(live / la.REVISION_FAILURES_LEDGER),
+            live / lm.ATTRIBUTION_FAILURES_LEDGER),
+        "revision_failures": read_jsonl(live / lm.REVISION_FAILURES_LEDGER),
         "audit_round0": read_jsonl(
-            live / "round00" / la.INJECTION_AUDIT_NAME),
+            live / "round00" / lm.INJECTION_AUDIT_NAME),
         "audit_round1": read_jsonl(
-            live / "round01" / la.INJECTION_AUDIT_NAME),
+            live / "round01" / lm.INJECTION_AUDIT_NAME),
         "unit_failures": read_jsonl(store.run_dir / "failed_units.jsonl"),
     }
 
@@ -388,15 +400,15 @@ def test_reference_runs_are_sane(tmp_path, name):
         assert (skills[B_ID]["status"], skills[B_ID]["version"]) == (
             "accepted", 2)
         assert skills[C_ID]["status"] == "discarded"
-        assert skills[C_ID]["discard_reason"] == la.LIVE_REVISION_DELETED
+        assert skills[C_ID]["discard_reason"] == lv.LIVE_REVISION_DELETED
         assert [row["better"] for row in reference["verdicts"]] == [
             False, True]
     else:
         for skill_id in (A_ID, B_ID):
             assert (skills[skill_id]["status"],
                     skills[skill_id]["discard_reason"]) == (
-                "discarded", la.LIVE_NO_IMPROVEMENT)
-        assert skills[C_ID]["discard_reason"] == la.LIVE_REVISION_DELETED
+                "discarded", lv.LIVE_NO_IMPROVEMENT)
+        assert skills[C_ID]["discard_reason"] == lv.LIVE_REVISION_DELETED
         assert [row["better"] for row in reference["verdicts"]] == [
             False, False]
     # One revision try failed (the attribution MOE only exists in the
@@ -486,12 +498,12 @@ class _IOCrasher:
         def wrapped(path, record):
             def describe():
                 name = Path(path).name
-                if name in (la.ATTRIBUTIONS_LEDGER,
-                            la.ATTRIBUTION_FAILURES_LEDGER):
+                if name in (lm.ATTRIBUTIONS_LEDGER,
+                            lm.ATTRIBUTION_FAILURES_LEDGER):
                     # An attribution plan (or its failed try) that never
                     # landed is asked again.
                     return {"author": 1}
-                if name == la.REVISION_FAILURES_LEDGER:
+                if name == lm.REVISION_FAILURES_LEDGER:
                     return {"rewriter": 1}
                 # Verdict rows and audit lines are pure derivations.
                 return {}
@@ -505,7 +517,9 @@ def _count_writes(tmp_path, monkeypatch, name):
     crasher = _IOCrasher(store, target=-1, when="before")
     store.save = crasher.save(store.save)
     with monkeypatch.context() as patch:
-        patch.setattr(la, "append_jsonl", crasher.append(la.append_jsonl))
+        wrapped = crasher.append(lv.append_jsonl)
+        patch.setattr(lv, "append_jsonl", wrapped)
+        patch.setattr(lat, "append_jsonl", wrapped)
         _, _, completed = run_flow(store, scenario, scenario["scripts"])
     assert completed
     return crasher.count
@@ -541,7 +555,9 @@ def test_crash_at_every_write_resumes_identically(tmp_path, monkeypatch,
     original_save = store.save
     store.save = crasher.save(original_save)
     with monkeypatch.context() as patch:
-        patch.setattr(la, "append_jsonl", crasher.append(la.append_jsonl))
+        wrapped = crasher.append(lv.append_jsonl)
+        patch.setattr(lv, "append_jsonl", wrapped)
+        patch.setattr(lat, "append_jsonl", wrapped)
         handles, _, completed = run_flow(store, scenario,
                                          scenario["scripts"])
     store.save = original_save
@@ -580,17 +596,17 @@ def test_attribution_crash_after_persist_never_reasks(tmp_path, monkeypatch):
     reference, _, _ = reference_run(tmp_path / "ref", name)
     store = fresh_run(tmp_path / "crashed", scenario)
     state = {"done": False}
-    original_append = la.append_jsonl
+    original_append = lat.append_jsonl
 
     def append(path, record):
         out = original_append(path, record)
-        if (Path(path).name == la.ATTRIBUTIONS_LEDGER
+        if (Path(path).name == lm.ATTRIBUTIONS_LEDGER
                 and not state["done"]):
             state["done"] = True
             raise Crash("crash after the attribution line")
         return out
 
-    monkeypatch.setattr(la, "append_jsonl", append)
+    monkeypatch.setattr(lat, "append_jsonl", append)
     handles, _, completed = run_flow(store, scenario, scenario["scripts"])
     monkeypatch.undo()
     assert not completed
@@ -675,7 +691,7 @@ def test_crash_between_verdict_and_commit_sweep_completes(tmp_path):
     assert all(store.load("skills", s.skill_id, Skill).status == "accepted"
                for s in GROUP)
     verdicts = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.VERDICTS_LEDGER)
+                          / lm.VERDICTS_LEDGER)
     assert len(verdicts) == 1 and verdicts[0]["better"] is True
 
 
@@ -688,9 +704,9 @@ def test_audit_first_write_survives_crash_resume_only_reads(tmp_path,
     scenario = SCENARIOS[name]
     reference, reference_prompts, _ = reference_run(tmp_path / "ref", name)
     store = fresh_run(tmp_path / "crashed", scenario)
-    audit_path = round_dir(store, 0) / la.INJECTION_AUDIT_NAME
+    audit_path = round_dir(store, 0) / lm.INJECTION_AUDIT_NAME
     state = {"done": False}
-    original_append = la.append_jsonl
+    original_append = lv.append_jsonl
 
     def append(path, record):
         out = original_append(path, record)
@@ -699,7 +715,7 @@ def test_audit_first_write_survives_crash_resume_only_reads(tmp_path,
             raise Crash("crash right after the audit freeze")
         return out
 
-    monkeypatch.setattr(la, "append_jsonl", append)
+    monkeypatch.setattr(lv, "append_jsonl", append)
     handles, _, completed = run_flow(store, scenario, scenario["scripts"])
     monkeypatch.undo()
     assert not completed
@@ -708,14 +724,14 @@ def test_audit_first_write_survives_crash_resume_only_reads(tmp_path,
     # Resume: the audit line is untouched -- the re-derived row equals
     # the frozen line and the dispatch step must not write it again.
     audit_writes = []
-    guarded_append = la.append_jsonl
+    guarded_append = lv.append_jsonl
 
     def no_audit_rewrites(path, record):
         if Path(path) == audit_path:
             audit_writes.append(record)
         return guarded_append(path, record)
 
-    monkeypatch.setattr(la, "append_jsonl", no_audit_rewrites)
+    monkeypatch.setattr(lv, "append_jsonl", no_audit_rewrites)
     resume_and_compare(store, scenario, prompts(handles), {},
                        reference, reference_prompts)
     monkeypatch.undo()
@@ -732,17 +748,17 @@ def test_attribution_budget_persists_across_crash(tmp_path, monkeypatch):
     reference, reference_prompts, _ = reference_run(tmp_path / "ref", name)
     store = fresh_run(tmp_path / "crashed", scenario)
     state = {"done": False}
-    original_append = la.append_jsonl
+    original_append = lat.append_jsonl
 
     def append(path, record):
         out = original_append(path, record)
-        if (Path(path).name == la.ATTRIBUTION_FAILURES_LEDGER
+        if (Path(path).name == lm.ATTRIBUTION_FAILURES_LEDGER
                 and not state["done"]):
             state["done"] = True
             raise Crash("crash after the failed try's ledger line")
         return out
 
-    monkeypatch.setattr(la, "append_jsonl", append)
+    monkeypatch.setattr(lat, "append_jsonl", append)
     handles, _, completed = run_flow(store, scenario, scenario["scripts"])
     monkeypatch.undo()
     assert not completed
@@ -751,6 +767,6 @@ def test_attribution_budget_persists_across_crash(tmp_path, monkeypatch):
     resume_and_compare(store, scenario, prompts(handles), {},
                        reference, reference_prompts)
     failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.ATTRIBUTION_FAILURES_LEDGER)
+                          / lm.ATTRIBUTION_FAILURES_LEDGER)
     assert [(row["try_index"], row["exhausted"]) for row in failures] == [
         (0, False)]

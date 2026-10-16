@@ -15,20 +15,28 @@ import json
 
 import pytest
 
-from expedistill.composites import live_acceptance as la
+from expedistill.composites import (
+    live_attribution as lat,
+    live_measurement as lm,
+    live_verdicts as lv,
+)
 from expedistill.composites.skill_status import discard_skill
-from expedistill.composites.live_acceptance import (
-    apply_revisions,
-    attribute_group,
+from expedistill.composites.live_measurement import (
     audit_row,
     expected_units,
-    finalize_group,
-    judge_round,
     load_baseline,
-    no_op_guard,
     pending_groups,
     skip_ids_for,
     survivors_and_block,
+)
+from expedistill.composites.live_verdicts import (
+    finalize_group,
+    judge_round,
+    no_op_guard,
+)
+from expedistill.composites.live_attribution import (
+    apply_revisions,
+    attribute_group,
 )
 from expedistill.core.ids import (
     make_merged_skill_id,
@@ -159,7 +167,7 @@ def freeze_audit(store, round_=0, task_id=TASK_ID, row=None):
     of the group either way)."""
     if row is None:
         row = audit_row(store, task_id, round_)
-    path = round_dir(store, round_) / la.INJECTION_AUDIT_NAME
+    path = round_dir(store, round_) / lm.INJECTION_AUDIT_NAME
     rows = [r for r in read_jsonl(path) if r.get("task_id") != task_id]
     rows.append(row)
     path.write_text("".join(
@@ -221,9 +229,9 @@ def stored_skills(store):
 # ---------------------------------------------------------------------------
 
 def test_discard_reason_vocabulary_is_pinned():
-    assert (la.WEAK_ALREADY_KNOWS, la.LIVE_NO_IMPROVEMENT,
-            la.LIVE_REVISION_DELETED, la.MODEL_OUTPUT_ERROR,
-            la.LIVE_UNDETERMINED, la.LIVE_INJECTION_OVERFLOW) == (
+    assert (lv.WEAK_ALREADY_KNOWS, lv.LIVE_NO_IMPROVEMENT,
+            lv.LIVE_REVISION_DELETED, lv.MODEL_OUTPUT_ERROR,
+            lv.LIVE_UNDETERMINED, lv.LIVE_INJECTION_OVERFLOW) == (
         "weak_already_knows", "live_no_improvement", "live_revision_deleted",
         "model_output_error", "live_undetermined", "live_injection_overflow")
 
@@ -330,7 +338,7 @@ def test_pending_groups_derives_the_universe(tmp_path):
     keep = make_group_skill(TASK_ID, 0, MARKED_A)
     gone = make_group_skill(TASK_ID, 1, MARKED_A)
     gone.status = "discarded"
-    gone.discard_reason = la.LIVE_REVISION_DELETED
+    gone.discard_reason = lv.LIVE_REVISION_DELETED
     other = make_group_skill(OTHER_TASK_ID, 0, MARKED_A)
     merged = Skill(skill_id=make_merged_skill_id(0), content=MARKED_A,
                    subtask_id=keep.subtask_id,
@@ -343,8 +351,8 @@ def test_pending_groups_derives_the_universe(tmp_path):
     # Terminal members, merged products and unknown-chain ids are not
     # units; every pending candidate group is, keyed by its task id.
     assert groups == {TASK_ID: [keep], OTHER_TASK_ID: [other]}
-    assert la._pending_group(store, TASK_ID) == [keep]
-    assert la._pending_group(store, make_task_id("tb", "nobody")) == []
+    assert lm._pending_group(store, TASK_ID) == [keep]
+    assert lm._pending_group(store, make_task_id("tb", "nobody")) == []
 
 
 def test_audit_row_members_sha_and_tokens(tmp_path):
@@ -374,7 +382,7 @@ def test_audit_row_excludes_terminal_merged_and_other_tasks(tmp_path):
     keep = make_group_skill(TASK_ID, 0, MARKED_A)
     gone = make_group_skill(TASK_ID, 1, MARKED_A)
     gone.status = "discarded"
-    gone.discard_reason = la.LIVE_REVISION_DELETED
+    gone.discard_reason = lv.LIVE_REVISION_DELETED
     elsewhere = make_group_skill(OTHER_TASK_ID, 0, MARKED_A)
     merged = Skill(skill_id=make_merged_skill_id(0), content=MARKED_A,
                    subtask_id=keep.subtask_id,
@@ -456,7 +464,7 @@ def test_judge_row_shape(tmp_path):
         "aux": None,
     }
     rows = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                      / la.VERDICTS_LEDGER)
+                      / lm.VERDICTS_LEDGER)
     assert rows == [verdict]
 
 
@@ -471,7 +479,7 @@ def test_judge_is_append_once_and_idempotent(tmp_path):
 
     assert second == first
     rows = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                      / la.VERDICTS_LEDGER)
+                      / lm.VERDICTS_LEDGER)
     assert len(rows) == 1
 
 
@@ -566,7 +574,7 @@ def test_judge_requires_a_dispatched_round_store(tmp_path):
 
 def test_judge_requires_the_frozen_audit_row(tmp_path):
     store, _ = seeded_run(tmp_path)
-    (round_dir(store, 0) / la.INJECTION_AUDIT_NAME).unlink()
+    (round_dir(store, 0) / lm.INJECTION_AUDIT_NAME).unlink()
 
     with pytest.raises(CodeBugError, match="frozen injection_audit"):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
@@ -598,7 +606,7 @@ def test_judge_all_holes_live_sample_is_undetermined(tmp_path):
         baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
         skip_ids=skip)
 
-    assert verdict["verdict"] == la.LIVE_UNDETERMINED
+    assert verdict["verdict"] == lv.LIVE_UNDETERMINED
     assert verdict["baseline"] is None and verdict["live"] is None
     assert verdict["better"] is None
     assert verdict["injection_tokens"] == audit["injection_tokens"]
@@ -606,9 +614,9 @@ def test_judge_all_holes_live_sample_is_undetermined(tmp_path):
     # The group terminalizes from the row alone.
     result = finalize_group(store, TASK_ID)
     assert result["outcome"] == "discarded"
-    assert result["reason"] == la.LIVE_UNDETERMINED
+    assert result["reason"] == lv.LIVE_UNDETERMINED
     assert all(s["status"] == "discarded"
-               and s["discard_reason"] == la.LIVE_UNDETERMINED
+               and s["discard_reason"] == lv.LIVE_UNDETERMINED
                for s in stored_skills(store).values())
 
 
@@ -638,7 +646,7 @@ def test_judge_undetermined_cannot_be_asserted_by_caller(tmp_path):
     with pytest.raises(CodeBugError, match="derived by judge_round"):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
-                    skip_ids=[], terminal=la.LIVE_UNDETERMINED)
+                    skip_ids=[], terminal=lv.LIVE_UNDETERMINED)
 
 
 def test_judge_weak_already_knows_zero_execution(tmp_path):
@@ -649,9 +657,9 @@ def test_judge_weak_already_knows_zero_execution(tmp_path):
     verdict = judge_round(
         store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
         baseline_counts=counts(3, 3), n_attempts=N_ATTEMPTS,
-        skip_ids=[], terminal=la.WEAK_ALREADY_KNOWS)
+        skip_ids=[], terminal=lv.WEAK_ALREADY_KNOWS)
 
-    assert verdict["verdict"] == la.WEAK_ALREADY_KNOWS
+    assert verdict["verdict"] == lv.WEAK_ALREADY_KNOWS
     assert verdict["baseline"] is None and verdict["live"] is None
     assert verdict["better"] is None
     assert verdict["injection_tokens"] is None   # nothing was ever injected
@@ -660,7 +668,7 @@ def test_judge_weak_already_knows_zero_execution(tmp_path):
     assert not round_dir(store, 0).exists()
     finalize_group(store, TASK_ID)
     assert all(s["status"] == "discarded"
-               and s["discard_reason"] == la.WEAK_ALREADY_KNOWS
+               and s["discard_reason"] == lv.WEAK_ALREADY_KNOWS
                for s in stored_skills(store).values())
 
 
@@ -669,7 +677,7 @@ def test_judge_weak_already_knows_requires_all_success(tmp_path):
     with pytest.raises(CodeBugError, match="not all-success"):
         judge_round(store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
-                    skip_ids=[], terminal=la.WEAK_ALREADY_KNOWS)
+                    skip_ids=[], terminal=lv.WEAK_ALREADY_KNOWS)
 
 
 def test_judge_weak_already_knows_is_limited_to_safe_rules(tmp_path):
@@ -680,7 +688,7 @@ def test_judge_weak_already_knows_is_limited_to_safe_rules(tmp_path):
         judge_round(store=store, task_id=TASK_ID, round_=0,
                     rule_name="live_test_pass_at_n",
                     baseline_counts=counts(3, 3), n_attempts=N_ATTEMPTS,
-                    skip_ids=[], terminal=la.WEAK_ALREADY_KNOWS)
+                    skip_ids=[], terminal=lv.WEAK_ALREADY_KNOWS)
 
 
 def overflow_run(tmp_path, tokens):
@@ -689,7 +697,7 @@ def overflow_run(tmp_path, tokens):
     seed_baseline(store, ("failure",) * N_ATTEMPTS)
     seed_round(store, 0, ("failure",) * N_ATTEMPTS)
     skills = store_group(store, [MARKED_A])
-    append_jsonl(round_dir(store, 0) / la.INJECTION_AUDIT_NAME, {
+    append_jsonl(round_dir(store, 0) / lm.INJECTION_AUDIT_NAME, {
         "schema": "injection-audit-v1", "task_id": TASK_ID, "round": 0,
         "members": [{"skill_id": s.skill_id, "version": 1} for s in skills],
         "injection_block_sha256": "frozen",
@@ -704,10 +712,10 @@ def test_judge_injection_overflow_row(tmp_path):
     verdict = judge_round(
         store=store, task_id=TASK_ID, round_=0, rule_name=RULE,
         baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
-        skip_ids=[], terminal=la.LIVE_INJECTION_OVERFLOW,
+        skip_ids=[], terminal=lv.LIVE_INJECTION_OVERFLOW,
         max_injection_tokens=1000)
 
-    assert verdict["verdict"] == la.LIVE_INJECTION_OVERFLOW
+    assert verdict["verdict"] == lv.LIVE_INJECTION_OVERFLOW
     assert verdict["injection_tokens"] == 9999
     assert verdict["better"] is None and verdict["live"] is None
     assert verdict["baseline"] is None
@@ -719,12 +727,12 @@ def test_judge_injection_overflow_row(tmp_path):
         judge_round(store=overflow_run(tmp_path / "nolimit", tokens=9999),
                     task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
-                    skip_ids=[], terminal=la.LIVE_INJECTION_OVERFLOW)
+                    skip_ids=[], terminal=lv.LIVE_INJECTION_OVERFLOW)
     with pytest.raises(CodeBugError, match="own evidence"):
         judge_round(store=overflow_run(tmp_path / "under", tokens=10),
                     task_id=TASK_ID, round_=0, rule_name=RULE,
                     baseline_counts=counts(3, 1), n_attempts=N_ATTEMPTS,
-                    skip_ids=[], terminal=la.LIVE_INJECTION_OVERFLOW,
+                    skip_ids=[], terminal=lv.LIVE_INJECTION_OVERFLOW,
                     max_injection_tokens=1000)
 
 
@@ -769,12 +777,12 @@ def test_clip_view_keeps_head_and_tail_under_budget():
     is where terminal-benchmark failure evidence lives), marks the
     elided middle, and never exceeds the budget."""
     text = "A" * 600 + "B" * 600 + "C" * 600
-    clipped = la._clip_view(text, 700)
+    clipped = lat._clip_view(text, 700)
     assert len(clipped) <= 700
     assert clipped.startswith("A")
     assert clipped.endswith("C")
     assert "chars elided to fit the attribution view budget" in clipped
-    assert la._clip_view("short view", 700) == "short view"   # no-op
+    assert lat._clip_view("short view", 700) == "short view"   # no-op
 
 
 def test_attribution_views_are_clipped_to_budget(tmp_path, monkeypatch):
@@ -791,7 +799,7 @@ def test_attribution_views_are_clipped_to_budget(tmp_path, monkeypatch):
                            observation="x" * 400)
                       for i in range(40)]
         rs.save(traj, "trajectories")
-    monkeypatch.setattr(la, "_LIVE_VIEWS_BUDGET_CHARS", 2_000)
+    monkeypatch.setattr(lat, "_LIVE_VIEWS_BUDGET_CHARS", 2_000)
     author = make_fake_handle("author", [
         plan_script([(s.skill_id, "keep", "") for s in skills])])
 
@@ -851,16 +859,16 @@ def test_attribution_appends_row_with_store_versions(tmp_path):
         {"skill_id": skills[2].skill_id, "version": 1, "action": "delete",
          "problem": "harmful here"},
     ]
-    frozen = read_jsonl(round_dir(store, 0) / la.INJECTION_AUDIT_NAME)[0]
+    frozen = read_jsonl(round_dir(store, 0) / lm.INJECTION_AUDIT_NAME)[0]
     # Bumping the skill changed what a re-derivation would say now; the
     # sha on the row is the frozen audit's, read from disk.
     assert row["injection_block_sha256"] == frozen["injection_block_sha256"]
     current_members = [store.load("skills", skill_id, Skill)
                        for skill_id in store.ids("skills")]
     current_block = format_skills_block(current_members)
-    assert row["injection_block_sha256"] != la._block_sha(current_block)
+    assert row["injection_block_sha256"] != lm._block_sha(current_block)
     stored = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                       / la.ATTRIBUTIONS_LEDGER)
+                       / lm.ATTRIBUTIONS_LEDGER)
     assert stored == [row]
 
 
@@ -873,7 +881,7 @@ def test_attribution_lookup_reuses_first_row_without_reasking(tmp_path):
                   "action": "keep", "problem": ""}],
              "injection_block_sha256": "frozen"}
     append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / la.ATTRIBUTIONS_LEDGER, first)
+                 / lm.ATTRIBUTIONS_LEDGER, first)
     author = make_fake_handle("author", [])
 
     row = attribute_group(
@@ -899,7 +907,7 @@ def test_attribution_budget_repairs_then_succeeds(tmp_path):
 
     assert row["diagnosis"] == "the injected skill did not help"
     failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.ATTRIBUTION_FAILURES_LEDGER)
+                          / lm.ATTRIBUTION_FAILURES_LEDGER)
     assert [(f["try_index"], f["exhausted"]) for f in failures] == [
         (0, False)]
     assert len(author.client.calls) == 2
@@ -910,7 +918,7 @@ def test_attribution_budget_persists_across_crash(tmp_path):
     resumed call gets the REMAINING budget, not a fresh one."""
     store, skills = seeded_run(tmp_path)
     append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / la.ATTRIBUTION_FAILURES_LEDGER,
+                 / lm.ATTRIBUTION_FAILURES_LEDGER,
                  {"schema": "live-repair-failure-v1", "task_id": TASK_ID,
                   "round": 0, "skill_id": None, "skill_version": None,
                   "try_index": 0, "exhausted": False, "message": "earlier"})
@@ -925,7 +933,7 @@ def test_attribution_budget_persists_across_crash(tmp_path):
     assert row is not None
     assert len(author.client.calls) == 1   # only the last try was left
     failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.ATTRIBUTION_FAILURES_LEDGER)
+                          / lm.ATTRIBUTION_FAILURES_LEDGER)
     assert len(failures) == 1              # the pre-crash line is the budget
 
 
@@ -948,7 +956,7 @@ def test_attribution_exhaustion_discards_first_then_ledger_row(tmp_path,
                 for skill_id in store.ids("skills")}
         return append_jsonl(path, record)
 
-    monkeypatch.setattr(la, "append_jsonl", spy)
+    monkeypatch.setattr(lat, "append_jsonl", spy)
     row = attribute_group(
         store=store, task_id=TASK_ID, round_=0, n_attempts=N_ATTEMPTS,
         task_instruction=TASK_INSTRUCTION, weak_profile=WEAK_PROFILE,
@@ -960,11 +968,11 @@ def test_attribution_exhaustion_discards_first_then_ledger_row(tmp_path,
     assert seen["statuses"] == {
         skill.skill_id: "discarded" for skill in skills}
     failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.ATTRIBUTION_FAILURES_LEDGER)
+                          / lm.ATTRIBUTION_FAILURES_LEDGER)
     assert [(f["try_index"], f["exhausted"]) for f in failures] == [
         (0, False), (1, True)]
     assert all(s["status"] == "discarded"
-               and s["discard_reason"] == la.MODEL_OUTPUT_ERROR
+               and s["discard_reason"] == lv.MODEL_OUTPUT_ERROR
                for s in stored_skills(store).values())
 
 
@@ -981,9 +989,9 @@ def test_attribution_infra_propagates_group_stays_pending(tmp_path):
 
     assert all(s["status"] == "pending" for s in stored_skills(store).values())
     assert read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                      / la.ATTRIBUTIONS_LEDGER) == []
+                      / lm.ATTRIBUTIONS_LEDGER) == []
     assert read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                      / la.ATTRIBUTION_FAILURES_LEDGER) == []
+                      / lm.ATTRIBUTION_FAILURES_LEDGER) == []
 
 
 def test_attribution_prompt_carries_composed_inputs(tmp_path):
@@ -1029,7 +1037,7 @@ def apply_run(tmp_path, plan_actions, rewriter_script, *,
               contents=(MARKED_A, MARKED_A, MARKED_A)):
     store, skills = seeded_run(tmp_path, contents=contents)
     append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / la.ATTRIBUTIONS_LEDGER,
+                 / lm.ATTRIBUTIONS_LEDGER,
                  {"schema": "live-attribution-v1", "task_id": TASK_ID,
                   "round": 0, "diagnosis": "the steps were skipped",
                   "skill_actions": [
@@ -1058,7 +1066,7 @@ def test_apply_keep_delete_revise(tmp_path):
     stored = stored_skills(store)
     assert stored[skills_ids[0]]["status"] == "pending"
     assert stored[skills_ids[1]]["status"] == "discarded"
-    assert stored[skills_ids[1]]["discard_reason"] == la.LIVE_REVISION_DELETED
+    assert stored[skills_ids[1]]["discard_reason"] == lv.LIVE_REVISION_DELETED
     revised = stored[skills_ids[2]]
     assert revised["version"] == 2
     assert revised["content"] == MARKED_A_REVISED
@@ -1098,7 +1106,7 @@ def test_apply_failure_view_is_clipped_to_budget(tmp_path, monkeypatch):
                       for i in range(40)]
         rs.save(traj, "trajectories")
     append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / la.ATTRIBUTIONS_LEDGER,
+                 / lm.ATTRIBUTIONS_LEDGER,
                  {"schema": "live-attribution-v1", "task_id": TASK_ID,
                   "round": 0, "diagnosis": "the steps were skipped",
                   "skill_actions": [
@@ -1106,7 +1114,7 @@ def test_apply_failure_view_is_clipped_to_budget(tmp_path, monkeypatch):
                        "action": "revise",
                        "problem": "the verify step is missing"}],
                   "injection_block_sha256": "frozen"})
-    monkeypatch.setattr(la, "_FAILURE_VIEW_BUDGET_CHARS", 700)
+    monkeypatch.setattr(lat, "_FAILURE_VIEW_BUDGET_CHARS", 700)
     rewriter = make_fake_handle("rewriter",
                                 [revision_script(MARKED_A_REVISED)])
 
@@ -1134,7 +1142,7 @@ def test_apply_marker_failure_rides_the_budget(tmp_path):
     assert stored[skills_ids[0]]["version"] == 2
     assert stored[skills_ids[0]]["content"] == MARKED_A_REVISED
     failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.REVISION_FAILURES_LEDGER)
+                          / lm.REVISION_FAILURES_LEDGER)
     assert [(f["try_index"], f["exhausted"]) for f in failures] == [(0, False)]
     assert "bracket sections" in failures[0]["message"]
     assert len(rewriter.client.calls) == 2
@@ -1155,10 +1163,10 @@ def test_apply_budget_exhaustion_discards_only_that_skill(tmp_path):
     stored = stored_skills(store)
     assert stored[skills_ids[0]]["status"] == "pending"
     assert stored[skills_ids[1]]["status"] == "discarded"
-    assert stored[skills_ids[1]]["discard_reason"] == la.MODEL_OUTPUT_ERROR
+    assert stored[skills_ids[1]]["discard_reason"] == lv.MODEL_OUTPUT_ERROR
     assert stored[skills_ids[1]]["version"] == 1
     failures = read_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                          / la.REVISION_FAILURES_LEDGER)
+                          / lm.REVISION_FAILURES_LEDGER)
     assert [(f["try_index"], f["exhausted"]) for f in failures] == [
         (0, False), (1, True)]
 
@@ -1227,7 +1235,7 @@ def test_apply_infra_failure_recorded_and_group_continues(tmp_path):
     assert stored[skills_ids[1]]["version"] == 2
     failures = read_jsonl(store.run_dir / "failed_units.jsonl")
     assert [f["unit_id"] for f in failures] == [skills_ids[0]]
-    assert failures[0]["stage"] == la.FAILURE_STAGE
+    assert failures[0]["stage"] == lat.FAILURE_STAGE
     assert failures[0]["error_class"] == "InfrastructureError"
 
 
@@ -1261,7 +1269,7 @@ def test_apply_of_an_unmarked_original_passes_through(tmp_path):
 def test_no_op_guard_fires_on_identical_block(tmp_path):
     store, skills = seeded_run(tmp_path)
     append_jsonl(store.run_dir / "stage4_acceptance" / "live_run"
-                 / la.ATTRIBUTIONS_LEDGER,
+                 / lm.ATTRIBUTIONS_LEDGER,
                  {"schema": "live-attribution-v1", "task_id": TASK_ID,
                   "round": 0, "diagnosis": "all keep",
                   "skill_actions": [
@@ -1272,7 +1280,7 @@ def test_no_op_guard_fires_on_identical_block(tmp_path):
     assert no_op_guard(store, TASK_ID, 0) is True
 
     assert all(s["status"] == "discarded"
-               and s["discard_reason"] == la.LIVE_NO_IMPROVEMENT
+               and s["discard_reason"] == lv.LIVE_NO_IMPROVEMENT
                for s in stored_skills(store).values())
     # And no round 1 follows (the stage's dispatch set is empty).
     assert survivors_and_block(store, TASK_ID) == ([], "")
@@ -1309,11 +1317,11 @@ def test_no_op_guard_reads_the_frozen_row_not_a_rederivation(tmp_path):
 
     # The same store, frozen line matching the survivors: it fires even
     # though the row's member list says something else entirely.
-    row["injection_block_sha256"] = la._block_sha(block)
+    row["injection_block_sha256"] = lm._block_sha(block)
     freeze_audit(store2, 0, row=row)
     assert no_op_guard(store2, TASK_ID, 0) is True
     assert all(s["status"] == "discarded"
-               and s["discard_reason"] == la.LIVE_NO_IMPROVEMENT
+               and s["discard_reason"] == lv.LIVE_NO_IMPROVEMENT
                for s in stored_skills(store2).values())
 
 
@@ -1335,7 +1343,7 @@ def test_no_op_guard_empty_survivors_returns_false(tmp_path):
 
 def verdicts_path(store):
     return (store.run_dir / "stage4_acceptance" / "live_run"
-            / la.VERDICTS_LEDGER)
+            / lm.VERDICTS_LEDGER)
 
 
 def store_verdict(store, row):
@@ -1372,25 +1380,25 @@ def test_finalize_round1_miss_discards_survivors(tmp_path):
     # The delete already landed during revision; the survivor is the
     # other member, and its round-1 miss keeps the delete's own reason.
     discard_me = store.load("skills", skills_ids[1], Skill)
-    discard_skill(store, discard_me, la.LIVE_REVISION_DELETED)
+    discard_skill(store, discard_me, lv.LIVE_REVISION_DELETED)
     store_verdict(store, judged_row(0, better=False))
     store_verdict(store, judged_row(1, better=False))
 
     result = finalize_group(store, TASK_ID)
 
     assert result["outcome"] == "discarded"
-    assert result["reason"] == la.LIVE_NO_IMPROVEMENT
+    assert result["reason"] == lv.LIVE_NO_IMPROVEMENT
     assert result["committed"] == [skills_ids[0]]
     stored = stored_skills(store)
-    assert stored[skills_ids[0]]["discard_reason"] == la.LIVE_NO_IMPROVEMENT
-    assert stored[skills_ids[1]]["discard_reason"] == la.LIVE_REVISION_DELETED
+    assert stored[skills_ids[0]]["discard_reason"] == lv.LIVE_NO_IMPROVEMENT
+    assert stored[skills_ids[1]]["discard_reason"] == lv.LIVE_REVISION_DELETED
 
 
 def test_finalize_round1_pass_accepts_survivors(tmp_path):
     skills_ids = group_skill_ids()
     store, skills = seeded_run(tmp_path, contents=(MARKED_A, MARKED_A))
     discard_skill(store, store.load("skills", skills_ids[1], Skill),
-                  la.LIVE_REVISION_DELETED)
+                  lv.LIVE_REVISION_DELETED)
     store_verdict(store, judged_row(0, better=False))
     store_verdict(store, judged_row(1, better=True))
 
@@ -1406,14 +1414,14 @@ def test_finalize_round1_pass_accepts_survivors(tmp_path):
 def test_finalize_zero_execution_row_discards_with_its_reason(tmp_path):
     store, skills = seeded_run(tmp_path)
     row = judged_row(0, better=False)
-    row["verdict"] = la.WEAK_ALREADY_KNOWS
+    row["verdict"] = lv.WEAK_ALREADY_KNOWS
     store_verdict(store, row)
 
     result = finalize_group(store, TASK_ID)
 
     assert result["outcome"] == "discarded"
-    assert result["reason"] == la.WEAK_ALREADY_KNOWS
-    assert all(s["discard_reason"] == la.WEAK_ALREADY_KNOWS
+    assert result["reason"] == lv.WEAK_ALREADY_KNOWS
+    assert all(s["discard_reason"] == lv.WEAK_ALREADY_KNOWS
                for s in stored_skills(store).values())
 
 
