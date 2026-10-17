@@ -268,15 +268,21 @@ def _receipted_skills(phase: PhaseInstance, row: TaskListRow,
 def _terminal_group_receipt(phase: PhaseInstance, row: TaskListRow,
                             phase_dir, members: Sequence[Skill],
                             receipted: Set[Any]) -> bool:
-    """The row-level receipt for a keep/delete row whose group holds no
-    resolvable pending member: the member loop would land nothing and the
+    """The row-level receipt for a keep/delete/revise row whose group holds
+    no resolvable pending member: the member loop would land nothing and the
     row would end the phase receiptless -- the docstring's "skipped and
     recorded" must hold at the ROW level too. One target-level row (the
     add path's shape: no skill_id, no version); the receipt guard makes a
     replay skip, so a resumed ledger equals an uninterrupted one's byte
     for byte. Members this phase already receipted cover the row already
     (their receipts exist), so the row-level receipt is written only
-    when the target has no receipt at all."""
+    when the target has no receipt at all.
+
+    Known window (pre-existing, accepted by the W3-E review): a member
+    saved this phase whose receipt append crashed resolves as gone on the
+    replay, so a single-member group's row says skipped_terminal while
+    the member's own store row carries its true (accepted) state. The
+    store stays the truth; this ledger row only notes the row landed."""
     if members or receipted:
         return False
     _append_outcome(phase, row, None, "skipped_terminal", None, phase_dir)
@@ -414,6 +420,8 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
                if skill.status in _ACTABLE_STATUSES]
     if not actable:
         receipted = _receipted_skills(phase, row, phase_dir)
+        if _terminal_group_receipt(phase, row, phase_dir, members, receipted):
+            return
         for skill in members:
             if skill.skill_id in receipted:
                 continue

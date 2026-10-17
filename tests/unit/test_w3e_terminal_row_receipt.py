@@ -134,6 +134,38 @@ def test_a_delete_row_on_a_terminal_group_writes_one_row_level_receipt(
     }]
 
 
+def test_a_revise_row_on_a_terminal_group_writes_one_row_level_receipt(
+        tmp_path):
+    """The revise row shares the keep/delete gap (the C review's point b):
+    an empty member list ends the phase receiptless. The row-level receipt
+    reuses the same helper -- the empty-actables branch returns before any
+    evidence or author work, so no handles are needed here."""
+    ctx = _ctx(tmp_path)
+    for segment in range(2):
+        ctx.store.save(_skill(segment), "skills")
+
+    _execute(ctx, [_row("revise")])
+
+    assert _outcomes(ctx) == [{
+        "schema": "learn-outcome-v1", "phase_label": LABEL,
+        "target_kind": "group", "target_id": TASK_ID, "action": "revise",
+        "skill_id": None, "outcome": "skipped_terminal", "version": None,
+    }]
+
+
+def test_a_revise_row_replay_writes_no_second_receipt(tmp_path):
+    """The receipt guard holds for the revise path too: a replay of the
+    same row leaves the ledger byte-identical (E5's discipline)."""
+    ctx = _ctx(tmp_path)
+    for segment in range(2):
+        ctx.store.save(_skill(segment), "skills")
+
+    _execute(ctx, [_row("revise")])
+    _execute(ctx, [_row("revise")])
+
+    assert len(_outcomes(ctx)) == 1
+
+
 # ---------------------------------------------------------------------------
 # Resume idempotency: a replayed row never writes a second receipt
 # ---------------------------------------------------------------------------
