@@ -1115,11 +1115,12 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     * p00 freezes the manifest (the identity re-check of last resort);
     * the D phase skips every stored trajectory (the copied shortfall
       unit is an accepted hole, never re-dispatched);
-    * the FIRST learn phase derives a real add row (the fixture's weak
-      arm fails the train task) -- the cross-agent seam the Wave 3
-      review found untested: the segmentation wiring finds the copied
-      subtasks (K2's stored-subtask skip, zero calls), the collected
-      experiences all have skills (skipped_existing), no author call;
+    * the FIRST learn phase derives NOTHING: the weak arm fails the
+      train task, but the pre-learn bank fallback reads the assembled
+      run's run-level bank (the pre-seeded artifact) and its anchor
+      covers the task, so no add row -- the frozen bank is the
+      measurement object and the decision must not re-offer material
+      for tasks it already covers;
     * the learn phases re-derive their decisions over the copied
       records and write their own artifacts -- the LAST one's curation
       short-circuits on the pre-seeded bank, zero calls, byte-identical;
@@ -1153,19 +1154,16 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     # and the copied shortfall unit is an accepted hole.
     assert stages["p01:D"]["report_rows"] == 2
     assert stages["p01:D"]["infra_accepted"] == [source.ids["traj"]["t1s"]]
-    # The first learn phase's add row (the assembled-context seam): the
-    # weak arm failed the train task and the (empty) first-learn bank
-    # covers nothing, so the decision authorizes an add -- and it lands
-    # with ZERO model calls: the copied subtasks satisfy K2's skip and
-    # every collected experience already has its skill.
-    assert stages["p02:L"]["task_list"] == {"add": 1,
-                                            "superseded_rows": 0}
-    assert stages["p02:L"]["outcomes"] == {"skipped_existing": 1}
-    receipt = read_jsonl(run_dir / "phases" / "p02_L"
-                         / "outcomes.jsonl")[0]
-    assert receipt["action"] == "add"
-    assert receipt["target_id"] == f"{_FAKE}:t1"
-    assert receipt["outcome"] == "skipped_existing"
+    # The first learn phase (the assembled-context seam): the weak arm
+    # failed the train task, but the pre-learn bank fallback read the
+    # pre-seeded run-level bank and its anchor task covers it, so the
+    # baseline-gap path authorizes no add at all -- zero rows, zero
+    # calls, and the bank the run was assembled to re-measure stays
+    # frozen.
+    assert stages["p02:L"]["task_list"] == {"superseded_rows": 0}
+    assert stages["p02:L"]["outcomes"] == {}
+    assert read_jsonl(run_dir / "phases" / "p02_L"
+                     / "outcomes.jsonl") == []
     # The last learn phase: the curation short-circuited on the
     # pre-seeded artifact (the bank members are exactly the kept rows)
     # and the artifact is byte-identical to what the assembly wrote.

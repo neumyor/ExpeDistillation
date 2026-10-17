@@ -320,12 +320,23 @@ def _live_round(names: Sequence[str], specs: dict, position: int) -> int:
 
 def _previous_bank(ctx: Any, names: Sequence[str], specs: dict,
                    index: int) -> List[Skill]:
-    """The previous learn phase's bank artifact as Skill objects (the
-    first learn phase of a sequence has none: the empty bank)."""
+    """The previous learn phase's bank artifact as Skill objects. The
+    first learn phase of a sequence has no artifact to load, so it falls
+    back to the run-level frozen bank -- the same pre-learn fallback
+    rule :func:`phase_execute.phase_disk._bank_skills` applies to the
+    delivery side. A from-scratch run's run-level bank does not exist
+    at that point (the phase pipeline writes only phase artifacts), so
+    the fallback reads empty and the first learn phase still starts
+    from nothing. An ASSEMBLED run's pre-seeded bank IS the run-level
+    currency, and the decision then knows which tasks the frozen bank
+    already covers -- without the fallback it would re-offer an add for
+    every weak-failed train task the store also has no skill for, and
+    the authored skill could grow the bank the run was assembled to
+    re-measure frozen."""
     previous = [position for position in range(index)
                 if isinstance(specs[names[position]], LearnPhaseSpec)]
     if not previous:
-        return []
+        return [Skill.from_dict(row) for row in ctx.store.bank()]
     position = previous[-1]
     rows = load_phase_bank(ctx.run_dir,
                            phase_label(position, names[position]))

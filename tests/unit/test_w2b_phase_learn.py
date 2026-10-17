@@ -528,6 +528,60 @@ def test_the_add_path_is_idempotent_across_a_crash(tmp_path, monkeypatch):
     assert result.summary["outcomes"] == {"skipped_existing": 1}
 
 
+def test_the_first_learn_phase_reads_the_run_level_bank_fallback(
+        tmp_path, monkeypatch):
+    """The pre-learn bank fallback: the FIRST learn phase has no
+    previous artifact, so its bank is the run-level frozen bank. A
+    from-scratch run has none yet (empty -- the baseline-gap adds fire
+    as before, the existing test above); a pre-seeded bank (the
+    assembled run's currency) whose anchor covers the weak-failed task
+    suppresses the re-offer, because the frozen bank is the measurement
+    object. A bank anchored elsewhere does NOT block the path -- the
+    uncovered task still gets its add."""
+    sequence, phases = _exam_sequence()
+    handles = {"author": make_fake_handle("author", [_distill_script()]),
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter", [])}
+    _install_curation(monkeypatch)
+
+    # A bank anchored on THIS task: the baseline gap is covered.
+    ctx = _make_ctx(tmp_path, sequence, phases, handles)
+    _seed_baseline(ctx.store, weak_correctness=False)
+    _seed_segment(ctx.store)
+    covered = _skill(status="accepted")
+    ctx.store.save(covered, "skills")
+    ctx.store.append_bank(covered.to_dict())
+
+    result = phase_learn.run(ctx, _phase(sequence, phases, 1))
+
+    assert result.summary["task_list"] == {"superseded_rows": 0}
+    assert _task_list_rows(ctx.run_dir, "p02:L") == []
+    assert handles["author"].client.calls == []
+
+    # A bank anchored on ANOTHER task: the gap stays open, the add fires.
+    other_task = ids.make_task_id(BENCHMARK, "t2")
+    other_traj = ids.make_trajectory_id(other_task, "strong", 0)
+    other_subtask = ids.make_subtask_id(other_traj, 0)
+    elsewhere = Skill(skill_id=ids.make_skill_id(other_subtask),
+                      content=MARKED_A, subtask_id=other_subtask,
+                      source_subtasks=[other_subtask], version=1,
+                      status="accepted")
+    ctx2 = StageContext(
+        run_dir=tmp_path / "run-elsewhere",
+        store=Store(tmp_path / "run-elsewhere"),
+        config=_Config(sequence, phases), usage=None, handles=handles,
+        workdir_root=tmp_path / "work-elsewhere")
+    _seed_baseline(ctx2.store, weak_correctness=False)
+    _seed_segment(ctx2.store)
+    ctx2.store.save(elsewhere, "skills")
+    ctx2.store.append_bank(elsewhere.to_dict())
+
+    result2 = phase_learn.run(ctx2, _phase(sequence, phases, 1))
+
+    assert result2.summary["task_list"]["add"] == 1
+    assert result2.summary["outcomes"] == {"added": 1}
+
+
 def test_the_previous_learn_artifact_covers_the_baseline_gap(
         tmp_path, monkeypatch):
     # A second baseline-gap learn over a bank that already holds the

@@ -923,3 +923,8 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件：`src/expedistill/methods/curation/__init__.py`、`src/expedistill/methods/curation/none.py`、`src/expedistill/composites/curation.py`（_within_budget 移植）、`README.md`（2.1）、`tests/unit/methods/test_params.py`、`tests/unit/methods/test_curation_none.py`、`tests/composites/test_curation.py`、本条对应 commit
 
+## 2026-10-17 14:05 — 首学习相位回退读 run 根冻结库（装配 run 零调用前提的缺口修复）
+
+一段话摘要：folder 版 C 实验的装配干跑（--until-phase 5 + 拒答死端点，任何真实模型调用即失败）暴露：第一个学习相位按"弱失败且库无技能"给 30 个训练任务发了 add 行，29 个被 store 既存技能挡住，但 custom-memory-heap-crash（弱臂 3 成 2、源 run 从未为它产出技能）真实触发了切段与 SKILL_DISTILL 调用——放任下去 B 相位要为这条新技能真实跑 3 次远端测量、终测库可能长成 142 条，实验前提（D/L/B 零调用、C 测冻结 141 条库）失效。根因：_previous_bank 对首学习相位恒返回空库，而装配文档明写的"pre-learn bank fallback"只在交付侧（_bank_skills）实现过。裁决（docs/decisions/prelearn_bank_fallback_20261017.md）：首学习相位没有上一工件时回退读 run 根冻结库——从零 run 此时尚无 run 根库，行为不变；装配 run 的预置 141 条库成为决策输入，add 行 30 → 13 且全部 skipped_existing 零调用，预置库保持冻结；库未锚定覆盖的任务照发 add（回退收窄不挡路）。端到端装配测试期望更新为零行零回执，w2b 新增"覆盖→不发/未覆盖→照发"两例。验收：全套 2203 passed + 4 deselected，ruff 全过；对本次实验实测：首学习相位 add 13 行全 skipped_existing，前段零调用。
+
+工件：`src/expedistill/stages/phase_learn.py`（_previous_bank 回退）、`docs/decisions/prelearn_bank_fallback_20261017.md`、`README.md`（5.6）、`tests/unit/test_w2b_phase_learn.py`（+1 例双断言）、`tests/unit/stages/test_assemble_reuse.py`（端到端期望更新）、本条对应 commit
