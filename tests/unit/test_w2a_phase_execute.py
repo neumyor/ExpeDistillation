@@ -611,6 +611,9 @@ def test_live_phase_with_an_empty_group_universe_completes(
     assert read_jsonl(phase_bank.phase_bank_dir(
         ctx.run_dir, phase.label) / phase_execute.UNITS_NAME) == []
     assert report_rows(ctx, phase) == []
+    # The ledger footprint exists even with nothing to measure: the
+    # empty live_run tree says "the phase ran and judged nothing".
+    assert (ctx.run_dir / "stage4_acceptance" / "live_run").is_dir()
 
 
 def test_live_injection_overflow_skips_the_group(monkeypatch, tmp_path):

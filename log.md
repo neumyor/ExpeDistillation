@@ -934,3 +934,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：零调用冒烟推进到 p03:B 时暴露第三个缺口：装配 run 全库已接受、无任何待定组，B 相位的任务集合为空，_prefixed_task_map 把空列表喂给 TB 插件、被"TB task list is empty"拒绝——这是管道细节（空集→空映射），不是语义守卫（"无组可测"是合法完成态，与"空库是合法库"同理）。修复：_prefixed_task_map 对空列表直接返回空映射、不调用插件；B 相位空宇宙走完空 units + 空报告正常完成。新增 w2a 测试钉住：空待定组宇宙的 live 相位零执行、空单元、空报告、正常完成。修复后冒烟全通：p00–p06 全部零调用完成（拒答死端点验证，任何模型调用即失败），p02 的 13 条 add 全部 skipped_existing，p06 预置工件与 run 根库逐字节相同，库指纹全程 bank:a340288b1562，llm_requests 零文件。验收：全套 2204 passed + 4 deselected，ruff 全过。
 
 工件：`src/expedistill/stages/phase_execute/engine.py`（_prefixed_task_map 空列表短路）、`tests/unit/test_w2a_phase_execute.py`（+1 例）、本条对应 commit
+
+## 2026-10-17 15:05 — 空宇宙 B 相位留账本足迹，审计按相位完成摘要区分空宇宙与丢账本
+
+一段话摘要：装配 run 的完整性审计暴露第四个缺口：空待定组宇宙的 B 相位不写任何 live_run 账本（账本在首次实测组时才惰性创建），audit 的布局检查按"序列带 live 相位但无 live_run 子树"报 ERROR。两侧同修：live 相位驱动在进入时即创建 stage4_acceptance/live_run/ 目录足迹（空树是"跑过且无可测"的诚实记录，ledger_path 进 live_measurement 导出面）；audit 的布局检查细化——每个 live 相位都有完成摘要且报告行为零（空宇宙形态）才降级为 INFO，任一 live 相位有报告行却没有账本（账本被删）仍然是 ERROR。新增断言：空宇宙 live 相位留下目录足迹。顺带把 scripts/run/launch_tb21_live_run.py 的配置名参数化（默认不变，folder 实验传 tb21_split_folder_v4）。验收：全套 2204 passed + 4 deselected，ruff 全过；装配 run 当前审计 0 error / 2 info（p07 未跑 + 空宇宙说明）。
+
+工件：`src/expedistill/stages/phase_execute/live.py`（账本足迹）、`src/expedistill/composites/live_measurement.py`（导出 ledger_path）、`scripts/audit/audit_live_run.py`（_live_phases_all_complete）、`scripts/run/launch_tb21_live_run.py`（配置参数化）、`tests/unit/test_w2a_phase_execute.py`（足迹断言）、本条对应 commit

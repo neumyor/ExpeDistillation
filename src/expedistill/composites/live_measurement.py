@@ -51,6 +51,7 @@ __all__ = [
     "VERDICTS_LEDGER",
     "audit_row",
     "expected_units",
+    "ledger_path",
     "load_baseline",
     "pending_groups",
     "round_dir",

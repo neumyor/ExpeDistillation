@@ -1,12 +1,14 @@
-"""Detached driver launcher for the TB21 split live-run experiment
-(AGENTS rules: start_new_session + pidfile + console log; liveness by
-pidfile, never pgrep).
+"""Detached driver launcher for the TB21 experiments (AGENTS rules:
+start_new_session + pidfile + console log; liveness by pidfile, never
+pgrep).
 
-Usage: launch_tb21_live_run.py <run_dir> [--until-phase N]
-Launches the whole frozen phase sequence by default; --until-phase N
-stops after sequence entry N (0-based, -1 = freeze only) for smoke runs
-and pilots. Source .env in the calling shell first -- the driver
-inherits this process's environment (the CLI loads nothing itself).
+Usage: launch_tb21_live_run.py <run_dir> [<config.yaml>] [--until-phase N]
+The config argument names configs/experiments/<file>; it defaults to the
+original live-run experiment. Launches the whole frozen phase sequence
+by default; --until-phase N stops after sequence entry N (0-based) for
+smoke runs and pilots. Source .env in the calling shell first -- the
+driver inherits this process's environment (the CLI loads nothing
+itself).
 
 Ops parameters only (workers / stagger / timeouts); every method
 parameter lives in the experiment config (configs/experiments/, the
@@ -16,10 +18,17 @@ import os
 import subprocess
 import sys
 
+config = "configs/experiments/tb21_split_live_run.yaml"
+args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
+if len(args) >= 2:
+    config = args[1]
+    if not config.startswith("configs/"):
+        config = f"configs/experiments/{config}"
+
 cmd = [
     ".venv/bin/expedistill", "run",
-    "--config", "configs/experiments/tb21_split_live_run.yaml",
-    "--run-dir", sys.argv[1],
+    "--config", config,
+    "--run-dir", args[0],
     "--workers", "64", "--k1-stagger", "20",
     "--llm-timeout", "1500",
     "--llm-infra-retries", "5", "--llm-infra-backoff", "10",
@@ -27,9 +36,9 @@ cmd = [
 if "--until-phase" in sys.argv:
     cmd += ["--until-phase", sys.argv[sys.argv.index("--until-phase") + 1]]
 
-console = open(os.path.join(sys.argv[1], "console.log"), "ab")
+console = open(os.path.join(args[0], "console.log"), "ab")
 proc = subprocess.Popen(cmd, stdout=console, stderr=console,
                         start_new_session=True)
-with open(os.path.join(sys.argv[1], "driver.pids"), "w") as stream:
+with open(os.path.join(args[0], "driver.pids"), "w") as stream:
     stream.write(str(proc.pid) + "\n")
 print("driver pid:", proc.pid)

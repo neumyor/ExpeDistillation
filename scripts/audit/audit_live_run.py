@@ -737,6 +737,30 @@ def _phase_dir_of(run_dir: Path, index: int, name: str) -> Optional[Path]:
         return None
 
 
+def _live_phases_all_complete(run_dir: Path,
+                              specs: Sequence[Tuple]) -> bool:
+    """Whether every live phase on the frozen sequence left a COMPLETE
+    phase summary with ZERO report rows -- the empty-universe shape (a
+    live phase that ran with no pending group measures nothing and
+    writes no ledger). A live phase that measured anything leaves report
+    rows, so a missing subtree beside them is a deleted ledger, never
+    the empty-universe explanation."""
+    for index, name, spec in specs:
+        if not isinstance(spec, dict) or spec.get("role") != PHASE_ROLE_LIVE:
+            continue
+        directory = _phase_dir_of(run_dir, index, name)
+        summary_path = (directory / EXEC_SUMMARY_NAME
+                        if directory is not None else None)
+        if summary_path is None or not summary_path.is_file():
+            return False
+        summary = read_json(summary_path)
+        if summary.get("complete") is not True:
+            return False
+        if summary.get("report_rows"):
+            return False
+    return True
+
+
 def check_phase_dirs(audit: Audit, run_dir: Path, specs: Sequence[Tuple]) \
         -> None:
     """Check 6: every phase directory's record agrees with the frozen
@@ -1291,6 +1315,18 @@ def _audit_v4(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
     live_dir = run_dir / LIVE_SUBTREE
     if not live_dir.exists():
         if mode == "live_run":
+            if _live_phases_all_complete(run_dir, specs):
+                # The assembled-run shape: every live phase completed over
+                # an empty pending-group universe (a fully accepted bank),
+                # so no ledger was ever written -- the phases' own
+                # summaries are the honest record of rounds that
+                # measured nothing.
+                audit.add(INFO, "layout",
+                          "every live phase completed with no live_run "
+                          "subtree: the group universe was empty (the "
+                          "assembled fully-accepted-bank shape) -- no "
+                          "ledgers to audit")
+                return audit
             audit.add(ERROR, "layout",
                       "the frozen sequence carries live phases but there "
                       "is no stage4_acceptance/live_run/ subtree -- a "

@@ -135,6 +135,14 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     round_ = _round_of(ctx, phase)
     rule_name = _compare_rule(spec)
     store = ctx.store
+    # The phase's ledger footprint, written even when the group universe
+    # is empty (the assembled-run shape: a fully accepted bank leaves no
+    # pending group, so nothing else would ever create the subtree). An
+    # empty live_run tree is the honest record of a round that measured
+    # and judged nothing, and the audit reads the subtree's presence as
+    # "the live phase ran".
+    lm.ledger_path(store, lm.VERDICTS_LEDGER).parent.mkdir(
+        parents=True, exist_ok=True)
     _, aux_scorer = aux_wiring(ctx.config.benchmark)
     stage1_holes = shortfall.stage1_accepted_unit_ids(ctx.run_dir)
 
