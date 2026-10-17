@@ -81,6 +81,12 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("delivery", "group_by_task"):
         _Entry("expedistill.methods.delivery.group_by_task",
                "expedistill.methods.delivery", "GroupByTaskParams"),
+    # The skill-folder play (M2): a catalog injection, test role only
+    # (core.config's load-time checklist holds that boundary; the M3
+    # execution version that pairs with it is not in the table yet).
+    ("delivery", "folder"):
+        _Entry("expedistill.methods.delivery.folder",
+               "expedistill.methods.delivery", "FolderParams"),
     # R8's new family: what kind of run an execute phase makes. Driver-
     # less -- the phase driver consumes the params directly.
     ("execution", "real"):

@@ -29,6 +29,7 @@ from expedistill.infra.store import Store
 from expedistill.inject import bank_reference, format_skills_block
 from expedistill.methods import resolve_fixed
 from expedistill.methods.delivery import (
+    FolderParams,
     GroupByTaskParams,
     NoneParams,
     PerSkillParams,
@@ -82,6 +83,9 @@ def _operands(name: str):
         return [skill], [make_exam_id(skill.subtask_id)], PerSkillParams()
     if name == "group_by_task":
         return {prefixed: [skill]}, [prefixed], GroupByTaskParams()
+    if name == "folder":
+        accepted = _skill(prefixed, status="accepted")
+        return [accepted], [task], FolderParams()
     if name == "retrieval":
         return ([skill], [task],
                 RetrievalParams(top_k=1, max_categories=2, min_score=0.0))
@@ -90,6 +94,7 @@ def _operands(name: str):
 
 @pytest.mark.parametrize("name", [
     "none", "whole_bank", "per_skill", "group_by_task", "retrieval",
+    "folder",
 ])
 def test_frozen_signature_returns_unit_rows(name):
     # The one signature every delivery driver resolves: positional and
@@ -265,6 +270,7 @@ def test_unit_id_digest_rules():
 
 @pytest.mark.parametrize("name", [
     "none", "whole_bank", "per_skill", "group_by_task", "retrieval",
+    "folder",
 ])
 def test_malformed_resolve_calls_fail_loudly(name):
     # Neither convention accepts a half-spelled call; the dispatcher

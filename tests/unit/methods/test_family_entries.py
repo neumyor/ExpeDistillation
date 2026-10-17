@@ -24,7 +24,8 @@ def test_the_table_is_organised_by_the_five_families():
         by_family.setdefault(family, []).append(name)
     assert set(by_family) == set(FAMILIES)
     assert sorted(by_family["delivery"]) == sorted([
-        "whole_bank", "retrieval", "none", "per_skill", "group_by_task"])
+        "whole_bank", "retrieval", "none", "per_skill", "group_by_task",
+        "folder"])
     assert sorted(by_family["execution"]) == ["exam", "real"]
     assert by_family["evidence"] == ["segment"]
     assert by_family["author"] == ["distill_diagnose"]

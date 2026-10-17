@@ -182,6 +182,14 @@ PHASE_TASK_SETS = ("train", "test")
 #: acceptance). The registry's execution entries resolve these.
 EXECUTION_NAMES = ("real", "exam")
 
+#: The delivery family's ``folder`` name: the skill-folder delivery
+#: (skill-folder M2) is registered for the TEST role (C) only -- the
+#: alignment ruling keeps the A (per-skill), B (whole-group) and D
+#: (bare) roles on the existing injection methods. The name lives here
+#: because core may not import the methods registry; it is the same
+#: cross-layer literal pattern EXECUTION_NAMES already uses.
+FOLDER_DELIVERY_NAME = "folder"
+
 #: The control a ``compare`` may name: an earlier phase's local name, or
 #: a bare arm run fresh inside this phase.
 FRESH_BARE = "fresh_bare"
@@ -378,6 +386,19 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             "test role runs the test set and only the test role does")
     delivery = _method_mapping(raw.get("delivery"),
                                f"phases.{name}.delivery")
+    # Checklist item 8: the folder delivery is a C-phase delivery. The
+    # catalog injection has no paired execution version on the other
+    # roles (M2 delivers it, M3 wires the execution side), and the
+    # alignment ruling pins the play to the final test regardless: A
+    # injects one skill, B a task's whole group, D nothing.
+    if delivery["name"] == FOLDER_DELIVERY_NAME and \
+            role != PHASE_ROLE_TEST:
+        raise ConfigError(
+            f"phases.{name} declares delivery name "
+            f"{FOLDER_DELIVERY_NAME!r} with role {role!r}: the "
+            "skill-folder delivery is a final-test delivery, legal only "
+            f"for role {PHASE_ROLE_TEST!r} (the C phase; the other "
+            f"roles use the existing delivery methods)")
     execution = _method_mapping(raw.get("execution"),
                                 f"phases.{name}.execution")
     exec_name = execution["name"]
@@ -507,7 +528,10 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
        would have nothing to learn from);
     7. a live phase carries ``compare`` naming an earlier baseline phase
        (its own report rows are all with-skill rows, so it has no
-       in-report control).
+       in-report control);
+    8. the ``folder`` delivery appears only on a test-role execute
+       phase (the skill-folder delivery is a C-phase delivery; the A, B
+       and D roles keep the existing injection methods).
 
     Model roles and ``invalid_redispatch_limit`` are ExperimentConfig's
     own checks, not the sequence's.

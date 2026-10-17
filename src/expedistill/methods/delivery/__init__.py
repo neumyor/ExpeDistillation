@@ -8,13 +8,18 @@ from dataclasses import dataclass
 
 from expedistill.core.config import ConfigError
 
-__all__ = ["GroupByTaskParams", "NoneParams", "PerSkillParams",
-           "RetrievalParams", "WholeBankParams"]
+__all__ = ["FolderParams", "GroupByTaskParams", "NoneParams",
+           "PerSkillParams", "RetrievalParams", "WholeBankParams"]
 
 
 @dataclass(frozen=True)
 class WholeBankParams:
     """No parameters: the whole bank, one fixed injection."""
+
+
+@dataclass(frozen=True)
+class FolderParams:
+    """No parameters: the whole accepted bank, one catalog injection."""
 
 
 @dataclass(frozen=True)
