@@ -167,7 +167,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | `role` | 相位角色，显式声明，加载期核对与字段一致。执行相位四选一：`baseline` / `exam` / `live` / `test`；学习相位恒为 `learn` |
 | `tasks` | 跑冻结的哪个列表：`train` 或 `test`（`test` 角色与 `test` 列表是同一件事，两者必须同时成立） |
 | `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `per_skill` / `group_by_task` / `folder`（技能文件夹交付，只有 test 角色相位可用，与 `real_folder` 执行一对一配对，流程见 5.5） |
-| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（考题执行）；带各自的参数（`arms`、`n_attempts`、`max_injection_tokens`——`real_folder` 的注入上限计目录文本的 token） |
+| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（考题执行）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 与 `exam` 一样**没有执行参数**——C 相位的采样深度沿用全局 `n_attempts_weak`，与旧 C 相位行为一致，配置里写参数键会因未知键检查响亮失败 |
 | `compare` | 对照来源（可选）：`against` 指向更早的相位名或 `fresh_bare`（相位内现场跑一条裸臂），`rule` 指定比较规则名 |
 | `acceptance` | 验收判分规则名（可选；缺省用 benchmark 的默认绑定，TB 是 `tb_scorer`） |
 
@@ -267,7 +267,7 @@ phases:
 ```
 
 （A / B / C / D / L 这些局部名是转换工具发出的缺省名，只是名字；
-配置作者可以自由改名。仓库里 8 份 v4 配置
+配置作者可以自由改名。仓库里 9 份 v4 配置
 `configs/experiments/*_v4.yaml` 覆盖这两类形状与 folder 形态。）
 
 ### 2.5 旧版本配置的转换
@@ -301,7 +301,8 @@ B 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没有 
 （strict_rate_gain / first_success_gain），各 2 种，配置形态上限
 36 × 2 × 2 = **144 种**。folder 交付目前只有 tb 的插件声明支持（插件
 能力位 `skill_folder_prompt_name`，见 5.5 与 3.6），searchqa / alfworld
-配 folder 的配置能通过加载，单元执行时被 E1 拒绝。
+配 folder 的配置能通过加载，C 相位派发前被相位级能力检查拒绝——与
+技能库空不空无关，逐单元的 E1 守卫保留作第二道。
 
 ---
 
@@ -861,18 +862,24 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   `/opt/openclaw-skills/`，零远端改动），提示词用指引段、无
   `{skills_block}` 槽，目录文本不进提示词，读取靠 agent 自己 cat。
   插件用能力位 `skill_folder_prompt_name` 声明支持（目前只有 tb 声明，
-  指向 `TB_TASK_PROMPT_FOLDER`）；folder 单元落到不支持的插件，E1 在
-  执行边界报配置错误。空已接受集不物化、单元裸跑（空注入 = 空串，不渲染
-  只剩头的空目录）。`real_folder` 执行的 `max_injection_tokens` 计目录
-  文本的 token；执行过程零拦截零预算，模型实际读了哪些技能文件，记录在
+  指向 `TB_TASK_PROMPT_FOLDER`）；folder 相位落到不支持的插件，C 相位
+  驱动在派发前就报配置错误停机——与技能库空不空无关，逐单元的 E1 守卫
+  保留作第二道。空已接受集不物化、单元裸跑（空注入是空串：不渲染一个
+  只剩表头的空目录文件）。`real_folder` 执行没有自己的执行参数，C 相位
+  的采样深度沿用全局 `n_attempts_weak`，与旧 C 相位行为一致；执行过程
+  零拦截零预算，模型实际读了哪些技能文件，记录在
   轨迹的 cat 命令里，事后由纯函数解析（`composites/skill_reads.py`：按
   清单文件名做词边界匹配，首读序去重，只读轨迹零落盘）：每单元的读取集
-  写进 C 相位摘要的 `skill_files_read` 键（`{轨迹 ID: [技能编号]}`，只盖
-  带技能臂；folder 相位才有该键，空已接受集报空列表，旧执行相位无键）。
+  写进 C 相位摘要的 `skill_files_read` 键（`{轨迹 ID: [技能编号]}`）。
+  键的口径要读全：它只盖带技能臂——对照臂不进键，且轨迹 ID 与对照臂
+  同形，审计拿 ID 对账必须配合臂目录使用。三态分辨：**键缺** = 旧执行
+  相位，或该单元没跑成 / 已接受为空洞（要与"跑了没读"区分，必须交叉
+  摘要的 `infra_missing` / `infra_accepted` 计数）；**空列表** = 跑了
+  但一个技能文件都没读；非空列表 = 实际读过的技能（首读序去重）。
   已知局限：别的目录下同名文件的 cat 会误记、只有 cat 算（grep/head 不
   算，catalog.md 永不进读取集）。C 相位不写验收报告，读取集不进任何
   决策输入，供事后审计与技能使用分析；泄题审计对 C 相位沿用既有覆盖
-  （A 相位考试管道的 D8 判定），folder 单元的读取集供人工事后审计；
+  （A 相位考试管道的 D8 判定）；
 - 对照臂：full 模式复用 D 相位的弱臂裸跑（连同其已接受空洞）；split 模式
   在相位内现场跑一条裸臂（`fresh_bare`）。两臂各有相位内独立的轨迹仓
   （轨迹 ID 不带臂信息，共用会互相继承轨迹算出假的零提升）；

@@ -43,6 +43,7 @@ __all__ = [
     "_Plan",
     "_arm_trajectories",
     "_dispatch_arm",
+    "_folder_manifest_of",
     "_plan_units",
     "_prefixed_task_map",
     "_redispatch_state",
@@ -87,6 +88,19 @@ class _Plan:
     n_attempts: int
 
 
+def _folder_manifest_of(row: ExecutionUnitRow) -> Optional[Any]:
+    """The row's folder manifest, or None when it carries none (the one
+    folder-row predicate: the folder delivery attaches ONE phase-level
+    manifest to every row, every other delivery's rows carry none, so
+    presence alone is the question -- the engine's attachment, the
+    phase driver's materialization and its read-set pass all ask it
+    here). A manifest with no ``files`` is the empty accepted bank's
+    null state; what that means (no materialization, no attachment, but
+    the summary still reports the read sets) is each caller's frozen
+    rule, not this predicate's."""
+    return row.aux.get("skill_folder")
+
+
 def _plan_units(rows: Sequence[ExecutionUnitRow],
                 tasks: Optional[Dict[str, Task]], *,
                 phase_label: str, benchmark: str, role: str,
@@ -104,15 +118,16 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
     refs pass through unchanged (they are not task ids).
 
     A row whose aux carries the folder delivery's manifest (the
-    real_folder execution, M3) gets it attached to its plan's Task meta
-    together with ``skill_folder_dir`` -- the materialized folder's
-    local path, which the CALLER materialized before dispatch (the
-    phase driver owns the bank the manifest resolves against). The
-    manifest with no files is the delivery's null state (an empty
-    accepted bank): no attachment, the unit runs bare -- the D9
-    empty-injection lesson, never a guidance claiming skills that do
-    not exist. A manifest with files but no directory is a wiring bug,
-    not a configuration problem."""
+    real_folder execution, M3; presence read through
+    ``_folder_manifest_of``, the one folder-row predicate) gets it
+    attached to its plan's Task meta together with ``skill_folder_dir``
+    -- the materialized folder's local path, which the CALLER
+    materialized before dispatch (the phase driver owns the bank the
+    manifest resolves against). The manifest with no files is the
+    delivery's null state (an empty accepted bank): no attachment, the
+    unit runs bare -- the D9 empty-injection lesson, never a guidance
+    claiming skills that do not exist. A manifest with files but no
+    directory is a wiring bug, not a configuration problem."""
     plans: List[_Plan] = []
     for row in rows:
         ref = row.task_ref
@@ -126,7 +141,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     "phase's task set; the driver and the delivery "
                     "disagree")
         task = tasks[ref] if tasks is not None else None
-        manifest = row.aux.get("skill_folder") if row.aux else None
+        manifest = _folder_manifest_of(row)
         if manifest is not None and manifest.get("files"):
             if skill_folder_dir is None or task is None:
                 raise CodeBugError(

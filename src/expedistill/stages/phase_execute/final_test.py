@@ -11,12 +11,14 @@ from typing import Any, Dict, List, Optional, Sequence, Set
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.base import Task
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.blocks import metrics as metrics_block
 from expedistill.composites import decision, shortfall
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.composites.skill_reads import skill_files_read
 from expedistill.core import ids
 from expedistill.core.config import (
+    FOLDER_DELIVERY_NAME,
     FRESH_BARE,
     PHASE_ROLE_TEST,
     ExecutePhaseSpec,
@@ -26,6 +28,7 @@ from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import (
     CodeBugError,
+    ConfigError,
     InfrastructureError,
 )
 from expedistill.infra.store import Store, write_json
@@ -36,6 +39,7 @@ from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute.engine import (
     _arm_trajectories,
     _dispatch_arm,
+    _folder_manifest_of,
     _plan_units,
     _prefixed_task_map,
     _task_objects,
@@ -74,6 +78,26 @@ def _missing_units(expected: Dict[str, int],
             not in stored]
 
 
+def _require_folder_capability(spec: ExecutePhaseSpec, benchmark: str) -> None:
+    """The PHASE-level folder capability check (the M6 review's
+    empty-bank gap): a folder phase on a plugin that declares no
+    ``skill_folder_prompt_name`` is a ConfigError BEFORE any dispatch,
+    bank or no bank. The per-unit E1 guard fires only when a unit
+    actually carries the manifest, and an empty accepted bank attaches
+    none -- without this check such a phase would run every unit bare
+    under the folder experiment's name. E1's per-unit refusal stays as
+    the second layer (any future folder-unit path still meets it)."""
+    if spec.delivery["name"] != FOLDER_DELIVERY_NAME:
+        return
+    if resolve_plugin(benchmark).skill_folder_prompt_name is None:
+        raise ConfigError(
+            f"benchmark {benchmark!r} does not support skill folders (the "
+            "real_folder execution): its plugin declares no "
+            "skill_folder_prompt_name, and a folder phase needs one "
+            "(as of this writing only the 'tb' plugin supports skill "
+            "folders)")
+
+
 def _materialize_folder(ctx: StageContext, phase: PhaseInstance,
                         bank: Sequence[Skill],
                         rows: Sequence[ExecutionUnitRow]
@@ -85,9 +109,9 @@ def _materialize_folder(ctx: StageContext, phase: PhaseInstance,
     The composite's fingerprint gate holds the bank version: a bank that
     moved under the manifest is a CodeBugError, never a silently wrong
     folder."""
-    manifest = next(
-        (row.aux.get("skill_folder") for row in rows
-         if row.aux.get("skill_folder")), None)
+    manifests = [manifest for manifest in map(_folder_manifest_of, rows)
+                 if manifest is not None]
+    manifest = manifests[0] if manifests else None
     if manifest is None or not manifest.get("files"):
         return None
     directory = materialize_skill_folder(
@@ -108,18 +132,18 @@ def _folder_read_sets(rows: Sequence[ExecutionUnitRow],
     every read set is empty). The dict covers the with-bank arm only:
     the control arm's units are bare by construction and have no folder
     to read. The manifest is the delivery rows' own (all rows share one,
-    the M3 ruling) -- the same manifest the units ran with.
+    the M3 ruling; presence read through ``_folder_manifest_of``, the
+    one folder-row predicate) -- the same manifest the units ran with.
 
     The read set is a FACT about what the test phase executed, reported
-    for audit (the scripts/audit consumption lands later); it is not a
-    verdict, not a comparison and not a decision input -- the C summary
-    sits outside decision's universe by the frozen rule that test
-    results never flow into learning, which is exactly why it may carry
-    it.
+    for post-hoc audit; it is not a verdict, not a comparison and not a
+    decision input -- the C summary sits outside decision's universe by
+    the frozen rule that test results never flow into learning, which
+    is exactly why it may carry it.
     """
-    manifest = next(
-        (row.aux.get("skill_folder") for row in rows
-         if row.aux.get("skill_folder") is not None), None)
+    manifests = [manifest for manifest in map(_folder_manifest_of, rows)
+                 if manifest is not None]
+    manifest = manifests[0] if manifests else None
     if manifest is None:
         return None
     return {traj.trajectory_id: skill_files_read(traj, manifest)
@@ -145,6 +169,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     so with-bank runs made now could be measured against the wrong
     bank."""
     _execution_params(spec)
+    _require_folder_capability(spec, ctx.config.benchmark)
     delivery, delivery_params = _resolve_delivery(spec)
     bank = _bank_skills(ctx, phase)
     benchmark = ctx.config.benchmark

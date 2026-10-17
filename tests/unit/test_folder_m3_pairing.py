@@ -5,8 +5,11 @@ Three surfaces, one rule (the alignment ruling: the folder delivery and
 the real_folder execution are ONE play, pinned to the C phase):
 
 * the registry resolves ``real_folder`` to
-  ``RealFolderExecutionParams`` (``real``'s two single-arm fields, no
-  ``arms``);
+  ``RealFolderExecutionParams`` (an empty params class, like the exam
+  execution's -- the M6 review removed ``n_attempts`` and
+  ``max_injection_tokens``, which no legal phase ever consumed: folder
+  is pinned to the test role and the C phase samples at the global
+  ``n_attempts_weak`` depth exactly as it always did);
 * ``parse_phases`` accepts the folder/real_folder pair on a test-role
   phase and refuses every mismatch: folder under the plain ``real``,
   ``real_folder`` over another delivery, either name on a non-test
@@ -41,22 +44,18 @@ from expedistill.core.config import ExecutePhaseSpec
 def test_real_folder_resolves_its_params():
     assert resolve_params("execution", {"name": "real_folder"}) == \
         RealFolderExecutionParams()
-    assert resolve_params("execution", {"name": "real_folder",
-                                        "n_attempts": 2,
-                                        "max_injection_tokens": 512}) == \
-        RealFolderExecutionParams(n_attempts=2,
-                                  max_injection_tokens=512)
+    # The two former fields are gone (dead parameters, the M6 removal):
+    # consumed by no legal phase, they must fail loudly here rather
+    # than be accepted and silently ignored.
+    for key in ("n_attempts", "max_injection_tokens"):
+        with pytest.raises(ConfigError, match="unknown"):
+            resolve_params("execution", {"name": "real_folder", key: 1})
 
 
-def test_real_folder_params_have_reals_fields_and_no_arms():
-    # real's two single-arm fields, same contracts; no arms field (a
-    # folder phase is a C phase -- single-armed, weak model).
-    assert set(RealFolderExecutionParams.__dataclass_fields__) == {
-        "n_attempts", "max_injection_tokens"}
-    with pytest.raises(ConfigError, match="real_folder n_attempts"):
-        RealFolderExecutionParams(n_attempts=0)
-    with pytest.raises(ConfigError, match="real_folder max_injection"):
-        RealFolderExecutionParams(max_injection_tokens=0)
+def test_real_folder_params_are_empty_like_the_exams():
+    # No fields at all: a C phase samples at the global n_attempts_weak
+    # and nothing about the folder run is budgeted at execution time.
+    assert not RealFolderExecutionParams.__dataclass_fields__
     # The three execution params classes stay distinct types.
     assert RealFolderExecutionParams() != RealExecutionParams()
     assert not isinstance(RealFolderExecutionParams(),
@@ -151,9 +150,11 @@ def test_folder_on_a_non_test_role_still_refused_first():
 
 
 def test_real_folder_n_attempts_gets_the_control_depth_cap():
-    # The generic depth cap (checklist item 4) covers the folder
-    # execution's n_attempts like real's: the C comparison never asks
-    # for executions the control did not run.
+    # The generic depth cap (checklist item 4) is parse-level and covers
+    # any execution's stray n_attempts, real_folder's included -- since
+    # the M6 removal the key never resolves (stage 0 refuses it as an
+    # unknown parameter), but the parse-level cap still fires first for
+    # an out-of-range value.
     with pytest.raises(ConfigError, match="exceeds its control's"):
         _parse_pair(FOLDER_DELIVERY_NAME,
                     {"name": FOLDER_EXECUTION_NAME, "n_attempts": 3})
@@ -167,9 +168,8 @@ def test_execution_params_passes_folder_params_through():
     spec = ExecutePhaseSpec(
         role="test", tasks="test",
         delivery={"name": FOLDER_DELIVERY_NAME},
-        execution={"name": FOLDER_EXECUTION_NAME, "n_attempts": 1},
+        execution={"name": FOLDER_EXECUTION_NAME},
         compare=None, acceptance=None, kind="execute")
-    # The arms consistency is real's own rule; the folder params carry
-    # no arms, so the seam returns them untouched.
-    assert _execution_params(spec) == RealFolderExecutionParams(
-        n_attempts=1)
+    # The arms consistency is real's own rule; the empty folder params
+    # carry nothing to check, so the seam returns them untouched.
+    assert _execution_params(spec) == RealFolderExecutionParams()

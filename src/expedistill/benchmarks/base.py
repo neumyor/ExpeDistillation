@@ -281,8 +281,9 @@ class BenchmarkPlugin(abc.ABC):
       ``{instruction}``, ``{skills_block}`` and ``{history}``.
     - the optional SKILL-FOLDER capability (``skill_folder_prompt_name``,
       the ``real_folder`` execution): see the attribute below -- a
-      plugin without it cannot run a folder unit, and E1 refuses one
-      loudly.
+      plugin without it cannot run a folder unit: the C-phase driver
+      refuses the whole phase before dispatch, and E1 refuses a unit
+      loudly as the second layer.
     - the optional AUXILIARY metric (``aux_metric_name`` /
       ``aux_success``): a second, pre-registered success notion reported
       ALWAYS beside the primary one (which stays the scorer verdict,

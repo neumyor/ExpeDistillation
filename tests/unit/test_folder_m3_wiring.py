@@ -302,3 +302,21 @@ def test_a_folder_c_phase_on_an_incapable_plugin_stops_loudly(
     with pytest.raises(InfraConfigError, match="does not support skill"):
         phase_execute.run(ctx, phase)
     assert plugin.calls == []  # refused before any unit ran
+
+
+def test_an_incapable_plugin_is_refused_even_with_an_empty_accepted_bank(
+        monkeypatch, tmp_path):
+    # The M6 review's empty-bank gap: the per-unit E1 guard fires only
+    # when a unit carries the manifest, and an empty accepted bank
+    # attaches none -- without the phase-level check this configuration
+    # (searchqa/alfworld + folder + empty bank) would run the whole
+    # phase bare under the folder experiment's name. The phase driver
+    # now refuses it BEFORE dispatch, bank or no bank.
+    plugin = _install_plugin(monkeypatch, FolderPlugin(capable=False))
+    ctx = _ctx(tmp_path)
+    _write_bank(ctx, [_group_skill("t1", status="pending")])
+    phase = _c_phase()
+
+    with pytest.raises(InfraConfigError, match="does not support skill"):
+        phase_execute.run(ctx, phase)
+    assert plugin.calls == []  # nothing ran: the refusal precedes dispatch

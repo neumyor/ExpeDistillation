@@ -14,8 +14,11 @@ refusals for a manifest that would shadow a file, escape the
 directory, or disagree with the bank.
 """
 
+import string
+
 import pytest
 
+from expedistill.composites import skill_reads
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.core.ids import (
     make_skill_id,
@@ -23,7 +26,7 @@ from expedistill.core.ids import (
     make_task_id,
     make_trajectory_id,
 )
-from expedistill.core.models import Skill
+from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import CodeBugError
 from expedistill.methods.delivery import FolderParams
 from expedistill.methods.delivery import folder as folder_driver
@@ -196,3 +199,49 @@ def test_a_manifest_without_a_catalog_name_is_refused(tmp_path):
     del manifest["catalog_filename"]
     with pytest.raises(CodeBugError, match="non-empty 'catalog_filename'"):
         materialize_skill_folder(manifest, bank, tmp_path / "x")
+
+
+# ---------------------------------------------------------------------------
+# The safe alphabet's three spellings stay one contract
+# ---------------------------------------------------------------------------
+
+def test_the_safe_alphabet_is_one_contract_across_its_three_spellings(
+        tmp_path):
+    # The delivery DERIVES the file names over the alphabet; the
+    # composite materializer and the read parser each RESTATE it (the
+    # layer rule forbids the import, and each restatement says so).
+    # This mirror test binds the three spellings (the FAILURE_CATEGORIES
+    # precedent): relaxing any one of them fails here, at test time,
+    # instead of as a mid-run CodeBugError.
+    from expedistill.composites.skill_folder import _FILENAME_RE
+    alphabet = string.ascii_letters + string.digits + "._-"
+    boundary = alphabet + ":/ \t中"
+    for ch in boundary:
+        inside = ch in alphabet
+        # The delivery's derivation keeps exactly the alphabet...
+        assert (folder_driver.skill_filename("s" + ch + "t")
+                == "s" + ch + "t.md") is inside
+        # ...the materializer's restated regex accepts exactly it...
+        assert bool(_FILENAME_RE.fullmatch("s" + ch + "t.md")) is inside
+        # ...and the read parser's delimited match treats the same
+        # characters as name characters.
+        assert (ch in skill_reads._NAME_ALPHABET) is inside
+    # The same contract end to end, through one odd skill id (colon,
+    # slash, dot and a non-ASCII character in one id): the delivery
+    # derives the name, the materializer accepts it, and the read
+    # parser counts a cat of exactly that name -- never a longer name
+    # that merely contains it.
+    odd = Skill(skill_id="tb:odd/id.name 中", content=MARKED,
+                subtask_id="s0", source_subtasks=["s0"],
+                summary="Odd id.", status="accepted")
+    manifest = folder_driver.skill_folder_manifest([odd])
+    filename = manifest["files"][0]["filename"]
+    assert filename == "tb_odd_id.name__.md"
+    materialize_skill_folder(manifest, [odd], tmp_path / "folder")
+    trajectory = Trajectory(
+        trajectory_id="tb:odd:weak:0", task_id="tb:odd", benchmark="tb",
+        model_role="weak", model_name="weak-7b", attempt_index=0,
+        steps=[{"action": f"cat /opt/openclaw-skills/train/{filename}",
+                "observation": "ok"}], correctness=True)
+    assert skill_reads.skill_files_read(trajectory, manifest) == \
+        [odd.skill_id]

@@ -29,10 +29,20 @@ manifest rewrites only the changed files. The function never deletes
 anything -- files the manifest does not name are another caller's
 business -- and never writes outside ``target_dir``: every file name
 is validated against the same safe alphabet the delivery's derivation
-uses, so a manifest cannot name a path that escapes the folder.
+uses, so a manifest cannot name a path that escapes the folder. One
+disclosed consequence of "never deletes" (the resume review's note,
+left on record): if the bank ever changed between two materializations
+against the same directory, the previous manifest's files would stay
+next to the new ones in the LOCAL directory -- unreachable in the
+current wiring (the fingerprint gate makes a mixed version impossible
+while resolve and materialize share one bank per call) and never
+carried into the run environment (the sandbox upload goes strictly by
+the manifest's file names), so a local directory audit should read the
+folder against the manifest, not trust the directory alone.
 
-Wiring: M2 ships the function and its tests; the phase driver calls it
-in M3, once the ``real_folder`` execution version exists.
+Wiring: the C-phase driver (``stages/phase_execute/final_test.py``)
+materializes the phase's folder once, before dispatch, into the phase
+directory's ``skill_folder/``.
 """
 
 import os

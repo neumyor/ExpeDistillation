@@ -167,8 +167,6 @@ src/expedistill/
                           stage1_baseline/ 下，live 基线加载与 C 相位的
                           复用对照都读它）
     skill_status.py       skill 状态提交（accept/discard）的唯一入口
-    skill_folder.py       folder 清单的幂等物化（M2：按指纹闸门从相位库
-                          读正文写文件；内容不变不重写）
     skill_reads.py        folder 单元的事后读取统计（M4 纯函数）：从存储
                           轨迹解析实际 cat 过的技能文件，benchmark 无关
     verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
@@ -356,7 +354,8 @@ configs/
    `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹
    （real_folder 执行）的插件再声明 `skill_folder_prompt_name`（指向
    folder 模式执行 prompt 的注册名，digest 进 manifest；目前只有 tb 声明，
-   folder 单元落到不声明的插件由 E1 响亮拒绝）；
+   folder 相位落到不声明的插件由 C 相位驱动在派发前响亮拒绝，E1 的逐单元
+   守卫保留作第二道）；
 2. 在 `benchmarks/registry.py` 登记名字；
 3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
    真实执行冒烟（标 `live`）；

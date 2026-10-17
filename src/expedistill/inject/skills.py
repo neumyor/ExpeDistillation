@@ -184,6 +184,13 @@ def bank_reference(skills: Sequence[Union[Skill, Mapping[str, Any]]]) -> str:
     regrouping does not change the reference, but any content, version or
     membership change does. Recorded in ``Trajectory.skills_injected`` when the
     whole bank is injected at stage 6.
+
+    Known edge, left on record (the skill-folder review's note): the
+    ``summary`` field sits OUTSIDE the digest. A summary-only change would
+    flow through the catalog text and the unit ids it feeds, not through
+    this fingerprint; today every summary change lands together with a
+    version/content change (the writers move all three), a constraint that
+    holds by construction, not by mechanism.
     """
     lines = [
         "{skill_id}@{version}:{content}".format(**_normalize(skill))

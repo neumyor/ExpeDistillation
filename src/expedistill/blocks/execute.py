@@ -91,10 +91,13 @@ def run_one(
     # a plugin that declares no skill_folder_prompt_name would silently
     # run it as a plain skills injection (the catalog text as the
     # skills block -- the wrong experiment), so it is refused here, at
-    # the one boundary where the unit meets the plugin. A configuration
-    # error, not a code bug: the config chose the folder play for a
-    # benchmark whose plugin never declared it (as of this writing only
-    # the 'tb' plugin does).
+    # the one boundary where the unit meets the plugin. The C-phase
+    # driver refuses the whole phase BEFORE dispatch (final_test's
+    # phase-level check); this per-unit guard stays as the second
+    # layer, so a folder unit can never slip through any future path. A
+    # configuration error, not a code bug: the config chose the folder
+    # play for a benchmark whose plugin never declared it (as of this
+    # writing only the 'tb' plugin does).
     if task.meta.get("skill_folder") is not None \
             and plugin.skill_folder_prompt_name is None:
         raise ConfigError(

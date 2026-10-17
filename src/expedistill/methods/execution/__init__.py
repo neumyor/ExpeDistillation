@@ -29,13 +29,13 @@ load; this contract validates the values at resolution, stage 0):
 play, M3): the same benchmark execution, but the delivery is the
 ``folder`` one and the phase driver materializes the delivered folder
 into the run environment instead of injecting the skills block into the
-prompt. The load-time checklist pins the pairing (folder delivery <->
-real_folder execution, test role only); the params mirror ``real``'s
-two single-arm fields -- ``n_attempts`` with the same None-means-global
-contract, and ``max_injection_tokens`` capping the CATALOG text (the
-folder delivery's ``skills_block`` is the catalog, so that text is what
-the cap counts). No ``arms``: a folder phase is a C phase, and C runs
-the weak model single-armed.
+prompt. Like the exam execution it carries NO parameters (the M6 review
+removed ``n_attempts`` and ``max_injection_tokens``, which no legal phase
+ever consumed -- folder is pinned to the test role, and the C phase
+samples at the global ``n_attempts_weak`` depth exactly as it always did
+under ``real``; a config key under ``real_folder`` fails loudly at the
+params builder's unknown-key check, the correct behaviour for a method
+with nothing to configure).
 """
 
 from dataclasses import dataclass
@@ -89,38 +89,19 @@ class ExamExecutionParams:
 
 @dataclass(frozen=True)
 class RealFolderExecutionParams:
-    """A folder benchmark execution: sampling depth, catalog-token cap.
+    """A folder benchmark execution: no parameters, like the exam one.
 
     The ``real_folder`` execution (the skill-folder play, M3): the
     benchmark runs for real like ``real``, but the phase's ``folder``
     delivery hands the agent a materialized folder of skill files plus a
-    catalog, and the prompt carries only the folder guidance -- never
-    the catalog text. The load-time checklist owns the pairing rules
-    (folder delivery <-> real_folder execution, test role only); the
-    values' contracts are ``real``'s, minus ``arms``:
-
-    * ``n_attempts`` -- the weak model's sampling depth; ``None`` (the
-      default) means the global ``n_attempts_weak`` at run time (the
-      same depth the bare control arm runs).
-    * ``max_injection_tokens`` -- the injection cap, counting the
-      CATALOG text's tokens (the folder delivery's injection is the
-      catalog listing; the skill files themselves live in the
-      environment, and execution neither budgets nor tracks which the
-      agent reads -- that audit is M4's trajectory parsing, never a
-      run-time interception). Null = uncapped.
-    """
-
-    n_attempts: Optional[int] = None
-    max_injection_tokens: Optional[int] = None
-
-    def __post_init__(self) -> None:
-        if self.n_attempts is not None and self.n_attempts < 1:
-            raise ConfigError(
-                "execution.real_folder n_attempts must be a positive int "
-                f"or absent, got {self.n_attempts!r}")
-        if (self.max_injection_tokens is not None
-                and self.max_injection_tokens < 1):
-            raise ConfigError(
-                "execution.real_folder max_injection_tokens must be a "
-                "positive int or absent, got "
-                f"{self.max_injection_tokens!r}")
+    catalog, and the prompt carries only the folder guidance. The
+    load-time checklist pins the pairing (folder delivery <->
+    real_folder execution, test role only), and the phase is a C phase:
+    it samples at the global ``n_attempts_weak`` depth -- the same depth
+    the bare control arm runs, the same rule the old C phase ran under
+    ``real`` -- and nothing about the folder run is budgeted at execution
+    time (which skill files the agent reads is M4's post-hoc trajectory
+    parse, never a run-time interception). The class is therefore empty
+    on purpose: a config key here fails loudly at the params builder's
+    unknown-key check (the M6 review removed ``n_attempts`` and
+    ``max_injection_tokens``, which no legal phase ever consumed)."""
