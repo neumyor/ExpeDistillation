@@ -14,6 +14,7 @@ from expedistill.benchmarks.base import Task
 from expedistill.blocks import metrics as metrics_block
 from expedistill.composites import decision, shortfall
 from expedistill.composites.skill_folder import materialize_skill_folder
+from expedistill.composites.skill_reads import skill_files_read
 from expedistill.core import ids
 from expedistill.core.config import (
     FRESH_BARE,
@@ -92,6 +93,37 @@ def _materialize_folder(ctx: StageContext, phase: PhaseInstance,
     directory = materialize_skill_folder(
         manifest, bank, _phase_dir(ctx, phase) / "skill_folder")
     return str(directory)
+
+
+def _folder_read_sets(rows: Sequence[ExecutionUnitRow],
+                      with_bank: Sequence[Trajectory]
+                      ) -> Optional[Dict[str, List[str]]]:
+    """The folder phase's per-unit read sets (M4): ``None`` when this
+    phase's delivery is not folder -- the old execution versions'
+    summaries carry no read statistics -- else
+    ``{trajectory_id: [skill_id, ...]}`` over the with-bank arm's stored
+    units, each list what :func:`skill_files_read` derives from the
+    stored trajectory (the read record is a post-hoc parse, zero
+    interception; an empty accepted bank leaves every unit bare, so
+    every read set is empty). The dict covers the with-bank arm only:
+    the control arm's units are bare by construction and have no folder
+    to read. The manifest is the delivery rows' own (all rows share one,
+    the M3 ruling) -- the same manifest the units ran with.
+
+    The read set is a FACT about what the test phase executed, reported
+    for audit (the scripts/audit consumption lands later); it is not a
+    verdict, not a comparison and not a decision input -- the C summary
+    sits outside decision's universe by the frozen rule that test
+    results never flow into learning, which is exactly why it may carry
+    it.
+    """
+    manifest = next(
+        (row.aux.get("skill_folder") for row in rows
+         if row.aux.get("skill_folder") is not None), None)
+    if manifest is None:
+        return None
+    return {traj.trajectory_id: skill_files_read(traj, manifest)
+            for traj in with_bank}
 
 
 def _run_test(ctx: StageContext, phase: PhaseInstance,
@@ -190,6 +222,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
                   arm="with_bank", skip_unit_ids=with_bank_accepted)
     with_bank = [traj for traj in _arm_trajectories(with_bank_store)
                  if traj.trajectory_id not in with_bank_accepted]
+    folder_reads = _folder_read_sets(rows, with_bank)
 
     # -- control arm -------------------------------------------------------
     if reused_control is not None:
@@ -263,6 +296,8 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
         "complete": not n_missing,
         "infra_shortfall_accepted": any(accepted_now.values()),
     }
+    if folder_reads is not None:
+        summary["skill_files_read"] = folder_reads
     write_json(_phase_dir(ctx, phase) / SUMMARY_NAME, summary, indent=2)
     if n_new:
         raise InfrastructureError(

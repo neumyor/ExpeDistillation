@@ -167,6 +167,10 @@ src/expedistill/
                           stage1_baseline/ 下，live 基线加载与 C 相位的
                           复用对照都读它）
     skill_status.py       skill 状态提交（accept/discard）的唯一入口
+    skill_folder.py       folder 清单的幂等物化（M2：按指纹闸门从相位库
+                          读正文写文件；内容不变不重写）
+    skill_reads.py        folder 单元的事后读取统计（M4 纯函数）：从存储
+                          轨迹解析实际 cat 过的技能文件，benchmark 无关
     verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
                           统一报告行
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
