@@ -916,3 +916,10 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：装配身份比对（ruling 4）原本只放行终测相位的 delivery 与 compare，但加载期第 8 条检查强制 folder 交付与 real_folder 执行一对一配对——执行名是交付名的强制孪生，目标配置根本不能自由选择它；只放行 delivery 不放行其孪生，会让"retrieval 源 run → folder 目标"的复用装配在 config.phases.C.execution.name 上被拒（静态干跑实测确认这是本实验唯一剩余拒绝面）。裁决：白名单加 config.phases.<终测名>.execution.name 叶子，且只有名字——n_attempts、max_injection_tokens 等改变测量口径的叶子仍然拒绝（新增测试钉住：folder+real_folder 目标装配通过且 allowed_identity_diffs 报出 delivery 与 execution.name 两节；给终测执行加 n_attempts 仍拒绝）。测试 49 passed，全套 2199+4 全绿。
 
 工件：`src/expedistill/stages/assemble_reuse.py`（_allowed_diff_prefixes 与模块 docstring）、`tests/unit/stages/test_assemble_reuse.py`（+2 例）、本条对应 commit
+
+## 2026-10-17 14:05 — 整理预算恢复"无护栏"拼写（2026-10-16 用户裁决的 v4 对应物）
+
+一段话摘要：folder 版 C 实验的目标配置要把整理 token_budget 与源 run 冻结值逐字对齐（复用裁决第 6 条），但源 run（tb21_split_live_run_20261015_0045）冻结的是 bank_token_budget: null——2026-10-16 用户裁决"token 上限退出预登记参数集，None = 无护栏"的值，而 v4 的整理参数契约只收正整数，null 无法加载，逐字对齐在 v4 世界无拼法。按迁移规范（AGENTS 十.2）把旧世界的 None 语义完整搬回：AgentBrewParams / NoneParams 的 token_budget 改 Optional[int]（None = 阀永不关闭，正值照旧闸门），composites/curation.py 恢复旧世界的 _within_budget 帮助函数（None 时轮停判定恒真、终检永不触发），none 方法的 write_as_is 同样处理。行为影响：null 预算下整理轮在第一轮后停（轮停判定恒真，与源 run 当年实际行为一致）；预置库短路路径本就不经预算阀。测试 +4：参数契约 None/0/负数/字符串、无护栏轮停一轮后 break 且终检不触发、none 方法 null 预算写超大库。README 2.1 整理行补 null 拼法说明。验收：全套 2202 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/methods/curation/__init__.py`、`src/expedistill/methods/curation/none.py`、`src/expedistill/composites/curation.py`（_within_budget 移植）、`README.md`（2.1）、`tests/unit/methods/test_params.py`、`tests/unit/methods/test_curation_none.py`、`tests/composites/test_curation.py`、本条对应 commit
+

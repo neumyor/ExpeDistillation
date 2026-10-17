@@ -455,6 +455,34 @@ def test_over_budget_after_rounds_raises_and_writes_no_bank(store):
     assert log["final_member_ids"] == sorted(_skill_id(i) for i in range(2))
 
 
+def test_none_budget_is_no_fender_at_all(store):
+    """A null budget (the 2026-10-16 ruling: the token ceilings left the
+    pre-registered parameter set) never closes the valve: a bank that no
+    int budget would admit still curates, the round loop stops after the
+    first round (there is no budget to merge down towards), and the
+    final over-"budget" check never fires."""
+    for index in range(2):
+        _add_skill(store, index, "x" * 1600)
+        _add_exam(store, index)
+    handles = _handles(
+        curator_script=[
+            _similarity(),
+            _grouping({_skill_id(0): "misc", _skill_id(1): "misc"}),
+        ],
+        answer_script=[],
+        judge_script=[],
+    )
+
+    bank = _curate(store, handles, budget=None)
+
+    assert [row["skill_id"] for row in bank] == sorted(
+        _skill_id(i) for i in range(2))
+    assert store.bank() == bank
+    log = _log_of(store)
+    assert log["rounds_executed"] == 1
+    assert log["rounds"][0]["stop"] is True
+
+
 # ---------------------------------------------------------------------------
 # Resume: existing bank returned, zero model calls
 # ---------------------------------------------------------------------------

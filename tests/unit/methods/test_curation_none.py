@@ -79,6 +79,18 @@ def test_over_budget_stops_loudly(tmp_path):
     assert ctx.store.bank() == []
 
 
+def test_null_budget_writes_an_over_any_ceiling_bank(tmp_path):
+    # The no-fender ruling: a null budget never closes the valve, so a
+    # bank no int would admit writes verbatim.
+    ctx = _ctx(tmp_path)
+    _skill(ctx.store, "traj/tb:t1/strong/00/seg00", "x" * 5000)
+
+    summary = none_driver.run(ctx, NoneParams(token_budget=None))
+
+    assert summary["size"] == 1
+    assert len(ctx.store.bank()) == 1
+
+
 def test_empty_accepted_set_is_a_valid_bank(tmp_path):
     ctx = _ctx(tmp_path)
     summary = none_driver.run(ctx, NoneParams(token_budget=BIG))

@@ -1019,6 +1019,14 @@ def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _within_budget(tokens: int, budget: Optional[int]) -> bool:
+    """True when the bank fits the budget. A ``None`` budget is no fender
+    at all (user ruling 2026-10-16: the token ceilings left the
+    pre-registered parameter set) -- present values still gate, so frozen
+    runs carrying one in their manifest keep their behaviour."""
+    return budget is None or tokens <= budget
+
+
 def curate_bank(
     *,
     store: Store,
@@ -1026,7 +1034,7 @@ def curate_bank(
     answerer_handle: ModelHandle,
     judge_handle: ModelHandle,
     curator_handle: ModelHandle,
-    bank_token_budget: int,
+    bank_token_budget: Optional[int],
     curation_rounds: int,
     merge_check: str = "exam",
     usage: Any = None,
@@ -1214,8 +1222,8 @@ def curate_bank(
             # meaningless, so the round ends without G9 (README stage 5
             # step 4 runs G9 whenever the bank has >= 2 members).
             round_record["done"] = True
-            round_record["stop"] = (count_bank_tokens(members)
-                                    <= bank_token_budget)
+            round_record["stop"] = _within_budget(
+                count_bank_tokens(members), bank_token_budget)
             _write_log(log, log_path)
             if round_record["stop"]:
                 break
@@ -1446,7 +1454,8 @@ def curate_bank(
             store.save(skill, "skills")
 
         round_record["done"] = True
-        round_record["stop"] = count_bank_tokens(members) <= bank_token_budget
+        round_record["stop"] = _within_budget(
+            count_bank_tokens(members), bank_token_budget)
         _write_log(log, log_path)
         if round_record["stop"]:
             break
@@ -1459,9 +1468,10 @@ def curate_bank(
     log["bank_tokens"] = bank_tokens
     log["final_member_ids"] = [skill.skill_id for skill in members]
 
-    if bank_tokens > bank_token_budget:
+    if not _within_budget(bank_tokens, bank_token_budget):
         # Over budget after the round cap: the stage stops, nothing is
         # auto-deleted; a human decides (new budget or new merge strategy).
+        # A None budget (the 2026-10-16 ruling) never stops here.
         _write_log(log, log_path)
         raise ConfigError(
             "skill bank exceeds bank_token_budget after "

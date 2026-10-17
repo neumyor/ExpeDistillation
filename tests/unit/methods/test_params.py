@@ -168,6 +168,24 @@ class TestCurationParams:
                                            "token_budget": 96000})
         assert none.token_budget == 96000
 
+    def test_null_budget_is_the_no_fender_ruling(self):
+        # The 2026-10-16 user ruling's v4 image: token ceilings left the
+        # pre-registered parameter set, so null is a legal value for BOTH
+        # curation methods -- the pre-v4 campaigns froze it, and the
+        # reuse identity walk loads those manifests verbatim.
+        assert resolve_params("curation", {
+            "name": "agentbrew", "token_budget": None,
+            "rounds": 3}).token_budget is None
+        assert resolve_params("curation", {
+            "name": "none", "token_budget": None}).token_budget is None
+        for bad in (0, -1, "96000"):
+            with pytest.raises(ConfigError, match="token_budget"):
+                resolve_params("curation", {"name": "agentbrew",
+                                             "token_budget": bad})
+            with pytest.raises(ConfigError, match="token_budget"):
+                resolve_params("curation", {"name": "none",
+                                            "token_budget": bad})
+
     def test_agentbrew_merge_check_param(self):
         # "exam" is the default (the frozen behaviour); "none" skips
         # K5's regression exams; anything else is refused loudly.

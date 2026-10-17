@@ -6,9 +6,16 @@ accepted skills down to the bank budget; the ``none`` method is the
 ablation -- the accepted skills ARE the bank, and the budget stays a
 hard safety valve (an over-budget bank still stops the run loudly, it
 just cannot be fixed by merging).
+
+``token_budget: null`` is the NO-FENDER spelling (user ruling
+2026-10-16: the token ceilings left the pre-registered parameter set;
+``None`` = the valve never closes). The pre-v4 world ran whole
+campaigns under it, so the reuse identity walk needs the value to load
+verbatim; a positive int still gates exactly as before.
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 from expedistill.core.config import ConfigError
 
@@ -34,15 +41,15 @@ class AgentBrewParams:
     instead.
     """
 
-    token_budget: int
+    token_budget: Optional[int]
     rounds: int = 3
     merge_check: str = "exam"
 
     def __post_init__(self) -> None:
-        if self.token_budget < 1:
+        if self.token_budget is not None and self.token_budget < 1:
             raise ConfigError(
-                "methods.curation.agentbrew token_budget must be >= 1, "
-                f"got {self.token_budget}")
+                "methods.curation.agentbrew token_budget must be >= 1 or "
+                f"null (the no-fender ruling), got {self.token_budget}")
         if self.rounds < 1:
             raise ConfigError(
                 f"methods.curation.agentbrew rounds must be >= 1, "
@@ -55,12 +62,13 @@ class AgentBrewParams:
 
 @dataclass(frozen=True)
 class NoneParams:
-    """The ablation has no rounds -- but keeps the budget valve."""
+    """The ablation has no rounds -- but keeps the budget valve (a null
+    budget is the no-fender ruling, so the valve never closes)."""
 
-    token_budget: int
+    token_budget: Optional[int]
 
     def __post_init__(self) -> None:
-        if self.token_budget < 1:
+        if self.token_budget is not None and self.token_budget < 1:
             raise ConfigError(
-                f"methods.curation.none token_budget must be >= 1, "
-                f"got {self.token_budget}")
+                "methods.curation.none token_budget must be >= 1 or null "
+                f"(the no-fender ruling), got {self.token_budget}")

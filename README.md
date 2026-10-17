@@ -178,7 +178,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | `role` | 恒为 `learn` |
 | `evidence` | 找证据方法：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算） |
 | `author` | 写作方法：`distill_diagnose` |
-| `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds`）或 `none`（带 `token_budget`） |
+| `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds`）或 `none`（带 `token_budget`）；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
 

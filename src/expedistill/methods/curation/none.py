@@ -17,7 +17,7 @@ curation treatment never sees a pending skill.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from expedistill.composites.phase_bank import (
     BANK_NAME,
@@ -34,10 +34,12 @@ __all__ = ["produce_phase_bank", "run", "write_as_is"]
 
 
 def write_as_is(store: Any, dest_dir: Path,
-                token_budget: int) -> Dict[str, Any]:
+                token_budget: Optional[int]) -> Dict[str, Any]:
     """The as-is treatment shared by the run-level and the phase entries.
 
-    The accepted rows go in verbatim and the budget stays a hard valve.
+    The accepted rows go in verbatim and the budget stays a hard valve
+    (``None`` is the no-fender ruling of 2026-10-16 -- the valve never
+    closes; a present value still gates).
     The bank is written WHOLE and atomically (store.write_jsonl), not
     appended: the content is a pure function of the accepted set, so an
     overwrite is idempotent by construction -- a crashed or repeated
@@ -56,7 +58,7 @@ def write_as_is(store: Any, dest_dir: Path,
         (skill for skill in skills if skill.status == "accepted"),
         key=lambda skill: skill.skill_id)
     bank_tokens = count_bank_tokens(accepted)
-    if bank_tokens > token_budget:
+    if token_budget is not None and bank_tokens > token_budget:
         raise ConfigError(
             f"skill bank exceeds token_budget without curation "
             f"(methods.curation.none): {bank_tokens} > {token_budget}; "
