@@ -124,6 +124,24 @@ def test_an_empty_summary_falls_back_to_the_when_to_use_section():
         "restarting anything.")
 
 
+def test_an_empty_summary_on_a_failure_reference_falls_back_to_trigger():
+    """The rev-1 symmetric fallback: a failure-reference skill (its
+    sections start at [Trigger], not [When to use]) uses that section
+    as its catalog description."""
+    content = "\n".join([
+        "[Trigger] The model restarts the service blindly.",
+        "[Why it fails] The lock file is still held.",
+        "[Do instead] Check the lock file, then restart.",
+        "[Do not use when] The status command already reports running.",
+    ])
+    skill = _skill("t1", summary="", content=content)
+    entry = render_catalog([skill]).splitlines()[-1]
+    # The [Trigger] body collapsed to one line; [Why it fails] never
+    # leaks into the description.
+    assert entry.endswith(
+        "| The model restarts the service blindly.")
+
+
 def test_a_markerless_skill_gets_the_explicit_placeholder():
     skill = _skill("t1", content="Just some prose with no sections.")
     catalog = render_catalog([skill])
@@ -154,10 +172,12 @@ def test_the_manifest_carries_the_accepted_files_and_the_bank_fingerprint():
     # The fingerprint is the phase artifact's bank-summary digest: over
     # the FULL bank (pending included), never a new version number.
     assert manifest["bank_fingerprint"] == bank_reference(bank)
+    # The rev-1 ruling: the file list is a NAME MAPPING -- no content
+    # travels with the manifest (progressive disclosure survives every
+    # stage; the bodies' only source is the phase bank).
     assert manifest["files"] == [
         {"skill_id": skill.skill_id, "version": skill.version,
-         "filename": skill_filename(skill.skill_id),
-         "content": skill.content}
+         "filename": skill_filename(skill.skill_id)}
         for skill in accepted]
 
 

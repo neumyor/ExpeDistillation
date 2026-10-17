@@ -10,14 +10,17 @@ manifest, and materializing them into a real directory is the composite
 layer's job (:mod:`expedistill.composites.skill_folder`, called by the
 M3 execution path).
 
-The manifest rides the unit rows' ``aux["skill_folder"]`` and is
-self-contained -- the skill contents travel with it, so the execution
-side needs nothing but the unit to build the folder, and "the execution
-always gets the current version of the folder" needs no version
-negotiation: whatever the unit carries IS the version. Which bank that
-is lives in the manifest's ``bank_fingerprint`` -- the same digest
-``composites.phase_bank``'s bank summary writes (``bank_reference``
-over the phase artifact's full member list), never a new counter.
+The manifest rides the unit rows' ``aux["skill_folder"]`` and stays
+LIGHTWEIGHT -- the skill contents never travel with it (the M2 rev-1
+ruling: progressive disclosure is the whole point of this play, so no
+stage may quietly become "inject everything somewhere else"). The
+manifest carries the catalog text, the file-name mapping and WHICH
+bank it resolves against (``bank_fingerprint`` -- the same digest
+``composites.phase_bank``'s bank summary writes, ``bank_reference``
+over the phase artifact's full member list, never a new counter); the
+skill contents' only source is the phase bank, and the composite
+materialization reads them from it (with the fingerprint checked) --
+the unit row stays as light as the old top-k one.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the curated skill bank, ``tasks`` the phase's tasks, ``params`` the
@@ -127,27 +130,30 @@ def when_to_use_line(content: str) -> str:
 
     The empty-summary fallback the M2 ruling froze (a v2-migrated
     skill has no summary, so its directory line falls back to the
-    section that says WHEN the skill applies). Only the procedure
-    marker counts here: the ruling names the [When to use] section, and
-    a failure reference's [Trigger] is a different claim -- a body with
-    neither section falls back to the explicit placeholder instead.
-    The section body runs from the marker line's remainder (the
-    renderer puts the first sentence on the marker line) to the next
-    section marker or the end of the content, collapsed to one line the
-    same way the D9 block collapses its bullets."""
-    marker = PROCEDURE_MARKERS[0]
+    section that says WHEN the skill applies). The M2 rev-1 ruling
+    extends the fallback to a failure reference's [Trigger] -- the
+    two sections make the same kind of claim (when this skill applies)
+    for the two skill kinds, so the fallback is symmetric (procedure
+    first, then failure reference). A body with neither section falls
+    back to the explicit placeholder instead. The section body runs
+    from the marker line's remainder (the renderer puts the first
+    sentence on the marker line) to the next section marker or the end
+    of the content, collapsed to one line the same way the D9 block
+    collapses its bullets."""
     body: List[str] = []
     in_section = False
     for line in content.splitlines():
         if in_section and any(line.startswith(section_marker)
                               for section_marker in _SECTION_MARKERS):
             break
-        if line.startswith(marker):
-            in_section = True
-            body.append(line[len(marker):])
+        if not in_section:
+            for marker in (PROCEDURE_MARKERS[0], FAILURE_REFERENCE_MARKERS[0]):
+                if line.startswith(marker):
+                    in_section = True
+                    body.append(line[len(marker):])
+                    break
             continue
-        if in_section:
-            body.append(line)
+        body.append(line)
     if not in_section:
         return ""
     return _one_line(" ".join(body))
@@ -155,8 +161,8 @@ def when_to_use_line(content: str) -> str:
 
 def _description(record: Union[Skill, Mapping[str, Any]]) -> str:
     """One skill's catalog description: the summary, else the [When to
-    use] section, else the explicit placeholder -- then one line, then
-    the explicit clip."""
+    use] / [Trigger] section (the rev-1 symmetric fallback), else the
+    explicit placeholder -- then one line, then the explicit clip."""
     description = _one_line(_field(record, "summary", "") or "")
     if not description:
         description = when_to_use_line(_field(record, "content", ""))
@@ -185,18 +191,21 @@ def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]]
 def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]]
                           ) -> Dict[str, Any]:
     """The folder manifest a folder unit carries (M3's materialization
-    input, verbatim)::
+    input)::
 
         {"bank_fingerprint": "bank:<12 hex>",   # the phase artifact's
                                                 # bank-summary digest
          "catalog_filename": "catalog.md",
          "catalog_text": "<the catalog file's exact bytes>",
-         "files": [{"skill_id", "version", "filename", "content"},
+         "files": [{"skill_id", "version", "filename"},
                    ...]}                      # accepted set, bank order
 
     The file list is the bank's ACCEPTED members only (whole_bank's
-    bookkeeping), each carrying its four-section content verbatim so
-    the manifest alone can build the folder. The fingerprint is
+    bookkeeping). It is a NAME MAPPING, not the skills: no content
+    travels with the manifest (the rev-1 ruling -- progressive
+    disclosure must survive every stage; the composite materialization
+    reads each skill's body from the phase bank, checking it against
+    the fingerprint below). The fingerprint is
     ``bank_reference`` over the FULL bank -- the same digest the
     phase's bank_summary.json writes -- which names which version of
     the bank this folder is without inventing a new version number.
@@ -225,7 +234,6 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]]
             "skill_id": skill_id,
             "version": _field(record, "version", 1),
             "filename": filename,
-            "content": _field(record, "content", ""),
         })
     return {
         "bank_fingerprint": bank_reference(bank),
