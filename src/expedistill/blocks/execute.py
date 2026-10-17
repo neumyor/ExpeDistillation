@@ -36,7 +36,7 @@ from expedistill.benchmarks.base import RunOutcome, Task
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
-from expedistill.infra.reliability import CodeBugError
+from expedistill.infra.reliability import CodeBugError, ConfigError
 
 __all__ = ["run_one", "make_task_id"]
 
@@ -86,6 +86,23 @@ def run_one(
         raise CodeBugError(
             f"benchmark must be a non-empty str, got {benchmark!r}")
     plugin = resolve_plugin(benchmark)
+    # The skill-folder guard (the real_folder execution, M3): a folder
+    # unit reaches the plugin with the delivery's manifest on its task;
+    # a plugin that declares no skill_folder_prompt_name would silently
+    # run it as a plain skills injection (the catalog text as the
+    # skills block -- the wrong experiment), so it is refused here, at
+    # the one boundary where the unit meets the plugin. A configuration
+    # error, not a code bug: the config chose the folder play for a
+    # benchmark whose plugin never declared it (as of this writing only
+    # the 'tb' plugin does).
+    if task.meta.get("skill_folder") is not None \
+            and plugin.skill_folder_prompt_name is None:
+        raise ConfigError(
+            f"benchmark {benchmark!r} does not support skill folders (the "
+            "real_folder execution): its plugin declares no "
+            "skill_folder_prompt_name, and a skill-folder unit needs one "
+            "(as of this writing only the 'tb' plugin supports skill "
+            "folders)")
     outcome = plugin.run(task, handle, skills_block, workdir)
     if not isinstance(outcome, RunOutcome):
         raise CodeBugError(

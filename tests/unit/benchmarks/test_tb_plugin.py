@@ -923,14 +923,18 @@ def test_import_registers_plugin_and_prompt():
     # effects are exactly: plugin registration + prompt registration.
     _reset_registry()
     PROMPTS.pop("TB_TASK_PROMPT", None)
+    PROMPTS.pop("TB_TASK_PROMPT_FOLDER", None)
     importlib.reload(importlib.import_module(
         "expedistill.benchmarks.tb.plugin"))
     importlib.reload(importlib.import_module("expedistill.benchmarks.tb"))
     assert get_plugin("tb").name == "tb"
     assert "TB_TASK_PROMPT" in PROMPTS
-    # The registered instance resolves the standard interface names.
+    assert "TB_TASK_PROMPT_FOLDER" in PROMPTS
+    # The registered instance resolves the standard interface names and
+    # its skill-folder capability prompt (M3).
     plugin = get_plugin("tb")
     assert plugin.task_prompt_name == "TB_TASK_PROMPT"
+    assert plugin.skill_folder_prompt_name == "TB_TASK_PROMPT_FOLDER"
     assert plugin.view_rules.max_obs_chars == 8000
 
 

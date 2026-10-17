@@ -55,6 +55,7 @@ def _tb_plugin_registered():
     except ConfigError:
         from expedistill.prompts.registry import PROMPTS
         PROMPTS.pop("TB_TASK_PROMPT", None)
+        PROMPTS.pop("TB_TASK_PROMPT_FOLDER", None)
         importlib.reload(
             importlib.import_module("expedistill.benchmarks.tb.plugin"))
         importlib.reload(

@@ -118,7 +118,9 @@ src/expedistill/
     call.py               call_model：取 prompt → 请求 → 解析 → 格式错误重试 → 记账落盘
     fake.py               测试用假模型（按脚本返回固定内容）
   benchmarks/             第 3 层：benchmark 插件
-    base.py               插件接口：load_tasks / run / view_rules / task_prompt
+    base.py               插件接口：load_tasks / run / view_rules / task_prompt；
+                          可选能力声明 skill_folder_prompt_name（技能文件夹
+                          执行 real_folder，M3；None=不支持）
     react_loop.py         本地 benchmark 共用的逐步 ReAct 执行循环
     aux.py                辅助指标的插件接线（声明与打分器包装）
     registry.py           按名字取插件
@@ -174,7 +176,8 @@ src/expedistill/
     registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（R8 五族：
                           delivery / execution / evidence / author / curation）
     execution/            execution 族参数契约：RealExecutionParams /
-                          ExamExecutionParams（无驱动，相位驱动直接消费）
+                          ExamExecutionParams / RealFolderExecutionParams
+                          （无驱动，相位驱动直接消费）
     evidence/             evidence 族：SegmentationParams + 三个采集器
                           add_path（加分路径）、live_group（G10 事实）、
                           exam_sheet（考卷答卷材料）+ segmentation.py
@@ -342,7 +345,10 @@ configs/
    为 `True`（判分器判对）/ `False`（判错）/ `None`（没拿到判分结果）；
    基础设施失败（沙箱超时、断网等）抛 `InfrastructureError`，由 K1 重试；
    Trajectory 的 ID、角色等簿记字段由 E1 组装）、`view_rules`（截断规则）、
-   `task_prompt`（执行 prompt，登记进 prompt 注册表）；
+   `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹
+   （real_folder 执行）的插件再声明 `skill_folder_prompt_name`（指向
+   folder 模式执行 prompt 的注册名，digest 进 manifest；目前只有 tb 声明，
+   folder 单元落到不声明的插件由 E1 响亮拒绝）；
 2. 在 `benchmarks/registry.py` 登记名字；
 3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
    真实执行冒烟（标 `live`）；

@@ -228,9 +228,26 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
     tests pin that every prompts/*.py module is in that import list --
     so the frozen surface can never miss a registered prompt. The cost is
     noise, not risk: a manifest lists digests this run may never call.
+
+    A plugin that declares the skill-folder capability names its folder
+    prompt through ``skill_folder_prompt_name`` (M3): that prompt is part
+    of what a folder unit runs under, so its digest freezes too -- and
+    an unregistered name is a ConfigError, not a None entry (a folder
+    prompt is plugin code, not a test fake; the plugin's own task prompt
+    keeps the None-on-unregistered contract for the fake-benchmarks).
     """
+    plugin = get_plugin(benchmark)
     names = set(prompts.METHOD_PROMPT_NAMES)
-    names.add(get_plugin(benchmark).task_prompt_name)
+    names.add(plugin.task_prompt_name)
+    folder_prompt = plugin.skill_folder_prompt_name
+    if folder_prompt is not None:
+        if folder_prompt not in prompts.PROMPTS:
+            raise ConfigError(
+                f"benchmark {benchmark!r} declares skill_folder_prompt_name "
+                f"{folder_prompt!r} but no prompt of that name is "
+                "registered -- the folder prompt is part of the frozen "
+                "protocol, so the plugin and its registration disagree")
+        names.add(folder_prompt)
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)

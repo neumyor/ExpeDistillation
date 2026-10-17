@@ -279,6 +279,10 @@ class BenchmarkPlugin(abc.ABC):
     - ``task_prompt_name``: the B2 name this plugin registered its task
       execution prompt under; the template's variables are
       ``{instruction}``, ``{skills_block}`` and ``{history}``.
+    - the optional SKILL-FOLDER capability (``skill_folder_prompt_name``,
+      the ``real_folder`` execution): see the attribute below -- a
+      plugin without it cannot run a folder unit, and E1 refuses one
+      loudly.
     - the optional AUXILIARY metric (``aux_metric_name`` /
       ``aux_success``): a second, pre-registered success notion reported
       ALWAYS beside the primary one (which stays the scorer verdict,
@@ -324,6 +328,22 @@ class BenchmarkPlugin(abc.ABC):
     #: records this limitation; compare against run directories, not
     #: across scorer versions).
     aux_metric_name: Optional[str] = None
+
+    #: Skill-folder capability (the ``real_folder`` execution,
+    #: skill-folder M3): the B2 name of the prompt a skill-folder
+    #: unit's task runs under, or None (the default) when this plugin
+    #: does not support skill folders at all -- currently only the tb
+    #: plugin declares it. A skill-folder unit reaches the plugin with
+    #: the folder delivery's manifest on ``task.meta["skill_folder"]``
+    #: (and the materialized folder's path on
+    #: ``task.meta["skill_folder_dir"]``); the plugin must bring that
+    #: folder into its run environment and point the agent at it
+    #: THROUGH this prompt (a guidance section), never by injecting
+    #: the catalog text. Declared as the prompt NAME rather than a
+    #: bare bool so the capability and its prompt freeze together in
+    #: one attribute (stage 0 digests the named prompt into the
+    #: manifest and refuses an unregistered name) and cannot drift.
+    skill_folder_prompt_name: Optional[str] = None
 
     def aux_success(self, traj: Trajectory) -> Optional[bool]:
         """Auxiliary success of one trajectory.

@@ -64,6 +64,7 @@ def _tb_plugin_registered():
         # package __init__ -- reload both (the pattern test_tb_plugin.py
         # established for exactly this situation).
         PROMPTS.pop("TB_TASK_PROMPT", None)
+        PROMPTS.pop("TB_TASK_PROMPT_FOLDER", None)
         importlib.reload(
             importlib.import_module("expedistill.benchmarks.tb.plugin"))
         importlib.reload(

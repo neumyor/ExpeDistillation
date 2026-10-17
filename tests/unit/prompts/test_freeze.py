@@ -59,19 +59,30 @@ def test_prompts_register_only_in_their_two_homes():
         f"{offenders}")
 
 
-def test_each_benchmark_registers_at_most_its_own_task_prompt():
+def test_each_benchmark_registers_at_most_its_declared_prompts():
     for package in sorted((ROOT / "benchmarks").iterdir()):
         if not package.is_dir():
             continue
         count = 0
+        declares_folder = False
         for path in package.glob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+            if "skill_folder_prompt_name" in source:
+                declares_folder = True
             for node in ast.walk(tree):
                 if (isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
                         and node.func.id == "register"):
                     count += 1
-        assert count <= 1, (
+        # One benchmark = one task prompt; the ONE extra registration a
+        # plugin may carry is the skill-folder capability's prompt
+        # (skill_folder_prompt_name, skill-folder M3) -- it freezes with
+        # the task prompt through the plugin's declared names, so it
+        # neither misses the freeze nor leaks. Anything else would.
+        cap = 2 if declares_folder else 1
+        assert count <= cap, (
             f"benchmark package {package.name} registers {count} prompts; "
-            "one benchmark = one task prompt (extra registrations would "
-            "either miss the freeze or leak benchmark-private prompts)")
+            "one benchmark = one task prompt plus at most the declared "
+            "skill-folder prompt (extra registrations would either miss "
+            "the freeze or leak benchmark-private prompts)")

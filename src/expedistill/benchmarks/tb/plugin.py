@@ -131,7 +131,9 @@ from expedistill.prompts.registry import PromptSpec, register
 
 __all__ = [
     "TBPlugin",
+    "TB_SKILL_FOLDER_GUIDANCE",
     "TB_TASK_PROMPT",
+    "TB_TASK_PROMPT_FOLDER",
     "classify_result",
     "result_facts",
     "runner_env",
@@ -180,6 +182,77 @@ task description.
 #: /data2/niuyiming/scripts/). Override with EXPEDISTILL_TB_RUNNER.
 DEFAULT_RUNNER = "/data2/niuyiming/scripts/run_tencent_tb21_smoke_niuyiming.sh"
 RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
+
+# --------------------------------------------------------------------------
+# B2: the skill-folder guidance and the folder unit's task prompt
+# (skill-folder M3).
+#
+# A folder unit's remote trial rides the SAME skills-mode mechanism a
+# skills-block trial does: the plugin uploads a per-run directory under
+# ``<TBENCH_SKILL_ROOT>/<run_id>/<task_name>/`` whose SKILL.md the remote
+# skill agent injects into the agent's task prompt, and the
+# TencentTaskSkillE2BEnvironment (outer scripts/tb21, vendored
+# tencent_tb2_skill_env.py) uploads that WHOLE directory -- SKILL.md and
+# every other file in it -- into the sandbox read-only at
+# ``/opt/openclaw-skills/<task_name>/``. The folder play uses exactly
+# that: SKILL.md carries the GUIDANCE below (the prompt-side injection --
+# the catalog text is never injected), and catalog.md plus the skill
+# files ride the same directory into the sandbox, where the agent cats
+# them. So the guidance's path wording is a remote contract: it must
+# name /opt/openclaw-skills, the mount the vendored environment hardcodes.
+# --------------------------------------------------------------------------
+TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox, under
+/opt/openclaw-skills/ (run `ls /opt/openclaw-skills` to find this task's
+directory). It holds one markdown file per skill plus a catalog, catalog.md.
+Read the catalog first: `cat <directory>/catalog.md`. Every catalog line
+lists one skill as "<skill id> | <file to cat> | <one-line description>".
+cat only the skill file the current step needs, one at a time; do not open
+many skill files at once; come back to the catalog when a later step needs
+another one. These skills are lessons distilled from earlier runs: use
+them as references when they apply to the current task, and ignore them
+when they do not."""
+
+TB_TASK_PROMPT_FOLDER = register(
+    PromptSpec(
+        name="TB_TASK_PROMPT_FOLDER",
+        template=(
+            "You are an AI assistant solving a command-line task inside a "
+            "Linux sandbox.\n"
+            "You act through a terminal: inspect the environment, run "
+            "shell commands, read\n"
+            "their output, and iterate until the task is done.\n"
+            "\n"
+            "SKILL FOLDER (lessons distilled from earlier runs live as "
+            "files in this\n"
+            "sandbox; use them as references when they apply to the "
+            "current task, and\n"
+            "ignore them when they do not):\n"
+            + TB_SKILL_FOLDER_GUIDANCE + "\n"
+            "\n"
+            "TASK:\n"
+            "{instruction}\n"
+            "\n"
+            "TERMINAL HISTORY (most recent state last):\n"
+            "{history}\n"
+            "Decide your next action from the terminal state above. Work "
+            "in small,\n"
+            "verifiable steps, check the effect of each command before "
+            "moving on, and do\n"
+            "not declare the task complete until you have verified the "
+            "goal against\n"
+            "the task description.\n"
+        ),
+        description=(
+            "E1 TB runner, skill-folder mode (the real_folder execution): "
+            "the folder unit's task prompt -- the SKILLS slot of "
+            "TB_TASK_PROMPT is replaced by the folder guidance section "
+            "(TB_SKILL_FOLDER_GUIDANCE verbatim, which is also what the "
+            "remote skill agent injects as the trial's SKILL.md); the "
+            "catalog text is never part of the prompt. No "
+            "{skills_block} slot: nothing variable is injected."
+        ),
+    )
+)
 
 #: Poll/deadline knobs (ssh round trips are expensive: poll modestly).
 POLL_ENV = "EXPEDISTILL_TB_POLL_SECONDS"
@@ -446,6 +519,11 @@ class TBPlugin(BenchmarkPlugin):
 
     name = "tb"
     task_prompt_name = "TB_TASK_PROMPT"
+    # The skill-folder capability (M3): a folder unit runs under the
+    # folder prompt registered above, and ``run`` brings the
+    # materialized folder into the sandbox through the skills-mode
+    # directory (the module docstring's submission design).
+    skill_folder_prompt_name = "TB_TASK_PROMPT_FOLDER"
 
     def __init__(self,
                  *,
