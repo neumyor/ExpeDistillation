@@ -1360,6 +1360,42 @@ def test_identity_diff_allows_the_whitelisted_keys_only(tmp_path):
         "mode", "split"]
 
 
+def test_identity_diff_allows_the_paired_execution_name(tmp_path):
+    """The folder play's forced twin: core's load-time pairing check
+    (checklist item 8) makes the C execution name the delivery name's
+    twin -- ``folder`` pairs with ``real_folder``, everything else with
+    plain ``real`` -- so a folder-delivery target over a whole_bank
+    source is allowed on the delivery AND the execution NAME leaves
+    (a delivery-only whitelist would refuse every folder reuse for a
+    knob the target cannot choose freely)."""
+    source = build_source_run(tmp_path)
+    config = reuse_config_dict(c_delivery={"name": "folder"})
+    config["phases"]["C"]["execution"] = {"name": "real_folder"}
+    config_path = write_reuse_config(tmp_path, config)
+
+    summary = assemble_reuse(
+        source.run_dir, config_path, tmp_path / "assembled")
+
+    assert "config.phases.C.delivery" in summary["allowed_identity_diffs"]
+    assert "config.phases.C.execution.name" in \
+        summary["allowed_identity_diffs"]
+
+
+def test_identity_diff_still_refuses_a_changed_execution_depth(tmp_path):
+    """Only the NAME leaf joined the delivery whitelist: an execution
+    key that changes what is measured (the sampling depth) stays a
+    refusal even on the final-test phase."""
+    source = build_source_run(tmp_path)
+    config = reuse_config_dict()
+    config["phases"]["C"]["execution"] = {"name": "real", "n_attempts": 1}
+    config_path = write_reuse_config(tmp_path, config)
+    with pytest.raises(
+            ConfigError,
+            match=r"config\.phases\.C\.execution\.n_attempts"):
+        assemble_reuse(source.run_dir, config_path, tmp_path / "assembled")
+    assert not (tmp_path / "assembled").exists()
+
+
 def test_prompt_digest_drift_is_disclosed_not_refused(tmp_path):
     # The mixed-protocol declaration (ruling 14): the new run freezes the
     # CURRENT registry's digests and never calls them, so a prompt change

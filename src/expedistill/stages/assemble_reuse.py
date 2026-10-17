@@ -53,10 +53,13 @@ Three load-bearing invariants (integration plan rulings 1/4/5):
 
 * Identity (ruling 4): the new config may differ from the source run's
   frozen manifest ONLY in ``{mode, split, tasks, schema_version, the
-  final-test phase's delivery and compare}``. The last two are the v4
-  image of the v3 delivery slot: the knobs that act only at the final
-  test, where the mode also decides the control arm (a full-mode C
-  compares against D's weak arm, a split-mode C runs fresh_bare). Every
+  final-test phase's delivery, compare and execution name}``. The last
+  three are the v4 image of the v3 delivery slot: the knobs that act
+  only at the final test, where the mode also decides the control arm
+  (a full-mode C compares against D's weak arm, a split-mode C runs
+  fresh_bare or reads the external campaign file), and the execution
+  name is the delivery's forced twin (the core pairing check -- only
+  the NAME leaf, never the depth or budget leaves). Every
   other key -- benchmark, both executor models, both attempt counts, the
   three rule names, the whole sequence and every phase definition, the
   redispatch budget, token_budgets, model_options, weak_profile, the
@@ -421,17 +424,29 @@ def _diff_paths(stored: Any, incoming: Any, prefix: str = "") -> List[str]:
 
 def _allowed_diff_prefixes(config: ExperimentConfig) -> tuple:
     """Ruling 4's whitelist for one target config: the shape-independent
-    keys plus the final-test phase's delivery and compare mappings (the
-    v4 image of the v3 delivery slot -- the knobs that act only at the C
-    phase, where the mode also decides the control arm). The phase's
-    LOCAL NAME is whatever the target config calls it, so the prefixes
-    are derived, never hardcoded."""
+    keys plus the final-test phase's delivery, compare and execution-NAME
+    mappings (the v4 image of the v3 delivery slot -- the knobs that act
+    only at the C phase, where the mode also decides the control arm).
+    The phase's LOCAL NAME is whatever the target config calls it, so
+    the prefixes are derived, never hardcoded.
+
+    ``execution.name`` joined the whitelist with the folder play: core's
+    load-time pairing check (config.py checklist item 8) makes the
+    execution name the delivery name's FORCED twin -- ``folder`` pairs
+    one-to-one with ``real_folder``, every other delivery with plain
+    ``real`` -- so whitelisting the delivery without its twin refused
+    every folder-delivery reuse on a retrieval source for a knob the
+    target config cannot even choose freely. Only the NAME leaf is
+    whitelisted: the execution's other leaves (``n_attempts``,
+    ``max_injection_tokens``) change what is measured and stay refused.
+    """
     prefixes = list(_BASE_ALLOWED_DIFF_PREFIXES)
     for name in config.sequence:
         spec = config.phases[name]
         if isinstance(spec, ExecutePhaseSpec) and spec.role == PHASE_ROLE_TEST:
             prefixes.append(f"config.phases.{name}.delivery")
             prefixes.append(f"config.phases.{name}.compare")
+            prefixes.append(f"config.phases.{name}.execution.name")
     return tuple(prefixes)
 
 
