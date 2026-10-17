@@ -8,6 +8,7 @@ import copy
 import importlib
 import importlib.abc
 import importlib.machinery
+import hashlib
 import json
 import sys
 import types
@@ -509,6 +510,51 @@ def test_registered_custom_rule_name_accepted(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# The external-campaign control's score file: verified at freeze
+# ---------------------------------------------------------------------------
+
+def test_external_control_file_verified_at_freeze(monkeypatch, tmp_path):
+    """A C phase comparing against the external campaign pins its score
+    file by sha256; the freeze step refuses a missing or drifted file
+    BEFORE anything is written -- the file is part of the frozen
+    method's identity, not a runtime lookup."""
+    _install_plugin(monkeypatch, StagePlugin())
+    payload = {"tasks": {"qwen:t3": {"n": 5, "rewards": [1.0] * 5,
+                                    "success_rate": 1.0}}}
+    score_path = tmp_path / "scores.json"
+    score_path.write_text(json.dumps(payload), encoding="utf-8")
+    sha = hashlib.sha256(score_path.read_bytes()).hexdigest()
+    phases = copy.deepcopy(PHASES)
+    phases["C"]["compare"] = {
+        "against": "external_campaign",
+        "external": {"path": str(score_path), "sha256": sha,
+                     "model_key": "qwen"}}
+    ctx = make_ctx(tmp_path, make_config(phases=phases))
+    stage0_freeze.run(ctx)
+    manifest = load_manifest(ctx.run_dir)
+    assert manifest["config"]["phases"]["C"]["compare"] == {
+        "against": "external_campaign", "rule": None,
+        "external": {"path": str(score_path), "sha256": sha,
+                     "model_key": "qwen"}}
+
+    # A drifted file refuses the freeze before anything is written.
+    score_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    run_dir2 = tmp_path / "run2"
+    ctx2 = make_ctx(tmp_path, make_config(phases=phases),
+                    run_name="run2")
+    with pytest.raises(ConfigError, match="hashes to sha256"):
+        stage0_freeze.run(ctx2)
+    assert not (run_dir2 / "manifest.json").exists()
+
+    # A missing file refuses the same way.
+    score_path.unlink()
+    ctx3 = make_ctx(tmp_path, make_config(phases=phases),
+                    run_name="run3")
+    with pytest.raises(ConfigError, match="does not exist"):
+        stage0_freeze.run(ctx3)
+
+
 # Prompt digests: method prompts + exactly the configured plugin's prompt
 # ---------------------------------------------------------------------------
 
@@ -712,7 +758,8 @@ def _golden_config(split):
             "C": {"role": "test", "tasks": "test",
                   "delivery": {"name": "whole_bank"},
                   "execution": {"name": "real"},
-                  "compare": {"against": "fresh_bare", "rule": None},
+                  "compare": {"against": "fresh_bare", "rule": None,
+                              "external": None},
                   "acceptance": None, "kind": "execute"},
         },
         "invalid_redispatch_limit": 1,

@@ -373,6 +373,7 @@
           "acceptance": null,
           "compare": {
             "against": "fresh_bare",
+            "external": null,
             "rule": null
           },
           "delivery": {

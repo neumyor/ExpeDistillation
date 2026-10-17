@@ -168,7 +168,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | `tasks` | 跑冻结的哪个列表：`train` 或 `test`（`test` 角色与 `test` 列表是同一件事，两者必须同时成立） |
 | `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `per_skill` / `group_by_task` / `folder`（技能文件夹交付，只有 test 角色相位可用，与 `real_folder` 执行一对一配对，流程见 5.5） |
 | `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（考题执行）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 与 `exam` 一样**没有执行参数**——C 相位的采样深度沿用全局 `n_attempts_weak`，与旧 C 相位行为一致，配置里写参数键会因未知键检查响亮失败 |
-| `compare` | 对照来源（可选）：`against` 指向更早的相位名或 `fresh_bare`（相位内现场跑一条裸臂），`rule` 指定比较规则名 |
+| `compare` | 对照来源（可选）：`against` 指向更早的相位名、`fresh_bare`（相位内现场跑一条裸臂）或 `external_campaign`（对照读外部 campaign 的冻结成绩文件，零执行，只有 test 角色相位可用，且必须带 `external` 块钉住文件身份：`path`（相对路径相对配置文件所在目录解析，冻结为绝对路径）+ `sha256`（成绩文件字节的校验和，防漂移）+ `model_key`（campaign 汇总里对应本 run 弱模型的前缀））；对照口径 = 每任务取前 `n_attempts_weak` 次采样的奖励均值（与旧外部对照报告的"前 3 次"对齐列同口径），`rule` 指定比较规则名 |
 | `acceptance` | 验收判分规则名（可选；缺省用 benchmark 的默认绑定，TB 是 `tb_scorer`） |
 
 **学习相位的字段**（`kind: learn`）：
@@ -205,9 +205,11 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
    `arms: [executor_strong, executor_weak]` 两臂（深度由全局
    `n_attempts_strong` / `n_attempts_weak` 决定）；单臂真实执行的
    `n_attempts` 不得超过对照的弱臂深度；
-4. `compare.against` 必须指向序列里更早出现的名字，或写 `fresh_bare`；
-   被指向的对照必须是 baseline 相位（只有摸底相位的弱臂裸跑报告才是
-   裸测量）；
+4. `compare.against` 必须指向序列里更早出现的名字，或写 `fresh_bare`，
+   或写 `external_campaign`（只允许 test 角色相位，且必须带 `external`
+   块；stage 0 会校验成绩文件存在且 sha256 匹配，C 相位派发前再校验任务
+   覆盖与奖励格式）；前两种情况下被指向的对照必须是 baseline 相位
+   （只有摸底相位的弱臂裸跑报告才是裸测量）；
 5. `curate.merge_check: exam` 要求序列里存在 exam 相位（合并的回归考题
    由 A 相位生成）；
 6. 序列必须以执行相位开头（学习相位没有可学的测量）；
@@ -299,7 +301,10 @@ B 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没有 
 （whole_bank / retrieval / folder），主轴组合 3 × 2 × 2 × 3 = **36 种**。
 学习相位还有两项选择：整理方法（agentbrew / none）与比较规则
 （strict_rate_gain / first_success_gain），各 2 种，配置形态上限
-36 × 2 × 2 = **144 种**。folder 交付目前只有 tb 的插件声明支持（插件
+36 × 2 × 2 = **144 种**。C 相位对照来源还有第三种：`external_campaign`
+（对照读外部 campaign 冻结成绩文件，零执行，见 5.5；另两种是相位复用
+与 `fresh_bare`），只影响对照臂的取数方式，不新增方法族。folder
+交付目前只有 tb 的插件声明支持（插件
 能力位 `skill_folder_prompt_name`，见 5.5 与 3.6），searchqa / alfworld
 配 folder 的配置能通过加载，C 相位派发前被相位级能力检查拒绝——与
 技能库空不空无关，逐单元的 E1 守卫保留作第二道。
@@ -881,7 +886,16 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   决策输入，供事后审计与技能使用分析；泄题审计对 C 相位沿用既有覆盖
   （A 相位考试管道的 D8 判定）；
 - 对照臂：full 模式复用 D 相位的弱臂裸跑（连同其已接受空洞）；split 模式
-  在相位内现场跑一条裸臂（`fresh_bare`）。两臂各有相位内独立的轨迹仓
+  在相位内现场跑一条裸臂（`fresh_bare`）；或 `external_campaign`——对照
+  读外部 campaign 的冻结成绩文件（AgentBrew 裸跑归档），**零执行**：C 相位
+  驱动在派发前加载并校验（文件存在、sha256 与冻结配置一致、`model_key`
+  覆盖全部 test 任务、每任务奖励数 ≥ 对齐深度），把文件字节拷进相位目录
+  （`external_control.json`），摘要带 `external_control` 审计记录（钉住
+  的路径 / sha256 / model_key / 对齐深度 / 每任务实际用到的奖励向量）。
+  对照口径 = 每任务前 `n_attempts_weak` 次采样奖励的均值（campaign 归档
+  每任务 5 次，实验对齐深度 3，与旧外部对照报告的"前 3 次"对齐列同口径），
+  归档尝试都是已判分尝试，所以对照臂没有 infra 概念、摘要的对照
+  `infra_missing` 恒为空。两臂轨迹仓的隔离只对前两种对照有意义
   （轨迹 ID 不带臂信息，共用会互相继承轨迹算出假的零提升）；
 - **每次全量重跑**：不调规则 1 的跳过、不调无效重派；
 - **不写验收报告**：delta 由 `decision.final_test_delta` 直接进摘要，

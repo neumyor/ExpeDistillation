@@ -232,6 +232,7 @@
           "acceptance": null,
           "compare": {
             "against": "D",
+            "external": null,
             "rule": "strict_rate_gain"
           },
           "delivery": {
@@ -250,6 +251,7 @@
           "acceptance": null,
           "compare": {
             "against": "fresh_bare",
+            "external": null,
             "rule": null
           },
           "delivery": {

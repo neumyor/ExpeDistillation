@@ -1,0 +1,1966 @@
+{
+ "tasks": {
+  "dpsk:adaptive-rejection-sampler": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:bn-fit-modify": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "dpsk:break-filter-js-from-html": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:build-cython-ext": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:build-pmars": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:build-pov-ray": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:caffe-cifar-10": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:cancel-async-tasks": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "dpsk:chess-best-move": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:circuit-fibsqrt": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "dpsk:cobol-modernization": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:code-from-image": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:compile-compcert": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:configure-git-webserver": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:constraints-scheduling": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:count-dataset-tokens": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:crack-7z-hash": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:custom-memory-heap-crash": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:db-wal-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:distribution-search": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:dna-assembly": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:dna-insert": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:extract-elf": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:extract-moves-from-video": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:feal-differential-cryptanalysis": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:feal-linear-cryptanalysis": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:filter-js-from-html": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:financial-document-processor": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:fix-code-vulnerability": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:fix-git": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:fix-ocaml-gc": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:gcode-to-text": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:git-leak-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:git-multibranch": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:gpt2-codegolf": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:headless-terminal": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:hf-model-inference": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:install-windows-3.11": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:kv-store-grpc": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:large-scale-text-editing": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:largest-eigenval": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:llm-inference-batching-scheduler": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:log-summary-date-ranges": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:mailman": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:make-doom-for-mips": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:make-mips-interpreter": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:mcmc-sampling-stan": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:merge-diff-arc-agi-task": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:model-extraction-relu-logits": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:modernize-scientific-stack": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:mteb-leaderboard": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:mteb-retrieve": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:multi-source-data-merger": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:nginx-request-logging": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:openssl-selfsigned-cert": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:overfull-hbox": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.4
+  },
+  "dpsk:password-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:path-tracing": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:path-tracing-reverse": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "dpsk:polyglot-c-py": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:polyglot-rust-c": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:portfolio-optimization": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:protein-assembly": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:prove-plus-comm": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:pypi-server": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:pytorch-model-cli": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:pytorch-model-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:qemu-alpine-ssh": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:qemu-startup": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:query-optimize": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:raman-fitting": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:regex-chess": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:regex-log": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:reshard-c4-data": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:rstan-to-pystan": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:sam-cell-seg": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:sanitize-git-repo": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:schemelike-metacircular-eval": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "dpsk:sparql-university": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:sqlite-db-truncate": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:sqlite-with-gcov": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:torch-pipeline-parallelism": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:torch-tensor-parallelism": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:train-fasttext": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "dpsk:tune-mjcf": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "dpsk:video-processing": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "dpsk:vulnerable-secret": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "dpsk:winning-avg-corewars": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "dpsk:write-compressor": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:adaptive-rejection-sampler": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:bn-fit-modify": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:break-filter-js-from-html": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "qwen:build-cython-ext": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:build-pmars": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:build-pov-ray": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:caffe-cifar-10": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:cancel-async-tasks": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:chess-best-move": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:circuit-fibsqrt": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:cobol-modernization": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:code-from-image": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:compile-compcert": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:configure-git-webserver": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:constraints-scheduling": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:count-dataset-tokens": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:crack-7z-hash": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:custom-memory-heap-crash": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:db-wal-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:distribution-search": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:dna-assembly": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:dna-insert": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:extract-elf": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:extract-moves-from-video": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:feal-differential-cryptanalysis": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:feal-linear-cryptanalysis": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "qwen:filter-js-from-html": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:financial-document-processor": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:fix-code-vulnerability": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:fix-git": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:fix-ocaml-gc": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:gcode-to-text": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:git-leak-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:git-multibranch": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "qwen:gpt2-codegolf": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:headless-terminal": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.4
+  },
+  "qwen:hf-model-inference": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:install-windows-3.11": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:kv-store-grpc": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:large-scale-text-editing": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:largest-eigenval": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:llm-inference-batching-scheduler": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:log-summary-date-ranges": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:mailman": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:make-doom-for-mips": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:make-mips-interpreter": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:mcmc-sampling-stan": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:merge-diff-arc-agi-task": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:model-extraction-relu-logits": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:modernize-scientific-stack": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:mteb-leaderboard": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:mteb-retrieve": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:multi-source-data-merger": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:nginx-request-logging": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:openssl-selfsigned-cert": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:overfull-hbox": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:password-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:path-tracing": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:path-tracing-reverse": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:polyglot-c-py": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:polyglot-rust-c": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:portfolio-optimization": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:protein-assembly": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:prove-plus-comm": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:pypi-server": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:pytorch-model-cli": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:pytorch-model-recovery": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.8
+  },
+  "qwen:qemu-alpine-ssh": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:qemu-startup": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 0.4
+  },
+  "qwen:query-optimize": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:raman-fitting": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:regex-chess": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:regex-log": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:reshard-c4-data": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:rstan-to-pystan": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:sam-cell-seg": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:sanitize-git-repo": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:schemelike-metacircular-eval": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:sparql-university": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:sqlite-db-truncate": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "success_rate": 0.6
+  },
+  "qwen:sqlite-with-gcov": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:torch-pipeline-parallelism": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:torch-tensor-parallelism": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "success_rate": 0.2
+  },
+  "qwen:train-fasttext": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:tune-mjcf": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:video-processing": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:vulnerable-secret": {
+   "n": 5,
+   "rewards": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "success_rate": 1.0
+  },
+  "qwen:winning-avg-corewars": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  },
+  "qwen:write-compressor": {
+   "n": 5,
+   "rewards": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "success_rate": 0.0
+  }
+ },
+ "qwen_avg@5": 0.46966292134831467,
+ "qwen_pass@5": 0.6629213483146067,
+ "dpsk_avg@5": 0.6314606741573037,
+ "dpsk_pass@5": 0.8539325842696629
+}

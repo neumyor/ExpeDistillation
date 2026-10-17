@@ -1032,7 +1032,11 @@ def check_final_test(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
                      specs: Sequence[Tuple]) -> None:
     """Check 9: a complete final-test summary's arms hold every expected
     test unit (its own phase store, or the run-level store for a reused
-    baseline control), minus the accepted holes."""
+    baseline control), minus the accepted holes. An external-campaign
+    control has no units anywhere by construction -- for it the check is
+    the phase directory's byte copy of the pinned score file hashing to
+    the frozen sha256 (the numbers the delta consumed must be the
+    campaign's exact bytes, not a drifted re-export)."""
     benchmark = manifest.get("benchmark")
     test_raw = (manifest.get("split") or {}).get("test")
     n_weak = (manifest.get("config") or {}).get("n_attempts_weak")
@@ -1062,10 +1066,31 @@ def check_final_test(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
                       "units from the manifest (benchmark / split.test / "
                       "n_attempts_weak)")
             continue
+        compare = (spec.get("compare") or {})
+        external = compare.get("external") if isinstance(compare, dict) \
+            else None
         expected = [ids.make_trajectory_id(
                         ids.make_task_id(benchmark, raw), "weak", attempt)
                     for raw in test_raw for attempt in range(n_weak)]
-        for arm in ARM_NAMES:
+        arms = ("with_bank",) if isinstance(external, dict) else ARM_NAMES
+        if isinstance(external, dict):
+            copy_path = directory / "external_control.json"
+            if not copy_path.is_file():
+                audit.add(ERROR, "final-test",
+                          f"phase {label}: the summary says complete but "
+                          "the external control's score-file copy is "
+                          "missing")
+            else:
+                actual = hashlib.sha256(
+                    copy_path.read_bytes()).hexdigest()
+                pinned = str(external.get("sha256") or "")
+                if actual != pinned:
+                    audit.add(
+                        ERROR, "final-test",
+                        f"phase {label}: the external control's score-file "
+                        f"copy hashes to sha256:{actual} but the frozen "
+                        f"config pins sha256:{pinned}")
+        for arm in arms:
             arm_dir = directory / arm
             if arm_dir.exists() and (arm_dir / "store").exists():
                 stored = set(Store(arm_dir / "store").ids("trajectories"))

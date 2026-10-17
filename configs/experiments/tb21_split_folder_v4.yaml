@@ -35,7 +35,11 @@ phases:
   C:
     acceptance: null
     compare:
-      against: fresh_bare
+      against: external_campaign
+      external:
+        model_key: qwen
+        path: ../seed/tb21_agentbrew_campaign_summary.json
+        sha256: 1b5c483cebdc35d8c44c2370de2a76c4e6ef06f607fe9368e06815b730666da2
       rule: null
     delivery:
       name: folder
@@ -64,7 +68,7 @@ phases:
       merge_check: none
       name: agentbrew
       rounds: 3
-      token_budget: 96000
+      token_budget: null
     evidence:
       K: 5
       name: segment

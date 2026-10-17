@@ -2568,7 +2568,7 @@
       }
     }
   },
-  "golden_matrix_base_commit": "36aad029834df065f8232804f28d681db8726503",
+  "golden_matrix_base_commit": "07f83585aefde995168dbd82e04b527889934353",
   "root_causes": {
     "LAYOUT": "The phase-world artifact locations (C summary, per-phase bank, A-phase generation failures, learn ledgers) are aligned onto the canonical names by v4_layout -- the alignment itself is the disclosure; these paths never reach the comparators.",
     "R6_STRONG_ONLY_ADD_PATH": "Repair plan R6 (docs/decisions/execute_learn_repair_plan_20261016.md): the add path's evidence is the D phase's STRONG trajectories only -- the weak arm's diagnose skills of the 69904f7 world have no phase-world producer, so the bank is smaller and everything derived from it differs (E1/E2 rows, leak verdicts, retrieval categories, every E4 call embedding a skills listing, the G10/G11 work per group, the injection token counts).",

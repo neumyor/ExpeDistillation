@@ -200,3 +200,9 @@ def test_control_arm_source_keeps_the_summary_vocabulary():
     assert control_arm_source(reused_phase="stage1") == "stage1_reuse"
     assert control_arm_source(reused_phase=None) == "fresh_bare_run"
     assert control_arm_source(reused_phase="p00:D") == "p00:D_reuse"
+    # The third source keeps the old stage-6 vocabulary verbatim, and
+    # the flag never leaks into the other labels.
+    assert control_arm_source(
+        reused_phase=None, external_campaign=True) == "external_campaign"
+    assert control_arm_source(
+        reused_phase=None, external_campaign=False) == "fresh_bare_run"

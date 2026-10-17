@@ -202,6 +202,24 @@ FOLDER_EXECUTION_NAME = "real_folder"
 #: a bare arm run fresh inside this phase.
 FRESH_BARE = "fresh_bare"
 
+#: The third control source a ``compare`` may name: the control numbers
+#: come from an EXTERNAL campaign's frozen score file (the AgentBrew
+#: bare-run archive) instead of any execution this run owns -- the v4
+#: image of the old stage-6 ``control_source: external_campaign``
+#: ruling (the bare control arm is never re-run; the comparison reads
+#: the byte-identical campaign harness's numbers). Legal on a test-role
+#: phase only, and it REQUIRES the ``external`` block naming the score
+#: file (path + sha256 + the campaign's model key for this run's weak
+#: executor), so the control's identity is pinned in the frozen config
+#: exactly like every other method input.
+EXTERNAL_CAMPAIGN = "external_campaign"
+
+#: The ``compare.external`` block's required key set.
+_EXTERNAL_CONTROL_KEYS = frozenset({"path", "sha256", "model_key"})
+
+#: A pinned sha256: 64 lowercase hex digits.
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+
 #: How many times the phase driver may re-dispatch one unit the verdict
 #: ruled invalid (R9/R1's redispatch loop; after the limit the unit
 #: stays a hole with cause ``invalid_redispatch_exhausted``). A method
@@ -230,13 +248,41 @@ def phase_label(index: int, name: str) -> str:
 
 
 @dataclass(frozen=True)
+class ExternalControlSpec:
+    """The frozen score-file identity of an ``external_campaign``
+    control: where the campaign's per-task scores live and which of its
+    models this run's weak executor is.
+
+    ``path`` is resolved against the config file's directory at load
+    time (the ``tasks``-path rule) and frozen absolute, so a resume from
+    another cwd reads the same file. ``sha256`` pins the exact bytes
+    (the control's numbers must not drift with a re-exported campaign
+    file), and ``model_key`` names the campaign's prefix for this run's
+    ``executor_weak`` (the archive covers several models; the wrong
+    prefix would compare the bank arm against a different model's
+    numbers). The score-file format and the task-alignment checks are
+    the loader's (composites/external_control.py), not core's.
+    """
+
+    path: str
+    sha256: str
+    model_key: str
+
+
+@dataclass(frozen=True)
 class CompareSpec:
     """An execute phase's control: which earlier measurement the decision
     compares against, and the named comparison rule (blocks/rules.py's
-    acceptance-improve registry; ``None`` is the rule family's default)."""
+    acceptance-improve registry; ``None`` is the rule family's default).
+
+    ``against`` is an earlier phase's local name, ``fresh_bare``, or
+    ``external_campaign`` (which requires the ``external`` block and is
+    legal on a test-role phase only -- the parsing checks enforce both).
+    """
 
     against: str
     rule: Optional[str] = None
+    external: Optional[ExternalControlSpec] = None
 
 
 @dataclass(frozen=True)
@@ -473,21 +519,69 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             raise ConfigError(
                 f"phases.{name}.compare must be a mapping with 'against' "
                 f"(and optionally 'rule'), got {compare_raw!r}")
-        unknown = sorted(set(compare_raw) - {"against", "rule"})
+        unknown = sorted(set(compare_raw) - {"against", "rule", "external"})
         if unknown:
             raise ConfigError(
                 f"phases.{name}.compare has unknown key(s) {unknown}")
         against = compare_raw.get("against")
         if not isinstance(against, str) or not against:
             raise ConfigError(
-                f"phases.{name}.compare.against must be a phase name or "
-                f"{FRESH_BARE!r}, got {against!r}")
+                f"phases.{name}.compare.against must be a phase name, "
+                f"{FRESH_BARE!r} or {EXTERNAL_CAMPAIGN!r}, got {against!r}")
         rule = compare_raw.get("rule")
         if rule is not None and (not isinstance(rule, str) or not rule):
             raise ConfigError(
                 f"phases.{name}.compare.rule must be a named rule or null, "
                 f"got {rule!r}")
-        compare = CompareSpec(against=against, rule=rule)
+        external_raw = compare_raw.get("external")
+        if against == EXTERNAL_CAMPAIGN:
+            if role != PHASE_ROLE_TEST:
+                raise ConfigError(
+                    f"phases.{name} declares compare.against "
+                    f"{EXTERNAL_CAMPAIGN!r} with role {role!r}: the "
+                    "external campaign control is a final-test control "
+                    f"(legal only for role {PHASE_ROLE_TEST!r}; the other "
+                    "roles' controls must be phases this run ran)")
+            if not isinstance(external_raw, dict):
+                raise ConfigError(
+                    f"phases.{name}.compare.against is "
+                    f"{EXTERNAL_CAMPAIGN!r} but compare.external is not a "
+                    "mapping with path / sha256 / model_key, got "
+                    f"{external_raw!r}")
+            unknown_external = sorted(
+                set(external_raw) - _EXTERNAL_CONTROL_KEYS)
+            if unknown_external:
+                raise ConfigError(
+                    f"phases.{name}.compare.external has unknown key(s) "
+                    f"{unknown_external}; required: "
+                    f"{sorted(_EXTERNAL_CONTROL_KEYS)}")
+            missing_external = sorted(
+                key for key in _EXTERNAL_CONTROL_KEYS
+                if not isinstance(external_raw.get(key), str)
+                or not external_raw[key])
+            if missing_external:
+                raise ConfigError(
+                    f"phases.{name}.compare.external is missing or empty "
+                    f"for key(s) {missing_external}; the external control's "
+                    "identity (file, checksum, campaign model key) is part "
+                    "of the frozen method, never a default")
+            sha256 = external_raw["sha256"].strip().lower()
+            if not _SHA256_RE.fullmatch(sha256):
+                raise ConfigError(
+                    f"phases.{name}.compare.external.sha256 must be 64 "
+                    f"hex digits, got {external_raw['sha256']!r}")
+            external = ExternalControlSpec(
+                path=external_raw["path"],
+                sha256=sha256,
+                model_key=external_raw["model_key"])
+        else:
+            if external_raw is not None:
+                raise ConfigError(
+                    f"phases.{name}.compare carries the 'external' block "
+                    f"but against is {against!r}: the block belongs to "
+                    f"against {EXTERNAL_CAMPAIGN!r} alone")
+            external = None
+        compare = CompareSpec(against=against, rule=rule, external=external)
     acceptance = raw.get("acceptance")
     if acceptance is not None and (not isinstance(acceptance, str)
                                     or not acceptance):
@@ -651,7 +745,10 @@ def _check_compare_targets(raw_sequence: List[str],
         if not isinstance(spec, ExecutePhaseSpec) or spec.compare is None:
             continue
         against = spec.compare.against
-        if against == FRESH_BARE:
+        if against == FRESH_BARE or against == EXTERNAL_CAMPAIGN:
+            # fresh_bare runs its control inside the phase; the external
+            # campaign control is a test-role-only file read (the parsing
+            # check pinned the role) -- neither names a sequence phase.
             continue
         if against not in raw_sequence[:position]:
             raise ConfigError(
@@ -681,12 +778,13 @@ def _check_live_needs_a_control(raw_sequence: List[str],
         if not isinstance(spec, ExecutePhaseSpec) or \
                 spec.role != PHASE_ROLE_LIVE:
             continue
-        if spec.compare is None or spec.compare.against == FRESH_BARE:
+        if spec.compare is None or spec.compare.against in (FRESH_BARE,
+                                                            EXTERNAL_CAMPAIGN):
             raise ConfigError(
                 f"phases.{name} is a live phase without a control: its "
                 "report rows all carry the injected group, so "
                 "compare.against must name an earlier baseline phase "
-                "(not fresh_bare and not nothing)")
+                "(not fresh_bare, not external_campaign and not nothing)")
 
 
 def _check_attempt_depths(raw_sequence: List[str],
@@ -1570,6 +1668,23 @@ def load_config(path: str) -> ExperimentConfig:
         if not tasks_path.is_absolute():
             tasks_path = config_dir / tasks_path
         data["tasks"] = str(tasks_path.resolve())
+    # The external-campaign score file follows the tasks-path rule: a
+    # relative path names a file relative to the config file, and the
+    # frozen value is absolute, so the control's identity never depends
+    # on the cwd a run or a resume started from.
+    for name, spec in (data.get("phases") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        compare = spec.get("compare")
+        if not isinstance(compare, dict):
+            continue
+        external = compare.get("external")
+        if not isinstance(external, dict) or "path" not in external:
+            continue
+        external_path = Path(external["path"]).expanduser()
+        if not external_path.is_absolute():
+            external_path = config_dir / external_path
+        external["path"] = str(external_path.resolve())
     return ExperimentConfig.from_dict(data)
 
 

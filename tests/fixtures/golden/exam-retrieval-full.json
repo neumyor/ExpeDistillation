@@ -702,6 +702,7 @@
           "acceptance": null,
           "compare": {
             "against": "D",
+            "external": null,
             "rule": null
           },
           "delivery": {

@@ -920,13 +920,19 @@ def _aux_delta(with_aux: Optional[Dict[str, Any]],
     }
 
 
-def control_arm_source(*, reused_phase: Optional[str]) -> str:
+def control_arm_source(*, reused_phase: Optional[str],
+                       external_campaign: bool = False) -> str:
     """The control arm's source label -- the choice that used to sit
     inside stage 6 (G3): a named earlier phase whose stored results the
-    control reuses, or a fresh bare run. Boundary doc section 2.4: the
-    control report's phase is a stage-config decision, not an execution
-    stage's. The label keeps the historical summary vocabulary (E3 pins
-    it): ``"<phase>_reuse"`` / ``"fresh_bare_run"``."""
+    control reuses, a fresh bare run, or the external campaign file the
+    old stage-6 ruling froze (``external_campaign``, zero execution --
+    the label keeps the old summary's exact vocabulary). Boundary doc
+    section 2.4: the control report's phase is a stage-config decision,
+    not an execution stage's. The label keeps the historical summary
+    vocabulary (E3 pins it): ``"<phase>_reuse"`` /
+    ``"fresh_bare_run"`` / ``"external_campaign"``."""
+    if external_campaign:
+        return "external_campaign"
     if reused_phase is None:
         return "fresh_bare_run"
     return f"{reused_phase}_reuse"

@@ -7,6 +7,7 @@ summary alone); the comparison is the final summary's own statistic,
 never a decision input.
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from expedistill.benchmarks.aux import aux_wiring
@@ -14,10 +15,12 @@ from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.blocks import metrics as metrics_block
 from expedistill.composites import decision, shortfall
+from expedistill.composites import external_control
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.composites.skill_reads import skill_files_read
 from expedistill.core import ids
 from expedistill.core.config import (
+    EXTERNAL_CAMPAIGN,
     FOLDER_DELIVERY_NAME,
     FRESH_BARE,
     PHASE_ROLE_TEST,
@@ -162,12 +165,15 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     (:func:`decision.final_test_delta`), never a decision input.
 
     The control is the baseline phase's stored weak bare trajectories
-    (the run-level store, deterministic-id reuse -- full mode) or a
-    fresh bare arm inside this phase (split mode). A missing control
-    unit the baseline phase never accepted stops the phase BEFORE the
-    with-bank arm spends anything: filling that hole can move the bank,
-    so with-bank runs made now could be measured against the wrong
-    bank."""
+    (the run-level store, deterministic-id reuse -- full mode), a
+    fresh bare arm inside this phase (split mode), or the external
+    campaign's frozen score file (``against: external_campaign``: zero
+    execution, the old stage-6 ruling's v4 image -- loaded and verified
+    before any spend, its bytes copied into the phase directory). A
+    missing control unit the baseline phase never accepted stops the
+    phase BEFORE the with-bank arm spends anything: filling that hole
+    can move the bank, so with-bank runs made now could be measured
+    against the wrong bank."""
     _execution_params(spec)
     _require_folder_capability(spec, ctx.config.benchmark)
     delivery, delivery_params = _resolve_delivery(spec)
@@ -185,13 +191,43 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     against = (spec.compare.against if spec.compare is not None
                else FRESH_BARE)
     control_source = decision.control_arm_source(
-        reused_phase=None if against == FRESH_BARE else against)
+        reused_phase=None if against in (FRESH_BARE, EXTERNAL_CAMPAIGN)
+        else against,
+        external_campaign=against == EXTERNAL_CAMPAIGN)
 
     # -- the control first, and its completeness BEFORE any spend --------
-    control_dir = _arm_dir(ctx, phase, "control")
+    control_dir: Optional[Path] = None
     control_accepted: Set[str] = set()
     reused_control: Optional[List[Trajectory]] = None
-    if against != FRESH_BARE:
+    external_metrics: Optional[Dict[str, Dict[str, int]]] = None
+    external_record: Optional[Dict[str, Any]] = None
+    if against == EXTERNAL_CAMPAIGN:
+        # The external campaign control: zero execution, the frozen
+        # score file's numbers instead of any store read. Loaded and
+        # verified HERE -- before the with-bank arm spends anything, the
+        # same place a reused control's completeness is proven -- and the
+        # file's exact bytes land in the phase directory beside the
+        # summary that consumed them (the run keeps its own control
+        # evidence; the sha256 re-check on every call catches drift).
+        assert spec.compare is not None and spec.compare.external is not None
+        pinned = spec.compare.external
+        external_metrics, external_rewards = external_control.\
+            load_external_control(
+                path=pinned.path, sha256=pinned.sha256,
+                model_key=pinned.model_key, benchmark=benchmark,
+                tasks=tasks, n_attempts=n_attempts)
+        phase_directory = _phase_dir(ctx, phase)
+        phase_directory.mkdir(parents=True, exist_ok=True)
+        with open(pinned.path, "rb") as source:
+            payload = source.read()
+        with open(phase_directory / external_control.EXTERNAL_CONTROL_NAME,
+                  "wb") as target:
+            target.write(payload)
+        external_record = external_control.external_control_record(
+            spec={"path": pinned.path, "sha256": pinned.sha256,
+                  "model_key": pinned.model_key},
+            n_attempts=n_attempts, rewards=external_rewards)
+    elif against != FRESH_BARE:
         stage1_holes = set(shortfall.stage1_accepted_unit_ids(ctx.run_dir))
         reused_control = []
         missing_control = []
@@ -250,10 +286,17 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     folder_reads = _folder_read_sets(rows, with_bank)
 
     # -- control arm -------------------------------------------------------
-    if reused_control is not None:
+    control: Optional[List[Trajectory]]
+    if external_metrics is not None:
+        # The external campaign control never executes and never has
+        # holes: every archived trial is a scored trial, so there is no
+        # missing-unit bookkeeping to do for it.
+        control = None
+    elif reused_control is not None:
         control = [traj for traj in reused_control
                    if traj.trajectory_id not in control_accepted]
     else:
+        control_dir = _arm_dir(ctx, phase, "control")
         control_accepted = set(shortfall.read_unit_ids(
             control_dir / shortfall.SHORTFALL_NAME))
         control_store = Store(control_dir / "store")
@@ -270,7 +313,8 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
                    if traj.trajectory_id not in control_accepted]
 
     missing = {"with_bank": _missing_units(expected, with_bank),
-               "control": _missing_units(expected, control)}
+               "control": ([] if external_metrics is not None
+                           else _missing_units(expected, control))}
     accepted_now = {"with_bank": with_bank_accepted,
                     "control": control_accepted}
     new_holes = {arm: [unit for unit in missing[arm]
@@ -292,8 +336,18 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
 
     with_bank_metrics = metrics_block.compute_task_metrics(
         with_bank, expected=expected, aux_scorer=aux_scorer)
-    control_metrics = metrics_block.compute_task_metrics(
-        control, expected=expected, aux_scorer=aux_scorer)
+    if external_metrics is not None:
+        control_metrics = external_metrics
+        # The campaign archive has no auxiliary-metric trials, so the
+        # external control's aux is None by construction -- the delta's
+        # own None rule then reports aux as None, never a fake zero.
+        control_summary = metrics_block.summarize(
+            control_metrics, n_attempts, aux_metric=None)
+    else:
+        control_metrics = metrics_block.compute_task_metrics(
+            control, expected=expected, aux_scorer=aux_scorer)
+        control_summary = metrics_block.summarize(
+            control_metrics, n_attempts, aux_metric=aux_metric)
     if set(with_bank_metrics) != set(control_metrics):
         raise CodeBugError(
             "the test phase's arms cover different task sets: with-bank "
@@ -302,8 +356,6 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
             "is exactly the bug this guard exists for)")
     with_bank_summary = metrics_block.summarize(
         with_bank_metrics, n_attempts, aux_metric=aux_metric)
-    control_summary = metrics_block.summarize(
-        control_metrics, n_attempts, aux_metric=aux_metric)
     n_missing = sum(len(unit_ids) for unit_ids in missing.values())
     n_new = sum(len(unit_ids) for unit_ids in new_holes.values())
     summary = {
@@ -323,6 +375,11 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     }
     if folder_reads is not None:
         summary["skill_files_read"] = folder_reads
+    if external_record is not None:
+        # The external control's own audit record: the pinned file
+        # identity plus the aligned reward vectors the numbers came
+        # from (the phase directory also holds the file's exact bytes).
+        summary["external_control"] = external_record
     write_json(_phase_dir(ctx, phase) / SUMMARY_NAME, summary, indent=2)
     if n_new:
         raise InfrastructureError(

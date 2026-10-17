@@ -951,7 +951,8 @@ GOLDEN_PHASES = {
     "C": {"role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
-          "compare": {"against": "fresh_bare", "rule": None},
+          "compare": {"against": "fresh_bare", "rule": None,
+                      "external": None},
           "acceptance": None, "kind": "execute"},
 }
 
@@ -1178,3 +1179,136 @@ class TestUpgradeCoversEveryV2Config:
                 ExperimentConfig.from_dict(upgrade_v3_config(upgraded))
             checked += 1
         assert checked >= 8, f"expected the v2 record set, got {checked}"
+
+
+class TestExternalCampaignCompare:
+    """The third control source: ``compare.against: external_campaign``
+    -- test-role only, the ``external`` block (path / sha256 / model_key)
+    required and shape-checked, and the block refused on every other
+    ``against`` value."""
+
+    SHA = "a" * 64
+
+    def _raw_phases(self, compare):
+        phases = copy.deepcopy(MIN_PHASES)
+        phases["C"]["compare"] = compare
+        return phases
+
+    def _config(self, compare):
+        return make_config(phases=self._raw_phases(compare))
+
+    def test_parses_on_a_test_phase(self):
+        from expedistill.core.config import ExternalControlSpec
+        cfg = self._config({
+            "against": "external_campaign",
+            "external": {"path": "/tmp/scores.json",
+                         "sha256": self.SHA, "model_key": "qwen"},
+        })
+        assert cfg.phases["C"].compare.external == ExternalControlSpec(
+            path="/tmp/scores.json", sha256=self.SHA, model_key="qwen")
+        # The freezable form round-trips (B4's resume comparison).
+        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_sha256_uppercase_normalised(self):
+        cfg = self._config({
+            "against": "external_campaign",
+            "external": {"path": "/tmp/scores.json",
+                         "sha256": "AB" * 32, "model_key": "qwen"},
+        })
+        assert cfg.phases["C"].compare.external.sha256 == "ab" * 32
+
+    def test_refused_on_a_non_test_phase(self):
+        phases = copy.deepcopy(MIN_PHASES)
+        phases["D"]["compare"] = {
+            "against": "external_campaign",
+            "external": {"path": "/tmp/scores.json",
+                         "sha256": self.SHA, "model_key": "qwen"},
+        }
+        with pytest.raises(ConfigError, match="role 'baseline'"):
+            make_config(phases=phases)
+
+    def test_external_block_required(self):
+        with pytest.raises(ConfigError, match="compare.external"):
+            self._config({"against": "external_campaign"})
+
+    @pytest.mark.parametrize("bad", [
+        {"path": "/tmp/scores.json", "sha256": "a" * 63, "model_key": "q"},
+        {"path": "/tmp/scores.json", "sha256": "a" * 64},
+        {"sha256": "a" * 64, "model_key": "q"},
+        {"path": "", "sha256": "a" * 64, "model_key": "q"},
+    ])
+    def test_missing_or_bad_keys_refused(self, bad):
+        with pytest.raises(ConfigError):
+            self._config({"against": "external_campaign", "external": bad})
+
+    def test_unknown_external_key_refused(self):
+        with pytest.raises(ConfigError, match="unknown key"):
+            self._config({"against": "external_campaign", "external": {
+                "path": "/tmp/scores.json", "sha256": self.SHA,
+                "model_key": "qwen", "extra": 1}})
+
+    def test_external_block_refused_without_external_against(self):
+        with pytest.raises(ConfigError, match="against is 'fresh_bare'"):
+            self._config({
+                "against": "fresh_bare",
+                "external": {"path": "/tmp/scores.json",
+                             "sha256": self.SHA, "model_key": "qwen"},
+            })
+
+    def test_live_phase_refuses_the_external_control(self):
+        # A live phase's control must be a baseline phase with report
+        # rows; the external control is a test-role control, so the
+        # per-phase role check refuses it before the live-needs-control
+        # checklist item ever sees it.
+        phases = self._raw_phases({
+            "against": "external_campaign",
+            "external": {"path": "/tmp/scores.json",
+                         "sha256": self.SHA, "model_key": "qwen"},
+        })
+        phases["D2"] = {"kind": "execute", "role": "baseline",
+                        "tasks": "train", "delivery": {"name": "none"},
+                        "execution": {"name": "real",
+                                      "arms": ["executor_strong",
+                                               "executor_weak"]}}
+        phases["B"] = {"kind": "execute", "role": "live", "tasks": "train",
+                       "delivery": {"name": "group_by_task"},
+                       "execution": {"name": "real", "n_attempts": 3},
+                       "compare": {"against": "external_campaign",
+                                   "external": {
+                                       "path": "/tmp/scores.json",
+                                       "sha256": self.SHA,
+                                       "model_key": "qwen"}}}
+        with pytest.raises(ConfigError, match="role 'live'"):
+            make_config(sequence=["D", "D2", "B", "L", "C"], phases=phases)
+
+    def test_load_config_resolves_the_relative_path(self, tmp_path):
+        seed = tmp_path / "seed" / "scores.json"
+        seed.parent.mkdir()
+        seed.write_text("{}", encoding="utf-8")
+        config_file = tmp_path / "configs" / "exp.yaml"
+        config_file.parent.mkdir()
+        config_file.write_text(f"""
+benchmark: tb
+mode: full
+models:
+  executor_strong: model-s
+  executor_weak: model-w
+schema_version: 4
+sequence: [D, L, C]
+phases:
+  D: {{kind: execute, role: baseline, tasks: train,
+       delivery: {{name: none}},
+       execution: {{name: real, arms: [executor_strong, executor_weak]}}}}
+  L: {{kind: learn, evidence: {{name: segment, K: 5}},
+       author: {{name: distill_diagnose}},
+       curate: {{name: none, token_budget: 4096}}}}
+  C: {{kind: execute, role: test, tasks: test,
+       delivery: {{name: whole_bank}}, execution: {{name: real}},
+       compare: {{against: external_campaign,
+                  external: {{path: ../seed/scores.json,
+                             sha256: {self.SHA},
+                             model_key: qwen}}}}}}
+""", encoding="utf-8")
+        cfg = load_config(str(config_file))
+        assert cfg.phases["C"].compare.external.path == str(
+            (tmp_path / "seed" / "scores.json").resolve())

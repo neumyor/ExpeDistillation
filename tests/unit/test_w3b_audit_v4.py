@@ -10,8 +10,10 @@ self-test builder (a hand-built minimal run, per the tests/fixtures
 discipline).
 """
 
+import hashlib
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
 from expedistill.core import ids
@@ -235,4 +237,56 @@ def test_a_dropped_final_test_unit_on_a_complete_summary_is_an_error(tmp_path):
         "trajectories", ids.make_trajectory_id(test_id, "weak", 0))
     victim.unlink()
     assert any("with_bank arm is missing" in message
+               for message in _errors(run_dir))
+
+
+# ---------------------------------------------------------------------------
+# The external-campaign control: no control units anywhere; the check is
+# the phase directory's byte copy of the pinned score file.
+# ---------------------------------------------------------------------------
+
+def _make_external_c_run(tmp_path: Path) -> Path:
+    """The clean v4 fake run with the C phase flipped to the external
+    campaign control: no control store, the score file's bytes copied
+    into the phase directory, the manifest pinning its sha256."""
+    run_dir = _clean_v4_run(tmp_path)
+    payload = json.dumps({"tasks": {"qwen:tt": {"n": 5,
+                                               "rewards": [0.0] * 5,
+                                               "success_rate": 0.0}}}
+                         ).encode("utf-8")
+    sha = hashlib.sha256(payload).hexdigest()
+    manifest = read_json(run_dir / "manifest.json")
+    manifest["config"]["phases"]["C"]["compare"] = {
+        "against": "external_campaign",
+        "external": {"path": "/tmp/scores.json", "sha256": sha,
+                     "model_key": "qwen"}}
+    write_json(run_dir / "manifest.json", manifest, indent=2)
+    shutil.rmtree(run_dir / "phases" / "p07_C" / "control")
+    (run_dir / "phases" / "p07_C" / "external_control.json"
+     ).write_bytes(payload)
+    return run_dir
+
+
+def test_an_external_campaign_control_skips_units_and_pins_bytes(tmp_path):
+    run_dir = _make_external_c_run(tmp_path)
+    assert not _errors(run_dir)
+    # The absence of a control store is not read as a reused-baseline
+    # hole: nothing in the findings mentions the control arm at all.
+    assert not any("control" in finding["message"]
+                   for finding in audit_live_run.audit_run(run_dir).findings
+                   if finding["check"] == "final-test")
+
+
+def test_a_drifted_external_control_copy_is_an_error(tmp_path):
+    run_dir = _make_external_c_run(tmp_path)
+    (run_dir / "phases" / "p07_C" / "external_control.json"
+     ).write_bytes(b"drifted bytes")
+    assert any("score-file copy hashes to" in message
+               for message in _errors(run_dir))
+
+
+def test_a_missing_external_control_copy_is_an_error(tmp_path):
+    run_dir = _make_external_c_run(tmp_path)
+    (run_dir / "phases" / "p07_C" / "external_control.json").unlink()
+    assert any("score-file copy is missing" in message
                for message in _errors(run_dir))

@@ -100,6 +100,7 @@ from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks import rules as rules_block
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.tasks import tasks_digest
+from expedistill.composites import external_control
 from expedistill.composites.verdicts import get_verdict_rule
 from expedistill.core.config import ExecutePhaseSpec, LearnPhaseSpec
 from expedistill.methods import resolve_params
@@ -300,6 +301,13 @@ def _resolve_phase_methods(config: Any) -> None:
     validating it here would refuse every test-plugin benchmark the
     verdict table has not heard of, and the benchmark registry itself
     has already been checked by now (``get_plugin`` in _prompt_digests).
+
+    An ``external_campaign`` control's score file is verified here too
+    (existence + the pinned sha256): the file is part of the frozen
+    method's identity, so a missing or drifted file must stop the run
+    at the freeze step, not after phases have spent. The task-set
+    alignment and the reward format stay with the loader the C phase
+    calls (they need the loaded tasks, which are read right after).
     """
     for name in config.sequence:
         spec = config.phases[name]
@@ -310,6 +318,11 @@ def _resolve_phase_methods(config: Any) -> None:
                 get_verdict_rule(spec.acceptance)
             if spec.compare is not None and spec.compare.rule is not None:
                 rules_block.get_acceptance_improve(spec.compare.rule)
+            if spec.compare is not None \
+                    and spec.compare.external is not None:
+                external_control.verify_external_control_file(
+                    spec.compare.external.path,
+                    spec.compare.external.sha256)
         elif isinstance(spec, LearnPhaseSpec):
             resolve_params("evidence", spec.evidence)
             resolve_params("author", spec.author)

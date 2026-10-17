@@ -167,6 +167,9 @@ src/expedistill/
                           stage1_baseline/ 下，live 基线加载与 C 相位的
                           复用对照都读它）
     skill_status.py       skill 状态提交（accept/discard）的唯一入口
+    external_control.py   外部 campaign 对照的加载与校验（sha256 钉住、任务
+                          覆盖、对齐深度的奖励切出）；C 相位
+                          against: external_campaign 时对照臂由此取数，零执行
     skill_reads.py        folder 单元的事后读取统计（M4 纯函数）：从存储
                           轨迹解析实际 cat 过的技能文件，benchmark 无关
     verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
@@ -310,6 +313,9 @@ configs/
                  scripts/run/convert_v2_configs.py 与 convert_v3_configs.py，
                  结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
+  seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，
+                 字节级拷贝 + sha256 由实验配置钉住；本仓库不修改它，
+                 campaign 侧重导出后按新 sha256 换新文件名）
 ```
 
 1. 一份配置对应一个实验，文件名即实验名：`<benchmark>_<mode>_<要点>.yaml`；

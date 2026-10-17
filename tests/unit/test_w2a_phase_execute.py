@@ -31,6 +31,7 @@ from expedistill.composites import phase_bank, shortfall, verdicts
 from expedistill.core.config import (
     CompareSpec,
     ExecutePhaseSpec,
+    ExternalControlSpec,
     LearnPhaseSpec,
     PhaseInstance,
 )
@@ -836,6 +837,94 @@ def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
     # denominators, and both summaries cover every task.
     assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
     assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
+
+
+def test_c_phase_external_campaign_control_zero_execution(
+        monkeypatch, tmp_path):
+    """``against: external_campaign``: the control is the pinned score
+    file's numbers -- zero control executions, no control store, the
+    file's bytes copied into the phase directory and the delta computed
+    against the aligned first-n rewards."""
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    config = make_config(mode="split", n_attempts_weak=1)
+    ctx = make_ctx(tmp_path, config)
+    write_bank_artifact(ctx, "p02:L", [make_group_skill(
+        _prefixed("t1"), status="accepted")])
+
+    rewards = {"t1": [1.0, 0.0, 1.0, 0.0, 0.0],
+               "t2": [0.0, 0.0, 0.0, 1.0, 1.0],
+               "t3": [1.0, 0.0, 0.0, 0.0, 0.0]}
+    payload = {"tasks": {f"qwen:{task}": {"n": 5, "rewards": values,
+                                          "success_rate": sum(values) / 5}
+                        for task, values in rewards.items()}}
+    score_path = tmp_path / "scores.json"
+    score_path.write_text(json.dumps(payload), encoding="utf-8")
+    sha = hashlib.sha256(score_path.read_bytes()).hexdigest()
+
+    phase = phase_of(2, "C", c_spec(compare=CompareSpec(
+        against="external_campaign",
+        external=ExternalControlSpec(path=str(score_path), sha256=sha,
+                                     model_key="qwen"))),
+        task_ids=TASK_IDS)
+    result = phase_execute.run(ctx, phase).summary
+
+    # Only the with-bank arm executed (3 tasks x 1 attempt).
+    assert len(plugin.calls) == 3
+    # The control never ran: no control store, no shortfall record.
+    control_dir = phase_bank.phase_bank_dir(ctx.run_dir, phase.label) \
+        / "control"
+    assert not control_dir.exists()
+    # The summary owns the comparison the old stage-6 ruling moved out:
+    # control_source keeps the old vocabulary, the delta is computed
+    # against the aligned first-n rewards (here n=1: t1 1.0, t2 0.0,
+    # t3 1.0 -- per-task mean then task mean).
+    assert result["control_source"] == "external_campaign"
+    assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
+    assert result["control"]["avg_at_n"] == pytest.approx(2 / 3)
+    assert result["control"]["pass_at_n"] == pytest.approx(2 / 3)
+    assert result["delta"]["avg_at_n"] == pytest.approx(1.0 - 2 / 3)
+    assert result["infra_missing"]["control"] == []
+    # The exact bytes the control consumed are in the phase directory,
+    # and the summary's audit record reproduces them without the file.
+    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
+    copy_path = directory / "external_control.json"
+    assert hashlib.sha256(copy_path.read_bytes()).hexdigest() == sha
+    record = result["external_control"]
+    assert record["sha256"] == sha
+    assert record["model_key"] == "qwen"
+    assert record["n_attempts"] == 1
+    assert record["rewards"] == {_prefixed("t1"): [1.0],
+                                 _prefixed("t2"): [0.0],
+                                 _prefixed("t3"): [1.0]}
+
+
+def test_c_phase_external_campaign_refuses_a_drifted_file(
+        monkeypatch, tmp_path):
+    """The sha256 gate runs before the with-bank arm spends anything: a
+    re-exported (or edited) campaign file stops the phase with the old
+    digest named beside the pinned one."""
+    _install_plugin(monkeypatch, PhasePlugin())
+    config = make_config(mode="split", n_attempts_weak=1)
+    ctx = make_ctx(tmp_path, config)
+    write_bank_artifact(ctx, "p02:L", [make_group_skill(
+        _prefixed("t1"), status="accepted")])
+
+    payload = {"tasks": {"qwen:t1": {"n": 5,
+                                     "rewards": [1.0] * 5,
+                                     "success_rate": 1.0}}}
+    score_path = tmp_path / "scores.json"
+    score_path.write_text(json.dumps(payload), encoding="utf-8")
+    sha = hashlib.sha256(score_path.read_bytes()).hexdigest()
+    # The file drifts AFTER the digest was pinned.
+    score_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+    phase = phase_of(2, "C", c_spec(compare=CompareSpec(
+        against="external_campaign",
+        external=ExternalControlSpec(path=str(score_path), sha256=sha,
+                                     model_key="qwen"))),
+        task_ids=TASK_IDS)
+    with pytest.raises(ConfigError, match="sha256"):
+        phase_execute.run(ctx, phase)
 
 
 def test_c_phase_reruns_every_time(monkeypatch, tmp_path):
