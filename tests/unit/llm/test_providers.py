@@ -10,7 +10,9 @@ from expedistill.llm.providers import PROVIDERS, default_client
 
 
 def test_the_registry_holds_the_default_provider():
-    assert set(PROVIDERS) == {"openai_compat"}
+    # 'fake' is the plan-scripted smoke client (llm/fake_provider.py);
+    # the checked-in entries are exactly the two.
+    assert set(PROVIDERS) == {"openai_compat", "fake"}
 
 
 def test_default_is_openai_compat(monkeypatch):

@@ -13,15 +13,18 @@ import os
 from typing import Any, Callable, Dict
 
 from expedistill.infra.reliability import ConfigError
+from expedistill.llm import fake_provider
 from expedistill.llm.client import OpenAICompatClient
 
 __all__ = ["PROVIDERS", "default_client"]
 
 #: Provider name -> ``builder(timeout_sec) -> client`` (one client per
 #: unique model is the pipeline's layout; the builder is called with the
-#: run's per-request timeout).
+#: run's per-request timeout). The ``fake`` entry is the plan-scripted
+#: smoke client (llm/fake_provider.py): same builder shape, no network.
 PROVIDERS: Dict[str, Callable[..., Any]] = {
     "openai_compat": OpenAICompatClient.from_env,
+    "fake": fake_provider.from_env,
 }
 
 
