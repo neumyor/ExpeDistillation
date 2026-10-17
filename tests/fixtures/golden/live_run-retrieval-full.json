@@ -1313,12 +1313,39 @@
     "checks_left": 0,
     "compare_rule": "strict_rate_gain",
     "current_phase": "B",
-    "outcomes": {},
+    "outcomes": {
+      "skipped_terminal": 2
+    },
     "role": "learn",
     "task_list": {
       "keep": 2,
       "superseded_rows": 0
     }
+  },
+  "phases/p06_L/outcomes.jsonl": [
+    {
+      "action": "keep",
+      "outcome": "skipped_terminal",
+      "phase_label": "p06:L",
+      "schema": "learn-outcome-v1",
+      "skill_id": null,
+      "target_id": "fakebench:t1",
+      "target_kind": "group",
+      "version": null
+    },
+    {
+      "action": "keep",
+      "outcome": "skipped_terminal",
+      "phase_label": "p06:L",
+      "schema": "learn-outcome-v1",
+      "skill_id": null,
+      "target_id": "fakebench:t2",
+      "target_kind": "group",
+      "version": null
+    }
+  ],
+  "phases/p06_L/outcomes.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "phases/p06_L/skill_bank.jsonl": [
     {
@@ -1713,7 +1740,9 @@
         "checks_left": 0,
         "compare_rule": "strict_rate_gain",
         "current_phase": "B",
-        "outcomes": {},
+        "outcomes": {
+          "skipped_terminal": 2
+        },
         "role": "learn",
         "task_list": {
           "keep": 2,

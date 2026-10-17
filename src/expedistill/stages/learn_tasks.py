@@ -265,6 +265,24 @@ def _receipted_skills(phase: PhaseInstance, row: TaskListRow,
                                    row.target_id)}
 
 
+def _terminal_group_receipt(phase: PhaseInstance, row: TaskListRow,
+                            phase_dir, members: Sequence[Skill],
+                            receipted: Set[Any]) -> bool:
+    """The row-level receipt for a keep/delete row whose group holds no
+    resolvable pending member: the member loop would land nothing and the
+    row would end the phase receiptless -- the docstring's "skipped and
+    recorded" must hold at the ROW level too. One target-level row (the
+    add path's shape: no skill_id, no version); the receipt guard makes a
+    replay skip, so a resumed ledger equals an uninterrupted one's byte
+    for byte. Members this phase already receipted cover the row already
+    (their receipts exist), so the row-level receipt is written only
+    when the target has no receipt at all."""
+    if members or receipted:
+        return False
+    _append_outcome(phase, row, None, "skipped_terminal", None, phase_dir)
+    return True
+
+
 def _land_keep(ctx: Any, phase: PhaseInstance, row: TaskListRow,
                phase_dir) -> None:
     """Keep: the pending target(s) enter the bank. An already-accepted
@@ -272,7 +290,10 @@ def _land_keep(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     phase already receipted owes nothing (the receipt guard)."""
     store: Store = ctx.store
     receipted = _receipted_skills(phase, row, phase_dir)
-    for skill in _target_members(store, row):
+    members = _target_members(store, row)
+    if _terminal_group_receipt(phase, row, phase_dir, members, receipted):
+        return
+    for skill in members:
         if skill.skill_id in receipted:
             continue
         stored = store.load("skills", skill.skill_id, Skill)
@@ -298,7 +319,10 @@ def _land_delete(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     guard)."""
     store: Store = ctx.store
     receipted = _receipted_skills(phase, row, phase_dir)
-    for skill in _target_members(store, row):
+    members = _target_members(store, row)
+    if _terminal_group_receipt(phase, row, phase_dir, members, receipted):
+        return
+    for skill in members:
         if skill.skill_id in receipted:
             continue
         stored = store.load("skills", skill.skill_id, Skill)
