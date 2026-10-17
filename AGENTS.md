@@ -170,6 +170,9 @@ src/expedistill/
     verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
                           统一报告行
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
+    skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
+                          从相位库读正文，把文件夹写进目标目录；C 相位派发前
+                          物化一次，全部单元共享
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
@@ -189,7 +192,8 @@ src/expedistill/
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
                           成员，待定成员原样透传）+ Params
     delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
-                          group_by_task.py、none.py + 各自的 Params
+                          group_by_task.py、none.py、folder.py（技能文件夹交付：
+                          目录清单，M2）+ 各自的 Params
   stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
     stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
     phase_execute/        执行相位驱动包（R9/R8）：__init__ 分发入口 run()；
