@@ -37,9 +37,13 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 # infra_error) and the derived ``success`` flag became ``correctness:
 # Optional[bool]``; infrastructure failures no longer occupy the record's
 # vocabulary (they raise instead of being stored).
+# Skill v3 (skill-folder M1, 2026-10-17): the one-line ``summary`` field.
+# v2 rows migrate with an EMPTY summary (the M1 alignment ruling); the
+# v1 -> v2 chain (source_subtasks) is unchanged and now lands directly on
+# v3.
 TRAJECTORY_SCHEMA_VERSION = 2
 SUBTASK_SCHEMA_VERSION = 1
-SKILL_SCHEMA_VERSION = 2
+SKILL_SCHEMA_VERSION = 3
 EXAM_SCHEMA_VERSION = 2
 ATTEMPT_SCHEMA_VERSION = 1
 
@@ -80,6 +84,16 @@ PROCEDURE_MARKERS = ("[When to use]", "[Steps]", "[Verify]", "[Do not use when]"
 #: marker is shared by both kinds; the other three identify the kind.
 FAILURE_REFERENCE_MARKERS = ("[Trigger]", "[Why it fails]", "[Do instead]",
                              "[Do not use when]")
+
+#: The write-side length cap of ``Skill.summary`` (schema v3): the
+#: summary is one line of a future skill-directory listing, so the G2 /
+#: G6 / G11 output contracts reject anything longer. A deliberately
+#: generous ceiling -- the prompt asks for one or two sentences, this
+#: only catches runaway output. Lives in core (like the markers) because
+#: TWO blocks enforce it (blocks/author.py, blocks/attribution.py) and
+#: blocks may not import each other; the K5 merge product's composed
+#: summary is NOT held to it (no model wrote that one).
+SKILL_SUMMARY_MAX_CHARS = 500
 
 
 def _check_vocab(value: str, allowed: Tuple[str, ...], owner: str,
@@ -235,6 +249,15 @@ class Skill(_Record):
     came from: ``[own subtask_id]`` for a stage-3 skill, the union of its
     sources' lists for a merge product. It is computed once at write time
     (K5 for merges); readers never re-derive it.
+
+    ``summary`` (schema v3) is the one-line "what this skill is" sentence
+    the G2 / G6 / G11 output contracts carry alongside the sections: the
+    line a future skill-directory listing shows next to the skill id, so
+    an agent can decide whether to open the skill. It is NOT part of
+    ``content`` and no current consumer renders it; M2's folder delivery
+    does. A v2 record migrates to the empty string -- M2's rendering will
+    fall back to the [When to use] section for those, so a migrated bank
+    keeps a working directory without a rewrite.
     """
 
     skill_id: str
@@ -242,6 +265,8 @@ class Skill(_Record):
     subtask_id: str
     #: Which subtasks this skill distills; see the class docstring.
     source_subtasks: List[str]
+    #: One line, <= SKILL_SUMMARY_MAX_CHARS, no newline (schema v3).
+    summary: str = ""
     version: int = 1
     status: str = "pending"
     #: e.g. "weak_already_knows" / "retry_exhausted" / "leak_audit"; free-form
@@ -249,9 +274,10 @@ class Skill(_Record):
     discard_reason: Optional[str] = None
     #: Capability group label, written in stage 5.
     group: Optional[str] = None
-    #: One entry per rewrite: the old content, the error category and the
-    #: rewrite reason (the error categorisation is itself data about what the
-    #: weak model cannot do).
+    #: One entry per rewrite: the old content, the old summary, the error
+    #: category and the rewrite reason (the old summary is evidence of
+    #: what the reading agent saw before the rewrite; the error
+    #: categorisation is itself data about what the weak model cannot do).
     rewrite_history: List[Dict[str, Any]] = field(default_factory=list)
     merged_from: List[str] = field(default_factory=list)
     schema_version: int = SKILL_SCHEMA_VERSION
@@ -261,8 +287,11 @@ class Skill(_Record):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Skill":
-        if data.get("schema_version") == 1:
+        version = data.get("schema_version")
+        if version == 1:
             data = _migrate_v1_skill_row(data)
+        elif version == 2:
+            data = _migrate_v2_skill_row(data)
         return cls(**_known_kwargs(cls, data))
 
 
@@ -328,9 +357,9 @@ class Attempt(_Record):
 
 
 # ---------------------------------------------------------------------------
-# v1 -> v2 migrations (schema bumps 2026-10-15 / 2026-10-16; AGENTS
-# "修改数据对象" rule 3: explicit migration or a loud error, never a silent
-# default)
+# Old-schema migrations (schema bumps 2026-10-15 / 2026-10-16 /
+# 2026-10-17; AGENTS "修改数据对象" rule 3: explicit migration or a loud
+# error, never a silent default)
 # ---------------------------------------------------------------------------
 
 def _migrate_v1_trajectory_row(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -386,7 +415,7 @@ def _v1_segment_source_subtasks(
 
 
 def _migrate_v1_skill_row(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Derive ``source_subtasks`` for one schema-v1 skill row (v2 row out).
+    """Derive ``source_subtasks`` for one schema-v1 skill row (v3 row out).
 
     Segment-born rows -- every skill a pre-v2 run's stage 3 wrote -- carry
     exactly one source, their own subtask. A v1 merge product cannot be
@@ -413,6 +442,22 @@ def _migrate_v1_skill_row(data: Dict[str, Any]) -> Dict[str, Any]:
             "source_subtasks cannot be derived -- a human must look at "
             "this run")
     return {**data, "source_subtasks": derived,
+            "summary": data.get("summary", ""),
+            "schema_version": SKILL_SCHEMA_VERSION}
+
+
+def _migrate_v2_skill_row(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Clear ``summary`` for one schema-v2 skill row (v3 row out).
+
+    The v3 alignment ruling (skill-folder M1): a v2 skill never carried a
+    summary, and the honest migration is the empty string, never a
+    silently derived one -- M2's folder rendering falls back to the
+    [When to use] section for empty summaries, so a migrated bank keeps a
+    working directory. A v2 row that somehow already carries a summary
+    key keeps it: dropping data a record actually holds is worse than
+    honoring it.
+    """
+    return {**data, "summary": data.get("summary", ""),
             "schema_version": SKILL_SCHEMA_VERSION}
 
 
@@ -449,18 +494,20 @@ def merged_source_subtasks(
 def migrate_skill_record(
         record: Dict[str, Any],
         skills_by_id: Mapping[str, Dict[str, Any]]) -> Dict[str, Any]:
-    """Migrate one stored skill row to the current schema; v2 row out.
+    """Migrate one stored skill row to the current schema; v3 row out.
 
     ``skills_by_id`` maps skill_id to the SAME run's stored rows (raw
     dicts, not objects). A v1 merge product resolves its source_subtasks
     recursively along ``merged_from`` -- nested merges included -- by
     unioning the sources' lists; a v1 segment row derives its single
-    source from its id. A v2 row is returned unchanged. Raises ValueError
-    when the lineage cannot be derived: an unknown v1 id shape, a
-    merged_from id missing from ``skills_by_id``, or a merged_from cycle
-    (each names a corrupted run). ``Skill.from_dict`` cannot do this job
-    -- it sees one record at a time -- which is why v1 merge products
-    raise there with a pointer to this function.
+    source from its id. A v2 row migrates the same way
+    ``Skill.from_dict`` migrates one (``summary`` cleared, schema v3). A
+    row already at the current (or a newer) schema is returned unchanged.
+    Raises ValueError when the lineage cannot be derived: an unknown v1
+    id shape, a merged_from id missing from ``skills_by_id``, or a
+    merged_from cycle (each names a corrupted run). ``Skill.from_dict``
+    cannot do this job -- it sees one record at a time -- which is why
+    v1 merge products raise there with a pointer to this function.
     """
     return _migrate_skill_record(record, skills_by_id, ())
 
@@ -473,8 +520,10 @@ def migrate_skill_rows(
     tool): a v1 merge product needs its sibling records, and a reader
     that already holds the whole store should not have to build the map
     itself, so this builds the id map once and migrates each row in input
-    order. A v2 row is returned unchanged (the same object). Raises
-    exactly what ``migrate_skill_record`` raises (a corrupted lineage).
+    order. A row already at the current schema is returned unchanged (the
+    same object); older rows migrate (a v2 row is not returned unchanged
+    anymore -- schema v3 clears its summary). Raises exactly what
+    ``migrate_skill_record`` raises (a corrupted lineage).
     """
     skills_by_id = {str(row["skill_id"]): row for row in rows}
     return [migrate_skill_record(row, skills_by_id) for row in rows]
@@ -484,7 +533,10 @@ def _migrate_skill_record(
         record: Dict[str, Any],
         skills_by_id: Mapping[str, Dict[str, Any]],
         seen: Tuple[str, ...]) -> Dict[str, Any]:
-    if record.get("schema_version") != 1:
+    version = record.get("schema_version")
+    if version == 2:
+        return _migrate_v2_skill_row(record)
+    if version != 1:
         return record  # current (or newer) schema: nothing to derive
     skill_id = record.get("skill_id")
     if skill_id in seen:
@@ -512,6 +564,7 @@ def _migrate_skill_record(
             source_lists.append(source_subtasks)
         return {**record,
                 "source_subtasks": merged_source_subtasks(source_lists),
+                "summary": record.get("summary", ""),
                 "schema_version": SKILL_SCHEMA_VERSION}
     derived = _v1_segment_source_subtasks(record)
     if derived is None:
@@ -521,4 +574,5 @@ def _migrate_skill_record(
             "source_subtasks cannot be derived -- a human must look at "
             "this run")
     return {**record, "source_subtasks": derived,
+            "summary": record.get("summary", ""),
             "schema_version": SKILL_SCHEMA_VERSION}

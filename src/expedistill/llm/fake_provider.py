@@ -243,6 +243,7 @@ class FakeProviderClient:
                       "reply with Finish[<the short answer>]"],
             "verify": "the environment reports the answer is correct",
             "not_applicable_when": "the answer is already known",
+            "summary": "search before submitting the final answer",
         })
 
     @staticmethod
@@ -253,6 +254,7 @@ class FakeProviderClient:
             "do_instead": ["search the question's key terms",
                            "reply with Finish[<the short answer>]"],
             "not_applicable_when": "a search was already done",
+            "summary": "never submit an answer before searching for it",
         })
 
     # -- G10 / G11 / G6 ---------------------------------------------------
@@ -283,6 +285,7 @@ class FakeProviderClient:
             "skill_text": (original + "\n" + self.revision_marker +
                            ": name the concrete state before acting."),
             "revision_reason": "made the trigger condition concrete",
+            "summary": "search before submitting the final answer",
         })
 
     def _rewrite(self, user: str) -> str:
@@ -293,6 +296,7 @@ class FakeProviderClient:
             "skill_text": original + "\n" + self.revision_marker +
                           ": name the concrete state before acting.",
             "rewrite_reason": "made the trigger condition concrete",
+            "summary": "search before submitting the final answer",
         })
 
     # -- G7 / G8 / G9 -------------------------------------------------------

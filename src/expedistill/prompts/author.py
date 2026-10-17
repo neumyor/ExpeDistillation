@@ -12,6 +12,14 @@ validates the fields and its renderer adds the bracket section markers, so
 the G2 templates carry no marker literals. REWRITE, by contrast, names all
 eight markers: its rewritten skill_text must reproduce them so the stored
 kind stays recognizable.
+
+Schema v3 (skill-folder M1, 2026-10-17) adds ONE non-section field to all
+three output contracts: ``summary``, the one-line "what this skill is"
+sentence a future skill-directory listing shows next to the skill id. It
+is not a fifth section and never enters the stored content; when_to_use
+says WHEN to apply the skill, summary says WHAT it is. REWRITE must
+produce a fresh summary: the content changed, so the old line no longer
+describes the skill.
 """
 
 from expedistill.prompts.registry import PromptSpec, register
@@ -54,6 +62,13 @@ Write the skill in four sections:
 - not_applicable_when: when this skill does NOT apply, so it is not forced
   onto unrelated subtasks.
 
+Also write a one-line summary of the skill: what it IS and does, in one
+or two sentences. This is not when_to_use -- when_to_use says WHEN to
+apply the skill, the summary says WHAT it is. It will be shown as the
+skill's single line in a directory of skills, so make it concrete and
+specific ("inspect the reported service state before acting on it", not
+"a helpful skill for service work"), and keep it on one line.
+
 Writing discipline:
 - short, simple sentences; one instruction per sentence;
 - imperative and concrete. Banned phrases the weak model cannot
@@ -67,7 +82,8 @@ Output ONLY JSON with exactly these fields:
 {{"when_to_use": "<one or two sentences>",
   "steps": ["<one action>", "<one action>", ...],
   "verify": "<one or two sentences>",
-  "not_applicable_when": "<one sentence>"}}
+  "not_applicable_when": "<one sentence>",
+  "summary": "<one line: what this skill is and does>"}}
 """,
         description=(
             "G2 skill writing, distill mode: turn a succeeded strong-model "
@@ -116,6 +132,13 @@ Work in three passes:
      placeholders where the subtask shows one.
    - not_applicable_when: when this reference does NOT apply.
 
+Also write a one-line summary of the reference: what mistake it warns
+against and what it teaches instead, in one or two sentences. This is
+not trigger -- trigger says WHEN the mistake is happening, the summary
+says WHAT the reference is. It will be shown as the skill's single line
+in a directory of skills, so make it concrete and specific, and keep it
+on one line.
+
 Writing discipline:
 - short, simple sentences; one instruction per sentence;
 - imperative and concrete. Banned phrases the weak model cannot
@@ -129,7 +152,8 @@ Output ONLY JSON with exactly these fields:
 {{"trigger": "<one or two sentences>",
   "why_it_fails": "<one or two sentences>",
   "do_instead": ["<one action>", "<one action>", ...],
-  "not_applicable_when": "<one sentence>"}}
+  "not_applicable_when": "<one sentence>",
+  "summary": "<one line: what this reference is and does>"}}
 """,
         description=(
             "G2 skill writing, diagnose mode: find where the weak model went "
@@ -178,7 +202,10 @@ Work in two steps:
    rewrite each section's content, never collapse them into prose. Reproduce
    the bracketed section headers exactly as written, each on its own line.
    Change the wording, granularity, or trigger conditions of the skill -- not
-   its underlying idea.
+   its underlying idea. Then write a fresh one-line summary of the REWRITTEN
+   skill (what it is and does, one sentence): the content changed, so the
+   skill's directory line must describe what it now says, not what it used
+   to say. Keep the summary on one line.
 
 Hard constraint: do NOT copy specific values, file names, entities, or any other
 concrete details from the exam question into the skill. The rewritten skill must
@@ -187,7 +214,8 @@ stay general; it must not smuggle in the answer to this particular exam.
 Output ONLY JSON with exactly these fields:
 {{"failure_category": "<misread|missing_step|wrong_trigger|other>",
   "skill_text": "<the rewritten skill, plain text>",
-  "rewrite_reason": "<one or two sentences: what you changed and why>"}}
+  "rewrite_reason": "<one or two sentences: what you changed and why>",
+  "summary": "<one line: what the rewritten skill is and does>"}}
 """,
         description=(
             "G6 skill rewrite: classify the weak model's failure category, "

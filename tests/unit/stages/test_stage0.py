@@ -648,11 +648,11 @@ _GOLDEN_PROMPT_DIGESTS = {
     "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
     "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
     "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
-    "REWRITE": "a16ea16efa74bc67183ecc7d0a3c534f9c8e0e8caa44a20c3e7cec45b82b1895",
+    "REWRITE": "5221c24ced0a12f5d965bb923d23daf463efdb25a26729b798c18ef75da7d69b",
     "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
     "SIMILARITY": "fd5ff69610c2c1047d3eee012a503002d12cc2e859707b4d6bc88536cdd4e610",
-    "SKILL_DIAGNOSE": "b1559a1e72ea959d42d8954f32f49f6895f325f3a4d628fa4453f85583c79050",
-    "SKILL_DISTILL": "5c959806cc3751508acbe9ed14eff248eee20c9a8f10bbb2be3370d19926826c",
+    "SKILL_DIAGNOSE": "0d5b9416627d27f430bfa1b7cbe4458000f13cb839c0989e0f9e5a0c74e4609c",
+    "SKILL_DISTILL": "48bfbaea7780ad51b4e1e586aef843b140a0e7157187086f99188da61830b00d",
     # v3 full freeze: the two live prompts register at prompts/__init__
     # import like every method prompt, so their digests are frozen on
     # every run -- exam runs included.

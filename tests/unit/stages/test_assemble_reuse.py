@@ -1030,20 +1030,24 @@ def test_bank_level_assembly_of_a_v1_object_source_run(tmp_path):
                 for row in read_jsonl(run_dir / "skill_bank.jsonl")]
     assert bank_ids == [source.ids["m0"], source.ids["m_nested"],
                         source.ids["s_a"]]
-    # Every assembled object row is v2-native with the new field derived
-    # (the write-side migration), and each loads through the plain
-    # from_dict every consumer uses -- the product needs no migration.
+    # Every assembled object row is current-schema with the new fields
+    # derived (the write-side migration: source_subtasks for v1 rows,
+    # the empty summary for pre-v3 rows), and each loads through the
+    # plain from_dict every consumer uses -- the product needs no
+    # migration.
     for row in read_jsonl(run_dir / "skill_bank.jsonl"):
-        assert row["schema_version"] == 2
+        assert row["schema_version"] == 3
         assert row["source_subtasks"]
+        assert row["summary"] == ""
         path = (run_dir / "stage3_generation" / "skills"
                 / (urllib.parse.quote(row["skill_id"], safe="") + ".json"))
         assert read_json(path) == row
         Skill.from_dict(row)
     for path in (run_dir / "stage3_generation" / "skills").glob("*.json"):
         row = read_json(path)
-        assert row["schema_version"] == 2
+        assert row["schema_version"] == 3
         assert "source_subtasks" in row
+        assert row["summary"] == ""
         Skill.from_dict(row)
     for path in (run_dir / "stage3_generation" / "exams").glob("*.json"):
         row = read_json(path)
@@ -1062,10 +1066,11 @@ def test_bank_level_assembly_of_a_v1_object_source_run(tmp_path):
     reverted = read_json(
         run_dir / "stage3_generation" / "skills"
         / (urllib.parse.quote(source.ids["m_revert"], safe="") + ".json"))
-    assert reverted["schema_version"] == 2
+    assert reverted["schema_version"] == 3
     assert reverted["source_subtasks"] == [
         source.ids["subtask"]["st1s"],
         source.ids["subtask"]["st1w3"]]
+    assert reverted["summary"] == ""
     # The phase-world consumers' enumeration loads every stored skill
     # (the A-phase report reader and the decision walk both go through
     # the candidate enumeration).
@@ -1074,7 +1079,7 @@ def test_bank_level_assembly_of_a_v1_object_source_run(tmp_path):
     assert [skill.skill_id for skill in candidates] == sorted(
         source.ids[name] for name in
         ("s_a", "s_b", "s_c", "s_d", "s_e", "s_f", "s_g", "s_h"))
-    assert all(skill.schema_version == 2 for skill in candidates)
+    assert all(skill.schema_version == 3 for skill in candidates)
 
 
 def test_refuses_a_source_whose_v1_lineage_cannot_migrate(tmp_path):

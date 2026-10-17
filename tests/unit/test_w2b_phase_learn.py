@@ -311,12 +311,14 @@ def _group_plan(*actions):
 
 def _revision_script(text=MARKED_B):
     return json_script({"skill_text": text, "failure_category": "missing_step",
-                        "revision_reason": "sharper trigger"})
+                        "revision_reason": "sharper trigger",
+                        "summary": "a revised one-liner"})
 
 
 def _rewrite_script(text=MARKED_B):
     return json_script({"skill_text": text, "failure_category": "missing_step",
-                        "rewrite_reason": "spelled out verification"})
+                        "rewrite_reason": "spelled out verification",
+                        "summary": "a rewritten one-liner"})
 
 
 def _distill_script():
@@ -326,6 +328,7 @@ def _distill_script():
                   "Restart the service with its restart command."],
         "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
+        "summary": "restore a service that rejects connections",
     })
 
 
@@ -591,7 +594,11 @@ def test_a_miss_with_a_check_left_revises_the_skill(tmp_path, monkeypatch):
     assert stored.version == 2
     assert stored.content == MARKED_B
     assert stored.status == "pending"          # the status never moved
+    assert stored.summary == "a rewritten one-liner"
+    # The history entry keeps the OLD summary next to the old content:
+    # what the reading agent saw before the rewrite.
     assert stored.rewrite_history[0]["reason"] == "spelled out verification"
+    assert stored.rewrite_history[0]["summary"] == skill.summary
     prompt = handles["rewriter"].client.calls[0]["user"]
     assert "How do you restart?" in prompt    # the exam question
     assert "I would restart it." in prompt    # the weak answer

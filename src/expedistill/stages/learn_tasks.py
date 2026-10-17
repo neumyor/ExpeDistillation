@@ -552,14 +552,20 @@ def _land_revision(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     if stored.version == package.old_skill.version:
         stored.rewrite_history.append({
             "content": stored.content,
+            # The OLD summary is evidence of what the reading agent saw
+            # before the rewrite (schema v3): it goes into history next
+            # to the old content, then the fresh one replaces it.
+            "summary": stored.summary,
             "error_category": outcome.failure_category,
             "reason": outcome.revision_reason,
         })
         stored.content = outcome.content
+        stored.summary = outcome.summary
         stored.version = expected
         store.save(stored, "skills")
     elif not (stored.version == expected
-              and stored.content == outcome.content):
+              and stored.content == outcome.content
+              and stored.summary == outcome.summary):
         raise CodeBugError(
             f"skill {skill_id!r} is at version {stored.version} with "
             "content the author did not produce; the store drifted from "

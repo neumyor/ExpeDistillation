@@ -50,6 +50,7 @@ DISTILL_SECTIONS = {
               "Restart the service."],
     "verify": "The service accepts the login.",
     "not_applicable_when": "The subtask is not about logging in.",
+    "summary": "check the login credentials before restarting the service",
 }
 
 DISTILL_CONTENT = "\n".join([
@@ -67,6 +68,7 @@ DIAGNOSE_SECTIONS = {
     "do_instead": ["Stop the service.", "Edit the config.",
                    "Start the service."],
     "not_applicable_when": "The subtask is not about the config.",
+    "summary": "never edit the config while the service is running",
 }
 
 DIAGNOSE_CONTENT = "\n".join([
@@ -92,6 +94,7 @@ HEREDOC_SECTIONS = {
     ],
     "verify": "The printed digest matches the expected value.",
     "not_applicable_when": "The file is not readable.",
+    "summary": "hash a file with an inline python heredoc",
 }
 
 HEREDOC_CONTENT = "\n".join([
@@ -194,6 +197,10 @@ def test_write_skill_distill_wiring_and_fields():
     assert skill.status == "pending"
     assert skill.rewrite_history == []
     assert skill.merged_from == []
+    # Schema v3: the response's summary lands verbatim (stripped) in its
+    # own field, never inside the rendered content.
+    assert skill.summary == DISTILL_SECTIONS["summary"]
+    assert skill.summary not in skill.content
     assert skill_markers(skill.content) == PROCEDURE_MARKERS
 
 
@@ -246,6 +253,7 @@ def test_write_skill_diagnose_wiring_and_fields():
     )
     assert handle.client.calls[0]["user"] == expected
     assert skill.content == DIAGNOSE_CONTENT
+    assert skill.summary == DIAGNOSE_SECTIONS["summary"]
     assert skill_markers(skill.content) == FAILURE_REFERENCE_MARKERS
 
 
@@ -531,6 +539,78 @@ def test_validate_skill_sections_non_dict_raises():
         validate_skill_sections("distill", ["not", "an", "object"])
 
 
+# ---------------------------------------------------------------------------
+# The schema v3 summary contract (skill-folder M1)
+# ---------------------------------------------------------------------------
+
+def test_validate_rejects_a_missing_summary():
+    payload = dict(DISTILL_SECTIONS)
+    del payload["summary"]
+    with pytest.raises(ModelOutputError, match="missing required field"):
+        validate_skill_sections("distill", payload)
+
+
+@pytest.mark.parametrize(
+    "summary, match",
+    [
+        ("", "non-empty"),
+        ("   ", "non-empty"),
+        (7, "must be a string"),
+        (None, "must be a string"),
+        ("one line\na second line", "ONE line"),
+        ("carriage return\rinside", "ONE line"),  # \r normalizes to \n
+        ("x" * 501, "at most 500"),
+    ],
+)
+def test_validate_rejects_bad_summaries(summary, match):
+    with pytest.raises(ModelOutputError, match=match):
+        validate_skill_sections(
+            "distill", {**DISTILL_SECTIONS, "summary": summary})
+
+
+def test_validate_accepts_the_length_limit_exactly():
+    validate_skill_sections(
+        "distill", {**DISTILL_SECTIONS, "summary": "x" * 500})
+
+
+def test_rewrite_skill_missing_or_bad_summary_raises():
+    subtask = make_subtask()
+    skill = make_skill(subtask)
+    for payload in (
+        {"failure_category": "misread", "skill_text": "Do X.",
+         "rewrite_reason": "r"},  # summary absent
+        {"failure_category": "misread", "skill_text": "Do X.",
+         "rewrite_reason": "r", "summary": "two\nlines"},
+        {"failure_category": "misread", "skill_text": "Do X.",
+         "rewrite_reason": "r", "summary": "y" * 501},
+    ):
+        handle = make_fake_handle(script=json_script(payload))
+        with pytest.raises(ModelOutputError, match="summary"):
+            rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+
+def test_rewrite_summary_can_differ_from_the_originals():
+    # The rewrite produces a FRESH summary (the content changed, so the
+    # old directory line no longer describes the skill); nothing in the
+    # contract ties it to the old one.
+    subtask = make_subtask()
+    skill = make_marker_skill(subtask, content=DISTILL_CONTENT)
+    rewritten = render_skill_content("distill", {
+        **DISTILL_SECTIONS,
+        "steps": ["Check the credentials before every login."],
+    })
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "misread",
+        "skill_text": rewritten,
+        "rewrite_reason": "Simplified the trigger wording.",
+        "summary": "a different, fresher one-liner",
+    }))
+
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+    assert result["summary"] == "a different, fresher one-liner"
+
+
 def test_render_and_validate_reject_unknown_mode():
     with pytest.raises(ValueError, match="mode"):
         render_skill_content("bogus", DISTILL_SECTIONS)
@@ -653,6 +733,7 @@ def test_rewrite_skill_wiring_and_result():
         "failure_category": "missing_step",
         "skill_text": "  Do X. Then do Y explicitly.  ",
         "rewrite_reason": "Spelled out the skipped intermediate step.",
+        "summary": "  do X then do Y explicitly  ",
     }))
 
     result = rewrite_skill(
@@ -678,6 +759,8 @@ def test_rewrite_skill_wiring_and_result():
         "content": "Do X. Then do Y explicitly.",
         "failure_category": "missing_step",
         "rewrite_reason": "Spelled out the skipped intermediate step.",
+        # Stripped and newline-normalized, like every stored field.
+        "summary": "do X then do Y explicitly",
     }
 
     # The block must not mutate the Skill: composites own version bumps and
@@ -699,6 +782,7 @@ def test_rewrite_skill_keeps_the_marker_set():
         "failure_category": "misread",
         "skill_text": rewritten,
         "rewrite_reason": "Simplified the trigger wording.",
+        "summary": "check the login credentials before every login",
     }))
 
     result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
@@ -718,6 +802,7 @@ def test_rewrite_skill_dropping_the_markers_raises():
         "failure_category": "misread",
         "skill_text": "Do X when Y, in plain prose.",
         "rewrite_reason": "Collapsed the sections.",
+        "summary": "do X when Y",
     }))
 
     with pytest.raises(ModelOutputError, match="bracket sections"):
@@ -734,6 +819,7 @@ def test_rewrite_skill_switching_marker_kind_raises():
         "failure_category": "misread",
         "skill_text": DIAGNOSE_CONTENT,
         "rewrite_reason": "Rewrote it as a failure reference.",
+        "summary": "a failure reference about config edits",
     }))
 
     with pytest.raises(ModelOutputError, match="bracket sections"):
@@ -750,6 +836,7 @@ def test_rewrite_skill_unmarked_original_skips_the_marker_check():
         "failure_category": "misread",
         "skill_text": "Do X when Y, still plain prose.",
         "rewrite_reason": "Simplified.",
+        "summary": "do X when Y",
     }))
 
     result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
@@ -765,6 +852,7 @@ def test_rewrite_skill_invalid_category_raises(category):
         "failure_category": category,
         "skill_text": "rewritten",
         "rewrite_reason": "reason",
+        "summary": "the rewritten skill",
     }))
 
     with pytest.raises(ModelOutputError, match="failure_category"):
@@ -780,6 +868,7 @@ def test_rewrite_skill_empty_skill_text_raises():
         "failure_category": "misread",
         "skill_text": "   ",
         "rewrite_reason": "reason",
+        "summary": "the rewritten skill",
     }))
 
     with pytest.raises(ModelOutputError, match="skill_text"):

@@ -71,12 +71,12 @@ class RevisionOutcome:
 
     ``decision`` is the author's call (keep / revise / delete);
     ``outcome`` is what happened: ``kept``, ``revised`` (new content in
-    ``content``, with the model's ``failure_category`` and
-    ``revision_reason``), ``deleted`` (``discard_reason`` is
-    live_revision_deleted), ``unchanged`` (no new version: exhausted
-    budget or identical output -- the applier leaves the skill as is)
-    or ``infra_failed`` (the work is valid, the service was not; the
-    skill stays for a retry).
+    ``content``, with the model's ``failure_category``,
+    ``revision_reason`` and fresh ``summary``), ``deleted``
+    (``discard_reason`` is live_revision_deleted), ``unchanged`` (no new
+    version: exhausted budget or identical output -- the applier leaves
+    the skill as is) or ``infra_failed`` (the work is valid, the service
+    was not; the skill stays for a retry).
     """
 
     skill_id: str
@@ -86,6 +86,9 @@ class RevisionOutcome:
     failure_category: Optional[str] = None
     revision_reason: Optional[str] = None
     discard_reason: Optional[str] = None
+    #: The revised skill's fresh one-liner (schema v3); None unless the
+    #: outcome is "revised".
+    summary: Optional[str] = None
 
 
 def default_decide(package: Any) -> str:
@@ -143,7 +146,8 @@ def _revise_once(
             weak_profile, handle, usage=usage, run_dir=run_dir)
         return {"content": result["content"],
                 "failure_category": result["failure_category"],
-                "revision_reason": result["rewrite_reason"]}
+                "revision_reason": result["rewrite_reason"],
+                "summary": result["summary"]}
     failure_view = package.fact("failure_view")
     if failure_view is None:
         raise CodeBugError(
@@ -164,7 +168,8 @@ def _revise_once(
             f"{skill_markers(new_text)!r}")
     return {"content": new_text,
             "failure_category": result["failure_category"],
-            "revision_reason": result["revision_reason"]}
+            "revision_reason": result["revision_reason"],
+            "summary": result["summary"]}
 
 
 def _revise_with_budget(
@@ -198,7 +203,8 @@ def _revise_with_budget(
             skill_id=skill.skill_id, decision="revise", outcome="revised",
             content=result["content"],
             failure_category=result["failure_category"],
-            revision_reason=result["revision_reason"])
+            revision_reason=result["revision_reason"],
+            summary=result["summary"])
     # Budget exhausted: NO discard -- the C8 ruling; the skill keeps
     # its version and the next learning round tries again.
     return RevisionOutcome(skill_id=skill.skill_id, decision="revise",

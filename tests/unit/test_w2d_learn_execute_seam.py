@@ -246,6 +246,7 @@ def _distill():
                   "Restart the service with its restart command."],
         "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
+        "summary": "restore a service that rejects connections",
     })
 
 
@@ -261,11 +262,12 @@ def _segmentation():
 
 def _revision():
     # The REWRITE prompt's output contract (same keys the exam revise
-    # path's tests use): the rewritten text, the failure category and
-    # the rewrite reason.
+    # path's tests use): the rewritten text, the failure category, the
+    # rewrite reason and the fresh one-line summary (schema v3).
     return json_script({"skill_text": REVISED,
                         "failure_category": "missing_step",
-                        "rewrite_reason": "spelled out verification"})
+                        "rewrite_reason": "spelled out verification",
+                        "summary": "a rewritten one-liner"})
 
 
 def _t1_subtask_id():

@@ -96,6 +96,7 @@ def _distill_script():
                   "Restart the service with its restart command."],
         "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
+        "summary": "restore a service that rejects connections",
     })
 
 

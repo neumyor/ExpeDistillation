@@ -1357,6 +1357,22 @@ def curate_bank(
                         # same value (models.migrate_skill_record).
                         source_subtasks=merged_source_subtasks(
                             source.source_subtasks for source in sources),
+                        # Schema v3 (skill-folder M1): the MERGE prompt
+                        # outputs plain text and carries no summary
+                        # contract, so the product's summary is composed,
+                        # not model-written -- the sources' non-empty
+                        # summaries joined with "; ". Chosen over asking
+                        # the merge prompt for one because it is
+                        # deterministic and semantically honest: a merge
+                        # keeps every source's advice, so its directory
+                        # line names every capability the sources named.
+                        # Not held to SKILL_SUMMARY_MAX_CHARS (no model
+                        # wrote it); all-empty sources (a v2-migrated
+                        # bank) compose "" and M2's folder rendering will
+                        # fall back to the [When to use] section for them.
+                        summary="; ".join(source.summary
+                                         for source in sources
+                                         if source.summary),
                         version=1,
                         status="pending",
                         merged_from=source_ids,

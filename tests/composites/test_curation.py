@@ -39,10 +39,11 @@ def _skill_id(index: int) -> str:
 
 
 def _add_skill(store: Store, index: int, content: str,
-               status: str = "accepted") -> Skill:
+               status: str = "accepted", summary: str = "") -> Skill:
     skill = Skill(skill_id=_skill_id(index), content=content,
                   subtask_id=_subtask(index),
-                  source_subtasks=[_subtask(index)], status=status)
+                  source_subtasks=[_subtask(index)], status=status,
+                  summary=summary)
     store.save(skill, "skills")
     return skill
 
@@ -152,6 +153,42 @@ def test_dedup_merge_kept(store):
     assert log["final_member_ids"] == [merged_id]
     assert log["bank_tokens"] == count_bank_tokens(
         [store.load("skills", merged_id, Skill)])
+
+
+def test_merge_product_summary_joins_the_source_summaries(tmp_path):
+    # Schema v3 (skill-folder M1): the MERGE prompt outputs plain text
+    # and has no summary contract, so K5 composes the product's
+    # directory line from its sources' non-empty summaries, joined with
+    # "; " in source order -- every capability the merge combines is
+    # named. All-empty sources (a v2-migrated bank) compose "".
+    def fresh_handles():
+        return _handles(
+            curator_script=[
+                _similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+                "Read the log before doing anything else.",
+                _grouping({"bank/merge/0000": "logs"})],
+            answer_script=["a", "a"],
+            judge_script=[_CORRECT(), _CORRECT()],
+        )
+
+    store = Store(tmp_path / "run")
+    for index, summary in enumerate(
+            ("check the log before acting", "read the log before deciding")):
+        _add_skill(store, index, f"skill {index}", summary=summary)
+        _add_exam(store, index)
+
+    _curate(store, fresh_handles())
+
+    merged = store.load("skills", "bank/merge/0000", Skill)
+    assert merged.summary == ("check the log before acting; "
+                              "read the log before deciding")
+    # The empty-summary case: a v2-migrated bank merges to "".
+    store2 = Store(tmp_path / "run2")
+    for index in range(2):
+        _add_skill(store2, index, f"skill {index}")  # summaries empty
+        _add_exam(store2, index)
+    _curate(store2, fresh_handles())
+    assert store2.load("skills", "bank/merge/0000", Skill).summary == ""
 
 
 # ---------------------------------------------------------------------------

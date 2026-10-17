@@ -127,11 +127,22 @@ def test_g2_json_contract_fields_match_validate_skill_sections():
     # The "Output ONLY JSON with exactly these fields" examples must name
     # exactly the keys validate_skill_sections requires for the mode: a
     # drift between prompt example and validator would surface as
-    # model_output_failed units, not as a loud wiring error.
+    # model_output_failed units, not as a loud wiring error. Schema v3
+    # adds the non-section summary field to every write contract.
+    from expedistill.blocks.author import SKILL_SUMMARY_FIELD
     assert _json_contract_keys(get("SKILL_DISTILL")) == set(
-        SKILL_SECTION_FIELDS["distill"])
+        SKILL_SECTION_FIELDS["distill"]) | {SKILL_SUMMARY_FIELD}
     assert _json_contract_keys(get("SKILL_DIAGNOSE")) == set(
-        SKILL_SECTION_FIELDS["diagnose"])
+        SKILL_SECTION_FIELDS["diagnose"]) | {SKILL_SUMMARY_FIELD}
+
+
+def test_rewrite_template_output_contract_carries_the_summary():
+    # Schema v3: the REWRITE JSON example carries the fresh summary, so
+    # a prompt edit that drops it fails here instead of surfacing as
+    # model_output_failed units at run time. (The category vocabulary's
+    # quoted names also match the key regex, hence the subset pin.)
+    assert {"failure_category", "skill_text", "rewrite_reason",
+            "summary"} <= _json_contract_keys(get("REWRITE"))
 
 
 def test_rewrite_template_names_every_section_marker():

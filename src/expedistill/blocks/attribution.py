@@ -30,17 +30,25 @@ It cannot be imported from there -- blocks may not import each other --
 so a unit test asserts equality with blocks.author.FAILURE_CATEGORIES: the
 two sets are one contract, and a future category change must consciously
 touch both prompts, which is a new experiment either way.
+
+The same mirroring rule covers the schema v3 ``summary`` contract (the
+skill's one-line directory entry, skill-folder M1): the validator below
+restates blocks/author.py's rule (non-empty, one line, at most
+SKILL_SUMMARY_MAX_CHARS) on top of the shared core constant, and a unit
+test drives both validators with the same payloads so they cannot drift
+apart unnoticed.
 """
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from expedistill.core.models import Skill
+from expedistill.core.models import SKILL_SUMMARY_MAX_CHARS, Skill
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm.call import ModelHandle, call_model
 
 __all__ = [
     "FAILURE_CATEGORIES",
+    "SKILL_SUMMARY_FIELD",
     "attribute_failure",
     "revise_skill",
 ]
@@ -49,6 +57,40 @@ __all__ = [
 #: equal to blocks.author.FAILURE_CATEGORIES (the REWRITE contract pins the
 #: vocabulary); test_attribution.py enforces the equality.
 FAILURE_CATEGORIES = ("misread", "missing_step", "wrong_trigger", "other")
+
+#: The revised skill's one-line summary field (schema v3), mirroring
+#: blocks.author.SKILL_SUMMARY_FIELD; test_attribution.py pins the mirror.
+SKILL_SUMMARY_FIELD = "summary"
+
+
+def _validate_summary(value: Any) -> str:
+    """The G11 mirror of blocks/author.py's summary rule (module docstring).
+
+    A non-empty string, ONE line, at most SKILL_SUMMARY_MAX_CHARS; the
+    stripped, newline-normalized line is the value the caller stores in
+    ``Skill.summary``. A stray ``\\r`` counts as a newline (the same
+    normalization the G2/G6 side applies).
+    """
+    if not isinstance(value, str):
+        raise ModelOutputError(
+            f"LIVE_SKILL_REVISION: field {SKILL_SUMMARY_FIELD!r} must be "
+            f"a string, got {value!r}")
+    summary = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not summary:
+        raise ModelOutputError(
+            f"LIVE_SKILL_REVISION: field {SKILL_SUMMARY_FIELD!r} must be "
+            f"a non-empty string, got {value!r}")
+    if "\n" in summary:
+        raise ModelOutputError(
+            f"LIVE_SKILL_REVISION: field {SKILL_SUMMARY_FIELD!r} must be "
+            "ONE line (the skill's directory entry); got a value with an "
+            f"embedded newline: {value!r}")
+    if len(summary) > SKILL_SUMMARY_MAX_CHARS:
+        raise ModelOutputError(
+            f"LIVE_SKILL_REVISION: field {SKILL_SUMMARY_FIELD!r} must be "
+            f"at most {SKILL_SUMMARY_MAX_CHARS} characters, got "
+            f"{len(summary)}")
+    return summary
 
 #: The closed action vocabulary of a G10 skill_actions entry.
 _ACTIONS = ("keep", "revise", "delete")
@@ -210,12 +252,15 @@ def revise_skill(
     evidence instead of an exam: ``attribution_report`` carries the group's
     diagnosis plus this skill's problem, ``failure_view`` excerpts of the
     round-0 failed attempts' D5 views. The returned dict is
-    ``{"failure_category", "skill_text", "revision_reason"}`` with
-    ``skill_text`` stripped; the caller (K6) owns bumping the skill version
-    and appending to rewrite_history, plus the marker-preservation check
-    (decision section 2.3). A failure_category outside FAILURE_CATEGORIES, a
-    non-object response, an empty skill_text, or an empty revision_reason
-    raises ModelOutputError.
+    ``{"failure_category", "skill_text", "revision_reason", "summary"}``
+    with ``skill_text`` stripped; ``summary`` is the revised skill's fresh
+    one-liner (schema v3) -- the content changed, so the old directory
+    line no longer describes the skill. The caller (K6) owns bumping the
+    skill version and appending to rewrite_history (storing the OLD
+    summary alongside the old content), plus the marker-preservation
+    check (decision section 2.3). A failure_category outside
+    FAILURE_CATEGORIES, a non-object response, an empty skill_text, an
+    empty revision_reason, or an invalid summary raises ModelOutputError.
     """
     variables = {
         "skill_text": skill_text,
@@ -248,9 +293,11 @@ def revise_skill(
         raise ModelOutputError(
             "LIVE_SKILL_REVISION: field 'revision_reason' must be a "
             f"non-empty string, got {revision_reason!r}")
+    summary = _validate_summary(parsed.get(SKILL_SUMMARY_FIELD))
 
     return {
         "failure_category": failure_category,
         "skill_text": new_text.strip(),
         "revision_reason": revision_reason,
+        "summary": summary,
     }

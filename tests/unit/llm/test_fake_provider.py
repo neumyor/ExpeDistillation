@@ -120,7 +120,7 @@ def test_distill_returns_the_protocol_v2_contract(client):
         label="l", description="d", steps_view="s", weak_profile="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed) == {"when_to_use", "steps", "verify",
-                           "not_applicable_when"}
+                           "not_applicable_when", "summary"}
     assert isinstance(parsed["steps"], list) and parsed["steps"]
 
 
@@ -130,7 +130,7 @@ def test_diagnose_returns_the_protocol_v2_contract(client):
         weak_profile="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed) == {"trigger", "why_it_fails", "do_instead",
-                           "not_applicable_when"}
+                           "not_applicable_when", "summary"}
 
 
 def test_attribution_revises_every_listed_skill(client):

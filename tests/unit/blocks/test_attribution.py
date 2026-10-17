@@ -95,6 +95,10 @@ REVISED_CONTENT = "\n".join([
     "[Do not use when] The subtask is not about logging in.",
 ])
 
+#: The G11 contract's summary payload (schema v3): the revised skill's
+#: fresh one-line directory entry.
+REVISED_SUMMARY = "check the credentials, restart, retry the login once"
+
 
 class RecordingUsage:
     """Test double for the B7 UsageRecorder (same record signature)."""
@@ -407,6 +411,7 @@ def test_revise_skill_wiring_and_result():
         "failure_category": "missing_step",
         "skill_text": f"  {REVISED_CONTENT}  ",
         "revision_reason": "Spelled out the skipped retry step.",
+        "summary": f"  {REVISED_SUMMARY}  ",
     }))
 
     result = revise_skill(
@@ -430,6 +435,7 @@ def test_revise_skill_wiring_and_result():
         "failure_category": "missing_step",
         "skill_text": REVISED_CONTENT,
         "revision_reason": "Spelled out the skipped retry step.",
+        "summary": REVISED_SUMMARY,
     }
 
 
@@ -441,6 +447,7 @@ def test_revise_skill_invalid_category_rejected(category):
         "failure_category": category,
         "skill_text": REVISED_CONTENT,
         "revision_reason": "reason",
+        "summary": REVISED_SUMMARY,
     }))
 
     with pytest.raises(ModelOutputError, match="failure_category"):
@@ -456,6 +463,7 @@ def test_revise_skill_empty_skill_text_rejected(skill_text):
         "failure_category": "missing_step",
         "skill_text": skill_text,
         "revision_reason": "reason",
+        "summary": REVISED_SUMMARY,
     }))
 
     with pytest.raises(ModelOutputError, match="skill_text"):
@@ -471,6 +479,7 @@ def test_revise_skill_empty_revision_reason_rejected(reason):
         "failure_category": "missing_step",
         "skill_text": REVISED_CONTENT,
         "revision_reason": reason,
+        "summary": REVISED_SUMMARY,
     }))
 
     with pytest.raises(ModelOutputError, match="revision_reason"):
@@ -496,6 +505,7 @@ def test_revise_skill_passes_usage_through():
         "failure_category": "missing_step",
         "skill_text": REVISED_CONTENT,
         "revision_reason": "Spelled out the skipped retry step.",
+        "summary": REVISED_SUMMARY,
     }))
 
     revise_skill(
@@ -506,6 +516,68 @@ def test_revise_skill_passes_usage_through():
     assert len(usage.records) == 1
     assert usage.records[0]["prompt"] == "LIVE_SKILL_REVISION"
     assert usage.records[0]["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# The schema v3 summary contract (skill-folder M1)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "summary, match",
+    [
+        ("", "non-empty"),
+        ("   ", "non-empty"),
+        (7, "must be a string"),
+        (None, "must be a string"),
+        ("one line\na second line", "ONE line"),
+        ("carriage return\rinside", "ONE line"),
+        ("x" * 501, "at most 500"),
+    ],
+)
+def test_revise_skill_bad_summary_rejected(summary, match):
+    # The G11 mirror of blocks/author.py's summary rule (module
+    # docstring): same payload classes, same verdicts.
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "missing_step",
+        "skill_text": REVISED_CONTENT,
+        "revision_reason": "reason",
+        "summary": summary,
+    }))
+
+    with pytest.raises(ModelOutputError, match=match):
+        revise_skill(
+            SKILL_A_CONTENT, ATTRIBUTION_REPORT, FAILURE_VIEW,
+            WEAK_PROFILE, handle,
+        )
+
+
+def test_revise_skill_missing_summary_rejected():
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "missing_step",
+        "skill_text": REVISED_CONTENT,
+        "revision_reason": "reason",
+    }))
+
+    with pytest.raises(ModelOutputError, match="must be a string"):
+        revise_skill(
+            SKILL_A_CONTENT, ATTRIBUTION_REPORT, FAILURE_VIEW,
+            WEAK_PROFILE, handle,
+        )
+
+
+def test_the_two_summary_validators_are_one_contract():
+    # Blocks may not import each other, so G11 restates G2/G6's summary
+    # rule (the FAILURE_CATEGORIES precedent): this drives both
+    # validators with the SAME payload classes so a drift in either
+    # direction fails loudly, and pins the field-name mirror.
+    from expedistill.blocks.attribution import SKILL_SUMMARY_FIELD
+    from expedistill.blocks.author import (
+        SKILL_SUMMARY_FIELD as AUTHOR_FIELD,
+    )
+
+    assert SKILL_SUMMARY_FIELD == AUTHOR_FIELD == "summary"
+    from expedistill.core.models import SKILL_SUMMARY_MAX_CHARS
+    assert SKILL_SUMMARY_MAX_CHARS == 500
 
 
 # ---------------------------------------------------------------------------
@@ -531,3 +603,16 @@ def test_failure_categories_match_author_vocabulary():
     # the moment the two drift apart, forcing a conscious prompt change on
     # both sides (a vocabulary change is a new experiment either way).
     assert FAILURE_CATEGORIES == AUTHOR_FAILURE_CATEGORIES
+
+
+def test_revision_template_output_contract_carries_the_summary():
+    # Schema v3: the LIVE_SKILL_REVISION JSON example carries the fresh
+    # summary, so a prompt edit that drops it fails here instead of
+    # surfacing as model_output_failed units at run time. (The category
+    # vocabulary's quoted names also match the key regex, hence the
+    # subset pin.)
+    import re
+
+    keys = set(re.findall(r'"([a-z_]+)":', get_prompt("LIVE_SKILL_REVISION")))
+    assert {"failure_category", "skill_text", "revision_reason",
+            "summary"} <= keys

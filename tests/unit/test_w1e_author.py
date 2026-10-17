@@ -104,15 +104,17 @@ def add_row():
 
 
 def revision_script(text, category="missing_step",
-                    reason="spelled out the verification step"):
+                    reason="spelled out the verification step",
+                    summary="a revised one-liner"):
     return json_script({"skill_text": text, "failure_category": category,
-                        "revision_reason": reason})
+                        "revision_reason": reason, "summary": summary})
 
 
 def rewrite_script(text, category="missing_step",
-                   reason="spelled out the verification step"):
+                   reason="spelled out the verification step",
+                   summary="a rewritten one-liner"):
     return json_script({"skill_text": text, "failure_category": category,
-                        "rewrite_reason": reason})
+                        "rewrite_reason": reason, "summary": summary})
 
 
 def run_revise(packages, script, *, decide=None, revision_attempts=2):
@@ -352,6 +354,7 @@ def distill_script():
                   "Restart the service with its restart command."],
         "verify": "The status command reports the service as running.",
         "not_applicable_when": "The service already reports running.",
+        "summary": "restore a service that rejects connections",
     })
 
 

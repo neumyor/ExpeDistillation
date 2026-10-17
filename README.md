@@ -567,12 +567,15 @@ Subtask（段）
   success(该段目标是否达成), context_summary
   （段内逐步原文不另存，按 step_range 从 Trajectory 取，只有一份来源）
 
-Skill（schema v2）
+Skill（schema v3）
   skill_id, content(自然语言正文), subtask_id(→段),
   source_subtasks[ subtask_id ... ](素材来源段；合并产物 = 各来源的并集),
+  summary(一句话摘要：这条技能是什么；目录行用，不进 content；
+    G2/G6/G11 产出，K5 合并产物 = 各来源非空摘要以 "; " 拼接；
+    v2 旧记录迁移时置空，M2 目录渲染对空摘要回退取 [When to use] 节),
   version(改写次数), status(pending/accepted/discarded/merged),
   discard_reason(自由字符串), group(能力分组，整理写入),
-  rewrite_history[ 旧版正文、错因归类与改写原因 ],
+  rewrite_history[ 旧版正文、旧摘要、错因归类与改写原因 ],
   merged_from[ skill_id ... ](仅整理产物)
 
 Exam（考题，schema v2）
@@ -588,7 +591,9 @@ Attempt（作答记录）
 **对象 schema 的历史**：v1→v2（2026-10-15）Skill 升 `source_subtasks`、
 Exam 升 `skill_id`；Trajectory 于 2026-10-16（R2b）升 v2：三值运行状态改为
 `correctness: true / false / null`，基础设施失败改走 `InfrastructureError`
-异常通道。旧记录的读取迁移显式做在 `core/models.py`（v1 的 success /
+异常通道；Skill 于 2026-10-17（技能文件夹 M1）升 v3：加一句话摘要
+`summary`，v2 旧记录迁移时显式置空。旧记录的读取迁移显式做在
+`core/models.py`（v1 的 success /
 failure 行读取时迁移，v1 的 infra_error 行按 K1 契约本就不该存在、明确拒载；
 v1 Skill / Exam 走同一文件里的迁移纯函数），不静默读成默认值。
 

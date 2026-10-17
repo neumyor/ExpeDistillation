@@ -217,14 +217,16 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
 # drift when tests/unit/stages/test_pipeline.py's fixtures evolve)
 # ---------------------------------------------------------------------------
 
-#: One valid JSON-contract payload per G2 mode (protocol v2): the fake
-#: answers satisfy the same contract the real model is held to.
+#: One valid JSON-contract payload per G2 mode (protocol v2 + the
+#: schema v3 summary): the fake answers satisfy the same contract the
+#: real model is held to.
 _DISTILL_SECTIONS = {
     "when_to_use": "when a service reports an unexpected state",
     "steps": ["inspect the reported state",
               "run the command that matches the state"],
     "verify": "the service reports the expected state",
     "not_applicable_when": "no state was reported",
+    "summary": "inspect the reported service state before acting on it",
 }
 _DIAGNOSE_SECTIONS = {
     "trigger": "acting on a report without inspecting it first",
@@ -232,6 +234,7 @@ _DIAGNOSE_SECTIONS = {
     "do_instead": ["inspect the reported state",
                    "run the command that matches the state"],
     "not_applicable_when": "the state was already inspected",
+    "summary": "never act on a report before inspecting it",
 }
 
 
@@ -265,6 +268,8 @@ def _script(system: str, user: str) -> str:
             "skill_text": original + "\n" + G11_REVISION_MARKER +
                           ": name the concrete state before acting.",
             "revision_reason": "made the trigger condition concrete",
+            "summary": "name the concrete state before acting on it "
+                       "(revised)",
         })
     # -- the exam conversation ----------------------------------------
     if user.startswith("You are given the view"):
@@ -305,6 +310,8 @@ def _script(system: str, user: str) -> str:
             "failure_category": "misread",
             "skill_text": original,
             "rewrite_reason": "Shorter sentences.",
+            "summary": "inspect the reported service state before acting "
+                       "on it",
         })
     if user.startswith("You are curating a bank of skills written for a "
                        "weak model. Find"):

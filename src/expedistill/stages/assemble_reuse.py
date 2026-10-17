@@ -1423,10 +1423,11 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     subtasks = {
         obj_id: Subtask.from_dict(record) for obj_id, record
         in _source_objects(source_run, "subtasks").items()}
-    # Skills load through the v1->v2 migration: a pre-v2 source run's
+    # Skills load through the old-schema migration: a pre-v2 source run's
     # merge products cannot go through from_dict alone (their
     # source_subtasks needs the sibling records), so every raw row is
-    # migrated first -- v2 rows pass through unchanged. The batch wrapper
+    # migrated first -- current-schema rows pass through unchanged. The
+    # batch wrapper
     # owns the sibling map; a row that cannot migrate is a corrupt source
     # (ConfigError, the family of every other source-integrity refusal).
     skill_rows = _source_objects(source_run, "skills")
@@ -1441,7 +1442,8 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
     except ValueError as exc:
         raise ConfigError(
             f"an object row of the source run {source_run} cannot "
-            f"migrate to schema v2: {exc}; the source is corrupt") from exc
+            f"migrate to the current skill schema: {exc}; the source is "
+            "corrupt") from exc
     attempts = {
         obj_id: Attempt.from_dict(record) for obj_id, record
         in _source_objects(source_run, "attempts").items()}
@@ -1495,8 +1497,8 @@ def assemble_reuse(source_run: Path, config_path: Path, run_dir: Path,
         except ValueError as exc:
             raise ConfigError(
                 f"bank row {row_skill_id!r} of the source run "
-                f"{source_run} cannot migrate to schema v2: {exc}; the "
-                "source is corrupt") from exc
+                f"{source_run} cannot migrate to the current skill "
+                f"schema: {exc}; the source is corrupt") from exc
         if row_obj.to_dict() != stored.to_dict():
             raise ConfigError(
                 f"bank row {row_skill_id!r} differs from the stored skill "

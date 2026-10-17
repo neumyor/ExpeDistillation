@@ -138,7 +138,10 @@ Work in two steps:
    [Why it fails]/[Do instead]/[Do not use when] for a failure reference):
    rewrite each section's content, never collapse them into prose.
    Reproduce the bracketed section headers exactly as written, each on its
-   own line.
+   own line. Then write a fresh one-line summary of the REWRITTEN skill
+   (what it is and does, one sentence): the content changed, so the
+   skill's directory line must describe what it now says, not what it
+   used to say. Keep the summary on one line.
 
 Hard constraint: do NOT copy the specific values, file names, entity names,
 or other concrete details of THIS task's trajectory into the skill. The
@@ -150,7 +153,8 @@ specifics are wrong.
 Output ONLY JSON with exactly these fields:
 {{"failure_category": "<misread|missing_step|wrong_trigger|other>",
   "skill_text": "<the rewritten skill, plain text>",
-  "revision_reason": "<one or two sentences: what you changed and why>"}}
+  "revision_reason": "<one or two sentences: what you changed and why>",
+  "summary": "<one line: what the rewritten skill is and does>"}}
 """,
         description=(
             "G11 live-run skill revision: classify the live failure "

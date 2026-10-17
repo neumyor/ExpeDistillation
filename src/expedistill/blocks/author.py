@@ -37,8 +37,17 @@ continuation lines at column 0.
 G6 deliberately returns a plain dict instead of a new Skill and never mutates
 its argument: version bumps and ``rewrite_history`` appends are bookkeeping,
 which belongs to the composites (K4), not to this block. The rewrite-history
-entry shape is pinned as ``{content, error_category, reason}`` where
-``content`` is the PREVIOUS version's text.
+entry shape is pinned as ``{content, summary, error_category, reason}`` where
+``content`` and ``summary`` are the PREVIOUS version's text and one-liner
+(the old summary is evidence of what the reading agent saw before the
+rewrite).
+
+Schema v3 (skill-folder M1, 2026-10-17): every G2 / G6 output also carries
+``summary`` -- ONE line saying what the skill IS (the directory line), not
+when to apply it. It is not a fifth section: it never enters the rendered
+content, and the summary contract (non-empty, no newline, at most
+SKILL_SUMMARY_MAX_CHARS) is enforced by ``_validate_summary`` in
+validate_skill_sections and rewrite_skill alike.
 """
 
 import re
@@ -49,6 +58,7 @@ from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import (
     FAILURE_REFERENCE_MARKERS,
     PROCEDURE_MARKERS,
+    SKILL_SUMMARY_MAX_CHARS,
     Exam,
     Skill,
     Subtask,
@@ -59,6 +69,7 @@ from expedistill.llm.call import ModelHandle, call_model
 __all__ = [
     "FAILURE_CATEGORIES",
     "SKILL_SECTION_FIELDS",
+    "SKILL_SUMMARY_FIELD",
     "gen_exam",
     "render_skill_content",
     "rewrite_skill",
@@ -88,6 +99,13 @@ _CHECKLIST_FIELDS: Dict[str, str] = {
     "distill": "steps",
     "diagnose": "do_instead",
 }
+
+#: The non-section field every G2 / G6 output carries alongside the four
+#: sections (schema v3): the skill's one-line directory entry. Pinned by
+#: the SKILL_DISTILL / SKILL_DIAGNOSE / REWRITE prompts' output contracts;
+#: blocks/attribution.py mirrors it for LIVE_SKILL_REVISION (blocks may
+#: not import each other, a unit test pins the mirror).
+SKILL_SUMMARY_FIELD = "summary"
 
 #: A checklist item's own "1. " / "12) " prefix. The G2 prompts forbid
 #: self-numbering, but a stray one is stripped rather than double-numbered.
@@ -228,23 +246,58 @@ def _reject_bad_text(mode: str, where: str, value: str) -> None:
                     f"{line_number}: {value!r}")
 
 
+def _validate_summary(where: str, value: Any) -> str:
+    """Validate one model-written skill summary; return the stored form.
+
+    The schema v3 contract (skill-folder M1): a non-empty string, ONE
+    line (the directory entry is a single line, so any embedded newline
+    -- after the same ``_normalize_newlines`` pass the sections get, so a
+    stray \\r is caught too -- is a format error), and at most
+    SKILL_SUMMARY_MAX_CHARS. The returned value is the stripped,
+    newline-normalized line that lands in ``Skill.summary``.
+    """
+    if not isinstance(value, str):
+        raise ModelOutputError(
+            f"{where}: field {SKILL_SUMMARY_FIELD!r} must be a string, "
+            f"got {value!r}")
+    summary = _normalize_newlines(value).strip()
+    if not summary:
+        raise ModelOutputError(
+            f"{where}: field {SKILL_SUMMARY_FIELD!r} must be a non-empty "
+            f"string, got {value!r}")
+    if "\n" in summary:
+        raise ModelOutputError(
+            f"{where}: field {SKILL_SUMMARY_FIELD!r} must be ONE line "
+            "(the skill's directory entry); got a value with an embedded "
+            f"newline: {value!r}")
+    if len(summary) > SKILL_SUMMARY_MAX_CHARS:
+        raise ModelOutputError(
+            f"{where}: field {SKILL_SUMMARY_FIELD!r} must be at most "
+            f"{SKILL_SUMMARY_MAX_CHARS} characters, got {len(summary)}")
+    return summary
+
+
 def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
     """Field-level validation of one parsed G2 response (protocol v2).
 
     ``sections`` must be a dict (extract_json can return a top-level
-    array); the mode's required keys (SKILL_SECTION_FIELDS) must be
-    present; every string field must be a non-empty string; the checklist
-    field (steps / do_instead) a non-empty list of strings, each stripped
-    of a leading self-numbering ("1. ", "12) ") and then non-empty.
+    array); the mode's required keys (SKILL_SECTION_FIELDS) plus the
+    schema v3 ``summary`` field must be present; every string field must
+    be a non-empty string; the checklist field (steps / do_instead) a
+    non-empty list of strings, each stripped of a leading
+    self-numbering ("1. ", "12) ") and then non-empty.
     Values MAY span multiple lines (the 2026-10-13 incident: the newline
     rejection was over-strict); what is checked instead is that NO line of
     a normalized value STARTS WITH any section marker: the renderer emits
     continuation lines at column 0, and a forged marker at a line start
     would make skill_markers read a legal skill as None and silently
-    disarm the rewrite/K5 marker checks. The checked bytes are the same
-    ``_normalize_newlines`` bytes the renderer will write. Extra keys are
-    ignored (lenient read, gen_exam precedent) but the checklist type
-    check is never skipped. Raises ModelOutputError otherwise.
+    disarm the rewrite/K5 marker checks. The summary is the one field the
+    multi-line license does NOT cover: it is a directory line, so
+    ``_validate_summary`` rejects any embedded newline. The checked bytes
+    are the same ``_normalize_newlines`` bytes the renderer will write.
+    Extra keys are ignored (lenient read, gen_exam precedent) but the
+    checklist type check is never skipped. Raises ModelOutputError
+    otherwise.
     """
     if mode not in SKILL_SECTION_FIELDS:
         raise ValueError(
@@ -253,7 +306,7 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
         raise ModelOutputError(
             f"write_skill(mode={mode!r}): sections must be a JSON object, "
             f"got {type(sections).__name__}")
-    for key in SKILL_SECTION_FIELDS[mode]:
+    for key in SKILL_SECTION_FIELDS[mode] + (SKILL_SUMMARY_FIELD,):
         if key not in sections:
             raise ModelOutputError(
                 f"write_skill(mode={mode!r}): missing required field "
@@ -285,6 +338,8 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
                     f"non-empty string, got {value!r}")
             _reject_bad_text(mode, f"field {key!r}",
                              _normalize_newlines(value).strip())
+    _validate_summary(f"write_skill(mode={mode!r})",
+                      sections[SKILL_SUMMARY_FIELD])
 
 
 def write_skill(
@@ -319,7 +374,9 @@ def write_skill(
 
     The named prompt returns JSON; the parsed dict is validated by
     validate_skill_sections and rendered by render_skill_content, whose
-    marker text is what lands in ``Skill.content``. Field-level failures
+    marker text is what lands in ``Skill.content``. The response's
+    ``summary`` (schema v3) lands verbatim -- stripped and
+    newline-normalized -- in ``Skill.summary``. Field-level failures
     raise ModelOutputError and are terminal for the unit (gen_exam
     precedent): call_model's format retries only cover JSON parsing,
     never field content.
@@ -369,6 +426,8 @@ def write_skill(
         content=render_skill_content(mode, parsed),
         subtask_id=subtask.subtask_id,
         source_subtasks=[subtask.subtask_id],
+        summary=_validate_summary(f"write_skill(mode={mode!r})",
+                                  parsed[SKILL_SUMMARY_FIELD]),
         version=1,
         status="pending",
         rewrite_history=[],
@@ -437,9 +496,12 @@ def rewrite_skill(
     """Rewrite a failed skill (G6); returns the new version's fields.
 
     No reference answer is ever passed in (README stage 4). The returned dict
-    is ``{"content", "failure_category", "rewrite_reason"}``; the caller (K4)
-    owns bumping ``skill.version`` and appending to ``rewrite_history``. The
-    ``Skill`` argument is left untouched.
+    is ``{"content", "failure_category", "rewrite_reason", "summary"}``;
+    the caller (K4) owns bumping ``skill.version`` and appending to
+    ``rewrite_history`` (storing the OLD summary alongside the old
+    content). The ``summary`` value is the rewritten skill's fresh
+    one-liner (schema v3): the content changed, so the old line no longer
+    describes the skill. The ``Skill`` argument is left untouched.
 
     Protocol v2 keeps the skill's structure: when the original content
     carries a section-marker set (every stored v2 skill does), the
@@ -489,9 +551,11 @@ def rewrite_skill(
         raise ModelOutputError(
             f"REWRITE: field 'rewrite_reason' must be a string, "
             f"got {rewrite_reason!r}")
+    summary = _validate_summary("REWRITE", parsed.get(SKILL_SUMMARY_FIELD))
 
     return {
         "content": new_text,
         "failure_category": failure_category,
         "rewrite_reason": rewrite_reason,
+        "summary": summary,
     }

@@ -187,8 +187,10 @@ class TestSkill:
             version=3,
             discard_reason="retry_exhausted" if status == "discarded" else None,
             group="filesystem",
+            summary="check the config before editing it",
             rewrite_history=[
-                {"content": "old text", "error_category": "missing step",
+                {"content": "old text", "summary": "old one-liner",
+                 "error_category": "missing step",
                  "reason": "spelled out the intermediate cd"}],
             merged_from=["traj/tb:t/strong/00/seg00/skill"],
         )
@@ -198,6 +200,7 @@ class TestSkill:
         skill = make_skill()
         assert skill.version == 1
         assert skill.status == "pending"
+        assert skill.summary == ""
         assert skill.discard_reason is None
         assert skill.group is None
         assert skill.rewrite_history == []
@@ -319,7 +322,7 @@ class TestSkillSectionMarkers:
 
 
 # ---------------------------------------------------------------------------
-# v1 -> v2 migration (schema bump 2026-10-15)
+# v1 -> v2 migration (schema bump 2026-10-15; the chain now lands on v3)
 # ---------------------------------------------------------------------------
 
 _SUB_A = "traj/tb:t1/strong/00/seg00"
@@ -448,7 +451,7 @@ class TestV1ToV2Migration:
             _v1_merge_row("bank/merge/0001",
                           ["bank/merge/0000", make_skill_id(_SUB_C)]),
             _v1_segment_row(_SUB_C),
-            make_skill().to_dict(),  # a v2 row passes through
+            make_skill().to_dict(),  # a current-schema row passes through
         ]
         migrated = migrate_skill_rows(rows)
         assert [row["skill_id"] for row in migrated] == [
@@ -458,7 +461,7 @@ class TestV1ToV2Migration:
         assert all(row["schema_version"] == SKILL_SCHEMA_VERSION
                    for row in migrated)
         # The nested merge resolves its transitive sources through the
-        # map the wrapper built; the v2 row is the SAME object.
+        # map the wrapper built; the current-schema row is the SAME object.
         assert migrated[3]["source_subtasks"] == [_SUB_A, _SUB_B, _SUB_C]
         assert migrated[5] is rows[5]
 
@@ -492,3 +495,70 @@ class TestV1ToV2Migration:
         assert merged_source_subtasks([["b", "a"], ["a", "c"]]) \
             == ["b", "a", "c"]
         assert merged_source_subtasks([]) == []
+
+
+# ---------------------------------------------------------------------------
+# v2 -> v3 migration (schema bump 2026-10-17, skill-folder M1)
+# ---------------------------------------------------------------------------
+
+def _v2_segment_row(subtask_id, content="c", summary=None):
+    """A stored v2 skill row: exactly the fields a pre-v3 run wrote
+    (no summary), optionally with a stray summary key."""
+    row = {
+        "skill_id": make_skill_id(subtask_id),
+        "content": content,
+        "subtask_id": subtask_id,
+        "source_subtasks": [subtask_id],
+        "version": 1,
+        "status": "accepted",
+        "discard_reason": None,
+        "group": None,
+        "rewrite_history": [],
+        "merged_from": [],
+        "schema_version": 2,
+    }
+    if summary is not None:
+        row["summary"] = summary
+    return row
+
+
+class TestV2ToV3Migration:
+    def test_from_dict_clears_the_summary(self):
+        # The M1 alignment ruling: a v2 skill never carried a summary,
+        # and the honest migration is the EMPTY string -- M2's folder
+        # rendering falls back to the [When to use] section for those.
+        # Explicit (the v2 row goes through a migration function), never
+        # a silent dataclass default.
+        skill = Skill.from_dict(_v2_segment_row(_SUB_A, content="check"))
+        assert skill.summary == ""
+        assert skill.schema_version == SKILL_SCHEMA_VERSION
+        assert skill.source_subtasks == [_SUB_A]
+        assert skill.content == "check"
+        assert skill.status == "accepted"
+
+    def test_from_dict_keeps_a_summary_key_a_v2_row_already_carried(self):
+        # Dropping data a record actually holds would be worse than
+        # honoring it: a v2 row with a summary key is not a clean v2
+        # row, but its bytes are real.
+        skill = Skill.from_dict(
+            _v2_segment_row(_SUB_A, summary="a stray one-liner"))
+        assert skill.summary == "a stray one-liner"
+        assert skill.schema_version == SKILL_SCHEMA_VERSION
+
+    def test_migrate_record_clears_the_summary(self):
+        row = _v2_segment_row(_SUB_A, content="check")
+        migrated = migrate_skill_record(row, {})
+        assert migrated["summary"] == ""
+        assert migrated["schema_version"] == SKILL_SCHEMA_VERSION
+        assert Skill.from_dict(migrated).summary == ""
+
+    def test_migrate_rows_migrates_a_v2_run(self):
+        rows = [_v2_segment_row(_SUB_A), _v2_segment_row(_SUB_B)]
+        migrated = migrate_skill_rows(rows)
+        assert all(row["summary"] == "" for row in migrated)
+        assert all(row["schema_version"] == SKILL_SCHEMA_VERSION
+                   for row in migrated)
+
+    def test_current_schema_rows_pass_through_unchanged(self):
+        row = make_skill(summary="the current shape").to_dict()
+        assert migrate_skill_record(row, {}) is row
