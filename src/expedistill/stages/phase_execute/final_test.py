@@ -13,6 +13,7 @@ from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.base import Task
 from expedistill.blocks import metrics as metrics_block
 from expedistill.composites import decision, shortfall
+from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.core import ids
 from expedistill.core.config import (
     FRESH_BARE,
@@ -20,7 +21,8 @@ from expedistill.core.config import (
     ExecutePhaseSpec,
     PhaseInstance,
 )
-from expedistill.core.models import Trajectory
+from expedistill.core.contracts import ExecutionUnitRow
+from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -69,6 +71,27 @@ def _missing_units(expected: Dict[str, int],
             for attempt in range(expected[task_id])
             if ids.make_trajectory_id(task_id, "weak", attempt)
             not in stored]
+
+
+def _materialize_folder(ctx: StageContext, phase: PhaseInstance,
+                        bank: Sequence[Skill],
+                        rows: Sequence[ExecutionUnitRow]
+                        ) -> Optional[str]:
+    """The phase's skill folder materialized under its phase directory
+    (the folder delivery's rows share one manifest), or None when the
+    rows carry no folder or the accepted bank is empty.
+
+    The composite's fingerprint gate holds the bank version: a bank that
+    moved under the manifest is a CodeBugError, never a silently wrong
+    folder."""
+    manifest = next(
+        (row.aux.get("skill_folder") for row in rows
+         if row.aux.get("skill_folder")), None)
+    if manifest is None or not manifest.get("files"):
+        return None
+    directory = materialize_skill_folder(
+        manifest, bank, _phase_dir(ctx, phase) / "skill_folder")
+    return str(directory)
 
 
 def _run_test(ctx: StageContext, phase: PhaseInstance,
@@ -149,9 +172,19 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
         # reads.
         delivery.write_audit(ctx.run_dir,
                              audit_rows(bank, tasks, delivery_params))
+    # The folder delivery's manifest (the real_folder execution, M3):
+    # every row shares one phase-level manifest, so ONE materialization
+    # before dispatch serves every unit (idempotent across resumes --
+    # unchanged bytes are not rewritten). The materialized directory is
+    # what the capable plugin carries into its run environment; an empty
+    # accepted bank has no files, so nothing materializes and the units
+    # run bare (the D9 empty-injection lesson, honoured at the engine's
+    # attach step).
+    folder_dir = _materialize_folder(ctx, phase, bank, rows)
     plans = _plan_units(rows, tasks_by_ref, phase_label=phase.label,
                         benchmark=benchmark, role="weak",
-                        n_attempts=n_attempts)
+                        n_attempts=n_attempts,
+                        skill_folder_dir=folder_dir)
     _write_units(ctx, phase, [plan.unit for plan in plans])
     _dispatch_arm(ctx, phase, plans=plans, store=with_bank_store,
                   arm="with_bank", skip_unit_ids=with_bank_accepted)

@@ -90,7 +90,8 @@ class _Plan:
 def _plan_units(rows: Sequence[ExecutionUnitRow],
                 tasks: Optional[Dict[str, Task]], *,
                 phase_label: str, benchmark: str, role: str,
-                n_attempts: int) -> List[_Plan]:
+                n_attempts: int,
+                skill_folder_dir: Optional[str] = None) -> List[_Plan]:
     """Rebuild each delivery row's full frozen unit id (verdicts' frozen
     rule; the row's task ref and sha8 already carry the pieces -- the
     P2 ruling's one rebuild site) and pair it with its Task object when
@@ -100,7 +101,18 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
     answers whatever identity its tasks carried (a Task object's raw
     id, a prefixed id, an exam ref), while the frozen unit id, the
     trajectory ids and the reports all speak the prefixed form. Exam
-    refs pass through unchanged (they are not task ids)."""
+    refs pass through unchanged (they are not task ids).
+
+    A row whose aux carries the folder delivery's manifest (the
+    real_folder execution, M3) gets it attached to its plan's Task meta
+    together with ``skill_folder_dir`` -- the materialized folder's
+    local path, which the CALLER materialized before dispatch (the
+    phase driver owns the bank the manifest resolves against). The
+    manifest with no files is the delivery's null state (an empty
+    accepted bank): no attachment, the unit runs bare -- the D9
+    empty-injection lesson, never a guidance claiming skills that do
+    not exist. A manifest with files but no directory is a wiring bug,
+    not a configuration problem."""
     plans: List[_Plan] = []
     for row in rows:
         ref = row.task_ref
@@ -113,6 +125,18 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     f"delivery resolved unit {row.unit_id!r} outside the "
                     "phase's task set; the driver and the delivery "
                     "disagree")
+        task = tasks[ref] if tasks is not None else None
+        manifest = row.aux.get("skill_folder") if row.aux else None
+        if manifest is not None and manifest.get("files"):
+            if skill_folder_dir is None or task is None:
+                raise CodeBugError(
+                    f"delivery resolved unit {row.unit_id!r} with a skill "
+                    "folder but the phase passes no materialized "
+                    "directory: materialize the folder before dispatch "
+                    "(the manifest resolves against the phase bank)")
+            task = replace(task, meta={**task.meta,
+                                       "skill_folder": manifest,
+                                       "skill_folder_dir": skill_folder_dir})
         plans.append(_Plan(
             unit=replace(
                 row,
@@ -121,7 +145,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     phase_label=phase_label, benchmark=benchmark,
                     task_ref=ref, role=role,
                     skills_injected=row.skills_injected)),
-            role=role, task=tasks[ref] if tasks is not None else None,
+            role=role, task=task,
             n_attempts=n_attempts))
     plans.sort(key=lambda plan: plan.unit.unit_id)
     return plans

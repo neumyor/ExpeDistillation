@@ -15,6 +15,14 @@ runner script there is the real remote entry point):
    ``<TBENCH_SKILL_ROOT>/<task>/SKILL.md`` and injects it into the agent's
    task prompt, so the remote agent sees the skills block as part of its
    task prompt. Bare runs (empty block) use ``TBENCH_EVAL_MODE=bare``.
+   **Skill-folder units (the real_folder execution, M3)** ride the same
+   mechanism: the SKILL.md carries the folder GUIDANCE
+   (``TB_SKILL_FOLDER_GUIDANCE`` -- never the catalog text), and the
+   manifest's catalog.md and skill files are uploaded beside it into the
+   same per-run directory, which the environment mounts into the sandbox
+   read-only at ``/opt/openclaw-skills/<task>/``; the agent cats what it
+   needs, every command stays in the recorded terminal session, and the
+   plugin neither intercepts nor budgets the reads (M4 parses them).
 2. **Launch**: one ssh round trip runs ``nohup setsid env <VARS> bash
    <runner> > <root>/logs/<run_id>.log 2>&1 < /dev/null & echo $!``. The
    runner is detached from the ssh session, so a dropped connection cannot
@@ -462,6 +470,42 @@ def _q(value: str) -> str:
     return shlex.quote(str(value))
 
 
+#: The task-meta keys the M3 stage wiring attaches to a folder unit (the
+#: delivery manifest and the materialized folder's local path). A task
+#: carrying the manifest is a folder unit; the pair travels the plugin's
+#: own opaque meta channel, so the plugins that never read it never see
+#: a folder unit.
+_FOLDER_MANIFEST_KEY = "skill_folder"
+_FOLDER_DIR_KEY = "skill_folder_dir"
+
+
+def _folder_of(task: Task) -> Optional[Tuple[Dict[str, Any], Path]]:
+    """A folder unit's (manifest, materialized local directory), or None.
+
+    The stage wiring (phase_execute) attaches both keys to every folder
+    unit's task before K1 dispatch; the manifest is the folder delivery's
+    ``aux["skill_folder"]`` (a NAME mapping -- no skill bodies -- plus
+    the catalog text and the bank fingerprint) and the directory is what
+    ``materialize_skill_folder`` wrote from it. A manifest without the
+    directory (or the other way round) is a wiring bug, not a
+    configuration problem."""
+    meta = task.meta if isinstance(task.meta, dict) else {}
+    manifest = meta.get(_FOLDER_MANIFEST_KEY)
+    if manifest is None:
+        return None
+    if not isinstance(manifest, dict):
+        raise CodeBugError(
+            f"task {task.task_id!r} carries {_FOLDER_MANIFEST_KEY!r} but "
+            f"it is not the folder manifest mapping, got {manifest!r}")
+    folder_dir = meta.get(_FOLDER_DIR_KEY)
+    if not isinstance(folder_dir, str) or not folder_dir:
+        raise CodeBugError(
+            f"the folder unit {task.task_id!r} carries a folder manifest "
+            f"but no {_FOLDER_DIR_KEY!r}: the phase driver must "
+            "materialize the folder before dispatch")
+    return manifest, Path(folder_dir)
+
+
 def runner_env(run_id: str, jobs_dir: str, retry_archive_root: str,
                task_name: str, model_name: str, eval_mode: str,
                skill_root: Optional[str]) -> Dict[str, str]:
@@ -608,6 +652,13 @@ class TBPlugin(BenchmarkPlugin):
         workdir.mkdir(parents=True, exist_ok=True)
         link = self._link if self._link is not None else RemoteLink()
         run_id = self._make_run_id(task_name, task)
+        # A folder unit rides the skills-mode mechanism with the GUIDANCE
+        # as its SKILL.md (the catalog text is never injected; the
+        # folder's files reach the sandbox beside it -- module docstring,
+        # the skill-folder M3 section).
+        folder = _folder_of(task)
+        skill_md = (TB_SKILL_FOLDER_GUIDANCE if folder is not None
+                    else skills_block)
         poll_seconds = _env_float(POLL_ENV, DEFAULT_POLL_SECONDS,
                                   self._poll_seconds)
         deadline_seconds = _env_float(DEADLINE_ENV, DEFAULT_DEADLINE_SECONDS,
@@ -619,6 +670,8 @@ class TBPlugin(BenchmarkPlugin):
             "task_name": task_name,
             "model": model_name,
             "run_id": run_id,
+            "prompt_name": (self.skill_folder_prompt_name if folder is not None
+                            else self.task_prompt_name),
         }
         try:
             # Root resolution and everything after it goes over the wire, so
@@ -629,10 +682,10 @@ class TBPlugin(BenchmarkPlugin):
             meta["remote_root"] = root
             meta["jobs_dir"] = f"{root}/jobs"
             eval_mode, skill_meta = self._skill_plan(root, run_id, task_name,
-                                                     skills_block)
+                                                     skill_md, folder)
             meta.update(skill_meta)
             record_file = workdir / _RECORD_DIR / f"{run_id}.json"
-            conditions = self._conditions(run_id, eval_mode, skills_block)
+            conditions = self._conditions(run_id, eval_mode, skill_md, folder)
             record = self._read_record(record_file, run_id)
             recorded_pid = record.get("pid") if record else None
             state, found, remote_meta = self._probe(
@@ -655,8 +708,8 @@ class TBPlugin(BenchmarkPlugin):
             else:
                 meta["resumed"] = None
                 self._upload_launch_files(link, root, run_id, skill_meta,
-                                          task_name, skills_block, workdir,
-                                          conditions)
+                                          task_name, skill_md, workdir,
+                                          conditions, folder)
                 pid = self._submit(link, root, run_id, task_name, model_name,
                                    eval_mode,
                                    skill_meta.get("remote_skill_root"))
@@ -680,7 +733,8 @@ class TBPlugin(BenchmarkPlugin):
                 # Usage-ledger label (pre-R2b rows say "infra_error";
                 # both simply count as a non-ok row).
                 self._record_usage(handle, run_id, task_name, (None, None),
-                                   "infra")
+                                   "infra",
+                                   prompt_name=meta.get("prompt_name"))
             raise
         # deadline / dead runner (outside the transport handler above: the
         # failure raised here must not be re-caught and usage-recorded
@@ -695,7 +749,7 @@ class TBPlugin(BenchmarkPlugin):
         # Usage-ledger label (pre-R2b rows say "infra_error"; both
         # simply count as a non-ok row).
         self._record_usage(handle, run_id, task_name, (None, None),
-                           "infra")
+                           "infra", prompt_name=meta.get("prompt_name"))
         if outcome[0] == "deadline":
             raise InfrastructureError(
                 f"TB rollout {run_id} exceeded the "
@@ -785,11 +839,21 @@ class TBPlugin(BenchmarkPlugin):
         return root
 
     def _skill_plan(self, root: str, run_id: str, task_name: str,
-                    skills_block: str) -> Tuple[str, Dict[str, Any]]:
+                    skill_md: str,
+                    folder: Optional[Tuple[Dict[str, Any], Path]]
+                    ) -> Tuple[str, Dict[str, Any]]:
         """The eval mode and where the run's SKILL.md lives remotely. Pure:
         a reused or rejoined run reports the same provenance without
-        uploading anything."""
-        if not skills_block.strip():
+        uploading anything.
+
+        A folder unit (``folder`` is its (manifest, local directory)) rides
+        the skills mode: its SKILL.md is the GUIDANCE (the caller passes
+        it as ``skill_md``), and the manifest's catalog and skill files
+        reach the sandbox beside it through the same per-run directory.
+        The trajectory keeps every terminal command, so what the agent
+        actually cat'd stays in the record for M4's parsing -- execution
+        here neither intercepts nor budgets the reads."""
+        if not skill_md.strip():
             return "bare", {"eval_mode": "bare", "skills_injected": False}
         remote_dir = f"{root}/skills/{run_id}"
         # The E2B skill env looks the skill directory up by the environment
@@ -801,7 +865,7 @@ class TBPlugin(BenchmarkPlugin):
         # Both spellings are therefore uploaded; the meta records the dashed
         # alias when one exists.
         dash_alias = task_name.replace(".", "-")
-        return "skills", {
+        meta: Dict[str, Any] = {
             "eval_mode": "skills",
             "skills_injected": True,
             "remote_skill_root": remote_dir,
@@ -810,15 +874,30 @@ class TBPlugin(BenchmarkPlugin):
                 f"{remote_dir}/{dash_alias}/SKILL.md"
                 if dash_alias != task_name else None),
         }
+        if folder is not None:
+            manifest, folder_dir = folder
+            meta["skill_folder"] = {
+                "local_dir": str(folder_dir),
+                "bank_fingerprint": manifest.get("bank_fingerprint"),
+                "catalog_filename": manifest.get("catalog_filename"),
+                "files": [entry.get("filename")
+                          for entry in manifest.get("files", [])],
+            }
+        return "skills", meta
 
     def _upload_launch_files(self, link: RemoteLink, root: str, run_id: str,
                              skill_meta: Dict[str, Any], task_name: str,
-                             skills_block: str, workdir: Path,
-                             conditions: Dict[str, Any]) -> None:
-        """Fresh launches only: upload the skills block as the run's
-        SKILL.md (the D9 block verbatim; the remote skill agent wraps it into
-        the agent's task prompt), then the remote submit meta -- last, so a
-        meta on the remote side means everything else is already there."""
+                             skill_md: str, workdir: Path,
+                             conditions: Dict[str, Any],
+                             folder: Optional[Tuple[Dict[str, Any], Path]]
+                             ) -> None:
+        """Fresh launches only: upload the run's SKILL.md (the D9 block
+        verbatim, or the folder GUIDANCE for a folder unit; the remote
+        skill agent wraps it into the agent's task prompt), a folder
+        unit's catalog and skill files beside it (the whole per-run
+        directory reaches the sandbox -- module docstring), then the
+        remote submit meta -- last, so a meta on the remote side means
+        everything else is already there."""
         dirs = [f"{root}/jobs"]
         if skill_meta["eval_mode"] == "skills":
             dirs.append(f"{skill_meta['remote_skill_root']}/{task_name}")
@@ -835,32 +914,90 @@ class TBPlugin(BenchmarkPlugin):
         if skill_meta["eval_mode"] == "skills":
             local = workdir / "skills" / task_name / "SKILL.md"
             local.parent.mkdir(parents=True, exist_ok=True)
-            local.write_text(skills_block, encoding="utf-8")
+            local.write_text(skill_md, encoding="utf-8")
             link.put(str(local), skill_meta["remote_skill_file"],
                      timeout=SUBMIT_TIMEOUT_SECONDS)
             alias_file = skill_meta.get("remote_skill_alias_file")
             if alias_file:
                 link.put(str(local), alias_file,
                          timeout=SUBMIT_TIMEOUT_SECONDS)
+            if folder is not None:
+                self._upload_folder_files(link, run_id, skill_meta,
+                                          task_name, folder)
         local_meta = workdir / _RECORD_DIR / f"{run_id}{_REMOTE_META_SUFFIX}"
         write_json(local_meta, conditions)
         link.put(str(local_meta),
                  f"{root}/jobs/{run_id}{_REMOTE_META_SUFFIX}",
                  timeout=SUBMIT_TIMEOUT_SECONDS)
 
+    def _upload_folder_files(self, link: RemoteLink, run_id: str,
+                             skill_meta: Dict[str, Any], task_name: str,
+                             folder: Tuple[Dict[str, Any], Path]) -> None:
+        """A folder unit's catalog and skill files, from the materialized
+        local directory into the run's remote skill directory (and its
+        dashed alias directory, the same spelling rule SKILL.md follows).
+
+        The manifest is a NAME mapping (no bodies), so the bytes come
+        from the directory the stage materialized; a file the manifest
+        names but the directory lacks is a code bug (the folder on the
+        remote side would be incomplete, and the sandbox env rejects a
+        skill directory without SKILL.md -- a half folder would die in
+        env setup, the 2026-10-13 lesson)."""
+        manifest, folder_dir = folder
+        if not folder_dir.is_dir():
+            raise CodeBugError(
+                f"TB run {run_id}: the folder unit's materialized "
+                f"directory {str(folder_dir)!r} does not exist; the phase "
+                "driver must materialize the folder before dispatch")
+        targets = [f"{skill_meta['remote_skill_root']}/{task_name}"]
+        alias_file = skill_meta.get("remote_skill_alias_file")
+        if alias_file:
+            targets.append(str(Path(alias_file).parent))
+        names = [entry["filename"] for entry in manifest.get("files", [])]
+        catalog_name = manifest.get("catalog_filename")
+        if manifest.get("catalog_text"):
+            names.append(catalog_name)
+        for name in names:
+            local = folder_dir / name
+            if not local.is_file():
+                raise CodeBugError(
+                    f"TB run {run_id}: the materialized folder "
+                    f"{str(folder_dir)!r} is missing {name!r}, which the "
+                    "manifest names -- the folder cannot ship incomplete")
+            for target in targets:
+                link.put(str(local), f"{target}/{name}",
+                         timeout=SUBMIT_TIMEOUT_SECONDS)
+
     # ------------------------------------------------------------------
     # Remote resume
     # ------------------------------------------------------------------
 
-    def _conditions(self, run_id: str, eval_mode: str,
-                    skills_block: str) -> Dict[str, Any]:
+    def _conditions(self, run_id: str, eval_mode: str, skill_md: str,
+                    folder: Optional[Tuple[Dict[str, Any], Path]]
+                    ) -> Dict[str, Any]:
         """What the launch of ``run_id`` depends on beyond the run id:
-        the forwarded runner knobs and the SKILL.md content."""
+        the forwarded runner knobs and the uploaded content's bytes.
+
+        Skills mode digests the SKILL.md; a folder unit additionally
+        folds in the manifest's bank fingerprint and catalog text -- the
+        guidance alone is a constant, and a run id whose folder changed
+        (a re-curated bank) must not be reused as if it were the same
+        trial."""
         knobs = {knob: os.environ.get(knob) or "" for knob in _FORWARDED_KNOBS}
         env_digest = hashlib.sha256(json.dumps(
             knobs, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-        skill_digest = (hashlib.sha256(skills_block.encode("utf-8")).hexdigest()
-                        if eval_mode == "skills" else None)
+        skill_digest = None
+        if eval_mode == "skills":
+            digest_payload = skill_md
+            if folder is not None:
+                manifest = folder[0]
+                digest_payload = "\n".join([
+                    skill_md,
+                    str(manifest.get("bank_fingerprint")),
+                    str(manifest.get("catalog_text")),
+                ])
+            skill_digest = hashlib.sha256(
+                digest_payload.encode("utf-8")).hexdigest()
         return {
             "run_id": run_id,
             "env_sha256": env_digest.hexdigest(),
@@ -1183,7 +1320,7 @@ class TBPlugin(BenchmarkPlugin):
             usage_status = "unscored"
         outcome = RunOutcome(steps=steps, correctness=correctness)
         self._record_usage(handle, run_id, task_name, usage_pair,
-                           usage_status)
+                           usage_status, prompt_name=meta.get("prompt_name"))
         outcome.meta.update(meta)
         return outcome
 
@@ -1238,7 +1375,8 @@ class TBPlugin(BenchmarkPlugin):
 
     def _record_usage(self, handle: Any, run_id: str, task_name: str,
                       usage_pair: Tuple[Optional[int], Optional[int]],
-                      status: str) -> None:
+                      status: str,
+                      prompt_name: Optional[str] = None) -> None:
         """One B7 ledger line per remote rollout; missing Harbor totals are
         recorded as null, never 0.
 
@@ -1254,7 +1392,7 @@ class TBPlugin(BenchmarkPlugin):
         in_tokens, out_tokens = usage_pair
         recorder.record(
             role=str(getattr(handle, "role", "executor")),
-            prompt=self.task_prompt_name,
+            prompt=prompt_name or self.task_prompt_name,
             model=str(handle.name),
             in_tokens=in_tokens,
             out_tokens=out_tokens,

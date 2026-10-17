@@ -999,7 +999,7 @@ def test_deliver_skills_uploads_dash_variant_for_dotted_tasks(tmp_path):
     plugin = TBPlugin()
     link = FakeRemoteLink()
     mode, meta = plugin._skill_plan(ROOT, "ed_t_a00", "install-windows-3.11",
-                                    "## Skill rules\n- test")
+                                    "## Skill rules\n- test", None)
     assert mode == "skills"
     assert meta["remote_skill_alias_file"].endswith(
         "/install-windows-3-11/SKILL.md")
@@ -1008,7 +1008,8 @@ def test_deliver_skills_uploads_dash_variant_for_dotted_tasks(tmp_path):
     plugin._upload_launch_files(
         link, ROOT, "ed_t_a00", meta, "install-windows-3.11",
         "## Skill rules\n- test", tmp_path,
-        {"run_id": "ed_t_a00", "env_sha256": "x", "skill_sha256": "y"})
+        {"run_id": "ed_t_a00", "env_sha256": "x", "skill_sha256": "y"},
+        None)
     dotted = [c[1] for c in link.puts
               if c[1].endswith("/install-windows-3.11/SKILL.md")]
     dashed = [c[1] for c in link.puts
@@ -1016,12 +1017,13 @@ def test_deliver_skills_uploads_dash_variant_for_dotted_tasks(tmp_path):
     assert dotted and dashed, "both spellings must be uploaded"
     # non-dotted names have no alias and upload exactly one SKILL.md
     mode2, meta2 = plugin._skill_plan(ROOT, "ed_t_a00", "fix-git",
-                                      "## Skill rules\n- x")
+                                      "## Skill rules\n- x", None)
     assert meta2["remote_skill_alias_file"] is None
     link2 = FakeRemoteLink()
     plugin._upload_launch_files(
         link2, ROOT, "ed_t_a00", meta2, "fix-git",
         "## Skill rules\n- x", tmp_path,
-        {"run_id": "ed_t_a00", "env_sha256": "x", "skill_sha256": "y"})
+        {"run_id": "ed_t_a00", "env_sha256": "x", "skill_sha256": "y"},
+        None)
     skills_puts = [c[1] for c in link2.puts if c[1].endswith("/SKILL.md")]
     assert len(skills_puts) == 1
