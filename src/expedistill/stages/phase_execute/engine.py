@@ -72,7 +72,14 @@ def _task_objects(ctx: StageContext, raw_ids: Sequence[str]) -> List[Task]:
 def _prefixed_task_map(ctx: StageContext,
                        raw_ids: Sequence[str]) -> Dict[str, Task]:
     """``{prefixed task id: Task}`` over the raw id list (the join of
-    delivery rows, K1's Task objects and the trajectory ids)."""
+    delivery rows, K1's Task objects and the trajectory ids). An empty
+    list is an empty map WITHOUT a plugin call: a live phase whose
+    pending-group universe is empty (an assembled run with a fully
+    accepted bank) resolves zero tasks, and a plugin may legitimately
+    refuse an empty task list (TB does -- empty means "the whole
+    89-task set by accident" is never allowed)."""
+    if not raw_ids:
+        return {}
     return {ids.make_task_id(ctx.config.benchmark, task.task_id): task
             for task in _task_objects(ctx, raw_ids)}
 

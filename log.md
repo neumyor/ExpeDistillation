@@ -928,3 +928,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：folder 版 C 实验的装配干跑（--until-phase 5 + 拒答死端点，任何真实模型调用即失败）暴露：第一个学习相位按"弱失败且库无技能"给 30 个训练任务发了 add 行，29 个被 store 既存技能挡住，但 custom-memory-heap-crash（弱臂 3 成 2、源 run 从未为它产出技能）真实触发了切段与 SKILL_DISTILL 调用——放任下去 B 相位要为这条新技能真实跑 3 次远端测量、终测库可能长成 142 条，实验前提（D/L/B 零调用、C 测冻结 141 条库）失效。根因：_previous_bank 对首学习相位恒返回空库，而装配文档明写的"pre-learn bank fallback"只在交付侧（_bank_skills）实现过。裁决（docs/decisions/prelearn_bank_fallback_20261017.md）：首学习相位没有上一工件时回退读 run 根冻结库——从零 run 此时尚无 run 根库，行为不变；装配 run 的预置 141 条库成为决策输入，add 行 30 → 13 且全部 skipped_existing 零调用，预置库保持冻结；库未锚定覆盖的任务照发 add（回退收窄不挡路）。端到端装配测试期望更新为零行零回执，w2b 新增"覆盖→不发/未覆盖→照发"两例。验收：全套 2203 passed + 4 deselected，ruff 全过；对本次实验实测：首学习相位 add 13 行全 skipped_existing，前段零调用。
 
 工件：`src/expedistill/stages/phase_learn.py`（_previous_bank 回退）、`docs/decisions/prelearn_bank_fallback_20261017.md`、`README.md`（5.6）、`tests/unit/test_w2b_phase_learn.py`（+1 例双断言）、`tests/unit/stages/test_assemble_reuse.py`（端到端期望更新）、本条对应 commit
+
+## 2026-10-17 14:20 — 空任务映射短路，B 相位空待定组宇宙不再碰插件
+
+一段话摘要：零调用冒烟推进到 p03:B 时暴露第三个缺口：装配 run 全库已接受、无任何待定组，B 相位的任务集合为空，_prefixed_task_map 把空列表喂给 TB 插件、被"TB task list is empty"拒绝——这是管道细节（空集→空映射），不是语义守卫（"无组可测"是合法完成态，与"空库是合法库"同理）。修复：_prefixed_task_map 对空列表直接返回空映射、不调用插件；B 相位空宇宙走完空 units + 空报告正常完成。新增 w2a 测试钉住：空待定组宇宙的 live 相位零执行、空单元、空报告、正常完成。修复后冒烟全通：p00–p06 全部零调用完成（拒答死端点验证，任何模型调用即失败），p02 的 13 条 add 全部 skipped_existing，p06 预置工件与 run 根库逐字节相同，库指纹全程 bank:a340288b1562，llm_requests 零文件。验收：全套 2204 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/stages/phase_execute/engine.py`（_prefixed_task_map 空列表短路）、`tests/unit/test_w2a_phase_execute.py`（+1 例）、本条对应 commit

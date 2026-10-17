@@ -592,6 +592,27 @@ def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
     assert reused[0].phase_label == second.label
 
 
+def test_live_phase_with_an_empty_group_universe_completes(
+        monkeypatch, tmp_path):
+    """The assembled-run shape: every bank member accepted, no pending
+    group anywhere -- the live phase has nothing to measure and must
+    COMPLETE (empty units, empty report) instead of feeding an empty
+    task list to the plugin (TB refuses empty lists on purpose)."""
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
+    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    calls_before = len(plugin.calls)
+
+    phase = phase_of(2, "B", live_spec())
+    result = phase_execute.run(ctx, phase)
+
+    assert len(plugin.calls) == calls_before  # zero executions
+    assert result.summary["round"] == 0
+    assert read_jsonl(phase_bank.phase_bank_dir(
+        ctx.run_dir, phase.label) / phase_execute.UNITS_NAME) == []
+    assert report_rows(ctx, phase) == []
+
+
 def test_live_injection_overflow_skips_the_group(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch,
                              PhasePlugin(_weak_baseline_behavior))
