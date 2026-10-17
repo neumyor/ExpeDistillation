@@ -1,0 +1,316 @@
+benchmark: tb
+invalid_redispatch_limit: 1
+mode: split
+model_options:
+  deepseek-v4-flash-0731--ali:
+    reasoning_effort: max
+models:
+  answerer: qwen3.6-flash-distill
+  auditor: deepseek-v4-flash-0731--ali
+  author: deepseek-v4-flash-0731--ali
+  curator: deepseek-v4-flash-0731--ali
+  examiner: deepseek-v4-flash-0731--ali
+  executor_strong: deepseek-v4-flash-0731--ali
+  executor_weak: qwen3.6-flash-distill
+  judge: deepseek-v4-flash-0731--ali
+  rewriter: deepseek-v4-flash-0731--ali
+  segmenter: deepseek-v4-flash-0731--ali
+n_attempts_strong: 3
+n_attempts_weak: 3
+phases:
+  B:
+    acceptance: null
+    compare:
+      against: D
+      rule: strict_rate_gain
+    delivery:
+      name: group_by_task
+    execution:
+      max_injection_tokens: null
+      n_attempts: 3
+      name: real
+    kind: execute
+    role: live
+    tasks: train
+  C:
+    acceptance: null
+    compare:
+      against: fresh_bare
+      rule: null
+    delivery:
+      name: folder
+    execution:
+      name: real_folder
+    kind: execute
+    role: test
+    tasks: test
+  D:
+    acceptance: null
+    compare: null
+    delivery:
+      name: none
+    execution:
+      arms:
+      - executor_strong
+      - executor_weak
+      name: real
+    kind: execute
+    role: baseline
+    tasks: train
+  L:
+    author:
+      name: distill_diagnose
+    curate:
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      token_budget: 96000
+    evidence:
+      K: 5
+      name: segment
+      retry_limit: 2
+    kind: learn
+    role: learn
+prompts_digests: {}
+rules:
+  segment_select: strong_success_weak_failed
+  task_select: any_weak_failed
+  trajectory_select: strong2_weak2
+schema_version: 4
+sequence:
+- D
+- L
+- B
+- L
+- B
+- L
+- C
+split:
+  reserved:
+  - bn-fit-modify
+  - circuit-fibsqrt
+  - cobol-modernization
+  - db-wal-recovery
+  - filter-js-from-html
+  - financial-document-processor
+  - git-multibranch
+  - headless-terminal
+  - install-windows-3.11
+  - make-mips-interpreter
+  - model-extraction-relu-logits
+  - mteb-leaderboard
+  - nginx-request-logging
+  - path-tracing
+  - pytorch-model-recovery
+  - qemu-startup
+  - schemelike-metacircular-eval
+  - sqlite-db-truncate
+  - tune-mjcf
+  - video-processing
+  test:
+  - adaptive-rejection-sampler
+  - build-cython-ext
+  - build-pov-ray
+  - caffe-cifar-10
+  - cancel-async-tasks
+  - compile-compcert
+  - configure-git-webserver
+  - crack-7z-hash
+  - dna-assembly
+  - feal-differential-cryptanalysis
+  - hf-model-inference
+  - kv-store-grpc
+  - large-scale-text-editing
+  - mailman
+  - make-doom-for-mips
+  - mcmc-sampling-stan
+  - modernize-scientific-stack
+  - password-recovery
+  - prove-plus-comm
+  - pytorch-model-cli
+  - qemu-alpine-ssh
+  - regex-chess
+  - regex-log
+  - rstan-to-pystan
+  - sqlite-with-gcov
+  - torch-pipeline-parallelism
+  - vulnerable-secret
+  - winning-avg-corewars
+  train:
+  - break-filter-js-from-html
+  - build-pmars
+  - chess-best-move
+  - code-from-image
+  - constraints-scheduling
+  - count-dataset-tokens
+  - custom-memory-heap-crash
+  - distribution-search
+  - dna-insert
+  - extract-elf
+  - extract-moves-from-video
+  - feal-linear-cryptanalysis
+  - fix-code-vulnerability
+  - fix-git
+  - fix-ocaml-gc
+  - gcode-to-text
+  - git-leak-recovery
+  - gpt2-codegolf
+  - largest-eigenval
+  - llm-inference-batching-scheduler
+  - log-summary-date-ranges
+  - merge-diff-arc-agi-task
+  - mteb-retrieve
+  - multi-source-data-merger
+  - openssl-selfsigned-cert
+  - overfull-hbox
+  - path-tracing-reverse
+  - polyglot-c-py
+  - polyglot-rust-c
+  - portfolio-optimization
+  - protein-assembly
+  - pypi-server
+  - query-optimize
+  - raman-fitting
+  - reshard-c4-data
+  - sam-cell-seg
+  - sanitize-git-repo
+  - sparql-university
+  - torch-tensor-parallelism
+  - train-fasttext
+  - write-compressor
+tasks:
+- adaptive-rejection-sampler
+- bn-fit-modify
+- break-filter-js-from-html
+- build-cython-ext
+- build-pmars
+- build-pov-ray
+- caffe-cifar-10
+- cancel-async-tasks
+- chess-best-move
+- circuit-fibsqrt
+- cobol-modernization
+- code-from-image
+- compile-compcert
+- configure-git-webserver
+- constraints-scheduling
+- count-dataset-tokens
+- crack-7z-hash
+- custom-memory-heap-crash
+- db-wal-recovery
+- distribution-search
+- dna-assembly
+- dna-insert
+- extract-elf
+- extract-moves-from-video
+- feal-differential-cryptanalysis
+- feal-linear-cryptanalysis
+- filter-js-from-html
+- financial-document-processor
+- fix-code-vulnerability
+- fix-git
+- fix-ocaml-gc
+- gcode-to-text
+- git-leak-recovery
+- git-multibranch
+- gpt2-codegolf
+- headless-terminal
+- hf-model-inference
+- install-windows-3.11
+- kv-store-grpc
+- large-scale-text-editing
+- largest-eigenval
+- llm-inference-batching-scheduler
+- log-summary-date-ranges
+- mailman
+- make-doom-for-mips
+- make-mips-interpreter
+- mcmc-sampling-stan
+- merge-diff-arc-agi-task
+- model-extraction-relu-logits
+- modernize-scientific-stack
+- mteb-leaderboard
+- mteb-retrieve
+- multi-source-data-merger
+- nginx-request-logging
+- openssl-selfsigned-cert
+- overfull-hbox
+- password-recovery
+- path-tracing
+- path-tracing-reverse
+- polyglot-c-py
+- polyglot-rust-c
+- portfolio-optimization
+- protein-assembly
+- prove-plus-comm
+- pypi-server
+- pytorch-model-cli
+- pytorch-model-recovery
+- qemu-alpine-ssh
+- qemu-startup
+- query-optimize
+- raman-fitting
+- regex-chess
+- regex-log
+- reshard-c4-data
+- rstan-to-pystan
+- sam-cell-seg
+- sanitize-git-repo
+- schemelike-metacircular-eval
+- sparql-university
+- sqlite-db-truncate
+- sqlite-with-gcov
+- torch-pipeline-parallelism
+- torch-tensor-parallelism
+- train-fasttext
+- tune-mjcf
+- video-processing
+- vulnerable-secret
+- winning-avg-corewars
+- write-compressor
+token_budgets:
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    answerer:
+      max_output_tokens: 5120
+    auditor:
+      max_output_tokens: 65536
+    author:
+      max_output_tokens: 65536
+    curator:
+      max_output_tokens: 65536
+    examiner:
+      max_output_tokens: 65536
+    executor_strong:
+      max_output_tokens: 65536
+    executor_weak:
+      max_output_tokens: 5120
+    judge:
+      max_output_tokens: 65536
+    rewriter:
+      max_output_tokens: 65536
+    segmenter:
+      max_output_tokens: 65536
+weak_profile: 'qwen3.6-flash-distill is a small, fast, distilled terminal agent: in
+  the
+
+  TB2.1 campaign over these 89 tasks it solved 47% of attempts on average
+
+  (avg@5 0.4697) against the strong model''s 63%. Its terminal interaction is
+
+  fragile: 11 of its 13 kept-as-model-failure trials died in the tmux keystroke
+
+  layer (unparseable command rounds, or keystrokes fired before tmux was even
+
+  installed), two more overran the agent time cap (AgentTimeoutError), and it
+
+  intermittently emits unparseable output turns that waste interaction rounds.
+
+  When it does run to completion it writes plausible-looking but subtly wrong
+
+  numerical or statistical code and declares success without validating the
+
+  result against the task''s tests, so skills should give exact commands,
+
+  concrete verification steps, and explicit guards against its early-exit habit.'
