@@ -1269,7 +1269,13 @@ def curate_bank(
                 base = {"round": round_index, "unit": unit_index,
                         "mode": mode, "serial": serial_of[unit_index]}
                 sources, skip = _resolve_group(group, _members)
-                if skip is None:
+                exams: List[Exam] = []
+                if skip is None and merge_check != "none":
+                    # The exam requirement is the 'exam' check's own: under
+                    # merge_check 'none' there is nothing to prove here
+                    # (a live-run sequence has no exam phase, so requiring
+                    # the exams would skip EVERY merge -- the very merges
+                    # the round-1 group re-execution is the proof of).
                     exams, skip = _source_exams(store, sources)
                 if skip is not None:
                     return {"status": "skipped", "base": base, "reason": skip,

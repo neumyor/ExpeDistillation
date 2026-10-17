@@ -331,6 +331,33 @@ def test_produce_agentbrew_merge_check_none_skips_k3(tmp_path):
     assert load_phase_bank(ctx.run_dir, "p01:learn")[0]["skill_id"] == merged_id
 
 
+def test_produce_agentbrew_merge_check_none_needs_no_exams(tmp_path):
+    # The live-run shape: a live-only sequence has NO exam phase, so the
+    # store holds no exams at all -- merge_check 'none' must still keep
+    # the merge (the round-1 group re-execution is its proof). Requiring
+    # the exams here would skip every merge of every live_run curation
+    # with "no stored exam; merge unverifiable" -- the 2026-10-17 smoke
+    # caught exactly that.
+    curate = _agentbrew_curate(merge_check="none")
+    ctx = _make_ctx(tmp_path,
+                    curator=_MERGE_SCRIPTS["curator"],
+                    answerer=[], judge=[])
+    _add_skill(ctx.store, 0, "Check the log file first.")
+    _add_skill(ctx.store, 1, "Look at the log file before anything else.")
+    assert ctx.store.ids("exams") == []
+
+    summary = phase_bank_entry.produce(ctx, curate, "p01:learn")
+
+    merged_id = "bank/merge/0000"
+    assert summary["members"] == [merged_id]
+    assert ctx.store.ids("attempts") == []
+    journal = read_json(phase_bank_dir(ctx.run_dir, "p01:learn")
+                        / "curation_log.json")
+    assert journal["merges"]["skipped"] == 0
+    assert journal["merges"]["kept"] == 1
+    assert load_phase_bank(ctx.run_dir, "p01:learn")[0]["skill_id"] == merged_id
+
+
 def test_produce_agentbrew_second_call_is_a_pure_rewrite(tmp_path):
     # The scripts are consumed by the first call; the second (resume)
     # call must make zero model calls and land on the same artifact.
