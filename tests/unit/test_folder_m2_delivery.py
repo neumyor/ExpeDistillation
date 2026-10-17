@@ -279,10 +279,11 @@ _LEARN = {
 }
 
 
-def _execute(role, tasks, delivery):
+def _execute(role, tasks, delivery, execution=None):
     raw = {"kind": "execute", "role": role, "tasks": tasks,
            "delivery": delivery,
-           "execution": {"name": "exam" if role == "exam" else "real"}}
+           "execution": execution
+           or {"name": "exam" if role == "exam" else "real"}}
     if role == "baseline":
         raw["execution"]["arms"] = ["executor_strong", "executor_weak"]
     return raw
@@ -297,8 +298,11 @@ def _parse_with(role_phase, sequence):
 
 
 def test_a_test_role_phase_may_deliver_the_folder():
+    # Since M3 the folder delivery pairs with the real_folder execution
+    # (checklist item 8's pairing rule), so the C phase parses with it.
     specs = _parse_with(
-        {"C": _execute("test", "test", {"name": FOLDER_DELIVERY_NAME})},
+        {"C": _execute("test", "test", {"name": FOLDER_DELIVERY_NAME},
+                       execution={"name": "real_folder"})},
         ["D", "L", "C"])
     assert specs["C"].delivery["name"] == FOLDER_DELIVERY_NAME
     assert specs["C"].role == PHASE_ROLE_TEST

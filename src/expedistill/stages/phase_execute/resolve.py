@@ -46,7 +46,8 @@ def _resolve_delivery(spec: ExecutePhaseSpec) -> Tuple[Any, Any]:
 def _execution_params(spec: ExecutePhaseSpec) -> Any:
     """The phase's execution parameters through the registry's execution
     family (``real`` -> RealExecutionParams, ``exam`` ->
-    ExamExecutionParams); unknown keys are refused loudly by the
+    ExamExecutionParams, ``real_folder`` -> RealFolderExecutionParams);
+    unknown keys are refused loudly by the
     params builder, the values' contracts by the params classes. The
     params layer speaks core's ConfigError (its stdlib-only
     vocabulary); this stage re-raises it as the infra ConfigError the

@@ -190,6 +190,14 @@ EXECUTION_NAMES = ("real", "exam")
 #: cross-layer literal pattern EXECUTION_NAMES already uses.
 FOLDER_DELIVERY_NAME = "folder"
 
+#: The execution family's ``real_folder`` name: the skill-folder
+#: execution (skill-folder M3), ``real``'s folder twin. Legal on a
+#: test-role execute phase only, and paired one-to-one with the folder
+#: delivery (checklist item 8). Kept out of EXECUTION_NAMES on purpose:
+#: that pair names the executions the OTHER roles may run, and
+#: ``real_folder`` never may.
+FOLDER_EXECUTION_NAME = "real_folder"
+
 #: The control a ``compare`` may name: an earlier phase's local name, or
 #: a bare arm run fresh inside this phase.
 FRESH_BARE = "fresh_bare"
@@ -387,10 +395,9 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
     delivery = _method_mapping(raw.get("delivery"),
                                f"phases.{name}.delivery")
     # Checklist item 8: the folder delivery is a C-phase delivery. The
-    # catalog injection has no paired execution version on the other
-    # roles (M2 delivers it, M3 wires the execution side), and the
-    # alignment ruling pins the play to the final test regardless: A
-    # injects one skill, B a task's whole group, D nothing.
+    # alignment ruling pins the play to the final test: A injects one
+    # skill, B a task's whole group, D nothing. Its real_folder
+    # execution is C-phase-only with it (the pairing check below).
     if delivery["name"] == FOLDER_DELIVERY_NAME and \
             role != PHASE_ROLE_TEST:
         raise ConfigError(
@@ -402,15 +409,36 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
     execution = _method_mapping(raw.get("execution"),
                                 f"phases.{name}.execution")
     exec_name = execution["name"]
-    if exec_name not in EXECUTION_NAMES:
+    if exec_name not in EXECUTION_NAMES + (FOLDER_EXECUTION_NAME,):
         raise ConfigError(
             f"phases.{name}.execution name {exec_name!r} is not one of "
-            f"{list(EXECUTION_NAMES)}")
+            f"{list(EXECUTION_NAMES + (FOLDER_EXECUTION_NAME,))}")
+    # Checklist item 8, second half: the folder delivery and the
+    # real_folder execution are one play, so they pair one-to-one on a
+    # test-role phase -- a folder delivery under the plain real
+    # execution would inject the catalog as a skills block (silently the
+    # wrong experiment), and a real_folder execution over another
+    # delivery would expect a folder no delivery produced.
+    if (delivery["name"] == FOLDER_DELIVERY_NAME) != \
+            (exec_name == FOLDER_EXECUTION_NAME):
+        raise ConfigError(
+            f"phases.{name} declares delivery name {delivery['name']!r} "
+            f"with execution name {exec_name!r}: the skill-folder play "
+            f"pairs delivery {FOLDER_DELIVERY_NAME!r} with execution "
+            f"{FOLDER_EXECUTION_NAME!r}, and nothing else (the other "
+            "deliveries run the plain real execution)")
     # The exam execution is what the exam ROLE measures with; every
-    # other role runs the benchmark for real.
-    expected_exec = (EXECUTION_NAMES[1] if role == PHASE_ROLE_EXAM
-                     else EXECUTION_NAMES[0])
-    if exec_name != expected_exec:
+    # non-test role runs the benchmark for real; a test role may also
+    # run the folder execution (checklist item 8 keeps the folder
+    # delivery -- and with the pairing above, real_folder -- on the
+    # test role alone).
+    if role == PHASE_ROLE_EXAM:
+        expected_exec = EXECUTION_NAMES[1]
+    elif role == PHASE_ROLE_TEST:
+        expected_exec = None  # real or real_folder, the pairing above
+    else:
+        expected_exec = EXECUTION_NAMES[0]
+    if expected_exec is not None and exec_name != expected_exec:
         raise ConfigError(
             f"phases.{name} declares role {role!r} but execution name "
             f"{exec_name!r}; that role runs {expected_exec!r}")
@@ -531,7 +559,11 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
        in-report control);
     8. the ``folder`` delivery appears only on a test-role execute
        phase (the skill-folder delivery is a C-phase delivery; the A, B
-       and D roles keep the existing injection methods).
+       and D roles keep the existing injection methods), and pairs
+       one-to-one with the ``real_folder`` execution: a folder delivery
+       under the plain ``real`` execution, or a ``real_folder``
+       execution over any other delivery, is refused (checklist item 8,
+       skill-folder M3).
 
     Model roles and ``invalid_redispatch_limit`` are ExperimentConfig's
     own checks, not the sequence's.

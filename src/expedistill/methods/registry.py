@@ -82,8 +82,8 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
         _Entry("expedistill.methods.delivery.group_by_task",
                "expedistill.methods.delivery", "GroupByTaskParams"),
     # The skill-folder play (M2): a catalog injection, test role only
-    # (core.config's load-time checklist holds that boundary; the M3
-    # execution version that pairs with it is not in the table yet).
+    # (core.config's load-time checklist holds that boundary and the
+    # pairing with the real_folder execution below).
     ("delivery", "folder"):
         _Entry("expedistill.methods.delivery.folder",
                "expedistill.methods.delivery", "FolderParams"),
@@ -95,6 +95,12 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("execution", "exam"):
         _Entry(None, "expedistill.methods.execution",
                "ExamExecutionParams"),
+    # The skill-folder play (M3): real's folder twin, paired with the
+    # folder delivery by core.config's load-time checklist (test role
+    # only).
+    ("execution", "real_folder"):
+        _Entry(None, "expedistill.methods.execution",
+               "RealFolderExecutionParams"),
     ("evidence", "segment"):
         _Entry(None, "expedistill.methods.evidence",
                "SegmentationParams"),
