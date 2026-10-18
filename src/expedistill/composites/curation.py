@@ -895,6 +895,46 @@ def _skipped(base: Dict[str, Any], reason: str,
             "sources": sources, "merged": None}
 
 
+def _finish_written_bank(store: Store, dest: Optional[Union[str, Path]],
+                         log_path: Path, bank: List[Dict[str, Any]],
+                         ) -> List[Dict[str, Any]]:
+    """The short-circuit for a non-empty written ``bank``: complete a
+    final append a crash interrupted, refresh a dest artifact, refuse a
+    stale bank, and return the bank. No model call."""
+    final_ids = _read_final_member_ids(log_path)
+    if final_ids is not None:
+        have = set(_bank_ids(bank))
+        if not have <= set(final_ids):
+            raise ConfigError(
+                "skill_bank.jsonl contains rows that are not in "
+                "curation_log.json final_member_ids "
+                f"({sorted(have - set(final_ids))}); the bank and the "
+                "curation log disagree -- a human must look at this run")
+        for skill_id in (i for i in final_ids if i not in have):
+            # Crash inside the final append loop: the ledger holds a
+            # prefix of the deterministic rows. Complete it from the
+            # stored records in their OWN on-disk form (same dicts,
+            # same order, no model call): the prefix rows were written
+            # from these same records, so the raw record is the only
+            # form guaranteed to match them across schema versions --
+            # the from_dict roundtrip would migrate a v1 record to v2
+            # (a mixed-version bank) and cannot load a v1 merge
+            # product at all (from_dict lacks the sibling records).
+            _append_bank_row(store, dest,
+                             read_json(store.path_for("skills", skill_id)))
+    if dest is not None:
+        # The assembled-run case (B1 fix): a pre-seeded artifact predates
+        # the run's own acceptances. The refresh reconciles it with the
+        # store BEFORE the staleness check, so the short-circuit stays a
+        # short-circuit. Run mode keeps the refusal: a run-level bank
+        # never has a pre-seeding author, and the final test's stored
+        # trajectories would silently diverge from a patched bank.
+        _refresh_dest_artifact(store, dest)
+    bank = _read_bank(store, dest)
+    _check_bank_not_stale(store, bank)
+    return bank
+
+
 def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
@@ -964,38 +1004,7 @@ def curate_bank(
     # -- resume: a written bank means the curation already finished -------
     bank = _read_bank(store, dest)
     if bank:
-        final_ids = _read_final_member_ids(log_path)
-        if final_ids is not None:
-            have = set(_bank_ids(bank))
-            if not have <= set(final_ids):
-                raise ConfigError(
-                    "skill_bank.jsonl contains rows that are not in "
-                    "curation_log.json final_member_ids "
-                    f"({sorted(have - set(final_ids))}); the bank and the "
-                    "curation log disagree -- a human must look at this run")
-            for skill_id in (i for i in final_ids if i not in have):
-                # Crash inside the final append loop: the ledger holds a
-                # prefix of the deterministic rows. Complete it from the
-                # stored records in their OWN on-disk form (same dicts,
-                # same order, no model call): the prefix rows were written
-                # from these same records, so the raw record is the only
-                # form guaranteed to match them across schema versions --
-                # the from_dict roundtrip would migrate a v1 record to v2
-                # (a mixed-version bank) and cannot load a v1 merge
-                # product at all (from_dict lacks the sibling records).
-                _append_bank_row(store, dest,
-                                read_json(store.path_for("skills", skill_id)))
-        if dest is not None:
-            # The assembled-run case (B1 fix): a pre-seeded artifact predates
-            # the run's own acceptances. The refresh reconciles it with the
-            # store BEFORE the staleness check, so the short-circuit stays a
-            # short-circuit. Run mode keeps the refusal: a run-level bank
-            # never has a pre-seeding author, and the final test's stored
-            # trajectories would silently diverge from a patched bank.
-            _refresh_dest_artifact(store, dest)
-        bank = _read_bank(store, dest)
-        _check_bank_not_stale(store, bank)
-        return bank
+        return _finish_written_bank(store, dest, log_path, bank)
 
     # -- resume: carry the journal forward, finish interrupted commits ------
     log, fresh = _load_log(log_path)
