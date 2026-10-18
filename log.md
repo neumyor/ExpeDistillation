@@ -976,3 +976,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：评审报告处理顺序第四步的第一部分。把 _V3_METHOD_DEFAULTS、upgrade_v2_config、_refuse_unmapped_keys、_v3_methods、upgrade_v3_config 原样搬进新文件 core/config_upgrade.py（402 行），config.py 在末尾重新导出两个公开函数，10 个导入方一行不改；config.py 从 1696 行（评审时）降到 1326 行。逐字节核对：搬出的两段代码与搬移前的文本完全相同。红线核对：9 份 v4 配置的 to_dict 与 17 份旧版配置的升级输出改动前后逐字节相同，分层检查通过（新文件只依赖 core.config 与标准库）。README 2.5 节、装配工具一行与 AGENTS.md 第四节同步改为新文件。验收：全套 2216 passed + 4 deselected，ruff 全过。
 
 工件：`src/expedistill/core/config_upgrade.py`（新建）、`src/expedistill/core/config.py`、`README.md`、`AGENTS.md`
+
+## 2026-10-18 18:01 — curation.py 的单元规划原样搬到 composites/curation_waves.py
+
+一段话摘要：评审报告处理顺序第四步的第二部分，只做搬移。把每轮单元规划的 9 个纯函数（_ordered_groups、_round_units、_display_sources、_unit_member_ids、_partition_waves、_dedup_key、_duplicate_units、_duplicate_record、_build_dispatch）原样搬进新文件 composites/curation_waves.py（139 行），curation.py 只新增导入其中 6 个名字的一段 import；测试通过 curation 模块引用的 _round_units 与 _partition_waves 解析为同一个对象，测试一行不改。纯搬移的证据：按语法树逐个取函数源码比较，搬出的 9 个函数与搬移前逐字相同，curation.py 留下的函数全部逐字未变，两边函数集合的并集正好等于搬移前的集合。管理者会话要求搬移提交里只能有搬移，所以本条取代上一版提交 c38b695（它在搬移之外还把 curate_bank 的已写库短路提成了函数，那部分另做一个提交）；c38b695 保留在分支 backup/before-split-c38b695。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/composites/curation_waves.py`（新建）、`src/expedistill/composites/curation.py`、`AGENTS.md`

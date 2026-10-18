@@ -153,6 +153,7 @@ src/expedistill/
     acceptance_skill_status.py  从存量记录读出 skill 状态、考题的已判作答
                           序列与裸答（报告读取器与 A 相位驱动共用）
     curation.py           K5
+    curation_waves.py     K5 每轮的单元规划（纯函数：分波、去重、派发编号）
     live_measurement.py   K6 测量部分（R0 拆分：live_run 路径与账本名、组推导、
                           基线读取、注入审计行、幸存组推导、轨迹视图的
                           预算裁剪）
