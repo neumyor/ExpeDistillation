@@ -154,6 +154,19 @@ class TestValidation:
         with pytest.raises(ValueError, match="n_attempts"):
             make_config(n_attempts_weak=attempts)
 
+    @pytest.mark.parametrize("split", [
+        {"train": None, "test": ["a"]},
+        {"train": ["a"], "test": None},
+    ])
+    def test_split_train_and_test_lists_are_required(self, split):
+        # Only the held-back reserved list may be null.
+        with pytest.raises(ValueError, match="must be a list"):
+            make_config(mode="split", split=split)
+
+    def test_split_reserved_may_be_null(self):
+        make_config(mode="split",
+                    split={"train": ["a"], "test": ["b"], "reserved": None})
+
     @pytest.mark.parametrize("sequence", ["DLC", None, []])
     def test_sequence_must_be_a_list_before_parsing(self, sequence):
         # A string must not be split into one-letter phase names, and a

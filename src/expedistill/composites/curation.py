@@ -226,6 +226,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from expedistill.blocks.author import skill_markers
 from expedistill.blocks.curate import assign_groups, find_similar, merge_skills
 from expedistill.composites.exam_once import exam_once
+from expedistill.composites.phase_bank import BANK_NAME
 from expedistill.core import ids
 from expedistill.core.models import (
     FAILURE_REFERENCE_MARKERS,
@@ -253,15 +254,12 @@ from expedistill.infra.store import (
 from expedistill.inject import count_bank_tokens, format_skills_block
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["curate_bank"]
+__all__ = ["accepted_members", "curate_bank", "within_budget"]
 
 #: Where the curation journal lives in run-level mode (dest mode keeps
 #: the same file name inside ``dest``).
 LOG_DIR = "stage5_curation"
 LOG_NAME = "curation_log.json"
-#: The bank file this composite writes: the run-root bank, or the phase
-#: artifact in dest mode (composites.phase_bank's layout).
-BANK_NAME = "skill_bank.jsonl"
 #: Journal format; a log without it (or with another value) is refused on
 #: resume rather than misread. v3 adds the per-round dispatch maps (the
 #: in-flight identity of the wave-parallel run); v2 logs stay on the old
@@ -386,7 +384,14 @@ def _read_final_member_ids(path: Path) -> Optional[List[str]]:
 # Store helpers
 # ---------------------------------------------------------------------------
 
-def _accepted_members(store: Store) -> List[Skill]:
+def _accepted_ids_outside(store: Store, known: Set[str]) -> List[str]:
+    """Ids of stored "accepted" skills not in ``known``, sorted."""
+    return [skill_id for skill_id in store.ids("skills")
+            if skill_id not in known
+            and store.load("skills", skill_id, Skill).status == "accepted"]
+
+
+def accepted_members(store: Store) -> List[Skill]:
     """Stored skills with status "accepted", sorted by skill_id.
 
     The fixed order is what makes merged-skill serials (and therefore IDs)
@@ -579,9 +584,7 @@ def _display_sources(group: Any) -> List[str]:
 
 def _unit_member_ids(group: Any) -> Set[str]:
     """The member ids one unit's group names (its wave-conflict set)."""
-    if isinstance(group, (list, tuple)):
-        return {str(item) for item in group}
-    return {repr(group)}
+    return set(_display_sources(group))
 
 
 def _partition_waves(units: Sequence[Tuple[str, Any]]) -> List[List[int]]:
@@ -913,7 +916,7 @@ def _check_store_matches_log(store: Store, log: Dict[str, Any]) -> None:
     waves: burned serials never enter it and never-run units leave no
     record.
     """
-    actual = {skill.skill_id for skill in _accepted_members(store)}
+    actual = {skill.skill_id for skill in accepted_members(store)}
     expected = set(_expected_accepted(log))
     extra = actual - expected
     extra_merged = sorted(i for i in extra if _merge_serial(i) is not None)
@@ -980,11 +983,8 @@ def _refresh_dest_artifact(store: Store,
             row = record_of(skill_id)
             changed = True
         refreshed.append(row)
-    present = {row.get("skill_id") for row in refreshed}
-    missing = sorted(
-        skill_id for skill_id in stored_ids
-        if skill_id not in present
-        and store.load("skills", skill_id, Skill).status == "accepted")
+    missing = _accepted_ids_outside(
+        store, {row.get("skill_id") for row in refreshed})
     if missing:
         refreshed.extend(record_of(skill_id) for skill_id in missing)
         changed = True
@@ -1005,20 +1005,23 @@ def _check_bank_not_stale(store: Store,
     directory: re-curating in place would leave the final test's stored
     trajectories carrying the old bank.
     """
-    known = set(_bank_ids(bank))
-    stale = sorted(
-        skill_id for skill_id in store.ids("skills")
-        if skill_id not in known
-        and store.load("skills", skill_id, Skill).status == "accepted")
+    stale = _accepted_ids_outside(store, set(_bank_ids(bank)))
     if stale:
         raise _stale_error(stale)
+
+
+def _skipped(base: Dict[str, Any], reason: str,
+             sources: List[str]) -> Dict[str, Any]:
+    """A unit outcome that ends without a merge (recorded as skipped)."""
+    return {"status": "skipped", "base": base, "reason": reason,
+            "sources": sources, "merged": None}
 
 
 def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _within_budget(tokens: int, budget: Optional[int]) -> bool:
+def within_budget(tokens: int, budget: Optional[int]) -> bool:
     """True when the bank fits the budget. A ``None`` budget is no fender
     at all (user ruling 2026-10-16: the token ceilings left the
     pre-registered parameter set) -- present values still gate, so frozen
@@ -1124,7 +1127,7 @@ def curate_bank(
         # The curation's input set, fixed at first start: every later
         # resume checks the store against it (stale / corrupted run).
         log["input_skill_ids"] = sorted(
-            skill.skill_id for skill in _accepted_members(store))
+            skill.skill_id for skill in accepted_members(store))
         _write_log(log, log_path)
     else:
         _check_store_matches_log(store, log)
@@ -1133,7 +1136,7 @@ def curate_bank(
         Path(dest) if dest is not None
         else (Path(run_dir) if run_dir is not None else store.run_dir))
 
-    members = _accepted_members(store)
+    members = accepted_members(store)
     if not members:
         # An empty bank is a valid bank; nothing to curate or append. (An
         # in-flight merge implies accepted sources, so none can be
@@ -1158,6 +1161,15 @@ def curate_bank(
 
     def record_failure(unit_id: str, exc: BaseException) -> None:
         recorder.record(unit_id, FAILURE_STAGE, exc, str(exc))
+
+    def finish_round(round_record: Dict[str, Any]) -> bool:
+        # Journal the round as done, with whether the bank now fits the
+        # budget; True ends the round loop.
+        round_record["done"] = True
+        round_record["stop"] = within_budget(
+            count_bank_tokens(members), bank_token_budget)
+        _write_log(log, log_path)
+        return round_record["stop"]
 
     def commit(outcome: Dict[str, Any]) -> None:
         # Ordered commit, main thread, one unit at a time: record first
@@ -1219,11 +1231,7 @@ def curate_bank(
             # nothing to merge, and grouping a single skill (or nothing) is
             # meaningless, so the round ends without G9 (G9 runs whenever
             # the bank has >= 2 members).
-            round_record["done"] = True
-            round_record["stop"] = _within_budget(
-                count_bank_tokens(members), bank_token_budget)
-            _write_log(log, log_path)
-            if round_record["stop"]:
+            if finish_round(round_record):
                 break
             continue
 
@@ -1282,13 +1290,10 @@ def curate_bank(
                     # the exams would skip EVERY merge -- the very merges
                     # the round-1 group re-execution is the proof of).
                     exams, skip = _source_exams(store, sources)
-                if skip is not None:
-                    return {"status": "skipped", "base": base, "reason": skip,
-                            "sources": ([source.skill_id for source in sources]
-                                        if sources
-                                        else _display_sources(group)),
-                            "merged": None}
                 source_ids = [source.skill_id for source in sources]
+                if skip is not None:
+                    return _skipped(base, skip, source_ids if sources
+                                    else _display_sources(group))
                 # Reused in-flight merges skip the K5 marker checks: a
                 # pending merge passed the post-check before it was ever
                 # written to disk (module docstring).
@@ -1346,9 +1351,7 @@ def curate_bank(
                         # a G8 output failure.
                         reason = (_describe(exc) if kind_conflict is not None
                                   else f"G8 merge failed: {_describe(exc)}")
-                        return {"status": "skipped", "base": base,
-                                "reason": reason,
-                                "sources": source_ids, "merged": None}
+                        return _skipped(base, reason, source_ids)
                     merged = Skill(
                         skill_id=ids.make_merged_skill_id(base["serial"]),
                         content=content,
@@ -1450,11 +1453,7 @@ def curate_bank(
             skill.group = group if isinstance(group, str) and group else None
             store.save(skill, "skills")
 
-        round_record["done"] = True
-        round_record["stop"] = _within_budget(
-            count_bank_tokens(members), bank_token_budget)
-        _write_log(log, log_path)
-        if round_record["stop"]:
+        if finish_round(round_record):
             break
 
     if legacy_in_flight is not None:
@@ -1465,7 +1464,7 @@ def curate_bank(
     log["bank_tokens"] = bank_tokens
     log["final_member_ids"] = [skill.skill_id for skill in members]
 
-    if not _within_budget(bank_tokens, bank_token_budget):
+    if not within_budget(bank_tokens, bank_token_budget):
         # Over budget after the round cap: the curation stops, nothing is
         # auto-deleted; a human decides (new budget or new merge strategy).
         # A None budget (the 2026-10-16 ruling) never stops here.

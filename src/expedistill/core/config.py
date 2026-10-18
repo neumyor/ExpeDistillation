@@ -54,11 +54,16 @@ import dataclasses
 import json
 import re
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 #: Experiment modes (README stage 0). ``split`` divides the task set into
 #: train/test; ``full`` distills on everything and re-runs with the bank.
 MODES = ("split", "full")
+
+#: The two legal key sets of an explicit split (``reserved`` optional).
+SPLIT_LIST_KEY_SETS = (frozenset({"train", "test"}),
+                       frozenset({"train", "test", "reserved"}))
 
 #: Keys of the named-rule selections.
 RULE_KEYS = ("task_select", "segment_select", "trajectory_select")
@@ -389,7 +394,7 @@ _LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author", "curate"})
 
 #: The baseline phase's two arms: fixed by design (the strong arm feeds
 #: the add path, the weak arm is every later comparison's control).
-_BASELINE_ARMS = ("executor_strong", "executor_weak")
+BASELINE_ARMS = ("executor_strong", "executor_weak")
 
 
 def _method_mapping(raw: Any, where: str) -> Dict[str, Any]:
@@ -492,10 +497,10 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
         # The two-arm phase: both arms, no per-arm depth (the global
         # n_attempts_strong / n_attempts_weak decide the two depths).
         arms = execution.get("arms")
-        if not (isinstance(arms, list) and tuple(arms) == _BASELINE_ARMS):
+        if not (isinstance(arms, list) and tuple(arms) == BASELINE_ARMS):
             raise ConfigError(
                 f"phases.{name}.execution.arms must be exactly "
-                f"{list(_BASELINE_ARMS)} (a baseline phase runs both arms; "
+                f"{list(BASELINE_ARMS)} (a baseline phase runs both arms; "
                 "their depths come from the global n_attempts_strong / "
                 "n_attempts_weak)")
         if "n_attempts" in execution:
@@ -872,11 +877,11 @@ def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:
 
 def _validate_split(split: Dict[str, Any]) -> None:
     keys = frozenset(split)
-    if keys in (frozenset({"train", "test"}),
-                frozenset({"train", "test", "reserved"})):
+    if keys in SPLIT_LIST_KEY_SETS:
         for name in ("train", "test", "reserved"):
             value = split.get(name)
-            if value is None:
+            if value is None and name == "reserved":
+                # Held back means empty (split_tasks reads it as []).
                 continue
             if (not isinstance(value, list)
                     or not all(isinstance(t, str) for t in value)):
@@ -1207,25 +1212,8 @@ class ExperimentConfig:
         # config IS the experiment's identity: an unknown key is a typo or
         # a version mismatch, and dropping it silently once ran a new config
         # on old code with dead defaults.
-        version = data.get("schema_version", CONFIG_SCHEMA_VERSION)
-        if not isinstance(version, int) or isinstance(version, bool):
-            raise ConfigError(
-                f"schema_version must be an int, got {version!r}")
-        if version > CONFIG_SCHEMA_VERSION:
-            raise ConfigError(
-                f"config schema_version is {version}, newer than this code's "
-                f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
-                "update the repository and retry")
-        if version < CONFIG_SCHEMA_VERSION:
-            raise ConfigError(
-                f"config schema_version is {version}; this code speaks "
-                f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
-                "convert the config with upgrade_v3_config (the converter "
-                "script scripts/run/convert_v3_configs.py writes NEW file "
-                "names; v3 files are frozen experiment records; a v2 file "
-                "chains through upgrade_v2_config first), and resume runs "
-                "frozen under an older schema on their maintenance branch "
-                "(AGENTS section 6)")
+        _check_schema_version(
+            data.get("schema_version", CONFIG_SCHEMA_VERSION), "config")
         unknown = [key for key in data if key not in known]
         if unknown:
             raise ConfigError(
@@ -1250,16 +1238,20 @@ def upgrade_v2_config(data: Dict[str, Any]) -> Dict[str, Any]:
     else moves key-for-key into the slot that owns it.
     """
     v2 = copy.deepcopy(data)
+    defaults = _V3_METHOD_DEFAULTS
     methods: Dict[str, Dict[str, Any]] = {
         "segmentation": {
-            "K": v2.pop("K", 5),
-            "retry_limit": v2.pop("segment_retry_limit", 2),
+            "K": v2.pop("K", defaults["segmentation"]["K"]),
+            "retry_limit": v2.pop("segment_retry_limit",
+                                  defaults["segmentation"]["retry_limit"]),
         },
-        "authoring": {"exams": True},
+        "authoring": dict(defaults["authoring"]),
         "curation": {
-            "name": "agentbrew",
-            "token_budget": v2.pop("bank_token_budget", 4096),
-            "rounds": v2.pop("curation_rounds", 3),
+            "name": defaults["curation"]["name"],
+            "token_budget": v2.pop("bank_token_budget",
+                                   defaults["curation"]["token_budget"]),
+            "rounds": v2.pop("curation_rounds",
+                             defaults["curation"]["rounds"]),
         },
     }
     acceptance = v2.pop("acceptance", None)
@@ -1268,7 +1260,8 @@ def upgrade_v2_config(data: Dict[str, Any]) -> Dict[str, Any]:
         # All three v2 spellings of the exam protocol map to one value.
         methods["acceptance"] = {
             "name": "exam",
-            "retry_limit": v2.pop("retry_limit", 2),
+            "retry_limit": v2.pop("retry_limit",
+                                  defaults["acceptance"]["retry_limit"]),
         }
     else:
         # live_run never read the top-level retry_limit; dropping it is a
@@ -1521,7 +1514,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "tasks": "train",
             "delivery": {"name": "none"},
             "execution": {"name": "real",
-                          "arms": ["executor_strong", "executor_weak"]},
+                          "arms": list(BASELINE_ARMS)},
         },
         "L": {
             "kind": "learn",
@@ -1592,6 +1585,39 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     return v4
 
 
+def _check_schema_version(version: Any, where: str) -> None:
+    """Refuse a schema version other than this code's, naming the remedy:
+    newer code for a newer config, the converter for an older one."""
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ConfigError(
+            f"{where}: schema_version must be an int, got {version!r}")
+    if version > CONFIG_SCHEMA_VERSION:
+        raise ConfigError(
+            f"{where} has schema_version {version}, newer than this code's "
+            f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
+            "update the repository and retry")
+    if version < CONFIG_SCHEMA_VERSION:
+        raise ConfigError(
+            f"{where} has schema_version {version}; this code speaks "
+            f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
+            "convert it with upgrade_v3_config (the converter script "
+            "scripts/run/convert_v3_configs.py writes NEW file names; "
+            "v3 files are frozen experiment records; a v2 file chains "
+            "through upgrade_v2_config first), and resume runs frozen "
+            "under an older schema on their maintenance branch "
+            "(AGENTS section 6)")
+
+
+def _absolute_path(value: str, config_dir: Path) -> str:
+    """A path from the config file as the absolute string the manifest
+    freezes: ``~`` expanded, a relative path taken relative to the config
+    file's directory (never the cwd a run or resume started from)."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = config_dir / path
+    return str(path.resolve())
+
+
 def load_config(path: str) -> ExperimentConfig:
     """Load one experiment config from a YAML file.
 
@@ -1613,8 +1639,6 @@ def load_config(path: str) -> ExperimentConfig:
     """
     import yaml  # function-local: see the module docstring
 
-    from pathlib import Path
-
     config_path = Path(path)
     # Relative paths inside the config are relative to the REAL config
     # file: loading it through a symlink must not change what they name.
@@ -1623,25 +1647,8 @@ def load_config(path: str) -> ExperimentConfig:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
-    version = data.get("schema_version", 3)
-    if not isinstance(version, int) or isinstance(version, bool):
-        raise ConfigError(
-            f"{path}: schema_version must be an int, got {version!r}")
-    if version > CONFIG_SCHEMA_VERSION:
-        raise ConfigError(
-            f"{path} has schema_version {version}, newer than this code's "
-            f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
-            "update the repository and retry")
-    if version < CONFIG_SCHEMA_VERSION:
-        raise ConfigError(
-            f"{path} has schema_version {version}; this code speaks "
-            f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
-            "convert it with upgrade_v3_config (the converter script "
-            "scripts/run/convert_v3_configs.py writes NEW file names; "
-            "v3 files are frozen experiment records; a v2 file chains "
-            "through upgrade_v2_config first), and resume runs frozen "
-            "under an older schema on their maintenance branch "
-            "(AGENTS section 6)")
+    # A file without schema_version predates v4, so it is refused.
+    _check_schema_version(data.get("schema_version", 3), str(path))
     known_file_keys = ({f.name for f in fields(ExperimentConfig)}
                        | {"weak_profile_file"})
     unknown = [key for key in data if key not in known_file_keys]
@@ -1661,10 +1668,7 @@ def load_config(path: str) -> ExperimentConfig:
             data["weak_profile"] = fh.read()
     tasks = data.get("tasks")
     if isinstance(tasks, str) and tasks.strip():
-        tasks_path = Path(tasks).expanduser()
-        if not tasks_path.is_absolute():
-            tasks_path = config_dir / tasks_path
-        data["tasks"] = str(tasks_path.resolve())
+        data["tasks"] = _absolute_path(tasks, config_dir)
     # The external-campaign score file follows the tasks-path rule: a
     # relative path names a file relative to the config file, and the
     # frozen value is absolute, so the control's identity never depends
@@ -1678,10 +1682,7 @@ def load_config(path: str) -> ExperimentConfig:
         external = compare.get("external")
         if not isinstance(external, dict) or "path" not in external:
             continue
-        external_path = Path(external["path"]).expanduser()
-        if not external_path.is_absolute():
-            external_path = config_dir / external_path
-        external["path"] = str(external_path.resolve())
+        external["path"] = _absolute_path(external["path"], config_dir)
     return ExperimentConfig.from_dict(data)
 
 

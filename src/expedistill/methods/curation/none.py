@@ -17,15 +17,15 @@ curation treatment never sees a pending skill.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
+from expedistill.composites.curation import accepted_members, within_budget
 from expedistill.composites.phase_bank import (
     BANK_NAME,
     phase_bank_dir,
     phase_bank_summary_path,
 )
 from expedistill.core.config import ConfigError
-from expedistill.core.models import Skill
 from expedistill.inject import bank_reference, count_bank_tokens
 from expedistill.infra.store import write_json, write_jsonl
 from expedistill.methods.curation import NoneParams, SUMMARY_DIR, SUMMARY_NAME
@@ -52,13 +52,9 @@ def write_as_is(store: Any, dest_dir: Path,
     stage 5 and the manifest pins the protocol), but real for direct
     driver calls.
     """
-    skills = [store.load("skills", skill_id, Skill)
-              for skill_id in store.ids("skills")]
-    accepted: List[Skill] = sorted(
-        (skill for skill in skills if skill.status == "accepted"),
-        key=lambda skill: skill.skill_id)
+    accepted = accepted_members(store)
     bank_tokens = count_bank_tokens(accepted)
-    if token_budget is not None and bank_tokens > token_budget:
+    if not within_budget(bank_tokens, token_budget):
         raise ConfigError(
             f"skill bank exceeds token_budget without curation "
             f"(methods.curation.none): {bank_tokens} > {token_budget}; "
