@@ -278,7 +278,6 @@ scripts/
   run/        启动实验：按配置调用 cli，例如 run_experiment.sh <配置名>
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
               freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
-              convert_v2_configs.py：一次性 schema v2→v3 配置转换（写新文件名）
               convert_v3_configs.py：一次性 schema v3→v4 配置转换（写新文件名；
                                   显式传入 v2 文件时在内存里链式走 v2→v3→v4）
               launch_tb21_live_run.py：正式实验的 detached 启动器
@@ -310,8 +309,7 @@ configs/
                  采样次数、相位序列（sequence + phases，方法参数全部在相位
                  定义里）、无效重派预算、具名规则的名字；
                  schema_version 4（v1/v2/v3 文件是冻结的历史记录，转换走
-                 scripts/run/convert_v2_configs.py 与 convert_v3_configs.py，
-                 结果写新文件名）
+                 scripts/run/convert_v3_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
   seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，
                  字节级拷贝 + sha256 由实验配置钉住；本仓库不修改它，

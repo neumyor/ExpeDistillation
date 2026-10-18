@@ -8,9 +8,8 @@ config in --dir -- the seven frozen v3 experiment records. A v2 (or
 pre-schema) file may be passed EXPLICITLY; it chains upgrade_v2_config ->
 upgrade_v3_config in memory. A v2 file whose <stem>_v3.yaml already
 exists is refused with a pointer at that v3 record: the one-time v2 -> v3
-conversion (scripts/run/convert_v2_configs.py) already wrote the file of
-record, and converting the v2 file again would freeze a second identity
-for the same experiment.
+conversion already wrote the file of record, and converting the v2 file
+again would freeze a second identity for the same experiment.
 
 Output: <stem>_v4.yaml next to the input (NEVER overwritten; v3 files
 are frozen experiment records, AGENTS section 6). The write is atomic

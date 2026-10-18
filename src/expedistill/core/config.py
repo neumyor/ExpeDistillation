@@ -474,20 +474,21 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             f"{FOLDER_EXECUTION_NAME!r}, and nothing else (the other "
             "deliveries run the plain real execution)")
     # The exam execution is what the exam ROLE measures with; every
-    # non-test role runs the benchmark for real; a test role may also
-    # run the folder execution (checklist item 8 keeps the folder
+    # other role runs the benchmark for real, and a test role may run
+    # the folder execution instead (checklist item 8 keeps the folder
     # delivery -- and with the pairing above, real_folder -- on the
     # test role alone).
     if role == PHASE_ROLE_EXAM:
-        expected_exec = EXECUTION_NAMES[1]
+        expected_execs = (EXECUTION_NAMES[1],)
     elif role == PHASE_ROLE_TEST:
-        expected_exec = None  # real or real_folder, the pairing above
+        expected_execs = (EXECUTION_NAMES[0], FOLDER_EXECUTION_NAME)
     else:
-        expected_exec = EXECUTION_NAMES[0]
-    if expected_exec is not None and exec_name != expected_exec:
+        expected_execs = (EXECUTION_NAMES[0],)
+    if exec_name not in expected_execs:
         raise ConfigError(
             f"phases.{name} declares role {role!r} but execution name "
-            f"{exec_name!r}; that role runs {expected_exec!r}")
+            f"{exec_name!r}; that role runs "
+            f"{' or '.join(repr(e) for e in expected_execs)}")
     if "n_attempts" in execution and role == PHASE_ROLE_EXAM:
         raise ConfigError(
             f"phases.{name}.execution carries n_attempts but an exam phase "
@@ -1048,16 +1049,29 @@ class ExperimentConfig:
             raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
         if not self.benchmark:
             raise ValueError("benchmark is required")
-        if self.n_attempts_strong < 1 or self.n_attempts_weak < 1:
-            raise ValueError("n_attempts_strong and n_attempts_weak must be >= 1")
+        if not (_is_positive_int(self.n_attempts_strong)
+                and _is_positive_int(self.n_attempts_weak)):
+            raise ValueError(
+                "n_attempts_strong and n_attempts_weak must be positive "
+                f"ints, got {self.n_attempts_strong!r} and "
+                f"{self.n_attempts_weak!r}")
         if self.split is not None:
             _validate_split(self.split)
         self.tasks = _normalise_tasks(self.tasks)
         # The phase sequence: parsed here (the load-time checklist runs
         # before anything freezes), whether the caller handed raw
         # mappings (YAML / a frozen manifest) or already-parsed specs
-        # (dataclasses.replace on a loaded config). Deep-copied inside,
-        # so the frozen value never aliases the caller's mapping.
+        # (dataclasses.replace on a loaded config). The types are checked
+        # before anything is converted, so a string sequence is refused
+        # instead of split into letters.
+        if not isinstance(self.sequence, (list, tuple)) or not self.sequence:
+            raise ConfigError(
+                "sequence must be a non-empty list of phase names, got "
+                f"{self.sequence!r}")
+        if not isinstance(self.phases, dict) or not self.phases:
+            raise ConfigError(
+                "phases must be a non-empty mapping of phase name -> "
+                f"definition, got {self.phases!r}")
         self.sequence = list(self.sequence)
         raw_phases = {
             name: (phase_spec_to_raw(spec)

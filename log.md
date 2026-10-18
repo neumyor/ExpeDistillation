@@ -952,3 +952,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：按用户经管理者会话转达的指示，对 core/config.py 与 composites/curation.py 做纯静态评审，只出报告不改代码。config.py 发现四项校验缺口，均在 .venv 中复现：测试相位可以配成考试执行而运行时照常真实执行；__post_init__ 先做类型转换，使 sequence 写成字符串被拆成字母、写成 null 抛出调用栈；n_attempts 的检查放过 True 与 1.5；scripts/run/convert_v2_configs.py 对每个 v2 文件都拒绝，已经失效。现有全部 v4 配置都不触发这些缺口，补上校验不影响任何现存配置。curation.py 的主要发现是：正式运行只走 dest 模式，run 模式只剩测试在用；文件内有多处可合并的重复，和 methods/curation/none.py 有两处相同逻辑；多处说明还在用已删除的 stage 编号。报告逐项标出不能动的内容：manifest 冻结字段、升级函数输出、外部对照 sha256、整理日志与技能库文件的字节内容和顺序、断点续跑的保存顺序，以及测试对 curation._write_log 的拦截。建议的处理顺序是先补四项校验缺口，再清理过时说明与无用代码，再合并重复，最后做原样搬移的拆分。尚未改动任何代码。
 
 工件：`docs/reviews/config_curation_redundancy_review_20261018.md`
+
+## 2026-10-18 17:23 — 补上 config.py 的四处校验缺口，删除失效的 v2 转换脚本
+
+一段话摘要：按评审报告的处理顺序做第一步，用户已同意推进。补上的四处：测试相位只允许 real 或 real_folder 执行，原来写成 exam 也能加载、运行时却照常真实执行；__post_init__ 在转换之前先检查 sequence 是非空列表、phases 是非空映射，原来字符串会被拆成单个字母、null 会抛出调用栈；n_attempts_strong 与 n_attempts_weak 改用 _is_positive_int，原来 True 与 1.5 能通过、"2" 抛出类型错误，错误类型仍为 ValueError；scripts/run/convert_v2_configs.py 在 v4 代码下对每个 v2 文件都拒绝，已删除，README 2.5 节与 AGENTS.md 第五、六节同步更新，需要时从 commit 78db71f 取回。红线核对：仓库全部 9 份 v4 配置改动前后都能加载，to_dict 输出逐字节相同，manifest 冻结字段不受影响；未改动升级函数、外部对照 sha256、金矩阵与审计文件。验收：全套 2214 passed + 4 deselected（新增 10 个测试用例），ruff 全过。
+
+工件：`src/expedistill/core/config.py`、`tests/unit/core/test_config.py`、`scripts/run/convert_v2_configs.py`（删除）、`scripts/run/convert_v3_configs.py`（说明）、`README.md`、`AGENTS.md`

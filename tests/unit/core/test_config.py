@@ -153,10 +153,29 @@ class TestValidation:
         with pytest.raises(ConfigError, match="leak_threshold"):
             load_config(str(cfg_file))
 
-    @pytest.mark.parametrize("attempts", [0, -1])
+    @pytest.mark.parametrize("attempts", [0, -1, True, 1.5, "2"])
     def test_attempts_must_be_positive(self, attempts):
         with pytest.raises(ValueError, match="n_attempts"):
             make_config(n_attempts_weak=attempts)
+
+    @pytest.mark.parametrize("sequence", ["DLC", None, []])
+    def test_sequence_must_be_a_list_before_parsing(self, sequence):
+        # A string must not be split into one-letter phase names, and a
+        # null must surface as a ConfigError, not a TypeError.
+        with pytest.raises(ConfigError, match="sequence must be"):
+            make_config(sequence=sequence)
+
+    @pytest.mark.parametrize("phases", [[], None, {}])
+    def test_phases_must_be_a_mapping_before_parsing(self, phases):
+        with pytest.raises(ConfigError, match="phases must be"):
+            make_config(phases=phases)
+
+    def test_test_role_refuses_the_exam_execution(self):
+        phases = copy.deepcopy(MIN_PHASES)
+        phases["C"]["execution"] = {"name": "exam"}
+        with pytest.raises(ConfigError,
+                           match="that role runs 'real' or 'real_folder'"):
+            make_config(phases=phases)
 
     def test_split_explicit_lists(self):
         cfg = make_config(mode="split",

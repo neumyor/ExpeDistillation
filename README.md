@@ -277,11 +277,14 @@ phases:
 v3 及更早的配置文件是冻结的实验记录，不修改。转换工具写新文件：
 
 ```
-scripts/run/convert_v2_configs.py    # v2 → v3（一次性，已完成）
 scripts/run/convert_v3_configs.py   # v3 → v4（写出 <原名>_v4.yaml；
                                     # 显式传入 v2 文件时在内存里链式
                                     # 走 v2→v3→v4）
 ```
+
+v2 → v3 的一次性转换在 commit `78db71f` 完成，当时的转换脚本
+`convert_v2_configs.py` 在 v4 代码下已无法转换任何文件，现已删除，需要时从该
+提交取回。
 
 转换映射是 `core/config.py` 的纯函数 `upgrade_v2_config` / `upgrade_v3_config`
 （装配器读旧 run 的 manifest 时走同一函数）。v3 → v4 的身份变化：
