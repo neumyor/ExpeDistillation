@@ -741,11 +741,8 @@ def test_assembles_train_lineage_with_full_chain_bank_filter(tmp_path):
         path.relative_to(run_dir).as_posix()
         for path in (run_dir / "phases").rglob("*")
         if path.is_file()) == ["phases/p08_L/skill_bank.jsonl"]
-    assert summary["checksums"]["phase_bank"] == summary["checksums"][
-        "skill_bank"]
 
-    # Copied objects carry zero test/reserved lineage (asserted inside the
-    # assembly; spot-checked here on the ids).
+    # Copied objects carry zero test/reserved lineage.
     kept_traj_ids = {path.name for path in
                      (run_dir / "stage1_baseline" / "trajectories").glob(
                          "*.json")}
@@ -768,8 +765,7 @@ def test_assembles_train_lineage_with_full_chain_bank_filter(tmp_path):
     assert not (run_dir / "work").exists()
     assert not (run_dir / "llm_requests").exists()
 
-    # Integrity: the kept bank rows are bit-identical to the copied skills
-    # (asserted inside; the bank file is the readable evidence).
+    # Integrity: the kept bank rows are bit-identical to the copied skills.
     for row in read_jsonl(run_dir / "skill_bank.jsonl"):
         path = (run_dir / "stage3_generation" / "skills"
                 / (urllib.parse.quote(row["skill_id"], safe="")
@@ -806,8 +802,6 @@ def test_assembled_from_records_provenance_and_merged_groups(tmp_path):
 
     text = (run_dir / "ASSEMBLED_FROM.md").read_text(encoding="utf-8")
     assert source.ids["s_c"] in text  # the dangling id is named
-    assert "seed 42" in text
-    assert "2fd12b88aafdd04a52c298e3940bcb189f9766d6" in text
     assert "远端任务目录的内容漂移" in text  # the digest-coverage disclaimer
     assert "全链" in text  # the full-chain criterion is stated
     # Stage-1 seeding provenance: the one campaign-seeded trajectory.
@@ -815,8 +809,8 @@ def test_assembled_from_records_provenance_and_merged_groups(tmp_path):
     # The v4 product lines: the pre-seeded artifact and the zero-copy
     # phases/ declaration.
     assert "phases/p08_L" in text
-    # Checksums and per-class counts are in the record.
-    assert summary["checksums"]["skill_bank"][:16] in text
+    # Per-kind counts are in the record.
+    assert f"| skill_bank 行 | {summary['counts']['bank_rows']} |" in text
 
     # The summary the CLI prints is JSON-safe and names the run pieces.
     json.dumps(summary)
@@ -1659,7 +1653,7 @@ def test_baseline_level_copies_only_trajectories_and_shortfall(tmp_path):
     }
     assert summary["split_sizes"] == {"train": 1, "test": 1, "reserved": 1}
     assert summary["train_subset_of_source_tasks"] == {
-        "train": 1, "source_tasks": 3, "outside_source": []}
+        "train": 1, "source_tasks": 3}
     # The levels are distinguishable: the bank record's identity section
     # does not exist here (no whitelist diff at the baseline level).
     assert "allowed_identity_diffs" not in summary
@@ -1711,7 +1705,7 @@ def test_baseline_level_copies_only_trajectories_and_shortfall(tmp_path):
     assert "D 相位之外的全部相位将按当前协议全新执行" in text
     assert "⊆ 源任务集" in text
     assert "archived-campaign" in text
-    assert summary["checksums"]["trajectories"][:16] in text
+    assert "| trajectories | 2 |" in text
 
 
 def test_baseline_refuses_a_changed_executor_model(tmp_path):

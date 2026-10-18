@@ -32,19 +32,28 @@ class FrozenProtocolChanged(ConfigError):
     """
 
 
-def _differing_keys(stored: Any, incoming: Any, prefix: str = "") -> List[str]:
-    """Dotted key paths where ``stored`` and ``incoming`` disagree."""
+def differing_keys(stored: Any, incoming: Any, *,
+                   mark_one_sided: bool = False,
+                   prefix: str = "") -> List[str]:
+    """Dotted key paths where ``stored`` and ``incoming`` disagree.
+
+    A key present on only one side is a diff at that key's path; with
+    ``mark_one_sided`` the path says which side lacks it.
+    """
     differing: List[str] = []
     if isinstance(stored, dict) and isinstance(incoming, dict):
         for key in sorted(set(stored) | set(incoming), key=str):
             path = f"{prefix}.{key}" if prefix else str(key)
             if key not in stored:
-                differing.append(f"{path} (not in frozen manifest)")
+                differing.append(f"{path} (not in frozen manifest)"
+                                 if mark_one_sided else path)
             elif key not in incoming:
-                differing.append(f"{path} (missing from new mapping)")
+                differing.append(f"{path} (missing from new mapping)"
+                                 if mark_one_sided else path)
             else:
-                differing.extend(
-                    _differing_keys(stored[key], incoming[key], path))
+                differing.extend(differing_keys(
+                    stored[key], incoming[key],
+                    mark_one_sided=mark_one_sided, prefix=path))
         return differing
     if stored != incoming:
         differing.append(prefix or "(top-level value)")
@@ -63,7 +72,8 @@ def freeze(run_dir: Path, mapping: Dict[str, Any]) -> None:
         return
     stored = read_json(path)
     if stored != mapping:
-        keys = ", ".join(_differing_keys(stored, mapping))
+        keys = ", ".join(
+            differing_keys(stored, mapping, mark_one_sided=True))
         raise FrozenProtocolChanged(
             f"{path} was frozen with different values; changed keys: "
             f"[{keys}]; use a new run directory for a changed protocol")

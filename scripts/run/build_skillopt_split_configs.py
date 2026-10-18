@@ -357,7 +357,7 @@ def verify_config(benchmark: str, cfg_path: Path,
         sys.exit(2)
 
     # The exact spec stage 0 hands to D1: the sorted union of the lists
-    # (stages/stage0_freeze.py _explicit_split_ids / _tasks_spec).
+    # (stages/stage0_freeze.py _explicit_split_ids / tasks_spec).
     union = sorted(set(config.split["train"]) | set(config.split["test"]))
     misses = (_alfworld_misses(union) if benchmark == "alfworld"
               else _searchqa_misses(union))

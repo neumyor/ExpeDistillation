@@ -574,8 +574,7 @@ def test_until_phase_non_integer_is_usage_error(monkeypatch, tmp_path):
 def test_assemble_reuse_calls_through_and_prints_the_summary(
         monkeypatch, capsys, tmp_path):
     calls = {}
-    summary = {"source_run": "src", "counts": {"skills": 6},
-               "checksums": {"skills": "abc"}}
+    summary = {"source_run": "src", "counts": {"skills": 6}}
 
     def fake_assemble_reuse(source_run, config_path, run_dir):
         calls.update(source_run=source_run, config_path=config_path,

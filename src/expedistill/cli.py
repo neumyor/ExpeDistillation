@@ -53,10 +53,10 @@ Three subcommands:
   current protocol. Both levels validate the identity (the ruling-4
   whitelist diff, respectively revision 3's pinned minimum), copy under
   the run lock, assert the negative list and write ASSEMBLED_FROM.md
-  provenance. Prints the returned per-class counts and checksums as one
-  JSON line. No model calls; its expected failures (ConfigError, a locked
-  run directory, an identity mismatch) exit 1 with a clear message, the
-  same contract as ``run``.
+  provenance. Prints the returned per-kind counts as one JSON line. No
+  model calls; its expected failures (ConfigError, a locked run
+  directory, an identity mismatch) exit 1 with a clear message, the same
+  contract as ``run``.
 """
 
 import argparse
