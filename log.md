@@ -947,3 +947,8 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件：`src/expedistill/stages/assemble_reuse.py`、`src/expedistill/stages/stage0_freeze.py`（tasks_spec 公开）、`src/expedistill/infra/manifest.py`（differing_keys）、`src/expedistill/infra/store.py`（object_filename、object_id_of_file）、`src/expedistill/composites/live_measurement.py`（改用 shortfall 读取）、`src/expedistill/cli.py`（说明文字去掉校验和）、`tests/unit/stages/test_assemble_reuse.py`、`tests/unit/test_cli.py`、`scripts/run/build_skillopt_split_configs.py`（注释里的函数名）
 
+## 2026-10-18 17:16 — 评审 config.py 与 curation.py 的冗余与校验
+
+一段话摘要：按用户经管理者会话转达的指示，对 core/config.py 与 composites/curation.py 做纯静态评审，只出报告不改代码。config.py 发现四项校验缺口，均在 .venv 中复现：测试相位可以配成考试执行而运行时照常真实执行；__post_init__ 先做类型转换，使 sequence 写成字符串被拆成字母、写成 null 抛出调用栈；n_attempts 的检查放过 True 与 1.5；scripts/run/convert_v2_configs.py 对每个 v2 文件都拒绝，已经失效。现有全部 v4 配置都不触发这些缺口，补上校验不影响任何现存配置。curation.py 的主要发现是：正式运行只走 dest 模式，run 模式只剩测试在用；文件内有多处可合并的重复，和 methods/curation/none.py 有两处相同逻辑；多处说明还在用已删除的 stage 编号。报告逐项标出不能动的内容：manifest 冻结字段、升级函数输出、外部对照 sha256、整理日志与技能库文件的字节内容和顺序、断点续跑的保存顺序，以及测试对 curation._write_log 的拦截。建议的处理顺序是先补四项校验缺口，再清理过时说明与无用代码，再合并重复，最后做原样搬移的拆分。尚未改动任何代码。
+
+工件：`docs/reviews/config_curation_redundancy_review_20261018.md`
