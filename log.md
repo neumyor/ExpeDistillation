@@ -940,3 +940,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：装配 run 的完整性审计暴露第四个缺口：空待定组宇宙的 B 相位不写任何 live_run 账本（账本在首次实测组时才惰性创建），audit 的布局检查按"序列带 live 相位但无 live_run 子树"报 ERROR。两侧同修：live 相位驱动在进入时即创建 stage4_acceptance/live_run/ 目录足迹（空树是"跑过且无可测"的诚实记录，ledger_path 进 live_measurement 导出面）；audit 的布局检查细化——每个 live 相位都有完成摘要且报告行为零（空宇宙形态）才降级为 INFO，任一 live 相位有报告行却没有账本（账本被删）仍然是 ERROR。新增断言：空宇宙 live 相位留下目录足迹。顺带把 scripts/run/launch_tb21_live_run.py 的配置名参数化（默认不变，folder 实验传 tb21_split_folder_v4）。验收：全套 2204 passed + 4 deselected，ruff 全过；装配 run 当前审计 0 error / 2 info（p07 未跑 + 空宇宙说明）。
 
 工件：`src/expedistill/stages/phase_execute/live.py`（账本足迹）、`src/expedistill/composites/live_measurement.py`（导出 ledger_path）、`scripts/audit/audit_live_run.py`（_live_phases_all_complete）、`scripts/run/launch_tb21_live_run.py`（配置参数化）、`tests/unit/test_w2a_phase_execute.py`（足迹断言）、本条对应 commit
+
+## 2026-10-18 16:55 — 装配 run 的组终态审计降级为出处说明(小样本验证后启动全量)
+
+一段话摘要:folder 版 C 的小样本(2 任务 × 3)全链路干净后启动了全量 84 trial(64 workers / stagger 20 / llm-timeout 1500,detached 驱动 + 监督者按 pidfile/产物文件判活,断链自动等待重连续跑,不重启损失)。小样本验证了:技能文件夹上传沙箱(141 文件 + 目录)、agent 真实按目录渐进 cat(6 条轨迹 1 条读了 1 个技能文件,skill_files_read 与轨迹 cat 命令逐字对上)、外部对照机制(sha256 审计记录、delta 正确);期间一次 VPN 中断造成 6 单元全 infra 失败,续跑零损失恢复,属网络事件非代码问题。小样本审计 0 error,但 19 条 WARN 都是装配 run 固有形态:store 的组终态来自源 run 拷贝,本 run 无裁决它的账本。审计细化:ASSEMBLED_FROM.md 存在且本 run 无任何裁决行/删除回执时,这组 WARN 降级为 INFO(出处=源 run 的账本);非装配 run 同形态仍是 WARN(真漂移)。新增两例单测钉住两侧。验收:全套 2206 passed + 4 deselected,ruff 全过;小样本 run 审计 0 error / 0 warn / 19 info。
+
+工件:`scripts/audit/audit_live_run.py`（check_group_terminals_v4 的 assembled 参数）、`tests/unit/test_w3b_audit_v4.py`（+2 例）、`runs/tb21_split_folder_smoke2_20261017_1729`（小样本 run，保留作证据）、`tmp/supervise_folder_run.py`（一次性监督者，不进 git）、本条对应 commit

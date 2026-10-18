@@ -17,6 +17,7 @@ import shutil
 from pathlib import Path
 
 from expedistill.core import ids
+from expedistill.core.models import Skill
 from expedistill.infra.store import Store, read_json, write_json, write_jsonl
 
 _SCRIPT = (Path(__file__).resolve().parents[2]
@@ -290,3 +291,43 @@ def test_a_missing_external_control_copy_is_an_error(tmp_path):
     (run_dir / "phases" / "p07_C" / "external_control.json").unlink()
     assert any("score-file copy is missing" in message
                for message in _errors(run_dir))
+
+
+def _terminal_group_store(tmp_path: Path) -> "audit_live_run.Store":
+    """One task group whose every member is terminal with a discard
+    reason no verdict row of THIS run explains (the assembled shape)."""
+    store = audit_live_run.Store(tmp_path / "s")
+    skill = Skill(
+        skill_id="traj/tb:tt/strong/00/seg00/skill",
+        content="x", version=1, status="discarded",
+        subtask_id="traj/tb:tt/strong/00/seg00",
+        source_subtasks=["traj/tb:tt/strong/00/seg00"],
+        discard_reason="leaked")
+    store.save(skill, "skills")
+    return store
+
+
+def test_an_assembled_terminal_group_without_verdicts_is_provenance(
+        tmp_path):
+    store = _terminal_group_store(tmp_path)
+    groups = {"tb:tt": [store.load(
+        "skills", "traj/tb:tt/strong/00/seg00/skill", Skill)]}
+    audit = audit_live_run.Audit(tmp_path)
+    audit_live_run.check_group_terminals_v4(
+        audit, store, groups, verdict_rows={}, delete_receipts={},
+        assembled=True)
+    severities = [(f["severity"], f["check"]) for f in audit.findings]
+    assert severities == [("INFO", "terminals")]
+    assert "assembled" in audit.findings[0]["message"]
+
+
+def test_a_scratch_terminal_group_without_verdicts_still_warns(tmp_path):
+    store = _terminal_group_store(tmp_path)
+    groups = {"tb:tt": [store.load(
+        "skills", "traj/tb:tt/strong/00/seg00/skill", Skill)]}
+    audit = audit_live_run.Audit(tmp_path)
+    audit_live_run.check_group_terminals_v4(
+        audit, store, groups, verdict_rows={}, delete_receipts={},
+        assembled=False)
+    severities = [(f["severity"], f["check"]) for f in audit.findings]
+    assert severities == [("WARN", "terminals")]

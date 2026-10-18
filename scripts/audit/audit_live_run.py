@@ -1151,7 +1151,8 @@ def check_final_test(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
 def check_group_terminals_v4(
         audit: Audit, store: Store, groups: Dict[str, List[Skill]],
         verdict_rows: Dict[Tuple[Any, ...], Dict[str, Any]],
-        delete_receipts: Dict[str, str]) -> None:
+        delete_receipts: Dict[str, str], *,
+        assembled: bool = False) -> None:
     """Check 1's phase-world shape: the same finalize_group precedence
     over the verdict rows, with the learn phases' outcome receipts (the
     successor of the old attributions ledger) explaining the terminals
@@ -1163,7 +1164,14 @@ def check_group_terminals_v4(
     world have no phase-world counterpart: a revision that produced no
     new version leaves the skill exactly as it is, and model-output
     failures are recorded per target in the run-root failed_units
-    ledger, never as a discard."""
+    ledger, never as a discard.
+
+    ``assembled`` (the run root carries ASSEMBLED_FROM.md) with no
+    verdict row and no delete receipt at all is the reuse shape: the
+    store's statuses were COPIED from a finished source run and the
+    verdict history that produced them lives there, so the
+    terminal-without-verdict groups are reported as the source's
+    provenance (INFO) instead of drift (WARN)."""
     for task_id, members in sorted(groups.items()):
         stored = {m.skill_id: store.load("skills", m.skill_id, Skill)
                   for m in members}
@@ -1226,13 +1234,25 @@ def check_group_terminals_v4(
                 if skill.discard_reason != "live_no_improvement"
                 and skill.skill_id not in delete_receipts]
             if unexplained:
-                audit.add(
-                    WARN, "terminals",
-                    f"{task_id}: terminal group whose verdict rows decide "
-                    "nothing and whose discards are neither the no-op "
-                    "guard's live_no_improvement nor covered by a learn-"
-                    "phase delete receipt (interrupted commit or store "
-                    "drift; compare the learn ledgers by hand)")
+                if assembled and not verdict_rows and not delete_receipts:
+                    # The assembled reuse shape: the store's statuses came
+                    # from the source run and NO verdict or receipt of
+                    # this run ever spoke -- the deciding history lives in
+                    # the source run named by ASSEMBLED_FROM.md.
+                    audit.add(
+                        INFO, "terminals",
+                        f"{task_id}: terminal group with no verdict row "
+                        "and no delete receipt in this run (the assembled "
+                        "shape: the statuses were copied from the source "
+                        "run, whose own ledgers decided them)")
+                else:
+                    audit.add(
+                        WARN, "terminals",
+                        f"{task_id}: terminal group whose verdict rows decide "
+                        "nothing and whose discards are neither the no-op "
+                        "guard's live_no_improvement nor covered by a learn-"
+                        "phase delete receipt (interrupted commit or store "
+                        "drift; compare the learn ledgers by hand)")
 
 
 def _learn_delete_receipts(run_dir: Path,
@@ -1370,7 +1390,9 @@ def _audit_v4(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
                    if isinstance(spec, dict) and spec.get("kind") == "learn"]
 
     check_group_terminals_v4(audit, store, groups, verdict_rows,
-                             delete_receipts)
+                             delete_receipts,
+                             assembled=(run_dir / "ASSEMBLED_FROM.md"
+                                        ).is_file())
     check_round_stores(audit, run_dir, groups, verdict_rows, audit_rows,
                        stage1_holes, rounds, depths.get)
     check_ledgers(audit, live_dir, ("verdicts",))
