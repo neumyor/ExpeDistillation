@@ -609,7 +609,6 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
 
 
 def parse_phases(raw_phases: Any, raw_sequence: Any, *,
-                 n_attempts_strong: int,
                  n_attempts_weak: int) -> Dict[str, PhaseSpec]:
     """Validate the v4 ``sequence`` / ``phases`` pair and return the
     parsed specs, keyed by local name (the sequence may repeat a name;
@@ -1067,7 +1066,6 @@ class ExperimentConfig:
             for name, spec in self.phases.items()}
         self.phases = parse_phases(
             raw_phases, self.sequence,
-            n_attempts_strong=self.n_attempts_strong,
             n_attempts_weak=self.n_attempts_weak)
         if not _is_positive_int(self.invalid_redispatch_limit):
             raise ConfigError(

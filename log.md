@@ -988,3 +988,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：从 curate_bank 里提出一段顺序执行的代码：库已经写好时，补全被崩溃打断的追加、在 dest 模式下刷新产物、做过期检查，然后返回库。已读出的库行作为参数传入，读盘次数不变；curate_bank 从 457 行降到 420 行。这一步改变了代码组织，所以和上一条纯搬移分成两个提交。红线核对：curation 测试套件的 193 次日志写入改动前后顺序和内容逐字节相同。验收：全套 2216 passed + 4 deselected，ruff 全过。
 
 工件：`src/expedistill/composites/curation.py`
+
+## 2026-10-18 18:04 — 删除 curate_bank 的 weak_profile 参数与 parse_phases 的 n_attempts_strong 参数
+
+一段话摘要：前面几步留下的两个未使用参数，只改函数签名，不改行为。curate_bank 的 weak_profile 从来没有被读取（它自己的说明也写明了这一点），删去参数和 methods/curation/agentbrew.py 的 2 处传参、4 个测试文件的 5 处传参；parse_phases 的 n_attempts_strong 在函数体里没有用到，删去参数、ExperimentConfig.__post_init__ 的 1 处传参和 3 个测试文件的 35 处传参。配置对象自身的 n_attempts_strong 字段不受影响，它仍然进 manifest。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/composites/curation.py`、`src/expedistill/core/config.py`、`src/expedistill/methods/curation/agentbrew.py`、`tests/composites/test_curation.py`、`tests/composites/test_curation_parallel.py`、`tests/composites/test_curation_resume.py`、`tests/unit/test_w1f_phase_bank.py`、`tests/unit/test_w2c_config_v4.py`、`tests/unit/test_folder_m2_delivery.py`、`tests/unit/test_folder_m3_pairing.py`

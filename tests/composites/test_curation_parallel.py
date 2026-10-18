@@ -188,7 +188,7 @@ def run(store, world, workers=1, budget=600, rounds=3):
         "answerer_handle": _routed_handle("weak", world.answerer_resolve),
         "judge_handle": _routed_handle("judge", world.judge_resolve),
     }
-    bank = curate_bank(store=store, weak_profile="weak",
+    bank = curate_bank(store=store,
                        bank_token_budget=budget, curation_rounds=rounds,
                        run_dir=store.run_dir, workers=workers, **handles)
     return bank, handles

@@ -39,7 +39,6 @@ def run(ctx: Any, params: AgentBrewParams) -> Dict[str, Any]:
     """
     bank = curate_bank(
         store=ctx.store,
-        weak_profile=ctx.config.weak_profile,
         answerer_handle=ctx.handle("answerer"),
         judge_handle=ctx.handle("judge"),
         curator_handle=ctx.handle("curator"),
@@ -77,7 +76,6 @@ def produce_phase_bank(ctx: Any, params: AgentBrewParams,
     dest.mkdir(parents=True, exist_ok=True)
     bank = curate_bank(
         store=ctx.store,
-        weak_profile=ctx.config.weak_profile,
         answerer_handle=ctx.handle("answerer"),
         judge_handle=ctx.handle("judge"),
         curator_handle=ctx.handle("curator"),

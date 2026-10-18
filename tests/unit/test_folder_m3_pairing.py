@@ -97,7 +97,7 @@ def _parse_pair(delivery, execution, role="test", tasks="test"):
     raw = _raw_sequence(delivery=delivery, execution=execution, role=role,
                         tasks=tasks)
     return parse_phases(raw["phases"], raw["sequence"],
-                        n_attempts_strong=1, n_attempts_weak=1)
+                        n_attempts_weak=1)
 
 
 def test_folder_pairs_with_real_folder_on_a_c_phase():

@@ -950,7 +950,6 @@ def within_budget(tokens: int, budget: Optional[int]) -> bool:
 def curate_bank(
     *,
     store: Store,
-    weak_profile: str,
     answerer_handle: ModelHandle,
     judge_handle: ModelHandle,
     curator_handle: ModelHandle,

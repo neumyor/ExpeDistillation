@@ -156,7 +156,7 @@ def _handles(scripts):
 
 def _run(store, handles):
     return curate_bank(
-        store=store, weak_profile="weak", bank_token_budget=BUDGET,
+        store=store, bank_token_budget=BUDGET,
         curation_rounds=3, run_dir=store.run_dir,
         **handles)
 
