@@ -63,12 +63,12 @@ MODES = ("split", "full")
 #: Keys of the named-rule selections.
 RULE_KEYS = ("task_select", "segment_select", "trajectory_select")
 
-#: Rule name per key when the config names none: the stage 2/3 protocol v2
-#: definitions of stage 1 (D4) and stage 3 (D6), plus stage 2's frozen
-#: default (all trajectories). The defaults ARE the method canon (every
-#: formal series config names them explicitly anyway), so switching them
-#: declares v2 rather than migrating anything; the v1 names stay registered
-#: in ``blocks/rules.py`` (old configs are historical records).
+#: Rule name per key when the config names none: the protocol-v2 task
+#: selection (D4) and segment selection (D6), plus the trajectory
+#: selection's frozen default (all trajectories). The defaults ARE the
+#: method canon (every formal series config names them explicitly
+#: anyway); the v1 names stay registered in ``blocks/rules.py`` (old
+#: configs are historical records).
 DEFAULT_RULES = {
     "task_select": "any_weak_failed",
     "segment_select": "strong_success_weak_failed",
@@ -88,15 +88,10 @@ _V3_METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "delivery": {"name": "whole_bank"},
 }
 
-#: Job role -> the executor anchor it defaults to: "strong", "weak", or
-#: None -- None means the config MUST name the model explicitly (the
-#: pipeline's handle builder refuses a missing role; nothing here
-#: guesses). The answerer uses the weak model by design (the exam probes
-#: what the weak model can do); everything else answers with the strong
-#: one. A dict on purpose -- the defaults are data, and the old name
-#: (MODEL_ROLES, a plain tuple) was a permanent namesake of
-#: core.models' trajectory roles.
-ROLE_DEFAULTS: Dict[str, Optional[str]] = {
+#: Job role -> the executor anchor it defaults to, "strong" or "weak".
+#: The answerer uses the weak model by design (the exam probes what the
+#: weak model can do); everything else answers with the strong one.
+ROLE_DEFAULTS: Dict[str, str] = {
     "executor_strong": "strong",
     "executor_weak": "weak",
     "segmenter": "strong",
@@ -135,8 +130,8 @@ class ConfigError(ValueError):
 
     Defined in core (not imported from infra.reliability) because core is
     stdlib-only. Subclassing ValueError keeps every existing contract:
-    pipeline.py wraps load_config's ValueErrors into infra's ConfigError for
-    the CLI, and callers matching ValueError keep matching.
+    ``cli.run_experiment`` wraps load_config's ValueErrors into infra's
+    ConfigError, and callers matching ValueError keep matching.
     """
 
 
@@ -155,10 +150,10 @@ class ConfigError(ValueError):
 #
 # Phase specs are DATACLASSES, not TypedDicts, for the same reason the
 # rest of core's records are: ``__post_init__`` is where the load-time
-# checklist lives (a TypedDict validates nothing at runtime), the frozen
-# manifest serialises them through ``dataclasses.fields`` exactly like
-# every other ExperimentConfig field, and frozen=True keeps a parsed
-# config from being mutated after the manifest comparison.
+# checklist lives (a TypedDict validates nothing at runtime), and the
+# frozen manifest serialises them through ``dataclasses.fields`` exactly
+# like every other ExperimentConfig field. frozen=True stops attribute
+# reassignment on a parsed spec; its mapping fields stay mutable dicts.
 
 #: R8's explicit phase roles. The decision entry (composites.decision)
 #: receives exactly these words as ``current_kind`` / ``control_kind``;
@@ -401,7 +396,7 @@ def _method_mapping(raw: Any, where: str) -> Dict[str, Any]:
     """One nested method mapping: a dict naming its method. The deep
     validation belongs to the family's contract in the methods layer
     (resolution, stage 0); here only the shape and the ``name`` are
-    checked, the same split as v3's ``_validate_methods``."""
+    checked. The returned dict is a one-level copy."""
     if not isinstance(raw, dict):
         raise ConfigError(
             f"{where} must be a mapping of the method's parameter names "
@@ -641,9 +636,10 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
        the field values (test role <-> test tasks, exam role <-> exam
        execution, baseline <-> both arms, single-arm depth limits);
     4. ``compare.against`` names a phase that appears EARLIER in the
-       sequence, or is exactly ``fresh_bare``; the named control is a
-       baseline phase; a single-arm real phase's ``n_attempts`` never
-       exceeds its control's weak-model depth;
+       sequence, or is exactly ``fresh_bare``, or (test role only)
+       ``external_campaign`` with its ``external`` block; the named
+       control is a baseline phase; a single-arm real phase's
+       ``n_attempts`` never exceeds its control's weak-model depth;
     5. ``curate.merge_check: exam`` requires an exam-role execute phase
        somewhere in the sequence (the merges' regression exams come from
        the A phases);
@@ -736,8 +732,8 @@ def _check_first_phase_is_execute(raw_sequence: List[str],
 def _check_compare_targets(raw_sequence: List[str],
                            specs: Dict[str, PhaseSpec]) -> None:
     """Checklist item 4, first half: ``against`` is an earlier sequence
-    name or exactly ``fresh_bare``, and the named control is a BASELINE
-    phase. A baseline's weak bare arm is the only report whose rows are
+    name, ``fresh_bare`` or ``external_campaign``, and a named control is
+    a BASELINE phase. A baseline's weak bare arm is the only report whose rows are
     bare measurements; a live phase's report rows all carry the
     injected group, and comparing against one would read a with-skill
     arm as the control."""
@@ -754,8 +750,9 @@ def _check_compare_targets(raw_sequence: List[str],
         if against not in raw_sequence[:position]:
             raise ConfigError(
                 f"phases.{name}.compare.against is {against!r}, which is "
-                "not 'fresh_bare' and does not appear earlier in the "
-                f"sequence; earlier phases: {raw_sequence[:position]}")
+                "not 'fresh_bare' or 'external_campaign' and does not "
+                "appear earlier in the sequence; earlier phases: "
+                f"{raw_sequence[:position]}")
         target = specs[against]
         if not isinstance(target, ExecutePhaseSpec) or \
                 target.role != PHASE_ROLE_BASELINE:
@@ -1113,12 +1110,8 @@ class ExperimentConfig:
                 "models must define 'executor_strong' and 'executor_weak'")
         # Fill the role table from the data defaults: the answerer uses
         # the weak model by design, everything else answers with the
-        # strong one; a None anchor stays absent -- the pipeline's
-        # handle builder refuses a missing role, so a must-configure
-        # role cannot silently fall back.
+        # strong one.
         for role, anchor in ROLE_DEFAULTS.items():
-            if anchor is None:
-                continue
             self.models.setdefault(role, weak if anchor == "weak" else strong)
         # Extra per-model chat-call parameters: keyed by model NAME, so they
         # are validated against the completed role table (any model a role
@@ -1169,14 +1162,6 @@ class ExperimentConfig:
         # cannot change through the caller's mapping and stage 0's replace()
         # re-validation is a no-op on an already-valid structure.
         self.token_budgets = _validate_token_budgets(self.token_budgets)
-
-    def model_for(self, role: str) -> str:
-        """Model name for a role (KeyError with the known roles on a typo)."""
-        try:
-            return self.models[role]
-        except KeyError:
-            raise KeyError(
-                f"unknown model role {role!r}; known: {sorted(self.models)}") from None
 
     def max_output_tokens_for(self, role: str) -> int:
         """Effective output cap for a role.
@@ -1358,10 +1343,8 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     converter and the reuse assembler's identity walk, both of which
     chain v1/v2 sources through ``upgrade_v2_config`` first.
 
-    The result carries ``schema_version: 4`` as DATA only: this code
-    still speaks v3 (``CONFIG_SCHEMA_VERSION`` flips with the M4.3
-    core, whose loader learns ``sequence``/``phases``), so the output
-    does not load yet and the converter writes it under new file names.
+    The result carries ``schema_version: 4``; the converter writes it
+    under new file names (v3 files are frozen experiment records).
 
     The emitted shapes are exactly what schema v4's ``parse_phases``
     accepts: every phase declares its R8 role (D baseline, A exam, B

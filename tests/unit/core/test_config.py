@@ -109,10 +109,6 @@ class TestRoleTable:
                                   "answerer": "model-s"})
         assert cfg.models["answerer"] == "model-s"
 
-    def test_model_for_reports_typo(self):
-        with pytest.raises(KeyError, match="known"):
-            make_config().model_for("juge")
-
     def test_unknown_role_rejected(self):
         with pytest.raises(ValueError, match="oracle"):
             make_config(models={"executor_strong": "model-s",
@@ -395,7 +391,7 @@ class TestTokenBudgets:
 
     def test_unknown_helper_role_is_a_caller_bug(self):
         # A typo'd role silently falling back to the default cap would make
-        # a budget bug invisible; like model_for, it is a KeyError.
+        # a budget bug invisible; it is a KeyError.
         cfg = make_config(token_budgets=FULL_BUDGETS)
         with pytest.raises(KeyError, match="known"):
             cfg.max_output_tokens_for("juge")
