@@ -26,6 +26,7 @@ from expedistill.llm.call import ModelHandle
 from expedistill.prompts.registry import PROMPTS, get as get_prompt
 from tests.unit.benchmarks.tb_fake_remote import (
     JobsRemoteLink,
+    RemoteShellSim,
     SimulatedCrash,
     trial_files,
 )
@@ -45,9 +46,11 @@ def _fixture_text(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-class FakeRemoteLink:
+class FakeRemoteLink(RemoteShellSim):
     """Test double for RemoteLink: scripted poll outcomes plus a remote file
-    store. Command routing mirrors the plugin's call patterns."""
+    store. Command routing mirrors the plugin's call patterns; the shell
+    simulator (tb_fake_remote.RemoteShellSim) answers the folder-cache
+    transport commands against a real directory/file model."""
 
     def __init__(self, polls=None, remote_files=None, home="/home/node29",
                  probe="ABSENT\n"):
@@ -59,11 +62,16 @@ class FakeRemoteLink:
         self.remote_files = dict(remote_files or {})
         self.commands = []
         self.puts = []
+        self.uploads = []
         self.pid = 4242
         self.probe = probe
+        self.dirs = set()
 
     def run(self, cmd, timeout=None):
         self.commands.append(cmd)
+        simulated = self.shell_run(cmd, timeout=timeout)
+        if simulated is not None:
+            return simulated
         if "$HOME" in cmd:
             return self.home, "", 0
         if "nohup" in cmd:  # the submit call
@@ -88,7 +96,18 @@ class FakeRemoteLink:
 
     def put(self, local, remote, timeout=None):
         self.puts.append((local, str(remote)))
-        self.remote_files[str(remote)] = Path(local).read_text(encoding="utf-8")
+        payload = Path(local).read_bytes()
+        # The put-time snapshot: the ship's cleanup rm removes the tar
+        # from the tree, but what LEFT the machine stays assertable.
+        self.uploads.append((str(remote), payload))
+        # Bytes, not text: the folder cache ships a tar, and the
+        # shell simulator's tar -xf reads whatever put stored.
+        self.remote_files[str(remote)] = payload
+
+    @property
+    def files(self):
+        # The shell simulator's name for the file map.
+        return self.remote_files
 
 
 def _completed_trial_files(result="result_success.json",

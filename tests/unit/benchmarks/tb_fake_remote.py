@@ -8,7 +8,10 @@ exactly the commands that name that run id -- which is what the run-id
 collision tests need. No network, no ssh.
 """
 
+import io
 import re
+import shlex
+import tarfile
 from pathlib import Path
 
 from expedistill.infra.reliability import InfrastructureError
@@ -49,7 +52,108 @@ def trial_files(run_id, task, result="result_success.json",
     }
 
 
-class JobsRemoteLink:
+class RemoteShellSim:
+    """The remote-shell half of the fake host: a directory set plus a
+    file map, with real semantics for the transport-shape commands the
+    folder-cache path issues (``test -d`` / ``mkdir -p`` / ``rm -rf`` /
+    ``mv`` / ``tar -xf`` / ``cp -r``), so tests can assert what the
+    remote side actually ends up holding -- byte-identical file copies
+    included. ``shell_run`` returns ``(out, err, rc)`` for a simulated
+    command and ``None`` for anything else (the caller falls back to
+    its scripted behaviour).
+
+    Host attributes used: ``self.dirs`` (set of directory paths) and
+    ``self.files`` (path -> str | bytes)."""
+
+    #: The command heads the simulator owns; anything else (probes,
+    #: submits, identity checks -- or a compound mixing an owned head
+    #: with a foreign one) falls back to the scripted halves. Matched on
+    #: the token head, never on substrings: a path segment like
+    #: "skills_cache" contains "kill" and would poison a substring rule.
+    _OWNED_HEADS = frozenset({"test", "mkdir", "rm", "mv", "tar", "cp"})
+
+    def shell_run(self, cmd, timeout=None):
+        parts = [shlex.split(part.strip())
+                 for part in cmd.split("&&")]
+        if any(not tokens or tokens[0] not in self._OWNED_HEADS
+               for tokens in parts):
+            return None
+        out = ""
+        for tokens in parts:
+            head = tokens[0]
+            if head == "test" and len(tokens) == 3 \
+                    and tokens[1] in ("-d", "-f"):
+                path = tokens[2]
+                present = (path in self.dirs if tokens[1] == "-d"
+                           else path in self.files)
+                if not present:
+                    return out, "", 1
+            elif head == "mkdir" and "-p" in tokens:
+                for path in tokens[tokens.index("-p") + 1:]:
+                    self._mkdir(path)
+            elif head == "rm" and ("-rf" in tokens or "-f" in tokens):
+                flag = "-rf" if "-rf" in tokens else "-f"
+                for path in tokens[tokens.index(flag) + 1:]:
+                    if flag == "-rf":
+                        self._rmtree(path)
+                    else:
+                        self.files.pop(path, None)
+            elif head == "mv" and len(tokens) == 3:
+                source, dest = tokens[1], tokens[2]
+                if source not in self.dirs:
+                    return out, "", 1
+                for path in sorted(self.files):
+                    if path.startswith(source + "/"):
+                        self.files[dest + path[len(source):]] = \
+                            self.files.pop(path)
+                for path in sorted(self.dirs):
+                    if path.startswith(source + "/"):
+                        self.dirs.discard(path)
+                        self.dirs.add(dest + path[len(source):])
+                self.dirs.discard(source)
+                self.dirs.add(dest)
+            elif head == "tar" and "-xf" in tokens and "-C" in tokens:
+                archive = tokens[tokens.index("-xf") + 1]
+                target = tokens[tokens.index("-C") + 1]
+                payload = self.files.get(archive)
+                if not isinstance(payload, (bytes, bytearray)):
+                    return out, "", 1
+                with tarfile.open(fileobj=io.BytesIO(bytes(payload))) as tar:
+                    for member in tar.getmembers():
+                        if not member.isfile():
+                            continue
+                        extracted = tar.extractfile(member).read()
+                        self._mkdir(target)
+                        self.files[f"{target}/{member.name}"] = extracted
+            elif head == "cp" and "-r" in tokens and len(tokens) >= 4:
+                source = tokens[tokens.index("-r") + 1]
+                dest = tokens[-1]
+                if not source.endswith("/.") or not dest.endswith("/"):
+                    return out, "", 1
+                source = source[:-2].rstrip("/")
+                dest = dest.rstrip("/")
+                self._mkdir(dest)
+                for path in sorted(self.files):
+                    if path.startswith(source + "/"):
+                        self.files[dest + path[len(source):]] = \
+                            self.files[path]
+            else:
+                return None
+        return out, "", 0
+
+    def _mkdir(self, path):
+        parts = path.strip("/").split("/")
+        for index in range(1, len(parts) + 1):
+            self.dirs.add("/" + "/".join(parts[:index]))
+
+    def _rmtree(self, path):
+        for target in (path, path + "/"):
+            self.dirs = {d for d in self.dirs if not d.startswith(target)}
+            for key in [k for k in self.files if k.startswith(target)]:
+                del self.files[key]
+
+
+class JobsRemoteLink(RemoteShellSim):
     """Remote host double: file tree + live pid set + a launch log.
 
     ``on_submit(run_id, task, model) -> dict | None`` decides what a launched
@@ -75,7 +179,10 @@ class JobsRemoteLink:
         self.commands = []
         self.launches = []
         self.puts = []
+        self.uploads = []
         self.kills = []
+        #: The simulated directory tree (files live in self.files).
+        self.dirs = set()
         #: Number of upcoming polls that "crash" the local process.
         self.crash_polls = 0
         self._next_pid = 5000
@@ -85,6 +192,9 @@ class JobsRemoteLink:
     def run(self, cmd, timeout=None):
         self.commands.append(cmd)
         assert "pkill" not in cmd and "pgrep" not in cmd, cmd
+        simulated = self.shell_run(cmd, timeout=timeout)
+        if simulated is not None:
+            return simulated
         if "$HOME" in cmd:
             return self.home, "", 0
         if "nohup" in cmd:
@@ -111,11 +221,20 @@ class JobsRemoteLink:
         except KeyError:
             raise InfrastructureError(
                 f"scp failed (rc=1) get {remote} -> {local}")
-        Path(local).write_text(content, encoding="utf-8")
+        if isinstance(content, bytes):
+            Path(local).write_bytes(content)
+        else:
+            Path(local).write_text(content, encoding="utf-8")
 
     def put(self, local, remote, timeout=None):
         self.puts.append((local, str(remote)))
-        self.files[str(remote)] = Path(local).read_text(encoding="utf-8")
+        payload = Path(local).read_bytes()
+        # The put-time snapshot: the ship's cleanup rm removes the tar
+        # from the tree, but what LEFT the machine stays assertable.
+        self.uploads.append((str(remote), payload))
+        # Bytes, not text: the folder cache ships a tar, and the
+        # simulator's tar -xf reads whatever put stored.
+        self.files[str(remote)] = payload
 
     # -- helpers -----------------------------------------------------------
 
@@ -166,7 +285,10 @@ class JobsRemoteLink:
         meta_path = f"{JOBS}/{run_id}.ed_meta.json"
         meta_line = ""
         if meta_path in self.files:
-            meta_line = "META " + self.files[meta_path].replace("\n", "") + "\n"
+            meta = self.files[meta_path]
+            if isinstance(meta, bytes):
+                meta = meta.decode("utf-8")
+            meta_line = "META " + meta.replace("\n", "") + "\n"
         if results:
             return f"RESULT {results[0]}\n" + meta_line
         run_dir_exists = (

@@ -118,14 +118,32 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
     assert TB_SKILL_FOLDER_GUIDANCE != _CATALOG
     assert (skill_remote, ) == tuple(
         remote for local, remote in link.puts if remote == skill_remote)
-    # The catalog and every manifest file ride the same directory, their
-    # bytes identical to the materialized folder (the manifest carries
-    # names only -- the bodies came from the bank through the composite).
-    for name in ([entry["filename"] for entry in _MANIFEST["files"]]
-                 + [_MANIFEST["catalog_filename"]]):
-        remote = (f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext/"
-                  f"{name}")
-        assert (str(folder_dir / name), remote) in link.puts
+    # The catalog and every manifest file ride the same directory as ONE
+    # tar over one scp (the phase-once cache; the manifest carries names
+    # only -- the bodies came from the bank through the composite), and
+    # the per-unit staging is a single remote cp from that cache: the
+    # simulator's file tree then holds the task directory's files
+    # byte-identical to the materialized folder.
+    tar_puts = [(local, remote) for local, remote in link.puts
+                if remote.startswith(f"{ROOT}/skills_cache/")
+                and remote.endswith(".tar")]
+    assert len(tar_puts) == 1
+    import io
+    import tarfile as _tarfile
+    # The local tar is deleted right after the put and the remote copy
+    # by the ship's cleanup rm; the put-time snapshot keeps the bytes.
+    shipped = dict(link.uploads)[tar_puts[0][1]]
+    with _tarfile.open(fileobj=io.BytesIO(shipped)) as tar:
+        members = {member.name: tar.extractfile(member).read()
+                   for member in tar.getmembers() if member.isfile()}
+    expected = {
+        name: (folder_dir / name).read_bytes()
+        for name in ([entry["filename"] for entry in _MANIFEST["files"]]
+                     + [_MANIFEST["catalog_filename"]])}
+    assert members == expected
+    staged = f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext"
+    for name, payload in expected.items():
+        assert link.remote_files[f"{staged}/{name}"] == payload
     # The runner is pointed at the per-run skills root in skills mode.
     submit = next(cmd for cmd in link.commands if "nohup" in cmd)
     assert "TBENCH_EVAL_MODE=skills" in submit
@@ -175,13 +193,28 @@ def test_folder_unit_uploads_the_dashed_alias_too(tmp_path):
 
     plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
 
+    # The staging cp names BOTH spellings (the same rule SKILL.md's
+    # alias upload follows), and the simulator's tree holds the folder
+    # files under both directories; SKILL.md itself rides each spelling
+    # by its own scp, as before.
     remotes = [remote for _, remote in link.puts]
+    assert (f"{ROOT}/skills/ed_install-windows-3.11_tok/"
+            f"install-windows-3.11/SKILL.md") in remotes
+    assert (f"{ROOT}/skills/ed_install-windows-3.11_tok/"
+            f"install-windows-3-11/SKILL.md") in remotes
+    copies = [cmd for cmd in link.commands if "cp -r " in cmd]
+    assert len(copies) == 1
+    assert "install-windows-3.11/" in copies[0]
+    assert "install-windows-3-11/" in copies[0]
     for name in ([entry["filename"] for entry in _MANIFEST["files"]]
-                 + [_MANIFEST["catalog_filename"], "SKILL.md"]):
-        assert (f"{ROOT}/skills/ed_install-windows-3.11_tok/"
-                f"install-windows-3.11/{name}") in remotes
-        assert (f"{ROOT}/skills/ed_install-windows-3.11_tok/"
-                f"install-windows-3-11/{name}") in remotes
+                 + [_MANIFEST["catalog_filename"]]):
+        payload = _materialized(tmp_path).joinpath(name).read_bytes()
+        assert link.remote_files[
+            f"{ROOT}/skills/ed_install-windows-3.11_tok/"
+            f"install-windows-3.11/{name}"] == payload
+        assert link.remote_files[
+            f"{ROOT}/skills/ed_install-windows-3.11_tok/"
+            f"install-windows-3-11/{name}"] == payload
 
 
 def test_folder_unit_refuses_an_unmaterialized_directory(tmp_path):
@@ -229,7 +262,8 @@ def test_a_resumed_folder_unit_reuses_the_trial_without_reupload(
 
     first = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
     puts_after_first = list(link.puts)
-    assert any(remote.endswith("/catalog.md")
+    assert any(remote.endswith(".tar")
+               and remote.startswith(f"{ROOT}/skills_cache/")
                for _, remote in puts_after_first)
 
     second = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
@@ -275,3 +309,101 @@ def test_live_folder_remote_smoke(tmp_path):
     assert outcome.meta["run_id"].startswith("ed_fix-git_smokef1")
     assert outcome.meta["eval_mode"] == "skills"
     assert outcome.meta["skill_folder"]["local_dir"] == str(folder_dir)
+
+
+def test_two_folder_units_share_one_cache_upload(tmp_path):
+    """The transport fix's heart: the folder ships ONCE per folder
+    content, no matter how many units ride it. The second unit finds
+    the cache (test -d), stages with its own cp, and never puts a
+    second tar -- the 2026-10-18 storm was 84 units x 141 per-file
+    scp connections; this shape is one scp plus one cp ssh per unit."""
+    second_trial = (f"{ROOT}/jobs/ed_crack-7z-hash_tok/"
+                    f"crack-7z-hash__AbCdEf1")
+    files = _trial_files_with_cat()
+    for name, text in (
+            ("result.json", Path("tests/fixtures/tb/result_success.json")
+             .read_text(encoding="utf-8")),
+            ("agent/trajectory.json", json.dumps(_CAT_TRAJECTORY)),
+            ("verifier/test-stdout.txt",
+             Path("tests/fixtures/tb/verifier_collected.txt")
+             .read_text(encoding="utf-8"))):
+        files[f"{second_trial}/{name}"] = text
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n",
+               f"RESULT {second_trial}/result.json\n"],
+        remote_files=files)
+    plugin = _make_plugin(link)
+    first = plugin.run(_folder_task(tmp_path), HANDLE, _CATALOG,
+                       tmp_path / "work1")
+    tars_after_first = [remote for _, remote in link.puts
+                        if remote.startswith(f"{ROOT}/skills_cache/")
+                        and remote.endswith(".tar")]
+    assert len(tars_after_first) == 1
+
+    second = plugin.run(_folder_task(tmp_path, task_name="crack-7z-hash"),
+                        HANDLE, _CATALOG, tmp_path / "work2")
+
+    # Exactly one tar ever; the second unit staged by cp alone.
+    tars = [remote for _, remote in link.puts
+            if remote.startswith(f"{ROOT}/skills_cache/")
+            and remote.endswith(".tar")]
+    assert tars == tars_after_first
+    copies = [cmd for cmd in link.commands if "cp -r " in cmd]
+    assert len(copies) == 2
+    assert "crack-7z-hash" in copies[1]
+    # Both task directories hold the folder's exact bytes.
+    folder_dir = _materialized(tmp_path)
+    for task in ("train-fasttext", "crack-7z-hash"):
+        for name in ([entry["filename"] for entry in _MANIFEST["files"]]
+                     + [_MANIFEST["catalog_filename"]]):
+            expected = folder_dir.joinpath(name).read_bytes()
+            assert link.remote_files[
+                f"{ROOT}/skills/ed_{task}_tok/{task}/{name}"] == expected
+    assert second.meta["skill_folder"] == first.meta["skill_folder"]
+
+
+def test_the_upload_gate_admits_fresh_launches_only(tmp_path, monkeypatch):
+    """The rolling admission: a fresh launch's upload+submit runs under
+    the gate, a resumed unit (state=result, only polling) never touches
+    it -- the long waits hold no slot, so admission is by upload
+    completion alone."""
+    from expedistill.benchmarks.tb import plugin as tb_plugin
+
+    events = []
+
+    class RecordingGate:
+        def __enter__(self):
+            events.append("enter")
+            return self
+
+        def __exit__(self, *args):
+            events.append("exit")
+
+    monkeypatch.setattr(tb_plugin, "_UPLOAD_GATE", RecordingGate())
+    # The stateful fake: the first run's finished trial stays visible to
+    # the second run's probe, so the second call really resumes.
+    from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink
+    link = JobsRemoteLink()
+    plugin = _make_plugin(link)
+    task = _folder_task(tmp_path)
+
+    first = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
+    assert events == ["enter", "exit"]
+    # The finished trial is reused on the second call: no upload, no
+    # gate traffic.
+    second = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
+    assert events == ["enter", "exit"]
+    assert second.meta["resumed"] == "result"
+    assert first.meta["resumed"] is None
+
+
+def test_the_gate_width_reads_the_environment(monkeypatch):
+    from expedistill.benchmarks.tb.plugin import _env_int
+
+    monkeypatch.setenv("EXPEDISTILL_TB_UPLOAD_GATE", "3")
+    assert _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8) == 3
+    monkeypatch.delenv("EXPEDISTILL_TB_UPLOAD_GATE")
+    assert _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8) == 8
+    monkeypatch.setenv("EXPEDISTILL_TB_UPLOAD_GATE", "zero")
+    with pytest.raises(Exception, match="EXPEDISTILL_TB_UPLOAD_GATE"):
+        _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8)

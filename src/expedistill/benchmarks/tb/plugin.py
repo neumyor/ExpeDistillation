@@ -117,6 +117,9 @@ import os
 import posixpath
 import re
 import shlex
+import tarfile
+import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -450,6 +453,20 @@ def _short(value: Any, limit: int = 400) -> Optional[str]:
     return text
 
 
+def _env_int(name: str, default: int) -> int:
+    """The environment's value, or the default; a positive int."""
+    raw = os.environ.get(name, "")
+    if not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(f"{name} must be an int, got {raw!r}") from None
+    if value < 1:
+        raise ConfigError(f"{name} must be >= 1, got {value!r}")
+    return value
+
+
 def _env_float(name: str, default: float, override: Optional[float]) -> float:
     """Constructor override wins, then the environment, then the default."""
     if override is not None:
@@ -464,6 +481,38 @@ def _env_float(name: str, default: float, override: Optional[float]) -> float:
     if value <= 0:
         raise ConfigError(f"{name} must be positive, got {value!r}")
     return value
+
+
+#: One folder ships once per process: the cache-ensure critical section
+#: is process-wide (K1's parallelism is a thread pool; the run directory
+#: lock already serialises whole drivers).
+_FOLDER_CACHE_LOCK = threading.Lock()
+
+#: Rolling upload admission (user ruling 2026-10-18): at most this many
+#: units may be between "started building connections" and "the submit
+#: returned" at once, and the next unit is admitted only when an earlier
+#: one's upload COMPLETES -- never by a timer alone. A transport-shape
+#: guard (the 2026-10-18 storm was 84 units x 141 per-file scp
+#: connections and node29's sshd MaxStartups dropped them): it changes
+#: when units start, never what they measure. Resumed units skip it
+#: (they only poll); polls run outside it (one ssh per poll period).
+_UPLOAD_GATE_WIDTH = _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8)
+_UPLOAD_GATE = threading.BoundedSemaphore(_UPLOAD_GATE_WIDTH)
+
+
+def _folder_dir_digest(folder_dir: Path) -> str:
+    """The CONTENT digest of a materialized skill folder: sha256 over the
+    sorted (name, bytes) of every file it holds. The cache key -- the
+    same folder re-uses the remote cache, a changed folder (a re-curated
+    bank) gets a new one, and two folders with equal digests are
+    byte-identical by construction."""
+    digest = hashlib.sha256()
+    for path in sorted(entry for entry in folder_dir.iterdir()
+                       if entry.is_file()):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
 
 
 def _q(value: str) -> str:
@@ -707,12 +756,18 @@ class TBPlugin(BenchmarkPlugin):
                 pid = int(recorded_pid)
             else:
                 meta["resumed"] = None
-                self._upload_launch_files(link, root, run_id, skill_meta,
-                                          task_name, skill_md, workdir,
-                                          conditions, folder)
-                pid = self._submit(link, root, run_id, task_name, model_name,
-                                   eval_mode,
-                                   skill_meta.get("remote_skill_root"))
+                # Rolling admission: the whole connection-building burst of
+                # a fresh launch (upload + submit) happens under the gate,
+                # so the next unit starts only after an earlier one's
+                # upload completed -- the poll phase (the long wait) runs
+                # outside it and never holds a slot.
+                with _UPLOAD_GATE:
+                    self._upload_launch_files(link, root, run_id, skill_meta,
+                                              task_name, skill_md, workdir,
+                                              conditions, folder)
+                    pid = self._submit(link, root, run_id, task_name,
+                                       model_name, eval_mode,
+                                       skill_meta.get("remote_skill_root"))
                 write_json(record_file, dict(conditions, pid=pid))
             launched = True
             meta["remote_pid"] = pid
@@ -922,7 +977,7 @@ class TBPlugin(BenchmarkPlugin):
                 link.put(str(local), alias_file,
                          timeout=SUBMIT_TIMEOUT_SECONDS)
             if folder is not None:
-                self._upload_folder_files(link, run_id, skill_meta,
+                self._upload_folder_files(link, root, run_id, skill_meta,
                                           task_name, folder)
         local_meta = workdir / _RECORD_DIR / f"{run_id}{_REMOTE_META_SUFFIX}"
         write_json(local_meta, conditions)
@@ -930,12 +985,22 @@ class TBPlugin(BenchmarkPlugin):
                  f"{root}/jobs/{run_id}{_REMOTE_META_SUFFIX}",
                  timeout=SUBMIT_TIMEOUT_SECONDS)
 
-    def _upload_folder_files(self, link: RemoteLink, run_id: str,
+    def _upload_folder_files(self, link: RemoteLink, root: str, run_id: str,
                              skill_meta: Dict[str, Any], task_name: str,
                              folder: Tuple[Dict[str, Any], Path]) -> None:
-        """A folder unit's catalog and skill files, from the materialized
-        local directory into the run's remote skill directory (and its
-        dashed alias directory, the same spelling rule SKILL.md follows).
+        """A folder unit's catalog and skill files reach the run's remote
+        skill directory (and its dashed alias directory, the same spelling
+        rule SKILL.md follows) through a PHASE-ONCE REMOTE CACHE: the
+        whole materialized folder ships as one tar over one scp into
+        ``<root>/skills_cache/<content digest>/`` (idempotent -- the
+        atomic ``mv`` of the extraction IS the existence marker), and
+        every unit stages its copy with ONE ssh (``mkdir -p`` + ``cp
+        -r`` from the cache). ``cp`` copies bytes, so the sandbox's
+        ``/opt/openclaw-skills/<task>/`` contents are byte-identical to
+        the per-file scp path this replaces -- the 2026-10-18 storm
+        (84 units x 141 files, one ssh connection each, node29's sshd
+        MaxStartups dropped them by the dozen) is a transport-shape
+        problem, not a measurement change.
 
         The manifest is a NAME mapping (no bodies), so the bytes come
         from the directory the stage materialized; a file the manifest
@@ -949,24 +1014,82 @@ class TBPlugin(BenchmarkPlugin):
                 f"TB run {run_id}: the folder unit's materialized "
                 f"directory {str(folder_dir)!r} does not exist; the phase "
                 "driver must materialize the folder before dispatch")
-        targets = [f"{skill_meta['remote_skill_root']}/{task_name}"]
-        alias_file = skill_meta.get("remote_skill_alias_file")
-        if alias_file:
-            targets.append(str(Path(alias_file).parent))
         names = [entry["filename"] for entry in manifest.get("files", [])]
         catalog_name = manifest.get("catalog_filename")
         if manifest.get("catalog_text"):
             names.append(catalog_name)
-        for name in names:
-            local = folder_dir / name
-            if not local.is_file():
-                raise CodeBugError(
-                    f"TB run {run_id}: the materialized folder "
-                    f"{str(folder_dir)!r} is missing {name!r}, which the "
-                    "manifest names -- the folder cannot ship incomplete")
-            for target in targets:
-                link.put(str(local), f"{target}/{name}",
-                         timeout=SUBMIT_TIMEOUT_SECONDS)
+        missing = [name for name in names
+                   if not (folder_dir / name).is_file()]
+        if missing:
+            raise CodeBugError(
+                f"TB run {run_id}: the materialized folder "
+                f"{str(folder_dir)!r} is missing {missing}, which the "
+                "manifest names -- the folder cannot ship incomplete")
+        # The cache key is the CONTENT digest (the sorted file names and
+        # bytes of the materialized directory, which the bank fingerprint
+        # pins through the manifest): same folder -> same cache, a
+        # re-curated bank -> a new cache, never a mixed one.
+        digest = _folder_dir_digest(folder_dir)
+        cache = f"{root}/skills_cache/{digest}"
+        with _FOLDER_CACHE_LOCK:
+            _, _, rc = link.run(f"test -d {_q(cache)}",
+                                timeout=SUBMIT_TIMEOUT_SECONDS)
+            if rc != 0:
+                self._ship_folder_cache(link, root, cache, folder_dir,
+                                        digest)
+        targets = [f"{skill_meta['remote_skill_root']}/{task_name}"]
+        alias_file = skill_meta.get("remote_skill_alias_file")
+        if alias_file:
+            targets.append(str(Path(alias_file).parent))
+        parts = ["mkdir -p " + " ".join(_q(target) for target in targets)]
+        parts += [f"cp -r {_q(cache)}/. {_q(target)}/"
+                  for target in targets]
+        _, err, rc = link.run(" && ".join(parts),
+                              timeout=SUBMIT_TIMEOUT_SECONDS)
+        if rc != 0:
+            raise InfrastructureError(
+                f"remote folder copy for TB run {run_id} failed "
+                f"(rc={rc}): {_short(err)}")
+
+    def _ship_folder_cache(self, link: RemoteLink, root: str, cache: str,
+                           folder_dir: Path, digest: str) -> None:
+        """The once-per-folder shipping: one tar, one scp, one atomic
+        extract. Called under the cache lock; a crash mid-ship leaves at
+        most a staging directory and a temporary tar, both of which the
+        next attempt removes before retrying -- the cache directory
+        itself only ever appears whole (the mv)."""
+        files = sorted(path for path in folder_dir.iterdir()
+                       if path.is_file())
+        handle, tar_path = tempfile.mkstemp(suffix=".tar",
+                                            prefix="skill_folder_")
+        os.close(handle)
+        try:
+            with tarfile.open(tar_path, "w") as tar:
+                for path in files:
+                    tar.add(path, arcname=path.name)
+            cache_root = f"{root}/skills_cache"
+            _, err, rc = link.run(f"mkdir -p {_q(cache_root)}",
+                                  timeout=SUBMIT_TIMEOUT_SECONDS)
+            if rc != 0:
+                raise InfrastructureError(
+                    f"remote skills_cache mkdir failed (rc={rc}): "
+                    f"{_short(err)}")
+            remote_tar = f"{cache_root}/{digest}.tmp{os.getpid()}.tar"
+            link.put(tar_path, remote_tar,
+                     timeout=SUBMIT_TIMEOUT_SECONDS)
+            staging = f"{cache_root}/{digest}.staging{os.getpid()}"
+            _, err, rc = link.run(
+                f"rm -rf {_q(staging)} && mkdir -p {_q(staging)} "
+                f"&& tar -xf {_q(remote_tar)} -C {_q(staging)} "
+                f"&& mv {_q(staging)} {_q(cache)} "
+                f"&& rm -f {_q(remote_tar)}",
+                timeout=SUBMIT_TIMEOUT_SECONDS)
+            if rc != 0:
+                raise InfrastructureError(
+                    f"remote skill folder cache extract failed "
+                    f"(rc={rc}): {_short(err)}")
+        finally:
+            os.unlink(tar_path)
 
     # ------------------------------------------------------------------
     # Remote resume
