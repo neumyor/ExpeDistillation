@@ -958,3 +958,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要:管理者发现巡检行失败数不降(39 stored / 74 failed,console 心跳是 done=38 failed=14),诊断方向正确:我把失败账本行的 unit_id 做 quote 后与存盘文件名比对,但存盘文件名是带 .json 后缀的百分号编码——两个集合永不相交,失败数永远是 74。修复:两侧统一到原始 unit-id 空间(存盘文件名 unquote 后去 .json 后缀),未解决失败数 = 账本行 unit_id 集合 − 已存盘集合,重试成功即从失败数消失。顺带把监督者从 tmp/(一次性)升格为 scripts/run/supervise_tb_run.py(已三次以上复用:装配冒烟、两轮续跑),新增 3 例计数口径单测(重试成功离开失败数、全失败全额、缺失文件读零)。验证:新巡检行 "48 stored / 36 failed unresolved" 与驱动心跳逐项对账吻合(48 = 10 前批 + 38 done;36 = 14 failed + 22 在飞单元的旧账本行,存盘即消失)。验收:全套 2212 passed + 4 deselected,ruff 全过。纯显示口径修正,不碰实验运行与测量。
 
 工件:`scripts/run/supervise_tb_run.py`(新建,自 tmp/supervise_folder_run.py 升格并修口径)、`tests/unit/scripts/test_supervise_tb_run.py`(新建 3 例)、`tmp/supervise_folder_run.py`(退役)、本条对应 commit
+
+## 2026-10-19 01:20 — 监督者重启路径修复:绝对命令 + 失败必落日志(管理者已批)
+
+一段话摘要:00:37 驱动第二次退出(15 单元 infra 耗尽)触发监督者首次重启即崩——os.chdir 的目标算错一级(parent.parent 落在 scripts/ 而非仓库根),重启命令的相对路径 .venv/bin/expedistill 在那里不存在,FileNotFoundError 未捕获直接杀死监督者本身,00:38–00:55 无守护无告警。按管理者批准(附两点补充)修复:chdir 目标改为 parents[2](仓库根,提取为 repo_root());重启命令首项绝对化(cli_command() 从脚本位置推仓库根拼接,不再依赖任何 cwd);重启执行包进 relaunch_driver(),失败捕获 OSError、写入 supervisor.log 与 stdout 后才退出——不许静默死。新增 3 例单测:命令绝对且可解析、失败必留 "relaunch FAILED" 日志、成功写 pidfile。验收:全套 2215 passed + 4 deselected,ruff 全过。纯运维脚本修复,不碰实验运行与测量口径;真实重启路径的验证结果待下次驱动退出时回报。
+
+工件:`scripts/run/supervise_tb_run.py`(repo_root/cli_command/relaunch_driver + chdir 修正)、`tests/unit/scripts/test_supervise_tb_run.py`(+3 例)、本条对应 commit

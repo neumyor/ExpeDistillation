@@ -58,3 +58,49 @@ def test_a_missing_ledger_or_store_reads_zero(tmp_path):
     assert supervise.unresolved_failures(run_dir, "p07:C") == 0
     assert supervise.stored_unit_ids(run_dir, "p07:C") == set()
     assert supervise.unresolved_failures(tmp_path / "nowhere", "p07:C") == 0
+
+
+def test_the_relaunch_command_is_absolute_and_exists(tmp_path):
+    cmd = supervise.cli_command("configs/experiments/x.yaml", tmp_path / "r")
+    assert Path(cmd[0]).is_absolute()
+    # The supervisor may run under any cwd: the executable must resolve
+    # from the script's own location (the 2026-10-19 crash was a
+    # relative path under a one-level-short chdir).
+    assert Path(cmd[0]).exists()
+    assert cmd[1:] == ["run", "--config", "configs/experiments/x.yaml",
+                       "--run-dir", str(tmp_path / "r"),
+                       "--workers", "64", "--k1-stagger", "20",
+                       "--llm-timeout", "1500",
+                       "--llm-infra-retries", "5",
+                       "--llm-infra-backoff", "10"]
+
+
+def test_a_failed_relaunch_is_logged_never_silent(tmp_path, monkeypatch):
+    lines = []
+
+    def log(message):
+        lines.append(message)
+
+    def broken_popen(*args, **kwargs):
+        raise FileNotFoundError("No such file or directory: 'x'")
+
+    monkeypatch.setattr(supervise.subprocess, "Popen", broken_popen)
+    result = supervise.relaunch_driver(tmp_path, ["x"], log)
+    assert result is None
+    assert any("relaunch FAILED" in line for line in lines)
+
+
+def test_a_successful_relaunch_writes_the_pidfile(tmp_path, monkeypatch):
+    lines = []
+
+    def log(message):
+        lines.append(message)
+
+    class FakeProc:
+        pid = 4321
+
+    monkeypatch.setattr(supervise.subprocess, "Popen",
+                        lambda *a, **k: FakeProc())
+    result = supervise.relaunch_driver(tmp_path, ["x"], log)
+    assert result == 4321
+    assert (tmp_path / "driver.pids").read_text() == "4321\n"

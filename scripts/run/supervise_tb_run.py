@@ -31,6 +31,41 @@ from pathlib import Path
 MAX_RESTARTS = 30
 
 
+def repo_root() -> Path:
+    """The repository root (this script lives in <root>/scripts/run/) --
+    the relaunch command's relative paths resolve against it."""
+    return Path(__file__).resolve().parents[2]
+
+
+def cli_command(config: str, run_dir: Path) -> list:
+    """The driver's launch command, ABSOLUTE first token: a relative
+    executable would break under any cwd (the 2026-10-19 crash -- the
+    supervisor chdir'd one level short of the root, the relaunch's
+    .venv/bin/expedistill did not exist there, and the unhandled
+    FileNotFoundError killed the supervisor itself, silently)."""
+    return [str(repo_root() / ".venv" / "bin" / "expedistill"),
+            "run", "--config", config, "--run-dir", str(run_dir),
+            "--workers", "64", "--k1-stagger", "20",
+            "--llm-timeout", "1500",
+            "--llm-infra-retries", "5", "--llm-infra-backoff", "10"]
+
+
+def relaunch_driver(run_dir: Path, cmd: list, log) -> "int | None":
+    """Start one driver, new session, pidfile written. A FAILED relaunch
+    is LOGGED, never a silent death: the exception goes to the
+    supervisor log and stdout before the caller decides to give up."""
+    try:
+        console = open(run_dir / "console.log", "ab")
+        proc = subprocess.Popen(cmd, stdout=console, stderr=console,
+                                start_new_session=True)
+    except OSError as exc:
+        log(f"relaunch FAILED: {type(exc).__name__}: {exc}")
+        return None
+    with open(run_dir / "driver.pids", "w") as handle:
+        handle.write(f"{proc.pid}\n")
+    return proc.pid
+
+
 def _traj_dir(run_dir: Path, phase_label: str) -> Path:
     directory = phase_label.replace(":", "_")
     return (run_dir / "phases" / directory / "with_bank" / "store"
@@ -77,10 +112,7 @@ def main() -> int:
     run_dir = Path(sys.argv[1]).resolve()
     config = sys.argv[2]
     phase_label = sys.argv[3] if len(sys.argv) > 3 else "p07:C"
-    cmd = [".venv/bin/expedistill", "run", "--config", config,
-           "--run-dir", str(run_dir), "--workers", "64",
-           "--k1-stagger", "20", "--llm-timeout", "1500",
-           "--llm-infra-retries", "5", "--llm-infra-backoff", "10"]
+    cmd = cli_command(config, run_dir)
     summary_path = (run_dir / "phases" / phase_label.replace(":", "_")
                     / "phase_summary.json")
     ssh_host = os.environ["EXPEDISTILL_TB_HOST"]
@@ -126,7 +158,7 @@ def main() -> int:
             time.sleep(300)
         return False
 
-    os.chdir(Path(__file__).resolve().parent.parent)  # the repo root
+    os.chdir(repo_root())  # the launch files and configs are repo-relative
     log(f"supervisor start: adopting driver pid {driver_pid()}")
     restarts = 0
     last_hour_mark = -1
@@ -154,12 +186,11 @@ def main() -> int:
             return 1
         restarts += 1
         log(f"driver gone; relaunching (restart {restarts}/{MAX_RESTARTS})")
-        console = open(run_dir / "console.log", "ab")
-        proc = subprocess.Popen(cmd, stdout=console, stderr=console,
-                                start_new_session=True)
-        with open(run_dir / "driver.pids", "w") as handle:
-            handle.write(f"{proc.pid}\n")
-        log(f"relaunched driver pid {proc.pid}")
+        pid = relaunch_driver(run_dir, cmd, log)
+        if pid is None:
+            log("supervisor exits: the relaunch command itself failed")
+            return 1
+        log(f"relaunched driver pid {pid}")
         time.sleep(60)
 
 
