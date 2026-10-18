@@ -964,3 +964,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要:00:37 驱动第二次退出(15 单元 infra 耗尽)触发监督者首次重启即崩——os.chdir 的目标算错一级(parent.parent 落在 scripts/ 而非仓库根),重启命令的相对路径 .venv/bin/expedistill 在那里不存在,FileNotFoundError 未捕获直接杀死监督者本身,00:38–00:55 无守护无告警。按管理者批准(附两点补充)修复:chdir 目标改为 parents[2](仓库根,提取为 repo_root());重启命令首项绝对化(cli_command() 从脚本位置推仓库根拼接,不再依赖任何 cwd);重启执行包进 relaunch_driver(),失败捕获 OSError、写入 supervisor.log 与 stdout 后才退出——不许静默死。新增 3 例单测:命令绝对且可解析、失败必留 "relaunch FAILED" 日志、成功写 pidfile。验收:全套 2215 passed + 4 deselected,ruff 全过。纯运维脚本修复,不碰实验运行与测量口径;真实重启路径的验证结果待下次驱动退出时回报。
 
 工件:`scripts/run/supervise_tb_run.py`(repo_root/cli_command/relaunch_driver + chdir 修正)、`tests/unit/scripts/test_supervise_tb_run.py`(+3 例)、本条对应 commit
+
+## 2026-10-19 03:30 — folder 版 C 终测完成:三口径持平,弱模型几乎不读技能文件(84 试 8 读)
+
+一段话摘要:复用旧 141 条技能库(bank:a340288b1562 全程未动)的 folder 交付终测完成,84 单元全部落盘、完整性审计 0 error / 0 warn / 1 info(装配形态预期说明)。成绩:folder avg@3 = 46.4%(17/28 过),对照外部 campaign 裸跑 47.6%(18/28)为 −1.2pp(差一个任务),对照同库 retrieval 历史 42.9%(18/28)为 +3.6pp;逐任务配对两组都在噪声内(9胜5负14平 / 7胜5负16平),三种口径不可区分。核心观测:folder 模式下弱模型几乎不读技能文件——84 次尝试共 8 次读取、24/28 任务零读取、8 条被读技能各恰好 1 次、0 次读目录外文件;但 70/84 读了 SKILL.md 指引、57/84 列过目录——模型看得见文件夹,只是不打开技能正文,folder 的实际效果接近"裸跑+偶发自主检索"。运行账目:续跑窗口 6h19m(10-18 20:24 → 10-19 02:43),弱模型 141 次尝试共 2.92 亿 prompt + 637 万 completion token,D/L/B 零调用;重试账本 89 行/74 单元全部恢复;17/84 trial 无判分(记 infra,源 run retrieval 为 0,系两 run 最大口径差异,已如实入报告)。基础设施事件:连接风暴(传输层修复 commit b719aff)、VPN 断连(网络事件)、监督者两修(86594b1/64513dc,后者的重启路径修复未被真实触发,由单测钉住)。最终报告:~/Documents/Manager/state/replies/tb_folder_c_run.md。全部 9 个提交在 feature/multi-method 未推送,全套 2215 passed + 4 deselected。
+
+工件:`runs/tb21_split_folder_20261017_1339`(正式 run,过审计)、`runs/tb21_split_folder_smoke1_20261018_1840`、`runs/tb21_split_folder_smoke2_20261017_1729`(小样本证据)、`~/Documents/Manager/state/replies/tb_folder_c_run.md`(最终报告)、本条对应 commit
