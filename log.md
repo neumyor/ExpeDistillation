@@ -970,3 +970,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：评审报告处理顺序的第三步。config.py：两处版本号检查合并为 _check_schema_version，调用方各自保留缺省版本（YAML 文件缺省 3 即拒绝、manifest 字典缺省 4）；tasks 与外部对照文件的路径解析合并为 _absolute_path，pathlib 移到模块顶部；upgrade_v2_config 的缺省值改为从 _V3_METHOD_DEFAULTS 读取；基线双臂常量公开为 BASELINE_ARMS，stages/phase_execute/resolve.py 改为导入；划分键集合公开为 SPLIT_LIST_KEY_SETS，blocks/tasks.py 的 split_tasks 改为导入它和 MODES。合并划分校验时发现一处不一致：core 放过 train 或 test 写成 null，而 split_tasks 会拒绝，现在 core 只放过 reserved 为 null，新增 3 个测试用例。curation.py：BANK_NAME 改为从 composites/phase_bank 导入；_unit_member_ids 改为复用 _display_sources；“已接受但不在某集合里”的扫描合并为 _accepted_ids_outside；“跳过”结果合并为 _skipped；每轮结束的收尾合并为 finish_round 闭包；_accepted_members 与 _within_budget 公开为 accepted_members 与 within_budget，methods/curation/none.py 改为复用，删去其中相同的扫描和预算判断。“未知键拒绝”的 14 处没有合并：每处的报错文字各不相同，测试按这些文字断言，合并后报错要么变差要么只省几行，不值得。“记录失败后重新抛出”的 4 处也没有合并，每处都只有两行。红线核对：9 份 v4 配置的 to_dict、17 份旧版配置经升级函数的输出，改动前后逐字节相同；curation 测试套件运行中的 193 次日志写入，改动前后顺序和内容逐字节相同；store.save、追加库行、write_jsonl 的调用处数量不变；金矩阵与整理相关测试 189 个通过。验收：全套 2216 passed + 4 deselected（新增 3 个测试用例），ruff 全过。
 
 工件：`src/expedistill/core/config.py`、`src/expedistill/composites/curation.py`、`src/expedistill/methods/curation/none.py`、`src/expedistill/stages/phase_execute/resolve.py`、`src/expedistill/blocks/tasks.py`、`tests/unit/core/test_config.py`
+
+## 2026-10-18 17:49 — config.py 的升级纯函数原样搬到 core/config_upgrade.py
+
+一段话摘要：评审报告处理顺序第四步的第一部分。把 _V3_METHOD_DEFAULTS、upgrade_v2_config、_refuse_unmapped_keys、_v3_methods、upgrade_v3_config 原样搬进新文件 core/config_upgrade.py（402 行），config.py 在末尾重新导出两个公开函数，10 个导入方一行不改；config.py 从 1696 行（评审时）降到 1326 行。逐字节核对：搬出的两段代码与搬移前的文本完全相同。红线核对：9 份 v4 配置的 to_dict 与 17 份旧版配置的升级输出改动前后逐字节相同，分层检查通过（新文件只依赖 core.config 与标准库）。README 2.5 节、装配工具一行与 AGENTS.md 第四节同步改为新文件。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/core/config_upgrade.py`（新建）、`src/expedistill/core/config.py`、`README.md`、`AGENTS.md`

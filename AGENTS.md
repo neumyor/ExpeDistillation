@@ -89,8 +89,8 @@ src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     ids.py                确定性 ID 规则
-    config.py             实验配置结构（schema v4：sequence + phases）、模型角色表、
-                          v2→v3→v4 升级纯函数
+    config.py             实验配置结构（schema v4：sequence + phases）、模型角色表
+    config_upgrade.py     v2→v3→v4 升级纯函数（config.py 重新导出）
     contracts.py          执行—学习循环的四个交接数据类（执行单元行 / 运行记录 /
                           验收报告行 / 任务清单行，R0 冻结的接口形状）
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
