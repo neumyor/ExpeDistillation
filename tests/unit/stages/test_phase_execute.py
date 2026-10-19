@@ -161,8 +161,8 @@ def make_config(**overrides):
         n_attempts_strong=1,
         n_attempts_weak=2,
         rules={},
-        sequence=["D"],
-        phases={"D": {"kind": "execute", "role": "baseline",
+        sequence=["baseline"],
+        phases={"baseline": {"kind": "execute", "role": "baseline",
                       "tasks": "train", "delivery": {"name": "none"},
                       "execution": {"name": "real",
                                     "arms": ["executor_strong",
@@ -234,7 +234,7 @@ def live_spec(**overrides):
     spec = dict(role="live", tasks="train",
                 delivery={"name": "group_by_task"},
                 execution={"name": "real", "n_attempts": 1},
-                compare=CompareSpec(against="D"))
+                compare=CompareSpec(against="baseline"))
     spec.update(overrides)
     return ExecutePhaseSpec(**spec)
 
@@ -251,7 +251,7 @@ def c_spec(**overrides):
     spec = dict(role="test", tasks="test",
                 delivery={"name": "whole_bank"},
                 execution={"name": "real"},
-                compare=CompareSpec(against="D"))
+                compare=CompareSpec(against="baseline"))
     spec.update(overrides)
     return ExecutePhaseSpec(**spec)
 
@@ -311,11 +311,11 @@ def test_baseline_runs_both_arms_and_writes_the_report(monkeypatch,
                                                        tmp_path):
     plugin = _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
-    phase = phase_of(0, "D", baseline_spec())
+    phase = phase_of(0, "baseline", baseline_spec())
 
     result = phase_execute.run(ctx, phase)
 
-    assert result.label == "p01:D"
+    assert result.label == "p01:baseline"
     assert result.summary["role"] == "baseline"
     # Strong once per task, weak twice per task (the frozen depths).
     strong_calls = [call for call in plugin.calls
@@ -325,7 +325,7 @@ def test_baseline_runs_both_arms_and_writes_the_report(monkeypatch,
     assert len(strong_calls) == 3
     assert len(weak_calls) == 6
     rows = report_rows(ctx, phase)
-    assert len(rows) == 6  # 3 tasks x 2 roles (D phases split by role)
+    assert len(rows) == 6  # 3 tasks x 2 roles (baseline phases split by role)
     assert all(row.status == verdicts.STATUS_NORMAL for row in rows)
     assert all(row.valid_count == row.success_count for row in rows)
     # The summary and the report are both on disk under the phase dir.
@@ -348,19 +348,19 @@ def test_baseline_leaves_the_bank_unchanged_r4(monkeypatch, tmp_path):
     ctx = make_ctx(tmp_path, make_config())
     before = snapshot_bank(ctx)
 
-    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
     skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
     before = snapshot_bank(ctx)
     examiner, answerer, judge, auditor = _exam_script(bare_correct=True)
     ctx = make_ctx(tmp_path, make_config(),
                    handles=make_handles(examiner=examiner, answerer=answerer,
                                         judge=judge, auditor=auditor))
-    phase_execute.run(ctx, phase_of(2, "A", exam_spec()))
-    write_bank_artifact(ctx, "p04:L", [make_group_skill(
+    phase_execute.run(ctx, phase_of(2, "exam", exam_spec()))
+    write_bank_artifact(ctx, "p04:learn", [make_group_skill(
         _prefixed("t1"), status="accepted")])
     before = snapshot_bank(ctx)
-    phase_execute.run(ctx, phase_of(4, "C", c_spec(compare=CompareSpec(
+    phase_execute.run(ctx, phase_of(4, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))
 
     assert snapshot_bank(ctx) == before
@@ -389,7 +389,7 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
 
     plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase = phase_of(0, "D", baseline_spec())
+    phase = phase_of(0, "baseline", baseline_spec())
 
     with pytest.raises(InfrastructureError, match="infra_missing"):
         phase_execute.run(ctx, phase)
@@ -455,7 +455,7 @@ def test_baseline_resume_without_the_flag_honours_accepted_holes(
 
     plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase = phase_of(0, "D", baseline_spec())
+    phase = phase_of(0, "baseline", baseline_spec())
 
     with pytest.raises(InfrastructureError, match="infra_missing"):
         phase_execute.run(ctx, phase)
@@ -490,7 +490,7 @@ def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
         monkeypatch, PhasePlugin(lambda record: _outcome(
             record["task_id"], None)))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase = phase_of(0, "D", baseline_spec(acceptance="scorer"))
+    phase = phase_of(0, "baseline", baseline_spec(acceptance="scorer"))
 
     summary = phase_execute.run(ctx, phase).summary
 
@@ -526,13 +526,13 @@ def test_live_control_perfect_skips_the_group(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch,
                              PhasePlugin(_weak_baseline_behavior))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
     # The group universe is the store's pending members (the same
     # derivation the frozen audit line carries).
     ctx.store.save(make_group_skill(_prefixed("t2")), "skills")
     calls_before = len(plugin.calls)
 
-    phase = phase_of(2, "B", live_spec())
+    phase = phase_of(2, "live", live_spec())
     result = phase_execute.run(ctx, phase)
 
     # D's weak arm was all-success on t2: the group is short-circuited
@@ -554,10 +554,10 @@ def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
                                  record["task_id"],
                                  record["handle"].role == "strong")))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
     ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
 
-    first = phase_of(2, "B", live_spec())
+    first = phase_of(2, "live", live_spec())
     phase_execute.run(ctx, first)
     measured = report_rows(ctx, first)
     assert len(measured) == 1
@@ -574,7 +574,7 @@ def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
     # byte-identical (the revision produced no new version): rule 1
     # reuses the round-0 verdict -- zero executions, no round-1 row
     # (the no-op guard's phase-world shape).
-    second = phase_of(4, "B", live_spec())
+    second = phase_of(4, "live", live_spec())
     result = phase_execute.run(ctx, second)
 
     assert len(plugin.calls) == calls_after_first
@@ -600,10 +600,10 @@ def test_live_phase_with_an_empty_group_universe_completes(
     task list to the plugin (TB refuses empty lists on purpose)."""
     plugin = _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
     calls_before = len(plugin.calls)
 
-    phase = phase_of(2, "B", live_spec())
+    phase = phase_of(2, "live", live_spec())
     result = phase_execute.run(ctx, phase)
 
     assert len(plugin.calls) == calls_before  # zero executions
@@ -620,11 +620,11 @@ def test_live_injection_overflow_skips_the_group(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch,
                              PhasePlugin(_weak_baseline_behavior))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
     ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
     calls_before = len(plugin.calls)
 
-    phase = phase_of(2, "B", live_spec(
+    phase = phase_of(2, "live", live_spec(
         execution={"name": "real", "n_attempts": 1,
                    "max_injection_tokens": 1}))
     phase_execute.run(ctx, phase)
@@ -688,32 +688,32 @@ def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
         monkeypatch, tmp_path):
     # Rule 1 on the exam role, the R5 shape: a revise that produced no
     # new version leaves the pending skill byte-identical, so the NEXT
-    # A phase reuses the previous verdict with zero executions. The
+    # exam phase reuses the previous verdict with zero executions. The
     # join goes through the real benchmark slot on BOTH the units and
     # the report rows (one source), which is exactly what the review's
     # blocking finding broke.
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
     examiner, answerer, judge, auditor = _exam_script(
         bare_correct=False, with_skill_correct=True)
     ctx = make_ctx(tmp_path, make_config(),
                    handles=make_handles(examiner=examiner, answerer=answerer,
                                         judge=judge, auditor=auditor))
-    first = phase_of(2, "A", exam_spec())
+    first = phase_of(2, "exam", exam_spec())
     first_summary = phase_execute.run(ctx, first).summary
     assert first_summary["measured"] == [make_exam_id(skill.subtask_id)]
     first_rows = {row.unit_id: row for row in report_rows(ctx, first)}
     calls_after_first = sum(
         len(handle.client.calls) for handle in ctx.handles.values())
 
-    # The learn phase between the two A phases accepted nothing and
+    # The learn phase between the two exam phases accepted nothing and
     # revised nothing (the rewrite produced no new version): its
     # artifact carries the same pending skill.
-    write_bank_artifact(ctx, "p04:L", [skill])
+    write_bank_artifact(ctx, "p04:learn", [skill])
 
-    second = phase_of(4, "A", exam_spec())
+    second = phase_of(4, "exam", exam_spec())
     second_summary = phase_execute.run(ctx, second).summary
 
     assert second_summary["reused"] == [make_exam_id(skill.subtask_id)]
@@ -739,13 +739,13 @@ def test_exam_bare_correct_skips_the_with_skill_answer(monkeypatch,
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
     examiner, answerer, judge, auditor = _exam_script(bare_correct=True)
     ctx = make_ctx(tmp_path, make_config(),
                    handles=make_handles(examiner=examiner, answerer=answerer,
                                         judge=judge, auditor=auditor))
 
-    phase = phase_of(2, "A", exam_spec())
+    phase = phase_of(2, "exam", exam_spec())
     result = phase_execute.run(ctx, phase).summary
 
     # The exam was generated at execution time and answered bare once;
@@ -769,13 +769,13 @@ def test_exam_measures_the_with_skill_answer(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
     examiner, answerer, judge, auditor = _exam_script(bare_correct=False)
     ctx = make_ctx(tmp_path, make_config(),
                    handles=make_handles(examiner=examiner, answerer=answerer,
                                         judge=judge, auditor=auditor))
 
-    phase = phase_of(2, "A", exam_spec())
+    phase = phase_of(2, "exam", exam_spec())
     result = phase_execute.run(ctx, phase).summary
 
     # Bare wrong -> leak audit (clean) -> with-skill answer -> judged.
@@ -793,14 +793,14 @@ def test_exam_leaked_version_voids_the_measurement(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
     examiner, answerer, judge, auditor = _exam_script(bare_correct=False,
                                                       leaked=True)
     ctx = make_ctx(tmp_path, make_config(),
                    handles=make_handles(examiner=examiner, answerer=answerer,
                                         judge=judge, auditor=auditor))
 
-    phase = phase_of(2, "A", exam_spec())
+    phase = phase_of(2, "exam", exam_spec())
     result = phase_execute.run(ctx, phase).summary
 
     assert result["leaked"] == [make_exam_id(skill.subtask_id)]
@@ -822,12 +822,12 @@ def test_c_phase_reuses_the_d_control_and_computes_the_delta(
     plugin = _install_plugin(monkeypatch,
                              PhasePlugin(_weak_baseline_behavior))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "D", baseline_spec()))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
     skill = make_group_skill(_prefixed("t1"), status="accepted")
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
     calls_before = len(plugin.calls)
 
-    phase = phase_of(2, "C", c_spec(), task_ids=TASK_IDS)
+    phase = phase_of(2, "test", c_spec(), task_ids=TASK_IDS)
     result = phase_execute.run(ctx, phase).summary
 
     # The with-bank arm executed; the control was reused from D's store
@@ -837,7 +837,7 @@ def test_c_phase_reuses_the_d_control_and_computes_the_delta(
     # honest zero over the shared denominators.
     with_bank_calls = [call for call in plugin.calls[calls_before:]]
     assert len(with_bank_calls) == 3
-    assert result["control_source"] == "D_reuse"
+    assert result["control_source"] == "baseline_reuse"
     assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
     assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
     # C writes no acceptance report (section 3 rule 9).
@@ -850,9 +850,9 @@ def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
     config = make_config(mode="split", n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
     skill = make_group_skill(_prefixed("t1"), status="accepted")
-    write_bank_artifact(ctx, "p02:L", [skill])
+    write_bank_artifact(ctx, "p02:learn", [skill])
 
-    phase = phase_of(2, "C", c_spec(compare=CompareSpec(
+    phase = phase_of(2, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS)
     result = phase_execute.run(ctx, phase).summary
 
@@ -872,7 +872,7 @@ def test_c_phase_external_campaign_control_zero_execution(
     plugin = _install_plugin(monkeypatch, PhasePlugin())
     config = make_config(mode="split", n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
-    write_bank_artifact(ctx, "p02:L", [make_group_skill(
+    write_bank_artifact(ctx, "p02:learn", [make_group_skill(
         _prefixed("t1"), status="accepted")])
 
     rewards = {"t1": [1.0, 0.0, 1.0, 0.0, 0.0],
@@ -885,7 +885,7 @@ def test_c_phase_external_campaign_control_zero_execution(
     score_path.write_text(json.dumps(payload), encoding="utf-8")
     sha = hashlib.sha256(score_path.read_bytes()).hexdigest()
 
-    phase = phase_of(2, "C", c_spec(compare=CompareSpec(
+    phase = phase_of(2, "test", c_spec(compare=CompareSpec(
         against="external_campaign",
         external=ExternalControlSpec(path=str(score_path), sha256=sha,
                                      model_key="qwen"))),
@@ -930,7 +930,7 @@ def test_c_phase_external_campaign_refuses_a_drifted_file(
     _install_plugin(monkeypatch, PhasePlugin())
     config = make_config(mode="split", n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
-    write_bank_artifact(ctx, "p02:L", [make_group_skill(
+    write_bank_artifact(ctx, "p02:learn", [make_group_skill(
         _prefixed("t1"), status="accepted")])
 
     payload = {"tasks": {"qwen:t1": {"n": 5,
@@ -942,7 +942,7 @@ def test_c_phase_external_campaign_refuses_a_drifted_file(
     # The file drifts AFTER the digest was pinned.
     score_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
-    phase = phase_of(2, "C", c_spec(compare=CompareSpec(
+    phase = phase_of(2, "test", c_spec(compare=CompareSpec(
         against="external_campaign",
         external=ExternalControlSpec(path=str(score_path), sha256=sha,
                                      model_key="qwen"))),
@@ -954,16 +954,16 @@ def test_c_phase_external_campaign_refuses_a_drifted_file(
 def test_c_phase_reruns_every_time(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config(mode="split", n_attempts_weak=1))
-    write_bank_artifact(ctx, "p02:L", [make_group_skill(
+    write_bank_artifact(ctx, "p02:learn", [make_group_skill(
         _prefixed("t1"), status="accepted")])
 
-    phase_execute.run(ctx, phase_of(2, "C", c_spec(compare=CompareSpec(
+    phase_execute.run(ctx, phase_of(2, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))
     calls_after_first = len(plugin.calls)
-    phase_execute.run(ctx, phase_of(4, "C", c_spec(compare=CompareSpec(
+    phase_execute.run(ctx, phase_of(4, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))
 
-    # No reuse across C phases: every unit re-ran (the frozen rule).
+    # No reuse across test phases: every unit re-ran (the frozen rule).
     assert len(plugin.calls) == 2 * calls_after_first
 
 
@@ -975,12 +975,12 @@ def test_unit_id_rebuild_matches_the_delivery_sha8():
     row = delivery_units.make_row(_prefixed("t1"),
                                   [{"skill_id": "s1", "version": 2}],
                                   "block bytes")
-    full = verdicts.make_unit_id(phase_label="p03:B", benchmark=_FAKE,
+    full = verdicts.make_unit_id(phase_label="p03:live", benchmark=_FAKE,
                                  task_ref=row.task_ref, role="weak",
                                  skills_injected=row.skills_injected)
     sha8 = hashlib.sha256(verdicts.canonical_skills(
         row.skills_injected).encode("utf-8")).hexdigest()[:8]
-    assert full == f"p03:B:{_FAKE}:{_prefixed('t1')}:weak:{sha8}"
+    assert full == f"p03:live:{_FAKE}:{_prefixed('t1')}:weak:{sha8}"
     # The delivery-side id is exactly the join the rebuild consumes.
     assert row.unit_id == f"{_prefixed('t1')}:{sha8}"
     # The three raw shapes stay distinct keys (the frozen rule).
@@ -991,7 +991,7 @@ def test_unit_id_rebuild_matches_the_delivery_sha8():
 
 def test_run_rejects_a_learn_phase(tmp_path):
     ctx = make_ctx(tmp_path, make_config())
-    phase = PhaseInstance(index=1, name="L", label="p02:L",
+    phase = PhaseInstance(index=1, name="learn", label="p02:learn",
                           spec=LearnPhaseSpec(), task_ids=())
     with pytest.raises(ConfigError, match="learn-phase driver"):
         phase_execute.run(ctx, phase)
@@ -999,12 +999,12 @@ def test_run_rejects_a_learn_phase(tmp_path):
 
 def test_execution_params_refuse_unknown_keys(tmp_path):
     ctx = make_ctx(tmp_path, make_config())
-    bad = phase_of(2, "B", live_spec(
+    bad = phase_of(2, "live", live_spec(
         execution={"name": "real", "n_attempts": 2, "surprise": 1}))
     with pytest.raises(ConfigError, match="surprise"):
         phase_execute.run(ctx, bad)
     arms_off_baseline = phase_of(
-        2, "B", live_spec(execution={"name": "real", "n_attempts": 2,
+        2, "live", live_spec(execution={"name": "real", "n_attempts": 2,
                                      "arms": ["executor_weak"]}))
     with pytest.raises(ConfigError, match="arms"):
         phase_execute.run(ctx, arms_off_baseline)
@@ -1013,7 +1013,7 @@ def test_execution_params_refuse_unknown_keys(tmp_path):
 def test_unknown_named_rule_fails_before_any_work(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
-    phase = phase_of(0, "D", baseline_spec(acceptance="no_such_rule"))
+    phase = phase_of(0, "baseline", baseline_spec(acceptance="no_such_rule"))
     with pytest.raises(ConfigError, match="unknown verdict rule"):
         phase_execute.run(ctx, phase)
 

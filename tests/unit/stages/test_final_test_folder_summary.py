@@ -1,11 +1,11 @@
-"""Skill-folder M4, the landing: the folder C phase's summary carries
+"""Skill-folder M4, the landing: the folder test phase's summary carries
 the per-unit read sets, the old execution versions' summaries do not,
 and the read set never reaches the decision module.
 
 Where the read set lands (the on-site ruling this file pins): a folder
-unit only exists in a C phase, and the frozen C rule writes NO
+unit only exists in a test phase, and the frozen C rule writes NO
 acceptance report (test results never flow into learning) -- the phase
-summary is the C phase's one report output, so the read sets land
+summary is the test phase's one report output, so the read sets land
 there, next to its existing per-unit facts (``infra_missing`` /
 ``infra_accepted``, keyed by trajectory id over the with-bank arm).
 The fake-plugin route of tests/unit/stages/test_final_test_folder_wiring.py (no network).
@@ -73,10 +73,10 @@ def _trajectory_id(task_id):
 
 
 def _plain_c_phase():
-    """A C phase on the OLD execution pair (whole_bank + real): the
+    """A test phase on the OLD execution pair (whole_bank + real): the
     standard test combo, no folder anywhere."""
     return PhaseInstance(
-        index=2, name="C", label="p03:C",
+        index=2, name="test", label="p03:test",
         spec=ExecutePhaseSpec(
             role="test", tasks="test",
             delivery={"name": "whole_bank"},
@@ -87,7 +87,7 @@ def _plain_c_phase():
 
 
 # ---------------------------------------------------------------------------
-# The folder C phase's summary carries the per-unit read sets
+# The folder test phase's summary carries the per-unit read sets
 # ---------------------------------------------------------------------------
 
 def test_folder_c_phase_reports_the_read_sets_in_its_summary(
@@ -183,7 +183,7 @@ def test_the_read_set_stays_out_of_the_decision_inputs(
     # The frozen C rule, pinned from the read set's side: the phase
     # writes NO acceptance report, so no row (with or without a read
     # set) exists for decision to read.
-    report_path = (Path(ctx.run_dir) / "phases" / "p03_C"
+    report_path = (Path(ctx.run_dir) / "phases" / "p03_test"
                    / REPORT_NAME)
     assert not report_path.exists()
     # And the decision module refuses a test-phase report outright

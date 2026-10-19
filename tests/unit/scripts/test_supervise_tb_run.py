@@ -18,13 +18,13 @@ _spec.loader.exec_module(supervise)
 
 def _skeleton(tmp_path, stored, ledger_rows):
     run_dir = tmp_path / "run"
-    traj = run_dir / "phases" / "p07_C" / "with_bank" / "store" \
+    traj = run_dir / "phases" / "p07_test" / "with_bank" / "store" \
         / "stage1_baseline" / "trajectories"
     traj.mkdir(parents=True)
     for unit_id in stored:
         name = urllib.parse.quote(unit_id, safe="") + ".json"
         (traj / name).write_text("{}", encoding="utf-8")
-    ledger = run_dir / "phases" / "p07_C" / "with_bank" / "store" \
+    ledger = run_dir / "phases" / "p07_test" / "with_bank" / "store" \
         / "failed_units.jsonl"
     ledger.parent.mkdir(parents=True, exist_ok=True)
     with open(ledger, "w", encoding="utf-8") as handle:
@@ -41,8 +41,8 @@ def test_retried_and_succeeded_units_leave_the_failed_count(tmp_path):
         stored=["traj/tb:t1/weak/00", "traj/tb:t1/weak/01"],
         ledger_rows=["traj/tb:t1/weak/00", "traj/tb:t1/weak/01",
                      "traj/tb:t2/weak/00"])
-    assert supervise.unresolved_failures(run_dir, "p07:C") == 1
-    assert supervise.stored_unit_ids(run_dir, "p07:C") == {
+    assert supervise.unresolved_failures(run_dir, "p07:test") == 1
+    assert supervise.stored_unit_ids(run_dir, "p07:test") == {
         "traj/tb:t1/weak/00", "traj/tb:t1/weak/01"}
 
 
@@ -50,14 +50,14 @@ def test_all_failed_still_pending_counts_every_row(tmp_path):
     run_dir = _skeleton(tmp_path, stored=[],
                         ledger_rows=[f"traj/tb:t{i}/weak/02"
                                      for i in range(74)])
-    assert supervise.unresolved_failures(run_dir, "p07:C") == 74
+    assert supervise.unresolved_failures(run_dir, "p07:test") == 74
 
 
 def test_a_missing_ledger_or_store_reads_zero(tmp_path):
     run_dir = _skeleton(tmp_path, stored=[], ledger_rows=[])
-    assert supervise.unresolved_failures(run_dir, "p07:C") == 0
-    assert supervise.stored_unit_ids(run_dir, "p07:C") == set()
-    assert supervise.unresolved_failures(tmp_path / "nowhere", "p07:C") == 0
+    assert supervise.unresolved_failures(run_dir, "p07:test") == 0
+    assert supervise.stored_unit_ids(run_dir, "p07:test") == set()
+    assert supervise.unresolved_failures(tmp_path / "nowhere", "p07:test") == 0
 
 
 def test_the_relaunch_command_is_absolute_and_exists(tmp_path):

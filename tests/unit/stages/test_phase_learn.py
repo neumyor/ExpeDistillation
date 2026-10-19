@@ -107,7 +107,7 @@ def _live_spec():
     return ExecutePhaseSpec(
         role="live", tasks="train", delivery={"name": "group_by_task"},
         execution={"name": "real", "n_attempts": 2},
-        compare=CompareSpec(against="D", rule="strict_rate_gain"))
+        compare=CompareSpec(against="baseline", rule="strict_rate_gain"))
 
 
 def _test_spec(against="fresh_bare", delivery="retrieval"):
@@ -118,7 +118,7 @@ def _test_spec(against="fresh_bare", delivery="retrieval"):
 
 def _learn_spec():
     return LearnPhaseSpec(
-        evidence={"name": "segment", "K": 5},
+        evidence={"name": "segment", "K": 5, "write_lessons": False},
         author={"name": "distill_diagnose"},
         curate={"name": "none", "token_budget": BIG})
 
@@ -143,16 +143,16 @@ class _Config:
 def _exam_sequence(retry_limit=1):
     """[D, L] + [A, L] x (retry_limit + 1) + [C] -- upgrade_v3_config's
     image of the exam method."""
-    phases = {"D": _baseline_spec(), "A": _exam_spec(), "L": _learn_spec(),
-              "C": _test_spec()}
-    sequence = ["D", "L"] + ["A", "L"] * (retry_limit + 1) + ["C"]
+    phases = {"baseline": _baseline_spec(), "exam": _exam_spec(), "learn": _learn_spec(),
+              "test": _test_spec()}
+    sequence = ["baseline", "learn"] + ["exam", "learn"] * (retry_limit + 1) + ["test"]
     return sequence, phases
 
 
 def _live_sequence():
-    return (["D", "L", "B", "L", "B", "L", "C"],
-            {"D": _baseline_spec(), "B": _live_spec(), "L": _learn_spec(),
-             "C": _test_spec(against="D", delivery="whole_bank")})
+    return (["baseline", "learn", "live", "learn", "live", "learn", "test"],
+            {"baseline": _baseline_spec(), "live": _live_spec(), "learn": _learn_spec(),
+             "test": _test_spec(against="baseline", delivery="whole_bank")})
 
 
 def _make_ctx(tmp_path, sequence, phases, handles):
@@ -196,7 +196,7 @@ def _skill(content=MARKED_A, version=1, status="pending", segment=0):
 
 
 def _seed_baseline(store, weak_correctness=False, attempts=2):
-    """The D phase's on-disk state: both arms of one task."""
+    """The baseline phase's on-disk state: both arms of one task."""
     store.save(Trajectory(
         trajectory_id=ids.make_trajectory_id(TASK_ID, "strong", 0),
         task_id=TASK_ID, benchmark=BENCHMARK, model_role="strong",
@@ -223,7 +223,7 @@ def _seed_segment(store, success=True):
     return subtask
 
 
-def _seed_finished_learn(store, run_dir, label="p02:L"):
+def _seed_finished_learn(store, run_dir, label="p02:learn"):
     """An earlier learn phase's artifact (empty: nothing accepted yet) --
     the exam learn phases read the previous learn phase's bank."""
     dest = phase_bank_dir(run_dir, label)
@@ -232,7 +232,7 @@ def _seed_finished_learn(store, run_dir, label="p02:L"):
 
 
 def _seed_exam_phase(store, *, with_skill_verdict, version=1):
-    """The A phase's on-disk state: the skill, its exam, a wrong bare
+    """The exam phase's on-disk state: the skill, its exam, a wrong bare
     answer and one judged with-skill attempt of ``version``."""
     skill = _skill()
     store.save(skill, "skills")
@@ -257,7 +257,7 @@ def _seed_attempt(store, serial, *, skill=None, version=None, verdict,
 
 
 def _seed_live_round(store, *, better=False):
-    """The B phase's on-disk state: a failed weak baseline, the round-0
+    """The live phase's on-disk state: a failed weak baseline, the round-0
     store, a pending group and its frozen audit line."""
     _seed_baseline(store, weak_correctness=False)
     round_dir = store.run_dir / "stage4_acceptance" / "live_run" / "round00"
@@ -335,7 +335,7 @@ def _task_list_rows(run_dir, label):
 
 def _report_row(unit_id, version):
     return AcceptanceReportRow(
-        unit_id=unit_id, phase_label="p03:A", role="weak",
+        unit_id=unit_id, phase_label="p03:exam", role="weak",
         injected_skills=[{"skill_id": SKILL_ID, "version": version}],
         runs=[], valid_count=1, success_count=0, status="normal",
         cause="", artifacts={})
@@ -387,15 +387,15 @@ def test_a_learn_phase_needs_the_v4_sequence_products(tmp_path):
 
 def test_a_learn_phase_without_a_preceding_execute_phase_is_refused(tmp_path):
     sequence, phases = _exam_sequence()
-    ctx = _make_ctx(tmp_path, ["L", "D", "A", "C"], phases, handles={})
+    ctx = _make_ctx(tmp_path, ["learn", "baseline", "exam", "test"], phases, handles={})
     with pytest.raises(CodeBugError, match="no preceding execute phase"):
-        phase_learn.run(ctx, _phase(["L", "D", "A", "C"], phases, 0))
+        phase_learn.run(ctx, _phase(["learn", "baseline", "exam", "test"], phases, 0))
 
 
 def test_a_learn_phase_after_the_final_test_phase_is_refused(tmp_path):
-    sequence = ["D", "L", "C", "L2"]
-    phases = {"D": _baseline_spec(), "L": _learn_spec(),
-              "C": _test_spec(), "L2": _learn_spec()}
+    sequence = ["baseline", "learn", "test", "L2"]
+    phases = {"baseline": _baseline_spec(), "learn": _learn_spec(),
+              "test": _test_spec(), "L2": _learn_spec()}
     ctx = _make_ctx(tmp_path, sequence, phases, handles={})
     with pytest.raises(CodeBugError,
                        match="test results do not flow into learning"):
@@ -405,8 +405,8 @@ def test_a_learn_phase_after_the_final_test_phase_is_refused(tmp_path):
 def test_a_label_off_the_frozen_derivation_is_refused(tmp_path):
     sequence, phases = _exam_sequence()
     ctx = _make_ctx(tmp_path, sequence, phases, handles={})
-    phase = PhaseInstance(index=1, name="L", label="p9:wrong",
-                          spec=phases["L"])
+    phase = PhaseInstance(index=1, name="learn", label="p9:wrong",
+                          spec=phases["learn"])
     with pytest.raises(CodeBugError, match="frozen derivation"):
         phase_learn.run(ctx, phase)
 
@@ -431,25 +431,25 @@ def test_the_first_learn_phase_adds_skills_for_failed_bare_tasks(
 
     result = phase_learn.run(ctx, _phase(sequence, phases, 1))
 
-    assert result.label == "p02:L"
+    assert result.label == "p02:learn"
     # One add row -> one pending skill, the stage-3 grain and status.
     skill = ctx.store.load("skills", SKILL_ID, Skill)
     assert skill.status == "pending" and skill.version == 1
     assert "[When to use]" in skill.content
-    rows = _task_list_rows(ctx.run_dir, "p02:L")
+    rows = _task_list_rows(ctx.run_dir, "p02:learn")
     assert rows[0]["action"] == "add"
     assert rows[0]["target_id"] == TASK_ID
-    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p02:L")] \
+    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p02:learn")] \
         == ["added"]
     assert result.summary["task_list"]["add"] == 1
     assert result.summary["outcomes"] == {"added": 1}
-    assert result.summary["checks_left"] == 2      # the two later A phases
+    assert result.summary["checks_left"] == 2      # the two later exam phases
     # The intermediate branch: as-is, not the configured curation, and
     # the curate mapping travels with the call (W2-C's frozen contract).
-    assert calls == [("produce_as_is", phases["L"].curate, "p02:L")]
+    assert calls == [("produce_as_is", phases["learn"].curate, "p02:learn")]
     # The artifact carries EVERY member: the new skill is pending, and
-    # the next A phase's universe comes out of this artifact.
-    rows = load_phase_bank(ctx.run_dir, "p02:L")
+    # the next exam phase's universe comes out of this artifact.
+    rows = load_phase_bank(ctx.run_dir, "p02:learn")
     assert [row["skill_id"] for row in rows] == [SKILL_ID]
     assert rows[0]["status"] == "pending"
     assert result.summary["bank"]["members"] == [SKILL_ID]
@@ -508,7 +508,7 @@ def test_the_add_path_is_idempotent_across_a_crash(tmp_path, monkeypatch):
     result = phase_learn.run(ctx, _phase(sequence, phases, 1))
 
     assert handles["author"].client.calls == []      # nothing re-asked
-    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p02:L")] \
+    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p02:learn")] \
         == ["skipped_existing"]
     assert result.summary["task_list"]["add"] == 1
     assert result.summary["outcomes"] == {"skipped_existing": 1}
@@ -541,7 +541,7 @@ def test_the_first_learn_phase_reads_the_run_level_bank_fallback(
     result = phase_learn.run(ctx, _phase(sequence, phases, 1))
 
     assert result.summary["task_list"] == {"superseded_rows": 0}
-    assert _task_list_rows(ctx.run_dir, "p02:L") == []
+    assert _task_list_rows(ctx.run_dir, "p02:learn") == []
     assert handles["author"].client.calls == []
 
     # A bank anchored on ANOTHER task: the gap stays open, the add fires.
@@ -573,10 +573,10 @@ def test_the_previous_learn_artifact_covers_the_baseline_gap(
     # A second baseline-gap learn over a bank that already holds the
     # task's skill decides no add row at all (the previous artifact,
     # not the store, is the decision's "no skill yet").
-    sequence = ["D", "L", "L2", "A", "L3", "C"]
-    phases = {"D": _baseline_spec(), "L": _learn_spec(),
+    sequence = ["baseline", "learn", "L2", "exam", "L3", "test"]
+    phases = {"baseline": _baseline_spec(), "learn": _learn_spec(),
               "L2": _learn_spec(), "L3": _learn_spec(),
-              "A": _exam_spec(), "C": _test_spec()}
+              "exam": _exam_spec(), "test": _test_spec()}
     handles = {"author": make_fake_handle("author", []),
                "rewriter": make_fake_handle("rewriter", [])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
@@ -584,7 +584,7 @@ def test_the_previous_learn_artifact_covers_the_baseline_gap(
     _seed_baseline(ctx.store, weak_correctness=False)
     _seed_segment(ctx.store)
     ctx.store.save(_skill(status="accepted"), "skills")
-    dest = phase_bank_dir(ctx.run_dir, "p02:L")
+    dest = phase_bank_dir(ctx.run_dir, "p02:learn")
     dest.mkdir(parents=True)
     curation_none.write_as_is(ctx.store, dest, BIG)
 
@@ -612,7 +612,7 @@ def test_an_improved_exam_row_accepts_the_skill(tmp_path, monkeypatch):
 
     stored = ctx.store.load("skills", skill.skill_id, Skill)
     assert stored.status == "accepted"
-    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p04:L")] \
+    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p04:learn")] \
         == ["accepted"]
     assert result.summary["task_list"] == {"keep": 1, "superseded_rows": 0}
     assert calls[0][0] == "produce_as_is"
@@ -688,11 +688,11 @@ def test_the_last_learn_phase_deletes_a_still_failing_skill(
     stored = ctx.store.load("skills", skill.skill_id, Skill)
     assert stored.status == "discarded"
     assert stored.discard_reason == "retry_exhausted"
-    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p04:L")] \
+    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p04:learn")] \
         == ["discarded"]
     assert result.summary["task_list"] == {"delete": 1, "superseded_rows": 0}
     assert calls[0][0] == "produce"           # the LAST learn phase curates
-    assert calls[0][1] == phases["L"].curate
+    assert calls[0][1] == phases["learn"].curate
     assert result.summary["bank"]["members"] == []
 
 
@@ -720,7 +720,7 @@ def test_the_d4_merge_decides_for_the_current_version(tmp_path, monkeypatch):
 
     result = phase_learn.run(ctx, _phase(sequence, phases, 3))
 
-    rows = _task_list_rows(ctx.run_dir, "p04:L")
+    rows = _task_list_rows(ctx.run_dir, "p04:learn")
     assert [row["action"] for row in rows if "action" in row] == ["revise"]
     assert rows[-1]["superseded_units"]        # v1's keep is named
     stored = ctx.store.load("skills", skill.skill_id, Skill)
@@ -742,10 +742,10 @@ def test_a_crashed_revision_is_replayed_from_the_ledger(tmp_path, monkeypatch):
     skill.content = MARKED_B
     skill.version = 2
     ctx.store.save(skill, "skills")
-    append_jsonl(phase_bank_dir(ctx.run_dir, "p04:L")
+    append_jsonl(phase_bank_dir(ctx.run_dir, "p04:learn")
                  / learn_tasks.REVISIONS_NAME, {
                      "schema": "learn-revision-v1",
-                     "phase_label": "p04:L", "target_kind": "skill",
+                     "phase_label": "p04:learn", "target_kind": "skill",
                      "target_id": skill.skill_id,
                      "skill_id": skill.skill_id, "from_version": 1})
 
@@ -753,7 +753,7 @@ def test_a_crashed_revision_is_replayed_from_the_ledger(tmp_path, monkeypatch):
 
     assert result.summary["outcomes"] == {"revised": 1}
     assert handles["rewriter"].client.calls == []
-    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p04:L")] \
+    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p04:learn")] \
         == ["revised"]
     assert ctx.store.load("skills", skill.skill_id, Skill).version == 2
 
@@ -782,7 +782,7 @@ def test_a_live_miss_with_a_check_left_revises_the_group(
     assert first.version == 2 and first.content == MARKED_B
     assert second.version == 1 and second.status == "pending"
     outcomes = {row["skill_id"]: row["outcome"]
-                for row in _outcomes(ctx.run_dir, "p04:L")}
+                for row in _outcomes(ctx.run_dir, "p04:learn")}
     assert outcomes == {skills[0].skill_id: "revised",
                         skills[1].skill_id: "kept"}
     assert result.summary["task_list"] == {"revise": 1, "superseded_rows": 0}
@@ -807,14 +807,14 @@ def test_a_partially_landed_group_revision_resumes_cleanly(
     landed.content = MARKED_B
     landed.version = 2
     ctx.store.save(landed, "skills")
-    phase_dir = phase_bank_dir(ctx.run_dir, "p04:L")
+    phase_dir = phase_bank_dir(ctx.run_dir, "p04:learn")
     phase_dir.mkdir(parents=True)
     append_jsonl(phase_dir / learn_tasks.REVISIONS_NAME, {
-        "schema": "learn-revision-v1", "phase_label": "p04:L",
+        "schema": "learn-revision-v1", "phase_label": "p04:learn",
         "target_kind": "group", "target_id": TASK_ID,
         "skill_id": landed.skill_id, "from_version": 1})
     append_jsonl(phase_dir / learn_tasks.OUTCOMES_NAME, {
-        "schema": "learn-outcome-v1", "phase_label": "p04:L",
+        "schema": "learn-outcome-v1", "phase_label": "p04:learn",
         "target_kind": "group", "target_id": TASK_ID, "action": "revise",
         "skill_id": landed.skill_id, "outcome": "revised", "version": 2})
 
@@ -870,7 +870,7 @@ def test_an_infra_failed_revision_raises_after_the_summary(
         phase_learn.run(ctx, _phase(sequence, phases, 3))
 
     assert calls == []                      # no bank published
-    outcomes = _outcomes(ctx.run_dir, "p04:L")
+    outcomes = _outcomes(ctx.run_dir, "p04:learn")
     assert [row["outcome"] for row in outcomes] == ["infra_failed"]
-    assert not (phase_bank_dir(ctx.run_dir, "p04:L") / "skill_bank.jsonl") \
+    assert not (phase_bank_dir(ctx.run_dir, "p04:learn") / "skill_bank.jsonl") \
         .exists()

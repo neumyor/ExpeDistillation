@@ -1009,8 +1009,8 @@ def test_stale_guard_ignores_merged_discarded_and_pending_skills(store):
 
 
 # ---------------------------------------------------------------------------
-# Protocol v2 K5 marker checks: pre-check, post-check, prose tolerance,
-# and the reuse branch's no-re-validation rule.
+# K5 section check (2026-10-19: one structure, no kind gate), prose
+# tolerance, and the reuse branch's no-re-validation rule.
 # ---------------------------------------------------------------------------
 
 PROCEDURE_CONTENT = "\n".join([
@@ -1022,52 +1022,60 @@ PROCEDURE_CONTENT = "\n".join([
     "[Do not use when] The service already reports running.",
 ])
 
-FAILURE_REFERENCE_CONTENT = "\n".join([
-    "[Trigger] The service rejects connections after a config edit.",
-    "[Why it fails] The config edit was not followed by a restart.",
-    "[Do instead]",
+LESSON_CONTENT = "\n".join([
+    "[When to use] The service rejects connections after a config edit.",
+    "[Steps]",
     "1. Re-check the config file for syntax errors.",
     "2. Restart the service.",
+    "[Verify] The service accepts connections again.",
     "[Do not use when] The service never accepted connections.",
 ])
 
 
-@pytest.mark.parametrize("other_content", [
-    FAILURE_REFERENCE_CONTENT,  # procedure mixed with failure reference
-    "Check the log file first.",  # marked mixed with unmarked prose
-])
-def test_mixed_kind_group_skips_the_merge_before_any_g8_call(
-        store, other_content):
+def test_a_strong_and_a_weak_skill_merge_into_one(store):
+    # The 2026-10-19 ruling: a skill learned from a weak failure has the
+    # same four sections as one learned from a strong success, and K5
+    # merges them like any other group -- no kind gate.
     _add_skill(store, 0, PROCEDURE_CONTENT)
-    _add_skill(store, 1, other_content)
-    for index in range(2):
-        _add_exam(store, index)
+    weak_subtask = "traj/tb:t1/weak/00/seg00"
+    store.save(make_skill(weak_subtask, LESSON_CONTENT, status="accepted"),
+               "skills")
+    weak_id = ids.make_skill_id(weak_subtask)
+    handles = _handles(
+        curator_script=[_similarity(groups=[[_skill_id(0), weak_id]]),
+                        _merged(PROCEDURE_CONTENT),
+                        _grouping({"bank/merge/0000": "service"})],
+        answer_script=[],
+        judge_script=[],
+    )
+
+    bank = _curate(store, handles, merge_check="none")
+
+    assert [row["skill_id"] for row in bank] == ["bank/merge/0000"]
+    merged = store.load("skills", "bank/merge/0000", Skill)
+    assert merged.source_subtasks == [_subtask(0), weak_subtask]
+
+
+def test_a_marked_skill_mixed_with_prose_still_needs_the_sections(store):
+    # A group with at least one four-section source holds the merge to the
+    # four sections; a prose G8 output is skipped, never stored.
+    _add_skill(store, 0, PROCEDURE_CONTENT)
+    _add_skill(store, 1, "Check the log file first.")
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+                        _merged("Check the log, then restart."),
                         _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
         answer_script=[],
         judge_script=[],
     )
 
-    bank = _curate(store, handles)
+    bank = _curate(store, handles, merge_check="none")
 
-    # The pre-check fired with ZERO G8 calls; nothing was stored and both
-    # sources stay accepted bank members.
-    merge_calls = [call for call in handles["curator_handle"].client.calls
-                   if "MERGE MODE" in call["user"]]
-    assert merge_calls == []
     assert "bank/merge/0000" not in store.ids("skills")
     assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(1)]
-    log = _log_of(store)
-    assert log["merges"]["skipped"] == 1
-    record = log["merge_records"][0]
+    record = _log_of(store)["merge_records"][0]
     assert record["outcome"] == "skipped"
-    # The skip record carries the pre-check's own reason: G8 never ran.
-    assert "merge group mixes skill kinds" in record["reason"]
-    assert "G8 merge failed" not in record["reason"]
-    failures = _failures(store)
-    assert len(failures) == 1
-    assert failures[0]["error_class"] == "ModelOutputError"
+    assert "four bracket sections" in record["reason"]
 
 
 def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
@@ -1075,8 +1083,7 @@ def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
     _add_skill(store, 1, PROCEDURE_CONTENT)
     for index in range(2):
         _add_exam(store, index)
-    # A G8 output that dropped [Verify]: skill_markers no longer reads the
-    # sources' procedure set.
+    # A G8 output that dropped [Verify]: has_skill_sections reads False.
     broken_output = "\n".join([
         "[When to use] You need to restart a stuck service.",
         "[Steps]",

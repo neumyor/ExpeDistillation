@@ -6,8 +6,9 @@ is wired to the wrong field (e.g. context_summary leaking into distill mode)
 fails loudly. Protocol v2 (decision section 3.3) adds the structural
 contract: write_skill guards the mode/outcome precondition, parses the G2
 JSON contract, validates it with validate_skill_sections, and stores
-render_skill_content's marker text; skill_markers reads that text back; and
-rewrite_skill requires the rewrite to keep the original's marker set. The
+render_skill_content's marker text; has_skill_sections reads that text back;
+and rewrite_skill requires the rewrite to keep the four sections. Since the
+2026-10-19 ruling both modes write the same four-section structure. The
 2026-10-13 incident (docs/decisions/g2_multiline_and_json_extraction_
 fix_20261014.md) relaxed the contract to accept multi-line values while
 keeping the marker defense as a per-line check. None of these tests touch
@@ -24,8 +25,7 @@ from expedistill.core.ids import (
     make_trajectory_id,
 )
 from expedistill.core.models import (
-    FAILURE_REFERENCE_MARKERS,
-    PROCEDURE_MARKERS,
+    SKILL_MARKERS,
     Skill,
     Subtask,
 )
@@ -34,9 +34,9 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts.registry import get as get_prompt
 from expedistill.blocks.author import (
     gen_exam,
+    has_skill_sections,
     render_skill_content,
     rewrite_skill,
-    skill_markers,
     validate_skill_sections,
     write_skill,
 )
@@ -63,21 +63,23 @@ DISTILL_CONTENT = "\n".join([
 ])
 
 DIAGNOSE_SECTIONS = {
-    "trigger": "You edit the config while the service is running.",
-    "why_it_fails": "The running service overwrites your edit on restart.",
-    "do_instead": ["Stop the service.", "Edit the config.",
-                   "Start the service."],
+    "when_to_use": "When you are about to edit the config of a running "
+                   "service: the running service overwrites the edit.",
+    "steps": ["Stop the service.", "Edit the config.",
+              "Start the service."],
+    "verify": "The service starts with the edited value.",
     "not_applicable_when": "The subtask is not about the config.",
-    "summary": "never edit the config while the service is running",
+    "summary": "stop the service before editing its config",
 }
 
 DIAGNOSE_CONTENT = "\n".join([
-    "[Trigger] You edit the config while the service is running.",
-    "[Why it fails] The running service overwrites your edit on restart.",
-    "[Do instead]",
+    "[When to use] When you are about to edit the config of a running "
+    "service: the running service overwrites the edit.",
+    "[Steps]",
     "1. Stop the service.",
     "2. Edit the config.",
     "3. Start the service.",
+    "[Verify] The service starts with the edited value.",
     "[Do not use when] The subtask is not about the config.",
 ])
 
@@ -201,7 +203,7 @@ def test_write_skill_distill_wiring_and_fields():
     # own field, never inside the rendered content.
     assert skill.summary == DISTILL_SECTIONS["summary"]
     assert skill.summary not in skill.content
-    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+    assert has_skill_sections(skill.content)
 
 
 def test_write_skill_prompt_name_override_keeps_the_mode_contract(monkeypatch):
@@ -230,7 +232,7 @@ def test_write_skill_prompt_name_override_keeps_the_mode_contract(monkeypatch):
     assert handle.client.calls[0]["user"] == expected
     # The mode's marker rendering, not the variant prompt's prose shape.
     assert skill.content == DISTILL_CONTENT
-    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+    assert has_skill_sections(skill.content)
 
 
 def test_write_skill_diagnose_wiring_and_fields():
@@ -254,7 +256,7 @@ def test_write_skill_diagnose_wiring_and_fields():
     assert handle.client.calls[0]["user"] == expected
     assert skill.content == DIAGNOSE_CONTENT
     assert skill.summary == DIAGNOSE_SECTIONS["summary"]
-    assert skill_markers(skill.content) == FAILURE_REFERENCE_MARKERS
+    assert has_skill_sections(skill.content)
 
 
 def test_write_skill_invalid_mode_raises_before_any_call():
@@ -349,9 +351,9 @@ def test_write_skill_strips_self_numbered_checklist_items():
         ("steps", ["   "]),                        # whitespace-only item
         ("steps", [7]),                            # non-string item
         ("steps", "not a list"),                   # checklist wrong type
-        ("when_to_use", "[Trigger] forged"),       # forged section marker
+        ("when_to_use", "[Steps] forged"),         # forged section marker
         ("steps", ["[Steps] do x"]),               # forged marker on an item
-        ("when_to_use", "line one\n[Trigger] forged"),  # forged on a LATER line
+        ("when_to_use", "line one\n[Verify] forged"),  # forged on a LATER line
         ("steps", ["do x\n[Verify] forged"]),      # forged line inside an item
     ],
 )
@@ -372,8 +374,8 @@ def test_write_skill_bad_fields_raise(field, value):
 @pytest.mark.parametrize(
     "field, value",
     [
-        ("trigger", "line one\n[Steps] forged"),    # forged on a LATER line
-        ("do_instead", ["do x\n[Verify] forged"]),  # forged line inside item
+        ("when_to_use", "line one\n[Steps] forged"),  # forged on a LATER line
+        ("steps", ["do x\n[Verify] forged"]),         # forged line inside item
     ],
 )
 def test_write_skill_bad_fields_raise_diagnose(field, value):
@@ -407,11 +409,11 @@ def test_write_skill_accepts_multiline_steps_verbatim():
     assert lines[3] == "2. Run this exact command:"
     assert lines[4] == "python3 - <<'PY'"     # continuation at column 0
     assert lines[7] == "PY"                   # heredoc closer, column 0
-    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+    assert has_skill_sections(skill.content)
     # Determinism: same sections in, byte-identical content out.
-    assert render_skill_content("distill", HEREDOC_SECTIONS) == skill.content
-    assert (render_skill_content("distill", HEREDOC_SECTIONS)
-            == render_skill_content("distill", HEREDOC_SECTIONS))
+    assert render_skill_content(HEREDOC_SECTIONS) == skill.content
+    assert (render_skill_content(HEREDOC_SECTIONS)
+            == render_skill_content(HEREDOC_SECTIONS))
 
 
 def test_write_skill_accepts_multiline_scalar():
@@ -437,7 +439,7 @@ def test_write_skill_accepts_multiline_scalar():
         "and no retry line.",
         "[Do not use when] The subtask is not about logging in.",
     ])
-    assert skill_markers(skill.content) == PROCEDURE_MARKERS
+    assert has_skill_sections(skill.content)
 
 
 def test_crlf_and_lone_cr_are_normalized_everywhere():
@@ -450,7 +452,7 @@ def test_crlf_and_lone_cr_are_normalized_everywhere():
         "steps": ["Check the credentials.\rRestart the service."],
     }
     validate_skill_sections("distill", sections)
-    content = render_skill_content("distill", sections)
+    content = render_skill_content(sections)
 
     assert "\r" not in content
     assert content.split("\n") == [
@@ -462,7 +464,7 @@ def test_crlf_and_lone_cr_are_normalized_everywhere():
         "[Verify] The service accepts the login.",
         "[Do not use when] The subtask is not about logging in.",
     ]
-    assert skill_markers(content) == PROCEDURE_MARKERS
+    assert has_skill_sections(content)
 
 
 def test_write_skill_passes_usage_through():
@@ -478,11 +480,11 @@ def test_write_skill_passes_usage_through():
 
 
 # ---------------------------------------------------------------------------
-# render_skill_content / validate_skill_sections / skill_markers
+# render_skill_content / validate_skill_sections / has_skill_sections
 # ---------------------------------------------------------------------------
 
 def test_render_skill_content_distill_is_exact_marker_text():
-    lines = render_skill_content("distill", DISTILL_SECTIONS).split("\n")
+    lines = render_skill_content(DISTILL_SECTIONS).split("\n")
     assert lines == [
         "[When to use] When the service rejects a login.",
         "[Steps]",
@@ -493,17 +495,8 @@ def test_render_skill_content_distill_is_exact_marker_text():
     ]
 
 
-def test_render_skill_content_diagnose_is_exact_marker_text():
-    lines = render_skill_content("diagnose", DIAGNOSE_SECTIONS).split("\n")
-    assert lines == [
-        "[Trigger] You edit the config while the service is running.",
-        "[Why it fails] The running service overwrites your edit on restart.",
-        "[Do instead]",
-        "1. Stop the service.",
-        "2. Edit the config.",
-        "3. Start the service.",
-        "[Do not use when] The subtask is not about the config.",
-    ]
+def test_render_skill_content_diagnose_sections_render_the_same_layout():
+    assert render_skill_content(DIAGNOSE_SECTIONS) == DIAGNOSE_CONTENT
 
 
 def test_render_is_deterministic():
@@ -512,15 +505,13 @@ def test_render_is_deterministic():
     # (the 2026-10-14 fix extends the invariant to heredoc-shaped values).
     multiline_diagnose = {
         **DIAGNOSE_SECTIONS,
-        "do_instead": ["Stop the service.\nsystemctl stop <service>",
-                       "Edit the config."],
+        "steps": ["Stop the service.\nsystemctl stop <service>",
+                  "Edit the config."],
     }
-    for mode, sections in (("distill", DISTILL_SECTIONS),
-                           ("diagnose", DIAGNOSE_SECTIONS),
-                           ("distill", HEREDOC_SECTIONS),
-                           ("diagnose", multiline_diagnose)):
-        assert (render_skill_content(mode, sections)
-                == render_skill_content(mode, sections))
+    for sections in (DISTILL_SECTIONS, DIAGNOSE_SECTIONS, HEREDOC_SECTIONS,
+                     multiline_diagnose):
+        assert (render_skill_content(sections)
+                == render_skill_content(sections))
 
 
 def test_validate_skill_sections_accepts_legal_payloads():
@@ -595,7 +586,7 @@ def test_rewrite_summary_can_differ_from_the_originals():
     # contract ties it to the old one.
     subtask = make_subtask()
     skill = make_marker_skill(subtask, content=DISTILL_CONTENT)
-    rewritten = render_skill_content("distill", {
+    rewritten = render_skill_content({
         **DISTILL_SECTIONS,
         "steps": ["Check the credentials before every login."],
     })
@@ -611,57 +602,48 @@ def test_rewrite_summary_can_differ_from_the_originals():
     assert result["summary"] == "a different, fresher one-liner"
 
 
-def test_render_and_validate_reject_unknown_mode():
-    with pytest.raises(ValueError, match="mode"):
-        render_skill_content("bogus", DISTILL_SECTIONS)
+def test_validate_rejects_unknown_mode():
     with pytest.raises(ValueError, match="mode"):
         validate_skill_sections("bogus", DISTILL_SECTIONS)
 
 
-def test_skill_markers_reads_complete_sets():
-    assert skill_markers(DISTILL_CONTENT) == PROCEDURE_MARKERS
-    assert skill_markers(DIAGNOSE_CONTENT) == FAILURE_REFERENCE_MARKERS
+def test_has_skill_sections_reads_complete_sets():
+    assert has_skill_sections(DISTILL_CONTENT)
+    assert has_skill_sections(DIAGNOSE_CONTENT)
 
 
-def test_skill_markers_partial_set_is_none():
+def test_has_skill_sections_partial_set_is_false():
     partial = "\n".join(
         line for line in DISTILL_CONTENT.split("\n")
         if not line.startswith("[Verify]"))
     assert "[Verify]" not in partial
-    assert skill_markers(partial) is None
+    assert not has_skill_sections(partial)
 
 
-def test_skill_markers_mixed_sets_are_none():
-    # A failure-only marker forged into a procedure skill leaves the shared
-    # "[Do not use when]" unable to disambiguate: neither set is complete
-    # and clean, so the content reads as None.
-    mixed = DISTILL_CONTENT + "\n[Trigger] forged"
-    assert skill_markers(mixed) is None
-    both = DISTILL_CONTENT + "\n" + DIAGNOSE_CONTENT
-    assert skill_markers(both) is None
+def test_retired_failure_reference_reads_as_unsectioned():
+    # The 2026-10-19 ruling: the old [Trigger] structure is not migrated.
+    retired = "\n".join([
+        "[Trigger] You edit the config while the service is running.",
+        "[Why it fails] The running service overwrites your edit.",
+        "[Do instead]",
+        "1. Stop the service.",
+        "[Do not use when] The subtask is not about the config.",
+    ])
+    assert not has_skill_sections(retired)
 
 
-def test_skill_markers_is_line_start_anchored():
+def test_has_skill_sections_is_line_start_anchored():
     # Every marker present but mid-line -- exactly what the single-line
     # compressed injection block looks like: no set is read off it.
     one_line = " ".join(DISTILL_CONTENT.split("\n"))
-    for marker in PROCEDURE_MARKERS:
+    for marker in SKILL_MARKERS:
         assert marker in one_line
-    assert skill_markers(one_line) is None
+    assert not has_skill_sections(one_line)
     # Indented markers do not anchor either: the marker must sit at
-    # column 0, so a bolded or indented variant reads as None.
+    # column 0, so a bolded or indented variant reads as False.
     indented = "\n".join("    " + line
                          for line in DISTILL_CONTENT.split("\n"))
-    assert skill_markers(indented) is None
-
-
-def test_render_and_skill_markers_roundtrip():
-    assert skill_markers(
-        render_skill_content("distill", DISTILL_SECTIONS)) \
-        == PROCEDURE_MARKERS
-    assert skill_markers(
-        render_skill_content("diagnose", DIAGNOSE_SECTIONS)) \
-        == FAILURE_REFERENCE_MARKERS
+    assert not has_skill_sections(indented)
 
 
 # ---------------------------------------------------------------------------
@@ -773,7 +755,7 @@ def test_rewrite_skill_wiring_and_result():
 def test_rewrite_skill_keeps_the_marker_set():
     subtask = make_subtask()
     skill = make_marker_skill(subtask)
-    rewritten = render_skill_content("distill", {
+    rewritten = render_skill_content({
         **DISTILL_SECTIONS,
         "steps": ["Check the credentials before every login."],
         "verify": "The login succeeds on the first try.",
@@ -789,7 +771,7 @@ def test_rewrite_skill_keeps_the_marker_set():
 
     assert result["content"] == rewritten
     assert result["failure_category"] == "misread"
-    assert skill_markers(result["content"]) == PROCEDURE_MARKERS
+    assert has_skill_sections(result["content"])
 
 
 def test_rewrite_skill_dropping_the_markers_raises():
@@ -803,23 +785,6 @@ def test_rewrite_skill_dropping_the_markers_raises():
         "skill_text": "Do X when Y, in plain prose.",
         "rewrite_reason": "Collapsed the sections.",
         "summary": "do X when Y",
-    }))
-
-    with pytest.raises(ModelOutputError, match="bracket sections"):
-        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
-
-
-def test_rewrite_skill_switching_marker_kind_raises():
-    # Set equality, not substring containment: a rewrite that swaps the
-    # procedure sections for failure-reference sections is rejected even
-    # though it carries four markers.
-    subtask = make_subtask()
-    skill = make_marker_skill(subtask)
-    handle = make_fake_handle(script=json_script({
-        "failure_category": "misread",
-        "skill_text": DIAGNOSE_CONTENT,
-        "rewrite_reason": "Rewrote it as a failure reference.",
-        "summary": "a failure reference about config edits",
     }))
 
     with pytest.raises(ModelOutputError, match="bracket sections"):

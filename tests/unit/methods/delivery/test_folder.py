@@ -122,10 +122,9 @@ def test_an_empty_summary_falls_back_to_the_when_to_use_section():
         "restarting anything.")
 
 
-def test_an_empty_summary_on_a_failure_reference_falls_back_to_trigger():
-    """The rev-1 symmetric fallback: a failure-reference skill (its
-    sections start at [Trigger], not [When to use]) uses that section
-    as its catalog description."""
+def test_a_retired_failure_reference_gets_the_explicit_placeholder():
+    """The 2026-10-19 ruling: only [When to use] is a fallback; a
+    pre-ruling [Trigger] skill is not migrated and reads as markerless."""
     content = "\n".join([
         "[Trigger] The model restarts the service blindly.",
         "[Why it fails] The lock file is still held.",
@@ -134,10 +133,7 @@ def test_an_empty_summary_on_a_failure_reference_falls_back_to_trigger():
     ])
     skill = _skill("t1", summary="", content=content)
     entry = render_catalog([skill]).splitlines()[-1]
-    # The [Trigger] body collapsed to one line; [Why it fails] never
-    # leaks into the description.
-    assert entry.endswith(
-        "| The model restarts the service blindly.")
+    assert entry.endswith("| (no summary)")
 
 
 def test_a_markerless_skill_gets_the_explicit_placeholder():
@@ -237,7 +233,7 @@ def test_colliding_file_names_are_refused_loudly():
 def test_folder_unit_ids_join_the_reuse_plumbing():
     bank, _accepted = _bank()
     rows = folder_driver.resolve(bank, _tasks("t1", "t2"), FolderParams())
-    phase_label = "p03:C"
+    phase_label = "p03:test"
     units = [ExecutionUnitRow(
         unit_id=make_unit_id(phase_label=phase_label, benchmark=BENCHMARK,
                              task_ref=row.task_ref, role="weak",
@@ -251,7 +247,7 @@ def test_folder_unit_ids_join_the_reuse_plumbing():
         # this row lands on the same key, so the join holds.
         digest = row.unit_id.rsplit(":", 1)[1]
         assert unit.unit_id == \
-            f"p03:C:{BENCHMARK}:{row.task_ref}:weak:{digest}"
+            f"p03:test:{BENCHMARK}:{row.task_ref}:weak:{digest}"
         assert reuse_key(unit).startswith(row.task_ref)
     # The same folder again reuses: nothing re-executes under rule 1.
     assert reusable_units(units, units) == \
@@ -266,7 +262,7 @@ def test_folder_unit_ids_join_the_reuse_plumbing():
 
 
 # ---------------------------------------------------------------------------
-# The load-time boundary: folder is a C-phase (test role) delivery
+# The load-time boundary: folder is a test-phase (test role) delivery
 # ---------------------------------------------------------------------------
 
 _LEARN = {
@@ -288,21 +284,21 @@ def _execute(role, tasks, delivery, execution=None):
 
 
 def _parse_with(role_phase, sequence):
-    phases = {"D": _execute("baseline", "train", {"name": "none"}),
-              "L": _LEARN}
+    phases = {"baseline": _execute("baseline", "train", {"name": "none"}),
+              "learn": _LEARN}
     phases.update(role_phase)
     return parse_phases(phases, sequence, n_attempts_weak=1)
 
 
 def test_a_test_role_phase_may_deliver_the_folder():
     # Since M3 the folder delivery pairs with the real_folder execution
-    # (checklist item 8's pairing rule), so the C phase parses with it.
+    # (checklist item 8's pairing rule), so the test phase parses with it.
     specs = _parse_with(
-        {"C": _execute("test", "test", {"name": FOLDER_DELIVERY_NAME},
+        {"test": _execute("test", "test", {"name": FOLDER_DELIVERY_NAME},
                        execution={"name": "real_folder"})},
-        ["D", "L", "C"])
-    assert specs["C"].delivery["name"] == FOLDER_DELIVERY_NAME
-    assert specs["C"].role == PHASE_ROLE_TEST
+        ["baseline", "learn", "test"])
+    assert specs["test"].delivery["name"] == FOLDER_DELIVERY_NAME
+    assert specs["test"].role == PHASE_ROLE_TEST
 
 
 @pytest.mark.parametrize("role,tasks", [
@@ -312,10 +308,10 @@ def test_a_test_role_phase_may_deliver_the_folder():
 ])
 def test_the_other_roles_refuse_the_folder(role, tasks):
     with pytest.raises(ConfigError,
-                       match=r"legal only for role 'test' \(the C phase"):
+                       match=r"legal only for role 'test' \(the test phase"):
         _parse_with(
             {"X": _execute(role, tasks, {"name": FOLDER_DELIVERY_NAME})},
-            ["D", "L", "X"])
+            ["baseline", "learn", "X"])
 
 
 # ---------------------------------------------------------------------------

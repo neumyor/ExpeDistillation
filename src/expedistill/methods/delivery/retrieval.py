@@ -7,7 +7,7 @@ task instruction; the with-bank trajectories record the task's
 control's ``None``. The resolution is audited (one row per test task,
 task-id order: routed categories, the full score ranking, the selection,
 the gate) to ``stage6_test/retrieval_audit.jsonl`` (the frozen location the
-audit tooling reads; the C phase keeps writing there), written BEFORE
+audit tooling reads; the test phase keeps writing there), written BEFORE
 dispatch so the audit names the injection this dispatch is about to
 render (decision 15).
 

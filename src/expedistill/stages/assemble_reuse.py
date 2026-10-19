@@ -11,7 +11,7 @@ record at the run root.
 
 Two levels (revision 3, the 2026-10-13 user ruling):
 
-* ``bank`` (default): the D-phase trajectories, the segmentation,
+* ``bank`` (default): the baseline-phase trajectories, the segmentation,
   authoring and acceptance objects, and the curated bank filtered to
   train lineage. The new config may differ from the source run's frozen
   manifest ONLY in {mode, split, tasks, schema_version} and the
@@ -21,7 +21,7 @@ Two levels (revision 3, the 2026-10-13 user ruling):
   exception: the new run freezes the current registry's digests without
   ever calling them, so their drift is disclosed, never refused
   (ruling 14).
-* ``baseline``: the D phase's train-side trajectories and the accepted
+* ``baseline``: the baseline phase's train-side trajectories and the accepted
   stage-1 infra shortfall ONLY; every downstream phase runs fresh. The
   identity check pins only what trajectory reproducibility needs:
   {benchmark, both executor models, both attempt counts, train within
@@ -59,7 +59,7 @@ v4): its train-side rows are counted and disclosed, not copied.
 
 The assembled run is not a finished run: stage 0 freezes its own
 manifest on the first pipeline start (the identity re-check of last
-resort), the D phase skips the stored trajectories, and the C phase runs
+resort), the baseline phase skips the stored trajectories, and the test phase runs
 fresh. The run directory is exclusively locked for the assembly; a
 failed assembly is safe to re-run (object files are overwritten, the
 ledgers are written atomically in full).
@@ -580,7 +580,7 @@ def _campaign_lines(campaign_seeded: Mapping[str, Any],
     else:
         lines = [
             f"- 拷贝的 {total} 条 train 双臂轨迹均无 campaign 播种溯源 "
-            "meta（源 run 的 D 相位为直接执行）。"]
+            "meta（源 run 的 baseline 相位为直接执行）。"]
     origins = campaign_seeded.get("origin_runs") or {}
     if origins:
         lines.append("- 溯源 origin run 分布：" + "、".join(
@@ -636,9 +636,9 @@ def _render_assembled_from(
     else:
         add("- 目标 sequence 不含 learn 相位，库只写入 run 根"
             "（skill_bank.jsonl），不预置相位产物。")
-    add("- 首次管线启动：p00 冻结 manifest（即同一性终检），D 相位跳过"
+    add("- 首次管线启动：p00 冻结 manifest（即同一性终检），baseline 相位跳过"
         "已存储的轨迹，learn 相位在拷贝的记录上重新决策、整理直接返回，"
-        "C 相位全新执行。")
+        "test 相位全新执行。")
     if counts["generation_failure_rows"]:
         add(f"- 披露：源 run 的阶段 3 generation_failures 有 "
             f"{counts['generation_failure_rows']} 条 train 溯源行。v4 学习"
@@ -648,7 +648,7 @@ def _render_assembled_from(
         add(f"- 披露：源 run 的末相位库产物携带 "
             f"{counts['pending_bank_rows']} 条 train 溯源的待定成员"
             "（源 run 未完成检验的材料），随库与 store 原样带入，"
-            "新 run 的 A/B 相位将真实测量它们。")
+            "新 run 的 exam/live 相位将真实测量它们。")
     add("")
     add("## 全链口径（契约 10）")
     add("")
@@ -685,7 +685,7 @@ def _render_assembled_from(
         for skill_id in merged["dangling"]:
             add(f"  - `{skill_id}`")
     add("")
-    add("## D 相位播种溯源")
+    add("## baseline 相位播种溯源")
     add("")
     lines.extend(_campaign_lines(campaign_seeded, counts["trajectories"]))
     add("")
@@ -800,13 +800,13 @@ def _render_assembled_from_baseline(
     add = lines.append
     lines.extend(header)
     add("- 方案：`docs/decisions/retrieval_delivery_tb_split_20261013.md`"
-        " 修订三（2026-10-13 用户裁决：D 相位轨迹复用 + 下游相位全新"
+        " 修订三（2026-10-13 用户裁决：baseline 相位轨迹复用 + 下游相位全新"
         "蒸馏）。")
     add("")
     add("## 同一性校验与 train ⊆ 源任务集（修订三）")
     add("")
     add("- baseline 档位只固定 {benchmark、双 executor 模型名、双 "
-        "n_attempts、train ⊆ 源任务集}，即 D 相位轨迹可复现所需的最小集；"
+        "n_attempts、train ⊆ 源任务集}，即 baseline 相位轨迹可复现所需的最小集；"
         "规则名、prompt digest、相位定义、预算等可以不同（它们只作用于"
         "全部重新运行的下游相位）。")
     add(f"- 核对通过：executor_strong {pinned['executor_strong']!r}、"
@@ -823,11 +823,11 @@ def _render_assembled_from_baseline(
     add(f"| accepted_infra_shortfall 单元 | "
         f"{counts['accepted_infra_shortfall_units']} |")
     add("")
-    add("## D 相位播种溯源")
+    add("## baseline 相位播种溯源")
     add("")
     lines.extend(_campaign_lines(campaign_seeded, counts["trajectories"]))
     add("")
-    add("## 未拷贝清单（D 相位轨迹之外零复用）")
+    add("## 未拷贝清单（baseline 相位轨迹之外零复用）")
     add("")
     add("- 不拷贝任何下游产物：subtask / skill / exam / attempt、"
         "skill_bank.jsonl、stage2_segments/segmentation_audit.jsonl、"
@@ -836,7 +836,7 @@ def _render_assembled_from_baseline(
         "pipeline_log.jsonl、llm_requests/、failed_units.jsonl、"
         "skip_audit.jsonl、各 stage summary、curation_log.json、"
         "stage6_test/、work/、leak_verdicts.jsonl、rewrite_failures.jsonl）。")
-    add("- **D 相位之外的全部相位将按当前协议全新执行**：切段、写作、"
+    add("- **baseline 相位之外的全部相位将按当前协议全新执行**：切段、写作、"
         "验收、整理与终测全部按本配置的相位定义与当前 prompt 注册表"
         "真实调用；新 run 的 manifest 由首次管线启动时 p00 冻结。")
     return "\n".join(lines) + "\n"

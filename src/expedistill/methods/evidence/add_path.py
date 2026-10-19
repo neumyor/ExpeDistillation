@@ -2,8 +2,9 @@
 
 The add action's target is a TASK (boundaries section 2.5: "when
 adding: which experiences to learn from"). Decision names the task in
-the task list after the D-phase screening; this collector reads the
-D-phase STRONG trajectories' segmentation results from the store, keeps
+the task list after the baseline-phase screening; this collector reads the
+baseline-phase trajectories' segmentation results from the store (strong
+segments, plus weak ones when ``write_lessons`` is on), keeps
 the segments the named segment_select rule passes, renders each one's
 steps view from its source trajectory, and packages them as one
 evidence package's ``source_experiences`` -- the material the author
@@ -29,11 +30,11 @@ __all__ = ["NoAddMaterial", "collect_add_evidence"]
 
 
 class NoAddMaterial(ValueError):
-    """The task has no strong segment the rule keeps: a data fact, not a
-    wiring bug. The decision authorizes an add off the WEAK arm's
-    failure alone, so the strong arm may hold no learnable material --
-    it was never run, its segments were all cut away by the segment
-    rule, or K2 exhausted its trajectories (terminal within a run).
+    """The task has no segment the rule keeps: a data fact, not a wiring
+    bug. The decision authorizes an add off the WEAK arm's failure
+    alone, so the collected roles may hold no learnable material --
+    never run, all segments cut away by the segment rule, or K2
+    exhausted the trajectories (terminal within a run).
     With segmentation wired into the add path this is reachable on real
     data; the landing records it (learn_tasks' ``skipped_no_material``
     receipt) where the old stage 3 answered with silence. A ValueError
@@ -47,20 +48,24 @@ def collect_add_evidence(
     task_row: TaskListRow,
     store: Store,
     rule_name: str,
+    write_lessons: bool = True,
     view_rules: Any = None,
 ) -> EvidencePackage:
-    """Collect one task's add-path evidence (its strong segments).
+    """Collect one task's add-path evidence (its strong segments, plus
+    its weak segments when ``write_lessons`` is on).
 
     ``task_row`` is the decision module's authorization (action ``add``,
     target a task id); ``rule_name`` is the configured segment_select
     rule (the same named rule stage 3 uses, resolved through
-    blocks.select). Only strong-source subtasks are gathered: an add
-    writes a procedure skill from what the strong model did right on a
-    task the weak model fails (the diagnose mode belongs to revision
-    evidence, not to a first skill). Each source experience carries the
-    subtask, its rendered steps view and the write mode the author uses
-    (``distill``); the package's segments pin the subtask ids and step
-    ranges so the author's output stays traceable to its evidence.
+    blocks.select). Strong segments teach what the strong model did
+    right; with ``write_lessons`` on, weak segments teach which mistake
+    the weak model made and what to do instead (the 2026-10-19 ruling;
+    the default segment_select rule keeps strong successes and weak
+    failures). Each source experience carries the subtask, its rendered
+    steps view and the write mode the author uses -- ``distill`` for a
+    strong segment, ``diagnose`` for a weak one; both write the same
+    four-section skill. The package's segments pin the subtask ids and
+    step ranges so the author's output stays traceable to its evidence.
     """
     if task_row.action != ADD:
         raise ValueError(
@@ -70,8 +75,9 @@ def collect_add_evidence(
     task_id = task_row.target_id
     subtasks = [store.load("subtasks", subtask_id, Subtask)
                 for subtask_id in store.ids("subtasks")]
+    roles = ("strong", "weak") if write_lessons else ("strong",)
     subtasks = [sub for sub in subtasks if sub.task_id == task_id
-                and sub.source == "strong"]
+                and sub.source in roles]
     subtasks = select_subtasks(subtasks, rule_name)
 
     source_experiences: List[dict] = []
@@ -85,14 +91,14 @@ def collect_add_evidence(
         source_experiences.append({
             "subtask": sub,
             "steps_view": steps_view,
-            "mode": "distill",
+            "mode": "distill" if sub.source == "strong" else "diagnose",
         })
         segments.append({"subtask_id": sub.subtask_id,
                          "trajectory_id": sub.trajectory_id,
                          "step_range": [start, end]})
     if not source_experiences:
         raise NoAddMaterial(
-            f"task {task_id!r} has no strong segment the rule "
+            f"task {task_id!r} has no {'/'.join(roles)} segment the rule "
             f"{rule_name!r} keeps: there is nothing to learn from on "
             "this task")
     return EvidencePackage(

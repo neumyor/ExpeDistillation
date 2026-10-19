@@ -18,10 +18,10 @@ models:
 n_attempts_strong: 3
 n_attempts_weak: 3
 phases:
-  B:
+  live:
     acceptance: null
     compare:
-      against: D
+      against: baseline
       rule: strict_rate_gain
     delivery:
       name: group_by_task
@@ -32,7 +32,7 @@ phases:
     kind: execute
     role: live
     tasks: train
-  C:
+  test:
     acceptance: null
     compare:
       against: fresh_bare
@@ -47,7 +47,7 @@ phases:
     kind: execute
     role: test
     tasks: test
-  D:
+  baseline:
     acceptance: null
     compare: null
     delivery:
@@ -60,7 +60,7 @@ phases:
     kind: execute
     role: baseline
     tasks: train
-  L:
+  learn:
     author:
       name: distill_diagnose
     curate:
@@ -81,13 +81,13 @@ rules:
   trajectory_select: strong2_weak2
 schema_version: 4
 sequence:
-- D
-- L
-- B
-- L
-- B
-- L
-- C
+- baseline
+- learn
+- live
+- learn
+- live
+- learn
+- test
 split:
   reserved:
   - bn-fit-modify

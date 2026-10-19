@@ -36,10 +36,14 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional, Union
 
 from expedistill.blocks.attribution import revise_skill
-from expedistill.blocks.author import rewrite_skill, skill_markers, write_skill
+from expedistill.blocks.author import (
+    has_skill_sections,
+    rewrite_skill,
+    write_skill,
+)
 from expedistill.composites.decision import ADD, LIVE_REVISION_DELETED, REVISE
 from expedistill.core.contracts import TaskListRow
-from expedistill.core.models import Skill
+from expedistill.core.models import SKILL_MARKERS, Skill
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -158,14 +162,12 @@ def _revise_once(
         skill.content, _attribution_report(package), failure_view,
         weak_profile, handle, usage=usage, run_dir=run_dir)
     new_text = result["skill_text"]
-    markers = skill_markers(skill.content)
-    if markers is not None and skill_markers(new_text) != markers:
+    if has_skill_sections(skill.content) and not has_skill_sections(new_text):
         # Same budget as a format failure; a structural raise outside
         # the budget's scope kills whole units (the K5 lesson).
         raise ModelOutputError(
-            "the revision must keep the same four bracket sections as "
-            f"the original ({' / '.join(markers)}), got "
-            f"{skill_markers(new_text)!r}")
+            "the revision must keep the four bracket sections "
+            f"({' / '.join(SKILL_MARKERS)})")
     return {"content": new_text,
             "failure_category": result["failure_category"],
             "revision_reason": result["revision_reason"],

@@ -132,11 +132,9 @@ Work in two steps:
 
 2. Rewrite the skill to fix the classified problem and the attribution
    report. Change the wording, granularity, or trigger conditions of the
-   skill -- not its underlying idea. The rewritten skill must keep the same
-   four bracket sections as the original skill ([When to use]/[Steps]/
-   [Verify]/[Do not use when] for a procedure skill, [Trigger]/
-   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):
-   rewrite each section's content, never collapse them into prose.
+   skill -- not its underlying idea. The rewritten skill must keep the
+   four bracket sections of the original skill ([When to use]/[Steps]/
+   [Verify]/[Do not use when]): rewrite each section's content, never collapse them into prose.
    Reproduce the bracketed section headers exactly as written, each on its
    own line. Then write a fresh one-line summary of the REWRITTEN skill
    (what it is and does, one sentence): the content changed, so the

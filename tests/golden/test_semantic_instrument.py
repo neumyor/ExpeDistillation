@@ -110,44 +110,44 @@ def _expected_red(report: dict, *red: str) -> None:
 def test_v4_layout_pins_the_phase_world_paths():
     exam = v4_layout("exam")
     assert set(exam) == {
-        "phases/p09_C/phase_summary.json",
-        "phases/p08_L/skill_bank.jsonl",
-        "phases/p03_A/generation_failures.jsonl",
-        "phases/p05_A/generation_failures.jsonl",
-        "phases/p07_A/generation_failures.jsonl",
-        "phases/p02_L/task_list.jsonl", "phases/p02_L/revisions.jsonl",
-        "phases/p02_L/outcomes.jsonl",
-        "phases/p04_L/task_list.jsonl", "phases/p04_L/revisions.jsonl",
-        "phases/p04_L/outcomes.jsonl",
-        "phases/p06_L/task_list.jsonl", "phases/p06_L/revisions.jsonl",
-        "phases/p06_L/outcomes.jsonl",
-        "phases/p08_L/task_list.jsonl", "phases/p08_L/revisions.jsonl",
-        "phases/p08_L/outcomes.jsonl",
+        "phases/p09_test/phase_summary.json",
+        "phases/p08_learn/skill_bank.jsonl",
+        "phases/p03_exam/generation_failures.jsonl",
+        "phases/p05_exam/generation_failures.jsonl",
+        "phases/p07_exam/generation_failures.jsonl",
+        "phases/p02_learn/task_list.jsonl", "phases/p02_learn/revisions.jsonl",
+        "phases/p02_learn/outcomes.jsonl",
+        "phases/p04_learn/task_list.jsonl", "phases/p04_learn/revisions.jsonl",
+        "phases/p04_learn/outcomes.jsonl",
+        "phases/p06_learn/task_list.jsonl", "phases/p06_learn/revisions.jsonl",
+        "phases/p06_learn/outcomes.jsonl",
+        "phases/p08_learn/task_list.jsonl", "phases/p08_learn/revisions.jsonl",
+        "phases/p08_learn/outcomes.jsonl",
     }
     # The bank is the LAST learn phase's artifact (R7); the C summary is
     # the execute phase's phase_summary.json; the generation failures
-    # live in the A phases (the R8 ruling moved G3 there), keyed exam_id.
-    assert exam["phases/p08_L/skill_bank.jsonl"] == (BANK, None, 7)
-    assert exam["phases/p09_C/phase_summary.json"] == (TEST_SUMMARY, None, 0)
-    assert exam["phases/p03_A/generation_failures.jsonl"] == (
+    # live in the exam phases (the R8 ruling moved G3 there), keyed exam_id.
+    assert exam["phases/p08_learn/skill_bank.jsonl"] == (BANK, None, 7)
+    assert exam["phases/p09_test/phase_summary.json"] == (TEST_SUMMARY, None, 0)
+    assert exam["phases/p03_exam/generation_failures.jsonl"] == (
         GENERATION_FAILURES, None, 2)
-    assert exam["phases/p07_A/generation_failures.jsonl"] == (
+    assert exam["phases/p07_exam/generation_failures.jsonl"] == (
         GENERATION_FAILURES, None, 6)
     live = v4_layout("live_run")
     assert set(live) == {
-        "phases/p07_C/phase_summary.json",
-        "phases/p06_L/skill_bank.jsonl",
-        "phases/p02_L/task_list.jsonl", "phases/p02_L/revisions.jsonl",
-        "phases/p02_L/outcomes.jsonl",
-        "phases/p04_L/task_list.jsonl", "phases/p04_L/revisions.jsonl",
-        "phases/p04_L/outcomes.jsonl",
-        "phases/p06_L/task_list.jsonl", "phases/p06_L/revisions.jsonl",
-        "phases/p06_L/outcomes.jsonl",
+        "phases/p07_test/phase_summary.json",
+        "phases/p06_learn/skill_bank.jsonl",
+        "phases/p02_learn/task_list.jsonl", "phases/p02_learn/revisions.jsonl",
+        "phases/p02_learn/outcomes.jsonl",
+        "phases/p04_learn/task_list.jsonl", "phases/p04_learn/revisions.jsonl",
+        "phases/p04_learn/outcomes.jsonl",
+        "phases/p06_learn/task_list.jsonl", "phases/p06_learn/revisions.jsonl",
+        "phases/p06_learn/outcomes.jsonl",
     }
-    assert live["phases/p06_L/skill_bank.jsonl"] == (BANK, None, 5)
-    assert live["phases/p04_L/revisions.jsonl"] == (LEARN_REVISIONS, None, 3)
-    assert live["phases/p04_L/outcomes.jsonl"] == (LEARN_OUTCOMES, None, 3)
-    assert live["phases/p02_L/task_list.jsonl"] == (LEARN_TASK_LIST, None, 1)
+    assert live["phases/p06_learn/skill_bank.jsonl"] == (BANK, None, 5)
+    assert live["phases/p04_learn/revisions.jsonl"] == (LEARN_REVISIONS, None, 3)
+    assert live["phases/p04_learn/outcomes.jsonl"] == (LEARN_OUTCOMES, None, 3)
+    assert live["phases/p02_learn/task_list.jsonl"] == (LEARN_TASK_LIST, None, 1)
     # The run-level artifacts never moved (P4): no mapping may touch the
     # live verdicts, the retrieval audit or the request history.
     for table in (exam, live):
@@ -157,10 +157,12 @@ def test_v4_layout_pins_the_phase_world_paths():
 
 
 def test_phase_sequences_match_the_upgrade_v3_table():
-    assert SEQUENCES["exam"] == ("D", "L", "A", "L", "A", "L", "A", "L", "C")
-    assert SEQUENCES["live_run"] == ("D", "L", "B", "L", "B", "L", "C")
-    assert phase_dir(SEQUENCES["exam"], 0) == "phases/p01_D"
-    assert phase_dir(SEQUENCES["live_run"], 6) == "phases/p07_C"
+    assert SEQUENCES["exam"] == ("baseline", "learn", "exam", "learn",
+                                 "exam", "learn", "exam", "learn", "test")
+    assert SEQUENCES["live_run"] == ("baseline", "learn", "live", "learn",
+                                     "live", "learn", "test")
+    assert phase_dir(SEQUENCES["exam"], 0) == "phases/p01_baseline"
+    assert phase_dir(SEQUENCES["live_run"], 6) == "phases/p07_test"
 
 
 # ---------------------------------------------------------------------------
@@ -187,14 +189,14 @@ def test_extraction_reproduces_the_committed_bundle(tmp_path):
 def test_canonicalize_maps_the_fixture_onto_the_canonical_keys(combo):
     """The regenerated matrix IS the phase-world shape: canonicalising
     it must produce the canonical keys the views read -- the last learn
-    phase's bank onto the canonical bank, the C phase's summary onto the
+    phase's bank onto the canonical bank, the test phase's summary onto the
     canonical test summary, the learn ledgers onto their canonical names
     -- while the run-level artifacts pass through unmoved (P4)."""
     canonical = canonicalize(_golden_snapshot(combo),
                              combo["acceptance"], "v4")
     assert BANK in canonical
     assert TEST_SUMMARY in canonical
-    # The learn ledgers: every L phase writes its task list and outcome
+    # The learn ledgers: every learn phase writes its task list and outcome
     # receipts; only a revise writes revision-plan rows (the exam combos
     # pass every skill on round one, so the golden matrix's exam
     # fixtures carry none).
@@ -215,7 +217,7 @@ def test_canonicalize_leaves_v3_snapshots_untouched():
 
 
 def test_canonicalize_concatenates_generation_failure_shards():
-    """The A phases' generation-failure shards concatenate onto the one
+    """The exam phases' generation-failure shards concatenate onto the one
     canonical ledger in phase order -- a later shard must not silently
     drop an earlier one (the branch is unreachable on the golden matrix,
     whose ledgers are empty; this is its pin)."""
@@ -226,8 +228,8 @@ def test_canonicalize_concatenates_generation_failure_shards():
                  {"exam_id": "traj/fakebench:t1/weak/00/seg00/exam",
                   "error_class": "ModelOutputError", "message": "c"}]
     snapshot_data = {  # insertion order deliberately not phase order
-        "phases/p07_A/generation_failures.jsonl": shard_p07,
-        "phases/p03_A/generation_failures.jsonl": shard_p03,
+        "phases/p07_exam/generation_failures.jsonl": shard_p07,
+        "phases/p03_exam/generation_failures.jsonl": shard_p03,
     }
     merged = canonicalize(snapshot_data, "exam", "v4")
     assert merged[GENERATION_FAILURES] == shard_p03 + shard_p07
@@ -432,7 +434,7 @@ def _bridge_views(combo: dict, subtask_id: str,
     ``v4_extras`` store entries (the same event in the phase world's
     form: a skill born, then discarded with model_output_error). The
     phase world records the event in ONE form -- a store discard here,
-    an A-phase failure row when nothing was ever born (pinned
+    an exam-phase failure row when nothing was ever born (pinned
     separately below) -- so the pair must not carry both. Returns
     (golden_views, fresh_views)."""
     v3 = _live_combo_snapshot()
@@ -454,7 +456,7 @@ def test_e2_unborn_bridge_aligns_v3_failure_rows_with_v4_discards():
     v3 records a G3-exhausted subtask as a generation_failures row
     (stage 3's pair save means no skill was stored); the phase world
     records the same event as a skills-store skill discarded with
-    model_output_error (born in L, deleted after the A-phase exam
+    model_output_error (born in L, deleted after the exam-phase exam
     failure; discards never enter the bank, so the store is their only
     durable home). The two forms must compare FULLY equal on the unborn
     multiset. The branch is unreachable in the golden matrix (P6: every
@@ -475,7 +477,7 @@ def test_e2_unborn_bridge_aligns_v3_failure_rows_with_v4_discards():
 
 
 def test_generation_failure_exam_id_keys_bridge():
-    """The phase world's other unborn form: the A-phase failure ledger
+    """The phase world's other unborn form: the exam-phase failure ledger
     keys ``exam_id`` (= subtask_id + '/exam', the R8 ruling) where v3
     keyed ``subtask_id``. A v3 row and the phase world's exam-id row
     project onto the SAME unborn entry, so the two snapshots compare
@@ -634,7 +636,7 @@ def test_tamper_control_source_alias_is_canonicalised():
     (the loud direction -- it becomes a difference). The alias runs at
     view-build time, so this is a snapshot-level pin."""
     combo = _combo("exam-whole_bank-full")
-    for label in ("stage1_reuse", "D_reuse", "D", "p01_D"):
+    for label in ("stage1_reuse", "baseline_reuse", "baseline", "p01_baseline"):
         snapshot_data = _live_combo_snapshot()
         snapshot_data[TEST_SUMMARY]["control_source"] = label
         views = semantic_views(snapshot_data, combo, "v3")

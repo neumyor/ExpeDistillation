@@ -157,20 +157,22 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     under new file names (v3 files are frozen experiment records).
 
     The emitted shapes are exactly what schema v4's ``parse_phases``
-    accepts: every phase declares its R8 role (D baseline, A exam, B
-    live, C test, L learn), and the v4-only global
+    accepts: every phase declares its R8 role and is named after it
+    (baseline, exam, live, test, learn), and the v4-only global
     ``invalid_redispatch_limit`` is emitted at its default.
 
     Deliberate identity changes, disclosed here and in the converter's
     diff output:
 
     * the acceptance method dissolves into the SEQUENCE -- exam with
-      ``retry_limit=R`` becomes ``[D, L] + [A, L] x (R+1) + [C]`` (the
-      K4 answer rounds), live_run becomes ``[D, L, B, L, B, L, C]`` --
-      and live_run's ``n_attempts`` / ``improvement`` /
-      ``max_injection_tokens`` move into the B phase;
+      ``retry_limit=R`` becomes
+      ``[baseline, learn] + [exam, learn] x (R+1) + [test]`` (the K4
+      answer rounds), live_run becomes
+      ``[baseline, learn, live, learn, live, learn, test]`` -- and
+      live_run's ``n_attempts`` / ``improvement`` /
+      ``max_injection_tokens`` move into the live phase;
     * a live_run config's merges are no longer proven on regression
-      exams: ``L.curate.merge_check = none`` (the live sequence has no
+      exams: ``learn.curate.merge_check = none`` (the live sequence has no
       exam phase to check against; merges are proven by the round-1
       group re-execution instead). An explicit ``merge_check`` in the
       curation slot is preserved -- except ``exam`` under live_run,
@@ -179,10 +181,10 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
       every emitted sequence; false converts only as the one legal
       ablation pair (live_run acceptance + curation ``none`` -- the
       same boundary v3's own cross-slot check draws) and is refused
-      otherwise. A live sequence has no A phase either way, so the
+      otherwise. A live sequence has no exam phase either way, so the
       ablation pair upgrades to the identical shape;
     * the five ``methods`` slots are deleted; delivery and curation
-      params move key-for-key into the C and L phases.
+      params move key-for-key into the test and learn phases.
 
     Absent, null or empty slots complete from the v3 defaults
     (``_V3_METHOD_DEFAULTS``) exactly as the v3 loader froze them, so the output is the v4
@@ -217,7 +219,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     v4 = copy.deepcopy(data)
     methods = _v3_methods(v4.pop("methods"))
 
-    # -- segmentation -> L.evidence (the add path's cutting budget) -----
+    # -- segmentation -> learn.evidence (the add path's cutting budget) -----
     segmentation = methods["segmentation"]
     seg_name = segmentation.get("name", "llm")
     if seg_name != "llm":
@@ -237,7 +239,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "retry_limit", _V3_METHOD_DEFAULTS["segmentation"]["retry_limit"]),
     }
 
-    # -- authoring -> L.author (the exams switch dies with the slot) ----
+    # -- authoring -> learn.author (the exams switch dies with the slot) ----
     authoring = methods["authoring"]
     auth_name = authoring.get("name", "distill_diagnose")
     if auth_name != "distill_diagnose":
@@ -251,7 +253,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
         raise ConfigError(
             f"methods.authoring.exams must be a bool, got {exams!r}")
 
-    # -- acceptance -> the sequence (and the B phase for live_run) ------
+    # -- acceptance -> the sequence (and the live phase for live_run) ------
     acceptance = methods["acceptance"]
     kind = acceptance.get("name")
     if kind is None:
@@ -262,7 +264,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             f"methods.acceptance name {kind!r} has no v4 mapping; the "
             "sequence derives from 'exam' or 'live_run'")
 
-    # -- curation -> L.curate (merge_check follows the acceptance) ------
+    # -- curation -> learn.curate (merge_check follows the acceptance) ------
     curation = methods["curation"]
     curate_name = curation.get("name")
     if curate_name is None:
@@ -316,7 +318,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "acceptance and curation 'none' -- the one legal ablation "
             "pair, the same boundary v3's own cross-slot check draws")
 
-    # -- delivery -> C.delivery, verbatim (same name, same params) ------
+    # -- delivery -> test.delivery, verbatim (same name, same params) ------
     delivery = methods["delivery"]
     if "name" not in delivery:
         raise ConfigError(
@@ -324,8 +326,14 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "'retrieval', 'none', 'per_skill', 'group_by_task']")
 
     # -- the phases (section 4's shapes, fixed construction order) ------
+    # Each phase is NAMED after its role (2026-10-19: the old letters
+    # D / L / A / B / C read as noise; the name is free, the role is what
+    # the drivers dispatch on, so one vocabulary serves both).
+    baseline, learn, exam, live, test = (
+        PHASE_ROLE_BASELINE, PHASE_ROLE_LEARN, PHASE_ROLE_EXAM,
+        PHASE_ROLE_LIVE, PHASE_ROLE_TEST)
     phases: Dict[str, Any] = {
-        "D": {
+        baseline: {
             "kind": "execute",
             "role": PHASE_ROLE_BASELINE,
             "tasks": "train",
@@ -333,7 +341,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
             "execution": {"name": "real",
                           "arms": list(BASELINE_ARMS)},
         },
-        "L": {
+        learn: {
             "kind": "learn",
             "role": PHASE_ROLE_LEARN,
             "evidence": evidence,
@@ -350,15 +358,16 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 or retry_limit < 0):
             raise ConfigError(
                 "methods.acceptance.exam retry_limit must be an int >= 0 "
-                f"(the sequence carries retry_limit + 1 A phases), got "
+                f"(the sequence carries retry_limit + 1 exam phases), got "
                 f"{retry_limit!r}")
-        phases["A"] = {
+        phases[exam] = {
             "kind": "execute",
             "role": PHASE_ROLE_EXAM,
             "delivery": {"name": "per_skill"},
             "execution": {"name": "exam"},
         }
-        sequence = ["D", "L"] + ["A", "L"] * (retry_limit + 1) + ["C"]
+        sequence = ([baseline, learn] + [exam, learn] * (retry_limit + 1)
+                    + [test])
     else:
         _refuse_unmapped_keys("acceptance", acceptance,
                               ("name", "n_attempts", "improvement",
@@ -368,7 +377,7 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 raise ConfigError(
                     "methods.acceptance method 'live_run' is missing "
                     f"required parameter {key!r}")
-        phases["B"] = {
+        phases[live] = {
             "kind": "execute",
             "role": PHASE_ROLE_LIVE,
             "delivery": {"name": "group_by_task"},
@@ -378,18 +387,19 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
                 "max_injection_tokens": acceptance.get(
                     "max_injection_tokens"),
             },
-            "compare": {"against": "D", "rule": acceptance["improvement"]},
+            "compare": {"against": baseline,
+                        "rule": acceptance["improvement"]},
         }
-        sequence = ["D", "L", "B", "L", "B", "L", "C"]
-    phases["C"] = {
+        sequence = [baseline, learn, live, learn, live, learn, test]
+    phases[test] = {
         "kind": "execute",
         "role": PHASE_ROLE_TEST,
         "tasks": "test",
         "delivery": delivery,
         "execution": {"name": "real"},
         # Split mode runs its own fresh bare control arm on the test set;
-        # full mode reuses D's weak arm (and its accepted holes).
-        "compare": ({"against": "D"} if mode == "full"
+        # full mode reuses the baseline's weak arm (and its accepted holes).
+        "compare": ({"against": baseline} if mode == "full"
                     else {"against": "fresh_bare"}),
     }
     v4["sequence"] = sequence

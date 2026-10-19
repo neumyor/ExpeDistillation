@@ -1,6 +1,6 @@
 """The per_skill delivery driver: one skill, one single-skill block.
 
-The v4 A-phase delivery (plan section 3): the exam execution driver
+The v4 exam-phase delivery (plan section 3): the exam execution driver
 answers the exam with the ONE skill under test injected, exactly the
 way K4 renders acceptance-time blocks today. In exam mode delivery
 receives only the deterministic exam IDENTIFIER (R5: ``<subtask_id>/
@@ -9,7 +9,7 @@ the reference answer travels to acceptance through the run record --
 delivery resolves identifiers, it never writes exams.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
-the skills under test (the A-phase universe is one exam per skill),
+the skills under test (the exam-phase universe is one exam per skill),
 ``tasks`` the phase's exam refs (``<subtask_id>/exam``), and ``params``
 the empty PerSkillParams. One row per exam ref: the exam's task_ref,
 the skill's reference list and its D9 block. The block comes from the
@@ -39,7 +39,7 @@ def _subtask_of_exam(ref: str) -> str:
         raise CodeBugError(
             f"task {ref!r} is not an exam ref (expected "
             "'<subtask_id>/exam'): per_skill delivery resolves exam "
-            "identifiers, and the A-phase tasks are all exams")
+            "identifiers, and the exam-phase tasks are all exams")
     return ref[:-len(_EXAM_SUFFIX)]
 
 
@@ -61,7 +61,7 @@ def resolve(bank: Sequence[Skill], tasks: Any,
         skill = by_subtask.get(subtask_id)
         if skill is None:
             raise CodeBugError(
-                f"exam {ref!r} has no skill in the bank: the A-phase "
+                f"exam {ref!r} has no skill in the bank: the exam-phase "
                 "universe is one exam per skill under test")
         rows.append(units.make_row(
             ref, [units.skill_reference(skill)],

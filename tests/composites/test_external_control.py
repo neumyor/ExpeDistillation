@@ -3,7 +3,7 @@ the sha256-pinned score file, the model-key coverage and the aligned
 reward slice -- every identity failure a loud ConfigError, never a
 silently widened or missing task.
 
-The C-phase wiring (control_source, the phase-directory copy, the
+The test-phase wiring (control_source, the phase-directory copy, the
 summary's audit record) is covered by the driver tests in
 tests/unit/stages/test_phase_execute.py; these tests pin the loader's own
 contract on a small fixture file in the real campaign shape.

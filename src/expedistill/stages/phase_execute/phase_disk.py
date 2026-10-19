@@ -46,7 +46,7 @@ REDISPATCH_NAME = "redispatch.json"
 SUMMARY_NAME = "phase_summary.json"
 GENERATION_FAILURES_NAME = "generation_failures.jsonl"
 
-#: A phase directory's name: ``pNN_<name>`` (phase_bank's colon mapping).
+#: exam phase directory's name: ``pNN_<name>`` (phase_bank's colon mapping).
 _PHASE_DIR_RE = re.compile(r"p([0-9]+)_(.+)")
 
 

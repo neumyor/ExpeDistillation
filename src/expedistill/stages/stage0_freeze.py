@@ -314,7 +314,7 @@ def _resolve_phase_methods(config: Any) -> None:
     (existence + the pinned sha256): the file is part of the frozen
     method's identity, so a missing or drifted file must stop the run
     at the freeze step, not after phases have spent. The task-set
-    alignment and the reward format stay with the loader the C phase
+    alignment and the reward format stay with the loader the test phase
     calls (they need the loaded tasks, which are read right after).
     """
     for name in config.sequence:

@@ -115,23 +115,18 @@ the reusing unit's own dispatch serial burns (the reused merge keeps its
 stored id), so later merges may sit at higher serials than the lost run
 would have produced -- the plan cannot survive the journal's loss.
 
-*K5 marker checks (protocol v2).* Every fresh merge unit runs two
-structural gates around G8 (docs/decisions/stage23_protocol_v2_20261013.md
-section 3.5). The PRE-CHECK reads every resolved source's
-``skill_markers`` before the G8 call: a group that mixes skill kinds -- a
-procedure skill with a failure reference, or a marked skill with an
-unmarked one -- has no legal merge product, so it is skipped with the
-pre-check's own reason and no model call (its record never claims a G8
-failure). The POST-CHECK runs between the G8 output and its commit-step-1
-save: a merged text whose ``skill_markers`` set differs from the sources'
-set is never stored. Both raises sit INSIDE the unit's
-ModelOutputError-to-skip try scope -- outside it run_units would treat
-them as fatal, stop the curation, and replay the same journaled G7 output into
-the same raise on every resume. A group whose sources are ALL unmarked
-(prose; test fixtures and foreign content, unreachable in a pure v2 run)
-skips both checks: prose merges into prose. The resume reuse branches
-never re-check a pending merge: it passed the post-check before it was
-ever written to disk.
+*K5 section check.* Every fresh merge's G8 output must carry the four
+section markers (``has_skill_sections``) before its commit-step-1 save:
+a structure-losing merge is never stored. The check is skipped when no
+source carries the four sections (prose; test fixtures and foreign
+content): prose merges into prose. Since the 2026-10-19 ruling
+(docs/decisions/unified_skill_structure_20261019.md) every skill shares
+one structure, so groups are never split by skill kind. The raise sits
+INSIDE the unit's ModelOutputError-to-skip try scope -- outside it
+run_units would treat it as fatal, stop the curation, and replay the
+same journaled G7 output into the same raise on every resume. The
+resume reuse branches never re-check a pending merge: it passed the
+check before it was ever written to disk.
 
 *Low-value drops (2026-10-19 ruling, docs/decisions/
 curation_generalize_20261019.md).* G7 also returns ``low_value``, a list
@@ -236,7 +231,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
-from expedistill.blocks.author import skill_markers
+from expedistill.blocks.author import has_skill_sections
 from expedistill.blocks.curate import (
     SIMILARITY_INPUTS,
     assign_groups,
@@ -255,8 +250,7 @@ from expedistill.composites.curation_waves import (
 )
 from expedistill.core import ids
 from expedistill.core.models import (
-    FAILURE_REFERENCE_MARKERS,
-    PROCEDURE_MARKERS,
+    SKILL_MARKERS,
     Attempt,
     Exam,
     Skill,
@@ -691,45 +685,6 @@ def _source_exams(store: Store, sources: Sequence[Skill],
     return exams, None
 
 
-def _describe_skill_kind(markers: Optional[Tuple[str, ...]]) -> str:
-    """One source's kind for a K5 marker message: which of the two stored
-    skill structures its content carries, or none."""
-    if markers == PROCEDURE_MARKERS:
-        return "procedure"
-    if markers == FAILURE_REFERENCE_MARKERS:
-        return "failure reference"
-    return "no section markers"
-
-
-def _group_marker_state(
-        sources: Sequence[Skill],
-        ) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
-    """K5 marker gate for one merge group (protocol v2, decision 3.5).
-
-    Reads every source's ``skill_markers`` once and returns
-    ``(expected_markers, conflict)``: all sources unmarked (prose; test
-    and foreign content, unreachable in a pure v2 run) -> ``(None, None)``
-    -- prose merges into prose and BOTH marker checks are skipped; one
-    marker set shared by every source -> ``(set, None)`` -- the merged
-    text must reproduce it; otherwise (a procedure skill with a failure
-    reference, or a marked skill with an unmarked one) -> ``(None,
-    reason)`` -- the group has no legal merge product.
-    """
-    per_source = {skill.skill_id: skill_markers(skill.content)
-                  for skill in sources}
-    present = {markers for markers in per_source.values()
-               if markers is not None}
-    if not present:
-        return None, None
-    if len(present) == 1 and all(markers is not None
-                                 for markers in per_source.values()):
-        return present.pop(), None
-    described = ", ".join(
-        f"{skill_id}={_describe_skill_kind(per_source[skill_id])}"
-        for skill_id in sorted(per_source))
-    return None, f"merge group mixes skill kinds: {described}"
-
-
 def _stored_regression_attempts(store: Store, merged: Skill,
                                 exams: Sequence[Exam]) -> Dict[str, Attempt]:
     """JUDGED regression attempts already stored for this merged skill.
@@ -858,7 +813,7 @@ def _refresh_dest_artifact(store: Store,
     Wave 3 review's B1 fix, the 2026-10-16 coordinator ruling).
 
     An assembled run pre-seeds the last learn phase's bank artifact from
-    the SOURCE run's curation, then its own A/B phases legitimately
+    the SOURCE run's curation, then its own exam/live phases legitimately
     accept members the artifact does not know yet (a ride-along pending
     member that passes its exam; a re-offered generation-failure unit).
     The run-mode answer to that state is the staleness refusal -- the
@@ -1022,7 +977,7 @@ def curate_bank(
     each kept merge re-answers every source's exam; ``none`` (the default
     since the 2026-10-19 ruling) skips the regression exams (the merge
     product goes pending -> accepted with zero answerer/judge calls). The
-    G8 marker gates and the budget valve are unchanged either way, and
+    G8 section check and the budget valve are unchanged either way, and
     the merge journal records the same outcomes.
 
     ``drop_low_value`` (2026-10-19 ruling): G7 also lists low-value
@@ -1274,44 +1229,27 @@ def curate_bank(
                         # merges freshly at its own dispatched serial.
                         _apply_reverted(store, legacy, "interrupted_merge")
                 if merged is None:
-                    expected_markers, kind_conflict = _group_marker_state(
-                        sources)
+                    sectioned = any(has_skill_sections(source.content)
+                                    for source in sources)
                     try:
-                        if kind_conflict is not None:
-                            # K5 pre-check (protocol v2): the raise must
-                            # stay inside this ModelOutputError-to-skip try
-                            # scope -- outside it run_units would treat it
-                            # as fatal, stop the curation, and replay the same
-                            # journaled G7 output into the same raise on
-                            # every resume.
-                            raise ModelOutputError(kind_conflict)
                         content, summary = merge_skills(
                             sources, curator_handle, mode=mode,
                             usage=usage, run_dir=run_dir)
-                        if expected_markers is not None:
-                            got = skill_markers(content)
-                            if got != expected_markers:
-                                # K5 post-check: a structure-losing merge
-                                # is rejected before its commit-step-1
-                                # save, so nothing lands on disk.
-                                raise ModelOutputError(
-                                    "merged skill must carry the source "
-                                    "skills' four bracket sections "
-                                    f"({' / '.join(expected_markers)}), "
-                                    f"got {_describe_skill_kind(got)}")
+                        if sectioned and not has_skill_sections(content):
+                            # K5 section check: a structure-losing merge
+                            # is rejected before its commit-step-1 save,
+                            # so nothing lands on disk.
+                            raise ModelOutputError(
+                                "merged skill must carry the four bracket "
+                                f"sections ({' / '.join(SKILL_MARKERS)})")
                     except InfrastructureError as exc:
                         record_failure(f"{unit_id}/merge", exc)
                         raise
                     except ModelOutputError as exc:
                         record_failure(f"{unit_id}/merge", exc)
-                        # kind_conflict is not None only for the pre-check
-                        # raise, which precedes every G8 call: that skip
-                        # record carries the pre-check's own reason (G8
-                        # never ran); every other ModelOutputError here is
-                        # a G8 output failure.
-                        reason = (_describe(exc) if kind_conflict is not None
-                                  else f"G8 merge failed: {_describe(exc)}")
-                        return _skipped(base, reason, source_ids)
+                        return _skipped(
+                            base, f"G8 merge failed: {_describe(exc)}",
+                            source_ids)
                     merged = Skill(
                         skill_id=ids.make_merged_skill_id(base["serial"]),
                         content=content,

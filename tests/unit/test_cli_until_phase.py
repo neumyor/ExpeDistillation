@@ -26,17 +26,17 @@ from expedistill.infra.store import read_jsonl
 
 _FAKE = "freezebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
-SEQUENCE = ["D", "L", "C"]
+SEQUENCE = ["baseline", "learn", "test"]
 PHASES = {
-    "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+    "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
-    "L": {"kind": "learn",
+    "learn": {"kind": "learn",
           "evidence": {"name": "segment", "K": 1},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096}},
-    "C": {"kind": "execute", "role": "test", "tasks": "test",
+    "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
           "compare": {"against": "fresh_bare"}},
@@ -162,12 +162,12 @@ def test_a_frozen_run_resumes_from_the_phase_after_the_freeze(
                        make_client=_make_client, until_phase=-1)
     cli.run_experiment(config_path=config_path, run_dir=run_dir,
                        make_client=_make_client, until_phase=0)
-    assert [phase.label for _, phase in drivers] == ["p01:D"]
+    assert [phase.label for _, phase in drivers] == ["p01:baseline"]
     rows = read_jsonl(cli.ledger_path(run_dir))
     # The resume replays the freeze step (its row is appended again --
     # every start re-runs the manifest comparison) and then the phase.
     assert [row["stage"] for row in rows] == [
-        "p00:freeze", "p00:freeze", "p01:D"]
+        "p00:freeze", "p00:freeze", "p01:baseline"]
 
 
 def test_the_bound_error_explains_the_minus_one_meaning(

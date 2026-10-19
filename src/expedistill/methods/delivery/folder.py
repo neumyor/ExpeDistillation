@@ -37,8 +37,7 @@ from typing import Any, Dict, List, Sequence, Union
 
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import (
-    FAILURE_REFERENCE_MARKERS,
-    PROCEDURE_MARKERS,
+    SKILL_MARKERS,
     Skill,
 )
 from expedistill.inject import bank_reference
@@ -70,9 +69,9 @@ _SAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 _LINE_MAX_CHARS = 200
 _TRUNCATION_MARK = " [truncated]"
 
-#: Every section marker a skill's content can carry (the [When to use]
-#: fallback runs to the next one of these, or the end of the content).
-_SECTION_MARKERS = tuple(PROCEDURE_MARKERS) + tuple(FAILURE_REFERENCE_MARKERS)
+#: The section the empty-summary fallback reads ([When to use]); it runs
+#: to the next section marker (SKILL_MARKERS) or the end of the content.
+_WHEN_TO_USE = SKILL_MARKERS[0]
 
 #: The description of a skill with neither a summary nor a [When to
 #: use] section (a markerless body): an explicit placeholder, never a
@@ -130,12 +129,10 @@ def when_to_use_line(content: str) -> str:
 
     The empty-summary fallback the M2 ruling froze (a v2-migrated
     skill has no summary, so its directory line falls back to the
-    section that says WHEN the skill applies). The M2 rev-1 ruling
-    extends the fallback to a failure reference's [Trigger] -- the
-    two sections make the same kind of claim (when this skill applies)
-    for the two skill kinds, so the fallback is symmetric (procedure
-    first, then failure reference). A body with neither section falls
-    back to the explicit placeholder instead. The section body runs
+    section that says WHEN the skill applies). Since the 2026-10-19
+    ruling every skill carries this section; a body without it (a
+    pre-ruling failure reference, a markerless body) falls back to the
+    explicit placeholder instead. The section body runs
     from the marker line's remainder (the renderer puts the first
     sentence on the marker line) to the next section marker or the end
     of the content, collapsed to one line the same way the D9 block
@@ -144,14 +141,12 @@ def when_to_use_line(content: str) -> str:
     in_section = False
     for line in content.splitlines():
         if in_section and any(line.startswith(section_marker)
-                              for section_marker in _SECTION_MARKERS):
+                              for section_marker in SKILL_MARKERS):
             break
         if not in_section:
-            for marker in (PROCEDURE_MARKERS[0], FAILURE_REFERENCE_MARKERS[0]):
-                if line.startswith(marker):
-                    in_section = True
-                    body.append(line[len(marker):])
-                    break
+            if line.startswith(_WHEN_TO_USE):
+                in_section = True
+                body.append(line[len(_WHEN_TO_USE):])
             continue
         body.append(line)
     if not in_section:
@@ -161,7 +156,7 @@ def when_to_use_line(content: str) -> str:
 
 def _description(record: Union[Skill, Mapping[str, Any]]) -> str:
     """One skill's catalog description: the summary, else the [When to
-    use] / [Trigger] section (the rev-1 symmetric fallback), else the
+    use] section, else the
     explicit placeholder -- then one line, then the explicit clip."""
     description = _one_line(_field(record, "summary", "") or "")
     if not description:

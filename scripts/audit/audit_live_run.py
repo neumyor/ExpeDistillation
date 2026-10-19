@@ -1142,7 +1142,7 @@ def check_final_test(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
                     "with_bank arm store is missing")
             else:
                 # A reused baseline control: the units live in the
-                # run-level store (the D phase's bare weak arm).
+                # run-level store (the baseline phase's bare weak arm).
                 run_store = Store(run_dir)
                 stage1 = set(_read_shortfall(run_dir / STAGE1_SHORTFALL))
                 missing = [unit for unit in expected
@@ -1610,29 +1610,30 @@ def _build_fake_v4_run(root: Path) -> Path:
     test_id = ids.make_task_id("tb", "tt")
     n_attempts = 3
 
-    sequence = ["D", "Lseed", "B1", "Lmid", "B2", "Lfinal", "C"]
+    sequence = ["baseline", "learn_seed", "live_1", "learn_mid", "live_2",
+                "learn_final", "test"]
     learn_spec = {"kind": "learn", "evidence": {"name": "segment", "K": 1},
                   "author": {"name": "distill_diagnose"},
                   "curate": {"name": "none"}}
     phases = {
-        "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+        "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
               "delivery": {"name": "none"},
               "execution": {"name": "real", "arms": ["strong", "weak"]},
               "compare": None, "acceptance": None},
-        "Lseed": dict(learn_spec),
-        "B1": {"kind": "execute", "role": "live", "tasks": "train",
+        "learn_seed": dict(learn_spec),
+        "live_1": {"kind": "execute", "role": "live", "tasks": "train",
                "delivery": {"name": "group_by_task"},
                "execution": {"name": "real", "n_attempts": n_attempts},
-               "compare": {"against": "D", "rule": "strict_rate_gain"},
+               "compare": {"against": "baseline", "rule": "strict_rate_gain"},
                "acceptance": None},
-        "Lmid": dict(learn_spec),
-        "B2": {"kind": "execute", "role": "live", "tasks": "train",
+        "learn_mid": dict(learn_spec),
+        "live_2": {"kind": "execute", "role": "live", "tasks": "train",
                "delivery": {"name": "group_by_task"},
                "execution": {"name": "real", "n_attempts": n_attempts},
-               "compare": {"against": "D", "rule": "strict_rate_gain"},
+               "compare": {"against": "baseline", "rule": "strict_rate_gain"},
                "acceptance": None},
-        "Lfinal": dict(learn_spec),
-        "C": {"kind": "execute", "role": "test", "tasks": "test",
+        "learn_final": dict(learn_spec),
+        "test": {"kind": "execute", "role": "test", "tasks": "test",
               "delivery": {"name": "whole_bank"},
               "execution": {"name": "real"},
               "compare": {"against": "fresh_bare"}, "acceptance": None},
@@ -1654,15 +1655,16 @@ def _build_fake_v4_run(root: Path) -> Path:
             "trajectories")
     store.save(_fake_trajectory(
         ids.make_trajectory_id(task_id, "strong", 0), False), "trajectories")
-    d_dir = _write_phase_record(run_dir, "p01:D", 0, "D", "baseline")
-    d_weak = _make_unit_id("p01:D", task_id, "weak", None)
-    d_strong = _make_unit_id("p01:D", task_id, "strong", None)
+    d_dir = _write_phase_record(run_dir, "p01:baseline", 0, "baseline",
+                                "baseline")
+    d_weak = _make_unit_id("p01:baseline", task_id, "weak", None)
+    d_strong = _make_unit_id("p01:baseline", task_id, "strong", None)
     write_jsonl(d_dir / UNITS_NAME, [
         _unit_row(d_weak, task_id, None),
         _unit_row(d_strong, task_id, None)])
     write_jsonl(d_dir / REPORT_NAME, [
-        _report_row(d_weak, "p01:D", "weak", None, n_attempts, 0),
-        _report_row(d_strong, "p01:D", "strong", None, 1, 0)])
+        _report_row(d_weak, "p01:baseline", "weak", None, n_attempts, 0),
+        _report_row(d_strong, "p01:baseline", "strong", None, 1, 0)])
     write_json(d_dir / EXEC_SUMMARY_NAME,
                {"role": "baseline", "complete": True, "report_rows": 2,
                 "infra_missing": [], "infra_accepted": []}, indent=2)
@@ -1672,28 +1674,28 @@ def _build_fake_v4_run(root: Path) -> Path:
     members = [_fake_group_skill(task_id, 0), _fake_group_skill(task_id, 1)]
     for skill in members:
         store.save(skill, "skills")
-    seed_dir = phase_bank_dir(run_dir, "p02:Lseed")
+    seed_dir = phase_bank_dir(run_dir, "p02:learn_seed")
     seed_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(seed_dir / TASK_LIST_NAME, [{
-        "schema": "learn-task-list-v1", "phase_label": "p02:Lseed",
+        "schema": "learn-task-list-v1", "phase_label": "p02:learn_seed",
         "target_kind": "task", "target_id": task_id, "action": "add",
         "reason": "weak_failed_no_skill", "basis_unit": d_weak}])
     for skill in members:
         _append_jsonl_raw(seed_dir / OUTCOMES_NAME, {
-            "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p02:Lseed",
+            "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p02:learn_seed",
             "target_kind": "task", "target_id": task_id, "action": "add",
             "skill_id": skill.skill_id, "outcome": "added", "version": 1})
     write_jsonl(seed_dir / BANK_NAME,
                [skill.to_dict() for skill in members])
     write_json(seed_dir / LEARN_SUMMARY_NAME,
-               {"role": "learn", "current_phase": "D",
+               {"role": "learn", "current_phase": "baseline",
                 "task_list": {"add": 1}, "outcomes": {"added": 2},
                 "bank": {"members": 2}}, indent=2)
 
     def live_round(b_label: str, b_name: str, b_index: int, round_: int,
                    refs: List[Dict[str, Any]],
                    contents: List[str]) -> str:
-        """One B phase: frozen audit row, executed round store, a
+        """One live phase: frozen audit row, executed round store, a
         not-better verdict row, the phase directory's units / report /
         summary. Returns the phase's unit id."""
         unit_id = _make_unit_id(b_label, task_id, "weak", refs)
@@ -1728,26 +1730,26 @@ def _build_fake_v4_run(root: Path) -> Path:
 
     # -- p03 B1 (round 0) over both members at version 1 -----------------
     refs1 = [{"skill_id": skill.skill_id, "version": 1} for skill in members]
-    b1_unit = live_round("p03:B1", "B1", 2, 0, refs1,
+    b1_unit = live_round("p03:live_1", "live_1", 2, 0, refs1,
                          [skill.content for skill in members])
 
     # -- p04 Lmid: revise both members to version 2 ----------------------
-    mid_dir = phase_bank_dir(run_dir, "p04:Lmid")
+    mid_dir = phase_bank_dir(run_dir, "p04:learn_mid")
     mid_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(mid_dir / TASK_LIST_NAME, [{
-        "schema": "learn-task-list-v1", "phase_label": "p04:Lmid",
+        "schema": "learn-task-list-v1", "phase_label": "p04:learn_mid",
         "target_kind": "group", "target_id": task_id, "action": "revise",
         "reason": "live_no_improvement", "basis_unit": b1_unit}])
     for skill in members:
         _append_jsonl_raw(mid_dir / REVISIONS_NAME, {
-            "schema": "learn-revision-v1", "phase_label": "p04:Lmid",
+            "schema": "learn-revision-v1", "phase_label": "p04:learn_mid",
             "target_kind": "group", "target_id": task_id,
             "skill_id": skill.skill_id, "from_version": 1})
         _bump_skill(store, skill.skill_id,
                     f"[When to use] x2\n[Steps]\n1. do\n"
                     f"[Verify] y\n[Do not use when] z{skill.skill_id[-1]}")
         _append_jsonl_raw(mid_dir / OUTCOMES_NAME, {
-            "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p04:Lmid",
+            "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p04:learn_mid",
             "target_kind": "group", "target_id": task_id,
             "action": "revise", "skill_id": skill.skill_id,
             "outcome": "revised", "version": 2})
@@ -1755,13 +1757,13 @@ def _build_fake_v4_run(root: Path) -> Path:
                [store.load("skills", skill.skill_id, Skill).to_dict()
                 for skill in members])
     write_json(mid_dir / LEARN_SUMMARY_NAME,
-               {"role": "learn", "current_phase": "p03:B1",
+               {"role": "learn", "current_phase": "p03:live_1",
                 "task_list": {"revise": 1}, "outcomes": {"revised": 2},
                 "bank": {"members": 2}}, indent=2)
 
     # -- p05 B2 (round 1) over both members at version 2 ----------------
     refs2 = [{"skill_id": skill.skill_id, "version": 2} for skill in members]
-    b2_unit = live_round("p05:B2", "B2", 4, 1, refs2,
+    b2_unit = live_round("p05:live_2", "live_2", 4, 1, refs2,
                          [store.load("skills", skill.skill_id, Skill).content
                           for skill in members])
     # The round-1 miss verdict: finalize_group discards both survivors.
@@ -1772,28 +1774,28 @@ def _build_fake_v4_run(root: Path) -> Path:
         store.save(skill, "skills")
 
     # -- p06 Lfinal: the decision's deletes find everything terminal ----
-    final_dir = phase_bank_dir(run_dir, "p06:Lfinal")
+    final_dir = phase_bank_dir(run_dir, "p06:learn_final")
     final_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(final_dir / TASK_LIST_NAME, [{
-        "schema": "learn-task-list-v1", "phase_label": "p06:Lfinal",
+        "schema": "learn-task-list-v1", "phase_label": "p06:learn_final",
         "target_kind": "group", "target_id": task_id, "action": "delete",
         "reason": "live_no_improvement", "basis_unit": b2_unit}])
     for skill in members:
         _append_jsonl_raw(final_dir / OUTCOMES_NAME, {
-            "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p06:Lfinal",
+            "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p06:learn_final",
             "target_kind": "group", "target_id": task_id,
             "action": "delete", "skill_id": None,
             "outcome": "skipped_terminal", "version": 2})
     write_jsonl(final_dir / BANK_NAME, [])
     write_json(final_dir / LEARN_SUMMARY_NAME,
-               {"role": "learn", "current_phase": "p05:B2",
+               {"role": "learn", "current_phase": "p05:live_2",
                 "task_list": {"delete": 1},
                 "outcomes": {"skipped_terminal": 2},
                 "bank": {"members": 0}}, indent=2)
 
     # -- p07 C: both arms hold every expected test unit ------------------
-    c_dir = _write_phase_record(run_dir, "p07:C", 6, "C", "test")
-    c_unit = _make_unit_id("p07:C", test_id, "weak", "bank-digest")
+    c_dir = _write_phase_record(run_dir, "p07:test", 6, "test", "test")
+    c_unit = _make_unit_id("p07:test", test_id, "weak", "bank-digest")
     write_jsonl(c_dir / UNITS_NAME,
                [_unit_row(c_unit, test_id, "bank-digest")])
     write_json(c_dir / REDISPATCH_NAME, {}, indent=2)
@@ -1815,7 +1817,7 @@ def _build_fake_v4_run(root: Path) -> Path:
     # resume retries it; the audit reports it for context as INFO).
     _append_jsonl_raw(run_dir / "failed_units.jsonl", {
         "schema": "unit-failure-v1", "unit_id": f"{task_id}:revise:0",
-        "stage": "p04:Lmid", "error_class": "ModelOutputError",
+        "stage": "p04:learn_mid", "error_class": "ModelOutputError",
         "message": "the revision call returned unusable json"})
     return run_dir
 
@@ -1837,7 +1839,7 @@ def _self_test_v4(root: Path) -> int:
 
     # Tamper 5: flip a phase record's role -> the directory drifted from
     # the frozen sequence.
-    b1_dir = phase_bank_dir(run_dir, "p03:B1")
+    b1_dir = phase_bank_dir(run_dir, "p03:live_1")
     record = read_json(b1_dir / PHASE_RECORD_NAME)
     record["role"] = "exam"
     write_json(b1_dir / PHASE_RECORD_NAME, record, indent=2)
@@ -1861,8 +1863,8 @@ def _self_test_v4(root: Path) -> int:
     # Tamper 7: an invented report row -> a verdict for a unit the phase
     # never resolved.
     report = read_jsonl(b1_dir / REPORT_NAME)
-    report.append(_report_row("p03:B1:tb:tb:t1:weak:deadbeef",
-                              "p03:B1", "weak", [], 3, 3))
+    report.append(_report_row("p03:live_1:tb:tb:t1:weak:deadbeef",
+                              "p03:live_1", "weak", [], 3, 3))
     write_jsonl(b1_dir / REPORT_NAME, report)
     audit = audit_run(run_dir)
     if not any("never resolved" in f["message"]
@@ -1873,8 +1875,9 @@ def _self_test_v4(root: Path) -> int:
 
     # Tamper 8: a receipt the store contradicts -> the landing never
     # landed (the member is discarded, the receipt says accepted).
-    _append_jsonl_raw(phase_bank_dir(run_dir, "p04:Lmid") / OUTCOMES_NAME, {
-        "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p04:Lmid",
+    mid_outcomes = phase_bank_dir(run_dir, "p04:learn_mid") / OUTCOMES_NAME
+    _append_jsonl_raw(mid_outcomes, {
+        "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p04:learn_mid",
         "target_kind": "group", "target_id": task_id, "action": "keep",
         "skill_id": ids.make_skill_id(ids.make_subtask_id(
             ids.make_trajectory_id(task_id, "strong", 0), 0)),
@@ -1889,7 +1892,7 @@ def _self_test_v4(root: Path) -> int:
 
     # Tamper 9: drop one final-test trajectory -> a complete summary with
     # a missing expected unit.
-    victim = Store(phase_bank_dir(run_dir, "p07:C") / "with_bank"
+    victim = Store(phase_bank_dir(run_dir, "p07:test") / "with_bank"
                    / "store").path_for(
         "trajectories", ids.make_trajectory_id(
             ids.make_task_id("tb", "tt"), "weak", 1))

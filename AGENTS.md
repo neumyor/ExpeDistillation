@@ -149,27 +149,27 @@ src/expedistill/
     exam_grading.py       K3 判卷部分（R0 拆分：跨崩溃持续的判卷修复预算）
     exam_once.py          K3 薄接线：作答 + 判卷拼成一条 Attempt
     acceptance_leak.py    K4 泄题判定（R0 拆分：D8 判定与 leak_verdicts 账本；
-                          A 相位驱动 phase_execute 调用）
+                          exam 相位驱动 phase_execute 调用）
     acceptance_skill_status.py  从存量记录读出 skill 状态、考题的已判作答
-                          序列与裸答（报告读取器与 A 相位驱动共用）
+                          序列与裸答（报告读取器与 exam 相位驱动共用）
     curation.py           K5
     curation_waves.py     K5 每轮的单元规划（纯函数：分波、去重、派发编号）
     live_measurement.py   K6 测量部分（R0 拆分：live_run 路径与账本名、组推导、
                           基线读取、注入审计行、幸存组推导、轨迹视图的
                           预算裁剪）
     live_verdicts.py      K6 判定部分（R0 拆分：轮判定、no-op 守卫、组终态提交；
-                          discard_reason 词表的 K6 侧再导出在此；B 相位驱动
+                          discard_reason 词表的 K6 侧再导出在此；live 相位驱动
                           phase_execute 经它写判定账本）
     decision.py           决策规则（M3 起的纯函数）：相位世界统一决策入口
                           decide_task_list 与 4.2/4.3 规则表；discard_reason
                           词表与 strict 短路规则集的定义处
     reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件
     shortfall.py          接受空洞的落盘记录（摸底相位的记录在 run 根的
-                          stage1_baseline/ 下，live 基线加载与 C 相位的
+                          stage1_baseline/ 下，live 基线加载与 test 相位的
                           复用对照都读它）
     skill_status.py       skill 状态提交（accept/discard）的唯一入口
     external_control.py   外部 campaign 对照的加载与校验（sha256 钉住、任务
-                          覆盖、对齐深度的奖励切出）；C 相位
+                          覆盖、对齐深度的奖励切出）；test 相位
                           against: external_campaign 时对照臂由此取数，零执行
     skill_reads.py        folder 单元的事后读取统计（M4 纯函数）：从存储
                           轨迹解析实际 cat 过的技能文件，benchmark 无关
@@ -177,7 +177,7 @@ src/expedistill/
                           统一报告行
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
-                          从相位库读正文，把文件夹写进目标目录；C 相位派发前
+                          从相位库读正文，把文件夹写进目标目录；test 相位派发前
                           物化一次，全部单元共享
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
@@ -186,27 +186,30 @@ src/expedistill/
                           delivery / execution / evidence / author / curation）
     execution/            execution 族参数契约：RealExecutionParams /
                           ExamExecutionParams / RealFolderExecutionParams
-                          （无驱动，相位驱动直接消费）
+                          （无驱动，相位驱动直接消费）+ README.md（模块说明与参数表）
     evidence/             evidence 族：SegmentationParams + 三个采集器
                           add_path（加分路径）、live_group（G10 事实）、
                           exam_sheet（考卷答卷材料）+ segmentation.py
-                          （segment 方法驱动：add 行的 K2 切段接线，只切
-                          强角色轨迹）+ package.py（证据包形状与只报事实守卫）
+                          （segment 方法驱动：add 行的 K2 切段接线，切强角色
+                          轨迹，write_lessons 开着时连弱角色一起切）+ README.md
+                          （模块说明与参数表）+ package.py
+                          （证据包形状与只报事实守卫）
     author/               author 族：AuthoringParams + write 驱动
-                          （写新 skill / 组修订 revise_group）
+                          （写新 skill / 组修订 revise_group）+ README.md
+                          （模块说明与参数表）
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
                           成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
     delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
                           group_by_task.py、none.py、folder.py（技能文件夹交付：
-                          目录清单，M2）+ 各自的 Params
+                          目录清单，M2）+ 各自的 Params + README.md（模块说明与参数表）
   stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
     stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
     phase_execute/        执行相位驱动包（R9/R8）：__init__ 分发入口 run()；
                           phase_disk 相位目录/早相位/库产物/复用连接；resolve
                           配置映射到驱动与参数；engine 派发→判分→重派引擎；
                           baseline / exam / live / final_test 四种 role 各一
-                          个模块（D 基线 / A 考试 / B live / C 终测）
+                          个模块（baseline 摸底 / exam 纸面验收 / live 实战验收 / test 终测）
     phase_learn.py        learn 相位驱动（R9）：决策 → 证据 → 写作 → 整理
     learn_tasks.py        learn 相位的逐行落地（keep/delete/revise/add 与
                           断点续跑账本；add 行先经 evidence 族的 segment 驱动
@@ -359,7 +362,7 @@ configs/
    `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹
    （real_folder 执行）的插件再声明 `skill_folder_prompt_name`（指向
    folder 模式执行 prompt 的注册名，digest 进 manifest；目前只有 tb 声明，
-   folder 相位落到不声明的插件由 C 相位驱动在派发前响亮拒绝，E1 的逐单元
+   folder 相位落到不声明的插件由 test 相位驱动在派发前响亮拒绝，E1 的逐单元
    守卫保留作第二道）；
 2. 在 `benchmarks/registry.py` 登记名字；
 3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的

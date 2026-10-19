@@ -118,12 +118,15 @@ BASELINE_DIR = (Path(__file__).resolve().parents[1] / "fixtures"
 # ---------------------------------------------------------------------------
 
 #: The two phase sequences the upgrade_v3 mapping derives (plan section 4):
-#: exam (retry_limit 2) -> [D, L] + [A, L] x 3 + [C]; live_run ->
-#: [D, L, B, L, B, L, C]. p00 is freeze; sequence entry i is phase
-#: p{i+1:02d}_<local-name>.
+#: exam (retry_limit 2) -> [baseline, learn] + [exam, learn] x 3 + [test];
+#: live_run -> [baseline, learn, live, learn, live, learn, test] (each
+#: phase is named after its role). p00 is freeze; sequence entry i is
+#: phase p{i+1:02d}_<local-name>.
 SEQUENCES: Dict[str, Tuple[str, ...]] = {
-    "exam": ("D", "L", "A", "L", "A", "L", "A", "L", "C"),
-    "live_run": ("D", "L", "B", "L", "B", "L", "C"),
+    "exam": ("baseline", "learn", "exam", "learn", "exam", "learn", "exam",
+             "learn", "test"),
+    "live_run": ("baseline", "learn", "live", "learn", "live", "learn",
+                 "test"),
 }
 
 
@@ -159,9 +162,11 @@ _SKILLS_PREFIX = KIND_DIRS["skills"] + "/"
 
 #: Values the C summary's ``control_source`` may take, canonicalised: a
 #: v3 stage reference and its v4 phase equivalents name the same control
-#: arm (full mode's C reuses D's weak arm). The phase world's label is
-#: ``<phase>_reuse`` (decision.control_arm_source), so the upgrade-mapped
-#: sequences write ``D_reuse``.
+#: arm (full mode's test phase reuses the baseline's weak arm). The phase
+#: world's label is ``<phase>_reuse`` (decision.control_arm_source), so
+#: the upgrade-mapped sequences write ``baseline_reuse`` (``D_reuse``
+#: before the 2026-10-19 phase rename). The canonical value keeps its
+#: letter spelling: it is the token the frozen 69904f7 bundle stores.
 CONTROL_SOURCE_ALIASES = {
     "fresh_bare_run": "fresh_bare_run",
     "stage1_reuse": "D_weak_arm",
@@ -169,6 +174,10 @@ CONTROL_SOURCE_ALIASES = {
     "phase_D": "D_weak_arm",
     "p01_D": "D_weak_arm",
     "D_reuse": "D_weak_arm",
+    "baseline": "D_weak_arm",
+    "phase_baseline": "D_weak_arm",
+    "p01_baseline": "D_weak_arm",
+    "baseline_reuse": "D_weak_arm",
 }
 
 
@@ -205,18 +214,18 @@ def v4_layout(acceptance: str) -> Dict[str, Tuple[str, Optional[str], int]]:
     """
     sequence = SEQUENCES[acceptance]
     table: Dict[str, Tuple[str, Optional[str], int]] = {}
-    c = sequence.index("C")
+    c = sequence.index("test")
     table[f"{phase_dir(sequence, c)}/phase_summary.json"] = (
         TEST_SUMMARY, None, 0)
-    last_l = max(i for i, local in enumerate(sequence) if local == "L")
+    last_l = max(i for i, local in enumerate(sequence) if local == "learn")
     table[f"{phase_dir(sequence, last_l)}/skill_bank.jsonl"] = (
         BANK, None, last_l)
     for i, local in enumerate(sequence):
         directory = phase_dir(sequence, i)
-        if local == "A":
+        if local == "exam":
             table[f"{directory}/generation_failures.jsonl"] = (
                 GENERATION_FAILURES, None, i)
-        elif local == "L":
+        elif local == "learn":
             table[f"{directory}/task_list.jsonl"] = (LEARN_TASK_LIST, None, i)
             table[f"{directory}/revisions.jsonl"] = (LEARN_REVISIONS, None, i)
             table[f"{directory}/outcomes.jsonl"] = (LEARN_OUTCOMES, None, i)
@@ -415,7 +424,7 @@ def _learn_round(phase_label: str, acceptance: str) -> int:
     _live_round)."""
     index = int(phase_label.split(":", 1)[0][1:]) - 1
     sequence = SEQUENCES[acceptance]
-    b_before = sum(1 for local in sequence[:index] if local == "B")
+    b_before = sum(1 for local in sequence[:index] if local == "live")
     return b_before - 1
 
 
@@ -983,15 +992,18 @@ ACCEPTANCE_NAME = "wave4_e1_e6_disclosure.json"
 #: The static root-cause key every Wave 4 difference carries. The
 #: pre-registered causes, expanded in the report itself:
 ROOT_CAUSES = {
-    "R6_STRONG_ONLY_ADD_PATH": (
-        "Repair plan R6 (docs/decisions/"
-        "execute_learn_repair_plan_20261016.md): the add path's evidence "
-        "is the D phase's STRONG trajectories only -- the weak arm's "
-        "diagnose skills of the 69904f7 world have no phase-world "
-        "producer, so the bank is smaller and everything derived from "
-        "it differs (E1/E2 rows, leak verdicts, retrieval categories, "
-        "every E4 call embedding a skills listing, the G10/G11 work per "
-        "group, the injection token counts)."),
+    "UNIFIED_SKILL_STRUCTURE": (
+        "The 2026-10-19 ruling (docs/decisions/"
+        "unified_skill_structure_20261019.md): every skill carries the "
+        "four [When to use]/[Steps]/[Verify]/[Do not use when] sections, "
+        "so a skill written from a weak failure no longer uses the "
+        "69904f7 world's [Trigger]/[Why it fails]/[Do instead] layout. "
+        "The same ruling restored the weak-failure add path (evidence "
+        "write_lessons, default on) that repair plan R6 had narrowed to "
+        "strong segments, so the bank holds the same skills, terminal "
+        "states and attribution traces as the baseline (E2/E6 green); "
+        "E1 differs only in those skills' content, and E4 only in the "
+        "text of the calls that carry a skill or a changed prompt."),
     "R8_EXAM_GENERATION_IN_A": (
         "The R8 ruling moved exam generation into the A phase; the live "
         "sequence has no A phase, so its EXAM_GEN calls are gone "

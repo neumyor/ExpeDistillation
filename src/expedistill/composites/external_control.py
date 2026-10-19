@@ -7,7 +7,7 @@ control arm of the final test is NEVER re-run; the comparison reads the
 existing AgentBrew campaign's numbers -- the byte-identical harness and
 task set -- and the run's own summary says so (``control_source``) rather
 than inventing zeros. This module is the v4 counterpart's loading half:
-the C-phase driver resolves ``compare.against: external_campaign`` to
+the test-phase driver resolves ``compare.against: external_campaign`` to
 the metrics built HERE instead of reading any trajectory store.
 
 The score file's format is the AgentBrew final archive's summary shape:
@@ -19,7 +19,7 @@ The score file's format is the AgentBrew final archive's summary shape:
 The aligned discipline (pre-registered, matching the old external
 comparison report): the control's per-task rate is the mean over the
 FIRST ``n_attempts`` rewards -- the campaign archived five attempts per
-task while the experiment's C phase samples the frozen weak depth, and
+task while the experiment's test phase samples the frozen weak depth, and
 the aligned column of the old report was exactly "the first 3 attempts".
 The full reward vectors stay in the file copied into the phase
 directory, so a post-hoc read of the unaligned depth needs no rerun.
@@ -81,7 +81,7 @@ def verify_external_control_file(path: str, sha256: str) -> Path:
 
     Returns the resolved path; raises ConfigError naming the offending
     side (missing file / digest mismatch). Pure bytes -- no parsing,
-    so the freeze step can pin the file before the C phase exists.
+    so the freeze step can pin the file before the test phase exists.
     """
     file_path = Path(path)
     if not file_path.is_file():

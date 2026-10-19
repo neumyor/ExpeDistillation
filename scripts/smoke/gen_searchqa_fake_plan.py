@@ -13,7 +13,7 @@ executor policies mirror ``configs/experiments/searchqa_split_live_smoke_v4.yaml
 * t3 (Angela Bassett)  -- policy ``revised_skills``: same as t2;
 * t4 (Sails)           -- policy ``never``: both rounds miss -> the last
                           learn phase deletes the group;
-* t5 (finale, test)    -- policy ``skills``: the C-phase with-bank arm
+* t5 (finale, test)    -- policy ``skills``: the test-phase with-bank arm
                           passes, the bare control fails.
 
 Inputs : EXPEDISTILL_SEARCHQA_EVAL_DIR (the outer benchmark/searchqa-eval

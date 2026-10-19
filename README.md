@@ -25,8 +25,10 @@
 - **学习阶段**：验收报告 + 运行记录 + 旧技能库 → 新技能库。
 
 一种方法就是这两种阶段排成的一个序列。例如 exam 方法是
-`D L A L A L A L C`，live 方法是 `D L B L B L C`，其中 L 是学习阶段，
-D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
+`baseline learn exam learn exam learn exam learn test`，live 方法是
+`baseline learn live learn live learn test`。相位名就是它的 role：
+`learn` 是学习阶段，`baseline`、`exam`、`live`、`test` 是四种执行阶段
+（含义见 1.2 的表）。
 
 ### 1.2 七个模块
 
@@ -51,13 +53,13 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 
 | 执行阶段 | 题 | 注入的技能 | 谁做、做几次 |
 |---|---|---|---|
-| D 摸底（baseline） | 每个训练任务 | 不注入 | 强、弱模型各做若干次 |
-| A 纸面验收（exam） | 每条待定（pending）技能对应的考题 | 这一条技能 | 弱模型答 1 次 |
-| B 实战验收（live） | 每个有技能的训练任务 | 该任务的整包技能 | 弱模型做 n 次 |
-| C 最终测试（test） | 每个测试任务 | 检索出的若干条，或整个技能库，或一个技能文件夹 | 弱模型做 n 次 |
+| baseline 摸底 | 每个训练任务 | 不注入 | 强、弱模型各做若干次 |
+| exam 纸面验收 | 每条待定（pending）技能对应的考题 | 这一条技能 | 弱模型答 1 次 |
+| live 实战验收 | 每个有技能的训练任务 | 该任务的整包技能 | 弱模型做 n 次 |
+| test 最终测试 | 每个测试任务 | 检索出的若干条，或整个技能库，或一个技能文件夹 | 弱模型做 n 次 |
 
 **对照单元**指同一道题、不注入任何技能的单元。它可以现场跑，
-也可以借用更早阶段（如 D）的结果。
+也可以借用更早阶段（如 baseline）的结果。
 
 ### 1.3 关键分工
 
@@ -78,10 +80,10 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
    属于找证据的工作。
 7. **决策不读轨迹，找证据不定动作，写作不做测量**。三者之间只通过任务清单
    和证据包交接。
-8. **实战验收的结论只到"包"**。B 阶段一个任务的整包技能一起上场，结论只能
+8. **实战验收的结论只到"包"**。live 相位一个任务的整包技能一起上场，结论只能
    针对整包。包里哪条有问题由找证据查出事实，具体怎么改由写作决定。
-9. **测试结果不流进学习**。C 阶段的报告只进入最终成绩；"带技能库比裸跑
-   提升多少"由 C 相位自己的汇总计算，决策入口收到 C 相位的报告会直接报错。
+9. **测试结果不流进学习**。test 相位的报告只进入最终成绩；"带技能库比裸跑
+   提升多少"由 test 相位自己的汇总计算，决策入口收到 test 相位的报告会直接报错。
 
 ### 1.4 决策规则
 
@@ -106,7 +108,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | 摸底：弱模型做不好、且还没有技能的任务 | 新增 | 新增 |
 
 "后面还有检验"指序列里这次学习之后是否还有在训练集上做的验收阶段
-（A 或 B）；C 不算。"摸底"那一行读 D 相位的报告，按 `task_select` 具名规则
+（exam 或 live）；test 不算。"摸底"那一行读 baseline 相位的报告，按 `task_select` 具名规则
 判断哪些任务弱模型做不好。
 
 比较规则是 `blocks/rules.py` 的 `ACCEPTANCE_IMPROVE` 具名注册表的成员，
@@ -122,7 +124,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 三条配套规则：
 
 1. **没变的单元不重测**。题和注入的技能都没变的单元，沿用上一次的验收结果
-   （实现见 5.8）。修改后内容和原来一字不差也算没变。C 相位例外，每次全量
+   （实现见 5.8）。修改后内容和原来一字不差也算没变。test 相位例外，每次全量
    重跑。
 2. **改写失败就原样保留**。修改没有产出新版本就视为没变：按上一条不重测，
    下次学习再试着改；到最后一次学习仍没有提升就按表删除。
@@ -166,8 +168,8 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 |---|---|
 | `role` | 相位角色，显式声明，加载期核对与字段一致。执行相位四选一：`baseline` / `exam` / `live` / `test`；学习相位恒为 `learn` |
 | `tasks` | 跑冻结的哪个列表：`train` 或 `test`（`test` 角色与 `test` 列表是同一件事，两者必须同时成立） |
-| `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `per_skill` / `group_by_task` / `folder`（技能文件夹交付，只有 test 角色相位可用，与 `real_folder` 执行一对一配对，流程见 5.5） |
-| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（考题执行）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 与 `exam` 一样**没有执行参数**——C 相位的采样深度沿用全局 `n_attempts_weak`，与旧 C 相位行为一致，配置里写参数键会因未知键检查响亮失败 |
+| `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `per_skill` / `group_by_task` / `folder`（技能文件夹交付，只有 test 角色相位可用，与 `real_folder` 执行一对一配对，流程见 5.5）；说明见 `src/expedistill/methods/delivery/README.md` |
+| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（考题执行）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 与 `exam` 一样**没有执行参数**——test 相位的采样深度沿用全局 `n_attempts_weak`，与旧 test 相位行为一致，配置里写参数键会因未知键检查响亮失败；说明见 `src/expedistill/methods/execution/README.md` |
 | `compare` | 对照来源（可选）：`against` 指向更早的相位名、`fresh_bare`（相位内现场跑一条裸臂）或 `external_campaign`（对照读外部 campaign 的冻结成绩文件，零执行，只有 test 角色相位可用，且必须带 `external` 块钉住文件身份：`path`（相对路径相对配置文件所在目录解析，冻结为绝对路径）+ `sha256`（成绩文件字节的校验和，防漂移）+ `model_key`（campaign 汇总里对应本 run 弱模型的前缀））；对照口径 = 每任务取前 `n_attempts_weak` 次采样的奖励均值（与旧外部对照报告的"前 3 次"对齐列同口径），`rule` 指定比较规则名 |
 | `acceptance` | 验收判分规则名（可选；缺省用 benchmark 的默认绑定，TB 是 `tb_scorer`） |
 
@@ -176,15 +178,15 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | 字段 | 说明 |
 |---|---|
 | `role` | 恒为 `learn` |
-| `evidence` | 找证据方法：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算） |
-| `author` | 写作方法：`distill_diagnose` |
+| `evidence` | 找证据方法：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算；`write_lessons` 默认 `true`，add 路径同时从弱模型失败段学，`false` 只学强模型成功段）；说明见 `src/expedistill/methods/evidence/README.md` |
+| `author` | 写作方法：`distill_diagnose`（无参数）；说明见 `src/expedistill/methods/author/README.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），见 `docs/decisions/curation_generalize_20261019.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
 
 每个相位有一个标签 `pNN:<局部名>`：冻结步恒为 `p00:freeze`；序列第 i 项
 （i 从 0 数）的标签是 `p{i+1:02d}:<局部名>`，例如第一个序列相位是
-`p01:D`。标签出现在进度账本（`pipeline_log.jsonl` 的 `stage` 值）、
+`p01:baseline`。标签出现在进度账本（`pipeline_log.jsonl` 的 `stage` 值）、
 `failed_units.jsonl` 和验收报告行的 `phase_label` 里；局部名不得带冒号
 （标签按冒号解析）。
 
@@ -207,16 +209,16 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
    `n_attempts` 不得超过对照的弱臂深度；
 4. `compare.against` 必须指向序列里更早出现的名字，或写 `fresh_bare`，
    或写 `external_campaign`（只允许 test 角色相位，且必须带 `external`
-   块；stage 0 会校验成绩文件存在且 sha256 匹配，C 相位派发前再校验任务
+   块；stage 0 会校验成绩文件存在且 sha256 匹配，test 相位派发前再校验任务
    覆盖与奖励格式）；前两种情况下被指向的对照必须是 baseline 相位
    （只有摸底相位的弱臂裸跑报告才是裸测量）；
 5. `curate.merge_check: exam` 要求序列里存在 exam 相位（合并的回归考题
-   由 A 相位生成）；
+   由 exam 相位生成）；
 6. 序列必须以执行相位开头（学习相位没有可学的测量）；
 7. live 相位必须带 `compare` 指向更早的 baseline 相位（它自己的报告行
    全部带注入，没有相位内的对照行）；
-8. `folder` 交付只出现在 test 角色的执行相位（A 注入单条、B 注入整组、
-   D 不注入，目录清单只服务终测），且与 `real_folder` 执行一对一配对：
+8. `folder` 交付只出现在 test 角色的执行相位（exam 注入单条、live 注入整组、
+   baseline 不注入，目录清单只服务终测），且与 `real_folder` 执行一对一配对：
    `folder` 配 plain `real`（会把目录文本当技能块注入，做错实验）或
    `real_folder` 配其他交付（会等一个没人准备的文件夹）都是配置错误。
 
@@ -230,46 +232,47 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 exam 方法（v3 配置 `acceptance: {name: exam, retry_limit: R}` 转换而来）：
 
 ```
-sequence: [D, L, A, L, A, L, A, L, C]        # retry_limit = 2 时
+sequence: [baseline, learn, exam, learn, exam, learn, exam, learn, test]  # retry_limit = 2 时
 phases:
-  D: {kind: execute, role: baseline, tasks: train,
+  baseline: {kind: execute, role: baseline, tasks: train,
        delivery: {name: none},
        execution: {name: real, arms: [executor_strong, executor_weak]}}
-  A: {kind: execute, role: exam,
+  exam: {kind: execute, role: exam,
        delivery: {name: per_skill}, execution: {name: exam}}
-  L: {kind: learn, evidence: {name: segment, K: 5, retry_limit: 2},
+  learn: {kind: learn, evidence: {name: segment, K: 5, retry_limit: 2},
        author: {name: distill_diagnose},
        curate: {name: agentbrew, merge_check: exam, token_budget: ..., rounds: 3}}
-  C: {kind: execute, role: test, tasks: test,
+  test: {kind: execute, role: test, tasks: test,
        delivery: <原配置的 delivery>, execution: {name: real},
-       compare: {against: fresh_bare}}        # full 模式改为 against: D
+       compare: {against: fresh_bare}}        # full 模式改为 against: baseline
 ```
 
 live 方法（v3 配置 `acceptance: {name: live_run, ...}` 转换而来）：
 
 ```
-sequence: [D, L, B, L, B, L, C]
+sequence: [baseline, learn, live, learn, live, learn, test]
 phases:
-  B: {kind: execute, role: live, tasks: train,
+  live: {kind: execute, role: live, tasks: train,
        delivery: {name: group_by_task},
        execution: {name: real, n_attempts: 3, max_injection_tokens: null},
-       compare: {against: D, rule: strict_rate_gain}}
-  L: {kind: learn, ..., curate: {name: agentbrew, merge_check: none, ...}}
+       compare: {against: baseline, rule: strict_rate_gain}}
+  learn: {kind: learn, ..., curate: {name: agentbrew, merge_check: none, ...}}
 ```
 
-C 相位的技能文件夹形态（folder 交付 + real_folder 执行，完整可跑的配置见
+test 相位的技能文件夹形态（folder 交付 + real_folder 执行，完整可跑的配置见
 `configs/experiments/tb21_split_folder_v4.yaml`）：
 
 ```
-sequence: [D, L, B, L, B, L, C]
+sequence: [baseline, learn, live, learn, live, learn, test]
 phases:
-  C: {kind: execute, role: test, tasks: test,
+  test: {kind: execute, role: test, tasks: test,
        delivery: {name: folder}, execution: {name: real_folder},
        compare: {against: fresh_bare}}
 ```
 
-（A / B / C / D / L 这些局部名是转换工具发出的缺省名，只是名字；
-配置作者可以自由改名。仓库里 9 份 v4 配置
+（相位名是转换工具发出的缺省名，与 role 同名，只是名字；配置作者可以
+自由改名，代码只认 `role`。2026-10-19 之前的缺省名是字母 D / L / A / B / C，
+旧 run 的 manifest 与相位目录里仍是字母。仓库里 9 份 v4 配置
 `configs/experiments/*_v4.yaml` 覆盖这两类形状与 folder 形态。）
 
 ### 2.5 旧版本配置的转换
@@ -288,28 +291,28 @@ v2 → v3 的一次性转换在 commit `78db71f` 完成，当时的转换脚本
 
 转换映射是 `core/config_upgrade.py` 的纯函数 `upgrade_v2_config` / `upgrade_v3_config`
 （装配器读旧 run 的 manifest 时走同一函数）。v3 → v4 的身份变化：
-acceptance 槽位溶进序列（exam 的 `retry_limit = R` 变成 R+1 个 A 相位；
+acceptance 槽位溶进序列（exam 的 `retry_limit = R` 变成 R+1 个 exam 相位；
 live_run 的 `n_attempts` / `improvement` / `max_injection_tokens` 移进
-B 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没有 A 相位，
+live 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没有 exam 相位，
 合并由轮 1 的整组重测证明）；authoring 的 `exams` 开关删除（true 由每条
 发出的序列蕴含；false 只在 live_run + curation none 这一对合法消融下可转，
-其余拒绝）；delivery 原样移进 C 相位；segmentation 的 `K` / `retry_limit`
-移进 L 相位的 evidence。转换结果带上 v4 新全局 `invalid_redispatch_limit`
+其余拒绝）；delivery 原样移进 test 相位；segmentation 的 `K` / `retry_limit`
+移进 learn 相位的 evidence。转换结果带上 v4 新全局 `invalid_redispatch_limit`
 的缺省值 1，使转换后的身份不依赖缺省值。
 
 ### 2.6 方法组合的计数
 
 一次实验必须在四根主轴上各选一项：benchmark（tb / searchqa / alfworld）、
-验收方法（exam / live）、模式（split / full）、C 相位交付
+验收方法（exam / live）、模式（split / full）、test 相位交付
 （whole_bank / retrieval / folder），主轴组合 3 × 2 × 2 × 3 = **36 种**。
 学习相位还有两项选择：整理方法（agentbrew / none）与比较规则
 （strict_rate_gain / first_success_gain），各 2 种，配置形态上限
-36 × 2 × 2 = **144 种**。C 相位对照来源还有第三种：`external_campaign`
+36 × 2 × 2 = **144 种**。test 相位对照来源还有第三种：`external_campaign`
 （对照读外部 campaign 冻结成绩文件，零执行，见 5.5；另两种是相位复用
 与 `fresh_bare`），只影响对照臂的取数方式，不新增方法族。folder
 交付目前只有 tb 的插件声明支持（插件
 能力位 `skill_folder_prompt_name`，见 5.5 与 3.6），searchqa / alfworld
-配 folder 的配置能通过加载，C 相位派发前被相位级能力检查拒绝——与
+配 folder 的配置能通过加载，test 相位派发前被相位级能力检查拒绝——与
 技能库空不空无关，逐单元的 E1 守卫保留作第二道。
 
 ---
@@ -453,7 +456,7 @@ E1 内部的 runner：
 | 编号 | 名称 | 输入 → 输出 |
 |---|---|---|
 | G1 | 切段 | （轨迹视图, K, 模型）→ 段列表（未校验）。模型只给每段的起止步号和 label / description / success |
-| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 模型）→ Skill v1。提炼写成 procedure，诊断写成 failure reference，固定四节结构；前提守卫：提炼要求段成功、诊断要求段失败 |
+| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 模型）→ Skill v1。两种写法产出同一种四节结构 `[When to use]`/`[Steps]`/`[Verify]`/`[Do not use when]`（2026-10-19 起统一，技能是做法还是教训看来源段的 `Subtask.source`）；前提守卫：提炼要求段成功、诊断要求段失败 |
 | G3 | 出考题 | （Subtask, 模型）→ Exam。不接收 skill |
 | G4 | 作答 | （模型, Exam, skill 列表（可选））→ 作答文本 |
 | G5 | 判卷 | （Exam, 作答, 模型）→ 对 / 错 + 错误描述（只说哪里不对，不复述正确答案，也不暗示该怎么改） |
@@ -477,10 +480,10 @@ E1 内部的 runner：
 | K5 | 库整理 | G7 →（可选）丢弃低价值 → G8 →（可选）K3 回归考试 → G9 → D10，合并与丢弃日志先写后改、续跑按日志重放 | `composites/curation.py` |
 | K6 | live 判定账本 | 轮判定（judge_round，append-once、首判为准、续跑重算逐字节核对）、组终态提交（finalize_group）、基线与轮仓读取、注入审计行 | `composites/live_verdicts.py`、`live_measurement.py` |
 | — | 验收判定核 | 每次运行的判定（success / failure / invalid）与单元汇总行；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`——tb_scorer 消费 correctness 与 verifier_ran / exception_type 事实，例外死亡 / 伪零分判 invalid） | `composites/verdicts.py` |
-| — | 决策 | 统一决策入口 `decide_task_list`、动作表、cause 词表、`final_test_delta`（C 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py` |
+| — | 决策 | 统一决策入口 `decide_task_list`、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py` |
 | — | 报告读取器 | 从磁盘现读三种验收报告（baseline / exam / live），只读 | `composites/reports.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
-| — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 markdown 文件 + catalog.md）幂等写进目标目录（内容不变不重写，永不删除别的文件）；C 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
+| — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 markdown 文件 + catalog.md）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
 | — | 空洞记录 | 已接受基础设施空洞（什么叫空洞见 5.9）的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
 | — | 考卷状态读取 | 从存量记录读出考题的已判作答与裸答 | `composites/acceptance_skill_status.py` |
@@ -527,19 +530,19 @@ E1 内部的 runner：
 | 相位 | 用到的积木 |
 |---|---|
 | 冻结步（p00） | D1、D2、B4、`methods/registry.py` 的逐族解析 |
-| baseline（D） | 交付 `none`、E1 × K1（强、弱两臂）、验收判定核（benchmark 默认判分规则）、D3（摘要）、辅助指标 |
-| exam（A） | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
-| live（B） | 交付 `group_by_task`、E1 × K1（整组注入、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用 |
-| test（C） | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
-| learn（L） | `decision.decide_task_list`；add：K2（含 D5、G1、D7）+ D6 + G2 + G3；revise：找证据（exam 考卷 / live 组）+ G11；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
+| baseline | 交付 `none`、E1 × K1（强、弱两臂）、验收判定核（benchmark 默认判分规则）、D3（摘要）、辅助指标 |
+| exam | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
+| live | 交付 `group_by_task`、E1 × K1（整组注入、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用 |
+| test | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
+| learn | `decision.decide_task_list`；add：K2（含 D5、G1、D7）+ D6 + G2 + G3；revise：找证据（exam 考卷 / live 组）+ G11；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
 
 **复用最多的几块**：
 
-- **D9 skill 注入**：A 相位的作答、B 相位的真实执行、C 相位的带库执行都
+- **D9 skill 注入**：exam 相位的作答、live 相位的真实执行、test 相位的带库执行都
   通过它把 skill 拼进 prompt，注入格式只有一份实现；
 - **K1 / E1 执行**：四种执行相位全部是它；
 - **D5 轨迹视图**：G1 切段看整条轨迹，找证据看段内步骤与失败视图；
-- **D3 成绩统计**：各执行相位的摘要与 C 相位的 delta 都是它。
+- **D3 成绩统计**：各执行相位的摘要与 test 相位的 delta 都是它。
 
 **跨 benchmark、跨模型**：加一个新 benchmark = 写一个插件（runner、任务加载、
 截断规则、执行 prompt 四样），其余积木不动；换强 / 弱模型 = 改配置的角色表
@@ -562,8 +565,8 @@ E1 内部的 runner：
 | 合并 skill | G8 | curator（最末学习相位） |
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
-| 执行任务·技能文件夹——目录靠 cat（`TB_TASK_PROMPT_FOLDER`，`inline_catalog=False`，默认） | E1 的 TB runner（folder 单元） | executor_weak（C 相位 real_folder） |
-| 执行任务·技能文件夹——目录内嵌提示词（`TB_TASK_PROMPT_FOLDER_INLINE`，`inline_catalog=True`） | E1 的 TB runner（folder 单元，inline_catalog 变体） | executor_weak（C 相位 real_folder，FolderParams.inline_catalog=True） |
+| 执行任务·技能文件夹——目录靠 cat（`TB_TASK_PROMPT_FOLDER`，`inline_catalog=False`，默认） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
+| 执行任务·技能文件夹——目录内嵌提示词（`TB_TASK_PROMPT_FOLDER_INLINE`，`inline_catalog=True`） | E1 的 TB runner（folder 单元，inline_catalog 变体） | executor_weak（test 相位 real_folder，FolderParams.inline_catalog=True） |
 | LIVE_RUN_ATTRIBUTION | G10 | author（学习相位 revise，live 组证据） |
 | LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，live 组修订） |
 
@@ -611,9 +614,8 @@ Skill（schema v3）
   skill_id, content(自然语言正文), subtask_id(→段),
   source_subtasks[ subtask_id ... ](素材来源段；合并产物 = 各来源的并集),
   summary(一句话摘要：这条技能是什么；目录行用，不进 content；
-    G2/G6/G11 产出，K5 合并产物 = 各来源非空摘要以 "; " 拼接；
-    v2 旧记录迁移时置空，M2 目录渲染对空摘要回退取 [When to use] 节
-    （失败参考型技能对称回退取 [Trigger] 节）),
+    G2/G6/G11 产出，K5 合并产物的摘要由 G8 写；
+    v2 旧记录迁移时置空，M2 目录渲染对空摘要回退取 [When to use] 节),
   version(改写次数), status(pending/accepted/discarded/merged),
   discard_reason(自由字符串), group(能力分组，整理写入),
   rewrite_history[ 旧版正文、旧摘要、错因归类与改写原因 ],
@@ -680,7 +682,7 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
   stage0_summary.json            冻结步摘要
 
   —— run 级五仓（全部相位共享；目录名沿用历史名字）——
-  stage1_baseline/trajectories/  轨迹仓：摸底相位两臂的裸跑轨迹（C 相位
+  stage1_baseline/trajectories/  轨迹仓：摸底相位两臂的裸跑轨迹（test 相位
                                  full 模式的对照也从这里读）
   stage1_baseline/accepted_infra_shortfall.json
                                  摸底相位已接受的基础设施空洞（本 run 的
@@ -716,11 +718,11 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     units.jsonl                  执行相位：交付解析出的执行单元清单（带
                                  完整冻结 unit_id；每次相位启动整文件重写，
                                  exam 相位读覆写前的内容当同相位重放标记）
-    acceptance_report.jsonl      执行相位：验收报告行（C 相位不写：它的
+    acceptance_report.jsonl      执行相位：验收报告行（test 相位不写：它的
                                  数字只进摘要，测试结果不流进学习）
     redispatch.json              执行相位：按单元持久记录的无效重派计数
-    <臂>/store/                  执行相位自己的轨迹仓（C 相位的两臂、
-                                 split 模式 C 相位的现场裸臂；摸底相位
+    <臂>/store/                  执行相位自己的轨迹仓（test 相位的两臂、
+                                 split 模式 test 相位的现场裸臂；摸底相位
                                  与 live 轮仓不在这里，见上）
     <臂>/accepted_infra_shortfall.json   本臂已接受的空洞
     skill_folder/                  test 相位（folder 交付）：物化出的技能
@@ -785,7 +787,7 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
 - 之后每次启动逐字段比对，再改即视为新实验（B4）。运行设置（并发、重试
   次数）不冻结。
 
-### 5.2 摸底相位（baseline，D）
+### 5.2 摸底相位（baseline）
 
 - 强模型与弱模型在每道训练题上各裸跑 `n_attempts_strong` / `n_attempts_weak`
   次，全部轨迹（成功和失败都保留）写进 run 级轨迹仓；
@@ -797,7 +799,7 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
   只补空洞；接受的空洞是本 run 的持久决定（见 5.9）；
 - 摘要含两臂的 D3 成绩与辅助指标。
 
-### 5.3 纸面验收相位（exam，A）
+### 5.3 纸面验收相位（exam）
 
 考题按"执行时点现场生成"的规则在相位内部产出（G3，examiner 角色），宇宙
 = 技能库工件里的全部**待定**成员（已接受 / 已合并 / 已弃用的成员有自己的
@@ -812,7 +814,7 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
 作答与判卷记录写进 run 级作答仓（考题 ID 锚定，跨相位不冲突）；出题的
 模型输出失败是本 run 内终态（`generation_failures.jsonl`，每道考题首行即
 定）。**改写循环不在这个相位**：考不过的技能由下一个学习相位决定修改
-（revise 行），改写后的新版本由再下一个 A 相位重新测量——规则 1 保证没变
+（revise 行），改写后的新版本由再下一个 exam 相位重新测量——规则 1 保证没变
 的单元零成本沿用旧结论。这个相位的判分规则恒为 `exam_judge`（消费判卷
 结论）。
 
@@ -822,11 +824,11 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
 K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判即直接沿用、
 不再调模型、判卷也不重跑。查的适用范围是"同一相位实例此前已规划过的单元"
 ——标记取本相位 `units.jsonl` 被**覆写前**的内容（unit_id 带相位标签，
-只有本相位写过它）；之后的 A 相位是新一轮测量，不在保护范围内（裸答重新
+只有本相位写过它）；之后的 exam 相位是新一轮测量，不在保护范围内（裸答重新
 作答，泄题审计按新版本另判）。考题本体与泄题判定沿用各自的落盘事实
 （考题仓的 exists 检查、leak 账本首判为准），不重生成。
 
-### 5.4 实战验收相位（live，B）
+### 5.4 实战验收相位（live）
 
 - 验收单元 = 一个训练任务的**组** = 该任务的全部待定成员，整组注入
   （`group_by_task` 交付），弱模型真实执行 `n_attempts` 次；
@@ -851,7 +853,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   直接沿用旧判定（这是 no-op 守卫的相位形态——同一个注入不会被反复重采样
   直到运气好）。
 
-### 5.5 终测相位（test，C）
+### 5.5 终测相位（test）
 
 - 在 test 列表（split 模式）或全部任务（full 模式）上跑带库臂：交付方法
   由配置给出（`whole_bank` 整库注入 / `retrieval` 逐任务检索注入 /
@@ -879,27 +881,27 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   提示词（带 `{skills_block}` 槽渲染目录文本，guidance 段仍保留以指明文件
   夹路径），两个提示词的 digest 都进 manifest 冻结面（stage0 在
   `skill_folder_prompt_name` 后按 `_INLINE` 约定查配套名并加入冻结面）；
-  folder 相位落到不支持的插件，C 相位
+  folder 相位落到不支持的插件，test 相位
   驱动在派发前就报配置错误停机——与技能库空不空无关，逐单元的 E1 守卫
   保留作第二道。空已接受集不物化、单元裸跑（空注入是空串：不渲染一个
-  只剩表头的空目录文件）。`real_folder` 执行没有自己的执行参数，C 相位
-  的采样深度沿用全局 `n_attempts_weak`，与旧 C 相位行为一致；执行过程
+  只剩表头的空目录文件）。`real_folder` 执行没有自己的执行参数，test 相位
+  的采样深度沿用全局 `n_attempts_weak`，与旧 test 相位行为一致；执行过程
   零拦截零预算，模型实际读了哪些技能文件，记录在
   轨迹的 cat 命令里，事后由纯函数解析（`composites/skill_reads.py`：按
   清单文件名做词边界匹配，首读序去重，只读轨迹零落盘）：每单元的读取集
-  写进 C 相位摘要的 `skill_files_read` 键（`{轨迹 ID: [技能编号]}`）。
+  写进 test 相位摘要的 `skill_files_read` 键（`{轨迹 ID: [技能编号]}`）。
   键的口径要读全：它只盖带技能臂——对照臂不进键，且轨迹 ID 与对照臂
   同形，审计拿 ID 对账必须配合臂目录使用。三态分辨：**键缺** = 旧执行
   相位，或该单元没跑成 / 已接受为空洞（要与"跑了没读"区分，必须交叉
   摘要的 `infra_missing` / `infra_accepted` 计数）；**空列表** = 跑了
   但一个技能文件都没读；非空列表 = 实际读过的技能（首读序去重）。
   已知局限：别的目录下同名文件的 cat 会误记、只有 cat 算（grep/head 不
-  算，catalog.md 永不进读取集）。C 相位不写验收报告，读取集不进任何
-  决策输入，供事后审计与技能使用分析；泄题审计对 C 相位沿用既有覆盖
-  （A 相位考试管道的 D8 判定）；
-- 对照臂：full 模式复用 D 相位的弱臂裸跑（连同其已接受空洞）；split 模式
+  算，catalog.md 永不进读取集）。test 相位不写验收报告，读取集不进任何
+  决策输入，供事后审计与技能使用分析；泄题审计对 test 相位沿用既有覆盖
+  （exam 相位考试管道的 D8 判定）；
+- 对照臂：full 模式复用 baseline 相位的弱臂裸跑（连同其已接受空洞）；split 模式
   在相位内现场跑一条裸臂（`fresh_bare`）；或 `external_campaign`——对照
-  读外部 campaign 的冻结成绩文件（AgentBrew 裸跑归档），**零执行**：C 相位
+  读外部 campaign 的冻结成绩文件（AgentBrew 裸跑归档），**零执行**：test 相位
   驱动在派发前加载并校验（文件存在、sha256 与冻结配置一致、`model_key`
   覆盖全部 test 任务、每任务奖励数 ≥ 对齐深度），把文件字节拷进相位目录
   （`external_control.json`），摘要带 `external_control` 审计记录（钉住
@@ -921,7 +923,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   两种口径各算一次；辅助指标**永远只并列**，不因为结果好看就替换主指标；
   未声明时相关字段全为 null。
 
-### 5.6 学习相位（learn，L）
+### 5.6 学习相位（learn）
 
 一个学习相位把四步跑完：**决策 → 找证据 → 写作 → 整理**。
 
@@ -932,7 +934,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 等价于空库开始；回退覆盖的任务不再重发 add，预置库因此保持冻结）；
 剩余检验次数由序列位置算出。全部交给 `decision.decide_task_list` 得任务
 清单。紧跟摸底相位的第一个学习相位走**摸底缺口路径**：本轮报告为空、
-D 相位报告当对照，对每个弱模型做不好且还没有技能的训练任务发一条 add 行。
+baseline 相位报告当对照，对每个弱模型做不好且还没有技能的训练任务发一条 add 行。
 
 **多版本行合并**：作答仓共享，一条技能可能带好几行报告行（不同版本各一
 行，结论可能互相冲突）。合并规则：**最高版本的那行算数**，低版本行作为
@@ -948,17 +950,19 @@ D 相位报告当对照，对每个弱模型做不好且还没有技能的训练
   （考题、弱模型答案、判卷理由）；live 路径的证据是组内全部尝试的轨迹视图
   与逐条问题事实，写作侧按证据对每条技能定去留（kept / deleted / revised）。
   改写没产出新版本 = 没变化（版本不动，记 unchanged，下次学习再试）；
-- **add**：把该任务的强模型段落蒸馏成新的待定技能（一段一技能，
-  `make_skill_id(subtask_id)` 编号）。
+- **add**：把该任务的强模型成功段提炼成新的待定技能；evidence 的
+  `write_lessons` 开着（默认）时，弱模型失败段也用诊断写法写成技能，
+  结构与提炼产物相同（一段一技能，`make_skill_id(subtask_id)` 编号）。
 
 **切段在相位世界里的位置**（关键设计，2026-10-16 Wave 3-S）：
 **切段发生在学习相位内部、add 行执行的时候**。流程世界没有独立的切段
 相位：`learn_tasks` 的 add 行先调 evidence 族的 segment 方法
 （`methods/evidence/segmentation.py`），它从 **run 级轨迹仓**（正是摸底
 相位两臂的裸跑轨迹）按 `trajectory_select` 具名规则逐任务挑轨迹、
-**只切其中的强角色轨迹**（弱臂段落没有消费者，弱臂的钱不花），逐条交给
+**切其中的强角色轨迹，`write_lessons` 开着时连弱角色轨迹一起切**
+（关掉时弱臂段落没有消费者，弱臂的钱不花），逐条交给
 K2（确定 ID、逐单元落盘、按存量跳过、D7 校验、重切预算、耗尽审计全部
-沿用 K2 的既有机制）。参数（`K`、`retry_limit`）来自学习相位的 evidence
+沿用 K2 的既有机制）。参数（`K`、`retry_limit`、`write_lessons`）来自学习相位的 evidence
 槽位。0 步轨迹在规则之前排除并写一次性的 "empty trajectory" 审计行。
 切不出可学材料（没有轨迹、全被段筛选规则筛掉、或 K2 重切耗尽——本 run
 内终态）时记 `skipped_no_material` 回执并继续，**不抛错**（抛错会让续跑
@@ -1042,7 +1046,7 @@ none：原样入库，预算仍是硬阀），中间的学习相位写原样工�
 - `--allow-infra-shortfall` 接受空洞：被接受的单元 ID 先写进持久记录再继续，
   之后每次启动都跳过、按空洞计分（没有撤回通道；开关只决定新出现的空洞
   接不接受）。摸底相位的记录在 `stage1_baseline/accepted_infra_shortfall.json`
-  （live 基线加载、C 相位对照都读它）；其他执行相位按臂记录在相位目录里；
+  （live 基线加载、test 相位对照都读它）；其他执行相位按臂记录在相位目录里；
   live 相位按轮记录（轮 1 的远程沙箱是新实例，轮 0 的空洞不自动继承）。
 
 ---
@@ -1063,9 +1067,9 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
   退出码 1；
 - `assemble-reuse` 从已完结的源 run 装配新 run（读旧版本源 manifest 时经
   升级纯函数做身份核对），零模型调用，产出可直接 `run` 的新 run 目录；
-  两档位：`bank`（拷贝源 run 的训练侧产物与过滤库：D 相位按存储轨迹跳过、
+  两档位：`bank`（拷贝源 run 的训练侧产物与过滤库：baseline 相位按存储轨迹跳过、
   学习相位零调用复用——末相位的整理在预置库上短路，短路前把产物刷新为
-  技能仓当前状态；C 相位全新执行，设计如此；v3 源的生成失败行不拷贝，
+  技能仓当前状态；test 相位全新执行，设计如此；v3 源的生成失败行不拷贝，
   新 run 的首个学习相位会真实重试它们——有模型调用，逐项披露见
   ASSEMBLED_FROM）、`baseline`（只拷摸底轨迹，其余按当前协议全新执行）。
 
@@ -1113,14 +1117,14 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
 2. **考题质量**：考题出得太像原题 → 弱模型靠记忆也能过；出得太泛 → 验收
    放水。裸答对照能筛掉"太简单"的考题，筛不掉"太泛"的。
 3. **考题与任务的距离**：技能过的是文本问答题，终测考的是真实执行。
-   "答得对"与"做得到"的差距只能在 C 相位的成绩里看出来。live 方法消掉了
+   "答得对"与"做得到"的差距只能在 test 相位的成绩里看出来。live 方法消掉了
    验收环节的这一差距，但整理的合并回归考试仍是文本考。
 4. **live 验收的统计功效**：`n_attempts = 3` 的二值比较在"技能无效果"的
    假设下单任务假通过率约 27–34%（数字按 n 重算，n=1 时约 50%，故设计
    文档把 live 相位的 `n_attempts ≥ 2` 定为推荐下限——总体设计 A2 的
    D1 守卫；代码在加载期只强制 ≥ 1，配 1 不会被拒绝——预检一律纯报告、
    不阻塞流程，统计功效由实验设计纪律保证）。验收是库的入门过滤器，库的
-   总体主张由 C 相位的 test 集承载；逐组计数全部落盘，可事后复核。
+   总体主张由 test 相位的 test 集承载；逐组计数全部落盘，可事后复核。
 5. **live 通过 ≠ 可迁移**：live 验收的组来自训练任务，可迁移性看 split
    模式的 test 集。full 模式下 live 验收与终测同任务——任务定制的内容会
    同时抬高验收与终测，这是 full 模式的定义，主张可迁移性时用 split 模式。

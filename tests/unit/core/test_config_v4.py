@@ -122,8 +122,8 @@ class TestVocabulary:
         # The label must satisfy composites.phase_bank's frozen regex
         # (exactly one colon right after the pNN head).
         from expedistill.composites.phase_bank import _PHASE_LABEL_RE
-        label = phase_label(0, "D")
-        assert label == "p01:D"
+        label = phase_label(0, "baseline")
+        assert label == "p01:baseline"
         assert _PHASE_LABEL_RE.fullmatch(label)
         assert FREEZE_LABEL == "p00:freeze"
         assert _PHASE_LABEL_RE.fullmatch(FREEZE_LABEL)
@@ -133,7 +133,7 @@ class TestVocabulary:
 class TestParsedShapes:
     def test_execute_phase_fields(self, exam_v4):
         specs = _parse(exam_v4)
-        d = specs["D"]
+        d = specs["baseline"]
         assert isinstance(d, ExecutePhaseSpec)
         assert d.kind == "execute"
         assert d.role == PHASE_ROLE_BASELINE
@@ -143,17 +143,17 @@ class TestParsedShapes:
                                "arms": ["executor_strong",
                                         "executor_weak"]}
         assert d.compare is None and d.acceptance is None
-        a = specs["A"]
+        a = specs["exam"]
         assert a.role == PHASE_ROLE_EXAM
         assert a.execution == {"name": "exam"}
-        c = specs["C"]
+        c = specs["test"]
         assert c.role == PHASE_ROLE_TEST
         assert c.tasks == "test"
         assert c.compare == CompareSpec(against="fresh_bare")
 
     def test_learn_phase_fields(self, exam_v4):
         specs = _parse(exam_v4)
-        learn = specs["L"]
+        learn = specs["learn"]
         assert isinstance(learn, LearnPhaseSpec)
         assert learn.kind == "learn"
         assert learn.role == PHASE_ROLE_LEARN
@@ -164,17 +164,17 @@ class TestParsedShapes:
         assert learn.curate["merge_check"] == "exam"
 
     def test_live_sequence_shape(self, live_v4):
-        assert live_v4["sequence"] == ["D", "L", "B", "L", "B", "L", "C"]
+        assert live_v4["sequence"] == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
         specs = _parse(live_v4)
-        b = specs["B"]
+        b = specs["live"]
         assert b.role == PHASE_ROLE_LIVE
         assert b.execution == {"name": "real", "n_attempts": 2,
                                "max_injection_tokens": None}
-        assert b.compare == CompareSpec(against="D",
+        assert b.compare == CompareSpec(against="baseline",
                                          rule="strict_rate_gain")
         # live_run's merges are not proven on regression exams: the
         # upgrade maps merge_check to 'none' (no exam phase exists).
-        assert specs["L"].curate["merge_check"] == "none"
+        assert specs["learn"].curate["merge_check"] == "none"
 
     def test_round_trip_through_the_freezable_form(self, exam_v4):
         # to_dict -> from_dict stability: the raw form of a parsed spec
@@ -187,9 +187,9 @@ class TestParsedShapes:
 
     def test_hand_off_contract_types(self, exam_v4):
         specs = _parse(exam_v4)
-        instance = PhaseInstance(index=0, name="D", label="p01:D",
-                                 spec=specs["D"], task_ids=("tb:t1",))
-        assert (instance.index, instance.label) == (0, "p01:D")
+        instance = PhaseInstance(index=0, name="baseline", label="p01:baseline",
+                                 spec=specs["baseline"], task_ids=("tb:t1",))
+        assert (instance.index, instance.label) == (0, "p01:baseline")
         result = PhaseResult(label=instance.label, summary={"units": 1})
         assert result.summary == {"units": 1}
 
@@ -206,22 +206,22 @@ class TestChecklist:
     def test_colon_in_a_name_refused(self, exam_v4):
         # The hard prerequisite of the pNN:<name> label: no colons.
         with pytest.raises(ConfigError, match="never a colon"):
-            _parse({**exam_v4, "sequence": ["D:", "L"]})
+            _parse({**exam_v4, "sequence": ["baseline:", "learn"]})
 
     def test_name_without_definition_refused(self, exam_v4):
         with pytest.raises(ConfigError, match="no definition"):
-            _parse({**exam_v4, "sequence": ["D", "X"]})
+            _parse({**exam_v4, "sequence": ["baseline", "X"]})
 
     def test_unused_definition_refused(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["X"] = dict(raw["A"])
+        raw["X"] = dict(raw["exam"])
         with pytest.raises(ConfigError, match="never runs"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_unknown_kind_refused(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["kind"] = "study"
+        raw["baseline"]["kind"] = "study"
         with pytest.raises(ConfigError, match="'execute' or 'learn'"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
@@ -230,59 +230,59 @@ class TestChecklist:
         # A learn key on an execute phase and vice versa: both refused,
         # never silently dropped.
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["evidence"] = {"name": "segment", "K": 5}
+        raw["baseline"]["evidence"] = {"name": "segment", "K": 5}
         with pytest.raises(ConfigError, match="kind 'execute' but carries"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["L"]["delivery"] = {"name": "none"}
+        raw["learn"]["delivery"] = {"name": "none"}
         with pytest.raises(ConfigError, match="kind 'learn' but carries"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_unknown_role_refused(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["role"] = "maybe"
+        raw["baseline"]["role"] = "maybe"
         with pytest.raises(ConfigError, match="declared, never inferred"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_test_role_and_test_tasks_are_one_fact(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["C"]["tasks"] = "train"
+        raw["test"]["tasks"] = "train"
         with pytest.raises(ConfigError, match="mixes role 'test'"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_exam_role_runs_the_exam_execution(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["A"]["execution"] = {"name": "real"}
+        raw["exam"]["execution"] = {"name": "real"}
         with pytest.raises(ConfigError, match="that role runs 'exam'"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
         raw = copy.deepcopy(exam_v4["phases"])
         # B replaces A in the sequence (a live phase runs the benchmark).
-        raw["B"] = dict(raw.pop("A"), role=PHASE_ROLE_LIVE)
-        raw["B"]["execution"] = {"name": "exam"}
-        sequence = ["D", "L", "B", "L", "C"]
+        raw["live"] = dict(raw.pop("exam"), role=PHASE_ROLE_LIVE)
+        raw["live"]["execution"] = {"name": "exam"}
+        sequence = ["baseline", "learn", "live", "learn", "test"]
         with pytest.raises(ConfigError, match="that role runs 'real'"):
             parse_phases(raw, sequence, n_attempts_weak=1)
 
     def test_baseline_arms_are_fixed(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["execution"]["arms"] = ["executor_weak"]
+        raw["baseline"]["execution"]["arms"] = ["executor_weak"]
         with pytest.raises(ConfigError, match="must be exactly"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
         raw = copy.deepcopy(exam_v4["phases"])
-        del raw["D"]["execution"]["arms"]
+        del raw["baseline"]["execution"]["arms"]
         with pytest.raises(ConfigError, match="must be exactly"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_baseline_refuses_a_per_arm_depth(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["execution"]["n_attempts"] = 2
+        raw["baseline"]["execution"]["n_attempts"] = 2
         with pytest.raises(ConfigError,
                            match="n_attempts_strong / n_attempts_weak"):
             parse_phases(raw, exam_v4["sequence"],
@@ -290,58 +290,58 @@ class TestChecklist:
 
     def test_only_the_baseline_is_two_armed(self, live_v4):
         raw = copy.deepcopy(live_v4["phases"])
-        raw["B"]["execution"]["arms"] = ["executor_weak"]
+        raw["live"]["execution"]["arms"] = ["executor_weak"]
         with pytest.raises(ConfigError, match="only a baseline"):
             parse_phases(raw, live_v4["sequence"],
                          n_attempts_weak=2)
 
     def test_an_exam_phase_has_no_sampling_depth(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["A"]["execution"]["n_attempts"] = 1
+        raw["exam"]["execution"]["n_attempts"] = 1
         with pytest.raises(ConfigError, match="no sampling depth"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_nested_method_mappings_need_a_name(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["delivery"] = {"arms": 1}
+        raw["baseline"]["delivery"] = {"arms": 1}
         with pytest.raises(ConfigError,
-                           match=r"phases.D.delivery needs a non-empty"):
+                           match=r"phases.baseline.delivery needs a non-empty"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["L"]["curate"] = "agentbrew"
+        raw["learn"]["curate"] = "agentbrew"
         with pytest.raises(ConfigError,
-                           match="phases.L.curate must be a mapping"):
+                           match="phases.learn.curate must be a mapping"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_compare_against_must_be_earlier_or_fresh_bare(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["compare"] = {"against": "C"}
+        raw["baseline"]["compare"] = {"against": "test"}
         with pytest.raises(ConfigError, match="does not appear earlier"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["D"]["compare"] = {"against": FRESH_BARE}
+        raw["baseline"]["compare"] = {"against": FRESH_BARE}
         # fresh_bare is legal anywhere (a fresh bare arm in this phase).
         parse_phases(raw, exam_v4["sequence"],
                      n_attempts_weak=1)
 
     def test_compare_target_must_be_a_bare_measurement(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["A"]["compare"] = {"against": "D"}
+        raw["exam"]["compare"] = {"against": "baseline"}
         # D (baseline) is a legal control for A too.
         parse_phases(raw, exam_v4["sequence"],
                      n_attempts_weak=1)
         # A control that appears EARLIER but is not a bare measurement
         # (the learn phase before A) is refused.
-        raw["A"]["compare"] = {"against": "L"}
+        raw["exam"]["compare"] = {"against": "learn"}
         with pytest.raises(ConfigError, match="bare measurement"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
         # A later phase (the final test) never qualifies as a control.
-        raw["A"]["compare"] = {"against": "C"}
+        raw["exam"]["compare"] = {"against": "test"}
         with pytest.raises(ConfigError, match="does not appear earlier"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
@@ -352,9 +352,9 @@ class TestChecklist:
         # baseline phase (the learn driver's check used to fire only
         # after the live phase's executions were spent).
         raw = copy.deepcopy(live_v4["phases"])
-        raw["B2"] = dict(raw["B"])
-        raw["B2"]["compare"] = {"against": "B"}
-        sequence = ["D", "L", "B", "L", "B2", "L", "C"]
+        raw["B2"] = dict(raw["live"])
+        raw["B2"]["compare"] = {"against": "live"}
+        sequence = ["baseline", "learn", "live", "learn", "B2", "learn", "test"]
         with pytest.raises(ConfigError, match="baseline phase's bare"):
             parse_phases(raw, sequence, n_attempts_weak=2)
 
@@ -362,18 +362,18 @@ class TestChecklist:
         # Without compare (or against fresh_bare) a live phase leaves
         # the decision with no control row to compare against.
         raw = copy.deepcopy(live_v4["phases"])
-        del raw["B"]["compare"]
+        del raw["live"]["compare"]
         with pytest.raises(ConfigError, match="without a control"):
             parse_phases(raw, live_v4["sequence"],
                          n_attempts_weak=2)
-        raw["B"]["compare"] = {"against": FRESH_BARE}
+        raw["live"]["compare"] = {"against": FRESH_BARE}
         with pytest.raises(ConfigError, match="without a control"):
             parse_phases(raw, live_v4["sequence"],
                          n_attempts_weak=2)
 
     def test_the_sequence_must_start_with_an_execute_phase(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        sequence = ["L", "D"] + exam_v4["sequence"]
+        sequence = ["learn", "baseline"] + exam_v4["sequence"]
         with pytest.raises(ConfigError,
                            match="must start with an execute phase"):
             parse_phases(raw, sequence,
@@ -381,44 +381,44 @@ class TestChecklist:
 
     def test_single_arm_depth_never_exceeds_the_control(self, live_v4):
         raw = copy.deepcopy(live_v4["phases"])
-        raw["B"]["execution"]["n_attempts"] = 3
+        raw["live"]["execution"]["n_attempts"] = 3
         with pytest.raises(ConfigError, match="exceeds its control's"):
             parse_phases(raw, live_v4["sequence"],
                          n_attempts_weak=2)
         # At the control's depth the check passes.
-        raw["B"]["execution"]["n_attempts"] = 2
+        raw["live"]["execution"]["n_attempts"] = 2
         parse_phases(raw, live_v4["sequence"],
                      n_attempts_weak=2)
 
     def test_single_arm_depth_must_be_a_positive_int(self, live_v4):
         raw = copy.deepcopy(live_v4["phases"])
-        raw["B"]["execution"]["n_attempts"] = 0
+        raw["live"]["execution"]["n_attempts"] = 0
         with pytest.raises(ConfigError, match="positive"):
             parse_phases(raw, live_v4["sequence"],
                          n_attempts_weak=2)
 
     def test_author_exams_switch_has_no_v4_image(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["L"]["author"] = {"name": "distill_diagnose", "exams": True}
+        raw["learn"]["author"] = {"name": "distill_diagnose", "exams": True}
         with pytest.raises(ConfigError, match="no v4 image"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)
 
     def test_merge_check_exam_needs_an_exam_phase(self, live_v4):
-        # The live sequence has no A phase: merge_check 'exam' is
+        # The live sequence has no exam phase: merge_check 'exam' is
         # refused (the upgrade maps it to 'none' for this reason).
         raw = copy.deepcopy(live_v4["phases"])
-        raw["L"]["curate"]["merge_check"] = "exam"
+        raw["learn"]["curate"]["merge_check"] = "exam"
         with pytest.raises(ConfigError, match="no exam execute phase"):
             parse_phases(raw, live_v4["sequence"],
                          n_attempts_weak=2)
 
     def test_acceptance_names_a_rule_or_stays_absent(self, exam_v4):
         raw = copy.deepcopy(exam_v4["phases"])
-        raw["A"]["acceptance"] = "scorer"
+        raw["exam"]["acceptance"] = "scorer"
         parse_phases(raw, exam_v4["sequence"],
                      n_attempts_weak=1)
-        raw["A"]["acceptance"] = ""
+        raw["exam"]["acceptance"] = ""
         with pytest.raises(ConfigError, match="verdict rule"):
             parse_phases(raw, exam_v4["sequence"],
                          n_attempts_weak=1)

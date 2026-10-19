@@ -6,7 +6,7 @@ unit runs with no skills. The ``skills_injected`` a bare run records is
 below-threshold task inside a with-bank arm -- and the block is the
 empty D9 block. In the R5 row semantics ``skills_injected=None`` IS the
 control unit's marker. Extracted from stage 6's hard-coded bare control
-arm (M2); in the v4 shape this is the D phase's delivery and the
+arm (M2); in the v4 shape this is the baseline phase's delivery and the
 fresh-bare control's spec.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``

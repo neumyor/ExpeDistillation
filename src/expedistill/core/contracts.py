@@ -112,7 +112,7 @@ class RunRecord:
 @dataclass
 class AcceptanceReportRow:
     """One unit's row of the acceptance report (the acceptance module's
-    output; one report, one row per unit -- D phases split by role)."""
+    output; one report, one row per unit -- baseline phases split by role)."""
 
     #: The unit this row judges (the join key shared with the execution
     #: unit list).

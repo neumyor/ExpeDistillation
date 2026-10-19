@@ -11,14 +11,16 @@ model output.
 Protocol v2 (docs/decisions/stage23_protocol_v2_20261013.md section 3.3)
 also makes this module the home of the G2 output contract. The section
 markers themselves live in ``core.models`` (a second block consumer exists),
-and around them: ``skill_markers`` reads the marker set a stored content
-carries, ``validate_skill_sections`` checks a parsed G2 response against its
+and around them: ``has_skill_sections`` checks a stored content carries
+all four sections, ``validate_skill_sections`` checks a parsed G2 response against its
 mode's JSON contract, and ``render_skill_content`` turns a validated response
 into the deterministic marker text stored in ``Skill.content`` (the single
 representation every later consumer -- injection, G7 similarity, G8 merge,
 D8 audit -- reads). ``write_skill`` refuses a subtask outcome that
 contradicts its mode before any model call, and ``rewrite_skill`` requires
-the rewrite to keep the original's marker set.
+the rewrite to keep the four sections. Since the 2026-10-19 ruling
+(docs/decisions/unified_skill_structure_20261019.md) the distill and
+diagnose modes share one four-section structure.
 
 2026-10-13 incident (run tb21_split_v2_20261013_2125, 67/315 stage-3 units
 killed): validate_skill_sections rejected ANY embedded newline in a field
@@ -26,9 +28,9 @@ value, but the G2 prompts ask for "the exact command FORM", and the model
 legally answers with heredoc-shaped steps -- real multi-line commands. The
 over-strict check killed legal payloads as ModelOutputError terminal units.
 The fix (docs/decisions/g2_multiline_and_json_extraction_fix_20261014.md)
-keeps the skill_markers defense but moves its carrier: values may span lines,
+keeps the forged-marker defense but moves its carrier: values may span lines,
 and the check runs PER LINE on the line-start markers (a forged marker would
-poison skill_markers' reading of the rendered content). Sections that pass
+poison has_skill_sections' reading of the rendered content). Sections that pass
 validation render so that a section marker can appear at a line start only
 where the renderer itself wrote it: scalar values and checklist items are
 normalized and checked line by line before the renderer puts their
@@ -56,8 +58,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.core.models import (
-    FAILURE_REFERENCE_MARKERS,
-    PROCEDURE_MARKERS,
+    SKILL_MARKERS,
     SKILL_SUMMARY_MAX_CHARS,
     Exam,
     Skill,
@@ -71,9 +72,9 @@ __all__ = [
     "SKILL_SECTION_FIELDS",
     "SKILL_SUMMARY_FIELD",
     "gen_exam",
+    "has_skill_sections",
     "render_skill_content",
     "rewrite_skill",
-    "skill_markers",
     "validate_skill_sections",
     "write_skill",
 ]
@@ -83,21 +84,23 @@ __all__ = [
 #: prompt, which is a new experiment.
 FAILURE_CATEGORIES = ("misread", "missing_step", "wrong_trigger", "other")
 
-#: The JSON contract each write_skill mode works against (protocol v2,
-#: decision section 3.2): the parsed response must carry exactly these keys,
-#: which map 1:1 onto the four stored sections. test_templates pins the G2
-#: prompts' "Output ONLY JSON" examples to this mapping.
-SKILL_SECTION_FIELDS: Dict[str, Tuple[str, ...]] = {
-    "distill": ("when_to_use", "steps", "verify", "not_applicable_when"),
-    "diagnose": ("trigger", "why_it_fails", "do_instead",
-                 "not_applicable_when"),
-}
+#: The JSON contract both write_skill modes work against: the parsed
+#: response must carry exactly these keys, which map 1:1 onto the four
+#: stored sections (SKILL_MARKERS). Since the 2026-10-19 ruling the
+#: distill and diagnose modes share ONE structure; the mode only picks
+#: the prompt and the material (a succeeded vs a failed subtask).
+#: test_templates pins the G2 prompts' "Output ONLY JSON" examples to it.
+SKILL_SECTION_FIELDS: Tuple[str, ...] = (
+    "when_to_use", "steps", "verify", "not_applicable_when")
 
-#: The checklist field of each mode's contract: a non-empty list of strings
-#: in validation, a renderer-numbered list in rendering.
-_CHECKLIST_FIELDS: Dict[str, str] = {
-    "distill": "steps",
-    "diagnose": "do_instead",
+#: The checklist field: a non-empty list of strings in validation, a
+#: renderer-numbered list in rendering.
+_CHECKLIST_FIELD = "steps"
+
+#: The write modes and their default prompts.
+_MODE_PROMPTS: Dict[str, str] = {
+    "distill": "SKILL_DISTILL",
+    "diagnose": "SKILL_DIAGNOSE",
 }
 
 #: The non-section field every G2 / G6 output carries alongside the four
@@ -111,10 +114,6 @@ SKILL_SUMMARY_FIELD = "summary"
 #: self-numbering, but a stray one is stripped rather than double-numbered.
 _SELF_NUMBERING_RE = re.compile(r"^\s*\d+[.)]\s+")
 
-#: All eight section markers. A stored field value must not start with any
-#: of them (validate_skill_sections): a forged marker would poison
-#: skill_markers' reading of the rendered content.
-_ALL_MARKERS = PROCEDURE_MARKERS + FAILURE_REFERENCE_MARKERS
 
 
 def _strip_self_numbering(item: str) -> str:
@@ -134,36 +133,25 @@ def _normalize_newlines(value: str) -> str:
     return value.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def skill_markers(content: str) -> Optional[Tuple[str, ...]]:
-    """The marker set a stored skill content carries, None when neither.
+def has_skill_sections(content: str) -> bool:
+    """True when a stored skill content carries all four section markers.
 
-    Precise semantics: returns PROCEDURE_MARKERS iff content contains all
-    four procedure markers AND no failure-only marker;
-    FAILURE_REFERENCE_MARKERS iff all four failure markers AND no
-    procedure-only marker ("[Do not use when]" is shared); otherwise None
-    (partial or mixed). Line-start anchored, and ONLY ever applied to the
-    stored multi-line content -- never to the single-line compressed
-    injection block (the compression keeps the marker text but destroys
-    line structure).
+    Line-start anchored, and ONLY ever applied to the stored multi-line
+    content -- never to the single-line compressed injection block (the
+    compression keeps the marker text but destroys line structure).
+    Content written before the 2026-10-19 ruling with the retired
+    failure-reference sections ([Trigger] / [Why it fails] / [Do instead])
+    reads as False: it is not migrated, the bank is regenerated.
     """
     lines = content.split("\n")
-    present = {
-        marker for marker in _ALL_MARKERS
-        if any(line.startswith(marker) for line in lines)
-    }
-    procedure = set(PROCEDURE_MARKERS)
-    failure = set(FAILURE_REFERENCE_MARKERS)
-    if procedure <= present and not present & (failure - procedure):
-        return PROCEDURE_MARKERS
-    if failure <= present and not present & (procedure - failure):
-        return FAILURE_REFERENCE_MARKERS
-    return None
+    return all(any(line.startswith(marker) for line in lines)
+               for marker in SKILL_MARKERS)
 
 
-def render_skill_content(mode: str, sections: Dict[str, Any]) -> str:
+def render_skill_content(sections: Dict[str, Any]) -> str:
     """Deterministic marker-text rendering of one validated sections dict.
 
-    Mode "distill" renders a procedure skill:
+    Both write modes render the same layout:
 
         [When to use] {when_to_use}
         [Steps]
@@ -172,55 +160,29 @@ def render_skill_content(mode: str, sections: Dict[str, Any]) -> str:
         [Verify] {verify}
         [Do not use when] {not_applicable_when}
 
-    Mode "diagnose" renders a failure reference, the same layout with
-    [Trigger]/{trigger}, [Why it fails]/{why_it_fails}, [Do instead] +
-    numbered {do_instead}, and [Do not use when]/{not_applicable_when}. The
-    renderer numbers the checklist itself; same sections in, byte-identical
-    content out (the stage-3 determinism invariant, decision section 4.2).
-    A stray self-numbering on an item is stripped here too, so it is never
-    double-numbered.
+    The renderer numbers the checklist itself; same sections in,
+    byte-identical content out (the stage-3 determinism invariant,
+    decision section 4.2). A stray self-numbering on an item is stripped
+    here too, so it is never double-numbered.
 
     Multi-line values are legal (the 2026-10-13 incident: heredoc-shaped
     steps). A checklist item renders its FIRST line behind the renderer's
     number ("2. ...") and every continuation line at column 0, verbatim;
     a multi-line scalar likewise continues at column 0. Scalars and items
-    pass through the same ``_normalize_newlines`` as validation, and for
-    single-line input the output is byte-identical to the pre-2026-10-14
-    renderer -- the anchor the 243 stored pairs of the incident run pin
-    (rendering unchanged for everything that was already legal).
+    pass through the same ``_normalize_newlines`` as validation.
     """
-    if mode not in SKILL_SECTION_FIELDS:
-        raise ValueError(
-            f'mode must be "distill" or "diagnose", got {mode!r}')
+    (when_to_use, steps, verify, not_applicable) = SKILL_SECTION_FIELDS
+    (use_marker, steps_marker, verify_marker, close_marker) = SKILL_MARKERS
     items = [f"{index}. {_strip_self_numbering(_normalize_newlines(item))}"
-             for index, item in enumerate(sections[_CHECKLIST_FIELDS[mode]], 1)]
-    if mode == "distill":
-        (when_to_use, _steps, verify, not_applicable) = SKILL_SECTION_FIELDS[mode]
-        (use_marker, steps_marker, verify_marker, close_marker) = \
-            PROCEDURE_MARKERS
-        lines = [
-            f"{use_marker} "
-            f"{_normalize_newlines(sections[when_to_use]).strip()}",
-            steps_marker,
-            *items,
-            f"{verify_marker} {_normalize_newlines(sections[verify]).strip()}",
-            f"{close_marker} "
-            f"{_normalize_newlines(sections[not_applicable]).strip()}",
-        ]
-    else:
-        (trigger, why_it_fails, _do_instead, not_applicable) = \
-            SKILL_SECTION_FIELDS[mode]
-        (trigger_marker, why_marker, instead_marker, close_marker) = \
-            FAILURE_REFERENCE_MARKERS
-        lines = [
-            f"{trigger_marker} {_normalize_newlines(sections[trigger]).strip()}",
-            f"{why_marker} "
-            f"{_normalize_newlines(sections[why_it_fails]).strip()}",
-            instead_marker,
-            *items,
-            f"{close_marker} "
-            f"{_normalize_newlines(sections[not_applicable]).strip()}",
-        ]
+             for index, item in enumerate(sections[steps], 1)]
+    lines = [
+        f"{use_marker} {_normalize_newlines(sections[when_to_use]).strip()}",
+        steps_marker,
+        *items,
+        f"{verify_marker} {_normalize_newlines(sections[verify]).strip()}",
+        f"{close_marker} "
+        f"{_normalize_newlines(sections[not_applicable]).strip()}",
+    ]
     return "\n".join(lines)
 
 
@@ -231,14 +193,13 @@ def _reject_bad_text(mode: str, where: str, value: str) -> None:
     prompts ask for the exact command form, and heredoc-shaped steps carry
     real newlines; the old any-newline rejection killed 67/315 stage-3
     units). What stays forbidden is a line -- any line, not just the first
-    -- starting with one of the eight section markers: the renderer writes
+    -- starting with one of the four section markers: the renderer writes
     a multi-line value's continuation lines at column 0 verbatim, and
-    skill_markers is line-start anchored, so a forged line-start marker in
-    a value would poison its reading of the rendered content exactly as a
-    forged first line used to.
+    has_skill_sections is line-start anchored, so a forged line-start
+    marker in a value would poison its reading of the rendered content.
     """
     for line_number, line in enumerate(value.split("\n"), 1):
-        for marker in _ALL_MARKERS:
+        for marker in SKILL_MARKERS:
             if line.startswith(marker):
                 raise ModelOutputError(
                     f"write_skill(mode={mode!r}): {where} must not carry "
@@ -290,8 +251,7 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
     rejection was over-strict); what is checked instead is that NO line of
     a normalized value STARTS WITH any section marker: the renderer emits
     continuation lines at column 0, and a forged marker at a line start
-    would make skill_markers read a legal skill as None and silently
-    disarm the rewrite/K5 marker checks. The summary is the one field the
+    would poison has_skill_sections' reading of the rendered content. The summary is the one field the
     multi-line license does NOT cover: it is a directory line, so
     ``_validate_summary`` rejects any embedded newline. The checked bytes
     are the same ``_normalize_newlines`` bytes the renderer will write.
@@ -299,21 +259,21 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
     checklist type check is never skipped. Raises ModelOutputError
     otherwise.
     """
-    if mode not in SKILL_SECTION_FIELDS:
+    if mode not in _MODE_PROMPTS:
         raise ValueError(
             f'mode must be "distill" or "diagnose", got {mode!r}')
     if not isinstance(sections, dict):
         raise ModelOutputError(
             f"write_skill(mode={mode!r}): sections must be a JSON object, "
             f"got {type(sections).__name__}")
-    for key in SKILL_SECTION_FIELDS[mode] + (SKILL_SUMMARY_FIELD,):
+    for key in SKILL_SECTION_FIELDS + (SKILL_SUMMARY_FIELD,):
         if key not in sections:
             raise ModelOutputError(
                 f"write_skill(mode={mode!r}): missing required field "
                 f"{key!r}, got keys {sorted(sections)}")
-    for key in SKILL_SECTION_FIELDS[mode]:
+    for key in SKILL_SECTION_FIELDS:
         value = sections[key]
-        if key == _CHECKLIST_FIELDS[mode]:
+        if key == _CHECKLIST_FIELD:
             if not isinstance(value, list) or not value:
                 raise ModelOutputError(
                     f"write_skill(mode={mode!r}): field {key!r} must be a "
@@ -355,11 +315,10 @@ def write_skill(
 ) -> Skill:
     """Write one structured skill for one subtask (G2, protocol v2).
 
-    ``mode`` picks the section structure (README stage 3): "distill"
-    renders a four-section procedure skill from a SUCCEEDED subtask,
-    "diagnose" a four-section failure reference from a FAILED one; the
-    mode-to-structure mapping is the extension point when a third skill
-    kind appears. Any other mode is a caller bug and raises ValueError
+    ``mode`` picks the prompt and the material: "distill" writes from a
+    SUCCEEDED subtask (what to do), "diagnose" from a FAILED one (which
+    mistake to avoid and what to do instead). Both render the same four
+    sections (the 2026-10-19 ruling). Any other mode is a caller bug and raises ValueError
     before any model call, and so does a subtask outcome that contradicts
     the mode: the guards below turn an old v1 selection rule combined
     with the v2 prompts from silent distortion into a loud refusal
@@ -368,8 +327,7 @@ def write_skill(
     ``prompt_name`` overrides the mode's default prompt (SKILL_DISTILL /
     SKILL_DIAGNOSE): a prompt-strategy variant registers its own prompt
     under a new name and passes it here, keeping the mode's four-section
-    output contract (the validation and rendering below still key on
-    ``mode`` alone). None -- every current caller -- keeps the default,
+    output contract. None -- every current caller -- keeps the default,
     so the parameter is invisible to the frozen runs.
 
     The named prompt returns JSON; the parsed dict is validated by
@@ -381,16 +339,18 @@ def write_skill(
     precedent): call_model's format retries only cover JSON parsing,
     never field content.
     """
+    if mode not in _MODE_PROMPTS:
+        raise ValueError(
+            f'mode must be "distill" or "diagnose", got {mode!r}')
+    name = prompt_name or _MODE_PROMPTS[mode]
     if mode == "distill":
-        name = prompt_name or "SKILL_DISTILL"
         variables = {
             "label": subtask.label,
             "description": subtask.description,
             "steps_view": steps_view,
             "weak_profile": weak_profile,
         }
-    elif mode == "diagnose":
-        name = prompt_name or "SKILL_DIAGNOSE"
+    else:
         variables = {
             "label": subtask.label,
             "description": subtask.description,
@@ -398,19 +358,16 @@ def write_skill(
             "context_summary": subtask.context_summary,
             "weak_profile": weak_profile,
         }
-    else:
-        raise ValueError(
-            f'mode must be "distill" or "diagnose", got {mode!r}')
 
     if mode == "distill" and subtask.success is not True:
         raise ValueError(
             'write_skill(mode="distill") requires subtask.success is True '
-            f"(procedure material), got success={subtask.success!r} on "
+            f"(success material), got success={subtask.success!r} on "
             f"{subtask.subtask_id}")
     if mode == "diagnose" and subtask.success is not False:
         raise ValueError(
             'write_skill(mode="diagnose") requires subtask.success is False '
-            f"(diagnosis material), got success={subtask.success!r} on "
+            f"(failure material), got success={subtask.success!r} on "
             f"{subtask.subtask_id}")
 
     parsed = call_model(
@@ -423,7 +380,7 @@ def write_skill(
     validate_skill_sections(mode, parsed)
     return Skill(
         skill_id=make_skill_id(subtask.subtask_id),
-        content=render_skill_content(mode, parsed),
+        content=render_skill_content(parsed),
         subtask_id=subtask.subtask_id,
         source_subtasks=[subtask.subtask_id],
         summary=_validate_summary(f"write_skill(mode={mode!r})",
@@ -505,12 +462,12 @@ def rewrite_skill(
 
     Protocol v2 keeps the skill's structure: when the original content
     carries a section-marker set (every stored v2 skill does), the
-    rewritten text must carry the SAME set (skill_markers set equality,
-    not substring containment) or the call fails with ModelOutputError --
-    a rewrite that drops a section or swaps the skill's kind would
-    silently change what every marker-based consumer reads. An original
-    without markers (test fixtures, foreign content; unreachable inside a
-    pure v2 run) is passed through without a marker check.
+    rewritten text must carry all four sections too (has_skill_sections)
+    or the call fails with ModelOutputError -- a rewrite that drops a
+    section would silently change what every marker-based consumer
+    reads. An original without the four sections (test fixtures, foreign
+    content, a pre-2026-10-19 failure reference) is passed through
+    without the check.
     """
     variables = {
         "skill_text": skill.content,
@@ -538,14 +495,10 @@ def rewrite_skill(
             f"REWRITE: field 'skill_text' must be a non-empty string, "
             f"got {skill_text!r}")
     new_text = skill_text.strip()
-    markers = skill_markers(skill.content)
-    if markers is not None:
-        new_markers = skill_markers(new_text)
-        if new_markers != markers:
-            raise ModelOutputError(
-                "REWRITE: the rewritten skill must keep the same four "
-                f"bracket sections as the original ({' / '.join(markers)}), "
-                f"got {new_markers!r}")
+    if has_skill_sections(skill.content) and not has_skill_sections(new_text):
+        raise ModelOutputError(
+            "REWRITE: the rewritten skill must keep the four bracket "
+            f"sections ({' / '.join(SKILL_MARKERS)})")
     rewrite_reason = parsed.get("rewrite_reason")
     if not isinstance(rewrite_reason, str):
         raise ModelOutputError(

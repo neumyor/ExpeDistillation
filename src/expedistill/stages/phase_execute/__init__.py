@@ -33,7 +33,7 @@ it re-runs everything on every call of ITS OWN phase instance (rule 1's
 own exception -- only a crash resume inside the phase keeps stored
 units, K1's own resume model); a COMPLETED instance replays as itself
 (``_finished_summary``, the completion signal every execute phase now
-has) and nothing is ever reused ACROSS C phases.
+has) and nothing is ever reused ACROSS test phases.
 
 The frozen companions, wired here:
 
@@ -94,9 +94,9 @@ learn-phase half is phase_bank's):
                                   the disk fact later phases derive from
         <arm>/store/              the arm's Trajectory store for the
                                   phases whose trajectories must NOT land
-                                  in the run-level store (the C phase's
+                                  in the run-level store (the test phase's
                                   two arms; a fresh-bare live control).
-                                  The D phase's bare arms and the live
+                                  The baseline phase's bare arms and the live
                                   rounds keep their frozen historical
                                   locations (the run-level store and
                                   ``live_run/roundNN``): every frozen
@@ -228,7 +228,7 @@ def _finished_summary(directory, role: str):
 def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
     """Run one execute-phase position; returns its summary as PhaseResult.
 
-    A phase whose last pass completed everything is skipped whole (its
+    exam phase whose last pass completed everything is skipped whole (its
     stored summary returned as-is): a resume replays the sequence from
     the first position, and a finished phase's artifacts must stay the
     bytes its own pass wrote -- re-deriving them would mix a later

@@ -1,7 +1,7 @@
 """Skill-folder M3, the stage wiring: materialize once per phase, attach
 to the with-bank units' tasks, refuse on an incapable plugin.
 
-The C phase is the only phase a folder unit can reach (the load-time
+The test phase is the only phase a folder unit can reach (the load-time
 pairing holds it there), so ``_run_test`` is the one driver that
 materializes: the folder delivery's rows share ONE phase-level manifest,
 ONE ``materialize_skill_folder`` call under the phase directory serves
@@ -143,8 +143,8 @@ def _config():
                 "executor_weak": "weak-7b"},
         weak_profile="a weak model",
         n_attempts_strong=1, n_attempts_weak=1,
-        rules={}, sequence=["D"],
-        phases={"D": {"kind": "execute", "role": "baseline",
+        rules={}, sequence=["baseline"],
+        phases={"baseline": {"kind": "execute", "role": "baseline",
                       "tasks": "train", "delivery": {"name": "none"},
                       "execution": {"name": "real",
                                     "arms": ["executor_strong",
@@ -168,7 +168,7 @@ def _ctx(tmp_path):
 
 def _c_phase(compare="fresh_bare"):
     return PhaseInstance(
-        index=2, name="C", label="p03:C",
+        index=2, name="test", label="p03:test",
         spec=ExecutePhaseSpec(
             role="test", tasks="test",
             delivery={"name": "folder"},
@@ -188,7 +188,7 @@ def _group_skill(task_id, status="accepted"):
 
 
 def _write_bank(ctx, skills):
-    directory = phase_bank.phase_bank_dir(ctx.run_dir, "p02:L")
+    directory = phase_bank.phase_bank_dir(ctx.run_dir, "p02:learn")
     directory.mkdir(parents=True, exist_ok=True)
     with open(directory / phase_bank.BANK_NAME, "w",
               encoding="utf-8") as handle:
@@ -198,7 +198,7 @@ def _write_bank(ctx, skills):
 
 
 # ---------------------------------------------------------------------------
-# The capable-plugin C phase
+# The capable-plugin test phase
 # ---------------------------------------------------------------------------
 
 def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
@@ -226,7 +226,7 @@ def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
     assert len(manifests) == 1  # one shared read-only manifest
     manifest = with_bank[0]["task"].meta["skill_folder"]
     folder_dir = Path(with_bank[0]["task"].meta["skill_folder_dir"])
-    assert folder_dir == Path(ctx.run_dir) / "phases" / "p03_C" / "skill_folder"
+    assert folder_dir == Path(ctx.run_dir) / "phases" / "p03_test" / "skill_folder"
     for call in control:
         assert call["task"].meta.get("skill_folder") is None
         assert call["task"].meta.get("skill_folder_dir") is None
@@ -254,7 +254,7 @@ def test_a_resumed_c_phase_materializes_idempotently(monkeypatch, tmp_path):
     _write_bank(ctx, [_group_skill("t1")])
     phase = _c_phase()
     phase_execute.run(ctx, phase)
-    folder_dir = Path(ctx.run_dir) / "phases" / "p03_C" / "skill_folder"
+    folder_dir = Path(ctx.run_dir) / "phases" / "p03_test" / "skill_folder"
     before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns)
               for path in folder_dir.iterdir()}
 
@@ -284,7 +284,7 @@ def test_an_empty_accepted_bank_runs_the_folder_units_bare(
     for call in plugin.calls:
         assert call["skills_block"] == ""
         assert call["task"].meta.get("skill_folder") is None
-    assert not (Path(ctx.run_dir) / "phases" / "p03_C"
+    assert not (Path(ctx.run_dir) / "phases" / "p03_test"
                 / "skill_folder").exists()
 
 

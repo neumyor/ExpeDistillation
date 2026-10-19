@@ -7,7 +7,7 @@ any field after the run started is a new experiment (B4 enforces that).
 SCHEMA v4 (the execute-learn repair, R9): the method is a ``sequence``
 of phases -- local names looked up under ``phases``, an execute or a
 learn phase each (see the schema-v4 section below for the parsed specs,
-the R8 role vocabulary and the load-time checklist). A phase family's
+the R8 role vocabulary and the load-time checklist). exam phase family's
 params are validated by the FAMILY'S OWN contract (a dataclass in the
 methods layer) at resolution time, NOT here: core is layer 0 and cannot
 know a method's parameters. Core owns only the shape, and nothing is
@@ -335,7 +335,7 @@ class LearnPhaseSpec:
                 f"got {self.role!r}")
 
 
-#: A phase definition: what ``config.phases`` maps a local name to.
+#: exam phase definition: what ``config.phases`` maps a local name to.
 PhaseSpec = Union[ExecutePhaseSpec, LearnPhaseSpec]
 
 
@@ -425,17 +425,17 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             "test role runs the test set and only the test role does")
     delivery = _method_mapping(raw.get("delivery"),
                                f"phases.{name}.delivery")
-    # Checklist item 8: the folder delivery is a C-phase delivery. The
+    # Checklist item 8: the folder delivery is a test-phase delivery. The
     # alignment ruling pins the play to the final test: A injects one
     # skill, B a task's whole group, D nothing. Its real_folder
-    # execution is C-phase-only with it (the pairing check below).
+    # execution is test-phase-only with it (the pairing check below).
     if delivery["name"] == FOLDER_DELIVERY_NAME and \
             role != PHASE_ROLE_TEST:
         raise ConfigError(
             f"phases.{name} declares delivery name "
             f"{FOLDER_DELIVERY_NAME!r} with role {role!r}: the "
             "skill-folder delivery is a final-test delivery, legal only "
-            f"for role {PHASE_ROLE_TEST!r} (the C phase; the other "
+            f"for role {PHASE_ROLE_TEST!r} (the test phase; the other "
             f"roles use the existing delivery methods)")
     execution = _method_mapping(raw.get("execution"),
                                 f"phases.{name}.execution")
@@ -596,7 +596,7 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
         raise ConfigError(
             f"phases.{name}.author carries 'exams', a v3 authoring switch "
             "with no v4 image: exam generation is implied by every "
-            "sequence's A phases (upgrade_v3_config maps the one legal "
+            "sequence's exam phases (upgrade_v3_config maps the one legal "
             "ablation pair to a sequence without any)")
     curate = _method_mapping(raw.get("curate"), f"phases.{name}.curate")
     role = raw.get("role", PHASE_ROLE_LEARN)
@@ -631,14 +631,14 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
        ``n_attempts`` never exceeds its control's weak-model depth;
     5. ``curate.merge_check: exam`` requires an exam-role execute phase
        somewhere in the sequence (the merges' regression exams come from
-       the A phases);
+       the exam phases);
     6. the sequence starts with an execute phase (a learn phase first
        would have nothing to learn from);
     7. a live phase carries ``compare`` naming an earlier baseline phase
        (its own report rows are all with-skill rows, so it has no
        in-report control);
     8. the ``folder`` delivery appears only on a test-role execute
-       phase (the skill-folder delivery is a C-phase delivery; the A, B
+       phase (the skill-folder delivery is a test-phase delivery; the A, B
        and D roles keep the existing injection methods), and pairs
        one-to-one with the ``real_folder`` execution: a folder delivery
        under the plain ``real`` execution, or a ``real_folder``

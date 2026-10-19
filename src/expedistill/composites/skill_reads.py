@@ -27,7 +27,7 @@ of a skill.
 Leak-audit note (M4's survey): the D8 leak judge's only hook is the A
 phase's exam pipeline (``composites/acceptance_leak.py``, keyed by
 (skill, version) over the skill's content) -- no leak hook exists on
-C-phase units, and none is invented here. The read set is a reported
+test-phase units, and none is invented here. The read set is a reported
 fact for post-hoc manual audit; the existing per-(skill, version)
 coverage keeps standing for folder units.
 """

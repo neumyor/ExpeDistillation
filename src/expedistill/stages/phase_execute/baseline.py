@@ -3,7 +3,7 @@
 The strong and weak arms run bare (nothing injected) at their frozen
 depths, stored in the RUN-LEVEL trajectory store with the stage-1
 accepted-holes record beside them -- every frozen consumer of a bare
-baseline (live baseline loading, the report reader, the C phase's
+baseline (live baseline loading, the report reader, the test phase's
 reused control) reads them there.
 """
 
@@ -48,8 +48,8 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
     """Both bare arms over the phase's task set, stored in the RUN-LEVEL
     trajectory store with the stage-1 accepted-holes record beside them
     -- every frozen consumer of a bare baseline (live baseline loading,
-    the report reader, the C phase's reused control) reads them there.
-    One report row per (task, role) (the D phases' role split); the
+    the report reader, the test phase's reused control) reads them there.
+    One report row per (task, role) (the baseline phases' role split); the
     failure-set derivation is NOT here (G3/R3: decision applies the
     named task-select rule to the weak rows)."""
     params = _execution_params(spec)

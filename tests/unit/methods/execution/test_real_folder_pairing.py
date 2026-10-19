@@ -2,13 +2,13 @@
 entry and its load-time pairing with the ``folder`` delivery.
 
 Three surfaces, one rule (the alignment ruling: the folder delivery and
-the real_folder execution are ONE play, pinned to the C phase):
+the real_folder execution are ONE play, pinned to the test phase):
 
 * the registry resolves ``real_folder`` to
   ``RealFolderExecutionParams`` (an empty params class, like the exam
   execution's -- the M6 review removed ``n_attempts`` and
   ``max_injection_tokens``, which no legal phase ever consumed: folder
-  is pinned to the test role and the C phase samples at the global
+  is pinned to the test role and the test phase samples at the global
   ``n_attempts_weak`` depth exactly as it always did);
 * ``parse_phases`` accepts the folder/real_folder pair on a test-role
   phase and refuses every mismatch: folder under the plain ``real``,
@@ -53,7 +53,7 @@ def test_real_folder_resolves_its_params():
 
 
 def test_real_folder_params_are_empty_like_the_exams():
-    # No fields at all: a C phase samples at the global n_attempts_weak
+    # No fields at all: a test phase samples at the global n_attempts_weak
     # and nothing about the folder run is budgeted at execution time.
     assert not RealFolderExecutionParams.__dataclass_fields__
     # The three execution params classes stay distinct types.
@@ -79,14 +79,14 @@ def _raw_sequence(*, delivery, execution, role="test", tasks="test"):
     minimal raw mapping parse_phases accepts shape-wise; the pairing
     rule is what the tests vary."""
     return {
-        "sequence": ["D", "C"],
+        "sequence": ["baseline", "test"],
         "phases": {
-            "D": {"kind": "execute", "role": "baseline",
+            "baseline": {"kind": "execute", "role": "baseline",
                   "tasks": "train", "delivery": {"name": "none"},
                   "execution": {"name": "real",
                                 "arms": ["executor_strong",
                                          "executor_weak"]}},
-            "C": {"kind": "execute", "role": role, "tasks": tasks,
+            "test": {"kind": "execute", "role": role, "tasks": tasks,
                   "delivery": {"name": delivery},
                   "execution": dict(execution, name=execution["name"])},
         },
@@ -103,15 +103,15 @@ def _parse_pair(delivery, execution, role="test", tasks="test"):
 def test_folder_pairs_with_real_folder_on_a_c_phase():
     specs = _parse_pair(FOLDER_DELIVERY_NAME,
                         {"name": FOLDER_EXECUTION_NAME})
-    assert specs["C"].execution["name"] == FOLDER_EXECUTION_NAME
-    assert specs["C"].delivery["name"] == FOLDER_DELIVERY_NAME
+    assert specs["test"].execution["name"] == FOLDER_EXECUTION_NAME
+    assert specs["test"].delivery["name"] == FOLDER_DELIVERY_NAME
 
 
 def test_whole_bank_with_plain_real_still_parses():
-    # The old C phase is untouched: nothing about the pairing rule
+    # The old test phase is untouched: nothing about the pairing rule
     # touches a non-folder delivery under the real execution.
     specs = _parse_pair("whole_bank", {"name": "real"})
-    assert specs["C"].execution["name"] == "real"
+    assert specs["test"].execution["name"] == "real"
 
 
 def test_folder_under_the_plain_real_execution_is_refused():
@@ -127,7 +127,7 @@ def test_real_folder_over_whole_bank_is_refused():
 
 def test_real_folder_on_a_baseline_role_is_refused():
     # A baseline phase is two-armed and runs the real execution; the
-    # folder play never leaves the C phase.
+    # folder play never leaves the test phase.
     with pytest.raises(ConfigError):
         _parse_pair("none", {"name": FOLDER_EXECUTION_NAME},
                     role="baseline", tasks="train")
@@ -141,7 +141,7 @@ def test_real_folder_on_a_live_role_is_refused():
 
 def test_folder_on_a_non_test_role_still_refused_first():
     # The M2 half of checklist item 8 holds on its own: the folder
-    # delivery on a B phase is refused before the pairing rule is
+    # delivery on a live phase is refused before the pairing rule is
     # even reached (the delivery is parsed first).
     with pytest.raises(ConfigError, match="legal only for role 'test'"):
         _parse_pair(FOLDER_DELIVERY_NAME,

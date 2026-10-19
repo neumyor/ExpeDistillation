@@ -50,7 +50,7 @@ def test_task_list_row_fields():
 
 def test_shapes_construct_with_plain_values():
     run = RunRecord(
-        unit_id="p00:D:tb:task1:weak:abcd0123", task_ref="tb:task1",
+        unit_id="p00:baseline:tb:task1:weak:abcd0123", task_ref="tb:task1",
         skills_injected=None, skills_block="", model_role="weak",
         model_name="m", sample_index=0, dispatch_index=0,
         correctness=None, metrics={}, aux={}, artifacts={})

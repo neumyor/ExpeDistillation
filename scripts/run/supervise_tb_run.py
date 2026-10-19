@@ -7,7 +7,7 @@ command, which retries only the failed units).
 
 Usage: supervise_tb_run.py <run_dir> <config.yaml> [phase_label]
 
-``phase_label`` defaults to ``p07:C`` (the folder experiment's
+``phase_label`` defaults to ``p07:test`` (the folder experiment's
 final-test phase). Source .env first: the relaunch command and the
 ssh probe read EXPEDISTILL_TB_* from the environment.
 
@@ -111,7 +111,7 @@ def unresolved_failures(run_dir: Path, phase_label: str) -> int:
 def main() -> int:
     run_dir = Path(sys.argv[1]).resolve()
     config = sys.argv[2]
-    phase_label = sys.argv[3] if len(sys.argv) > 3 else "p07:C"
+    phase_label = sys.argv[3] if len(sys.argv) > 3 else "p07:test"
     cmd = cli_command(config, run_dir)
     summary_path = (run_dir / "phases" / phase_label.replace(":", "_")
                     / "phase_summary.json")

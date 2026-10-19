@@ -14,7 +14,7 @@ consumer.
 
 ``AuthoringParams`` is the family's registered ``distill_diagnose``
 contract: an empty parameter set (the v3 ``exams`` switch has no v4
-image -- exam generation is implied by every sequence's A phases).
+image -- exam generation is implied by every sequence's exam phases).
 """
 
 from dataclasses import dataclass

@@ -427,7 +427,7 @@ def test_select_skills_marked_beats_unmarked_and_other_sections_do_not():
     assert scores["skill/a-plain"] > scores["skill/c-other"]
 
 
-def test_select_skills_failure_reference_trigger_section_weighted():
+def test_select_skills_retired_trigger_section_is_not_weighted():
     bank = [
         make_skill("s/none", "tool case alpha"),
         make_skill("s/proc", "tool case [When to use] alpha"),
@@ -437,7 +437,7 @@ def test_select_skills_failure_reference_trigger_section_weighted():
                            min_score=0.0)
     scores = {entry["skill_id"]: entry["score"]
               for entry in result["scores"]}
-    # Both marker families' applicability sections ([When to use] for
-    # procedure skills, [Trigger] for failure references) are weighted.
+    # Only [When to use] is weighted (the 2026-10-19 ruling retired the
+    # failure-reference structure); [Trigger] is plain text.
     assert scores["s/proc"] > scores["s/none"]
-    assert scores["s/fail"] > scores["s/none"]
+    assert scores["s/fail"] <= scores["s/none"]

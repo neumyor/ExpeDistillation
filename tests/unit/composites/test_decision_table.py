@@ -19,7 +19,7 @@ from expedistill.infra.reliability import CodeBugError, ConfigError
 def _row(*, valid=1, success=1, status="normal", cause="", unit_id="u1",
          role="weak", injected=None):
     return AcceptanceReportRow(
-        unit_id=unit_id, phase_label="p01:A", role=role,
+        unit_id=unit_id, phase_label="p01:exam", role=role,
         injected_skills=injected if injected is not None else
         [{"skill_id": "traj/tb:t1/strong/00/seg00/skill", "version": 1}],
         runs=[], valid_count=valid, success_count=success, status=status,

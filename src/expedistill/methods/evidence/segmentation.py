@@ -3,8 +3,8 @@
 Wave 3-S. In the old world stage 2 cut the whole failure set's
 trajectories right after stage 1, so stage 3 always found subtasks in
 the store. In the phase world no execute phase owns that cut: the add
-path's evidence (boundaries doc section 2.5 -- the D-phase strong-model
-segments; repair plan R6 -- "the evidence module reads the D phase's
+path's evidence (boundaries doc section 2.5 -- the baseline-phase strong-model
+segments; repair plan R6 -- "the evidence module reads the baseline phase's
 strong trajectories and their segmentation results") would find an
 empty store. This driver closes that gap, and
 ``stages/learn_tasks._land_add`` calls it lazily, right before the
@@ -17,18 +17,17 @@ Alignment with the old stage 2 (git c6a9fb8), deliberately:
 * the candidate set is ONE task's stored NON-EMPTY trajectories of
   BOTH roles -- the per-task shape the trajectory_select rule's
   contract fixes (one call per task, both roles mixed) -- and the
-  run-level store holds exactly the D phase's bare trajectories;
+  run-level store holds exactly the baseline phase's bare trajectories;
 * 0-step trajectories are excluded BEFORE the rule (segmenting nothing
   is undefined input for G1/D7) with the same "empty trajectory" skip
   records in K2's audit channel, once per run directory;
 * the named trajectory_select rule decides WHICH trajectories; the
-  driver keeps the STRONG entries of the selection and segments only
-  those -- the add path's material is the strong model's segments, and
-  the weak half has no phase-world consumer (the revise paths read
-  exam sheets and live groups, not weak segments), so it is not paid
-  for. For the registered rules this changes nothing about what the
-  rule sees: it is handed the same both-roles set the old stage
-  handed it;
+  driver segments the selection's STRONG entries, plus its WEAK entries
+  when ``params.write_lessons`` is on (the 2026-10-19 ruling: weak
+  failures are lesson material). With the switch off the weak half has
+  no consumer, so it is not paid for. For the registered rules this
+  changes nothing about what the rule sees: it is handed the same
+  both-roles set the old stage handed it;
 * processing order is sorted trajectory_id -- the old stage's own
   rule, kept so a resume replays the same sequence;
 * K2 (composites.segment_checked) owns everything per trajectory:
@@ -125,14 +124,15 @@ def segment_add_material(
     usage: Any = None,
     run_dir: Union[str, Path, None] = None,
 ) -> Dict[str, int]:
-    """Segment the task's selected strong trajectories via K2.
+    """Segment the task's selected trajectories via K2 (strong ones, plus
+    weak ones when ``params.write_lessons`` is on).
 
     ``params`` is the learn phase's evidence method (the registry's
     ``(evidence, segment)`` entry: K and the re-segmentation budget);
     ``trajectory_select`` is the configured named rule;
     ``view_rules`` the run's benchmark plugin's. Returns the old stage
     2 summary shape for one task: ``segmented`` / ``skipped`` count the
-    selected strong trajectories K2 returned subtasks for / skipped
+    selected trajectories of those roles K2 returned subtasks for / skipped
     (exhaustion, or an earlier call's terminal skip), ``empty_skipped``
     the 0-step exclusions. Zero model calls when every selected
     trajectory is already done (K2's own resume guard).
@@ -145,13 +145,14 @@ def segment_add_material(
     _record_empty_skips(base, empty)
 
     selected = get_trajectory_select(trajectory_select)(trajectories)
-    strong = sorted((traj for traj in selected
-                     if traj.model_role == "strong"),
-                    key=lambda traj: traj.trajectory_id)
+    roles = ("strong", "weak") if params.write_lessons else ("strong",)
+    material = sorted((traj for traj in selected
+                       if traj.model_role in roles),
+                      key=lambda traj: traj.trajectory_id)
 
     segmented = 0
     skipped = 0
-    for trajectory in strong:
+    for trajectory in material:
         subtasks = segment_checked(
             store=store,
             trajectory=trajectory,

@@ -4,7 +4,7 @@ decide_task_list turns (this round's report, the control report, the
 bank, the checks left) into one task list. Pinned here: the exam-kind
 and live-kind target mappings, the in-phase vs borrowed control, the
 first-learn-phase baseline path (empty current report, D report as the
-input), the C-phase rejection, the bank's immutability (R4's decision
+input), the test-phase rejection, the bank's immutability (R4's decision
 side) and the loud failures on wiring bugs. The table itself is pinned
 cell by cell in tests/unit/composites/test_decision_table.py.
 
@@ -26,8 +26,8 @@ from tests.helpers.skills import make_skill
 
 _EXAM = "traj/tb:t1/strong/00/seg00/exam"
 _SKILL = "traj/tb:t1/strong/00/seg00/skill"
-_EXAM_UNIT = f"p01:A:tb:{_EXAM}:weak:11111111"
-_BARE_EXAM_UNIT = f"p01:A:tb:{_EXAM}:weak:00000000"
+_EXAM_UNIT = f"p01:exam:tb:{_EXAM}:weak:11111111"
+_BARE_EXAM_UNIT = f"p01:exam:tb:{_EXAM}:weak:00000000"
 
 
 def _skill(skill_id=_SKILL):
@@ -35,7 +35,7 @@ def _skill(skill_id=_SKILL):
 
 
 def _row(*, unit_id, role="weak", injected=None, valid=1, success=1,
-         status="normal", cause="", phase_label="p01:A"):
+         status="normal", cause="", phase_label="p01:exam"):
     return AcceptanceReportRow(
         unit_id=unit_id, phase_label=phase_label, role=role,
         injected_skills=injected, runs=[], valid_count=valid,
@@ -58,19 +58,19 @@ def _exam_rows(*, with_skill_valid=1, with_skill_success=1):
 
 
 def _live_rows(*, valid=1, success=1, status="normal", cause=""):
-    return [_row(unit_id="p01:B:tb:tb:t1:weak:22222222",
+    return [_row(unit_id="p01:live:tb:tb:t1:weak:22222222",
                  injected=[{"skill_id": _SKILL, "version": 1}],
                  valid=valid, success=success, status=status, cause=cause,
-                 phase_label="p01:B")]
+                 phase_label="p01:live")]
 
 
 def _d_report(task_valid=2, task_success=0):
     return [
-        _row(unit_id="p00:D:tb:tb:t1:strong:00000000", role="strong",
-             injected=None, valid=1, success=1, phase_label="p00:D"),
-        _row(unit_id="p00:D:tb:tb:t1:weak:00000000", role="weak",
+        _row(unit_id="p00:baseline:tb:tb:t1:strong:00000000", role="strong",
+             injected=None, valid=1, success=1, phase_label="p00:baseline"),
+        _row(unit_id="p00:baseline:tb:tb:t1:weak:00000000", role="weak",
              injected=None, valid=task_valid, success=task_success,
-             phase_label="p00:D"),
+             phase_label="p00:baseline"),
     ]
 
 
@@ -99,11 +99,11 @@ def test_exam_no_gain_on_the_last_check_deletes_with_retry_exhausted():
 
 def test_exam_row_without_an_exam_id_is_a_wiring_bug():
     rows = [
-        _row(unit_id="p01:A:tb:tb:t1:weak:33333333",
+        _row(unit_id="p01:exam:tb:tb:t1:weak:33333333",
              injected=[{"skill_id": _SKILL, "version": 1}]),
         # An in-phase control so the missing-control guard stays quiet
         # and the exam-id check itself fires.
-        _row(unit_id="p01:A:tb:tb:t1:weak:00000000", injected=None),
+        _row(unit_id="p01:exam:tb:tb:t1:weak:00000000", injected=None),
     ]
     with pytest.raises(CodeBugError, match="not an exam id"):
         decide_task_list(current_kind=decision.PHASE_EXAM,
@@ -111,7 +111,7 @@ def test_exam_row_without_an_exam_id_is_a_wiring_bug():
 
 
 # ---------------------------------------------------------------------------
-# Live kind: a task's whole group, D-phase control
+# Live kind: a task's whole group, baseline-phase control
 # ---------------------------------------------------------------------------
 
 def test_live_improved_unit_targets_the_task_group():
@@ -123,7 +123,7 @@ def test_live_improved_unit_targets_the_task_group():
     assert out == [decision.TaskListRow(
         target_kind="group", target_id="tb:t1", action=decision.KEEP,
         reason="improved",
-        basis_unit="p01:B:tb:tb:t1:weak:22222222")]
+        basis_unit="p01:live:tb:tb:t1:weak:22222222")]
 
 
 def test_live_strong_arm_of_the_control_batch_is_ignored():
@@ -211,7 +211,7 @@ def test_live_target_without_a_control_is_a_wiring_bug():
         decide_task_list(
             current_kind=decision.PHASE_LIVE,
             current_report=[_row(
-                unit_id="p01:B:tb:tb:t2:weak:44444444",
+                unit_id="p01:live:tb:tb:t2:weak:44444444",
                 injected=[{"skill_id": "s", "version": 1}])],
             control_kind=decision.PHASE_BASELINE,
             control_report=_d_report(), bank=_bank(), checks_left=1)
@@ -224,10 +224,10 @@ def test_retrieval_miss_rows_are_controls_never_targets():
     # instead of raising, produces no action row of its own, and serves
     # as the control for the same task's target row.
     rows = [
-        _row(unit_id="p01:B:tb:tb:t1:weak:55555555",
+        _row(unit_id="p01:live:tb:tb:t1:weak:55555555",
              injected=[{"skill_id": _SKILL, "version": 1}],
              valid=1, success=1),
-        _row(unit_id="p01:B:tb:tb:t1:weak:66666666", injected=[],
+        _row(unit_id="p01:live:tb:tb:t1:weak:66666666", injected=[],
              valid=2, success=0),
     ]
     out = decide_task_list(current_kind=decision.PHASE_LIVE,
@@ -238,7 +238,7 @@ def test_retrieval_miss_rows_are_controls_never_targets():
     assert out == [decision.TaskListRow(
         target_kind="group", target_id="tb:t1", action=decision.KEEP,
         reason="improved",
-        basis_unit="p01:B:tb:tb:t1:weak:55555555")]
+        basis_unit="p01:live:tb:tb:t1:weak:55555555")]
     assert decide_task_list(
         current_kind=decision.PHASE_LIVE,
         current_report=[rows[1]], bank=_bank(), checks_left=1) == []
@@ -248,7 +248,7 @@ def test_malformed_unit_ids_fail_loudly():
     # The third id is a bare "pNN" phase label (no ":<name>" colon): it
     # eats the benchmark slot, which the parser now refuses instead of
     # silently mis-slicing the task id (D2).
-    for bad_id in ("not-a-unit-id", "p01:A:tb:t1:weak:not-hex!",
+    for bad_id in ("not-a-unit-id", "p01:exam:tb:t1:weak:not-hex!",
                    "x01:A:tb:t1:weak:aaaaaaaa",
                    "p01:tb:tb:t1:weak:aaaaaaaa"):
         with pytest.raises(CodeBugError, match="malformed unit id"):
@@ -267,9 +267,9 @@ def test_malformed_unit_ids_fail_loudly():
 
 def _d_weak_row(task, *, valid=2, success=0, status="normal",
                 cause=""):
-    return _row(unit_id=f"p00:D:tb:{task}:weak:00000000", role="weak",
+    return _row(unit_id=f"p00:baseline:tb:{task}:weak:00000000", role="weak",
                 injected=None, valid=valid, success=success, status=status,
-                cause=cause, phase_label="p00:D")
+                cause=cause, phase_label="p00:baseline")
 
 
 def test_baseline_path_adds_failed_skillless_tasks():
@@ -290,7 +290,7 @@ def test_baseline_path_adds_failed_skillless_tasks():
     assert out == [decision.TaskListRow(
         target_kind="task", target_id="tb:t1", action=decision.ADD,
         reason=decision.BASELINE_GAP_REASON,
-        basis_unit="p00:D:tb:tb:t1:weak:00000000")]
+        basis_unit="p00:baseline:tb:tb:t1:weak:00000000")]
 
 
 def test_baseline_path_skips_tasks_the_bank_already_covers():
@@ -323,10 +323,10 @@ def test_baseline_path_uses_the_named_task_select_rule():
 
 
 def test_baseline_path_demands_the_d_report():
-    with pytest.raises(CodeBugError, match="D-phase report"):
+    with pytest.raises(CodeBugError, match="baseline-phase report"):
         decide_task_list(current_kind=None, control_kind=None,
                          control_report=None, bank=[], checks_left=1)
-    with pytest.raises(CodeBugError, match="D-phase report"):
+    with pytest.raises(CodeBugError, match="baseline-phase report"):
         decide_task_list(current_kind=None, control_kind=decision.PHASE_EXAM,
                          control_report=[], bank=[], checks_left=1)
     with pytest.raises(CodeBugError, match="without a phase kind"):
@@ -337,7 +337,7 @@ def test_baseline_path_demands_the_d_report():
 
 
 # ---------------------------------------------------------------------------
-# Section 3 rule 9: the C-phase rejection, and R4's decision side
+# Section 3 rule 9: the test-phase rejection, and R4's decision side
 # ---------------------------------------------------------------------------
 
 def test_final_test_reports_are_rejected_on_both_sides():
@@ -359,13 +359,13 @@ def test_the_bank_is_untouched_by_the_decision():
     decide_task_list(
         current_kind=decision.PHASE_LIVE,
         current_report=[_row(
-            unit_id="p01:B:tb:tb:t2:weak:66666666",
+            unit_id="p01:live:tb:tb:t2:weak:66666666",
             injected=[{"skill_id": bank[1].skill_id, "version": 1}],
             valid=1, success=0)],
         control_kind=decision.PHASE_BASELINE,
-        control_report=[_row(unit_id="p00:D:tb:tb:t2:weak:00000000",
+        control_report=[_row(unit_id="p00:baseline:tb:tb:t2:weak:00000000",
                              role="weak", injected=None, valid=2,
-                             success=1, phase_label="p00:D")],
+                             success=1, phase_label="p00:baseline")],
         bank=bank, checks_left=0)
     assert [skill.to_dict() for skill in bank] == before
 

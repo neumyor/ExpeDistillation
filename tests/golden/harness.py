@@ -170,7 +170,7 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
     stage renders it into the G10 input, so unlike the unit-test stubs the
     golden matrix's FAKE_TASK must be a real B2 entry (mirrors what every
     checked-in plugin does). Also registers the stub benchmark's verdict
-    rule binding (``scorer`` -- the phase world's D phase and report
+    rule binding (``scorer`` -- the phase world's baseline phase and report
     reader judge through the benchmark's default named rule), the same
     runtime seam the unit suites use. Usable under pytest and standalone."""
     from expedistill.benchmarks.registry import _reset_registry, register_plugin
@@ -229,10 +229,11 @@ _DISTILL_SECTIONS = {
     "summary": "inspect the reported service state before acting on it",
 }
 _DIAGNOSE_SECTIONS = {
-    "trigger": "acting on a report without inspecting it first",
-    "why_it_fails": "the action does not match the actual state.",
-    "do_instead": ["inspect the reported state",
-                   "run the command that matches the state"],
+    "when_to_use": "about to act on a report without inspecting it first: "
+                   "the action would not match the actual state",
+    "steps": ["inspect the reported state",
+              "run the command that matches the state"],
+    "verify": "the command's result matches the inspected state",
     "not_applicable_when": "the state was already inspected",
     "summary": "never act on a report before inspecting it",
 }

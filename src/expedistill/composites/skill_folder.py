@@ -40,7 +40,7 @@ carried into the run environment (the sandbox upload goes strictly by
 the manifest's file names), so a local directory audit should read the
 folder against the manifest, not trust the directory alone.
 
-Wiring: the C-phase driver (``stages/phase_execute/final_test.py``)
+Wiring: the test-phase driver (``stages/phase_execute/final_test.py``)
 materializes the phase's folder once, before dispatch, into the phase
 directory's ``skill_folder/``.
 """

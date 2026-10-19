@@ -11,7 +11,7 @@ execute_learn_repair_plan_20261016.md, boundaries doc section 3 rule 2):
 2. K1's retry stays mechanical: a run that came back with a scorer
    verdict -- however suspicious its facts look -- is never retried;
    only a run that raised an infrastructure failure is.
-3. Exam answering (the A-phase execution half) persists the answer with
+3. Exam answering (the exam-phase execution half) persists the answer with
    correctness blank (``judge_verdict=None``) and never grades.
 
 No network, no real model: the TB remote is the stateful fake from

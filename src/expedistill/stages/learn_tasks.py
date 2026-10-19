@@ -33,7 +33,7 @@ add distills the task's strong segments into new PENDING skills, the
 stage-3 grain and status exactly as stage 3 always wrote them -- and
 produces those segments first when they do not exist yet (the evidence
 family's segmentation wiring, ``methods.evidence.segmentation``; Wave
-3-S), so the whole chain from the D-phase trajectories to the new
+3-S), so the whole chain from the baseline-phase trajectories to the new
 skill runs inside the phase world with nothing seeded.
 
 **Evidence and author** (boundaries sections 2.5/2.6): a revise row
@@ -348,7 +348,7 @@ def _land_add(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     produced first if they do not exist yet: no execute phase cuts
     them, so the landing runs the evidence family's segmentation
     wiring (``segmentation.segment_add_material`` -- K2 over the task's
-    trajectory_select-selected strong D-phase trajectories) right
+    trajectory_select-selected strong baseline-phase trajectories) right
     before collecting, lazily -- only an add row pays for the cut, and
     K2's stored-subtask skip makes a resumed add row free. Experiences
     whose skill already exists are skipped -- the add path's other
@@ -359,10 +359,11 @@ def _land_add(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     if _rows_of(phase_dir / OUTCOMES_NAME, phase.label, row.target_id):
         return  # this add already landed; its receipt is the proof
     store: Store = ctx.store
+    evidence_params = resolve_params("evidence", phase.spec.evidence)
     segmentation.segment_add_material(
         store=store,
         task_id=row.target_id,
-        params=resolve_params("evidence", phase.spec.evidence),
+        params=evidence_params,
         trajectory_select=ctx.config.rules["trajectory_select"],
         view_rules=get_plugin(ctx.config.benchmark).view_rules,
         handle=ctx.handle("segmenter"),
@@ -371,11 +372,12 @@ def _land_add(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     try:
         package = add_path.collect_add_evidence(
             task_row=row, store=store,
-            rule_name=ctx.config.rules["segment_select"])
+            rule_name=ctx.config.rules["segment_select"],
+            write_lessons=evidence_params.write_lessons)
     except add_path.NoAddMaterial:
         # A data fact the old stage 3 answered with silence (no subtask,
         # no skill): the weak arm's failure authorized the add, but the
-        # strong arm holds no learnable material -- not run, all cut
+        # collected roles hold no learnable material -- not run, all cut
         # away by the segment rule, or K2-exhausted (terminal within
         # this run, so raising here would brick the phase on a resume
         # that re-derives the same row forever). Recorded, not raised.

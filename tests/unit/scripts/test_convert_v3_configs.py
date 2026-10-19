@@ -79,14 +79,14 @@ def test_every_repository_v3_config_converts_and_loads(tmp_path):
         # The real loader on the written file: the YAML round-trip and
         # the whole v4 load-time checklist.
         config = load_config(str(out))
-        assert config.phases["D"].role == "baseline"
-        assert config.sequence[0] == "D"
-        assert config.sequence[-1] == "C"
+        assert config.phases["baseline"].role == "baseline"
+        assert config.sequence[0] == "baseline"
+        assert config.sequence[-1] == "test"
 
 
 @pytest.mark.parametrize("retry_limit,expected", [
-    (0, ["D", "L", "A", "L", "C"]),
-    (2, ["D", "L", "A", "L", "A", "L", "A", "L", "C"]),
+    (0, ["baseline", "learn", "exam", "learn", "test"]),
+    (2, ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"]),
 ])
 def test_v2_exam_input_chains_through_both_upgrades(tmp_path, retry_limit,
                                                      expected):
@@ -114,11 +114,11 @@ def test_v2_live_run_input_chains_through_both_upgrades(tmp_path):
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
     assert status.startswith("chain_v2.yaml -> "), status
     config = load_config(str(tmp_path / "chain_v2_v4.yaml"))
-    assert config.sequence == ["D", "L", "B", "L", "B", "L", "C"]
-    live = config.phases["B"]
+    assert config.sequence == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
+    live = config.phases["live"]
     assert live.role == "live"
     assert live.execution["n_attempts"] == 2
-    assert live.compare.against == "D"
+    assert live.compare.against == "baseline"
     assert live.compare.rule == "strict_rate_gain"
 
 

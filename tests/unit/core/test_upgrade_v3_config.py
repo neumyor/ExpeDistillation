@@ -40,7 +40,7 @@ def _load_raw(name):
         return yaml.safe_load(fh)
 
 
-#: Section 4's D phase -- the double-arm baseline, the same literal in
+#: Section 4's baseline phase -- the double-arm baseline, the same literal in
 #: every sequence the upgrade emits (the two-arm depths are the global
 #: n_attempts_strong / n_attempts_weak, never per-phase).
 D_PHASE = {
@@ -52,8 +52,8 @@ D_PHASE = {
                   "arms": ["executor_strong", "executor_weak"]},
 }
 
-#: Section 4's A phase -- one exam measurement round (the retry_limit
-#: budget is expressed by how many A phases the sequence carries, so the
+#: Section 4's exam phase -- one exam measurement round (the retry_limit
+#: budget is expressed by how many exam phases the sequence carries, so the
 #: phase itself has no parameters).
 A_PHASE = {
     "kind": "execute",
@@ -69,118 +69,118 @@ A_PHASE = {
 #: them. Everything a config varies is spelled out in its own row.
 EXPECTED = [
     ("alfworld_skillopt_split_v2_v3.yaml",
-     ["D", "L", "A", "L", "A", "L", "A", "L", "C"],
+     ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"],
      {
-         "D": D_PHASE,
-         "A": A_PHASE,
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+         "baseline": D_PHASE,
+         "exam": A_PHASE,
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.05},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn", "role": "learn",
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
                           "token_budget": 96000, "rounds": 3}},
      }),
     ("alfworld_skillopt_split_v3.yaml",
-     ["D", "L", "A", "L", "A", "L", "A", "L", "C"],
+     ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"],
      {
-         "D": D_PHASE,
-         "A": A_PHASE,
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+         "baseline": D_PHASE,
+         "exam": A_PHASE,
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "whole_bank"},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn", "role": "learn",
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
                           "token_budget": 96000, "rounds": 3}},
      }),
     ("searchqa_skillopt_split_v3.yaml",
-     ["D", "L", "A", "L", "A", "L", "A", "L", "C"],
+     ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"],
      {
-         "D": D_PHASE,
-         "A": A_PHASE,
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+         "baseline": D_PHASE,
+         "exam": A_PHASE,
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "whole_bank"},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn", "role": "learn",
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
                           "token_budget": 96000, "rounds": 3}},
      }),
     ("tb21_full_v2_v3.yaml",
-     ["D", "L", "A", "L", "A", "L", "A", "L", "C"],
+     ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"],
      {
-         "D": D_PHASE,
-         "A": A_PHASE,
+         "baseline": D_PHASE,
+         "exam": A_PHASE,
          # full mode: no held-out test set, so C reuses D's weak bare
          # arm (and its accepted holes) instead of running a fresh one.
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "whole_bank"},
                "execution": {"name": "real"},
-               "compare": {"against": "D"}},
-         "L": {"kind": "learn", "role": "learn",
+               "compare": {"against": "baseline"}},
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
                           "token_budget": 96000, "rounds": 3}},
      }),
     ("tb21_split_live_run_v3.yaml",
-     ["D", "L", "B", "L", "B", "L", "C"],
+     ["baseline", "learn", "live", "learn", "live", "learn", "test"],
      {
-         "D": D_PHASE,
+         "baseline": D_PHASE,
          # live_run's acceptance params move into B; its merges are
          # proven by the round-1 group re-execution, not regression
          # exams (merge_check: none -- the disclosed identity change).
-         "B": {"kind": "execute", "role": "live",
+         "live": {"kind": "execute", "role": "live",
                "delivery": {"name": "group_by_task"},
                "execution": {"name": "real", "n_attempts": 3,
                              "max_injection_tokens": None},
-               "compare": {"against": "D", "rule": "strict_rate_gain"}},
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+               "compare": {"against": "baseline", "rule": "strict_rate_gain"}},
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.02},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn", "role": "learn",
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "none",
                           "token_budget": 96000, "rounds": 3}},
      }),
     ("tb21_split_reuse_v3.yaml",
-     ["D", "L", "A", "L", "A", "L", "A", "L", "C"],
+     ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"],
      {
-         "D": D_PHASE,
-         "A": A_PHASE,
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+         "baseline": D_PHASE,
+         "exam": A_PHASE,
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.02},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn", "role": "learn",
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
                           "token_budget": 96000, "rounds": 3}},
      }),
     ("tb21_split_v2_v3.yaml",
-     ["D", "L", "A", "L", "A", "L", "A", "L", "C"],
+     ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"],
      {
-         "D": D_PHASE,
-         "A": A_PHASE,
-         "C": {"kind": "execute", "role": "test", "tasks": "test",
+         "baseline": D_PHASE,
+         "exam": A_PHASE,
+         "test": {"kind": "execute", "role": "test", "tasks": "test",
                "delivery": {"name": "retrieval", "top_k": 5,
                             "max_categories": 3, "min_score": 0.02},
                "execution": {"name": "real"},
                "compare": {"against": "fresh_bare"}},
-         "L": {"kind": "learn", "role": "learn",
+         "learn": {"kind": "learn", "role": "learn",
                "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
                "author": {"name": "distill_diagnose"},
                "curate": {"name": "agentbrew", "merge_check": "exam",
@@ -252,18 +252,18 @@ class TestUpgradeV3ConfigShapes:
         # 4's field table): reordering a phase's fields must be a
         # conscious change, not a dict-iteration accident.
         exam = upgrade_v3_config(_load_raw("tb21_split_v2_v3.yaml"))
-        assert list(exam["phases"]) == ["D", "L", "A", "C"]
-        assert list(exam["phases"]["D"]) == [
+        assert list(exam["phases"]) == ["baseline", "learn", "exam", "test"]
+        assert list(exam["phases"]["baseline"]) == [
             "kind", "role", "tasks", "delivery", "execution"]
-        assert list(exam["phases"]["A"]) == [
+        assert list(exam["phases"]["exam"]) == [
             "kind", "role", "delivery", "execution"]
-        assert list(exam["phases"]["C"]) == [
+        assert list(exam["phases"]["test"]) == [
             "kind", "role", "tasks", "delivery", "execution", "compare"]
-        assert list(exam["phases"]["L"]) == [
+        assert list(exam["phases"]["learn"]) == [
             "kind", "role", "evidence", "author", "curate"]
         live = upgrade_v3_config(_load_raw("tb21_split_live_run_v3.yaml"))
-        assert list(live["phases"]) == ["D", "L", "B", "C"]
-        assert list(live["phases"]["B"]) == [
+        assert list(live["phases"]) == ["baseline", "learn", "live", "test"]
+        assert list(live["phases"]["live"]) == [
             "kind", "role", "delivery", "execution", "compare"]
 
     def test_input_mapping_untouched(self):
@@ -310,7 +310,7 @@ class TestUpgradeV3Refusals:
 
     def test_already_v4_input_refused(self):
         with pytest.raises(ConfigError, match="sequence"):
-            upgrade_v3_config({"methods": {}, "sequence": ["D"]})
+            upgrade_v3_config({"methods": {}, "sequence": ["baseline"]})
         with pytest.raises(ConfigError, match="phases"):
             upgrade_v3_config({"methods": {}, "phases": {}})
 
@@ -349,7 +349,7 @@ class TestUpgradeV3SyntheticShapes:
     def test_exam_retry_limit_counts_the_a_phases(self):
         v4 = upgrade_v3_config(
             _minimal(acceptance={"name": "exam", "retry_limit": 0}))
-        assert v4["sequence"] == ["D", "L", "A", "L", "C"]
+        assert v4["sequence"] == ["baseline", "learn", "exam", "learn", "test"]
 
     def test_empty_methods_complete_to_the_defaults(self):
         # An absent or empty slot is METHOD_DEFAULTS (the v3 loader's
@@ -370,7 +370,7 @@ class TestUpgradeV3SyntheticShapes:
 
     def test_exams_false_ablation_pair_converts_identically(self):
         # exams: false is legal only as live_run + curation none, and a
-        # live sequence has no A phase either way -- so the ablation
+        # live sequence has no exam phase either way -- so the ablation
         # pair upgrades to the identical shape as exams: true.
         base = _minimal(**_live_slots())
         ablated = _minimal(**_live_slots())
@@ -383,17 +383,17 @@ class TestUpgradeV3SyntheticShapes:
                 "name": "live_run", "n_attempts": 5,
                 "improvement": "strict_rate_gain",
                 "max_injection_tokens": 4096})))
-        b = v4["phases"]["B"]
+        b = v4["phases"]["live"]
         assert b["kind"] == "execute"
         assert b["delivery"] == {"name": "group_by_task"}
         assert b["execution"] == {"name": "real", "n_attempts": 5,
                                   "max_injection_tokens": 4096}
-        assert b["compare"] == {"against": "D",
+        assert b["compare"] == {"against": "baseline",
                                 "rule": "strict_rate_gain"}
-        assert v4["phases"]["L"]["curate"] == {
+        assert v4["phases"]["learn"]["curate"] == {
             "name": "none", "token_budget": 96000}
-        assert v4["sequence"] == ["D", "L", "B", "L", "B", "L", "C"]
-        assert "A" not in v4["phases"]
+        assert v4["sequence"] == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
+        assert "exam" not in v4["phases"]
 
     def test_explicit_merge_check_is_preserved(self):
         # The curation slot may carry merge_check (M3); an explicit value
@@ -401,7 +401,7 @@ class TestUpgradeV3SyntheticShapes:
         v4 = upgrade_v3_config(_minimal(
             curation={"name": "agentbrew", "token_budget": 96000,
                       "rounds": 3, "merge_check": "none"}))
-        assert v4["phases"]["L"]["curate"]["merge_check"] == "none"
+        assert v4["phases"]["learn"]["curate"]["merge_check"] == "none"
 
     def test_explicit_merge_check_exam_under_live_run_refused(self):
         # merge_check: exam under live_run has no v4 image: the live
@@ -414,7 +414,7 @@ class TestUpgradeV3SyntheticShapes:
 
     def test_delivery_copies_name_and_params_verbatim(self):
         v4 = upgrade_v3_config(_minimal(delivery={"name": "per_skill"}))
-        assert v4["phases"]["C"]["delivery"] == {"name": "per_skill"}
+        assert v4["phases"]["test"]["delivery"] == {"name": "per_skill"}
 
     def test_v2_source_chains_through_upgrade_v2(self):
         # The assembler's version walk (plan section 7): a v2 source

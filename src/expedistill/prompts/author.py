@@ -5,13 +5,14 @@ All three write for the weak model, in the student-aware style of AgentBrew
 conditions, no abstract commands the weak model cannot operationalize.
 
 Protocol v2 (docs/decisions/stage23_protocol_v2_20261013.md section 3.2):
-the two G2 prompts distill only SUCCEEDED subtasks into procedure skills and
-diagnose only failed ones into failure references, and both return JSON whose
-field names map 1:1 onto the four stored sections -- blocks/author.py
-validates the fields and its renderer adds the bracket section markers, so
-the G2 templates carry no marker literals. REWRITE, by contrast, names all
-eight markers: its rewritten skill_text must reproduce them so the stored
-kind stays recognizable.
+SKILL_DISTILL writes from SUCCEEDED subtasks, SKILL_DIAGNOSE from failed ones,
+and both return JSON whose field names map 1:1 onto the four stored sections
+-- blocks/author.py validates the fields and its renderer adds the bracket
+section markers, so the G2 templates carry no marker literals. Since the
+2026-10-19 ruling (docs/decisions/unified_skill_structure_20261019.md) both
+return the SAME four fields: a skill learned from a failure has the same
+structure as one learned from a success. REWRITE names the four markers:
+its rewritten skill_text must reproduce them.
 
 Schema v3 (skill-folder M1, 2026-10-17) adds ONE non-section field to all
 three output contracts: ``summary``, the one-line "what this skill is"
@@ -96,9 +97,10 @@ Output ONLY JSON with exactly these fields:
 SKILL_DIAGNOSE = register(
     PromptSpec(
         name="SKILL_DIAGNOSE",
-        template="""You are writing a failure reference for a weaker model, based on ONE subtask
-of the weak model's own trajectory where it went wrong. The weak model will
-read it to recognize the same kind of mistake and avoid it.
+        template="""You are writing a skill for a weaker model, learned from ONE subtask of the
+weak model's own trajectory where it went wrong. The skill teaches the weak
+model to recognize the situation where this mistake happens and what to do
+there instead.
 
 SUBTASK LABEL: {label}
 SUBTASK DESCRIPTION: {description}
@@ -121,21 +123,25 @@ Work in three passes:
    out as written -- vocabulary it knows, tool syntax it handles, one action
    per step. Where the profile names a weakness that caused or worsened this
    failure, the fix must guard against it.
-3. Write the reference in four sections:
-   - trigger: the failure signature -- what the weak model is doing when this
-     mistake is happening. Concrete and observable, phrased so the model can
-     recognize it in its own behavior.
-   - why_it_fails: one or two sentences: what goes wrong and why.
-   - do_instead: an ordered checklist of concrete actions, the correct
-     procedure for this kind of subtask. One action per item, imperative
-     voice, WITHOUT its own numbering; the exact command FORM with generic
-     placeholders where the subtask shows one.
-   - not_applicable_when: when this reference does NOT apply.
+3. Write the skill in four sections:
+   - when_to_use: the situation where this mistake happens -- concrete and
+     observable, phrased so the model can recognize it mid-task (including
+     its own failing behavior, such as an error it keeps getting). Say in
+     one short sentence what goes wrong there if the model does the usual
+     thing.
+   - steps: an ordered checklist of concrete actions, the correct procedure
+     for this situation. One action per item, imperative voice, WITHOUT its
+     own numbering; the exact command FORM with generic placeholders where
+     the subtask shows one.
+   - verify: the observable sign that the correct procedure worked. State
+     what to do when the sign is absent (redo the previous step, or report
+     the failure); never "keep retrying".
+   - not_applicable_when: when this skill does NOT apply.
 
-Also write a one-line summary of the reference: what mistake it warns
-against and what it teaches instead, in one or two sentences. This is
-not trigger -- trigger says WHEN the mistake is happening, the summary
-says WHAT the reference is. It will be shown as the skill's single line
+Also write a one-line summary of the skill: what mistake it prevents and
+what it teaches instead, in one or two sentences. This is not
+when_to_use -- when_to_use says WHEN to apply the skill, the summary
+says WHAT it is. It will be shown as the skill's single line
 in a directory of skills, so make it concrete and specific, and keep it
 on one line.
 
@@ -146,14 +152,14 @@ Writing discipline:
   consider", "be aware of", "make sure", "keep in mind". Write the action to
   take instead of any of them;
 - no references to this specific task, its file names, or its concrete
-  values: the reference must transfer to other tasks of the same kind.
+  values: the skill must transfer to other tasks of the same kind.
 
 Output ONLY JSON with exactly these fields:
-{{"trigger": "<one or two sentences>",
-  "why_it_fails": "<one or two sentences>",
-  "do_instead": ["<one action>", "<one action>", ...],
+{{"when_to_use": "<one or two sentences>",
+  "steps": ["<one action>", "<one action>", ...],
+  "verify": "<one or two sentences>",
   "not_applicable_when": "<one sentence>",
-  "summary": "<one line: what this reference is and does>"}}
+  "summary": "<one line: what this skill is and does>"}}
 """,
         description=(
             "G2 skill writing, diagnose mode: find where the weak model went "
@@ -196,10 +202,8 @@ Work in two steps:
      the weak model applied it wrongly or at the wrong moment;
    - "other": none of the above.
 2. Rewrite the skill to fix the classified problem. The rewritten skill must
-   keep the same four bracket sections as the original skill ([When to use]/
-   [Steps]/[Verify]/[Do not use when] for a procedure skill, [Trigger]/
-   [Why it fails]/[Do instead]/[Do not use when] for a failure reference):
-   rewrite each section's content, never collapse them into prose. Reproduce
+   keep the four bracket sections of the original skill ([When to use]/
+   [Steps]/[Verify]/[Do not use when]): rewrite each section's content, never collapse them into prose. Reproduce
    the bracketed section headers exactly as written, each on its own line.
    Change the wording, granularity, or trigger conditions of the skill -- not
    its underlying idea. Then write a fresh one-line summary of the REWRITTEN

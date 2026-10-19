@@ -9,7 +9,7 @@ pipeline's own repair budget died (the terminal
 ``exam_generation_failed`` cause).
 
 Replay protection (the phase's own resume rule, scoped to THIS phase
-instance: a later A phase is a fresh measurement round, not a replay): a
+instance: a later exam phase is a fresh measurement round, not a replay): a
 unit this same phase already planned in an earlier pass (phase_disk's
 pre-overwrite units.jsonl is the marker -- unit ids carry the phase
 label) whose bare or with-skill answer for the same key is already
@@ -79,7 +79,7 @@ __all__ = ["_pending_bank_skills", "_run_exam"]
 
 
 def _pending_bank_skills(bank: Sequence[Skill]) -> List[Skill]:
-    """The bank members still under test (the A-phase universe is one
+    """The bank members still under test (the exam-phase universe is one
     exam per PENDING skill: accepted / merged / discarded members have
     their verdicts already)."""
     return sorted((skill for skill in bank if skill.status == "pending"),
@@ -111,7 +111,7 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     the driver looks the key's latest JUDGED attempt up -- for the units
     this same phase already planned in an earlier pass -- and reuses it,
     so an interrupted-and-resumed phase never re-answers an exam whose
-    measurement already happened; a later A phase (a new measurement
+    measurement already happened; a later exam phase (a new measurement
     round) is untouched by the guard and re-measures as before."""
     _execution_params(spec)  # the exam execution has no knobs; loud check
     rule_name = spec.acceptance or verdicts.default_verdict_rule("exam")
@@ -265,7 +265,7 @@ def _exam_report(ctx: StageContext, phase: PhaseInstance,
                  pending: Sequence[Skill], rule_name: str,
                  reused: Dict[str, AcceptanceReportRow]
                  ) -> List[AcceptanceReportRow]:
-    """The A phase's report rows from the shared stores' on-disk state:
+    """The exam phase's report rows from the shared stores' on-disk state:
     one bare control row per exam plus one row per measured (skill,
     version) -- the frozen reader's shape, over THIS phase's universe,
     with rule-1 reuse rows joined in. The unit ids carry the run's real

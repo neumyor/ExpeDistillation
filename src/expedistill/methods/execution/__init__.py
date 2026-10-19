@@ -31,7 +31,7 @@ play, M3): the same benchmark execution, but the delivery is the
 into the run environment instead of injecting the skills block into the
 prompt. Like the exam execution it carries NO parameters (the M6 review
 removed ``n_attempts`` and ``max_injection_tokens``, which no legal phase
-ever consumed -- folder is pinned to the test role, and the C phase
+ever consumed -- folder is pinned to the test role, and the test phase
 samples at the global ``n_attempts_weak`` depth exactly as it always did
 under ``real``; a config key under ``real_folder`` fails loudly at the
 params builder's unknown-key check, the correct behaviour for a method
@@ -96,9 +96,9 @@ class RealFolderExecutionParams:
     delivery hands the agent a materialized folder of skill files plus a
     catalog, and the prompt carries only the folder guidance. The
     load-time checklist pins the pairing (folder delivery <->
-    real_folder execution, test role only), and the phase is a C phase:
+    real_folder execution, test role only), and the phase is a test phase:
     it samples at the global ``n_attempts_weak`` depth -- the same depth
-    the bare control arm runs, the same rule the old C phase ran under
+    the bare control arm runs, the same rule the old test phase ran under
     ``real`` -- and nothing about the folder run is budgeted at execution
     time (which skill files the agent reads is M4's post-hoc trajectory
     parse, never a run-time interception). The class is therefore empty

@@ -126,23 +126,23 @@ def clean_registry():
     _reset_registry()
 
 
-#: The exam-style method every fixture carries (an A phase so stage 0
+#: The exam-style method every fixture carries (an exam phase so stage 0
 #: resolves the exam execution and the merge_check: exam constraint).
-SEQUENCE = ["D", "L", "A", "L", "C"]
+SEQUENCE = ["baseline", "learn", "exam", "learn", "test"]
 PHASES = {
-    "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+    "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
-    "L": {"kind": "learn",
+    "learn": {"kind": "learn",
           "evidence": {"name": "segment", "K": 4},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "agentbrew", "token_budget": 4096,
                      "rounds": 3, "merge_check": "exam"}},
-    "A": {"kind": "execute", "role": "exam", "tasks": "train",
+    "exam": {"kind": "execute", "role": "exam", "tasks": "train",
           "delivery": {"name": "per_skill"},
           "execution": {"name": "exam"}},
-    "C": {"kind": "execute", "role": "test", "tasks": "test",
+    "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
           "compare": {"against": "fresh_bare"}},
@@ -211,8 +211,8 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert manifest["prompt_digests"]["SEGMENT"]
     # The frozen config copy carries the digests (core.config contract).
     assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
-    assert (manifest["config"]["phases"]["L"]["evidence"]["K"]
-            == config.phases["L"].evidence["K"])
+    assert (manifest["config"]["phases"]["learn"]["evidence"]["K"]
+            == config.phases["learn"].evidence["K"])
     # Explicit-list configs load exactly the union of the lists (reserved
     # included -- held-back tasks are still loaded).
     assert plugin.load_specs == [["t1", "t2", "t3"]]
@@ -332,10 +332,10 @@ def test_changed_config_on_frozen_run_raises(monkeypatch, tmp_path):
     stage0_freeze.run(ctx)
 
     phases = copy.deepcopy(PHASES)
-    phases["L"]["evidence"]["K"] = 9
+    phases["learn"]["evidence"]["K"] = 9
     changed = make_ctx(tmp_path, make_config(phases=phases))
     with pytest.raises(FrozenProtocolChanged,
-                       match=r"config\.phases\.L\.evidence\.K"):
+                       match=r"config\.phases\.learn\.evidence\.K"):
         stage0_freeze.run(changed)
 
 
@@ -515,7 +515,7 @@ def test_registered_custom_rule_name_accepted(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_external_control_file_verified_at_freeze(monkeypatch, tmp_path):
-    """A C phase comparing against the external campaign pins its score
+    """A test phase comparing against the external campaign pins its score
     file by sha256; the freeze step refuses a missing or drifted file
     BEFORE anything is written -- the file is part of the frozen
     method's identity, not a runtime lookup."""
@@ -526,14 +526,14 @@ def test_external_control_file_verified_at_freeze(monkeypatch, tmp_path):
     score_path.write_text(json.dumps(payload), encoding="utf-8")
     sha = hashlib.sha256(score_path.read_bytes()).hexdigest()
     phases = copy.deepcopy(PHASES)
-    phases["C"]["compare"] = {
+    phases["test"]["compare"] = {
         "against": "external_campaign",
         "external": {"path": str(score_path), "sha256": sha,
                      "model_key": "qwen"}}
     ctx = make_ctx(tmp_path, make_config(phases=phases))
     stage0_freeze.run(ctx)
     manifest = load_manifest(ctx.run_dir)
-    assert manifest["config"]["phases"]["C"]["compare"] == {
+    assert manifest["config"]["phases"]["test"]["compare"] == {
         "against": "external_campaign", "rule": None,
         "external": {"path": str(score_path), "sha256": sha,
                      "model_key": "qwen"}}
@@ -692,12 +692,12 @@ _GOLDEN_PROMPT_DIGESTS = {
     "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
     "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
     "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
-    "MERGE": "867f2ad25ac948a14d27d596b93a1d3c17a041c68361b727f99852b7ff5f2338",
+    "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
     "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
-    "REWRITE": "5221c24ced0a12f5d965bb923d23daf463efdb25a26729b798c18ef75da7d69b",
+    "REWRITE": "5f7c0eff8c77274db2dd0b50c18f1ce1c6d9adc88362ade74b0bc419c9bd9d52",
     "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
-    "SIMILARITY": "78161f680c429bfd400bd5c774bd1e8c0e1ab7f1e9de4414d87ee0a220c3d307",
-    "SKILL_DIAGNOSE": "0d5b9416627d27f430bfa1b7cbe4458000f13cb839c0989e0f9e5a0c74e4609c",
+    "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
+    "SKILL_DIAGNOSE": "623162e49bb5f71df3fa4e8d0a0ad061ce3d730947c242ef3913fc7710272b67",
     "SKILL_DISTILL": "48bfbaea7780ad51b4e1e586aef843b140a0e7157187086f99188da61830b00d",
     # v3 full freeze: the two live prompts register at prompts/__init__
     # import like every method prompt, so their digests are frozen on
@@ -736,26 +736,26 @@ def _golden_config(split):
         "n_attempts_weak": 2,
         "split": split,
         "tasks": None,
-        "sequence": ["D", "L", "A", "L", "C"],
+        "sequence": ["baseline", "learn", "exam", "learn", "test"],
         "phases": {
-            "D": {"role": "baseline", "tasks": "train",
+            "baseline": {"role": "baseline", "tasks": "train",
                   "delivery": {"name": "none"},
                   "execution": {"name": "real",
                                 "arms": ["executor_strong",
                                          "executor_weak"]},
                   "compare": None, "acceptance": None,
                   "kind": "execute"},
-            "L": {"evidence": {"name": "segment", "K": 4},
+            "learn": {"evidence": {"name": "segment", "K": 4},
                   "author": {"name": "distill_diagnose"},
                   "curate": {"name": "agentbrew", "token_budget": 4096,
                              "rounds": 3, "merge_check": "exam"},
                   "kind": "learn", "role": "learn"},
-            "A": {"role": "exam", "tasks": "train",
+            "exam": {"role": "exam", "tasks": "train",
                   "delivery": {"name": "per_skill"},
                   "execution": {"name": "exam"},
                   "compare": None, "acceptance": None,
                   "kind": "execute"},
-            "C": {"role": "test", "tasks": "test",
+            "test": {"role": "test", "tasks": "test",
                   "delivery": {"name": "whole_bank"},
                   "execution": {"name": "real"},
                   "compare": {"against": "fresh_bare", "rule": None,
@@ -814,8 +814,8 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
         "LIVE_RUN_ATTRIBUTION")
     assert frozen["LIVE_SKILL_REVISION"] == prompts.digest(
         "LIVE_SKILL_REVISION")
-    # The A phase's exam execution freezes like every phase definition.
-    assert (load_manifest(ctx.run_dir)["config"]["phases"]["A"]
+    # The exam phase's exam execution freezes like every phase definition.
+    assert (load_manifest(ctx.run_dir)["config"]["phases"]["exam"]
             ["execution"] == {"name": "exam"})
 
 
@@ -847,19 +847,19 @@ def test_unknown_compare_rule_stops_stage0(monkeypatch, tmp_path):
     task/segment/trajectory rule names."""
     plugin = _install_plugin(monkeypatch, StagePlugin())
     config = make_config(
-        sequence=["D", "L", "B", "L", "C"],
+        sequence=["baseline", "learn", "live", "learn", "test"],
         phases={
-            "D": PHASES["D"],
+            "baseline": PHASES["baseline"],
             # A live-only sequence: merge_check flips to 'none' (the
             # load-time checklist requires an exam phase otherwise).
-            "L": {**PHASES["L"],
+            "learn": {**PHASES["learn"],
                   "curate": {"name": "agentbrew", "token_budget": 4096,
                              "rounds": 3, "merge_check": "none"}},
-            "B": {"kind": "execute", "role": "live", "tasks": "train",
+            "live": {"kind": "execute", "role": "live", "tasks": "train",
                   "delivery": {"name": "group_by_task"},
                   "execution": {"name": "real", "n_attempts": 2},
-                  "compare": {"against": "D", "rule": "no_such_rule"}},
-            "C": PHASES["C"],
+                  "compare": {"against": "baseline", "rule": "no_such_rule"}},
+            "test": PHASES["test"],
         })
     ctx = make_ctx(tmp_path, config)
     with pytest.raises(ConfigError, match="no_such_rule"):
@@ -875,7 +875,7 @@ def test_unknown_acceptance_rule_stops_stage0(monkeypatch, tmp_path):
     registry before anything is loaded or frozen."""
     plugin = _install_plugin(monkeypatch, StagePlugin())
     phases = copy.deepcopy(PHASES)
-    phases["A"]["acceptance"] = "no_such_verdict_rule"
+    phases["exam"]["acceptance"] = "no_such_verdict_rule"
     ctx = make_ctx(tmp_path, make_config(phases=phases))
     with pytest.raises(ConfigError, match="no_such_verdict_rule"):
         stage0_freeze.run(ctx)

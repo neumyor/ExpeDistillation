@@ -91,7 +91,7 @@ def run_one(
     # a plugin that declares no skill_folder_prompt_name would silently
     # run it as a plain skills injection (the catalog text as the
     # skills block -- the wrong experiment), so it is refused here, at
-    # the one boundary where the unit meets the plugin. The C-phase
+    # the one boundary where the unit meets the plugin. The test-phase
     # driver refuses the whole phase BEFORE dispatch (final_test's
     # phase-level check); this per-unit guard stays as the second
     # layer, so a folder unit can never slip through any future path. A

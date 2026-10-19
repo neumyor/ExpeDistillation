@@ -28,8 +28,8 @@ from expedistill.infra.runlock import RunLockedError
 #: The fabricated runs' frozen sequence and the completeness checklist
 #: derived from it (cli._expected_labels reads the manifest, never a
 #: code constant).
-SEQUENCE = ["D", "L", "C"]
-EXPECTED_LABELS = ["p00:freeze", "p01:D", "p02:L", "p03:C"]
+SEQUENCE = ["baseline", "learn", "test"]
+EXPECTED_LABELS = ["p00:freeze", "p01:baseline", "p02:learn", "p03:test"]
 
 
 def _fabricate_ledger(run_dir: Path, labels) -> None:
@@ -111,7 +111,7 @@ def _run_raising(monkeypatch, tmp_path, error, *extra):
 
 def test_run_infra_exhaustion_says_resume_and_exits_nonzero(
         monkeypatch, capsys, tmp_path):
-    # A phase that finished every other unit and then raised
+    # exam phase that finished every other unit and then raised
     # InfrastructureError is resumable: no traceback, a clear message
     # telling the user to re-run the same command, and the exact command.
     error = InfrastructureError(
@@ -292,7 +292,7 @@ def test_summary_incomplete_run_exits_one(capsys, tmp_path):
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     captured = capsys.readouterr()
     assert code == 1
-    assert "p03:C" in captured.err
+    assert "p03:test" in captured.err
 
 
 def test_summary_takes_last_line_per_phase(capsys, tmp_path):
@@ -301,8 +301,8 @@ def test_summary_takes_last_line_per_phase(capsys, tmp_path):
     _fabricate_ledger(run_dir, EXPECTED_LABELS)
     with (run_dir / "pipeline_log.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
-            "stage": "p03:C",
-            "summary": {"stage": "p03:C", "rerun": True},
+            "stage": "p03:test",
+            "summary": {"stage": "p03:test", "rerun": True},
         }) + "\n")
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     out = capsys.readouterr().out

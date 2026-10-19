@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed a TB21 run directory's baseline (D-phase) units from the campaign
+"""Seed a TB21 run directory's baseline (baseline-phase) units from the campaign
 archive.
 
 The TB21 full campaign does not need live rollouts for its baseline: the

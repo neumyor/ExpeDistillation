@@ -107,7 +107,7 @@ def version_row(rows, version):
 
 def test_scenario_bare_answer_right_is_weak_already_knows(tmp_path):
     """The control-perfect discard (weak_already_knows): the bare control
-    row is a success, so the A-phase driver skips the with-skill run and
+    row is a success, so the exam-phase driver skips the with-skill run and
     its report answers with not_run_control_perfect -- decision deletes
     off that row alone."""
     store = Store(tmp_path / "run")
@@ -334,7 +334,7 @@ def test_scenario_exam_generation_died_is_generation_failed(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# baseline-side discards (the D-phase reader's terminal states)
+# baseline-side discards (the baseline-phase reader's terminal states)
 # ---------------------------------------------------------------------------
 
 def test_scenario_redispatch_budget_died_is_invalid_redispatch_exhausted(

@@ -14,14 +14,14 @@ rules, the status/cause vocabulary, ``summarize_unit``'s checks); this
 module only reads the same ledgers, stores and round directories the
 former readers read and hands each found run to the verdict core:
 
-* ``kind="baseline"`` -- the D phase's bare arms over the run-level
+* ``kind="baseline"`` -- the baseline phase's bare arms over the run-level
   trajectory store and stage 1's accepted-shortfall record: one row per
-  (task, role) (D phases split by role), ``runs`` one entry per expected
+  (task, role) (baseline phases split by role), ``runs`` one entry per expected
   unit (a stored trajectory judged by its benchmark's default named rule
   through ``verdict_from_run``, or an invalid
   ``missing`` entry for a unit whose infra retries were exhausted; an
   accepted hole is no run at all);
-* ``kind="exam"`` -- the A phase over the shared exams/attempts stores:
+* ``kind="exam"`` -- the exam phase over the shared exams/attempts stores:
   one control row per exam (the judged bare answer) plus one row per
   (skill, version) the exam measurement touched -- judged with-skill
   attempts as ``runs``, a leaked version as ``not_testable``/``leak`` with
@@ -29,7 +29,7 @@ former readers read and hands each found run to the verdict core:
   answer's judge budget died, as ``not_testable``/``exam_generation_failed``
   (the exam pipeline's terminal failure), and a merely unanswered sheet
   as the ``not_testable``/``zero_execution`` visibility fact;
-* ``kind="live"`` -- the B phase over the verdicts / injection-audit
+* ``kind="live"`` -- the live phase over the verdicts / injection-audit
   ledgers and the round stores: one row per (group, round); the frozen
   verdict row's zero-execution terminals map onto the status/cause
   vocabulary (weak_already_knows -> not_run_control_perfect, overflow /
@@ -84,7 +84,7 @@ __all__ = ["acceptance_report"]
 #: readers; the ROW shape is the same for all three).
 _KINDS = ("baseline", "exam", "live")
 
-#: The D phase's two bare arms (role split, core/contracts.py).
+#: The baseline phase's two bare arms (role split, core/contracts.py).
 _ROLES = ("strong", "weak")
 
 
@@ -179,13 +179,13 @@ def acceptance_report(store: Store, *, kind: str, benchmark: str,
 
 
 # ---------------------------------------------------------------------------
-# baseline: the D phase's trajectory store + accepted shortfall
+# baseline: the baseline phase's trajectory store + accepted shortfall
 # ---------------------------------------------------------------------------
 
 def _baseline_rows(store: Store, *, benchmark: str, phase_label: str,
                    n_attempts_strong: int, n_attempts_weak: int
                    ) -> List[AcceptanceReportRow]:
-    """One row per (task, role) of the D phase (module docstring)."""
+    """One row per (task, role) of the baseline phase (module docstring)."""
     accepted = set(shortfall.stage1_accepted_unit_ids(store.run_dir))
     trajectories = [store.load("trajectories", trajectory_id, Trajectory)
                     for trajectory_id in store.ids("trajectories")]

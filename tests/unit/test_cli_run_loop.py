@@ -50,21 +50,21 @@ TASK_IDS = ("t1", "t2", "t3")
 
 #: The fixture method: one baseline, two learns, one final test -- enough
 #: to prove repeated names (L twice) get distinct pNN labels.
-SEQUENCE = ["D", "L", "B", "L", "C"]
+SEQUENCE = ["baseline", "learn", "live", "learn", "test"]
 PHASES = {
-    "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+    "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
-    "L": {"kind": "learn",
+    "learn": {"kind": "learn",
           "evidence": {"name": "segment", "K": 2},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096}},
-    "B": {"kind": "execute", "role": "live", "tasks": "train",
+    "live": {"kind": "execute", "role": "live", "tasks": "train",
           "delivery": {"name": "group_by_task"},
           "execution": {"name": "real", "n_attempts": 1},
-          "compare": {"against": "D"}},
-    "C": {"kind": "execute", "role": "test", "tasks": "test",
+          "compare": {"against": "baseline"}},
+    "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
           "compare": {"against": "fresh_bare"}},
@@ -201,17 +201,17 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
         make_client=ClientLog().make_client, on_stage=on_stage)
 
     assert [phase.label for _, phase in drivers] == [
-        "p01:D", "p02:L", "p03:B", "p04:L", "p05:C"]
+        "p01:baseline", "p02:learn", "p03:live", "p04:learn", "p05:test"]
     # Kinds dispatch by the phase definition, not the position.
     assert [kind for kind, _ in drivers] == [
         "execute", "learn", "execute", "learn", "execute"]
     # The instance carries the frozen identity of its position.
     d = drivers[0][1]
-    assert (d.index, d.name, d.label) == (0, "D", "p01:D")
+    assert (d.index, d.name, d.label) == (0, "baseline", "p01:baseline")
     assert d.spec.role == "baseline"
     assert d.task_ids == ("t1", "t2")
     b = drivers[2][1]
-    assert (b.index, b.name, b.label) == (2, "B", "p03:B")
+    assert (b.index, b.name, b.label) == (2, "live", "p03:live")
     assert b.task_ids == ("t1", "t2")
     c = drivers[4][1]
     assert c.spec.tasks == "test"
@@ -220,8 +220,8 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
     assert drivers[1][1].task_ids == ()
     # on_stage fired in the same order, and the last summary is the last
     # phase's.
-    assert seen == ["p00:freeze", "p01:D", "p02:L", "p03:B", "p04:L",
-                   "p05:C"]
+    assert seen == ["p00:freeze", "p01:baseline", "p02:learn", "p03:live", "p04:learn",
+                   "p05:test"]
     assert last == {"kind": "execute", "index": 4}
 
 
@@ -234,7 +234,7 @@ def test_the_ledger_rows_key_stage_and_pnn_values(
     # The KEY stays "stage" (consumer compatibility, the implementation
     # contract section 6); the values are p00:freeze then pNN:<name>.
     assert [row["stage"] for row in rows] == [
-        "p00:freeze", "p01:D", "p02:L", "p03:B", "p04:L", "p05:C"]
+        "p00:freeze", "p01:baseline", "p02:learn", "p03:live", "p04:learn", "p05:test"]
     assert all(set(row) == {"stage", "summary"} for row in rows)
 
 
@@ -273,10 +273,10 @@ def test_infra_shortfall_accepted_flag_reaches_the_ledger_row_top_level(
     cli.run_experiment(config_path=config_path, run_dir=run_dir,
                        make_client=ClientLog().make_client)
     rows = read_jsonl(cli.ledger_path(run_dir))
-    flagged = [row for row in rows if row["stage"] == "p01:D"]
+    flagged = [row for row in rows if row["stage"] == "p01:baseline"]
     assert flagged[0]["infra_shortfall_accepted"] is True
     assert all("infra_shortfall_accepted" not in row
-               for row in rows if row["stage"] == "p02:L")
+               for row in rows if row["stage"] == "p02:learn")
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +289,7 @@ def test_until_phase_stops_after_the_named_entry(
         config_path=config_path, run_dir=tmp_path / "run",
         make_client=ClientLog().make_client, until_phase=2)
     assert [phase.label for _, phase in drivers] == [
-        "p01:D", "p02:L", "p03:B"]
+        "p01:baseline", "p02:learn", "p03:live"]
     # Freeze always runs, so the return value is a real summary.
     assert last == {"kind": "execute", "index": 2}
 
@@ -404,8 +404,8 @@ def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model",
                 "judge": "judge-model"},
-        sequence=["D", "L", "C"],
-        phases={name: PHASES[name] for name in ("D", "L", "C")},
+        sequence=["baseline", "learn", "test"],
+        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
         model_options={"strong-model": {"reasoning_effort": "max"},
                        "judge-model": {"top_p": 0.9}},
         token_budgets={"default_max_output_tokens": 65536},
@@ -435,8 +435,8 @@ def test_build_handles_wires_output_budget_per_role(plugin, tmp_path):
         benchmark=_FAKE, mode="full",
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
-        sequence=["D", "L", "C"],
-        phases={name: PHASES[name] for name in ("D", "L", "C")},
+        sequence=["baseline", "learn", "test"],
+        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
         token_budgets={
             "default_max_output_tokens": 65536,
             "roles": {"judge": {"max_output_tokens": 1024},
@@ -508,8 +508,8 @@ def test_a_stopped_run_replays_from_the_first_phase(
     assert len(drivers) == 7  # 2 + the full replay of 5
     rows = read_jsonl(cli.ledger_path(run_dir))
     assert [row["stage"] for row in rows] == [
-        "p00:freeze", "p01:D", "p02:L",
-        "p00:freeze", "p01:D", "p02:L", "p03:B", "p04:L", "p05:C"]
+        "p00:freeze", "p01:baseline", "p02:learn",
+        "p00:freeze", "p01:baseline", "p02:learn", "p03:live", "p04:learn", "p05:test"]
 
 
 def test_the_frozen_sequence_survives_the_resume_check(

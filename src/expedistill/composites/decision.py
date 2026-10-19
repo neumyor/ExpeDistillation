@@ -344,11 +344,11 @@ _CAUSE_DELETE_REASONS = {
 
 
 class FinalTestReportRejected(CodeBugError):
-    """A final-test (C-phase) report was handed to the decision entry.
+    """A final-test (test-phase) report was handed to the decision entry.
 
     Boundary doc section 3 rule 9: test results do not flow into
     learning. The final summary computes the with-bank delta itself
-    (:func:`final_test_delta`); a C-phase report reaching decision is a
+    (:func:`final_test_delta`); a test-phase report reaching decision is a
     wiring bug, not data.
     """
 
@@ -623,14 +623,14 @@ def _baseline_rows(*, control_kind: Optional[str],
                    task_select_rule: str) -> List[TaskListRow]:
     """The section 4.2 baseline row: the first learn phase follows the D
     phase, no acceptance phase has run yet, so this round's report is
-    empty and the D-phase report acts as the input. Every train task the
+    empty and the baseline-phase report acts as the input. Every train task the
     weak model fails (the named task-select rule over its weak rows) and
     that has no skill in the bank yet gets one add row."""
     rows = list(control_report or ())
     if control_kind != PHASE_BASELINE or not rows:
         raise CodeBugError(
             "the empty-current-report path (the first learn phase) needs "
-            "the D-phase report as the control: got control_kind="
+            "the baseline-phase report as the control: got control_kind="
             f"{control_kind!r} with {len(rows)} row(s)")
     rule = get_task_select(task_select_rule)
     covered = {task for task in (_task_of_bank_skill(skill) for skill in bank)
@@ -682,7 +682,7 @@ def decide_task_list(
       :class:`FinalTestReportRejected` (section 3 rule 9).
     * ``current_kind=None`` is the first learn phase's path: no
       acceptance phase has run yet, so this round's report is empty and
-      the D-phase report (``control_kind="baseline"``) acts as the input
+      the baseline-phase report (``control_kind="baseline"``) acts as the input
       -- the table's baseline row, one add per failed, skill-less train
       task. ``task_select_rule`` (a named blocks/rules.py rule) plus
       ``n_attempts_weak`` decide "the weak model fails"; the bank decides
@@ -712,7 +712,7 @@ def decide_task_list(
     _get_compare_rule(compare_rule)  # unknown names fail before any work
     if current_kind == PHASE_TEST or control_kind == PHASE_TEST:
         raise FinalTestReportRejected(
-            "the decision entry does not take final-test (C-phase) "
+            "the decision entry does not take final-test (test-phase) "
             "reports (boundary doc section 3 rule 9: test results do not "
             "flow into learning); the final summary computes the "
             "with-bank delta itself (decision.final_test_delta)")
@@ -749,7 +749,7 @@ def decide_task_list(
             row for row in rows if not row.injected_skills]:
         if row.role != "weak":
             # The control is the weak model's bare result: the question
-            # is about the student, and a D-phase control batch carries
+            # is about the student, and a baseline-phase control batch carries
             # the strong arm's rows too.
             continue
         task_id, _ = parse_unit_id(row.unit_id)
@@ -864,12 +864,12 @@ def revise_outcome(row: TaskListRow, *,
 
 def final_test_delta(with_bank: Dict[str, Any],
                      control: Dict[str, Any]) -> Dict[str, Any]:
-    """The C-phase summary's with-bank minus control difference.
+    """The test-phase summary's with-bank minus control difference.
 
     Section 3 rule 9 / repair plan section 4.5: the final summary
     computes the test delta itself -- this is the comparison that used
     to live inside stage 6 (G3), moved here unchanged. It is a summary
-    statistic, NOT a decision: the decision entry never sees a C-phase
+    statistic, NOT a decision: the decision entry never sees a test-phase
     report (``decide_task_list`` rejects one).
 
     D3 pre-registers two avg@N disciplines (conditional ``avg_at_n`` and

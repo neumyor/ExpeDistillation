@@ -28,7 +28,7 @@ from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
 TASK_ID = ids.make_task_id(BENCHMARK, "t1")
-LABEL = "p02:L"
+LABEL = "p02:learn"
 
 _SCRIPT = (Path(__file__).resolve().parents[3]
            / "scripts" / "audit" / "audit_live_run.py")
@@ -72,7 +72,7 @@ def _ctx(tmp_path):
 
 
 def _phase():
-    return PhaseInstance(index=1, name="L", label=LABEL, spec=None,
+    return PhaseInstance(index=1, name="learn", label=LABEL, spec=None,
                          task_ids=())
 
 
@@ -286,7 +286,7 @@ def test_the_audit_check8_accepts_the_row_level_receipt(tmp_path):
     audit = audit_live_run.Audit(ctx.run_dir)
     skills = audit_live_run._load_skills(Store(ctx.run_dir))
     audit_live_run.check_learn_ledgers(audit, ctx.run_dir,
-                                       [(1, "L", {"kind": "learn"})], skills)
+                                       [(1, "learn", {"kind": "learn"})], skills)
     errors = [f for f in audit.findings
               if f["severity"] == audit_live_run.ERROR]
     assert errors == []

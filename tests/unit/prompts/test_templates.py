@@ -10,7 +10,7 @@ REWRITE/MERGE/SIMILARITY templates must reproduce the markers literally
 import re
 import string
 
-from expedistill.core.models import FAILURE_REFERENCE_MARKERS, PROCEDURE_MARKERS
+from expedistill.core.models import SKILL_MARKERS
 from expedistill.blocks.author import SKILL_SECTION_FIELDS
 from expedistill.prompts import PROMPTS, get
 
@@ -35,7 +35,10 @@ EXPECTED = {
     "GROUP": ("G9", {"skills_listing"}),
 }
 
-ALL_MARKERS = set(PROCEDURE_MARKERS) | set(FAILURE_REFERENCE_MARKERS)
+ALL_MARKERS = set(SKILL_MARKERS)
+
+#: The retired failure-reference markers: no prompt may name them.
+RETIRED_MARKERS = ("[Trigger]", "[Why it fails]", "[Do instead]")
 
 DUMMY = "dummy"
 
@@ -125,15 +128,14 @@ def test_g2_templates_carry_no_section_markers():
 
 def test_g2_json_contract_fields_match_validate_skill_sections():
     # The "Output ONLY JSON with exactly these fields" examples must name
-    # exactly the keys validate_skill_sections requires for the mode: a
-    # drift between prompt example and validator would surface as
-    # model_output_failed units, not as a loud wiring error. Schema v3
-    # adds the non-section summary field to every write contract.
+    # exactly the keys validate_skill_sections requires: a drift between
+    # prompt example and validator would surface as model_output_failed
+    # units, not as a loud wiring error. Schema v3 adds the non-section
+    # summary field; since 2026-10-19 both modes share one field set.
     from expedistill.blocks.author import SKILL_SUMMARY_FIELD
-    assert _json_contract_keys(get("SKILL_DISTILL")) == set(
-        SKILL_SECTION_FIELDS["distill"]) | {SKILL_SUMMARY_FIELD}
-    assert _json_contract_keys(get("SKILL_DIAGNOSE")) == set(
-        SKILL_SECTION_FIELDS["diagnose"]) | {SKILL_SUMMARY_FIELD}
+    for name in ("SKILL_DISTILL", "SKILL_DIAGNOSE"):
+        assert _json_contract_keys(get(name)) == set(
+            SKILL_SECTION_FIELDS) | {SKILL_SUMMARY_FIELD}, name
 
 
 def test_rewrite_template_output_contract_carries_the_summary():
@@ -147,10 +149,10 @@ def test_rewrite_template_output_contract_carries_the_summary():
 
 def test_rewrite_template_names_every_section_marker():
     # The rewritten skill_text must keep the original's four bracket
-    # sections, so the REWRITE prompt has to name all eight markers (both
-    # kinds, each contiguous so the model can copy it) and to demand
-    # line-start-accurate reproduction: a bolded or preamble-shifted
-    # variant would make skill_markers read None.
+    # sections, so the REWRITE prompt has to name all four markers (each
+    # contiguous so the model can copy it) and to demand line-start-
+    # accurate reproduction: a bolded or preamble-shifted variant would
+    # make has_skill_sections read False.
     template = get("REWRITE")
     for marker in ALL_MARKERS:
         assert marker in template, marker
@@ -162,24 +164,23 @@ def test_rewrite_template_names_every_section_marker():
     assert "wording, structure, granularity" not in text
 
 
-def test_similarity_template_groups_by_skill_kind():
-    # G7 must group/pair procedure skills with procedure skills and failure
-    # references with failure references, in similar_groups AND in conflicts
-    # (a cross-kind pair has no legal merge product).
-    template = get("SIMILARITY")
-    assert "'[When to use]' section header" in template
-    assert "'[Trigger]' section header" in template
-    assert "in similar_groups AND in conflicts" in _normalized(template)
+def test_no_prompt_names_a_retired_marker():
+    # The 2026-10-19 ruling: the failure-reference structure is gone, and
+    # G7 no longer restricts groups to one skill kind.
+    for name in PROMPTS:
+        for marker in RETIRED_MARKERS:
+            assert marker not in get(name), (name, marker)
+    assert "same kind: procedure skills" not in _normalized(get("SIMILARITY"))
 
 
 def test_merge_template_preserves_section_structure():
-    # G8's merged skill must carry the same four sections, and the section
+    # G8's merged skill must carry the four sections, and the section
     # headers must be reproduced exactly (line-start anchored markers).
-    text = _normalized(get("MERGE"))
-    assert ("Preserve the bracketed section structure of the source skills: "
-            "the merged skill carries the same four sections.") in text
+    template = get("MERGE")
+    for marker in ALL_MARKERS:
+        assert marker in template, marker
     assert ("Reproduce the bracketed section headers exactly as written, "
-            "each on its own line.") in text
+            "each on its own line.") in _normalized(template)
 
 
 def test_merge_template_puts_generalization_first_and_asks_for_json():

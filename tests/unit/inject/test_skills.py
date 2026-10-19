@@ -1,5 +1,5 @@
 """Unit tests for D9 skill injection and D10 bank-length accounting."""
-from expedistill.core.models import PROCEDURE_MARKERS, Skill
+from expedistill.core.models import SKILL_MARKERS, Skill
 from expedistill.inject.skills import (
     bank_reference,
     count_bank_tokens,
@@ -103,7 +103,7 @@ def test_internal_newlines_collapse_to_single_spaces():
 def test_section_markers_survive_single_line_compression():
     # Protocol v2: a stored skill is multi-line marker text, and the
     # injection block compresses it onto one bullet. The compression
-    # destroys the line structure (so skill_markers must never read the
+    # destroys the line structure (so has_skill_sections must never read the
     # block) but keeps every marker literal, so the weak model still sees
     # the section headers -- pinned here instead of asserted by eye.
     content = "\n".join([
@@ -116,7 +116,7 @@ def test_section_markers_survive_single_line_compression():
     ])
     block = format_skills_block([make_skill("s1", content)])
     assert block.count("\n") == 1  # header + one single-line bullet
-    for marker in PROCEDURE_MARKERS:
+    for marker in SKILL_MARKERS:
         assert marker in block
 
 
@@ -138,7 +138,7 @@ def test_multiline_heredoc_content_compresses_markers_survive():
     ])
     block = format_skills_block([make_skill("s1", content)])
     assert block.count("\n") == 1  # header + one single-line bullet
-    for marker in PROCEDURE_MARKERS:
+    for marker in SKILL_MARKERS:
         assert marker in block
     assert "python3 - <<'PY'" in block
     assert "print('ok')" in block

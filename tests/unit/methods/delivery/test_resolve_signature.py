@@ -140,7 +140,7 @@ def test_whole_bank_rows_carry_the_bank_digest():
 
 
 def test_per_skill_resolves_exam_refs():
-    # The A-phase operand contract: tasks are the deterministic exam
+    # The exam-phase operand contract: tasks are the deterministic exam
     # identifiers (<subtask_id>/exam); delivery resolves the identifier,
     # it never writes the exam itself (R5).
     skill = _skill(make_task_id(BENCHMARK, "t1"))

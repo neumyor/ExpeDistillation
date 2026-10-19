@@ -20,7 +20,7 @@ phase's artifact, and one test drives the REAL phase pipeline
 to pin the v4 resume contract -- every phase through the last learn
 phase completes with ZERO model calls and the artifact byte-identical.
 
-The baseline level (revision 3: the D phase's trajectories only, every
+The baseline level (revision 3: the baseline phase's trajectories only, every
 downstream phase fresh under the current protocol) gets its own block
 below: it reuses the same fixture but a config that deliberately
 differs from the source run in rule names, the phase definitions, K and
@@ -118,7 +118,7 @@ class _Plugin(BenchmarkPlugin):
 @pytest.fixture(autouse=True)
 def clean_registry():
     _reset_registry()
-    # The resume test drives the real D phase, which judges stored runs
+    # The resume test drives the real baseline phase, which judges stored runs
     # under the benchmark's default verdict rule (the w2a pattern).
     verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     yield
@@ -155,8 +155,8 @@ def install_plugin():
 # emits for the corresponding v3 acceptance slots)
 # ---------------------------------------------------------------------------
 
-EXAM_SEQUENCE = ["D", "L", "A", "L", "A", "L", "A", "L", "C"]
-LIVE_SEQUENCE = ["D", "L", "B", "L", "B", "L", "C"]
+EXAM_SEQUENCE = ["baseline", "learn", "exam", "learn", "exam", "learn", "exam", "learn", "test"]
+LIVE_SEQUENCE = ["baseline", "learn", "live", "learn", "live", "learn", "test"]
 
 _LEARN_EXAM = {
     "kind": "learn",
@@ -176,31 +176,31 @@ _LEARN_LIVE = {
 }
 
 EXAM_PHASES = {
-    "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+    "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
-    "L": dict(_LEARN_EXAM),
-    "A": {"kind": "execute", "role": "exam",
+    "learn": dict(_LEARN_EXAM),
+    "exam": {"kind": "execute", "role": "exam",
           "delivery": {"name": "per_skill"},
           "execution": {"name": "exam"}},
-    "C": {"kind": "execute", "role": "test", "tasks": "test",
+    "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
-          "compare": {"against": "D"}},
+          "compare": {"against": "baseline"}},
 }
 
 LIVE_PHASES = {
-    "D": dict(EXAM_PHASES["D"]),
-    "L": dict(_LEARN_LIVE),
-    "B": {"kind": "execute", "role": "live", "tasks": "train",
+    "baseline": dict(EXAM_PHASES["baseline"]),
+    "learn": dict(_LEARN_LIVE),
+    "live": {"kind": "execute", "role": "live", "tasks": "train",
           "delivery": {"name": "group_by_task"},
           "execution": {"name": "real", "n_attempts": 3},
-          "compare": {"against": "D", "rule": "strict_rate_gain"}},
-    "C": {"kind": "execute", "role": "test", "tasks": "test",
+          "compare": {"against": "baseline", "rule": "strict_rate_gain"}},
+    "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
-          "compare": {"against": "D"}},
+          "compare": {"against": "baseline"}},
 }
 
 
@@ -217,7 +217,7 @@ _RULES = {"task_select": "all_valid_failed",
 
 def make_source_config(*, live=False, n_attempts_weak=None):
     """The source experiment: full mode over the whole task set, in the
-    exam or the live method shape. A live source's B phase measures at
+    exam or the live method shape. A live source's live phase measures at
     depth 3, which the checklist bounds by the global weak-model depth
     (the first TB live config's user-agreed shape)."""
     if n_attempts_weak is None:
@@ -242,13 +242,13 @@ def reuse_config_dict(*, live=False, mode="split", c_delivery=None):
     phase's delivery/compare re-chosen (the v4 image of the v3 delivery
     slot) -- exactly the keys the ruling-4 whitelist allows to move."""
     phases = copy.deepcopy(LIVE_PHASES if live else EXAM_PHASES)
-    phases["C"]["delivery"] = (c_delivery if c_delivery is not None
+    phases["test"]["delivery"] = (c_delivery if c_delivery is not None
                                else {"name": "retrieval", "top_k": 2,
                                      "max_categories": 2, "min_score": 0.02})
-    # The mode decides the C phase's control arm (the same coupling
+    # The mode decides the test phase's control arm (the same coupling
     # upgrade_v3_config freezes): full reuses D's weak arm, split runs
     # its own fresh bare arm.
-    phases["C"]["compare"] = ({"against": "D"} if mode == "full"
+    phases["test"]["compare"] = ({"against": "baseline"} if mode == "full"
                               else {"against": "fresh_bare"})
     config = {
         "benchmark": _FAKE,
@@ -293,22 +293,22 @@ def baseline_config_dict(*, live=False):
         "rules": {"task_select": "any_weak_failed",
                   "segment_select": "strong_success_weak_failed",
                   "trajectory_select": "strong2_weak2"},
-        "sequence": (["D", "L", "B", "L", "B", "L", "C"] if live
-                     else ["D", "L", "A", "L", "C"]),
+        "sequence": (["baseline", "learn", "live", "learn", "live", "learn", "test"] if live
+                     else ["baseline", "learn", "exam", "learn", "test"]),
         "phases": copy.deepcopy(LIVE_PHASES if live else EXAM_PHASES),
     }
-    learn = config["phases"]["L"]
+    learn = config["phases"]["learn"]
     learn["evidence"] = {"name": "segment", "K": 9, "retry_limit": 5}
     learn["curate"] = {"name": "none", "token_budget": 12345}
     if live:
         # The baseline level pins n_attempts (1), so the live target's B
         # phase measures at depth 1 instead of the source's 3 -- exactly
         # the kind of downstream difference this level allows.
-        config["phases"]["B"]["execution"]["n_attempts"] = 1
-    config["phases"]["C"]["delivery"] = {
+        config["phases"]["live"]["execution"]["n_attempts"] = 1
+    config["phases"]["test"]["delivery"] = {
         "name": "retrieval", "top_k": 3, "max_categories": 2,
         "min_score": 0.05}
-    config["phases"]["C"]["compare"] = {"against": "fresh_bare"}
+    config["phases"]["test"]["compare"] = {"against": "fresh_bare"}
     return config
 
 
@@ -448,7 +448,7 @@ def build_source_run(tmp_path: Path, source_tasks=None, *,
     config below. The bank deliberately contains a MIXED-LINEAGE merge
     (train anchor + reserved source) that the full-chain criterion must
     drop and the anchor-only criterion would keep. The bank is the LAST
-    learn phase's artifact (p08:L for the exam shape, p06:L for the
+    learn phase's artifact (p08:learn for the exam shape, p06:learn for the
     live one), and the phases/ tree carries a few real-shaped phase
     records the assembly must NOT copy.
 
@@ -559,15 +559,15 @@ def build_source_run(tmp_path: Path, source_tasks=None, *,
                 "size": len(bank_rows)}, indent=2)
 
     # Real-shaped phase records (a finished run wrote them; the assembly
-    # copies none), plus the A/B phase's exam-generation failure ledger.
+    # copies none), plus the exam/live phase's exam-generation failure ledger.
     label = _last_learn_label_of(config)
     index_of = {name: position for position, name
                 in enumerate(config.sequence)}
-    write_json(phase_bank_dir(run_dir, "p01:D") / "phase.json",
-               {"label": "p01:D", "index": 0, "name": "D",
+    write_json(phase_bank_dir(run_dir, "p01:baseline") / "phase.json",
+               {"label": "p01:baseline", "index": 0, "name": "baseline",
                 "role": "baseline"}, indent=2)
-    measure_label = f"p{index_of['B' if live else 'A'] + 1:02d}:" \
-        + ("B" if live else "A")
+    measure_label = f"p{index_of['live' if live else 'exam'] + 1:02d}:" \
+        + ("live" if live else "exam")
     failures_dir = phase_bank_dir(run_dir, measure_label)
     failures_dir.mkdir(parents=True, exist_ok=True)
     (failures_dir / "generation_failures.jsonl").write_text(
@@ -710,7 +710,7 @@ def test_assembles_train_lineage_with_full_chain_bank_filter(tmp_path):
     assert counts["accepted_infra_shortfall_units"] == 1  # train unit only
     assert summary["split_sizes"] == {"train": 1, "test": 1, "reserved": 1}
     assert summary["source_schema"] == 4
-    assert summary["preseeded_phase_bank"] == "p08:L"
+    assert summary["preseeded_phase_bank"] == "p08:learn"
 
     # The full-chain criterion (the "42-equivalent" assertion): the mixed
     # merge has a TRAIN anchor but a reserved source, so it is in neither
@@ -730,12 +730,12 @@ def test_assembles_train_lineage_with_full_chain_bank_filter(tmp_path):
     # The v4 product: the same rows pre-seeded as the LAST learn phase's
     # artifact, and NOTHING else under phases/ (the source's phase
     # records, ledgers and summaries all stayed behind).
-    artifact = run_dir / "phases" / "p08_L" / "skill_bank.jsonl"
+    artifact = run_dir / "phases" / "p08_learn" / "skill_bank.jsonl"
     assert read_jsonl(artifact) == read_jsonl(run_dir / "skill_bank.jsonl")
     assert sorted(
         path.relative_to(run_dir).as_posix()
         for path in (run_dir / "phases").rglob("*")
-        if path.is_file()) == ["phases/p08_L/skill_bank.jsonl"]
+        if path.is_file()) == ["phases/p08_learn/skill_bank.jsonl"]
 
     # Copied objects carry zero test/reserved lineage.
     kept_traj_ids = {path.name for path in
@@ -803,7 +803,7 @@ def test_assembled_from_records_provenance_and_merged_groups(tmp_path):
     assert "archived-campaign" in text
     # The v4 product lines: the pre-seeded artifact and the zero-copy
     # phases/ declaration.
-    assert "phases/p08_L" in text
+    assert "phases/p08_learn" in text
     # Per-kind counts are in the record.
     assert f"| skill_bank 行 | {summary['counts']['bank_rows']} |" in text
 
@@ -813,7 +813,7 @@ def test_assembled_from_records_provenance_and_merged_groups(tmp_path):
     assert summary["assembled_from"] == "ASSEMBLED_FROM.md"
     # The identity diff: exactly the allowed keys moved (section level).
     assert summary["allowed_identity_diffs"] == [
-        "config.mode", "config.phases.C.compare", "config.phases.C.delivery",
+        "config.mode", "config.phases.test.compare", "config.phases.test.delivery",
         "config.split", "mode", "split"]
 
 
@@ -849,7 +849,7 @@ def test_v3_stage_world_source_assembles_equally(tmp_path):
     assert [row["skill_id"]
             for row in read_jsonl(run_dir / "skill_bank.jsonl")] == [
         source.ids["m0"], source.ids["s_a"]]
-    assert read_jsonl(run_dir / "phases" / "p08_L"
+    assert read_jsonl(run_dir / "phases" / "p08_learn"
                       / "skill_bank.jsonl") == read_jsonl(
         run_dir / "skill_bank.jsonl")
     # The generation-failure ledger is NOT copied (nothing in v4 reads
@@ -867,7 +867,7 @@ def test_v3_stage_world_source_assembles_equally(tmp_path):
     # The identity walk upgraded the source: the same allowed diffs as
     # the v4-source assembly.
     assert summary["allowed_identity_diffs"] == [
-        "config.mode", "config.phases.C.compare", "config.phases.C.delivery",
+        "config.mode", "config.phases.test.compare", "config.phases.test.delivery",
         "config.split", "mode", "split"]
 
 
@@ -875,7 +875,7 @@ def test_pending_members_of_a_v4_source_ride_along_disclosed(tmp_path):
     """A v4 source's final artifact may carry PENDING members (a learn
     phase's new skills the source never finished measuring). They are
     train-lineage material: they ride along into the store, the bank and
-    the pre-seeded artifact (the assembled run's A/B phases will measure
+    the pre-seeded artifact (the assembled run's exam/live phases will measure
     them), and the accepted-set invariant compares ACCEPTED rows only."""
     source = build_source_run(tmp_path)
     s_p = _skill(source.ids["subtask"]["st1w2"], "pending",
@@ -891,7 +891,7 @@ def test_pending_members_of_a_v4_source_ride_along_disclosed(tmp_path):
 
     assert summary["counts"]["bank_rows"] == 3
     assert summary["counts"]["pending_bank_rows"] == 1
-    artifact_rows = read_jsonl(run_dir / "phases" / "p08_L"
+    artifact_rows = read_jsonl(run_dir / "phases" / "p08_learn"
                                / "skill_bank.jsonl")
     assert [row["skill_id"] for row in artifact_rows] == [
         source.ids["m0"], source.ids["s_a"], s_p.skill_id]
@@ -1061,7 +1061,7 @@ def test_bank_level_assembly_of_a_v1_object_source_run(tmp_path):
         source.ids["subtask"]["st1w3"]]
     assert reverted["summary"] == ""
     # The phase-world consumers' enumeration loads every stored skill
-    # (the A-phase report reader and the decision walk both go through
+    # (the exam-phase report reader and the decision walk both go through
     # the candidate enumeration).
     store = Store(run_dir)
     candidates = stage3_candidates(store)
@@ -1102,7 +1102,7 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     the last learn phase over the assembled directory:
 
     * p00 freezes the manifest (the identity re-check of last resort);
-    * the D phase skips every stored trajectory (the copied shortfall
+    * the baseline phase skips every stored trajectory (the copied shortfall
       unit is an accepted hole, never re-dispatched);
     * the FIRST learn phase derives NOTHING: the weak arm fails the
       train task, but the pre-learn bank fallback reads the assembled
@@ -1120,7 +1120,7 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     config_path = write_reuse_config(tmp_path)
     run_dir = tmp_path / "assembled"
     assemble_reuse(source.run_dir, config_path, run_dir)
-    artifact = run_dir / "phases" / "p08_L" / "skill_bank.jsonl"
+    artifact = run_dir / "phases" / "p08_learn" / "skill_bank.jsonl"
     artifact_before = artifact.read_bytes()
 
     cfg = load_config(str(config_path))
@@ -1137,21 +1137,21 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
         on_stage=lambda label, summary: stages.setdefault(label, summary))
 
     # Every phase through the last learn phase ran, in sequence order.
-    assert list(stages) == ["p00:freeze", "p01:D", "p02:L", "p03:A",
-                            "p04:L", "p05:A", "p06:L", "p07:A", "p08:L"]
-    # The D phase: both bare arms are fully stored, so nothing dispatched
+    assert list(stages) == ["p00:freeze", "p01:baseline", "p02:learn", "p03:exam",
+                            "p04:learn", "p05:exam", "p06:learn", "p07:exam", "p08:learn"]
+    # The baseline phase: both bare arms are fully stored, so nothing dispatched
     # and the copied shortfall unit is an accepted hole.
-    assert stages["p01:D"]["report_rows"] == 2
-    assert stages["p01:D"]["infra_accepted"] == [source.ids["traj"]["t1s"]]
+    assert stages["p01:baseline"]["report_rows"] == 2
+    assert stages["p01:baseline"]["infra_accepted"] == [source.ids["traj"]["t1s"]]
     # The first learn phase (the assembled-context seam): the weak arm
     # failed the train task, but the pre-learn bank fallback read the
     # pre-seeded run-level bank and its anchor task covers it, so the
     # baseline-gap path authorizes no add at all -- zero rows, zero
     # calls, and the bank the run was assembled to re-measure stays
     # frozen.
-    assert stages["p02:L"]["task_list"] == {"superseded_rows": 0}
-    assert stages["p02:L"]["outcomes"] == {}
-    assert read_jsonl(run_dir / "phases" / "p02_L"
+    assert stages["p02:learn"]["task_list"] == {"superseded_rows": 0}
+    assert stages["p02:learn"]["outcomes"] == {}
+    assert read_jsonl(run_dir / "phases" / "p02_learn"
                      / "outcomes.jsonl") == []
     # The last learn phase: the curation short-circuited on the
     # pre-seeded artifact (the bank members are exactly the kept rows)
@@ -1165,7 +1165,7 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
 
     # A full replay of the same range: every phase skips at zero cost
     # (the learn phases' stored summaries are their commit points, the
-    # D phase's units are all stored) and the artifact still matches.
+    # baseline phase's units are all stored) and the artifact still matches.
     run_experiment(
         config_path=config_path, run_dir=run_dir,
         make_client=refusing_client, until_phase=last_learn)
@@ -1176,7 +1176,7 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
         tmp_path):
     """The Wave 3 review's blocker B1 (ruling 1's acceptance test): an
     assembled run whose pre-seeded bank carries a PENDING member has
-    that member measured by its own A phase (real model calls -- the
+    that member measured by its own exam phase (real model calls -- the
     exam answering, the leak audit and the judging), accepted by the
     next learn phase's keep row, and the LAST learn phase's curation
     short-circuit must then complete the run by REFRESHING the
@@ -1195,7 +1195,7 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
     config_path = write_reuse_config(tmp_path)
     run_dir = tmp_path / "assembled"
     assemble_reuse(source.run_dir, config_path, run_dir)
-    artifact = run_dir / "phases" / "p08_L" / "skill_bank.jsonl"
+    artifact = run_dir / "phases" / "p08_learn" / "skill_bank.jsonl"
     seeded = read_jsonl(artifact)
     assert [row["skill_id"] for row in seeded] == [
         source.ids["m0"], source.ids["s_a"], s_p.skill_id]
@@ -1207,7 +1207,7 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
     stages = {}
     clients = {}
 
-    # The A phase measures the pending member for real: the answerer
+    # The exam phase measures the pending member for real: the answerer
     # (the weak model) answers bare then with the skill, the judge
     # fails the bare and passes the skilled answer, the leak audit is
     # clean. Curation must make no call -- its short-circuit refreshes
@@ -1230,17 +1230,17 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
         make_client=scripted_client, until_phase=last_learn,
         on_stage=lambda label, summary: stages.setdefault(label, summary))
 
-    # The A phase measured exactly the ride-along member; the next learn
+    # The exam phase measured exactly the ride-along member; the next learn
     # phase accepted it (the keep row's receipt).
-    assert stages["p03:A"]["measured"] == [exam_id]
+    assert stages["p03:exam"]["measured"] == [exam_id]
     accepted_receipts = [
-        row for row in read_jsonl(run_dir / "phases" / "p04_L"
+        row for row in read_jsonl(run_dir / "phases" / "p04_learn"
                                  / "outcomes.jsonl")
         if row["skill_id"] == s_p.skill_id]
     assert [row["outcome"] for row in accepted_receipts] == ["accepted"]
     assert Store(run_dir).load("skills", s_p.skill_id, Skill).status \
         == "accepted"
-    # Exactly the A phase's five calls, nothing else (the curation
+    # Exactly the exam phase's five calls, nothing else (the curation
     # short-circuit spent zero).
     assert len(clients[WEAK].calls) == 2
     assert len(clients[STRONG].calls) == 3
@@ -1276,10 +1276,10 @@ def _assemble_with_config(tmp_path, config):
 
 def test_identity_diff_rejects_a_changed_method_key(tmp_path):
     config = reuse_config_dict()
-    config["phases"]["L"]["evidence"]["K"] = 9
+    config["phases"]["learn"]["evidence"]["K"] = 9
     source, config_path, run_dir = _assemble_with_config(tmp_path, config)
     with pytest.raises(ConfigError,
-                       match=r"config\.phases\.L\.evidence\.K"):
+                       match=r"config\.phases\.learn\.evidence\.K"):
         assemble_reuse(source.run_dir, config_path, run_dir)
     assert not run_dir.exists()  # refused before anything was written
 
@@ -1322,9 +1322,9 @@ def test_identity_diff_rejects_a_renamed_test_phase(tmp_path):
     changes the sequence and the phase definitions, and the assembly
     refuses instead of guessing the correspondence."""
     config = reuse_config_dict()
-    config["sequence"] = [name if name != "C" else "FINAL"
+    config["sequence"] = [name if name != "test" else "FINAL"
                           for name in config["sequence"]]
-    config["phases"]["FINAL"] = config["phases"].pop("C")
+    config["phases"]["FINAL"] = config["phases"].pop("test")
     source, config_path, run_dir = _assemble_with_config(tmp_path, config)
     with pytest.raises(ConfigError, match=r"config\.(sequence|phases)"):
         assemble_reuse(source.run_dir, config_path, run_dir)
@@ -1343,7 +1343,7 @@ def test_identity_diff_allows_the_whitelisted_keys_only(tmp_path):
     summary = assemble_reuse(
         source.run_dir, config_path, tmp_path / "assembled")
     assert summary["allowed_identity_diffs"] == [
-        "config.mode", "config.phases.C.compare", "config.split",
+        "config.mode", "config.phases.test.compare", "config.split",
         "mode", "split"]
 
 
@@ -1357,14 +1357,14 @@ def test_identity_diff_allows_the_paired_execution_name(tmp_path):
     knob the target cannot choose freely)."""
     source = build_source_run(tmp_path)
     config = reuse_config_dict(c_delivery={"name": "folder"})
-    config["phases"]["C"]["execution"] = {"name": "real_folder"}
+    config["phases"]["test"]["execution"] = {"name": "real_folder"}
     config_path = write_reuse_config(tmp_path, config)
 
     summary = assemble_reuse(
         source.run_dir, config_path, tmp_path / "assembled")
 
-    assert "config.phases.C.delivery" in summary["allowed_identity_diffs"]
-    assert "config.phases.C.execution.name" in \
+    assert "config.phases.test.delivery" in summary["allowed_identity_diffs"]
+    assert "config.phases.test.execution.name" in \
         summary["allowed_identity_diffs"]
 
 
@@ -1374,11 +1374,11 @@ def test_identity_diff_still_refuses_a_changed_execution_depth(tmp_path):
     refusal even on the final-test phase."""
     source = build_source_run(tmp_path)
     config = reuse_config_dict()
-    config["phases"]["C"]["execution"] = {"name": "real", "n_attempts": 1}
+    config["phases"]["test"]["execution"] = {"name": "real", "n_attempts": 1}
     config_path = write_reuse_config(tmp_path, config)
     with pytest.raises(
             ConfigError,
-            match=r"config\.phases\.C\.execution\.n_attempts"):
+            match=r"config\.phases\.test\.execution\.n_attempts"):
         assemble_reuse(source.run_dir, config_path, tmp_path / "assembled")
     assert not (tmp_path / "assembled").exists()
 
@@ -1477,8 +1477,8 @@ def test_phase_tree_assertion_fires_on_a_dirty_phases_dir(tmp_path):
     config_path = write_reuse_config(tmp_path)
     run_dir = tmp_path / "assembled"
     run_dir.mkdir()
-    (run_dir / "phases" / "p01_D").mkdir(parents=True)
-    (run_dir / "phases" / "p01_D" / "phase.json").write_text(
+    (run_dir / "phases" / "p01_baseline").mkdir(parents=True)
+    (run_dir / "phases" / "p01_baseline" / "phase.json").write_text(
         "{}", encoding="utf-8")
     with pytest.raises(ConfigError, match="phases/"):
         assemble_reuse(source.run_dir, config_path, run_dir)
@@ -1625,7 +1625,7 @@ def test_lineage_of_a_merge_naming_a_missing_original_is_refused():
 
 
 # ---------------------------------------------------------------------------
-# The baseline level (revision 3): the D phase's trajectories only
+# The baseline level (revision 3): the baseline phase's trajectories only
 # ---------------------------------------------------------------------------
 
 def test_baseline_level_copies_only_trajectories_and_shortfall(tmp_path):
@@ -1697,7 +1697,7 @@ def test_baseline_level_copies_only_trajectories_and_shortfall(tmp_path):
     # carries, so their origin is load-bearing).
     text = (run_dir / "ASSEMBLED_FROM.md").read_text(encoding="utf-8")
     assert "baseline 档位" in text
-    assert "D 相位之外的全部相位将按当前协议全新执行" in text
+    assert "baseline 相位之外的全部相位将按当前协议全新执行" in text
     assert "⊆ 源任务集" in text
     assert "archived-campaign" in text
     assert "| trajectories | 2 |" in text

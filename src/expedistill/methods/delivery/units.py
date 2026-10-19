@@ -40,7 +40,7 @@ def accepted_bank(bank: Sequence[Any]) -> List[Any]:
     that is what the run-level bank held before the phase artifacts
     existed, and the 2026-10-16 review ruling pins the filter to that
     pre-change behaviour. Pending members ride along in the artifact for
-    the A and B phases that test them -- never into a whole-bank or
+    the A and live phases that test them -- never into a whole-bank or
     retrieval injection. Bank rows (mappings) and Skill objects are
     accepted the way ``blocks.retrieve`` accepts them.
     """

@@ -249,10 +249,11 @@ class FakeProviderClient:
     @staticmethod
     def _diagnose() -> str:
         return _fenced({
-            "trigger": "submitting an answer without searching first",
-            "why_it_fails": "the guess misses the gold phrasing.",
-            "do_instead": ["search the question's key terms",
-                           "reply with Finish[<the short answer>]"],
+            "when_to_use": "about to submit an answer without searching "
+                           "first: the guess misses the gold phrasing",
+            "steps": ["search the question's key terms",
+                      "reply with Finish[<the short answer>]"],
+            "verify": "the environment reports the answer is correct",
             "not_applicable_when": "a search was already done",
             "summary": "never submit an answer before searching for it",
         })

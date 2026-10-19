@@ -4,7 +4,7 @@ Three companion rules (unchanged units are not re-tested; a failed
 rewrite keeps the target as it was; a perfect control may skip the
 with-skill run), plus the two comparisons that moved out of
 stage6_test.py into the decision layer (G3): the final-test summary
-delta and the control-arm source label. The C phase's never-reuse
+delta and the control-arm source label. The test phase's never-reuse
 exception is a caller contract, pinned here only as a docstring rule.
 """
 
@@ -35,62 +35,62 @@ def _unit(unit_id, task_ref="tb:t1", skills_injected=None, block=""):
 # ---------------------------------------------------------------------------
 
 def test_reuse_key_covers_task_role_and_block_bytes():
-    a = _unit("p01:B:tb:tb:t1:weak:11111111", block="the block")
-    same = _unit("p01:B:tb:tb:t1:weak:22222222", block="the block")
+    a = _unit("p01:live:tb:tb:t1:weak:11111111", block="the block")
+    same = _unit("p01:live:tb:tb:t1:weak:22222222", block="the block")
     assert reuse_key(a) == reuse_key(same)
     # A different task, role or block bytes each break the key.
     assert reuse_key(a) != reuse_key(
-        _unit("p01:B:tb:tb:t1:weak:11111111", task_ref="tb:t2",
+        _unit("p01:live:tb:tb:t1:weak:11111111", task_ref="tb:t2",
               block="the block"))
     assert reuse_key(a) != reuse_key(
-        _unit("p01:B:tb:tb:t1:strong:11111111", block="the block"))
+        _unit("p01:live:tb:tb:t1:strong:11111111", block="the block"))
     assert reuse_key(a) != reuse_key(
-        _unit("p01:B:tb:tb:t1:weak:11111111", block="another block"))
+        _unit("p01:live:tb:tb:t1:weak:11111111", block="another block"))
     assert reuse_key(a) != reuse_key(
-        _unit("p01:B:tb:tb:t1:weak:11111111", block=""))
+        _unit("p01:live:tb:tb:t1:weak:11111111", block=""))
 
 
 def test_unchanged_units_reuse_the_previous_result():
     previous = [
-        _unit("p00:B:tb:tb:t1:weak:11111111", block="the block"),
-        _unit("p00:B:tb:tb:t2:weak:22222222", block="other"),
+        _unit("p00:live:tb:tb:t1:weak:11111111", block="the block"),
+        _unit("p00:live:tb:tb:t2:weak:22222222", block="other"),
     ]
     new = [
         # Same task, same block: reuse (the unit id differs -- the sha is
         # over the injected REFERENCES, a rewrite bumped the version).
-        _unit("p01:B:tb:tb:t1:weak:33333333",
+        _unit("p01:live:tb:tb:t1:weak:33333333",
               skills_injected=[{"skill_id": "s", "version": 2}],
               block="the block"),
         # Different block: re-execute.
-        _unit("p01:B:tb:tb:t2:weak:44444444", block="changed"),
+        _unit("p01:live:tb:tb:t2:weak:44444444", block="changed"),
     ]
     assert reusable_units(new, previous) == {
-        "p01:B:tb:tb:t1:weak:33333333": "p00:B:tb:tb:t1:weak:11111111"}
+        "p01:live:tb:tb:t1:weak:33333333": "p00:live:tb:tb:t1:weak:11111111"}
 
 
 def test_bare_and_retrieval_miss_units_share_the_empty_block_key():
     # Both are the same measurement (a bare run), so one may reuse the
     # other's acceptance result under rule 1.
-    previous = [_unit("p00:C:tb:tb:t1:weak:11111111",
+    previous = [_unit("p00:test:tb:tb:t1:weak:11111111",
                       skills_injected=None, block="")]
-    new = [_unit("p01:C:tb:tb:t1:weak:22222222",
+    new = [_unit("p01:test:tb:tb:t1:weak:22222222",
                  skills_injected=[], block="")]
     assert reusable_units(new, previous) == {
-        "p01:C:tb:tb:t1:weak:22222222": "p00:C:tb:tb:t1:weak:11111111"}
+        "p01:test:tb:tb:t1:weak:22222222": "p00:test:tb:tb:t1:weak:11111111"}
 
 
 def test_duplicate_previous_keys_fail_loudly():
     previous = [
-        _unit("p00:B:tb:tb:t1:weak:11111111", block="the block"),
-        _unit("p00:B:tb:tb:t1:weak:22222222", block="the block"),
+        _unit("p00:live:tb:tb:t1:weak:11111111", block="the block"),
+        _unit("p00:live:tb:tb:t1:weak:22222222", block="the block"),
     ]
     with pytest.raises(CodeBugError, match="share the reuse key"):
-        reusable_units([_unit("p01:B:tb:tb:t1:weak:33333333",
+        reusable_units([_unit("p01:live:tb:tb:t1:weak:33333333",
                               block="the block")], previous)
 
 
 def test_malformed_unit_ids_fail_loudly_in_the_reuse_key():
-    for bad in ("no-colons-at-all", "p01:B:tb:t1:weak:ZZZZZZZZ",
+    for bad in ("no-colons-at-all", "p01:live:tb:t1:weak:ZZZZZZZZ",
                 "xx:B:tb:t1:weak:11111111"):
         with pytest.raises(CodeBugError, match="malformed unit id"):
             reuse_key(_unit(bad, block="the block"))
@@ -103,7 +103,7 @@ def test_malformed_unit_ids_fail_loudly_in_the_reuse_key():
 def test_failed_rewrite_keeps_the_target_as_it_was():
     revise = TaskListRow(target_kind="group", target_id="tb:t1",
                          action=decision.REVISE, reason="no_gain",
-                         basis_unit="p01:B:tb:tb:t1:weak:22222222")
+                         basis_unit="p01:live:tb:tb:t1:weak:22222222")
     landed = revise_outcome(revise, produced_new_version=False)
     assert landed.target_kind == "group"
     assert landed.target_id == "tb:t1"
@@ -199,7 +199,7 @@ def test_control_arm_source_keeps_the_summary_vocabulary():
     # into the decision layer but the labels must not change.
     assert control_arm_source(reused_phase="stage1") == "stage1_reuse"
     assert control_arm_source(reused_phase=None) == "fresh_bare_run"
-    assert control_arm_source(reused_phase="p00:D") == "p00:D_reuse"
+    assert control_arm_source(reused_phase="p00:baseline") == "p00:baseline_reuse"
     # The third source keeps the old stage-6 vocabulary verbatim, and
     # the flag never leaks into the other labels.
     assert control_arm_source(

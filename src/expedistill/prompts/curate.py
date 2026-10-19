@@ -36,11 +36,6 @@ SKILLS:
   makes sense for the one task the skill came from (its specific files,
   values or one-off computation), or advice too vague to act on.
 
-Only group or pair skills of the same kind: procedure skills (whose content
-contains the '[When to use]' section header) with procedure skills, failure
-references (whose content contains the '[Trigger]' section header) with
-failure references -- in similar_groups AND in conflicts.
-
 Do not force anything: return empty lists when there is nothing to merge, no
 conflicts and no low-value skill.
 
@@ -84,9 +79,9 @@ Rules:
 - Keep every distinct piece of advice from the sources, stated in general form.
 - You may generalize the sources' conditions and steps; do not add advice that
   none of the sources supports.
-- Preserve the bracketed section structure of the source skills: the merged
-  skill carries the same four sections. Reproduce the bracketed section
-  headers exactly as written, each on its own line.
+- The merged skill carries the four bracketed sections every source skill
+  carries: [When to use], [Steps], [Verify], [Do not use when]. Reproduce
+  the bracketed section headers exactly as written, each on its own line.
 - Keep the weak-model-friendly style: short sentences, one instruction per
   sentence, explicit order, concrete trigger conditions.
 

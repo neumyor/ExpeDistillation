@@ -2,7 +2,7 @@
 finished measurement.
 
 Three crash points, three resumes (the exam phase's own replay rules,
-completing the picture the D phase draws with unit-id skips and the B
+completing the picture the baseline phase draws with unit-id skips and the B
 phase with its append-once verdicts ledger):
 
 * a COMPLETED phase replayed whole: every unit's attempts are already
@@ -16,7 +16,7 @@ phase with its append-once verdicts ledger):
 * a crash BETWEEN the answer and the judge: the unjudged pending attempt
   is completed by the resumed exam_once call -- the pre-existing
   ``_pending_attempt`` path, which the guard must leave untouched;
-* a LATER A phase over a revised version: a fresh measurement round, not
+* a LATER exam phase over a revised version: a fresh measurement round, not
   a replay -- the bare control is re-answered and the new version is
   audited again (the guard's scope, pinning the W2-D skeleton's shape).
 """
@@ -149,8 +149,8 @@ def _config():
         models={"executor_strong": "big-model", "executor_weak": "weak-7b"},
         weak_profile="a weak model",
         n_attempts_strong=1, n_attempts_weak=1,
-        sequence=["D"],
-        phases={"D": {"kind": "execute", "role": "baseline",
+        sequence=["baseline"],
+        phases={"baseline": {"kind": "execute", "role": "baseline",
                      "tasks": "train", "delivery": {"name": "none"},
                      "execution": {"name": "real",
                                    "arms": ["executor_strong",
@@ -172,7 +172,7 @@ def _ctx(tmp_path, handles):
         run_settings=RunSettings())
 
 
-def _phase(index=2, name="A"):
+def _phase(index=2, name="exam"):
     from expedistill.core.config import PhaseInstance
     return PhaseInstance(index=index, name=name,
                          label=f"p{index + 1:02d}:{name}", spec=_exam_spec(),
@@ -284,7 +284,7 @@ def test_a_completed_phase_replays_with_zero_model_calls(monkeypatch,
     ctx = _ctx(tmp_path, _handles(allowed=("t1", "t2", "t3"),
                                   bare_correct=("t2",), leaked=("t3",)))
     skills = [_skill_on(ctx, raw) for raw in ("t1", "t2", "t3")]
-    _write_bank(ctx, "p02:L", skills)
+    _write_bank(ctx, "p02:learn", skills)
     phase = _phase()
 
     first = phase_execute.run(ctx, phase).summary
@@ -333,7 +333,7 @@ def test_a_partial_replay_answers_only_the_unmeasured_units(monkeypatch,
     InfrastructureError, so the pass writes its summary (infra_failed
     non-empty, hence NOT a completion signal) and raises; the resume
     re-enters the phase, reuses the measured unit's judged attempts and
-    spends calls only on the owed one. (A phase whose pass COMPLETED is
+    spends calls only on the owed one. (exam phase whose pass COMPLETED is
     skipped whole by the completion signal instead -- the test above
     pins that path; and the bank cannot grow between two passes of the
     same phase in a sequence replay, because the previous learn phase's
@@ -363,7 +363,7 @@ def test_a_partial_replay_answers_only_the_unmeasured_units(monkeypatch,
     ctx = _ctx(tmp_path, _infra_exploding(("t1",), "t2"))
     measured = _skill_on(ctx, "t1")
     owed = _skill_on(ctx, "t2")
-    _write_bank(ctx, "p02:L", [measured, owed])
+    _write_bank(ctx, "p02:learn", [measured, owed])
     phase = _phase()
     with pytest.raises(InfrastructureError):
         phase_execute.run(ctx, phase)
@@ -413,7 +413,7 @@ def test_a_crash_between_the_answer_and_the_judge_resumes_the_answer(
     handles["judge"] = make_fake_handle("judge", [AssertionError("judge died")])
     ctx = _ctx(tmp_path, handles)
     skill = _skill_on(ctx, "t1")
-    _write_bank(ctx, "p02:L", [skill])
+    _write_bank(ctx, "p02:learn", [skill])
     phase = _phase()
     with pytest.raises(AssertionError, match="judge died"):
         phase_execute.run(ctx, phase)
@@ -455,36 +455,36 @@ def test_a_crash_between_the_answer_and_the_judge_resumes_the_answer(
 
 
 # ---------------------------------------------------------------------------
-# The guard's scope: a later A phase is a new measurement round
+# The guard's scope: a later exam phase is a new measurement round
 # ---------------------------------------------------------------------------
 
 def test_a_later_phase_over_a_new_version_remeasures_the_bare_control(
         monkeypatch, tmp_path):
-    # A second A phase after a revise is a FRESH round, not a replay: the
+    # A second exam phase after a revise is a FRESH round, not a replay: the
     # bare control is re-answered and the new version gets its own leak
     # audit (the W2-D two-round skeleton's shape -- the replay guard must
     # not swallow it). Only the exam itself is reused (its exists check).
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = _ctx(tmp_path, _handles(allowed=("t1",)))
     skill = _skill_on(ctx, "t1")
-    _write_bank(ctx, "p02:L", [skill])
+    _write_bank(ctx, "p02:learn", [skill])
     exam_id = make_exam_id(skill.subtask_id)
-    first = phase_execute.run(ctx, _phase(2, "A")).summary
+    first = phase_execute.run(ctx, _phase(2, "exam")).summary
     assert first["measured"] == [exam_id]
     assert {name: len(handle.client.calls)
             for name, handle in ctx.handles.items()} == {
         "examiner": 1, "answerer": 2, "judge": 2, "auditor": 1}
 
-    # The learn phase between the two A phases revised the skill: same
+    # The learn phase between the two exam phases revised the skill: same
     # id, new version, new content (a changed block, so rule 1 does not
     # reuse the previous verdict either).
     revised = Skill(skill_id=skill.skill_id, content=SKILL_TEXT + "\n3. Verify.",
                     subtask_id=skill.subtask_id,
                     source_subtasks=[skill.subtask_id], version=2,
                     status="pending")
-    _write_bank(ctx, "p04:L", [revised])
+    _write_bank(ctx, "p04:learn", [revised])
     second_ctx = _ctx(tmp_path, _handles(allowed=("t1",)))
-    second = phase_execute.run(second_ctx, _phase(4, "A")).summary
+    second = phase_execute.run(second_ctx, _phase(4, "exam")).summary
 
     assert second["measured"] == [exam_id]
     assert second["reused"] == []

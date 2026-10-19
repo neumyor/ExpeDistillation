@@ -1,6 +1,6 @@
 """The add-path evidence driver: a task's source experiences (R6).
 
-The add action's target is a task; the evidence is the D-phase strong
+The add action's target is a task; the evidence is the baseline-phase strong
 segments the configured segment_select rule keeps, each with its
 rendered steps view. Fact-only, like every evidence package.
 """

@@ -1,15 +1,15 @@
 """The learn <-> execute seam over the REAL drivers (the Wave 2 review C's
 hard requirement): a real learn phase (decision -> add -> pending skill ->
-artifact) feeding a real A phase (pending universe out of the ARTIFACT ->
+artifact) feeding a real exam phase (pending universe out of the ARTIFACT ->
 exam generated -> answered -> judged), the next learn phase accepting or
-discarding the skill off the A phase's report, and the two-round exam
+discarding the skill off the exam phase's report, and the two-round exam
 skeleton (D L A L A L A L C) as one smoke.
 
 Every phase here is the production driver -- no seeded report files, no
 seeded artifacts, no hand-written acceptance rows, and since Wave 3-S no
-seeded SUBTASK either: the add path segments the D phase's strong
+seeded SUBTASK either: the add path segments the baseline phase's strong
 trajectory itself (methods.evidence.segmentation through learn_tasks),
-so the chain from the D-phase trajectories to the new skill is real end
+so the chain from the baseline-phase trajectories to the new skill is real end
 to end.
 """
 
@@ -147,26 +147,28 @@ def _phases(retry_rounds=3):
     """The v4 phase definitions of the exam method (upgrade_v3_config's
     image): [D, L] + [A, L] * retry_rounds + [C]."""
     return {
-        "D": {"kind": "execute", "role": "baseline",
+        "baseline": {"kind": "execute", "role": "baseline",
               "tasks": "train", "delivery": {"name": "none"},
               "execution": {"name": "real",
                             "arms": ["executor_strong", "executor_weak"]}},
-        "L": {"kind": "learn",
-              "evidence": {"name": "segment", "K": 5},
+        "learn": {"kind": "learn",
+              "evidence": {"name": "segment", "K": 5,
+                           "write_lessons": False},
               "author": {"name": "distill_diagnose"},
               "curate": {"name": "none", "token_budget": BIG}},
-        "A": {"kind": "execute", "role": "exam", "tasks": "train",
+        "exam": {"kind": "execute", "role": "exam", "tasks": "train",
               "delivery": {"name": "per_skill"},
               "execution": {"name": "exam"}},
-        "C": {"kind": "execute", "role": "test", "tasks": "test",
+        "test": {"kind": "execute", "role": "test", "tasks": "test",
               "delivery": {"name": "whole_bank"},
               "execution": {"name": "real"},
-              "compare": {"against": "D"}},
+              "compare": {"against": "baseline"}},
     }
 
 
 def _sequence(retry_rounds=3):
-    return ["D", "L"] + ["A", "L"] * retry_rounds + ["C"]
+    return ((["baseline", "learn"] + ["exam", "learn"] * retry_rounds)
+            + ["test"])
 
 
 def _config(retry_rounds=3):
@@ -271,7 +273,7 @@ def _revision():
 
 
 def _t1_subtask_id():
-    """The add path's real segment id: the first cut of the D phase's
+    """The add path's real segment id: the first cut of the baseline phase's
     strong attempt 0 on t1 (the deterministic chain the segmentation
     wiring produces inside L1)."""
     task_id = ids.make_task_id(_FAKE, "t1")
@@ -284,7 +286,7 @@ def _load_skill(ctx, skill_id):
 
 
 # ---------------------------------------------------------------------------
-# The seam: a pending skill rides the artifact into the A phase and back
+# The seam: a pending skill rides the artifact into the exam phase and back
 # ---------------------------------------------------------------------------
 
 def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
@@ -311,9 +313,9 @@ def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
     assert skill.status == "pending" and skill.version == 1
     assert first.summary["task_list"] == {"add": 1, "superseded_rows": 0}
     # THE seam: the intermediate learn phase's artifact carries the
-    # PENDING member -- without it the A phase's universe is empty and
+    # PENDING member -- without it the exam phase's universe is empty and
     # the whole exam method silently measures nothing.
-    artifact = load_phase_bank(ctx.run_dir, "p02:L")
+    artifact = load_phase_bank(ctx.run_dir, "p02:learn")
     assert [row["skill_id"] for row in artifact] == [skill_id]
     assert artifact[0]["status"] == "pending"
 
@@ -321,7 +323,7 @@ def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
     second = _run(ctx, config, 2)
     exam_id = ids.make_exam_id(subtask_id)
     assert second.summary["measured"] == [exam_id]
-    rows = _report_rows(ctx, "p03:A")
+    rows = _report_rows(ctx, "p03:exam")
     with_skill = next(row for row in rows if row.injected_skills)
     assert with_skill.status == verdicts.STATUS_NORMAL
     assert with_skill.success_count == 1
@@ -332,8 +334,8 @@ def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
     skill = _load_skill(ctx, skill_id)
     assert skill.status == "accepted"
     assert third.summary["task_list"] == {"keep": 1, "superseded_rows": 0}
-    # The last learn phase's artifact is the bank the C phase injects.
-    artifact = load_phase_bank(ctx.run_dir, "p04:L")
+    # The last learn phase's artifact is the bank the test phase injects.
+    artifact = load_phase_bank(ctx.run_dir, "p04:learn")
     assert [row["status"] for row in artifact] == ["accepted"]
     # Nothing ran on the executor beyond D's two arms.
     assert all(call["handle"].role in ("strong", "weak") for call in
@@ -368,8 +370,8 @@ def test_a_still_failing_skill_is_discarded_at_the_last_check(
     assert result.summary["task_list"] == {"delete": 1,
                                            "superseded_rows": 0}
     # The discarded member leaves the bank: the last learn phase's
-    # artifact is empty and the C phase would inject nothing.
-    assert load_phase_bank(ctx.run_dir, "p04:L") == []
+    # artifact is empty and the test phase would inject nothing.
+    assert load_phase_bank(ctx.run_dir, "p04:learn") == []
     # ... and C runs against an empty bank without raising.
     final = _run(ctx, config, 4)
     assert final.summary["role"] == "test"
@@ -435,16 +437,16 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     # phase measures nothing (the exam method's quiet round).
     third = _run(ctx, config, 6)
     assert third.summary["universe"] == []
-    assert _report_rows(ctx, "p07:A") == []
+    assert _report_rows(ctx, "p07:exam") == []
 
     # L4 (the last learn phase) re-curates and C injects the accepted
     # bank over the test set against D's weak arm.
     _run(ctx, config, 7)
-    assert load_phase_bank(ctx.run_dir, "p08:L")[0]["status"] == "accepted"
+    assert load_phase_bank(ctx.run_dir, "p08:learn")[0]["status"] == "accepted"
     final = _run(ctx, config, 8)
 
     assert final.summary["role"] == "test"
-    assert final.summary["control_source"] == "D_reuse"
+    assert final.summary["control_source"] == "baseline_reuse"
     assert final.summary["with_bank"]["tasks"] == 3
     # The with-bank arm really carried the skill's block.
     with_bank_calls = [call for call in plugin.calls
@@ -457,7 +459,8 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     outcomes = []
     from expedistill.infra.store import read_jsonl
     for index in (1, 3, 5, 7):
-        path = (phase_bank.phase_bank_dir(ctx.run_dir, f"p{index + 1:02d}:L")
-                / learn_tasks.OUTCOMES_NAME)
+        path = (phase_bank.phase_bank_dir(ctx.run_dir,
+                                          f"p{index + 1:02d}:learn")
+                 / learn_tasks.OUTCOMES_NAME)
         outcomes.extend(row["outcome"] for row in read_jsonl(path))
     assert outcomes == ["added", "revised", "accepted", "already_accepted"]

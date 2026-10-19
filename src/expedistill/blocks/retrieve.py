@@ -15,8 +15,7 @@ Both steps score in the same lexical space: tokens are lowercase
 ``[a-z0-9_]+`` runs and IDF is computed from the retrieval documents of
 the given bank. A skill's retrieval document is its full text with one
 weighted section kind: the body of the applicability section -- the one
-opened by ``[When to use]`` (procedure skills) or ``[Trigger]`` (failure
-references) -- counts x3, and every other text counts x1, the marker
+opened by ``[When to use]`` -- counts x3, and every other text counts x1, the marker
 headers included (they are structure, not payload). A skill without
 markers is its full text at x1 (the whole current TB bank).
 
@@ -31,7 +30,7 @@ from collections import Counter
 from collections.abc import Mapping as _Mapping
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from expedistill.core.models import FAILURE_REFERENCE_MARKERS, PROCEDURE_MARKERS
+from expedistill.core.models import SKILL_MARKERS
 
 __all__ = ["CATEGORY_MERGE_THRESHOLD", "derive_categories", "select_skills"]
 
@@ -41,18 +40,16 @@ _TOKEN_RE = re.compile(r"[a-z0-9_]+")
 #: One alternation over every skill-content section marker; a match opens
 #: a weighted section. Sorted so the pattern text is stable across runs.
 _MARKER_RE = re.compile("|".join(
-    re.escape(marker) for marker in
-    sorted(set(PROCEDURE_MARKERS) | set(FAILURE_REFERENCE_MARKERS))))
+    re.escape(marker) for marker in sorted(SKILL_MARKERS)))
 
-#: The applicability sections named by the D11 spec (contract 4): the
-#: section opened by ``[When to use]`` in a procedure skill and by
-#: ``[Trigger]`` in a failure reference -- the "when does this apply"
-#: text, which is what task matching needs. Only these section BODIES
-#: are weighted; the other sections, the marker headers and any text
-#: outside sections stay x1 (a v2 skill has no text outside its sections,
-#: so weighting every section would be a uniform scale change and the
+#: The applicability section named by the D11 spec (contract 4): the
+#: section opened by ``[When to use]`` -- the "when does this apply"
+#: text, which is what task matching needs. Only this section's BODY is
+#: weighted; the other sections, the marker headers and any text outside
+#: sections stay x1 (a v2 skill has no text outside its sections, so
+#: weighting every section would be a uniform scale change and the
 #: mechanism would be provably inert).
-_APPLICABILITY_MARKERS = ("[When to use]", "[Trigger]")
+_APPLICABILITY_MARKERS = (SKILL_MARKERS[0],)
 
 #: Tokens of an applicability section body count this many times.
 _MARKED_SECTION_WEIGHT = 3
@@ -111,8 +108,7 @@ def _retrieval_counts(content: str) -> Counter:
 
     Sections are delimited by the skill-content markers; a section's body
     runs from its opening marker to the next marker or the end of the
-    text. The body of an applicability section (``[When to use]`` /
-    ``[Trigger]``) counts ``_MARKED_SECTION_WEIGHT`` times; every other
+    text. The body of the applicability section (``[When to use]``) counts ``_MARKED_SECTION_WEIGHT`` times; every other
     text -- the marker headers themselves, the other sections' bodies,
     and any text before the first marker -- counts once. A skill without
     markers is its full text counting once, which is the same rule

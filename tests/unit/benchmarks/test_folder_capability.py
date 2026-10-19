@@ -60,7 +60,7 @@ def test_tb_declares_the_capability_and_its_prompt_is_registered():
 def test_searchqa_and_alfworld_do_not_declare_it():
     # One line each of their execution logic is untouched: they inherit
     # the None default and never see a folder unit through the config
-    # path (the pairing checks keep folder on the C phase; E1's guard
+    # path (the pairing checks keep folder on the test phase; E1's guard
     # holds the boundary for direct callers).
     assert ensure_plugin("searchqa").skill_folder_prompt_name is None
     assert ensure_plugin("alfworld").skill_folder_prompt_name is None

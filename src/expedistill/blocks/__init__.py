@@ -54,8 +54,8 @@ from expedistill.blocks.curate import (
     merge_skills as merge_skills,
 )
 from expedistill.blocks.author import (
+    has_skill_sections as has_skill_sections,
     render_skill_content as render_skill_content,
-    skill_markers as skill_markers,
     validate_skill_sections as validate_skill_sections,
 )
 from expedistill.blocks.retrieve import (

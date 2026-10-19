@@ -82,7 +82,7 @@ def test_the_mode_comes_from_the_frozen_sequence_not_a_slot(tmp_path):
     manifest = read_json(run_dir / "manifest.json")
     # Flip the live phases to exam phases: the live subtree then contradicts
     # the frozen identity exactly as the legacy exam-mode check demands.
-    for name in ("B1", "B2"):
+    for name in ("live_1", "live_2"):
         manifest["config"]["phases"][name]["role"] = "exam"
     write_json(run_dir / "manifest.json", manifest, indent=2)
     errors = _errors(run_dir)
@@ -108,7 +108,7 @@ def test_n_attempts_is_read_per_live_phase_and_overridable(tmp_path):
     # shrinking the second live phase's depth must flag the stored
     # round-1 units as beyond the frozen depth.
     manifest = read_json(run_dir / "manifest.json")
-    manifest["config"]["phases"]["B2"]["execution"]["n_attempts"] = 2
+    manifest["config"]["phases"]["live_2"]["execution"]["n_attempts"] = 2
     write_json(run_dir / "manifest.json", manifest, indent=2)
     errors = _errors(run_dir)
     assert any("unexpected stored unit" in message
@@ -130,7 +130,7 @@ def _errors_with_override(run_dir: Path, n_attempts: int):
 
 def test_a_phase_record_drifted_from_the_sequence_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
-    record_path = (run_dir / "phases" / "p03_B1"
+    record_path = (run_dir / "phases" / "p03_live_1"
                    / audit_live_run.PHASE_RECORD_NAME)
     record = read_json(record_path)
     record["index"] = 5
@@ -141,12 +141,12 @@ def test_a_phase_record_drifted_from_the_sequence_is_an_error(tmp_path):
 
 def test_an_unplanned_report_row_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
-    report_path = (run_dir / "phases" / "p03_B1"
+    report_path = (run_dir / "phases" / "p03_live_1"
                    / audit_live_run.REPORT_NAME)
     rows = [json.loads(line) for line in
             report_path.read_text(encoding="utf-8").splitlines() if line]
     rows.append(audit_live_run._report_row(
-        "p03:B1:tb:tb:t1:weak:deadbeef", "p03:B1", "weak", [], 3, 3))
+        "p03:live_1:tb:tb:t1:weak:deadbeef", "p03:live_1", "weak", [], 3, 3))
     write_jsonl(report_path, rows)
     assert any("never resolved" in message
                for message in _errors(run_dir))
@@ -154,7 +154,7 @@ def test_an_unplanned_report_row_is_an_error(tmp_path):
 
 def test_a_final_test_report_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
-    write_jsonl(run_dir / "phases" / "p07_C"
+    write_jsonl(run_dir / "phases" / "p07_test"
                / audit_live_run.REPORT_NAME, [])
     assert any("final-test phase wrote an acceptance report" in message
                for message in _errors(run_dir))
@@ -168,7 +168,7 @@ def test_a_bank_artifact_without_the_summary_commit_is_a_warn(tmp_path):
     # phase runs) -- a human look, not a dead run (Wave 3 review O3's
     # ruling: ERROR downgraded to WARN, matching the module's own
     # grading docstring and the legacy terminals check).
-    (run_dir / "phases" / "p06_Lfinal"
+    (run_dir / "phases" / "p06_learn_final"
      / audit_live_run.LEARN_SUMMARY_NAME).unlink()
     audit = audit_live_run.audit_run(run_dir)
     assert not audit.errors()
@@ -190,11 +190,11 @@ def test_an_already_accepted_echo_of_an_earlier_receipt_is_the_resume_idiom(
                                                0)
     keeper.status = "accepted"
     Store(run_dir).save(keeper, "skills")
-    outcomes = run_dir / "phases" / "p02_Lseed" / audit_live_run.OUTCOMES_NAME
+    outcomes = run_dir / "phases" / "p02_learn_seed" / audit_live_run.OUTCOMES_NAME
     for outcome in ("accepted", "already_accepted"):
         audit_live_run._append_jsonl_raw(outcomes, {
             "schema": audit_live_run.LEARN_OUTCOME_SCHEMA,
-            "phase_label": "p02:Lseed", "target_kind": "skill",
+            "phase_label": "p02:learn_seed", "target_kind": "skill",
             "target_id": keeper.skill_id, "action": "keep",
             "skill_id": keeper.skill_id, "outcome": outcome, "version": 1})
     assert not _errors(run_dir)
@@ -202,7 +202,7 @@ def test_an_already_accepted_echo_of_an_earlier_receipt_is_the_resume_idiom(
 
 def test_a_second_action_receipt_for_one_target_skill_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
-    outcomes = run_dir / "phases" / "p04_Lmid" / audit_live_run.OUTCOMES_NAME
+    outcomes = run_dir / "phases" / "p04_learn_mid" / audit_live_run.OUTCOMES_NAME
     duplicate = json.loads(outcomes.read_text(encoding="utf-8"
                                               ).splitlines()[0])
     audit_live_run._append_jsonl_raw(outcomes, duplicate)
@@ -222,8 +222,8 @@ def test_a_revision_ledger_the_store_contradicts_is_an_error(tmp_path):
     # The row goes to the final learn phase (its revisions ledger is
     # empty, so this plan row is the first one read for the skill).
     audit_live_run._append_jsonl_raw(
-        run_dir / "phases" / "p06_Lfinal" / audit_live_run.REVISIONS_NAME, {
-            "schema": "learn-revision-v1", "phase_label": "p06:Lfinal",
+        run_dir / "phases" / "p06_learn_final" / audit_live_run.REVISIONS_NAME, {
+            "schema": "learn-revision-v1", "phase_label": "p06:learn_final",
             "target_kind": "group", "target_id": task_id,
             "skill_id": member, "from_version": 5})
     assert any("drifted from the ledger" in message
@@ -233,7 +233,7 @@ def test_a_revision_ledger_the_store_contradicts_is_an_error(tmp_path):
 def test_a_dropped_final_test_unit_on_a_complete_summary_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
     test_id = ids.make_task_id("tb", "tt")
-    victim = Store(run_dir / "phases" / "p07_C" / "with_bank"
+    victim = Store(run_dir / "phases" / "p07_test" / "with_bank"
                    / "store").path_for(
         "trajectories", ids.make_trajectory_id(test_id, "weak", 0))
     victim.unlink()
@@ -247,7 +247,7 @@ def test_a_dropped_final_test_unit_on_a_complete_summary_is_an_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _make_external_c_run(tmp_path: Path) -> Path:
-    """The clean v4 fake run with the C phase flipped to the external
+    """The clean v4 fake run with the test phase flipped to the external
     campaign control: no control store, the score file's bytes copied
     into the phase directory, the manifest pinning its sha256."""
     run_dir = _clean_v4_run(tmp_path)
@@ -257,13 +257,13 @@ def _make_external_c_run(tmp_path: Path) -> Path:
                          ).encode("utf-8")
     sha = hashlib.sha256(payload).hexdigest()
     manifest = read_json(run_dir / "manifest.json")
-    manifest["config"]["phases"]["C"]["compare"] = {
+    manifest["config"]["phases"]["test"]["compare"] = {
         "against": "external_campaign",
         "external": {"path": "/tmp/scores.json", "sha256": sha,
                      "model_key": "qwen"}}
     write_json(run_dir / "manifest.json", manifest, indent=2)
-    shutil.rmtree(run_dir / "phases" / "p07_C" / "control")
-    (run_dir / "phases" / "p07_C" / "external_control.json"
+    shutil.rmtree(run_dir / "phases" / "p07_test" / "control")
+    (run_dir / "phases" / "p07_test" / "external_control.json"
      ).write_bytes(payload)
     return run_dir
 
@@ -280,7 +280,7 @@ def test_an_external_campaign_control_skips_units_and_pins_bytes(tmp_path):
 
 def test_a_drifted_external_control_copy_is_an_error(tmp_path):
     run_dir = _make_external_c_run(tmp_path)
-    (run_dir / "phases" / "p07_C" / "external_control.json"
+    (run_dir / "phases" / "p07_test" / "external_control.json"
      ).write_bytes(b"drifted bytes")
     assert any("score-file copy hashes to" in message
                for message in _errors(run_dir))
@@ -288,7 +288,7 @@ def test_a_drifted_external_control_copy_is_an_error(tmp_path):
 
 def test_a_missing_external_control_copy_is_an_error(tmp_path):
     run_dir = _make_external_c_run(tmp_path)
-    (run_dir / "phases" / "p07_C" / "external_control.json").unlink()
+    (run_dir / "phases" / "p07_test" / "external_control.json").unlink()
     assert any("score-file copy is missing" in message
                for message in _errors(run_dir))
 

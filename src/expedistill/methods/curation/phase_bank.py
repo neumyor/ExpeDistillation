@@ -20,7 +20,7 @@ pending -- without them in the artifact the exam phase's universe (the
 pending members) would always be empty. Curation itself still works on
 the accepted set only; the pending members pass through unchanged,
 appended after the curated rows, and the token-budget valve stays over
-the accepted set (pending members are the material the A and B phases
+the accepted set (pending members are the material the A and live phases
 test, not the deliverable bank the whole-bank and retrieval drivers
 inject).
 

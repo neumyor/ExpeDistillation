@@ -15,10 +15,10 @@ full freeze): no defensive import is needed here, and a caller that
 bypasses stage 0 still finds the names registered.
 
 Scope kept out of this module on purpose (decision section 2.3): the
-marker-preservation check on a revised skill (``skill_markers(new) ==
-skill_markers(old)``, the K5 precedent) belongs to the composite K6, which
-also owns the version bump and rewrite_history append -- blocks may not
-import each other, and skill_markers lives in blocks/author.py. The same
+section-preservation check on a revised skill (``has_skill_sections``,
+the K5 precedent) belongs to the author driver, which also owns the
+version bump and rewrite_history append -- blocks may not import each
+other, and has_skill_sections lives in blocks/author.py. The same
 rule is why the version field of an attribution ledger row is not here
 either: the model never provides it, K6 reads it from the store when
 appending.

@@ -75,15 +75,14 @@ ATTEMPT_PURPOSES = ("bare", "acceptance", "regression")
 # prompts embed these markers literally (their outputs must reproduce
 # them); the G2 prompts carry the JSON field names that map 1:1 onto the
 # four sections (blocks/author.py's renderer adds the markers);
-# blocks/retrieve.py weights them for retrieval.
+# blocks/retrieve.py weights the [When to use] section for retrieval.
 
-#: The four sections of a stored PROCEDURE skill's content.
-PROCEDURE_MARKERS = ("[When to use]", "[Steps]", "[Verify]", "[Do not use when]")
-
-#: The four sections of a stored FAILURE REFERENCE's content. The last
-#: marker is shared by both kinds; the other three identify the kind.
-FAILURE_REFERENCE_MARKERS = ("[Trigger]", "[Why it fails]", "[Do instead]",
-                             "[Do not use when]")
+#: The four sections of every stored skill's content. A skill written
+#: from a strong success (distill) and one written from a weak failure
+#: (diagnose) carry the same four sections (the 2026-10-19 ruling,
+#: docs/decisions/unified_skill_structure_20261019.md); which kind a
+#: skill is, its source subtasks' ``Subtask.source`` says.
+SKILL_MARKERS = ("[When to use]", "[Steps]", "[Verify]", "[Do not use when]")
 
 #: The write-side length cap of ``Skill.summary`` (schema v3): the
 #: summary is one line of a future skill-directory listing, so the G2 /

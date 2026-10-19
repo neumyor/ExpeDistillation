@@ -21,18 +21,18 @@ from expedistill.core.config import (
 #: phase, one final test. Small on purpose -- the sequence/phase-shape
 #: checklist has its own file (tests/unit/core/test_config_v4.py); here it
 #: only needs to be legal.
-MIN_SEQUENCE = ["D", "L", "C"]
+MIN_SEQUENCE = ["baseline", "learn", "test"]
 
 MIN_PHASES = {
-    "D": {"kind": "execute", "role": "baseline", "tasks": "train",
+    "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
-    "L": {"kind": "learn",
+    "learn": {"kind": "learn",
           "evidence": {"name": "segment", "K": 5},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096}},
-    "C": {"kind": "execute", "role": "test", "tasks": "test",
+    "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
           "compare": {"against": "fresh_bare"}},
@@ -41,15 +41,15 @@ MIN_PHASES = {
 #: The sequence/phases block every loadable YAML fixture carries, in the
 #: same inline spelling a config file uses.
 YAML_METHOD = (
-    "sequence: [D, L, C]\n"
+    "sequence: [baseline, learn, test]\n"
     "phases:\n"
-    "  D: {kind: execute, role: baseline, tasks: train,"
+    "  baseline: {kind: execute, role: baseline, tasks: train,"
     " delivery: {name: none},"
     " execution: {name: real, arms: [executor_strong, executor_weak]}}\n"
-    "  L: {kind: learn, evidence: {name: segment, K: 5},"
+    "  learn: {kind: learn, evidence: {name: segment, K: 5},"
     " author: {name: distill_diagnose},"
     " curate: {name: none, token_budget: 4096}}\n"
-    "  C: {kind: execute, role: test, tasks: test,"
+    "  test: {kind: execute, role: test, tasks: test,"
     " delivery: {name: whole_bank}, execution: {name: real},"
     " compare: {against: fresh_bare}}\n"
 )
@@ -181,7 +181,7 @@ class TestValidation:
 
     def test_test_role_refuses_the_exam_execution(self):
         phases = copy.deepcopy(MIN_PHASES)
-        phases["C"]["execution"] = {"name": "exam"}
+        phases["test"]["execution"] = {"name": "exam"}
         with pytest.raises(ConfigError,
                            match="that role runs 'real' or 'real_folder'"):
             make_config(phases=phases)
@@ -573,8 +573,8 @@ class TestPhaseFields:
             LearnPhaseSpec,
         )
         cfg = make_config()
-        assert isinstance(cfg.phases["D"], ExecutePhaseSpec)
-        assert isinstance(cfg.phases["L"], LearnPhaseSpec)
+        assert isinstance(cfg.phases["baseline"], ExecutePhaseSpec)
+        assert isinstance(cfg.phases["learn"], LearnPhaseSpec)
 
     def test_parsed_specs_accepted_back(self):
         # dataclasses.replace on a loaded config re-parses harmlessly.
@@ -585,8 +585,8 @@ class TestPhaseFields:
     def test_not_shared_with_caller_mapping(self):
         given = copy.deepcopy(MIN_PHASES)
         cfg = make_config(phases=given)
-        given["L"]["curate"]["token_budget"] = 99
-        assert cfg.phases["L"].curate["token_budget"] == 4096
+        given["learn"]["curate"]["token_budget"] = 99
+        assert cfg.phases["learn"].curate["token_budget"] == 4096
 
     def test_from_dict_round_trip(self):
         cfg = make_config()
@@ -605,8 +605,8 @@ class TestPhaseFields:
             + YAML_METHOD,
             encoding="utf-8")
         cfg = load_config(str(cfg_file))
-        assert cfg.sequence == ["D", "L", "C"]
-        assert cfg.phases["C"].delivery == {"name": "whole_bank"}
+        assert cfg.sequence == ["baseline", "learn", "test"]
+        assert cfg.phases["test"].delivery == {"name": "whole_bank"}
         out = tmp_path / "out.yaml"
         save_config(cfg, str(out))
         assert load_config(str(out)) == cfg
@@ -819,7 +819,7 @@ class TestSerialisation:
         assert cfg.benchmark == "tb"
         assert cfg.mode == "split"
         assert cfg.split == {"ratio": 0.8, "seed": 7}
-        assert cfg.phases["L"].evidence["K"] == 5
+        assert cfg.phases["learn"].evidence["K"] == 5
         assert cfg.rules["task_select"] == "all_weak_fail"
         assert cfg.models["judge"] == "model-s"
         assert cfg.models["answerer"] == "model-w"
@@ -967,16 +967,16 @@ GOLDEN_TO_DICT_KEY_ORDER = [
 
 #: The canonical (parsed, all-keys) form of the fixture's phases.
 GOLDEN_PHASES = {
-    "D": {"role": "baseline", "tasks": "train",
+    "baseline": {"role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]},
           "compare": None, "acceptance": None, "kind": "execute"},
-    "L": {"evidence": {"name": "segment", "K": 5},
+    "learn": {"evidence": {"name": "segment", "K": 5},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096},
           "kind": "learn", "role": "learn"},
-    "C": {"role": "test", "tasks": "test",
+    "test": {"role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
           "compare": {"against": "fresh_bare", "rule": None,
@@ -1004,7 +1004,7 @@ GOLDEN_TO_DICT_FULL_FORM = {
     "n_attempts_weak": 1,
     "split": None,
     "tasks": None,
-    "sequence": ["D", "L", "C"],
+    "sequence": ["baseline", "learn", "test"],
     "phases": GOLDEN_PHASES,
     "invalid_redispatch_limit": 1,
     "rules": {
@@ -1038,13 +1038,13 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
     "n_attempts_weak": 5,
     "split": {"train": ["tb:1"], "test": ["tb:2"], "reserved": ["tb:3"]},
     "tasks": ["tb:1", "tb:2", "tb:3"],
-    "sequence": ["D", "L", "C"],
+    "sequence": ["baseline", "learn", "test"],
     "phases": {
         **GOLDEN_PHASES,
         # A GIVEN phase freezes verbatim -- no per-key merge with any
         # default (a merge would smuggle one method's params into
         # another's phase).
-        "L": {"evidence": {"name": "segment", "K": 6},
+        "learn": {"evidence": {"name": "segment", "K": 6},
               "author": {"name": "distill_diagnose"},
               "curate": {"name": "none", "token_budget": 4096},
               "kind": "learn", "role": "learn"},
@@ -1070,7 +1070,7 @@ class TestToDictGolden:
 
     def test_split_form_freezes_byte_identically(self):
         phases = copy.deepcopy(MIN_PHASES)
-        phases["L"]["evidence"]["K"] = 6
+        phases["learn"]["evidence"]["K"] = 6
         cfg = make_config(
             mode="split",
             weak_profile="model-w is easily confused by multi-step "
@@ -1151,9 +1151,9 @@ class TestUpgradeV2:
         }
         cfg = ExperimentConfig.from_dict(
             upgrade_v3_config(upgrade_v2_config(v2)))
-        assert cfg.sequence == ["D", "L", "B", "L", "B", "L", "C"]
-        assert cfg.phases["B"].execution["n_attempts"] == 3
-        assert cfg.phases["L"].curate["token_budget"] == 96000
+        assert cfg.sequence == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
+        assert cfg.phases["live"].execution["n_attempts"] == 3
+        assert cfg.phases["learn"].curate["token_budget"] == 96000
 
     def test_input_mapping_untouched(self):
         v2 = {"K": 5, "token_budgets": {"default_max_output_tokens": 1},
@@ -1219,7 +1219,7 @@ class TestExternalCampaignCompare:
 
     def _raw_phases(self, compare):
         phases = copy.deepcopy(MIN_PHASES)
-        phases["C"]["compare"] = compare
+        phases["test"]["compare"] = compare
         return phases
 
     def _config(self, compare):
@@ -1232,7 +1232,7 @@ class TestExternalCampaignCompare:
             "external": {"path": "/tmp/scores.json",
                          "sha256": self.SHA, "model_key": "qwen"},
         })
-        assert cfg.phases["C"].compare.external == ExternalControlSpec(
+        assert cfg.phases["test"].compare.external == ExternalControlSpec(
             path="/tmp/scores.json", sha256=self.SHA, model_key="qwen")
         # The freezable form round-trips (B4's resume comparison).
         assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
@@ -1243,11 +1243,11 @@ class TestExternalCampaignCompare:
             "external": {"path": "/tmp/scores.json",
                          "sha256": "AB" * 32, "model_key": "qwen"},
         })
-        assert cfg.phases["C"].compare.external.sha256 == "ab" * 32
+        assert cfg.phases["test"].compare.external.sha256 == "ab" * 32
 
     def test_refused_on_a_non_test_phase(self):
         phases = copy.deepcopy(MIN_PHASES)
-        phases["D"]["compare"] = {
+        phases["baseline"]["compare"] = {
             "against": "external_campaign",
             "external": {"path": "/tmp/scores.json",
                          "sha256": self.SHA, "model_key": "qwen"},
@@ -1298,7 +1298,7 @@ class TestExternalCampaignCompare:
                         "execution": {"name": "real",
                                       "arms": ["executor_strong",
                                                "executor_weak"]}}
-        phases["B"] = {"kind": "execute", "role": "live", "tasks": "train",
+        phases["live"] = {"kind": "execute", "role": "live", "tasks": "train",
                        "delivery": {"name": "group_by_task"},
                        "execution": {"name": "real", "n_attempts": 3},
                        "compare": {"against": "external_campaign",
@@ -1307,7 +1307,7 @@ class TestExternalCampaignCompare:
                                        "sha256": self.SHA,
                                        "model_key": "qwen"}}}
         with pytest.raises(ConfigError, match="role 'live'"):
-            make_config(sequence=["D", "D2", "B", "L", "C"], phases=phases)
+            make_config(sequence=["baseline", "D2", "live", "learn", "test"], phases=phases)
 
     def test_load_config_resolves_the_relative_path(self, tmp_path):
         seed = tmp_path / "seed" / "scores.json"
@@ -1322,15 +1322,15 @@ models:
   executor_strong: model-s
   executor_weak: model-w
 schema_version: 4
-sequence: [D, L, C]
+sequence: [baseline, learn, test]
 phases:
-  D: {{kind: execute, role: baseline, tasks: train,
+  baseline: {{kind: execute, role: baseline, tasks: train,
        delivery: {{name: none}},
        execution: {{name: real, arms: [executor_strong, executor_weak]}}}}
-  L: {{kind: learn, evidence: {{name: segment, K: 5}},
+  learn: {{kind: learn, evidence: {{name: segment, K: 5}},
        author: {{name: distill_diagnose}},
        curate: {{name: none, token_budget: 4096}}}}
-  C: {{kind: execute, role: test, tasks: test,
+  test: {{kind: execute, role: test, tasks: test,
        delivery: {{name: whole_bank}}, execution: {{name: real}},
        compare: {{against: external_campaign,
                   external: {{path: ../seed/scores.json,
@@ -1338,5 +1338,5 @@ phases:
                              model_key: qwen}}}}}}
 """, encoding="utf-8")
         cfg = load_config(str(config_file))
-        assert cfg.phases["C"].compare.external.path == str(
+        assert cfg.phases["test"].compare.external.path == str(
             (tmp_path / "seed" / "scores.json").resolve())

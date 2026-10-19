@@ -1,4 +1,4 @@
-"""Skill-folder M6, the C phase's true mid-run resume: a folder phase
+"""Skill-folder M6, the test phase's true mid-run resume: a folder phase
 interrupted partway (some units stored, some not) lands on the SAME
 summary as a one-shot run -- byte for byte, read sets included.
 

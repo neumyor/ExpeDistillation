@@ -1064,3 +1064,27 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：用户要求 README 大幅简化，只讲清楚整理模块是什么、暴露哪些参数、各自含义与可选项，其他不展开。重写后只保留：模块一句话说明、只在最后一个学习阶段真正整理、agentbrew 的 5 个参数表（token_budget、rounds、merge_check、drop_low_value、similarity_input）、none 的 1 个参数、以及 token_budget 为 null 时只跑一轮这一条必须知道的注意事项；原先的核心概念、常见场景、踩坑清单、产物文件、参数传递路径分析与已知限制全部删去。只改文档。
 
 工件：`src/expedistill/methods/curation/README.md`（重写）、`README.md`、`AGENTS.md`（指引措辞同步）
+
+## 2026-10-19 15:20 — 技能结构统一（做法 / 教训同一套四段）与教训类技能产出恢复（用户裁决）
+
+一段话摘要：用户裁决（`docs/decisions/unified_skill_structure_20261019.md`）五条：不加类型字段，技能是做法还是教训看来源段的 `Subtask.source`；所有技能统一为 `[When to use]`/`[Steps]`/`[Verify]`/`[Do not use when]` 四段；旧库不迁移（技能将重新生成）；恢复教训类技能产出，开关 `write_lessons` 放在找证据（evidence `segment`）参数里，默认 true；旧写法不再兼容，下游不再按类型分支。起因：10-16 重构中修复方案 R6 把 add 路径证据收窄为只读强模型切段，此后新 run 不产出教训类技能（10-17 02:41 协调者裁决接受了这一收窄，见 `docs/decisions/e1_baseline_equivalence_ruling_20261017.md`，并要求恢复时走 README → decisions → 代码、重生成金基线时重新披露 E1；本次按此执行）。改动：core 只留一套 `SKILL_MARKERS`，删除 `FAILURE_REFERENCE_MARKERS`；写作块两种写法共用一套字段与渲染，`skill_markers` 换成 `has_skill_sections`（是否带齐四段），改写（G6/G11）与合并（K5）的后置检查都改为"带齐四段"，K5 删除合并前的类型门；SKILL_DIAGNOSE 改为输出四段（失败征兆写进 when_to_use），REWRITE / LIVE_SKILL_REVISION / SIMILARITY / MERGE 删去两套结构与"只许同类归组"的说明；folder 目录回退与检索加权只认 `[When to use]`；evidence 的 `SegmentationParams` 加 `write_lessons`，开着时切段与证据采集同时取弱模型轨迹，弱段按 diagnose 写作，段筛选仍由 `segment_select` 决定。旧 `[Trigger]` 技能仍可加载，但视为不带四段（目录显示占位符、改写与合并不做段落检查）。五个提示词 digest 变化（新实验，需新建 run）。金矩阵重生成：默认开关下金跑产出弱源技能，模型调用数约翻倍，三种崩溃续跑变体全部等价；wave4 披露重生成，对归档基线 69904f7 的比较中 E2（终态）与 E6（归因痕迹）由红转绿，E1 只剩弱源技能正文结构不同（技能编号、状态、分组、版本全等），E4 的调用（角色、提示词）多重集一一对应、只差请求文本，根因条目 R6_STRONG_ONLY_ADD_PATH 换为 UNIFIED_SKILL_STRUCTURE。端到端：假模型 SearchQA smoke（tmp/unified_smoke_run，未写 runs/）D L B L B L C 跑通，弱源技能 5 条接受，全部四段、无 [Trigger]，一条强源与一条弱源技能被合并为 bank/merge/0000，audit_live_run 0 error / 0 warn / 0 info。测试 2255 passed + 4 deselected（基线 2256：删去类型门、类型切换、两套标记等用例，新增强弱合并、write_lessons 开关、旧结构不识别等用例），ruff 全过。未提交。
+
+工件：`docs/decisions/unified_skill_structure_20261019.md`（新建）、`src/expedistill/core/models.py`、`src/expedistill/blocks/author.py`、`src/expedistill/blocks/__init__.py`、`src/expedistill/blocks/attribution.py`、`src/expedistill/blocks/retrieve.py`、`src/expedistill/composites/curation.py`、`src/expedistill/methods/author/write.py`、`src/expedistill/methods/delivery/folder.py`、`src/expedistill/methods/evidence/__init__.py`、`src/expedistill/methods/evidence/add_path.py`、`src/expedistill/methods/evidence/segmentation.py`、`src/expedistill/stages/learn_tasks.py`、`src/expedistill/prompts/author.py`、`src/expedistill/prompts/attribution.py`、`src/expedistill/prompts/curate.py`、`src/expedistill/llm/fake_provider.py`、`tests/golden/harness.py`、`tests/golden/semantics.py`、`tests/fixtures/golden/`（8 组合 + provenance 重生成）、`tests/fixtures/golden_acceptance/wave4_e1_e6_disclosure.json`（重生成）、14 个测试文件、`README.md`、`AGENTS.md`
+
+## 2026-10-19 15:35 — 写作模块使用说明（src/expedistill/methods/author/README.md）
+
+一段话摘要：按用户要求，仿整理模块 README 的格式给写作模块写使用说明：模块一句话说明、在哪个阶段执行、`distill_diagnose` 的 YAML 写法、"无参数"、新增与修改两件事的表（写法、四段结构、用哪个模型角色），以及两条注意事项——是否从弱模型失败片段学由找证据参数 `evidence.write_lessons` 决定、改写失败算没变化不删技能；末尾指向裁决文档。主 README 的 author 行与 AGENTS.md 目录条目加指引。
+
+工件：`src/expedistill/methods/author/README.md`（新建）、`README.md`、`AGENTS.md`
+
+## 2026-10-19 15:55 — 找证据、交付、执行三个模块的使用说明
+
+一段话摘要：按用户要求，仿整理模块 README 的格式给 evidence、delivery、execution 各写一份使用说明（模块一句话说明、配置位置、方法一览或 YAML 写法、参数表"含义 / 可选项 / 默认"、少量注意事项、指向设计文档）。evidence：`segment` 的 K（必填）、retry_limit（默认 2）、write_lessons（默认 true），三种证据来源按任务清单动作自动选择，挑轨迹与留片段由全局 rules 决定。delivery：六种方法与各自对应的相位（只有 folder 在读配置时检查相位），retrieval 的 top_k / max_categories / min_score（全部必填），folder 的 inline_catalog。execution：real / exam / real_folder 与相位的搭配（读配置时检查），real 的 n_attempts、max_injection_tokens（目前只有 B 相位消费）、arms（只在 D 相位写且取值固定）。文中每个 YAML 示例都经 `resolve_params` 实际解析通过，"必填"与"不接受参数"的说法也逐条实测。主 README 三行与 AGENTS.md 目录条目加指引。
+
+工件：`src/expedistill/methods/evidence/README.md`、`src/expedistill/methods/delivery/README.md`、`src/expedistill/methods/execution/README.md`（均新建）、`README.md`、`AGENTS.md`
+
+## 2026-10-19 16:10 — 相位改名：D / L / A / B / C 改为与 role 同名
+
+一段话摘要：用户要求让相位名更可读，选定"相位名与 role 同名"：D→baseline、A→exam、B→live、C→test、L→learn，运行后标签与目录随之变为 `p01:baseline` / `phases/p01_baseline`。代码本来只按 `role` 分发，相位名是自由字符串，所以这是命名约定的改动，不改行为。改动：`core/config_upgrade.py` 用 role 常量作相位名（转换出的序列如 `[baseline, learn, live, learn, live, learn, test]`）；9 份 v4 配置的 sequence、phases 键与 `compare.against` 同步改名，逐份 `load_config` 通过，7 份转换配置的序列、相位名集合、对照指向与转换函数输出一致；src 与 scripts 中"X phase / X-phase / X 相位"式的说明与报错文字（86 处）和装配器写进 ASSEMBLED_FROM.md 的中文改为新名；审计脚本自检夹具的自定义名改为 learn_seed / live_1 / learn_mid / live_2 / learn_final（保留"相位名可自由起"的覆盖）；supervise_tb_run 默认标签改为 `p07:test`；测试 36 个文件的手写序列、相位标签与说明同步改名（排查出两处非相位的单字母误改——截断测试的 "A"*600 文本与并发测试的线程名——已还原）；金矩阵重生成，模型调用数与改名前完全相同（34/18/22/12），wave4 披露把新名映射回字母后与改名前逐字节相同。金基线对照来源别名表保留字母键与 `D_weak_arm` 规范值（冻结的 69904f7 基线包存的是它），新增 baseline 系列键。README、AGENTS.md、五个模块 README 改用新名；历史决策文档与 log 不改。旧 run（6 个）的 manifest 与相位目录仍是字母，用新配置续跑会被 manifest 冻结检查拒绝，这些 run 都已结束。测试 2255 passed + 4 deselected，ruff 全过，审计自检通过。未提交。
+
+工件：`src/expedistill/core/config_upgrade.py`、`configs/experiments/*_v4.yaml`（9 份）、src 与 scripts 中的说明文字（多个文件）、`scripts/audit/audit_live_run.py`、`scripts/run/supervise_tb_run.py`、`tests/golden/semantics.py`、36 个测试文件、`tests/fixtures/golden/`（重生成）、`tests/fixtures/golden_acceptance/wave4_e1_e6_disclosure.json`（重生成）、`README.md`、`AGENTS.md`、`src/expedistill/methods/*/README.md`
