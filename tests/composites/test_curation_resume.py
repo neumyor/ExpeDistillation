@@ -67,7 +67,12 @@ def _incorrect():
 
 
 def _similarity(groups):
-    return json_script({"similar_groups": groups, "conflicts": []})
+    return json_script({"similar_groups": groups, "conflicts": [],
+                        "low_value": []})
+
+
+def _merged(content):
+    return json_script({"content": content, "summary": "merged summary"})
 
 
 def _grouping(mapping):
@@ -77,11 +82,11 @@ def _grouping(mapping):
 def _scripts():
     curator = [
         _similarity([[_sid(0), _sid(1)], [_sid(2), _sid(3)]]),   # 0 G7 r1
-        "y" * 1200,                                              # 1 G8 A
-        "z" * 1500,                                              # 2 G8 B
+        _merged("y" * 1200),                                     # 1 G8 A
+        _merged("z" * 1500),                                     # 2 G8 B
         _grouping({M0: "g1", _sid(2): "g1", _sid(3): "g2"}),     # 3 G9 r1
         _similarity([[M0, _sid(2)]]),                            # 4 G7 r2
-        "short merged skill",                                    # 5 G8 C
+        _merged("short merged skill"),                           # 5 G8 C
         _grouping({M2: "g3", _sid(3): "g2"}),                    # 6 G9 r2
     ]
     # A: exams 0, 1; B: exams 2, 3 (3 fails); C: exams 0, 1, 2.
@@ -157,7 +162,7 @@ def _handles(scripts):
 def _run(store, handles):
     return curate_bank(
         store=store, bank_token_budget=BUDGET,
-        curation_rounds=3, run_dir=store.run_dir,
+        curation_rounds=3, merge_check="exam", run_dir=store.run_dir,
         **handles)
 
 

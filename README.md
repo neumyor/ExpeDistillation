@@ -178,7 +178,7 @@ D、A、B、C 是四种执行阶段（名字见 1.2 的表）。
 | `role` | 恒为 `learn` |
 | `evidence` | 找证据方法：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算） |
 | `author` | 写作方法：`distill_diagnose` |
-| `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds`）或 `none`（带 `token_budget`）；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
+| `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），见 `docs/decisions/curation_generalize_20261019.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
 
@@ -458,8 +458,8 @@ E1 内部的 runner：
 | G4 | 作答 | （模型, Exam, skill 列表（可选））→ 作答文本 |
 | G5 | 判卷 | （Exam, 作答, 模型）→ 对 / 错 + 错误描述（只说哪里不对，不复述正确答案，也不暗示该怎么改） |
 | G6 | 改写 skill | （上一版 Skill, 考题, 错误作答, 错误描述, 弱模型画像, 模型）→ 新版本 + 错因归类。不接收参考答案 |
-| G7 | 找相似与冲突 | （skill 列表, 模型）→ 候选合并组、冲突对 |
-| G8 | 合并 skill | （一组 skill 或一对冲突 skill, 模型）→ 合并后的 Skill |
+| G7 | 找相似、冲突与低价值 | （skill 列表, 模型, 输入方式 全文/摘要）→ 候选合并组、冲突对、低价值技能列表 |
+| G8 | 合并 skill | （一组 skill 或一对冲突 skill, 模型）→ 合并后的 Skill 正文 + 一句话摘要（JSON；泛化优先，冲突先析因） |
 | G9 | 分组 | （skill 列表, 模型）→ 每条 skill 的能力分组标签 |
 | G10 | live 归因 | （任务 prompt 渲染产物, 基线状态行, 本轮全部尝试的轨迹视图, skill 组列表, 弱模型画像, author 模型）→ 组级诊断 + 逐 skill 的问题事实（相位世界里只报告事实，动作归决策与写作） |
 | G11 | live 修订 | （skill 现文本, 归因事实, 失败尝试视图摘录, 弱模型画像, rewriter 模型）→ 保节结构的新正文 + 错因归类 + 修订理由。修订纪律：不得写入本题的具体数值 / 文件名 / 实体名（检索交付会把技能注入其他任务，任务局部化的内容对别的任务有害） |
@@ -474,7 +474,7 @@ E1 内部的 runner：
 | K2 | 切段（带校验） | D5 → G1 → D7；不通过就把错误清单交给 G1 重切，次数上限 `retry_limit`；耗尽则记审计日志、本 run 内终态 | `composites/segment_checked.py` |
 | K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt；先存作答、再判卷；判卷预算跨崩溃持续 | `composites/exam_once.py`、`exam_answering.py`、`exam_grading.py` |
 | K4 | 泄题判定 | D8 的判定与 leak_verdicts 账本：每个 (skill, 版本) 恰一行、首判为准，续跑不重问 | `composites/acceptance_leak.py` |
-| K5 | 库整理 | G7 → G8 → K3 回归考试 → G9 → D10，合并日志先写后改、续跑按日志重放 | `composites/curation.py` |
+| K5 | 库整理 | G7 →（可选）丢弃低价值 → G8 →（可选）K3 回归考试 → G9 → D10，合并与丢弃日志先写后改、续跑按日志重放 | `composites/curation.py` |
 | K6 | live 判定账本 | 轮判定（judge_round，append-once、首判为准、续跑重算逐字节核对）、组终态提交（finalize_group）、基线与轮仓读取、注入审计行 | `composites/live_verdicts.py`、`live_measurement.py` |
 | — | 验收判定核 | 每次运行的判定（success / failure / invalid）与单元汇总行；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`——tb_scorer 消费 correctness 与 verifier_ran / exception_type 事实，例外死亡 / 伪零分判 invalid） | `composites/verdicts.py` |
 | — | 决策 | 统一决策入口 `decide_task_list`、动作表、cause 词表、`final_test_delta`（C 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py` |
@@ -558,7 +558,7 @@ E1 内部的 runner：
 | 作答（带 skill / 裸答共用） | G4 | answerer（exam 相位、整理的回归考试） |
 | 判卷 | G5 | judge（exam 相位、整理的回归考试） |
 | 改写 skill | G6 | rewriter（学习相位 revise，exam 证据路径） |
-| 找相似与冲突 | G7 | curator（最末学习相位） |
+| 找相似、冲突与低价值 | G7 | curator（最末学习相位） |
 | 合并 skill | G8 | curator（最末学习相位） |
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |

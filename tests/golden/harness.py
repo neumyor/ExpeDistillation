@@ -315,10 +315,14 @@ def _script(system: str, user: str) -> str:
         })
     if user.startswith("You are curating a bank of skills written for a "
                        "weak model. Find"):
-        return json_script({"similar_groups": [], "conflicts": []})
+        return json_script({"similar_groups": [], "conflicts": [],
+                            "low_value": []})
     if user.startswith("You are curating a bank of skills written for a "
                        "weak model. Merge"):
-        return "Inspect the state first. Then take the matching action."
+        return json_script({
+            "content": "Inspect the state first. Then take the matching "
+                       "action.",
+            "summary": "inspect the state before acting on it"})
     if user.startswith("You are curating a bank of skills written for a "
                        "weak model. Assign"):
         ids = [line[2:].split(": ", 1)[0]

@@ -180,6 +180,10 @@ LEARN_OUTCOME_SCHEMA = "learn-outcome-v1"
 #: so these are reconciled against their own action, not the verdict.
 EARLIER_ACTION_REASONS = ("live_revision_deleted", "model_output_error")
 
+#: The discard reason curation's ``drop_low_value`` switch writes on an
+#: accepted member (composites.curation.LOW_VALUE_REASON).
+CURATION_DROP_REASON = "low_value"
+
 ERROR = "ERROR"
 WARN = "WARN"
 INFO = "INFO"
@@ -326,6 +330,10 @@ def check_group_terminals(
             direction, reason = decided
             tolerated = (set(EARLIER_ACTION_REASONS) if reason is None
                         else set(EARLIER_ACTION_REASONS) | {reason})
+            if direction == "accepted":
+                # Curation acts on accepted members after the verdict: a
+                # low-value drop (2026-10-19 ruling) is its own action.
+                tolerated.add(CURATION_DROP_REASON)
             for skill in stored.values():
                 if skill.status == "pending":
                     audit.add(

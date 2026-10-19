@@ -65,11 +65,17 @@ def _similarity(groups=(), conflicts=()):
     return json_script({
         "similar_groups": [list(group) for group in groups],
         "conflicts": [list(pair) for pair in conflicts],
+        "low_value": [],
     })
 
 
 def _grouping(mapping):
     return json_script({"groups": mapping})
+
+
+def _merged(content):
+    return json_script({"content": content,
+                        "summary": "read the log before acting"})
 
 
 def _correct():
@@ -121,7 +127,7 @@ def _none_curate(budget=BIG):
 
 _MERGE_SCRIPTS = dict(
     curator=(_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-             "Read the log file before doing anything else.",
+             _merged("Read the log file before doing anything else."),
              _grouping({"bank/merge/0000": "error handling"})),
     answerer=("first answer", "second answer"),
     judge=(_correct(), _correct()),

@@ -222,8 +222,8 @@
             },
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "9b57870299eb005b497fe9394a601c30976fdb881121f4982983d9922a9478f9",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "d7b9ba4180a234b7bc64ba8484d86731b9280d9950f4391c0293033d36f556ba",
               "role": "curator"
             },
             {
@@ -379,7 +379,7 @@
           "passed": false
         },
         "E4": {
-          "diff": "E4.calls: 11 row(s) missing, 2 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"SIMILARITY\", \"request_text\": \"You are curating a bank of skills written for a weak model. Find\\nnear-duplicate groups and conflicting pairs in the l...",
+          "diff": "E4.calls: 11 row(s) missing, 2 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"SIMILARITY\", \"request_text\": \"You are curating a bank of skills written for a weak model. Find\\nnear-duplicate groups, conflicting pairs and low-val...",
           "passed": false
         },
         "E6": {
@@ -507,8 +507,8 @@
           "extra": [
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "6a5dc760f5c0383fbf54fe13e060e139d0d8140dd5556eaa2553801b83ad8ed8",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "5691143927c74bb90742c11605ad766883db9ce03fa5e5009c73ad3db63c125d",
               "role": "curator"
             },
             {
@@ -682,8 +682,8 @@
             },
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "9b57870299eb005b497fe9394a601c30976fdb881121f4982983d9922a9478f9",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "d7b9ba4180a234b7bc64ba8484d86731b9280d9950f4391c0293033d36f556ba",
               "role": "curator"
             },
             {
@@ -839,7 +839,7 @@
           "passed": true
         },
         "E4": {
-          "diff": "E4.calls: 11 row(s) missing, 2 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"SIMILARITY\", \"request_text\": \"You are curating a bank of skills written for a weak model. Find\\nnear-duplicate groups and conflicting pairs in the l...",
+          "diff": "E4.calls: 11 row(s) missing, 2 extra; first missing: {\"prompt\": \"ANSWER\", \"request_text\": \"Answer the question below.\\n\\nQUESTION:\\nA service reports an unexpected state and stops. What should be done before anyth...; first extra: {\"prompt\": \"SIMILARITY\", \"request_text\": \"You are curating a bank of skills written for a weak model. Find\\nnear-duplicate groups, conflicting pairs and low-val...",
           "passed": false
         },
         "E6": {
@@ -911,8 +911,8 @@
           "extra": [
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "6a5dc760f5c0383fbf54fe13e060e139d0d8140dd5556eaa2553801b83ad8ed8",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "5691143927c74bb90742c11605ad766883db9ce03fa5e5009c73ad3db63c125d",
               "role": "curator"
             },
             {
@@ -1362,8 +1362,8 @@
             },
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "d72727758ab1c1268a3d39d42cc16d49c03d07088c14850e537112972136b3b8",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "17db9915037285c7dc8d6932498b5d46d9521f615e6768cb8397a89eaf704928",
               "role": "curator"
             },
             {
@@ -1763,8 +1763,8 @@
             },
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "f742b2469e035a6e6321637650eb5134679656687114cb06763e37ea58c07e70",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "67b0f0df4705aa09486dc667945fb09b4c7f63e9362d7c63a243f4c924fd87f3",
               "role": "curator"
             },
             {
@@ -2107,8 +2107,8 @@
             },
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "d72727758ab1c1268a3d39d42cc16d49c03d07088c14850e537112972136b3b8",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "17db9915037285c7dc8d6932498b5d46d9521f615e6768cb8397a89eaf704928",
               "role": "curator"
             },
             {
@@ -2448,8 +2448,8 @@
             },
             {
               "prompt": "SIMILARITY",
-              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the list",
-              "request_text_sha256": "f742b2469e035a6e6321637650eb5134679656687114cb06763e37ea58c07e70",
+              "request_text_prefix": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value ",
+              "request_text_sha256": "67b0f0df4705aa09486dc667945fb09b4c7f63e9362d7c63a243f4c924fd87f3",
               "role": "curator"
             },
             {
@@ -2568,7 +2568,7 @@
       }
     }
   },
-  "golden_matrix_base_commit": "07f83585aefde995168dbd82e04b527889934353",
+  "golden_matrix_base_commit": "08964030d2746601d7f756f1f593b655ab1d66e3",
   "root_causes": {
     "LAYOUT": "The phase-world artifact locations (C summary, per-phase bank, A-phase generation failures, learn ledgers) are aligned onto the canonical names by v4_layout -- the alignment itself is the disclosure; these paths never reach the comparators.",
     "R6_STRONG_ONLY_ADD_PATH": "Repair plan R6 (docs/decisions/execute_learn_repair_plan_20261016.md): the add path's evidence is the D phase's STRONG trajectories only -- the weak arm's diagnose skills of the 69904f7 world have no phase-world producer, so the bank is smaller and everything derived from it differs (E1/E2 rows, leak verdicts, retrieval categories, every E4 call embedding a skills listing, the G10/G11 work per group, the injection token counts).",

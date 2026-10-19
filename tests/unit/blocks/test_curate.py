@@ -12,7 +12,7 @@ import pytest
 
 from expedistill.blocks.curate import assign_groups, find_similar, merge_skills
 from expedistill.core.models import Skill
-from expedistill.infra.reliability import ModelOutputError
+from expedistill.infra.reliability import ConfigError, ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts.registry import get as get_prompt
 
@@ -57,10 +57,11 @@ def test_find_similar_wiring_and_result(tmp_path):
     handle = make_fake_handle(script=json_script({
         "similar_groups": [["s0", "s1"]],
         "conflicts": [["s2", "s3"]],
+        "low_value": ["s2", "s2"],
     }))
     usage = RecordingUsage()
 
-    groups, conflicts = find_similar(
+    groups, conflicts, low_value = find_similar(
         SKILLS, handle, usage=usage, run_dir=tmp_path)
 
     assert len(handle.client.calls) == 1
@@ -68,6 +69,7 @@ def test_find_similar_wiring_and_result(tmp_path):
     assert handle.client.calls[0]["user"] == expected
     assert groups == [["s0", "s1"]]
     assert conflicts == [["s2", "s3"]]
+    assert low_value == ["s2"]  # a repeated id collapses
 
     # usage and run_dir thread through to call_model.
     assert len(usage.records) == 1
@@ -78,13 +80,13 @@ def test_find_similar_wiring_and_result(tmp_path):
 
 def test_find_similar_empty_input_short_circuits():
     handle = make_fake_handle(script=[])
-    assert find_similar([], handle) == ([], [])
+    assert find_similar([], handle) == ([], [], [])
     assert handle.client.calls == []
 
 
 def test_find_similar_unknown_id_in_group():
     handle = make_fake_handle(script=json_script({
-        "similar_groups": [["s0", "nope"]], "conflicts": [],
+        "similar_groups": [["s0", "nope"]], "conflicts": [], "low_value": [],
     }))
     with pytest.raises(ModelOutputError) as excinfo:
         find_similar(SKILLS, handle)
@@ -94,7 +96,7 @@ def test_find_similar_unknown_id_in_group():
 
 def test_find_similar_unknown_id_in_conflict():
     handle = make_fake_handle(script=json_script({
-        "similar_groups": [], "conflicts": [["s0", "ghost"]],
+        "similar_groups": [], "conflicts": [["s0", "ghost"]], "low_value": [],
     }))
     with pytest.raises(ModelOutputError) as excinfo:
         find_similar(SKILLS, handle)
@@ -104,7 +106,7 @@ def test_find_similar_unknown_id_in_conflict():
 
 def test_find_similar_group_too_small():
     handle = make_fake_handle(script=json_script({
-        "similar_groups": [["s0"]], "conflicts": [],
+        "similar_groups": [["s0"]], "conflicts": [], "low_value": [],
     }))
     with pytest.raises(ModelOutputError) as excinfo:
         find_similar(SKILLS, handle)
@@ -114,6 +116,7 @@ def test_find_similar_group_too_small():
 def test_find_similar_conflict_wrong_size():
     handle = make_fake_handle(script=json_script({
         "similar_groups": [], "conflicts": [["s0", "s1", "s2"]],
+        "low_value": [],
     }))
     with pytest.raises(ModelOutputError) as excinfo:
         find_similar(SKILLS, handle)
@@ -122,7 +125,7 @@ def test_find_similar_conflict_wrong_size():
 
 def test_find_similar_non_string_entry():
     handle = make_fake_handle(script=json_script({
-        "similar_groups": [["s0", 7]], "conflicts": [],
+        "similar_groups": [["s0", 7]], "conflicts": [], "low_value": [],
     }))
     with pytest.raises(ModelOutputError):
         find_similar(SKILLS, handle)
@@ -133,6 +136,43 @@ def test_find_similar_missing_field():
     with pytest.raises(ModelOutputError) as excinfo:
         find_similar(SKILLS, handle)
     assert "conflicts" in str(excinfo.value)
+
+
+def test_find_similar_missing_low_value_field():
+    handle = make_fake_handle(script=json_script(
+        {"similar_groups": [], "conflicts": []}))
+    with pytest.raises(ModelOutputError, match="low_value"):
+        find_similar(SKILLS, handle)
+
+
+@pytest.mark.parametrize("low_value", [["ghost"], "s0", [["s0"]]])
+def test_find_similar_bad_low_value(low_value):
+    handle = make_fake_handle(script=json_script(
+        {"similar_groups": [], "conflicts": [], "low_value": low_value}))
+    with pytest.raises(ModelOutputError, match="low_value"):
+        find_similar(SKILLS, handle)
+
+
+def test_find_similar_summary_input_lists_summaries():
+    skills = [make_skill("s0", "Long content zero."),
+              make_skill("s1", "Long content one.")]
+    skills[0].summary = "check the log"
+    skills[1].summary = "restart\nsafely"
+    handle = make_fake_handle(script=json_script(
+        {"similar_groups": [], "conflicts": [], "low_value": []}))
+
+    find_similar(skills, handle, similarity_input="summary")
+
+    expected = get_prompt("SIMILARITY").format(
+        skills_listing="- s0: check the log\n- s1: restart safely")
+    assert handle.client.calls[0]["user"] == expected
+
+
+def test_find_similar_summary_input_refuses_a_missing_summary():
+    handle = make_fake_handle(script=[])
+    with pytest.raises(ConfigError, match="s0"):
+        find_similar(SKILLS, handle, similarity_input="summary")
+    assert handle.client.calls == []
 
 
 def test_find_similar_non_object_response():
@@ -147,9 +187,11 @@ def test_find_similar_non_object_response():
 # ---------------------------------------------------------------------------
 
 def test_merge_skills_dedup_wiring_and_result():
-    handle = make_fake_handle(script="  Read the log file first.\n\n")
+    handle = make_fake_handle(script=json_script({
+        "content": "  Read the log file first.\n\n",
+        "summary": "  read the log before acting  "}))
 
-    merged = merge_skills(SKILLS[:2], handle, mode="dedup")
+    merged, summary = merge_skills(SKILLS[:2], handle, mode="dedup")
 
     assert len(handle.client.calls) == 1
     # The skills block keeps the full multi-line content, headed by id.
@@ -161,18 +203,36 @@ def test_merge_skills_dedup_wiring_and_result():
     )
     assert handle.client.calls[0]["user"] == expected
     assert merged == "Read the log file first."
+    assert summary == "read the log before acting"
 
 
 def test_merge_skills_conflict_mode_string():
-    handle = make_fake_handle(script="Restart only when the config check fails.")
+    handle = make_fake_handle(script=json_script({
+        "content": "Restart only when the config check fails.",
+        "summary": "restart only after the config check fails"}))
 
-    merged = merge_skills(SKILLS[2:], handle, mode="conflict")
+    merged, _summary = merge_skills(SKILLS[2:], handle, mode="conflict")
 
     user = handle.client.calls[0]["user"]
     assert "MERGE MODE: conflict" in user
     assert "### s2\nRestart the service." in user
     assert "### s3\nNever restart the service." in user
     assert merged == "Restart only when the config check fails."
+
+
+@pytest.mark.parametrize("reply,field", [
+    ({"summary": "one line"}, "content"),
+    ({"content": "Merged."}, "summary"),
+    ({"content": "", "summary": "one line"}, "content"),
+    ({"content": "Merged.", "summary": " "}, "summary"),
+    ({"content": "Merged.", "summary": "two\nlines"}, "ONE line"),
+    ({"content": "Merged.", "summary": "x" * 501}, "at most"),
+    ({"content": "Merged.", "summary": 3}, "summary"),
+])
+def test_merge_skills_format_errors(reply, field):
+    handle = make_fake_handle(script=json_script(reply))
+    with pytest.raises(ModelOutputError, match=field):
+        merge_skills(SKILLS[:2], handle, mode="dedup")
 
 
 def test_merge_skills_wrong_mode_raises_before_any_call():
@@ -289,15 +349,17 @@ def test_find_similar_normalizes_missing_skill_suffix():
                 ["traj/tb:t1/strong/00/seg01", "traj/tb:t1/strong/00/seg00"],
             ],
             "conflicts": [["traj/tb:t1/strong/00/seg01", "bank/merge/0000"]],
+            "low_value": ["traj/tb:t1/strong/00/seg01"],
         })
     ]
     handle = make_fake_handle(script=script)
-    groups, conflicts = find_similar([s1, s2, m1], handle)
+    groups, conflicts, low_value = find_similar([s1, s2, m1], handle)
     assert groups == [
         ["traj/tb:t1/strong/00/seg00/skill", "bank/merge/0000"],
         ["traj/tb:t1/strong/00/seg01/skill", "traj/tb:t1/strong/00/seg00/skill"],
     ]
     assert conflicts == [["traj/tb:t1/strong/00/seg01/skill", "bank/merge/0000"]]
+    assert low_value == ["traj/tb:t1/strong/00/seg01/skill"]
 
 
 def test_find_similar_rejects_ambiguous_suffix_free_ids():
@@ -310,7 +372,7 @@ def test_find_similar_rejects_ambiguous_suffix_free_ids():
                source_subtasks=["traj/tb:t1/strong/00/seg00"])
     script = [json_script({
         "similar_groups": [["traj/tb:t1/strong/00/seg00", "traj/tb:t9/nope"]],
-        "conflicts": [],
+        "conflicts": [], "low_value": [],
     })]
     handle = make_fake_handle(script=script)
     with pytest.raises(ModelOutputError, match="traj/tb:t9/nope"):

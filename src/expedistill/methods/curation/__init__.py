@@ -30,20 +30,32 @@ SUMMARY_NAME = "stage5_summary.json"
 
 @dataclass(frozen=True)
 class AgentBrewParams:
-    """K5's bank budget, merge-round limit and regression-exam switch.
+    """K5's bank budget, merge-round limit, regression-exam switch and
+    the two 2026-10-19 switches (docs/decisions/
+    curation_generalize_20261019.md).
 
-    ``merge_check`` (plan section 3's curate family, M3): ``exam`` (the
-    default) is the frozen behaviour -- every kept merge re-answers each
-    source's exam; ``none`` skips the regression exams (the merge product
-    goes pending -> accepted with zero answerer/judge calls; the marker
-    gates and the budget valve are unchanged) -- the live-run sequence's
-    setting, where merges are proven by the round-1 group re-execution
-    instead.
+    ``merge_check`` (plan section 3's curate family, M3): ``exam`` --
+    every kept merge re-answers each source's exam; ``none`` skips the
+    regression exams (the merge product goes pending -> accepted with
+    zero answerer/judge calls; the marker gates and the budget valve are
+    unchanged). The default is ``none`` since 2026-10-19 (it was
+    ``exam``): a config that omits the key no longer runs the regression
+    exams. The v3 -> v4 upgrade always writes the key explicitly, so only
+    a hand-written v4 config without it changes behaviour.
+
+    ``drop_low_value``: G7 lists low-value skills; ``True`` discards them
+    before the round's merges, ``False`` (default) only journals them.
+
+    ``similarity_input``: what G7 sees of each skill -- ``full``
+    (default, the content) or ``summary`` (the one-line summary; a skill
+    without one stops the curation loudly).
     """
 
     token_budget: Optional[int]
     rounds: int = 3
-    merge_check: str = "exam"
+    merge_check: str = "none"
+    drop_low_value: bool = False
+    similarity_input: str = "full"
 
     def __post_init__(self) -> None:
         if self.token_budget is not None and self.token_budget < 1:
@@ -58,6 +70,10 @@ class AgentBrewParams:
             raise ConfigError(
                 "methods.curation.agentbrew merge_check must be 'exam' or "
                 f"'none', got {self.merge_check!r}")
+        if self.similarity_input not in ("full", "summary"):
+            raise ConfigError(
+                "methods.curation.agentbrew similarity_input must be 'full' "
+                f"or 'summary', got {self.similarity_input!r}")
 
 
 @dataclass(frozen=True)

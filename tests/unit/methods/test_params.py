@@ -5,7 +5,7 @@ and moved the config lookup out of the API: every test resolves a
 family's RAW mapping, exactly what a v4 phase carries. The retired v3
 slot keys (segmentation, authoring, acceptance) have no entries any
 more -- their coverage moved to the evidence/author/execution families
-here and to the load-time checklist in tests/unit/test_w2c_config_v4.py.
+here and to the load-time checklist in tests/unit/core/test_config_v4.py.
 """
 
 import pytest
@@ -79,7 +79,7 @@ class TestRealExecutionParams:
     """The execution family's ``real`` entry (R8's new family): what a
     v4 execute phase's ``execution`` mapping validates at resolution.
     The role-consistency and depth rules around these values live in the
-    config loader's checklist (tests/unit/test_w2c_config_v4.py)."""
+    config loader's checklist (tests/unit/core/test_config_v4.py)."""
 
     def test_all_params_load(self):
         params = resolve_params("execution", {
@@ -149,7 +149,7 @@ class TestEvidenceAndAuthorParams:
         # distill_diagnose is the author family's one method; its params
         # are empty (the v3 exams switch is gone from the config surface
         # AND from the params class -- a v4 config naming it is refused
-        # at load, see test_w2c_config_v4).
+        # at load, see test_config_v4).
         params = resolve_params("author", {"name": "distill_diagnose"})
         assert params == AuthoringParams()
 
@@ -187,19 +187,41 @@ class TestCurationParams:
                                             "token_budget": bad})
 
     def test_agentbrew_merge_check_param(self):
-        # "exam" is the default (the frozen behaviour); "none" skips
-        # K5's regression exams; anything else is refused loudly.
+        # "none" is the default since the 2026-10-19 ruling (it was
+        # "exam"); "exam" runs K5's regression exams; anything else is
+        # refused loudly.
         default = resolve_params("curation", {"name": "agentbrew",
                                               "token_budget": 96000})
-        assert default.merge_check == "exam"
+        assert default.merge_check == "none"
         params = resolve_params("curation", {
             "name": "agentbrew", "token_budget": 96000,
-            "merge_check": "none"})
-        assert params.merge_check == "none"
+            "merge_check": "exam"})
+        assert params.merge_check == "exam"
         with pytest.raises(ConfigError, match="merge_check"):
             resolve_params("curation", {
                 "name": "agentbrew", "token_budget": 96000,
                 "merge_check": "regression"})
+
+
+    def test_agentbrew_low_value_and_similarity_input_params(self):
+        # The 2026-10-19 switches: both default to today's behaviour.
+        default = resolve_params("curation", {"name": "agentbrew",
+                                              "token_budget": None})
+        assert default.drop_low_value is False
+        assert default.similarity_input == "full"
+        params = resolve_params("curation", {
+            "name": "agentbrew", "token_budget": None,
+            "drop_low_value": True, "similarity_input": "summary"})
+        assert params.drop_low_value is True
+        assert params.similarity_input == "summary"
+        with pytest.raises(ConfigError, match="similarity_input"):
+            resolve_params("curation", {
+                "name": "agentbrew", "token_budget": None,
+                "similarity_input": "titles"})
+        with pytest.raises(ConfigError, match="drop_low_value"):
+            resolve_params("curation", {
+                "name": "agentbrew", "token_budget": None,
+                "drop_low_value": "yes"})
 
 
 class TestResolveFixed:

@@ -78,11 +78,19 @@ def _curate(store: Store, handles, *, budget=10 ** 6, rounds=3,
     )
 
 
-def _similarity(groups=(), conflicts=()):
+
+
+def _similarity(groups=(), conflicts=(), low_value=()):
     return json_script({
         "similar_groups": [list(group) for group in groups],
         "conflicts": [list(pair) for pair in conflicts],
+        "low_value": list(low_value),
     })
+
+
+def _merged(content, summary="merged skill summary"):
+    """A G8 reply: the merged skill and its one-line summary (JSON)."""
+    return json_script({"content": content, "summary": summary})
 
 
 def _grouping(mapping):
@@ -113,7 +121,7 @@ def test_dedup_merge_kept(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        "Read the log file before doing anything else.",
+                        _merged("Read the log file before doing anything else."),
                         _grouping({"bank/merge/0000": "error handling"})],
         answer_script=["first answer", "second answer"],
         judge_script=[_CORRECT(), _CORRECT()],
@@ -154,40 +162,200 @@ def test_dedup_merge_kept(store):
         [store.load("skills", merged_id, Skill)])
 
 
-def test_merge_product_summary_joins_the_source_summaries(tmp_path):
-    # Schema v3 (skill-folder M1): the MERGE prompt outputs plain text
-    # and has no summary contract, so K5 composes the product's
-    # directory line from its sources' non-empty summaries, joined with
-    # "; " in source order -- every capability the merge combines is
-    # named. All-empty sources (a v2-migrated bank) compose "".
-    def fresh_handles():
-        return _handles(
-            curator_script=[
-                _similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                "Read the log before doing anything else.",
-                _grouping({"bank/merge/0000": "logs"})],
-            answer_script=["a", "a"],
-            judge_script=[_CORRECT(), _CORRECT()],
-        )
-
-    store = Store(tmp_path / "run")
+def test_merge_product_summary_is_the_g8_summary(store):
+    # The 2026-10-19 ruling: G8 writes the merged skill's own one-line
+    # summary; the sources' summaries are no longer joined with "; ".
     for index, summary in enumerate(
             ("check the log before acting", "read the log before deciding")):
         _add_skill(store, index, f"skill {index}", summary=summary)
         _add_exam(store, index)
+    handles = _handles(
+        curator_script=[
+            _similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+            _merged("Read the log before doing anything else.",
+                    summary="read the log before acting on any error"),
+            _grouping({"bank/merge/0000": "logs"})],
+        answer_script=["a", "a"],
+        judge_script=[_CORRECT(), _CORRECT()],
+    )
 
-    _curate(store, fresh_handles())
+    _curate(store, handles)
 
     merged = store.load("skills", "bank/merge/0000", Skill)
-    assert merged.summary == ("check the log before acting; "
-                              "read the log before deciding")
-    # The empty-summary case: a v2-migrated bank merges to "".
-    store2 = Store(tmp_path / "run2")
+    assert merged.content == "Read the log before doing anything else."
+    assert merged.summary == "read the log before acting on any error"
+
+
+@pytest.mark.parametrize("bad", [
+    {"content": "Merged."},                                  # no summary
+    {"summary": "one line"},                                 # no content
+    {"content": "Merged.", "summary": ""},                   # empty summary
+    {"content": "Merged.", "summary": "two\nlines"},          # not one line
+    {"content": "Merged.", "summary": "x" * 501},            # over the cap
+    {"content": "  ", "summary": "one line"},                # empty content
+])
+def test_a_malformed_g8_reply_skips_the_unit(store, bad):
+    # Format only: a G8 reply that breaks the JSON contract is a G8
+    # failure (the block's ModelOutputError), so the unit is skipped and
+    # nothing is stored -- the sources stay accepted.
     for index in range(2):
-        _add_skill(store2, index, f"skill {index}")  # summaries empty
-        _add_exam(store2, index)
-    _curate(store2, fresh_handles())
-    assert store2.load("skills", "bank/merge/0000", Skill).summary == ""
+        _add_skill(store, index, f"skill {index}")
+        _add_exam(store, index)
+    reply = json_script(bad)
+    handles = _handles(
+        curator_script=[
+            _similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+            reply,
+            _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[], judge_script=[])
+
+    bank = _curate(store, handles, rounds=1)
+
+    assert sorted(row["skill_id"] for row in bank) == \
+        sorted([_skill_id(0), _skill_id(1)])
+    record = _log_of(store)["merge_records"][0]
+    assert record["outcome"] == "skipped"
+    assert record["reason"].startswith("G8 merge failed")
+    assert not store.exists("skills", "bank/merge/0000")
+
+
+# ---------------------------------------------------------------------------
+# Low-value skills (the 2026-10-19 drop_low_value switch)
+# ---------------------------------------------------------------------------
+
+def _curate_low_value(store, handles, *, drop, rounds=1):
+    return curate_bank(
+        store=store, bank_token_budget=10 ** 6, curation_rounds=rounds,
+        merge_check="none", drop_low_value=drop, run_dir=store.run_dir,
+        **handles)
+
+
+def test_low_value_skills_are_dropped_before_the_merges(store):
+    for index in range(3):
+        _add_skill(store, index, f"skill {index}")
+    # G7 groups 0+1 AND flags 1 as low-value: the drop runs first, so the
+    # group resolves to one current member and is skipped -- no G8 call.
+    handles = _handles(
+        curator_script=[
+            _similarity(groups=[[_skill_id(0), _skill_id(1)]],
+                        low_value=[_skill_id(1)]),
+            _grouping({_skill_id(0): "a", _skill_id(2): "a"})],
+        answer_script=[], judge_script=[])
+
+    bank = _curate_low_value(store, handles, drop=True)
+
+    assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(2)]
+    dropped = store.load("skills", _skill_id(1), Skill)
+    assert dropped.status == "discarded"
+    assert dropped.discard_reason == "low_value"
+    log = _log_of(store)
+    assert log["rounds"][0]["low_value"] == [_skill_id(1)]
+    assert log["rounds"][0]["dropped"] == [_skill_id(1)]
+    assert log["merge_records"][0]["outcome"] == "skipped"
+    assert log["final_member_ids"] == [_skill_id(0), _skill_id(2)]
+
+
+def test_low_value_skills_are_only_journaled_when_the_switch_is_off(store):
+    for index in range(2):
+        _add_skill(store, index, f"skill {index}")
+    handles = _handles(
+        curator_script=[
+            _similarity(low_value=[_skill_id(1)]),
+            _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[], judge_script=[])
+
+    bank = _curate_low_value(store, handles, drop=False)
+
+    assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(1)]
+    assert store.load("skills", _skill_id(1), Skill).status == "accepted"
+    round_record = _log_of(store)["rounds"][0]
+    assert round_record["low_value"] == [_skill_id(1)]
+    assert round_record["dropped"] == []
+
+
+def test_a_crash_after_the_drop_journal_resumes_the_drop(store):
+    # The G7 write journals the drop list (the commit point); a crash
+    # before the effects leaves the skill accepted. The resume finishes
+    # the drop BEFORE checking the store against the journal, so the run
+    # is neither stale nor corrupted.
+    for index in range(2):
+        _add_skill(store, index, f"skill {index}")
+    write_json(store.run_dir / LOG_DIR / LOG_NAME, {
+        "schema": LOG_SCHEMA,
+        "rounds_executed": 1,
+        "merges": {"attempted": 0, "kept": 0, "reverted": 0, "skipped": 0},
+        "merge_records": [],
+        "rounds": [{"round": 1, "similar_groups": [], "conflicts": [],
+                    "low_value": [_skill_id(1)], "dropped": [_skill_id(1)],
+                    "grouping": None, "dispatch": None,
+                    "done": False, "stop": False}],
+        "final_member_ids": [],
+        "bank_tokens": 0,
+        "input_skill_ids": [_skill_id(0), _skill_id(1)],
+    })
+    handles = _handles(curator_script=[], answer_script=[], judge_script=[])
+
+    bank = _curate_low_value(store, handles, drop=True)
+
+    assert [row["skill_id"] for row in bank] == [_skill_id(0)]
+    assert store.load("skills", _skill_id(1), Skill).discard_reason == \
+        "low_value"
+
+
+def test_a_low_value_id_outside_the_input_stops_the_curation(store):
+    for index in range(2):
+        _add_skill(store, index, f"skill {index}")
+    reply = _similarity(low_value=["traj/tb:ghost/strong/00/seg00/skill"])
+    handles = _handles(curator_script=[reply],
+                       answer_script=[], judge_script=[])
+
+    with pytest.raises(ModelOutputError, match="low_value"):
+        _curate_low_value(store, handles, drop=True)
+    assert store.load("skills", _skill_id(0), Skill).status == "accepted"
+
+
+# ---------------------------------------------------------------------------
+# similarity_input: what G7 sees of each skill
+# ---------------------------------------------------------------------------
+
+def test_similarity_input_summary_lists_the_summaries(store):
+    for index, summary in enumerate(("check the log", "restart safely")):
+        _add_skill(store, index, f"long content {index}", summary=summary)
+    handles = _handles(
+        curator_script=[_similarity(),
+                        _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[], judge_script=[])
+
+    curate_bank(store=store, bank_token_budget=10 ** 6, curation_rounds=1,
+                similarity_input="summary", run_dir=store.run_dir, **handles)
+
+    g7_user = handles["curator_handle"].client.calls[0]["user"]
+    assert f"- {_skill_id(0)}: check the log" in g7_user
+    assert "long content" not in g7_user
+    # G9 still sees the content: the switch is G7's only.
+    g9_user = handles["curator_handle"].client.calls[1]["user"]
+    assert "long content 0" in g9_user
+
+
+def test_similarity_input_summary_refuses_a_skill_without_summary(store):
+    _add_skill(store, 0, "content 0", summary="check the log")
+    _add_skill(store, 1, "content 1")  # no summary
+    handles = _handles(curator_script=[], answer_script=[], judge_script=[])
+
+    with pytest.raises(ConfigError, match="summary"):
+        curate_bank(store=store, bank_token_budget=10 ** 6,
+                    curation_rounds=1, similarity_input="summary",
+                    run_dir=store.run_dir, **handles)
+    assert handles["curator_handle"].client.calls == []
+
+
+def test_an_unknown_similarity_input_is_refused(store):
+    _add_skill(store, 0, "content 0")
+    handles = _handles(curator_script=[], answer_script=[], judge_script=[])
+    with pytest.raises(ConfigError, match="similarity_input"):
+        curate_bank(store=store, bank_token_budget=10 ** 6,
+                    curation_rounds=1, similarity_input="titles",
+                    run_dir=store.run_dir, **handles)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +373,7 @@ def test_merge_check_none_merges_without_any_regression_call(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        "Read the log file before doing anything else.",
+                        _merged("Read the log file before doing anything else."),
                         _grouping({"bank/merge/0000": "error handling"})],
         answer_script=[],
         judge_script=[],
@@ -243,7 +411,7 @@ def test_regression_fail_reverts_merge(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        "Whatever the merge produced.",
+                        _merged("Whatever the merge produced."),
                         _grouping({_skill_id(0): "writing",
                                    _skill_id(1): "writing"})],
         answer_script=["a", "b"],
@@ -283,7 +451,7 @@ def test_conflict_pair_merged_with_conflict_mode(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(conflicts=[[_skill_id(0), _skill_id(1)]]),
-                        "Restart only when the config check fails.",
+                        _merged("Restart only when the config check fails."),
                         _grouping({"bank/merge/0000": "recovery"})],
         answer_script=["a", "b"],
         judge_script=[_CORRECT(), _CORRECT()],
@@ -365,7 +533,7 @@ def test_within_budget_first_round_done(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        "Merged advice.",
+                        _merged("Merged advice."),
                         _grouping({"bank/merge/0000": "misc"})],
         answer_script=["a", "b"],
         judge_script=[_CORRECT(), _CORRECT()],
@@ -391,10 +559,10 @@ def test_over_budget_second_round_merges_more(store):
     handles = _handles(
         curator_script=[
             _similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-            merged_round_one,
+            _merged(merged_round_one),
             _grouping({"bank/merge/0000": "misc", _skill_id(2): "misc"}),
             _similarity(groups=[["bank/merge/0000", _skill_id(2)]]),
-            merged_round_two,
+            _merged(merged_round_two),
             _grouping({"bank/merge/0001": "misc"}),
         ],
         # Round two re-examines bank/merge/0000's sources transitively:
@@ -546,7 +714,7 @@ def test_same_inputs_same_member_ids_and_order(tmp_path):
             _add_exam(store, index)
         handles = _handles(
             curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                            "Merged content.",
+                            _merged("Merged content."),
                             _grouping({"bank/merge/0000": "misc"})],
             answer_script=["a", "b"],
             judge_script=[_CORRECT(), _CORRECT()],
@@ -620,7 +788,7 @@ def test_merge_of_merge_of_merge_resolves_sources_transitively(store):
     _add_exam(store, 3)
     handles = _handles(
         curator_script=[_similarity(groups=[["bank/merge/0001", _skill_id(3)]]),
-                        "merged twice",
+                        _merged("merged twice"),
                         _grouping({"bank/merge/0002": "misc"})],
         answer_script=["a", "b", "c", "d"],
         judge_script=[_CORRECT() for _ in range(4)],
@@ -652,7 +820,7 @@ def test_merge_model_output_error_skips_that_merge_and_continues(store):
             _similarity(groups=[[_skill_id(0), _skill_id(1)],
                                 [_skill_id(2), _skill_id(3)]]),
             ModelOutputError("merge text unusable"),
-            "merged two and three",
+            _merged("merged two and three"),
             _grouping({_skill_id(0): "a", _skill_id(1): "a",
                        "bank/merge/0001": "b"})],
         answer_script=["a", "b"],
@@ -687,7 +855,7 @@ def test_regression_model_output_error_reverts_that_merge(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        "merged",
+                        _merged("merged"),
                         _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
         answer_script=["a"],
         # K3 resamples the judge once on ModelOutputError, then gives up.
@@ -756,7 +924,7 @@ def test_orphaned_pending_merge_is_rolled_back_and_its_serial_not_reused(
     store.save(orphan, "skills")
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(1), _skill_id(2)]]),
-                        "merged one and two",
+                        _merged("merged one and two"),
                         _grouping({_skill_id(0): "a",
                                    "bank/merge/0001": "a"})],
         answer_script=["a", "b"],
@@ -804,7 +972,7 @@ def _finish_one_merge_run(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        "merged", _grouping({"bank/merge/0000": "a"})],
+                        _merged("merged"), _grouping({"bank/merge/0000": "a"})],
         answer_script=["a", "b"], judge_script=[_CORRECT(), _CORRECT()])
     return _curate(store, handles)
 
@@ -933,7 +1101,7 @@ def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
     ])
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        broken_output,
+                        _merged(broken_output),
                         _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
         answer_script=[],
         judge_script=[],
@@ -970,7 +1138,7 @@ def test_all_prose_group_skips_both_marker_checks(store):
         _add_exam(store, index)
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
-                        PROCEDURE_CONTENT,
+                        _merged(PROCEDURE_CONTENT),
                         _grouping({"bank/merge/0000": "error handling"})],
         answer_script=["a", "b"],
         judge_script=[_CORRECT(), _CORRECT()],

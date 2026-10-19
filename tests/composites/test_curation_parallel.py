@@ -126,10 +126,12 @@ class World:
             fault = self.merge_faults.pop((mode, sources), None)
             if fault is not None:
                 raise fault
-            return self.merges[(mode, sources)]
+            return json_script({"content": self.merges[(mode, sources)],
+                                "summary": "merged summary"})
         members = self._members(user)
         if "- similar_groups:" in user:
-            return json_script(self.similarity[members])
+            return json_script({"low_value": [],
+                                **self.similarity[members]})
         return json_script({"groups": self.grouping[members]})
 
     def answerer_resolve(self, user):
@@ -190,7 +192,8 @@ def run(store, world, workers=1, budget=600, rounds=3):
     }
     bank = curate_bank(store=store,
                        bank_token_budget=budget, curation_rounds=rounds,
-                       run_dir=store.run_dir, workers=workers, **handles)
+                       merge_check="exam", run_dir=store.run_dir,
+                       workers=workers, **handles)
     return bank, handles
 
 

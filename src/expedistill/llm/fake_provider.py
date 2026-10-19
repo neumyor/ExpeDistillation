@@ -317,7 +317,8 @@ class FakeProviderClient:
     def _similarity(self, user: str) -> str:
         ids = self._listing_ids(user)
         groups = [ids[:2]] if len(ids) >= 2 else []
-        return _fenced({"similar_groups": groups, "conflicts": []})
+        return _fenced({"similar_groups": groups, "conflicts": [],
+                        "low_value": []})
 
     @staticmethod
     def _merge(user: str) -> str:
@@ -328,8 +329,11 @@ class FakeProviderClient:
                 sources.append(content.strip())
         if not sources:
             raise AssertionError("the MERGE prompt listed no skills")
-        return (sources[0] + "\nMerged from " +
-                str(max(2, len(sources))) + " near-duplicate skills.")
+        return _fenced({
+            "content": (sources[0] + "\nMerged from " +
+                        str(max(2, len(sources))) + " near-duplicate skills."),
+            "summary": "search before submitting the final answer",
+        })
 
     def _group(self, user: str) -> str:
         ids = self._listing_ids(user)

@@ -133,6 +133,19 @@ skips both checks: prose merges into prose. The resume reuse branches
 never re-check a pending merge: it passed the post-check before it was
 ever written to disk.
 
+*Low-value drops (2026-10-19 ruling, docs/decisions/
+curation_generalize_20261019.md).* G7 also returns ``low_value``, a list
+of skills that would not help on any other task. The round record
+journals it together with ``dropped`` -- the same list when the
+``drop_low_value`` switch is on, ``[]`` when it is off -- in the G7
+write, so the drop decision is durable before any effect. The effects
+(each dropped skill accepted -> discarded, reason ``low_value``) run
+before the round's dispatch, so no unit of the round can resolve a
+dropped skill; a resume first replays every round's drop list
+(idempotent) and only then checks the store against the journal, whose
+replay subtracts the dropped skills. Old round records without the two
+keys read as empty lists.
+
 *Failure dispositions (unchanged semantics, now under run_units).*
 ModelOutputError from G8 or from a merge's regression exam affects only
 that merge: recorded by the worker as skipped (G8, serial burned) or
@@ -224,7 +237,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from expedistill.blocks.author import skill_markers
-from expedistill.blocks.curate import assign_groups, find_similar, merge_skills
+from expedistill.blocks.curate import (
+    SIMILARITY_INPUTS,
+    assign_groups,
+    find_similar,
+    merge_skills,
+)
 from expedistill.composites.exam_once import exam_once
 from expedistill.composites.phase_bank import BANK_NAME
 from expedistill.composites.curation_waves import (
@@ -452,6 +470,24 @@ def _apply_reverted(store: Store, merged: Skill, discard_reason: str) -> None:
         merged.status = "discarded"
         merged.discard_reason = discard_reason
         store.save(merged, "skills")
+
+
+#: The discard reason of a skill G7 flagged as low-value and the
+#: ``drop_low_value`` switch removed (docs/decisions/
+#: curation_generalize_20261019.md).
+LOW_VALUE_REASON = "low_value"
+
+
+def _apply_low_value_drops(store: Store, skill_ids: Sequence[str]) -> None:
+    """Discard the journaled low-value skills. Idempotent: a skill that is
+    no longer accepted (already dropped by an earlier call) is left alone,
+    so a resumed call can replay every round's drop list."""
+    for skill_id in skill_ids:
+        skill = store.load("skills", skill_id, Skill)
+        if skill.status == "accepted":
+            skill.status = "discarded"
+            skill.discard_reason = LOW_VALUE_REASON
+            store.save(skill, "skills")
 
 
 def _corrupted(what: str) -> ConfigError:
@@ -772,12 +808,17 @@ def _stale_error(stale: Sequence[str]) -> ConfigError:
 
 def _expected_accepted(log: Dict[str, Any]) -> List[str]:
     """Replay the journal: the input set, minus every kept merge's sources,
-    plus the kept merged skill (which a later kept merge may consume)."""
+    plus the kept merged skill (which a later kept merge may consume),
+    minus every round's dropped low-value skills (a dropped skill is a
+    current member when it is dropped and never a merge source after it,
+    so the subtraction order does not matter)."""
     expected = set(log["input_skill_ids"])
     for record in log["merge_records"]:
         if record.get("outcome") == "kept":
             expected -= set(record["sources"])
             expected.add(record["skill_id"])
+    for round_record in log["rounds"]:
+        expected -= set(round_record.get("dropped") or ())
     return sorted(expected)
 
 
@@ -955,7 +996,9 @@ def curate_bank(
     curator_handle: ModelHandle,
     bank_token_budget: Optional[int],
     curation_rounds: int,
-    merge_check: str = "exam",
+    merge_check: str = "none",
+    drop_low_value: bool = False,
+    similarity_input: str = "full",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
@@ -975,12 +1018,20 @@ def curate_bank(
     when the bank is still over budget after ``curation_rounds`` rounds;
     nothing is deleted in that case.
 
-    ``merge_check`` (M3, plan section 3's curate family): ``exam`` (the
-    default) is the frozen behaviour -- each kept merge re-answers every
-    source's exam; ``none`` skips the regression exams (the merge product
-    goes pending -> accepted with zero answerer/judge calls). The G8
-    marker gates and the budget valve are unchanged either way, and the
-    merge journal records the same outcomes.
+    ``merge_check`` (M3, plan section 3's curate family): ``exam`` --
+    each kept merge re-answers every source's exam; ``none`` (the default
+    since the 2026-10-19 ruling) skips the regression exams (the merge
+    product goes pending -> accepted with zero answerer/judge calls). The
+    G8 marker gates and the budget valve are unchanged either way, and
+    the merge journal records the same outcomes.
+
+    ``drop_low_value`` (2026-10-19 ruling): G7 also lists low-value
+    skills; with the switch on they are discarded (reason ``low_value``)
+    before the round's merge units are dispatched, so no merge consumes
+    them; off (the default), the list is only journaled.
+    ``similarity_input`` picks what G7 sees of each skill: ``full``
+    (default) the content, ``summary`` the one-line summary (a skill
+    without one stops the curation with a ConfigError before the call).
 
     ``workers`` bounds the parallelism of one wave's units (B5 run_units);
     any output is bit-identical to the serial run (module docstring).
@@ -996,6 +1047,10 @@ def curate_bank(
     if merge_check not in ("exam", "none"):
         raise ConfigError(
             f"merge_check must be 'exam' or 'none', got {merge_check!r}")
+    if similarity_input not in SIMILARITY_INPUTS:
+        raise ConfigError(
+            f"similarity_input must be one of {list(SIMILARITY_INPUTS)}, "
+            f"got {similarity_input!r}")
     if workers < 1:
         raise ConfigError(f"workers must be >= 1, got {workers}")
     log_path = _log_path(store, run_dir, dest)
@@ -1016,6 +1071,11 @@ def curate_bank(
             skill.skill_id for skill in accepted_members(store))
         _write_log(log, log_path)
     else:
+        # A crash between a round's journal write and its drop effects
+        # leaves dropped skills still accepted: finish them first (the
+        # journal is the commit point), then check the store.
+        for round_record in log["rounds"]:
+            _apply_low_value_drops(store, round_record.get("dropped") or ())
         _check_store_matches_log(store, log)
     next_serial = _initial_next_serial(store, log)
     recorder = UnitFailureRecorder(
@@ -1097,19 +1157,33 @@ def curate_bank(
 
         if round_record is None:
             try:
-                similar_groups, conflicts = find_similar(
-                    members, curator_handle, usage=usage, run_dir=run_dir)
+                similar_groups, conflicts, low_value = find_similar(
+                    members, curator_handle,
+                    similarity_input=similarity_input,
+                    usage=usage, run_dir=run_dir)
             except (InfrastructureError, ModelOutputError) as exc:
                 record_failure(f"{unit_prefix}/similarity", exc)
                 raise
+            # The drop decision is journaled with the G7 output (one write,
+            # the commit point); its effects follow below.
             round_record = {"round": round_index,
                             "similar_groups": similar_groups,
                             "conflicts": conflicts,
+                            "low_value": low_value,
+                            "dropped": low_value if drop_low_value else [],
                             "grouping": None, "dispatch": None,
                             "done": False, "stop": False}
             log["rounds"].append(round_record)
             rounds_by_index[round_index] = round_record
             _write_log(log, log_path)
+
+        dropped = set(round_record.get("dropped") or ())
+        if dropped:
+            # Before dispatch: a dropped skill is no current member, so
+            # _resolve_group leaves it out of every unit of this round.
+            _apply_low_value_drops(store, sorted(dropped))
+            members = [skill for skill in members
+                       if skill.skill_id not in dropped]
 
         units = _round_units(round_record)
         if not units and len(members) < 2:
@@ -1211,9 +1285,9 @@ def curate_bank(
                             # journaled G7 output into the same raise on
                             # every resume.
                             raise ModelOutputError(kind_conflict)
-                        content = merge_skills(
+                        content, summary = merge_skills(
                             sources, curator_handle, mode=mode,
-                            usage=usage, run_dir=run_dir).strip()
+                            usage=usage, run_dir=run_dir)
                         if expected_markers is not None:
                             got = skill_markers(content)
                             if got != expected_markers:
@@ -1251,22 +1325,11 @@ def curate_bank(
                         # same value (models.migrate_skill_record).
                         source_subtasks=merged_source_subtasks(
                             source.source_subtasks for source in sources),
-                        # Schema v3 (skill-folder M1): the MERGE prompt
-                        # outputs plain text and carries no summary
-                        # contract, so the product's summary is composed,
-                        # not model-written -- the sources' non-empty
-                        # summaries joined with "; ". Chosen over asking
-                        # the merge prompt for one because it is
-                        # deterministic and semantically honest: a merge
-                        # keeps every source's advice, so its directory
-                        # line names every capability the sources named.
-                        # Not held to SKILL_SUMMARY_MAX_CHARS (no model
-                        # wrote it); all-empty sources (a v2-migrated
-                        # bank) compose "" and M2's folder rendering will
-                        # fall back to the [When to use] section for them.
-                        summary="; ".join(source.summary
-                                         for source in sources
-                                         if source.summary),
+                        # The 2026-10-19 ruling: G8 writes the merged
+                        # skill's own one-line summary (held to the
+                        # summary rule by the block), replacing the
+                        # sources' summaries joined with "; ".
+                        summary=summary,
                         version=1,
                         status="pending",
                         merged_from=source_ids,

@@ -178,13 +178,14 @@ def test_similarity_groups_the_first_pair(client):
     listing = "- s1: content one\n- s2: content two\n- s3: content three"
     user = get_prompt("SIMILARITY").format(skills_listing=listing)
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed == {"similar_groups": [["s1", "s2"]], "conflicts": []}
+    assert parsed == {"similar_groups": [["s1", "s2"]], "conflicts": [],
+                      "low_value": []}
 
 
 def test_similarity_with_one_skill_groups_nothing(client):
     user = get_prompt("SIMILARITY").format(skills_listing="- s1: content one")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed == {"similar_groups": [], "conflicts": []}
+    assert parsed == {"similar_groups": [], "conflicts": [], "low_value": []}
 
 
 def test_merge_keeps_the_first_sources_markers(client):
@@ -192,7 +193,9 @@ def test_merge_keeps_the_first_sources_markers(client):
              "[Do not use when] d\n\n### s2\n[When to use] e\n"
              "[Steps] f\n[Verify] g\n[Do not use when] h")
     user = get_prompt("MERGE").format(mode="dedup", skills_block=block)
-    merged = client.complete("fake-strong", "s", user)
+    parsed = extract_json(client.complete("fake-strong", "s", user))
+    merged = parsed["content"]
+    assert parsed["summary"]
     assert merged.startswith("[When to use] a")
     assert merged != ("[When to use] a\n[Steps] b\n[Verify] c\n"
                      "[Do not use when] d")

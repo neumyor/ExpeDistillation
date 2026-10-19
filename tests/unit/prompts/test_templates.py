@@ -177,7 +177,28 @@ def test_merge_template_preserves_section_structure():
     # headers must be reproduced exactly (line-start anchored markers).
     text = _normalized(get("MERGE"))
     assert ("Preserve the bracketed section structure of the source skills: "
-            "the merged skill carries the same four sections, merged "
-            "section by section.") in text
+            "the merged skill carries the same four sections.") in text
     assert ("Reproduce the bracketed section headers exactly as written, "
             "each on its own line.") in text
+
+
+def test_merge_template_puts_generalization_first_and_asks_for_json():
+    # The 2026-10-19 ruling: generalization is G8's first requirement,
+    # dedup distills a general lesson, conflict analyses the cause first,
+    # and the output is JSON with the merged skill and its summary.
+    text = _normalized(get("MERGE"))
+    assert text.index("Generalization comes first.") < \
+        text.index("MERGE MODE:")
+    assert "Distill them into one general lesson." in text
+    assert "First work out why they conflict" in text
+    assert '"content":' in text and '"summary":' in text
+
+
+def test_similarity_template_has_one_criterion_and_a_low_value_field():
+    # The 2026-10-19 ruling: no "same trigger conditions" next to "judge
+    # by literal meaning" -- one criterion (the behavior taught), and a
+    # low_value output field.
+    text = _normalized(get("SIMILARITY"))
+    assert "same trigger conditions" not in text
+    assert "judge the behavior they teach, not their wording" in text
+    assert '"low_value": ["skill_id", ...]' in text

@@ -60,12 +60,13 @@
       "out_tokens": null,
       "parsed": {
         "conflicts": [],
+        "low_value": [],
         "similar_groups": []
       },
       "prompt_name": "SIMILARITY",
       "request_id": "<request_id>",
-      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups and conflicting pairs in the listing below. Each entry\nstarts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n- traj/fakebench:t2/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n\n- similar_groups: groups of skills that teach the same thing (same advice, same\n  trigger conditions). Group only skills that could be merged into one skill;\n  every group has at least two skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n\nOnly group or pair skills of the same kind: procedure skills (whose content\ncontains the '[When to use]' section header) with procedure skills, failure\nreferences (whose content contains the '[Trigger]' section header) with\nfailure references -- in similar_groups AND in conflicts.\n\nJudge by literal meaning, not surface wording: skills about the same behavior\nwith different examples still belong to one group. Do not force anything:\nreturn empty lists when there is nothing to merge and no conflicts.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...]}\n",
-      "response_text": "```json\n{\"similar_groups\": [], \"conflicts\": []}\n```",
+      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value skills in the listing\nbelow. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n- traj/fakebench:t2/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n\n- similar_groups: groups of skills that teach the same procedure or the same\n  lesson. Two skills belong together when one merged skill could teach what\n  both teach. Differences in the task they came from, in task-specific error\n  messages, file names or concrete values do NOT make them different: judge\n  the behavior they teach, not their wording. Every group has at least two\n  skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n- low_value: skills that would not help on any other task: advice that only\n  makes sense for the one task the skill came from (its specific files,\n  values or one-off computation), or advice too vague to act on.\n\nOnly group or pair skills of the same kind: procedure skills (whose content\ncontains the '[When to use]' section header) with procedure skills, failure\nreferences (whose content contains the '[Trigger]' section header) with\nfailure references -- in similar_groups AND in conflicts.\n\nDo not force anything: return empty lists when there is nothing to merge, no\nconflicts and no low-value skill.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...],\n  \"low_value\": [\"skill_id\", ...]}\n",
+      "response_text": "```json\n{\"similar_groups\": [], \"conflicts\": [], \"low_value\": []}\n```",
       "role": "curator",
       "status": "ok",
       "system": "You are a helpful assistant. Follow the instructions exactly."
@@ -613,7 +614,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 440,
+        "estimated_in": 528,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -761,11 +762,11 @@
         "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
         "LIVE_RUN_ATTRIBUTION": "9ff5b74d43afbf36bb841d3b112bebf4966268492a6be7d1788dc3e1da6c33ec",
         "LIVE_SKILL_REVISION": "3d6b7f4c207a8e3043b146f951d6f27de829d882ab5c52fa72aff912c70dc8af",
-        "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
+        "MERGE": "867f2ad25ac948a14d27d596b93a1d3c17a041c68361b727f99852b7ff5f2338",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
         "REWRITE": "5221c24ced0a12f5d965bb923d23daf463efdb25a26729b798c18ef75da7d69b",
         "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
-        "SIMILARITY": "fd5ff69610c2c1047d3eee012a503002d12cc2e859707b4d6bc88536cdd4e610",
+        "SIMILARITY": "78161f680c429bfd400bd5c774bd1e8c0e1ab7f1e9de4414d87ee0a220c3d307",
         "SKILL_DIAGNOSE": "0d5b9416627d27f430bfa1b7cbe4458000f13cb839c0989e0f9e5a0c74e4609c",
         "SKILL_DISTILL": "48bfbaea7780ad51b4e1e586aef843b140a0e7157187086f99188da61830b00d"
       },
@@ -816,11 +817,11 @@
       "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
       "LIVE_RUN_ATTRIBUTION": "9ff5b74d43afbf36bb841d3b112bebf4966268492a6be7d1788dc3e1da6c33ec",
       "LIVE_SKILL_REVISION": "3d6b7f4c207a8e3043b146f951d6f27de829d882ab5c52fa72aff912c70dc8af",
-      "MERGE": "46844826e71fe7c5c403ba6ccfe192ef17e89122d5e7fb15597421c9842f3bfc",
+      "MERGE": "867f2ad25ac948a14d27d596b93a1d3c17a041c68361b727f99852b7ff5f2338",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
       "REWRITE": "5221c24ced0a12f5d965bb923d23daf463efdb25a26729b798c18ef75da7d69b",
       "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
-      "SIMILARITY": "fd5ff69610c2c1047d3eee012a503002d12cc2e859707b4d6bc88536cdd4e610",
+      "SIMILARITY": "78161f680c429bfd400bd5c774bd1e8c0e1ab7f1e9de4414d87ee0a220c3d307",
       "SKILL_DIAGNOSE": "0d5b9416627d27f430bfa1b7cbe4458000f13cb839c0989e0f9e5a0c74e4609c",
       "SKILL_DISTILL": "48bfbaea7780ad51b4e1e586aef843b140a0e7157187086f99188da61830b00d"
     },
@@ -1554,10 +1555,12 @@
         "conflicts": [],
         "dispatch": [],
         "done": true,
+        "dropped": [],
         "grouping": {
           "traj/fakebench:t1/strong/00/seg00/skill": "state inspection",
           "traj/fakebench:t2/strong/00/seg00/skill": "state inspection"
         },
+        "low_value": [],
         "round": 1,
         "similar_groups": [],
         "stop": true
