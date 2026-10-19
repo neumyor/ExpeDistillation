@@ -562,7 +562,8 @@ E1 内部的 runner：
 | 合并 skill | G8 | curator（最末学习相位） |
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
-| 执行任务·技能文件夹（`TB_TASK_PROMPT_FOLDER`，插件经能力位 `skill_folder_prompt_name` 声明，目前只有 tb） | E1 的 TB runner（folder 单元） | executor_weak（C 相位 real_folder） |
+| 执行任务·技能文件夹——目录靠 cat（`TB_TASK_PROMPT_FOLDER`，`inline_catalog=False`，默认） | E1 的 TB runner（folder 单元） | executor_weak（C 相位 real_folder） |
+| 执行任务·技能文件夹——目录内嵌提示词（`TB_TASK_PROMPT_FOLDER_INLINE`，`inline_catalog=True`） | E1 的 TB runner（folder 单元，inline_catalog 变体） | executor_weak（C 相位 real_folder，FolderParams.inline_catalog=True） |
 | LIVE_RUN_ATTRIBUTION | G10 | author（学习相位 revise，live 组证据） |
 | LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，live 组修订） |
 
@@ -861,16 +862,24 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   把技能放进执行环境里的一个文件夹，提示词只带一段固定指引。交付解析出
   的每个单元在 `aux["skill_folder"]` 里带一份清单：目录文本、每条已接受
   技能的文件名映射、库指纹——不带技能正文（正文的唯一来源是相位技能库，
-  渐进读取是这个玩法的核心）。目录文件 catalog.md 每行是
+  渐进读取是这个玩法的核心）。`FolderParams.inline_catalog` 控制目录文本
+  出现的位置：`False`（默认）目录只在 `catalog.md` 文件里，agent 自己 cat；
+  `True` 目录文本通过提示词模板的 `{skills_block}` 槽直接进提示词，agent
+  无需先找目录文件（这两个模式都把目录文本写进 `aux["skill_folder"]` 的
+  `catalog_text`，物化和读取统计不受影响）。目录文件 catalog.md 每行是
   "技能编号 | 要 cat 的文件名 | 一句话摘要"，开头是使用规则（先看目录、
   按需打开、别一次开太多）。派发前相位驱动把清单物化成真实目录（相位
   目录下的 `skill_folder/`，`materialize_skill_folder` 幂等：内容不变
   不重写；库指纹与相位库不符是代码 bug 停机）。支持技能文件夹的插件把
   目录送进执行环境（TB：目录随既有 skills 上传链进沙箱
-  `/opt/openclaw-skills/`，零远端改动），提示词用指引段、无
-  `{skills_block}` 槽，目录文本不进提示词，读取靠 agent 自己 cat。
-  插件用能力位 `skill_folder_prompt_name` 声明支持（目前只有 tb 声明，
-  指向 `TB_TASK_PROMPT_FOLDER`）；folder 相位落到不支持的插件，C 相位
+  `/opt/openclaw-skills/`，零远端改动）。插件用能力位
+  `skill_folder_prompt_name` 声明支持（目前只有 tb 声明，默认指向
+  `TB_TASK_PROMPT_FOLDER`，目录文本不进提示词、无 `{skills_block}` 槽）；
+  `inline_catalog=True` 时 `run()` 切换到配套的 `TB_TASK_PROMPT_FOLDER_INLINE`
+  提示词（带 `{skills_block}` 槽渲染目录文本，guidance 段仍保留以指明文件
+  夹路径），两个提示词的 digest 都进 manifest 冻结面（stage0 在
+  `skill_folder_prompt_name` 后按 `_INLINE` 约定查配套名并加入冻结面）；
+  folder 相位落到不支持的插件，C 相位
   驱动在派发前就报配置错误停机——与技能库空不空无关，逐单元的 E1 守卫
   保留作第二道。空已接受集不物化、单元裸跑（空注入是空串：不渲染一个
   只剩表头的空目录文件）。`real_folder` 执行没有自己的执行参数，C 相位

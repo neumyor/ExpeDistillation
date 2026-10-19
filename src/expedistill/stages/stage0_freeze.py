@@ -249,6 +249,14 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
                 "registered -- the folder prompt is part of the frozen "
                 "protocol, so the plugin and its registration disagree")
         names.add(folder_prompt)
+        # The inline-catalog folder prompt (FolderParams.inline_catalog=True)
+        # is a companion to the standard folder prompt: the plugin registers
+        # it under a conventional sibling name (folder_prompt + "_INLINE").
+        # When it exists, freeze its digest too so an inline-catalog run's
+        # manifest covers both prompts regardless of which the config selects.
+        inline_folder_prompt = folder_prompt + "_INLINE"
+        if inline_folder_prompt in prompts.PROMPTS:
+            names.add(inline_folder_prompt)
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)

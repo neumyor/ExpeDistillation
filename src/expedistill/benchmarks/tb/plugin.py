@@ -145,6 +145,8 @@ __all__ = [
     "TB_SKILL_FOLDER_GUIDANCE",
     "TB_TASK_PROMPT",
     "TB_TASK_PROMPT_FOLDER",
+    "TB_TASK_PROMPT_FOLDER_INLINE",
+    "TB_TASK_PROMPT_FOLDER_INLINE_NAME",
     "classify_result",
     "result_facts",
     "runner_env",
@@ -253,13 +255,66 @@ TB_TASK_PROMPT_FOLDER = register(
             "the task description.\n"
         ),
         description=(
-            "E1 TB runner, skill-folder mode (the real_folder execution): "
-            "the folder unit's task prompt -- the SKILLS slot of "
-            "TB_TASK_PROMPT is replaced by the folder guidance section "
+            "E1 TB runner, skill-folder mode (the real_folder execution, "
+            "inline_catalog=False): the folder unit's task prompt -- the "
+            "SKILLS slot is replaced by the folder guidance section "
             "(TB_SKILL_FOLDER_GUIDANCE verbatim, which is also what the "
             "remote skill agent injects as the trial's SKILL.md); the "
             "catalog text is never part of the prompt. No "
-            "{skills_block} slot: nothing variable is injected."
+            "{skills_block} slot: nothing variable is injected. See "
+            "TB_TASK_PROMPT_FOLDER_INLINE for the inline-catalog variant."
+        ),
+    )
+)
+
+#: The registered name of the inline-catalog folder prompt, used to switch
+#: on the FolderParams.inline_catalog flag without a magic string in run().
+TB_TASK_PROMPT_FOLDER_INLINE_NAME = "TB_TASK_PROMPT_FOLDER_INLINE"
+
+TB_TASK_PROMPT_FOLDER_INLINE = register(
+    PromptSpec(
+        name=TB_TASK_PROMPT_FOLDER_INLINE_NAME,
+        template=(
+            "You are an AI assistant solving a command-line task inside a "
+            "Linux sandbox.\n"
+            "You act through a terminal: inspect the environment, run "
+            "shell commands, read\n"
+            "their output, and iterate until the task is done.\n"
+            "\n"
+            "SKILL FOLDER (lessons distilled from earlier runs; use them "
+            "as references\n"
+            "when they apply to the current task, and ignore them when "
+            "they do not):\n"
+            + TB_SKILL_FOLDER_GUIDANCE + "\n"
+            "\n"
+            "SKILL CATALOG (every skill available in the folder is listed "
+            "below; cat only\n"
+            "the skill file the current step needs, one at a time):\n"
+            "{skills_block}\n"
+            "\n"
+            "TASK:\n"
+            "{instruction}\n"
+            "\n"
+            "TERMINAL HISTORY (most recent state last):\n"
+            "{history}\n"
+            "Decide your next action from the terminal state above. Work "
+            "in small,\n"
+            "verifiable steps, check the effect of each command before "
+            "moving on, and do\n"
+            "not declare the task complete until you have verified the "
+            "goal against\n"
+            "the task description.\n"
+        ),
+        description=(
+            "E1 TB runner, skill-folder mode (the real_folder execution, "
+            "inline_catalog=True): the folder unit's task prompt with the "
+            "catalog text injected verbatim into {skills_block}, so the "
+            "agent sees the full catalog in the prompt without needing to "
+            "cat catalog.md first. The skill bodies still live in the "
+            "mounted folder for on-demand cat. The guidance section "
+            "(TB_SKILL_FOLDER_GUIDANCE) also appears so the agent knows "
+            "the folder path. See TB_TASK_PROMPT_FOLDER for the "
+            "file-only variant where the agent must cat the catalog."
         ),
     )
 )
@@ -701,12 +756,27 @@ class TBPlugin(BenchmarkPlugin):
         link = self._link if self._link is not None else RemoteLink()
         run_id = self._make_run_id(task_name, task)
         # A folder unit rides the skills-mode mechanism with the GUIDANCE
-        # as its SKILL.md (the catalog text is never injected; the
-        # folder's files reach the sandbox beside it -- module docstring,
-        # the skill-folder M3 section).
+        # as its SKILL.md (the catalog text is never part of SKILL.md;
+        # the catalog lives in catalog.md inside the same directory).
+        # inline_catalog=True: the catalog text was placed in skills_block
+        # by the delivery driver; the INLINE prompt template renders it
+        # via {skills_block} so the agent sees it without catting a file.
+        # inline_catalog=False (default): the SKILL.md carries guidance
+        # only; the agent must cat catalog.md from the mounted folder.
         folder = _folder_of(task)
-        skill_md = (TB_SKILL_FOLDER_GUIDANCE if folder is not None
-                    else skills_block)
+        inline_catalog = (
+            bool(task.meta.get("inline_catalog", False))
+            if isinstance(task.meta, dict) else False
+        ) if folder is not None else False
+        if folder is not None and inline_catalog:
+            skill_md = TB_SKILL_FOLDER_GUIDANCE
+            folder_prompt_name = TB_TASK_PROMPT_FOLDER_INLINE_NAME
+        elif folder is not None:
+            skill_md = TB_SKILL_FOLDER_GUIDANCE
+            folder_prompt_name = self.skill_folder_prompt_name
+        else:
+            skill_md = skills_block
+            folder_prompt_name = self.task_prompt_name
         poll_seconds = _env_float(POLL_ENV, DEFAULT_POLL_SECONDS,
                                   self._poll_seconds)
         deadline_seconds = _env_float(DEADLINE_ENV, DEFAULT_DEADLINE_SECONDS,
@@ -718,8 +788,7 @@ class TBPlugin(BenchmarkPlugin):
             "task_name": task_name,
             "model": model_name,
             "run_id": run_id,
-            "prompt_name": (self.skill_folder_prompt_name if folder is not None
-                            else self.task_prompt_name),
+            "prompt_name": folder_prompt_name,
         }
         try:
             # Root resolution and everything after it goes over the wire, so
