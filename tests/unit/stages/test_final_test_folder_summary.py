@@ -101,7 +101,7 @@ def test_folder_c_phase_reports_the_read_sets_in_its_summary(
 
     # The with-bank arm's units, keyed by trajectory id: t1 cat the
     # first manifest file, t2 both (manifest order), t3 nothing.
-    assert result["skill_files_read"] == {
+    assert result["test"]["skill_files_read"] == {
         _trajectory_id("t1"): [_group_skill("t1").skill_id],
         _trajectory_id("t2"): [_group_skill("t1").skill_id,
                                _group_skill("t2").skill_id],
@@ -128,7 +128,7 @@ def test_an_empty_accepted_bank_reports_empty_read_sets(
 
     result = phase_execute.run(ctx, phase).summary
 
-    assert result["skill_files_read"] == {
+    assert result["test"]["skill_files_read"] == {
         _trajectory_id(task_id): [] for task_id in TASK_IDS}
 
 
@@ -139,8 +139,8 @@ def test_a_resumed_c_phase_recomputes_the_same_read_sets(
     _write_bank(ctx, [_group_skill("t1"), _group_skill("t2")])
     phase = _c_phase()
 
-    first = phase_execute.run(ctx, phase).summary["skill_files_read"]
-    second = phase_execute.run(ctx, phase).summary["skill_files_read"]
+    first = phase_execute.run(ctx, phase).summary["test"]["skill_files_read"]
+    second = phase_execute.run(ctx, phase).summary["test"]["skill_files_read"]
 
     # K1's own resume keeps the stored units, so the same stored
     # trajectories parse to the same read sets (the pure function's

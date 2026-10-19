@@ -1524,29 +1524,46 @@
     "role": "baseline"
   },
   "phases/p01_baseline/phase_summary.json": {
+    "baseline": {
+      "infra_shortfalls": [],
+      "strong": {
+        "aux": null,
+        "avg_at_n": 1.0,
+        "avg_at_n_conservative": 1.0,
+        "infra_tasks": [],
+        "pass_at_n": 1.0,
+        "tasks": 2
+      },
+      "weak": {
+        "aux": null,
+        "avg_at_n": 0.0,
+        "avg_at_n_conservative": 0.0,
+        "infra_tasks": [],
+        "pass_at_n": 0.0,
+        "tasks": 2
+      }
+    },
     "complete": true,
+    "execution": {
+      "executed": 4,
+      "planned": 4,
+      "reused": 0,
+      "skipped": 0
+    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "infra_shortfalls": [],
-    "report_rows": 4,
-    "role": "baseline",
-    "strong": {
-      "aux": null,
-      "avg_at_n": 1.0,
-      "avg_at_n_conservative": 1.0,
-      "infra_tasks": [],
-      "pass_at_n": 1.0,
-      "tasks": 2
+    "outcomes": {
+      "failure": 2,
+      "infra_error": 0,
+      "success": 2
     },
-    "weak": {
-      "aux": null,
-      "avg_at_n": 0.0,
-      "avg_at_n_conservative": 0.0,
-      "infra_tasks": [],
-      "pass_at_n": 0.0,
-      "tasks": 2
-    }
+    "report": {
+      "format": "acceptance_report_v1",
+      "path": "phases/p01:baseline/acceptance_report.jsonl",
+      "row_count": 4
+    },
+    "role": "baseline"
   },
   "phases/p01_baseline/strong/redispatch.json": {
     "p01:baseline:fakebench:fakebench:t1:strong:140bedbf": {
@@ -1971,25 +1988,45 @@
     "role": "exam"
   },
   "phases/p03_exam/phase_summary.json": {
-    "control_perfect": [],
-    "generation_failed": [],
-    "infra_failed": [],
-    "leaked": [],
-    "measured": [
-      "traj/fakebench:t1/strong/00/seg00/exam",
-      "traj/fakebench:t1/weak/00/seg00/exam",
-      "traj/fakebench:t2/strong/00/seg00/exam",
-      "traj/fakebench:t2/weak/00/seg00/exam"
-    ],
-    "report_rows": 8,
-    "reused": [],
-    "role": "exam",
-    "universe": [
-      "traj/fakebench:t1/strong/00/seg00/exam",
-      "traj/fakebench:t1/weak/00/seg00/exam",
-      "traj/fakebench:t2/strong/00/seg00/exam",
-      "traj/fakebench:t2/weak/00/seg00/exam"
-    ]
+    "complete": true,
+    "exam": {
+      "control_perfect": [],
+      "generation_failed": [],
+      "leaked": [],
+      "measured": [
+        "traj/fakebench:t1/strong/00/seg00/exam",
+        "traj/fakebench:t1/weak/00/seg00/exam",
+        "traj/fakebench:t2/strong/00/seg00/exam",
+        "traj/fakebench:t2/weak/00/seg00/exam"
+      ],
+      "reused": [],
+      "universe": [
+        "traj/fakebench:t1/strong/00/seg00/exam",
+        "traj/fakebench:t1/weak/00/seg00/exam",
+        "traj/fakebench:t2/strong/00/seg00/exam",
+        "traj/fakebench:t2/weak/00/seg00/exam"
+      ]
+    },
+    "execution": {
+      "executed": 8,
+      "planned": 4,
+      "reused": 0,
+      "skipped": 0
+    },
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "outcomes": {
+      "failure": 4,
+      "infra_error": 0,
+      "success": 4
+    },
+    "report": {
+      "format": "acceptance_report_v1",
+      "path": "phases/p03:exam/acceptance_report.jsonl",
+      "row_count": 8
+    },
+    "role": "exam"
   },
   "phases/p03_exam/units.jsonl": [
     {
@@ -2231,15 +2268,35 @@
     "role": "exam"
   },
   "phases/p05_exam/phase_summary.json": {
-    "control_perfect": [],
-    "generation_failed": [],
-    "infra_failed": [],
-    "leaked": [],
-    "measured": [],
-    "report_rows": 0,
-    "reused": [],
-    "role": "exam",
-    "universe": []
+    "complete": true,
+    "exam": {
+      "control_perfect": [],
+      "generation_failed": [],
+      "leaked": [],
+      "measured": [],
+      "reused": [],
+      "universe": []
+    },
+    "execution": {
+      "executed": 0,
+      "planned": 0,
+      "reused": 0,
+      "skipped": 0
+    },
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "outcomes": {
+      "failure": 0,
+      "infra_error": 0,
+      "success": 0
+    },
+    "report": {
+      "format": "acceptance_report_v1",
+      "path": "phases/p05:exam/acceptance_report.jsonl",
+      "row_count": 0
+    },
+    "role": "exam"
   },
   "phases/p05_exam/units.jsonl": [],
   "phases/p06_learn/bank_summary.json": {
@@ -2432,15 +2489,35 @@
     "role": "exam"
   },
   "phases/p07_exam/phase_summary.json": {
-    "control_perfect": [],
-    "generation_failed": [],
-    "infra_failed": [],
-    "leaked": [],
-    "measured": [],
-    "report_rows": 0,
-    "reused": [],
-    "role": "exam",
-    "universe": []
+    "complete": true,
+    "exam": {
+      "control_perfect": [],
+      "generation_failed": [],
+      "leaked": [],
+      "measured": [],
+      "reused": [],
+      "universe": []
+    },
+    "execution": {
+      "executed": 0,
+      "planned": 0,
+      "reused": 0,
+      "skipped": 0
+    },
+    "infra_accepted": [],
+    "infra_missing": [],
+    "infra_shortfall_accepted": false,
+    "outcomes": {
+      "failure": 0,
+      "infra_error": 0,
+      "success": 0
+    },
+    "report": {
+      "format": "acceptance_report_v1",
+      "path": "phases/p07:exam/acceptance_report.jsonl",
+      "row_count": 0
+    },
+    "role": "exam"
   },
   "phases/p07_exam/units.jsonl": [],
   "phases/p08_learn/bank_summary.json": {
@@ -2677,41 +2754,57 @@
     "role": "test"
   },
   "phases/p09_test/phase_summary.json": {
-    "bank_reference": "bank:f0d8957e4003",
     "complete": true,
-    "control": {
-      "aux": null,
-      "avg_at_n": 0.0,
-      "avg_at_n_conservative": 0.0,
-      "infra_tasks": [],
-      "pass_at_n": 0.0,
-      "tasks": 2
+    "execution": {
+      "executed": 4,
+      "planned": 4,
+      "reused": 0,
+      "skipped": 0
     },
-    "control_source": "baseline_reuse",
-    "delta": {
-      "aux": null,
-      "avg_at_n": 1.0,
-      "avg_at_n_conservative": 1.0,
-      "pass_at_n": 1.0
-    },
-    "infra_accepted": {
-      "control": [],
-      "with_bank": []
-    },
-    "infra_missing": {
-      "control": [],
-      "with_bank": []
-    },
+    "infra_accepted": [],
+    "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "mode": "full",
+    "outcomes": {
+      "failure": 2,
+      "infra_error": 0,
+      "success": 2
+    },
+    "report": {
+      "format": null,
+      "path": null,
+      "row_count": 0
+    },
     "role": "test",
-    "with_bank": {
-      "aux": null,
-      "avg_at_n": 1.0,
-      "avg_at_n_conservative": 1.0,
-      "infra_tasks": [],
-      "pass_at_n": 1.0,
-      "tasks": 2
+    "test": {
+      "bank_reference": "bank:f0d8957e4003",
+      "control": {
+        "aux": null,
+        "avg_at_n": 0.0,
+        "avg_at_n_conservative": 0.0,
+        "infra_tasks": [],
+        "pass_at_n": 0.0,
+        "tasks": 2
+      },
+      "control_source": "baseline_reuse",
+      "delta": {
+        "aux": null,
+        "avg_at_n": 1.0,
+        "avg_at_n_conservative": 1.0,
+        "pass_at_n": 1.0
+      },
+      "infra_missing_by_arm": {
+        "control": [],
+        "with_bank": []
+      },
+      "mode": "full",
+      "with_bank": {
+        "aux": null,
+        "avg_at_n": 1.0,
+        "avg_at_n_conservative": 1.0,
+        "infra_tasks": [],
+        "pass_at_n": 1.0,
+        "tasks": 2
+      }
     }
   },
   "phases/p09_test/units.jsonl": [
@@ -2789,29 +2882,46 @@
     {
       "stage": "p01:baseline",
       "summary": {
+        "baseline": {
+          "infra_shortfalls": [],
+          "strong": {
+            "aux": null,
+            "avg_at_n": 1.0,
+            "avg_at_n_conservative": 1.0,
+            "infra_tasks": [],
+            "pass_at_n": 1.0,
+            "tasks": 2
+          },
+          "weak": {
+            "aux": null,
+            "avg_at_n": 0.0,
+            "avg_at_n_conservative": 0.0,
+            "infra_tasks": [],
+            "pass_at_n": 0.0,
+            "tasks": 2
+          }
+        },
         "complete": true,
+        "execution": {
+          "executed": 4,
+          "planned": 4,
+          "reused": 0,
+          "skipped": 0
+        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "infra_shortfalls": [],
-        "report_rows": 4,
-        "role": "baseline",
-        "strong": {
-          "aux": null,
-          "avg_at_n": 1.0,
-          "avg_at_n_conservative": 1.0,
-          "infra_tasks": [],
-          "pass_at_n": 1.0,
-          "tasks": 2
+        "outcomes": {
+          "failure": 2,
+          "infra_error": 0,
+          "success": 2
         },
-        "weak": {
-          "aux": null,
-          "avg_at_n": 0.0,
-          "avg_at_n_conservative": 0.0,
-          "infra_tasks": [],
-          "pass_at_n": 0.0,
-          "tasks": 2
-        }
+        "report": {
+          "format": "acceptance_report_v1",
+          "path": "phases/p01:baseline/acceptance_report.jsonl",
+          "row_count": 4
+        },
+        "role": "baseline"
       }
     },
     {
@@ -2843,25 +2953,45 @@
     {
       "stage": "p03:exam",
       "summary": {
-        "control_perfect": [],
-        "generation_failed": [],
-        "infra_failed": [],
-        "leaked": [],
-        "measured": [
-          "traj/fakebench:t1/strong/00/seg00/exam",
-          "traj/fakebench:t1/weak/00/seg00/exam",
-          "traj/fakebench:t2/strong/00/seg00/exam",
-          "traj/fakebench:t2/weak/00/seg00/exam"
-        ],
-        "report_rows": 8,
-        "reused": [],
-        "role": "exam",
-        "universe": [
-          "traj/fakebench:t1/strong/00/seg00/exam",
-          "traj/fakebench:t1/weak/00/seg00/exam",
-          "traj/fakebench:t2/strong/00/seg00/exam",
-          "traj/fakebench:t2/weak/00/seg00/exam"
-        ]
+        "complete": true,
+        "exam": {
+          "control_perfect": [],
+          "generation_failed": [],
+          "leaked": [],
+          "measured": [
+            "traj/fakebench:t1/strong/00/seg00/exam",
+            "traj/fakebench:t1/weak/00/seg00/exam",
+            "traj/fakebench:t2/strong/00/seg00/exam",
+            "traj/fakebench:t2/weak/00/seg00/exam"
+          ],
+          "reused": [],
+          "universe": [
+            "traj/fakebench:t1/strong/00/seg00/exam",
+            "traj/fakebench:t1/weak/00/seg00/exam",
+            "traj/fakebench:t2/strong/00/seg00/exam",
+            "traj/fakebench:t2/weak/00/seg00/exam"
+          ]
+        },
+        "execution": {
+          "executed": 8,
+          "planned": 4,
+          "reused": 0,
+          "skipped": 0
+        },
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "outcomes": {
+          "failure": 4,
+          "infra_error": 0,
+          "success": 4
+        },
+        "report": {
+          "format": "acceptance_report_v1",
+          "path": "phases/p03:exam/acceptance_report.jsonl",
+          "row_count": 8
+        },
+        "role": "exam"
       }
     },
     {
@@ -2893,15 +3023,35 @@
     {
       "stage": "p05:exam",
       "summary": {
-        "control_perfect": [],
-        "generation_failed": [],
-        "infra_failed": [],
-        "leaked": [],
-        "measured": [],
-        "report_rows": 0,
-        "reused": [],
-        "role": "exam",
-        "universe": []
+        "complete": true,
+        "exam": {
+          "control_perfect": [],
+          "generation_failed": [],
+          "leaked": [],
+          "measured": [],
+          "reused": [],
+          "universe": []
+        },
+        "execution": {
+          "executed": 0,
+          "planned": 0,
+          "reused": 0,
+          "skipped": 0
+        },
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "outcomes": {
+          "failure": 0,
+          "infra_error": 0,
+          "success": 0
+        },
+        "report": {
+          "format": "acceptance_report_v1",
+          "path": "phases/p05:exam/acceptance_report.jsonl",
+          "row_count": 0
+        },
+        "role": "exam"
       }
     },
     {
@@ -2933,15 +3083,35 @@
     {
       "stage": "p07:exam",
       "summary": {
-        "control_perfect": [],
-        "generation_failed": [],
-        "infra_failed": [],
-        "leaked": [],
-        "measured": [],
-        "report_rows": 0,
-        "reused": [],
-        "role": "exam",
-        "universe": []
+        "complete": true,
+        "exam": {
+          "control_perfect": [],
+          "generation_failed": [],
+          "leaked": [],
+          "measured": [],
+          "reused": [],
+          "universe": []
+        },
+        "execution": {
+          "executed": 0,
+          "planned": 0,
+          "reused": 0,
+          "skipped": 0
+        },
+        "infra_accepted": [],
+        "infra_missing": [],
+        "infra_shortfall_accepted": false,
+        "outcomes": {
+          "failure": 0,
+          "infra_error": 0,
+          "success": 0
+        },
+        "report": {
+          "format": "acceptance_report_v1",
+          "path": "phases/p07:exam/acceptance_report.jsonl",
+          "row_count": 0
+        },
+        "role": "exam"
       }
     },
     {
@@ -2973,41 +3143,57 @@
     {
       "stage": "p09:test",
       "summary": {
-        "bank_reference": "bank:f0d8957e4003",
         "complete": true,
-        "control": {
-          "aux": null,
-          "avg_at_n": 0.0,
-          "avg_at_n_conservative": 0.0,
-          "infra_tasks": [],
-          "pass_at_n": 0.0,
-          "tasks": 2
+        "execution": {
+          "executed": 4,
+          "planned": 4,
+          "reused": 0,
+          "skipped": 0
         },
-        "control_source": "baseline_reuse",
-        "delta": {
-          "aux": null,
-          "avg_at_n": 1.0,
-          "avg_at_n_conservative": 1.0,
-          "pass_at_n": 1.0
-        },
-        "infra_accepted": {
-          "control": [],
-          "with_bank": []
-        },
-        "infra_missing": {
-          "control": [],
-          "with_bank": []
-        },
+        "infra_accepted": [],
+        "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "mode": "full",
+        "outcomes": {
+          "failure": 2,
+          "infra_error": 0,
+          "success": 2
+        },
+        "report": {
+          "format": null,
+          "path": null,
+          "row_count": 0
+        },
         "role": "test",
-        "with_bank": {
-          "aux": null,
-          "avg_at_n": 1.0,
-          "avg_at_n_conservative": 1.0,
-          "infra_tasks": [],
-          "pass_at_n": 1.0,
-          "tasks": 2
+        "test": {
+          "bank_reference": "bank:f0d8957e4003",
+          "control": {
+            "aux": null,
+            "avg_at_n": 0.0,
+            "avg_at_n_conservative": 0.0,
+            "infra_tasks": [],
+            "pass_at_n": 0.0,
+            "tasks": 2
+          },
+          "control_source": "baseline_reuse",
+          "delta": {
+            "aux": null,
+            "avg_at_n": 1.0,
+            "avg_at_n_conservative": 1.0,
+            "pass_at_n": 1.0
+          },
+          "infra_missing_by_arm": {
+            "control": [],
+            "with_bank": []
+          },
+          "mode": "full",
+          "with_bank": {
+            "aux": null,
+            "avg_at_n": 1.0,
+            "avg_at_n_conservative": 1.0,
+            "infra_tasks": [],
+            "pass_at_n": 1.0,
+            "tasks": 2
+          }
         }
       }
     }

@@ -539,7 +539,7 @@ def test_live_control_perfect_skips_the_group(monkeypatch, tmp_path):
     # with zero executions -- through the ledger's weak_already_knows
     # terminal row, and the report row carries the cause.
     assert len(plugin.calls) == calls_before
-    assert result.summary["skipped_control_perfect"] == [
+    assert result.summary["live"]["skipped_control_perfect"] == [
         row.unit_id for row in report_rows(ctx, phase)]
     row = report_rows(ctx, phase)[0]
     assert row.status == verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
@@ -578,9 +578,9 @@ def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
     result = phase_execute.run(ctx, second)
 
     assert len(plugin.calls) == calls_after_first
-    assert result.summary["skipped_reused"] == [measured[0].unit_id.replace(
+    assert result.summary["live"]["skipped_reused"] == [measured[0].unit_id.replace(
         first.label, second.label)]
-    assert result.summary["round"] == 1
+    assert result.summary["live"]["round"] == 1
     ledger = read_jsonl(ctx.run_dir / "stage4_acceptance" / "live_run"
                         / "verdicts.jsonl")
     assert [row["round"] for row in ledger] == [0]
@@ -607,7 +607,7 @@ def test_live_phase_with_an_empty_group_universe_completes(
     result = phase_execute.run(ctx, phase)
 
     assert len(plugin.calls) == calls_before  # zero executions
-    assert result.summary["round"] == 0
+    assert result.summary["live"]["round"] == 0
     assert read_jsonl(phase_bank.phase_bank_dir(
         ctx.run_dir, phase.label) / phase_execute.UNITS_NAME) == []
     assert report_rows(ctx, phase) == []
@@ -703,7 +703,7 @@ def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
                                         judge=judge, auditor=auditor))
     first = phase_of(2, "exam", exam_spec())
     first_summary = phase_execute.run(ctx, first).summary
-    assert first_summary["measured"] == [make_exam_id(skill.subtask_id)]
+    assert first_summary["exam"]["measured"] == [make_exam_id(skill.subtask_id)]
     first_rows = {row.unit_id: row for row in report_rows(ctx, first)}
     calls_after_first = sum(
         len(handle.client.calls) for handle in ctx.handles.values())
@@ -716,8 +716,8 @@ def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
     second = phase_of(4, "exam", exam_spec())
     second_summary = phase_execute.run(ctx, second).summary
 
-    assert second_summary["reused"] == [make_exam_id(skill.subtask_id)]
-    assert second_summary["measured"] == []
+    assert second_summary["exam"]["reused"] == [make_exam_id(skill.subtask_id)]
+    assert second_summary["exam"]["measured"] == []
     # Zero model calls: the exam, the answers and the audits all stand.
     assert sum(len(handle.client.calls)
                for handle in ctx.handles.values()) == calls_after_first
@@ -753,7 +753,7 @@ def test_exam_bare_correct_skips_the_with_skill_answer(monkeypatch,
     assert len(examiner.client.calls) == 1
     assert len(answerer.client.calls) == 1
     assert len(judge.client.calls) == 1
-    assert result["control_perfect"] == [make_exam_id(skill.subtask_id)]
+    assert result["exam"]["control_perfect"] == [make_exam_id(skill.subtask_id)]
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     bare_row = next(row for row in rows.values()
                     if row.injected_skills is None)
@@ -781,7 +781,7 @@ def test_exam_measures_the_with_skill_answer(monkeypatch, tmp_path):
     # Bare wrong -> leak audit (clean) -> with-skill answer -> judged.
     assert len(answerer.client.calls) == 2
     assert len(auditor.client.calls) == 1
-    assert result["measured"] == [make_exam_id(skill.subtask_id)]
+    assert result["exam"]["measured"] == [make_exam_id(skill.subtask_id)]
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     skill_row = next(row for row in rows.values()
                      if row.injected_skills is not None)
@@ -803,7 +803,7 @@ def test_exam_leaked_version_voids_the_measurement(monkeypatch, tmp_path):
     phase = phase_of(2, "exam", exam_spec())
     result = phase_execute.run(ctx, phase).summary
 
-    assert result["leaked"] == [make_exam_id(skill.subtask_id)]
+    assert result["exam"]["leaked"] == [make_exam_id(skill.subtask_id)]
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     skill_row = next(row for row in rows.values()
                      if row.injected_skills is not None)
@@ -837,9 +837,9 @@ def test_c_phase_reuses_the_d_control_and_computes_the_delta(
     # honest zero over the shared denominators.
     with_bank_calls = [call for call in plugin.calls[calls_before:]]
     assert len(with_bank_calls) == 3
-    assert result["control_source"] == "baseline_reuse"
-    assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
-    assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
+    assert result["test"]["control_source"] == "baseline_reuse"
+    assert result["test"]["with_bank"]["tasks"] == result["test"]["control"]["tasks"] == 3
+    assert result["test"]["delta"]["pass_at_n"] == pytest.approx(0.0)
     # C writes no acceptance report (section 3 rule 9).
     directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
     assert not (directory / phase_execute.REPORT_NAME).exists()
@@ -856,11 +856,11 @@ def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
         against="fresh_bare")), task_ids=TASK_IDS)
     result = phase_execute.run(ctx, phase).summary
 
-    assert result["control_source"] == "fresh_bare_run"
+    assert result["test"]["control_source"] == "fresh_bare_run"
     # Both arms ran on the same task set: the delta is over identical
     # denominators, and both summaries cover every task.
-    assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
-    assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
+    assert result["test"]["with_bank"]["tasks"] == result["test"]["control"]["tasks"] == 3
+    assert result["test"]["delta"]["pass_at_n"] == pytest.approx(0.0)
 
 
 def test_c_phase_external_campaign_control_zero_execution(
@@ -902,18 +902,18 @@ def test_c_phase_external_campaign_control_zero_execution(
     # control_source keeps the old vocabulary, the delta is computed
     # against the aligned first-n rewards (here n=1: t1 1.0, t2 0.0,
     # t3 1.0 -- per-task mean then task mean).
-    assert result["control_source"] == "external_campaign"
-    assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
-    assert result["control"]["avg_at_n"] == pytest.approx(2 / 3)
-    assert result["control"]["pass_at_n"] == pytest.approx(2 / 3)
-    assert result["delta"]["avg_at_n"] == pytest.approx(1.0 - 2 / 3)
-    assert result["infra_missing"]["control"] == []
+    assert result["test"]["control_source"] == "external_campaign"
+    assert result["test"]["with_bank"]["tasks"] == result["test"]["control"]["tasks"] == 3
+    assert result["test"]["control"]["avg_at_n"] == pytest.approx(2 / 3)
+    assert result["test"]["control"]["pass_at_n"] == pytest.approx(2 / 3)
+    assert result["test"]["delta"]["avg_at_n"] == pytest.approx(1.0 - 2 / 3)
+    assert result["test"]["infra_missing_by_arm"]["control"] == []
     # The exact bytes the control consumed are in the phase directory,
     # and the summary's audit record reproduces them without the file.
     directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
     copy_path = directory / "external_control.json"
     assert hashlib.sha256(copy_path.read_bytes()).hexdigest() == sha
-    record = result["external_control"]
+    record = result["test"]["external_control"]
     assert record["sha256"] == sha
     assert record["model_key"] == "qwen"
     assert record["n_attempts"] == 1

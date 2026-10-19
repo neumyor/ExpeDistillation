@@ -322,7 +322,7 @@ def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
     # A: a real exam phase over that artifact's pending member.
     second = _run(ctx, config, 2)
     exam_id = ids.make_exam_id(subtask_id)
-    assert second.summary["measured"] == [exam_id]
+    assert second.summary["exam"]["measured"] == [exam_id]
     rows = _report_rows(ctx, "p03:exam")
     with_skill = next(row for row in rows if row.injected_skills)
     assert with_skill.status == verdicts.STATUS_NORMAL
@@ -375,7 +375,7 @@ def test_a_still_failing_skill_is_discarded_at_the_last_check(
     # ... and C runs against an empty bank without raising.
     final = _run(ctx, config, 4)
     assert final.summary["role"] == "test"
-    assert final.summary["with_bank"]["tasks"] == 3
+    assert final.summary["test"]["with_bank"]["tasks"] == 3
 
 
 def _report_rows(ctx, label):
@@ -426,8 +426,8 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     # reuse) on the SAME stored exam, and this time it passes.
     second = _run(ctx, config, 4)
     exam_id = ids.make_exam_id(subtask_id)
-    assert second.summary["measured"] == [exam_id]
-    assert second.summary["reused"] == []
+    assert second.summary["exam"]["measured"] == [exam_id]
+    assert second.summary["exam"]["reused"] == []
 
     # L3 accepts version 2.
     _run(ctx, config, 5)
@@ -436,7 +436,7 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     # A3: nothing is pending any more -- the universe is empty and the
     # phase measures nothing (the exam method's quiet round).
     third = _run(ctx, config, 6)
-    assert third.summary["universe"] == []
+    assert third.summary["exam"]["universe"] == []
     assert _report_rows(ctx, "p07:exam") == []
 
     # L4 (the last learn phase) re-curates and C injects the accepted
@@ -446,8 +446,8 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     final = _run(ctx, config, 8)
 
     assert final.summary["role"] == "test"
-    assert final.summary["control_source"] == "baseline_reuse"
-    assert final.summary["with_bank"]["tasks"] == 3
+    assert final.summary["test"]["control_source"] == "baseline_reuse"
+    assert final.summary["test"]["with_bank"]["tasks"] == 3
     # The with-bank arm really carried the skill's block.
     with_bank_calls = [call for call in plugin.calls
                        if call["skills_block"]]

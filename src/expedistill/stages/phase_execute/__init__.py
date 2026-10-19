@@ -219,7 +219,7 @@ def _finished_summary(directory, role: str):
     if not isinstance(summary, dict) or summary.get("role") != role:
         return None
     if role == PHASE_ROLE_EXAM:
-        done = not summary.get("infra_failed")
+        done = not summary.get("infra_missing")
     else:
         done = summary.get("complete") is True
     return summary if done else None

@@ -1141,7 +1141,7 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
                             "p04:learn", "p05:exam", "p06:learn", "p07:exam", "p08:learn"]
     # The baseline phase: both bare arms are fully stored, so nothing dispatched
     # and the copied shortfall unit is an accepted hole.
-    assert stages["p01:baseline"]["report_rows"] == 2
+    assert stages["p01:baseline"]["report"]["row_count"] == 2
     assert stages["p01:baseline"]["infra_accepted"] == [source.ids["traj"]["t1s"]]
     # The first learn phase (the assembled-context seam): the weak arm
     # failed the train task, but the pre-learn bank fallback read the
@@ -1232,7 +1232,7 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
 
     # The exam phase measured exactly the ride-along member; the next learn
     # phase accepted it (the keep row's receipt).
-    assert stages["p03:exam"]["measured"] == [exam_id]
+    assert stages["p03:exam"]["exam"]["measured"] == [exam_id]
     accepted_receipts = [
         row for row in read_jsonl(run_dir / "phases" / "p04_learn"
                                  / "outcomes.jsonl")

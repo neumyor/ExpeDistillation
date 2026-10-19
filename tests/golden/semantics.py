@@ -391,6 +391,9 @@ def _e2(snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _e3(snapshot_data: Dict[str, Any]) -> Dict[str, Any]:
     summary = snapshot_data[TEST_SUMMARY]
+    # Frozen pre-unification snapshots carry the role-specific fields at
+    # the top level; current runs nest them under the role namespace.
+    summary = summary.get("test", summary)
     return {
         "with_bank": summary["with_bank"],
         "bare": summary["control"],

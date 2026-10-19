@@ -289,9 +289,9 @@ def test_a_completed_phase_replays_with_zero_model_calls(monkeypatch,
 
     first = phase_execute.run(ctx, phase).summary
     exam_ids = [make_exam_id(skill.subtask_id) for skill in skills]
-    assert first["measured"] == [exam_ids[0]]
-    assert first["control_perfect"] == [exam_ids[1]]
-    assert first["leaked"] == [exam_ids[2]]
+    assert first["exam"]["measured"] == [exam_ids[0]]
+    assert first["exam"]["control_perfect"] == [exam_ids[1]]
+    assert first["exam"]["leaked"] == [exam_ids[2]]
     # Every unit spent exactly its own calls: three generated exams, the
     # bare answers (t2's was perfect and t3's leaked, so no with-skill
     # answers for them), the judgements and the two leak audits.
@@ -376,9 +376,9 @@ def test_a_partial_replay_answers_only_the_unmeasured_units(monkeypatch,
     resumed = _ctx(tmp_path, _handles(allowed=("t2",)))
     second = phase_execute.run(resumed, phase).summary
 
-    assert second["measured"] == sorted(
+    assert second["exam"]["measured"] == sorted(
         [make_exam_id(measured.subtask_id), make_exam_id(owed.subtask_id)])
-    assert second["reused"] == []
+    assert second["exam"]["reused"] == []
     # The measured unit's artifacts are byte-identical, and only the owed
     # unit spent calls: one exam generation, one leak audit, one bare
     # and one with-skill answer with their judgements.
@@ -441,7 +441,7 @@ def test_a_crash_between_the_answer_and_the_judge_resumes_the_answer(
     resumed = _ctx(tmp_path, resumed_handles)
     result = phase_execute.run(resumed, phase).summary
 
-    assert result["measured"] == [exam_id]
+    assert result["exam"]["measured"] == [exam_id]
     # The weak model was never re-asked the bare question: the resumed
     # answerer's only call is the with-skill answer.
     assert len(resumed_handles["answerer"].client.calls) == 1
@@ -470,7 +470,7 @@ def test_a_later_phase_over_a_new_version_remeasures_the_bare_control(
     _write_bank(ctx, "p02:learn", [skill])
     exam_id = make_exam_id(skill.subtask_id)
     first = phase_execute.run(ctx, _phase(2, "exam")).summary
-    assert first["measured"] == [exam_id]
+    assert first["exam"]["measured"] == [exam_id]
     assert {name: len(handle.client.calls)
             for name, handle in ctx.handles.items()} == {
         "examiner": 1, "answerer": 2, "judge": 2, "auditor": 1}
@@ -486,8 +486,8 @@ def test_a_later_phase_over_a_new_version_remeasures_the_bare_control(
     second_ctx = _ctx(tmp_path, _handles(allowed=("t1",)))
     second = phase_execute.run(second_ctx, _phase(4, "exam")).summary
 
-    assert second["measured"] == [exam_id]
-    assert second["reused"] == []
+    assert second["exam"]["measured"] == [exam_id]
+    assert second["exam"]["reused"] == []
     # The bare control was re-answered, the with-skill answer ran, the
     # new version was audited; only the stored exam was reused.
     assert {name: len(handle.client.calls)

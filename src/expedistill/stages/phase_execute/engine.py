@@ -348,3 +348,72 @@ def _arm_trajectories(store: Store) -> List[Trajectory]:
     """Every trajectory in one arm store, sorted by id."""
     return [store.load("trajectories", trajectory_id, Trajectory)
             for trajectory_id in store.ids("trajectories")]
+
+
+# ============================================================================
+# Unified phase summary (shared by all four execute roles)
+# ============================================================================
+
+def build_unified_summary(role: str, *,
+                         execution_planned: int,
+                         execution_executed: int,
+                         execution_reused: int,
+                         execution_skipped: int,
+                         outcomes_success: int,
+                         outcomes_failure: int,
+                         outcomes_infra_error: int,
+                         infra_missing: List[str],
+                         infra_accepted: List[str],
+                         complete: bool,
+                         infra_shortfall_accepted: bool,
+                         report_path: Optional[str],
+                         report_row_count: int,
+                         role_specific: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a unified summary structure for all execution phases.
+
+    All execution phases (baseline/exam/live/test) now share a common
+    structure with three mandatory sections:
+
+    1. execution: planned/executed/reused/skipped counts
+    2. outcomes: success/failure/infra_error counts
+    3. infra_*: infrastructure status fields
+    4. report: report metadata (path, format, row_count)
+
+    Phase-specific fields go under the role namespace (e.g., "baseline": {...}).
+
+    Args:
+        role: Phase role (PHASE_ROLE_BASELINE/EXAM/LIVE/TEST)
+        execution_*: Execution statistics
+        outcomes_*: Outcome counts
+        infra_*: Infrastructure status
+        report_path: Relative path to acceptance_report.jsonl
+        report_row_count: Number of rows in the report
+        role_specific: Phase-specific fields (goes under role namespace)
+
+    Returns:
+        Unified summary dict
+    """
+    return {
+        "role": role,
+        "execution": {
+            "planned": execution_planned,
+            "executed": execution_executed,
+            "reused": execution_reused,
+            "skipped": execution_skipped,
+        },
+        "outcomes": {
+            "success": outcomes_success,
+            "failure": outcomes_failure,
+            "infra_error": outcomes_infra_error,
+        },
+        "infra_missing": sorted(infra_missing),
+        "infra_accepted": sorted(infra_accepted),
+        "complete": complete,
+        "infra_shortfall_accepted": infra_shortfall_accepted,
+        "report": {
+            "path": report_path,
+            "format": "acceptance_report_v1" if report_path else None,
+            "row_count": report_row_count,
+        },
+        role: role_specific,
+    }
