@@ -1430,96 +1430,6 @@
     },
     "tasks_digest": "acc365b23957040e3bcf2982fdd1e0ee48767f5f65259e071af281aca036fec3"
   },
-  "phases/p01_baseline/acceptance_report.jsonl": [
-    {
-      "artifacts": {
-        "trajectory_ids": [
-          "traj/fakebench:t1/strong/00"
-        ]
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p01:baseline",
-      "role": "strong",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/strong/00",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "trajectory_ids": [
-          "traj/fakebench:t1/weak/00"
-        ]
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p01:baseline",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/00",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "trajectory_ids": [
-          "traj/fakebench:t2/strong/00"
-        ]
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p01:baseline",
-      "role": "strong",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t2/strong/00",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "trajectory_ids": [
-          "traj/fakebench:t2/weak/00"
-        ]
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p01:baseline",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t2/weak/00",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf",
-      "valid_count": 1
-    }
-  ],
   "phases/p01_baseline/phase.json": {
     "index": 0,
     "label": "p01:baseline",
@@ -1527,45 +1437,10 @@
     "role": "baseline"
   },
   "phases/p01_baseline/phase_summary.json": {
-    "baseline": {
-      "infra_shortfalls": [],
-      "strong": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "infra_tasks": [],
-        "pass_at_n": 1.0,
-        "tasks": 2
-      },
-      "weak": {
-        "aux": null,
-        "avg_at_n": 0.0,
-        "avg_at_n_conservative": 0.0,
-        "infra_tasks": [],
-        "pass_at_n": 0.0,
-        "tasks": 2
-      }
-    },
     "complete": true,
-    "execution": {
-      "executed": 4,
-      "planned": 4,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 2,
-      "infra_error": 0,
-      "success": 2
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p01:baseline/acceptance_report.jsonl",
-      "row_count": 4
-    },
     "role": "baseline"
   },
   "phases/p01_baseline/strong/redispatch.json": {
@@ -1576,6 +1451,28 @@
       "passes": 0
     }
   },
+  "phases/p01_baseline/unit_verdicts.jsonl": [
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    }
+  ],
   "phases/p01_baseline/units.jsonl": [
     {
       "aux": {},
@@ -1778,212 +1675,6 @@
       "target_kind": "task"
     }
   ],
-  "phases/p03_exam/acceptance_report.jsonl": [
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t1/strong/00/seg00/exam/att00"
-        ],
-        "exam_id": "traj/fakebench:t1/strong/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: No action is stated.",
-          "run": "traj/fakebench:t1/strong/00/seg00/exam/att00",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t1/strong/00/seg00/exam:weak:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t1/strong/00/seg00/exam/att01"
-        ],
-        "exam_id": "traj/fakebench:t1/strong/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": [
-        {
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 1
-        }
-      ],
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: the G5 model judge",
-          "run": "traj/fakebench:t1/strong/00/seg00/exam/att01",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t1/strong/00/seg00/exam:weak:78dcc25c",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t1/weak/00/seg00/exam/att00"
-        ],
-        "exam_id": "traj/fakebench:t1/weak/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: No action is stated.",
-          "run": "traj/fakebench:t1/weak/00/seg00/exam/att00",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t1/weak/00/seg00/exam:weak:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t1/weak/00/seg00/exam/att01"
-        ],
-        "exam_id": "traj/fakebench:t1/weak/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": [
-        {
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-          "version": 1
-        }
-      ],
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: the G5 model judge",
-          "run": "traj/fakebench:t1/weak/00/seg00/exam/att01",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t1/weak/00/seg00/exam:weak:c101aaf2",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t2/strong/00/seg00/exam/att00"
-        ],
-        "exam_id": "traj/fakebench:t2/strong/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: No action is stated.",
-          "run": "traj/fakebench:t2/strong/00/seg00/exam/att00",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t2/strong/00/seg00/exam:weak:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t2/strong/00/seg00/exam/att01"
-        ],
-        "exam_id": "traj/fakebench:t2/strong/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": [
-        {
-          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-          "version": 1
-        }
-      ],
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: the G5 model judge",
-          "run": "traj/fakebench:t2/strong/00/seg00/exam/att01",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t2/strong/00/seg00/exam:weak:b192db93",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t2/weak/00/seg00/exam/att00"
-        ],
-        "exam_id": "traj/fakebench:t2/weak/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: No action is stated.",
-          "run": "traj/fakebench:t2/weak/00/seg00/exam/att00",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t2/weak/00/seg00/exam:weak:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "attempt_ids": [
-          "traj/fakebench:t2/weak/00/seg00/exam/att01"
-        ],
-        "exam_id": "traj/fakebench:t2/weak/00/seg00/exam"
-      },
-      "cause": "",
-      "injected_skills": [
-        {
-          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-          "version": 1
-        }
-      ],
-      "phase_label": "p03:exam",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "exam_judge: the G5 model judge",
-          "run": "traj/fakebench:t2/weak/00/seg00/exam/att01",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p03:exam:fakebench:traj/fakebench:t2/weak/00/seg00/exam:weak:3184af20",
-      "valid_count": 1
-    }
-  ],
   "phases/p03_exam/phase.json": {
     "index": 2,
     "label": "p03:exam",
@@ -1992,45 +1683,33 @@
   },
   "phases/p03_exam/phase_summary.json": {
     "complete": true,
-    "exam": {
-      "control_perfect": [],
-      "generation_failed": [],
-      "leaked": [],
-      "measured": [
-        "traj/fakebench:t1/strong/00/seg00/exam",
-        "traj/fakebench:t1/weak/00/seg00/exam",
-        "traj/fakebench:t2/strong/00/seg00/exam",
-        "traj/fakebench:t2/weak/00/seg00/exam"
-      ],
-      "reused": [],
-      "universe": [
-        "traj/fakebench:t1/strong/00/seg00/exam",
-        "traj/fakebench:t1/weak/00/seg00/exam",
-        "traj/fakebench:t2/strong/00/seg00/exam",
-        "traj/fakebench:t2/weak/00/seg00/exam"
-      ]
-    },
-    "execution": {
-      "executed": 8,
-      "planned": 4,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 4,
-      "infra_error": 0,
-      "success": 4
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p03:exam/acceptance_report.jsonl",
-      "row_count": 8
-    },
     "role": "exam"
   },
+  "phases/p03_exam/unit_verdicts.jsonl": [
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p03:exam:fakebench:traj/fakebench:t1/strong/00/seg00/exam:weak:78dcc25c"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p03:exam:fakebench:traj/fakebench:t1/weak/00/seg00/exam:weak:c101aaf2"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p03:exam:fakebench:traj/fakebench:t2/strong/00/seg00/exam:weak:b192db93"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p03:exam:fakebench:traj/fakebench:t2/weak/00/seg00/exam:weak:3184af20"
+    }
+  ],
   "phases/p03_exam/units.jsonl": [
     {
       "aux": {},
@@ -2263,7 +1942,6 @@
       "target_kind": "skill"
     }
   ],
-  "phases/p05_exam/acceptance_report.jsonl": [],
   "phases/p05_exam/phase.json": {
     "index": 4,
     "label": "p05:exam",
@@ -2272,35 +1950,12 @@
   },
   "phases/p05_exam/phase_summary.json": {
     "complete": true,
-    "exam": {
-      "control_perfect": [],
-      "generation_failed": [],
-      "leaked": [],
-      "measured": [],
-      "reused": [],
-      "universe": []
-    },
-    "execution": {
-      "executed": 0,
-      "planned": 0,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 0,
-      "infra_error": 0,
-      "success": 0
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p05:exam/acceptance_report.jsonl",
-      "row_count": 0
-    },
     "role": "exam"
   },
+  "phases/p05_exam/unit_verdicts.jsonl": [],
   "phases/p05_exam/units.jsonl": [],
   "phases/p06_learn/bank_summary.json": {
     "bank_reference": "bank:f0d8957e4003",
@@ -2484,7 +2139,6 @@
       "target_kind": "skill"
     }
   ],
-  "phases/p07_exam/acceptance_report.jsonl": [],
   "phases/p07_exam/phase.json": {
     "index": 6,
     "label": "p07:exam",
@@ -2493,35 +2147,12 @@
   },
   "phases/p07_exam/phase_summary.json": {
     "complete": true,
-    "exam": {
-      "control_perfect": [],
-      "generation_failed": [],
-      "leaked": [],
-      "measured": [],
-      "reused": [],
-      "universe": []
-    },
-    "execution": {
-      "executed": 0,
-      "planned": 0,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 0,
-      "infra_error": 0,
-      "success": 0
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p07:exam/acceptance_report.jsonl",
-      "row_count": 0
-    },
     "role": "exam"
   },
+  "phases/p07_exam/unit_verdicts.jsonl": [],
   "phases/p07_exam/units.jsonl": [],
   "phases/p08_learn/bank_summary.json": {
     "bank_reference": "bank:f0d8957e4003",
@@ -2757,57 +2388,41 @@
     "role": "test"
   },
   "phases/p09_test/phase_summary.json": {
+    "bank_reference": "bank:f0d8957e4003",
     "complete": true,
-    "execution": {
-      "executed": 4,
-      "planned": 4,
-      "reused": 0,
-      "skipped": 0
+    "control": {
+      "aux": null,
+      "avg_at_n": 0.0,
+      "avg_at_n_conservative": 0.0,
+      "infra_tasks": [],
+      "pass_at_n": 0.0,
+      "tasks": 2
     },
-    "infra_accepted": [],
-    "infra_missing": [],
+    "control_source": "baseline_reuse",
+    "delta": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "pass_at_n": 1.0
+    },
+    "infra_accepted": {
+      "control": [],
+      "with_bank": []
+    },
+    "infra_missing": {
+      "control": [],
+      "with_bank": []
+    },
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 2,
-      "infra_error": 0,
-      "success": 2
-    },
-    "report": {
-      "format": null,
-      "path": null,
-      "row_count": 0
-    },
+    "mode": "full",
     "role": "test",
-    "test": {
-      "bank_reference": "bank:f0d8957e4003",
-      "control": {
-        "aux": null,
-        "avg_at_n": 0.0,
-        "avg_at_n_conservative": 0.0,
-        "infra_tasks": [],
-        "pass_at_n": 0.0,
-        "tasks": 2
-      },
-      "control_source": "baseline_reuse",
-      "delta": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "pass_at_n": 1.0
-      },
-      "infra_missing_by_arm": {
-        "control": [],
-        "with_bank": []
-      },
-      "mode": "full",
-      "with_bank": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "infra_tasks": [],
-        "pass_at_n": 1.0,
-        "tasks": 2
-      }
+    "with_bank": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "infra_tasks": [],
+      "pass_at_n": 1.0,
+      "tasks": 2
     }
   },
   "phases/p09_test/units.jsonl": [
@@ -2905,45 +2520,10 @@
     {
       "stage": "p01:baseline",
       "summary": {
-        "baseline": {
-          "infra_shortfalls": [],
-          "strong": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "infra_tasks": [],
-            "pass_at_n": 1.0,
-            "tasks": 2
-          },
-          "weak": {
-            "aux": null,
-            "avg_at_n": 0.0,
-            "avg_at_n_conservative": 0.0,
-            "infra_tasks": [],
-            "pass_at_n": 0.0,
-            "tasks": 2
-          }
-        },
         "complete": true,
-        "execution": {
-          "executed": 4,
-          "planned": 4,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 2,
-          "infra_error": 0,
-          "success": 2
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p01:baseline/acceptance_report.jsonl",
-          "row_count": 4
-        },
         "role": "baseline"
       }
     },
@@ -2977,43 +2557,9 @@
       "stage": "p03:exam",
       "summary": {
         "complete": true,
-        "exam": {
-          "control_perfect": [],
-          "generation_failed": [],
-          "leaked": [],
-          "measured": [
-            "traj/fakebench:t1/strong/00/seg00/exam",
-            "traj/fakebench:t1/weak/00/seg00/exam",
-            "traj/fakebench:t2/strong/00/seg00/exam",
-            "traj/fakebench:t2/weak/00/seg00/exam"
-          ],
-          "reused": [],
-          "universe": [
-            "traj/fakebench:t1/strong/00/seg00/exam",
-            "traj/fakebench:t1/weak/00/seg00/exam",
-            "traj/fakebench:t2/strong/00/seg00/exam",
-            "traj/fakebench:t2/weak/00/seg00/exam"
-          ]
-        },
-        "execution": {
-          "executed": 8,
-          "planned": 4,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 4,
-          "infra_error": 0,
-          "success": 4
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p03:exam/acceptance_report.jsonl",
-          "row_count": 8
-        },
         "role": "exam"
       }
     },
@@ -3047,33 +2593,9 @@
       "stage": "p05:exam",
       "summary": {
         "complete": true,
-        "exam": {
-          "control_perfect": [],
-          "generation_failed": [],
-          "leaked": [],
-          "measured": [],
-          "reused": [],
-          "universe": []
-        },
-        "execution": {
-          "executed": 0,
-          "planned": 0,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 0,
-          "infra_error": 0,
-          "success": 0
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p05:exam/acceptance_report.jsonl",
-          "row_count": 0
-        },
         "role": "exam"
       }
     },
@@ -3107,33 +2629,9 @@
       "stage": "p07:exam",
       "summary": {
         "complete": true,
-        "exam": {
-          "control_perfect": [],
-          "generation_failed": [],
-          "leaked": [],
-          "measured": [],
-          "reused": [],
-          "universe": []
-        },
-        "execution": {
-          "executed": 0,
-          "planned": 0,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 0,
-          "infra_error": 0,
-          "success": 0
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p07:exam/acceptance_report.jsonl",
-          "row_count": 0
-        },
         "role": "exam"
       }
     },
@@ -3166,57 +2664,41 @@
     {
       "stage": "p09:test",
       "summary": {
+        "bank_reference": "bank:f0d8957e4003",
         "complete": true,
-        "execution": {
-          "executed": 4,
-          "planned": 4,
-          "reused": 0,
-          "skipped": 0
+        "control": {
+          "aux": null,
+          "avg_at_n": 0.0,
+          "avg_at_n_conservative": 0.0,
+          "infra_tasks": [],
+          "pass_at_n": 0.0,
+          "tasks": 2
         },
-        "infra_accepted": [],
-        "infra_missing": [],
+        "control_source": "baseline_reuse",
+        "delta": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "pass_at_n": 1.0
+        },
+        "infra_accepted": {
+          "control": [],
+          "with_bank": []
+        },
+        "infra_missing": {
+          "control": [],
+          "with_bank": []
+        },
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 2,
-          "infra_error": 0,
-          "success": 2
-        },
-        "report": {
-          "format": null,
-          "path": null,
-          "row_count": 0
-        },
+        "mode": "full",
         "role": "test",
-        "test": {
-          "bank_reference": "bank:f0d8957e4003",
-          "control": {
-            "aux": null,
-            "avg_at_n": 0.0,
-            "avg_at_n_conservative": 0.0,
-            "infra_tasks": [],
-            "pass_at_n": 0.0,
-            "tasks": 2
-          },
-          "control_source": "baseline_reuse",
-          "delta": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "pass_at_n": 1.0
-          },
-          "infra_missing_by_arm": {
-            "control": [],
-            "with_bank": []
-          },
-          "mode": "full",
-          "with_bank": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "infra_tasks": [],
-            "pass_at_n": 1.0,
-            "tasks": 2
-          }
+        "with_bank": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "infra_tasks": [],
+          "pass_at_n": 1.0,
+          "tasks": 2
         }
       }
     }

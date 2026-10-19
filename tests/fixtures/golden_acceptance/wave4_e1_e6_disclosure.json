@@ -2560,7 +2560,7 @@
       }
     }
   },
-  "golden_matrix_base_commit": "8bf8f5c81d62429eacece30bdd9d3ad5f51a187e",
+  "golden_matrix_base_commit": "4b14489ba0e536c2b5786b8c4dc74bd38e366475",
   "root_causes": {
     "LAYOUT": "The phase-world artifact locations (C summary, per-phase bank, A-phase generation failures, learn ledgers) are aligned onto the canonical names by v4_layout -- the alignment itself is the disclosure; these paths never reach the comparators.",
     "R8_EXAM_GENERATION_IN_A": "The R8 ruling moved exam generation into the A phase; the live sequence has no A phase, so its EXAM_GEN calls are gone (whitelist 1, pre-registered).",

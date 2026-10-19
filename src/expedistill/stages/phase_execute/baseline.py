@@ -4,22 +4,17 @@ Orchestration:
     1. Resolve parameters (execution, delivery, verdict rule)
     2. Plan units for both arms (strong, weak)
     3. Execute both arms through K1 (run-level store)
-    4. Compute metrics for each arm
-    5. Generate acceptance report
-    6. Write summary and check for holes
+    4. Write the per-unit verdicts (the rule-1 reuse input)
+    5. Write summary and check for holes
 
 Components used:
     - engine: parameter resolution, unit planning, arm execution
-    - composites.reports: acceptance report generation
     - composites.shortfall: stage-1 hole tracking
-    - blocks.metrics: task metrics computation
 """
 
-from typing import Any, Dict, Set
+from typing import Any, Dict, List, Set, Tuple
 
-from expedistill.benchmarks.aux import aux_wiring
-from expedistill.blocks import metrics as metrics_block
-from expedistill.composites import reports, shortfall
+from expedistill.composites import shortfall
 from expedistill.core.config import (
     PHASE_ROLE_BASELINE,
     ExecutePhaseSpec,
@@ -79,12 +74,16 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
     # Stage-1 accepted holes: never re-dispatched, never re-raised
     stage1_holes = set(shortfall.stage1_accepted_unit_ids(ctx.run_dir))
     holes: Set[str] = set()
+    verdicts: List[Tuple[str, str, str]] = []
 
     for role in ("strong", "weak"):
-        _, arm_holes = engine._run_arm_units(
+        rows, arm_holes = engine._run_arm_units(
             ctx, phase, plans=plans_by_role[role], store=ctx.store,
             arm=role, rule_name=rule_name, limit=limit,
             accepted=set(stage1_holes))
+
+        verdicts.extend((row.unit_id, row.status, row.cause)
+                        for row in rows)
 
         if arm_holes and ctx.run_settings.allow_infra_shortfall:
             # Accept new holes and update stage-1 record
@@ -96,74 +95,22 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
             holes |= arm_holes
 
     # ========================================================================
-    # 4. COMPUTE METRICS FOR EACH ARM
+    # 4. WRITE THE PER-UNIT VERDICTS
     # ========================================================================
-    aux_metric, aux_scorer = aux_wiring(ctx.config.benchmark)
-    arm_summaries: Dict[str, Dict[str, Any]] = {}
-    weak_metrics: Dict[str, Dict[str, Any]] = {}
-
-    for role in ("strong", "weak"):
-        plans = plans_by_role[role]
-        trajectories = [traj for traj in engine._arm_trajectories(ctx.store)
-                        if traj.model_role == role
-                        and traj.trajectory_id not in stage1_holes]
-
-        expected = {plan.unit.task_ref: plan.n_attempts for plan in plans}
-        metrics = metrics_block.compute_task_metrics(
-            trajectories, expected=expected, aux_scorer=aux_scorer)
-
-        if role == "weak":
-            weak_metrics = metrics
-
-        arm_summaries[role] = metrics_block.summarize(
-            metrics, depths[role], aux_metric=aux_metric)
+    phase_disk._write_verdicts(ctx, phase, verdicts)
 
     # ========================================================================
-    # 5. GENERATE ACCEPTANCE REPORT
-    # ========================================================================
-    all_rows = reports.acceptance_report(
-        ctx.store, kind="baseline", benchmark=ctx.config.benchmark,
-        phase_label=phase.label,
-        n_attempts_strong=ctx.config.n_attempts_strong,
-        n_attempts_weak=ctx.config.n_attempts_weak)
-    phase_disk._write_report(ctx, phase, all_rows)
-
-    # ========================================================================
-    # 6. WRITE SUMMARY AND CHECK HOLES
+    # 5. WRITE SUMMARY AND CHECK HOLES
     # ========================================================================
     every_hole = set(stage1_holes) | holes
 
-    # Execution and outcome counts come from the report rows (one row per
-    # (task, role)); planned counts attempts.
-    total_planned = sum(plan.n_attempts
-                        for plans in plans_by_role.values()
-                        for plan in plans)
-    total_executed = sum(row.valid_count for row in all_rows)
-    total_success = sum(row.success_count for row in all_rows)
-    total_failure = total_executed - total_success
-
-    summary = engine.build_unified_summary(
-        role=PHASE_ROLE_BASELINE,
-        execution_planned=total_planned,
-        execution_executed=total_executed,
-        execution_reused=0,  # baseline never reuses
-        execution_skipped=0,
-        outcomes_success=total_success,
-        outcomes_failure=total_failure,
-        outcomes_infra_error=len(every_hole),
-        infra_missing=list(every_hole),
-        infra_accepted=list(stage1_holes),
-        complete=not every_hole,
-        infra_shortfall_accepted=bool(stage1_holes),
-        report_path=f"phases/{phase.label}/acceptance_report.jsonl",
-        report_row_count=len(all_rows),
-        role_specific={
-            "strong": arm_summaries["strong"],
-            "weak": arm_summaries["weak"],
-            "infra_shortfalls": sorted(
-                task_id for task_id, counts in weak_metrics.items()
-                if counts["valid"] < ctx.config.n_attempts_weak),
-        })
+    summary = {
+        "role": PHASE_ROLE_BASELINE,
+        "infra_missing": sorted(every_hole),
+        "infra_accepted": sorted(stage1_holes),
+        "complete": not every_hole,
+        "infra_shortfall_accepted": bool(stage1_holes),
+    }
 
     write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
                summary, indent=2)

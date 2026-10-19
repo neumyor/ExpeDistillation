@@ -8,7 +8,7 @@ module: the roles (baseline / exam / live / final_test) and the engine
 consume them, none owns them.
 """
 
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Sequence, Tuple
@@ -16,10 +16,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 from expedistill.composites import decision, verdicts
 from expedistill.composites import phase_bank
 from expedistill.core.config import PhaseInstance
-from expedistill.core.contracts import (
-    AcceptanceReportRow,
-    ExecutionUnitRow,
-)
+from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
 from expedistill.infra.store import read_json, read_jsonl, write_jsonl
@@ -29,7 +26,7 @@ __all__ = [
     "GENERATION_FAILURES_NAME",
     "PHASE_RECORD_NAME",
     "REDISPATCH_NAME",
-    "REPORT_NAME",
+    "VERDICTS_NAME",
     "SUMMARY_NAME",
     "UNITS_NAME",
     "_earlier_pass_unit_ids",
@@ -41,7 +38,7 @@ __all__ = [
 #: phase_bank's.
 PHASE_RECORD_NAME = "phase.json"
 UNITS_NAME = "units.jsonl"
-REPORT_NAME = "acceptance_report.jsonl"
+VERDICTS_NAME = "unit_verdicts.jsonl"
 REDISPATCH_NAME = "redispatch.json"
 SUMMARY_NAME = "phase_summary.json"
 GENERATION_FAILURES_NAME = "generation_failures.jsonl"
@@ -124,12 +121,22 @@ def _write_units(ctx: StageContext, phase: PhaseInstance,
                 [asdict(unit) for unit in units])
 
 
-def _write_report(ctx: StageContext, phase: PhaseInstance,
-                  rows: Sequence[AcceptanceReportRow]) -> None:
-    """Persist the phase's acceptance report (one JSON row per unit),
-    atomically (temp file + rename, B3's pattern)."""
-    write_jsonl(_phase_dir(ctx, phase) / REPORT_NAME,
-                [asdict(row) for row in rows])
+def _write_verdicts(ctx: StageContext, phase: PhaseInstance,
+                    verdicts: Sequence[tuple]) -> None:
+    """Persist the phase's minimal per-unit verdicts, atomically.
+
+    One row per planned unit, exactly three fields::
+
+        {"unit_id": ..., "status": ..., "cause": ...}
+
+    The file serves the rule-1 reuse join (a unit's block bytes are in
+    ``units.jsonl``; this file says whether its result is reusable) and
+    the audit's coverage/status checks. It is NOT the acceptance report
+    the learning phase reads -- that one is recomputed from the store.
+    """
+    write_jsonl(_phase_dir(ctx, phase) / VERDICTS_NAME,
+                [{"unit_id": unit_id, "status": status, "cause": cause}
+                 for unit_id, status, cause in verdicts])
 
 
 def _earlier_pass_unit_ids(ctx: StageContext, phase: PhaseInstance
@@ -170,51 +177,49 @@ def _earlier_pass_units(ctx: StageContext, phase: PhaseInstance
     return [ExecutionUnitRow(**row) for row in read_jsonl(path)]
 
 
-def _reused_rows(ctx: StageContext, phase: PhaseInstance,
-                 new_units: Sequence[ExecutionUnitRow]
-                 ) -> Dict[str, AcceptanceReportRow]:
-    """Rule 1's reuse map: for each new unit that matches an earlier
-    execute phase's unit (same task, same role, same rendered block --
-    :func:`decision.reuse_key`), the previous row it reuses, keyed by
-    the new unit id. Most recent phase wins; a ``zero_execution`` row is
-    not an acceptance result and is never reused (its work is still
-    owed -- the earlier phase resumes it, the later one does not
-    inherit a nothing)."""
-    reused: Dict[str, AcceptanceReportRow] = {}
+def _reusable_units(ctx: StageContext, phase: PhaseInstance,
+                    new_units: Sequence[ExecutionUnitRow]
+                    ) -> Dict[str, tuple]:
+    """Rule 1's reuse map: new unit id -> the previous verdict.
+
+    A new unit reuses an earlier execute unit's result when task, role
+    and the rendered injection bytes match (:func:`decision.reusable_units`).
+    The returned verdict is ``(status, cause)`` from the earlier phase's
+    ``unit_verdicts.jsonl`` so the reusing phase can record the carried
+    verdict without re-deriving it. A ``zero_execution`` verdict is not
+    a measurement and is never reused. Most recent phase wins.
+    """
+    reused: Dict[str, tuple] = {}
     for record in _earlier_phases(ctx, phase):
         directory = phase_bank.phase_bank_dir(ctx.run_dir,
                                               record["label"])
         units_path = directory / UNITS_NAME
-        report_path = directory / REPORT_NAME
-        if not units_path.exists() or not report_path.exists():
+        verdicts_path = directory / VERDICTS_NAME
+        if not units_path.exists() or not verdicts_path.exists():
             continue
         matches = decision.reusable_units(
             new_units, [ExecutionUnitRow(**row)
                         for row in read_jsonl(units_path)])
         if not matches:
             continue
-        rows = {row.unit_id: row for row in (
-            AcceptanceReportRow(**entry)
-            for entry in read_jsonl(report_path))}
+        stored = {row["unit_id"]: (row.get("status", ""),
+                                   row.get("cause", ""))
+                  for row in read_jsonl(verdicts_path)}
         for new_id, previous_id in matches.items():
             if new_id in reused:
                 continue  # a more recent phase already answered this unit
-            row = rows.get(previous_id)
-            if row is None:
+            verdict = stored.get(previous_id)
+            if verdict is None:
                 raise CodeBugError(
                     f"phase {record['label']!r} has a unit {previous_id!r} "
-                    "but no report row for it: the phase directory is "
+                    f"but no verdict row for it: {verdicts_path} is "
                     "internally inconsistent and a human must look at "
                     "this run")
-            if (row.status == verdicts.STATUS_NOT_TESTABLE
-                    and row.cause == verdicts.CAUSE_ZERO_EXECUTION):
+            status, cause = verdict
+            if (status == verdicts.STATUS_NOT_TESTABLE
+                    and cause == verdicts.CAUSE_ZERO_EXECUTION):
                 continue
-            reused[new_id] = row
+            reused[new_id] = verdict
     return reused
 
 
-def _rebased_row(row: AcceptanceReportRow, *, unit_id: str,
-                 phase_label: str) -> AcceptanceReportRow:
-    """A reused unit's row under its new unit id (rule 1: the verdicts
-    carry over unchanged; only the phase identity is new)."""
-    return replace(row, unit_id=unit_id, phase_label=phase_label)

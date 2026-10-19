@@ -26,15 +26,13 @@ Entry guards (short-circuit conditions):
 """
 
 import json
-from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from expedistill.benchmarks.aux import aux_wiring
-from expedistill.composites import decision, shortfall
+from expedistill.composites import decision, shortfall, verdicts
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import live_verdicts as lv
-from expedistill.composites import reports
 from expedistill.core import ids
 from expedistill.core.config import PHASE_ROLE_LIVE, ExecutePhaseSpec, PhaseInstance
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
@@ -113,7 +111,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     phase_disk._write_units(ctx, phase, all_units)
 
     plan_by_task = {plan.unit.task_ref: plan for plan in plans}
-    reused = phase_disk._reused_rows(ctx, phase, all_units)
+    reused = phase_disk._reusable_units(ctx, phase, all_units)
 
     accepted = shortfall.read_unit_ids(
         lm.round_dir(store, round_) / shortfall.SHORTFALL_NAME)
@@ -277,90 +275,43 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             infra_failed.add(task_id)
 
     # ========================================================================
-    # 7. GENERATE ACCEPTANCE REPORT
+    # 7. WRITE SUMMARY
     # ========================================================================
-    report = reports.acceptance_report(
-        store, kind="live", benchmark=benchmark, phase_label=phase.label,
-        round_=round_)
-
-    # Replace reader's unit IDs with delivery's (for non-dispatched groups)
-    by_id = {row.unit_id: row for row in report}
-    for plan in plans:
-        for row in report:
-            if (decision.parse_unit_id(row.unit_id)[0] == plan.unit.task_ref
-                    and row.unit_id != plan.unit.unit_id):
-                del by_id[row.unit_id]
-                by_id[plan.unit.unit_id] = replace(
-                    row, unit_id=plan.unit.unit_id,
-                    injected_skills=plan.unit.skills_injected)
-
-    # Add reused rows
+    # ========================================================================
+    # 7. WRITE THE PER-UNIT VERDICTS
+    # ========================================================================
+    # A group's verdict is its ledger terminal when it wrote one, else
+    # "normal" (it was judged); a unit carried from an earlier pass of
+    # this phase keeps the terminal that pass committed; a reused unit
+    # carries the previous phase's verdict. A group still owing runs is
+    # a zero-execution hole.
+    unit_verdicts: List[Tuple[str, str, str]] = []
     for unit in all_units:
+        task_id = unit.task_ref
         if unit.unit_id in reused:
-            by_id.setdefault(
-                unit.unit_id,
-                phase_disk._rebased_row(reused[unit.unit_id],
-                                       unit_id=unit.unit_id,
-                                       phase_label=phase.label))
-
-    report = sorted(by_id.values(), key=lambda row: row.unit_id)
-    phase_disk._write_report(ctx, phase, report)
+            status, cause = reused[unit.unit_id]
+        elif task_id in infra_failed:
+            status, cause = (verdicts.STATUS_NOT_TESTABLE,
+                             verdicts.CAUSE_ZERO_EXECUTION)
+        else:
+            terminal = _round_terminal(store, task_id, round_)
+            if terminal is None:
+                status, cause = verdicts.STATUS_NORMAL, ""
+            else:
+                status, cause = verdicts.status_cause_for_terminal(terminal)
+        unit_verdicts.append((unit.unit_id, status, cause))
+    phase_disk._write_verdicts(ctx, phase, unit_verdicts)
 
     # ========================================================================
     # 8. WRITE SUMMARY
     # ========================================================================
-    terminals = {unit.task_ref: _round_terminal(store, unit.task_ref, round_)
-                 for unit in all_units}
-
-    # Compute execution statistics
-    dispatched_list = sorted({
-        unit.task_ref for unit in all_units
-        if unit.unit_id not in reused
-        and _frozen_audit_row(store, round_, unit.task_ref) is not None
-        and terminals[unit.task_ref] not in (lv.WEAK_ALREADY_KNOWS,
-                                            lv.LIVE_INJECTION_OVERFLOW)})
-    skipped_reused_list = sorted(
-        unit.unit_id for unit in all_units if unit.unit_id in reused)
-    skipped_control_perfect_list = sorted(
-        unit.unit_id for unit in all_units
-        if terminals[unit.task_ref] == lv.WEAK_ALREADY_KNOWS)
-    skipped_injection_overflow_list = sorted(
-        unit.unit_id for unit in all_units
-        if terminals[unit.task_ref] == lv.LIVE_INJECTION_OVERFLOW)
-
-    total_executed = sum(row.valid_count for row in report)
-    total_reused = len(skipped_reused_list)
-    total_skipped = len(skipped_control_perfect_list) + len(skipped_injection_overflow_list)
-
-    # Outcome counts come from the report rows' own counts
-    total_success = sum(row.success_count for row in report)
-    total_failure = total_executed - total_success
-
-    summary = engine.build_unified_summary(
-        role=PHASE_ROLE_LIVE,
-        execution_planned=len(all_units),
-        execution_executed=total_executed,
-        execution_reused=total_reused,
-        execution_skipped=total_skipped,
-        outcomes_success=total_success,
-        outcomes_failure=total_failure,
-        outcomes_infra_error=len(infra_failed),
-        infra_missing=list(infra_failed),
-        infra_accepted=list(accepted),
-        complete=not infra_failed,
-        infra_shortfall_accepted=bool(accepted),
-        report_path=f"phases/{phase.label}/acceptance_report.jsonl",
-        report_row_count=len(report),
-        role_specific={
-            "round": round_,
-            "n_attempts": n_attempts,
-            "improvement_rule": rule_name,
-            "units": [unit.unit_id for unit in all_units],
-            "dispatched": dispatched_list,
-            "skipped_reused": skipped_reused_list,
-            "skipped_control_perfect": skipped_control_perfect_list,
-            "skipped_injection_overflow": skipped_injection_overflow_list,
-        })
+    summary = {
+        "role": PHASE_ROLE_LIVE,
+        "infra_missing": sorted(infra_failed),
+        "infra_accepted": sorted(accepted),
+        "complete": not infra_failed,
+        "infra_shortfall_accepted": bool(accepted),
+    }
 
     write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
                summary, indent=2)

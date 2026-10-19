@@ -163,7 +163,7 @@ ZERO_EXECUTION_VERDICTS = ("weak_already_knows", "live_injection_overflow",
 # not reach into stages/ private names (AGENTS section 5).
 PHASE_RECORD_NAME = "phase.json"
 UNITS_NAME = "units.jsonl"
-REPORT_NAME = "acceptance_report.jsonl"
+VERDICTS_NAME = "unit_verdicts.jsonl"
 REDISPATCH_NAME = "redispatch.json"
 EXEC_SUMMARY_NAME = "phase_summary.json"
 TASK_LIST_NAME = "task_list.jsonl"
@@ -764,7 +764,8 @@ def _live_phases_all_complete(run_dir: Path,
         summary = read_json(summary_path)
         if summary.get("complete") is not True:
             return False
-        if summary.get("report_rows"):
+        verdicts_path = directory / VERDICTS_NAME
+        if verdicts_path.exists() and read_jsonl(verdicts_path):
             return False
     return True
 
@@ -835,27 +836,27 @@ def check_units_report(audit: Audit, run_dir: Path,
                 unit_ids.append(unit_id)
         unit_set = set(unit_ids)
 
-        report_path = directory / REPORT_NAME
+        verdicts_path = directory / VERDICTS_NAME
         is_test = spec.get("role") == PHASE_ROLE_TEST
-        if is_test and report_path.exists():
+        if is_test and verdicts_path.exists():
             audit.add(
                 ERROR, "units-report",
-                f"phase {label}: a final-test phase wrote an acceptance "
-                "report (its numbers go to the summary alone; test results "
-                "never flow into learning)")
-        if not is_test and report_path.exists():
+                f"phase {label}: a final-test phase wrote per-unit verdicts "
+                "(its numbers go to the summary alone; test results never "
+                "flow into learning)")
+        if not is_test and verdicts_path.exists():
             reported: Set[str] = set()
-            for row in read_jsonl(report_path):
+            for row in read_jsonl(verdicts_path):
                 unit_id = row.get("unit_id")
                 if unit_id not in unit_set:
                     audit.add(
                         ERROR, "units-report",
-                        f"phase {label}: report row names unit {unit_id!r} "
+                        f"phase {label}: verdict row names unit {unit_id!r} "
                         "the phase never resolved (an invented row)")
                 if row.get("status") not in UNIT_STATUSES:
                     audit.add(
                         ERROR, "units-report",
-                        f"phase {label}: report row {unit_id!r} carries "
+                        f"phase {label}: verdict row {unit_id!r} carries "
                         f"status {row.get('status')!r} outside the closed "
                         f"vocabulary {list(UNIT_STATUSES)}")
                 reported.add(unit_id)
@@ -873,8 +874,8 @@ def check_units_report(audit: Audit, run_dir: Path,
         elif units_path.exists() and not is_test:
             audit.add(
                 INFO, "units-report",
-                f"phase {label}: units resolved but no acceptance report "
-                "yet (the phase is in flight or was interrupted)")
+                f"phase {label}: units resolved but no verdicts yet "
+                "(the phase is in flight or was interrupted)")
 
         redispatch_path = directory / REDISPATCH_NAME
         if redispatch_path.exists():
@@ -1558,14 +1559,10 @@ def _make_unit_id(phase: str, task_ref: str, role: str,
                         skills_injected=skills_injected)
 
 
-def _report_row(unit_id: str, phase: str, role: str, injected: Any,
-                valid: int, success: int) -> Dict[str, Any]:
-    """One acceptance-report row in the frozen AcceptanceReportRow shape
-    (a normal row; the fake runs are all-miss)."""
-    return {"unit_id": unit_id, "phase_label": phase, "role": role,
-            "injected_skills": injected, "runs": [],
-            "valid_count": valid, "success_count": success,
-            "status": "normal", "cause": "", "artifacts": {}}
+def _verdict_row(unit_id: str, status: str = "normal",
+                 cause: str = "") -> Dict[str, Any]:
+    """One minimal per-unit verdict row (``unit_verdicts.jsonl``)."""
+    return {"unit_id": unit_id, "status": status, "cause": cause}
 
 
 def _unit_row(unit_id: str, task_ref: str, injected: Any,
@@ -1662,11 +1659,11 @@ def _build_fake_v4_run(root: Path) -> Path:
     write_jsonl(d_dir / UNITS_NAME, [
         _unit_row(d_weak, task_id, None),
         _unit_row(d_strong, task_id, None)])
-    write_jsonl(d_dir / REPORT_NAME, [
-        _report_row(d_weak, "p01:baseline", "weak", None, n_attempts, 0),
-        _report_row(d_strong, "p01:baseline", "strong", None, 1, 0)])
+    write_jsonl(d_dir / VERDICTS_NAME, [
+        _verdict_row(d_weak),
+        _verdict_row(d_strong)])
     write_json(d_dir / EXEC_SUMMARY_NAME,
-               {"role": "baseline", "complete": True, "report_rows": 2,
+               {"role": "baseline", "complete": True,
                 "infra_missing": [], "infra_accepted": []}, indent=2)
     write_json(d_dir / REDISPATCH_NAME, {}, indent=2)
 
@@ -1718,13 +1715,11 @@ def _build_fake_v4_run(root: Path) -> Path:
                                         b_name, "live")
         write_jsonl(directory / UNITS_NAME,
                    [_unit_row(unit_id, task_id, refs)])
-        write_jsonl(directory / REPORT_NAME, [
-            _report_row(unit_id, b_label, "weak", refs, n_attempts, 0)])
+        write_jsonl(directory / VERDICTS_NAME, [
+            _verdict_row(unit_id)])
         write_json(directory / EXEC_SUMMARY_NAME,
-                   {"role": "live", "round": round_, "complete": True,
-                    "report_rows": 1, "units": [unit_id],
-                    "dispatched": [task_id], "infra_missing": [],
-                    "infra_accepted": []}, indent=2)
+                   {"role": "live", "complete": True,
+                    "infra_missing": [], "infra_accepted": []}, indent=2)
         write_json(directory / REDISPATCH_NAME, {}, indent=2)
         return unit_id
 
@@ -1862,10 +1857,9 @@ def _self_test_v4(root: Path) -> int:
 
     # Tamper 7: an invented report row -> a verdict for a unit the phase
     # never resolved.
-    report = read_jsonl(b1_dir / REPORT_NAME)
-    report.append(_report_row("p03:live_1:tb:tb:t1:weak:deadbeef",
-                              "p03:live_1", "weak", [], 3, 3))
-    write_jsonl(b1_dir / REPORT_NAME, report)
+    report = read_jsonl(b1_dir / VERDICTS_NAME)
+    report.append(_verdict_row("p03:live_1:tb:tb:t1:weak:deadbeef"))
+    write_jsonl(b1_dir / VERDICTS_NAME, report)
     audit = audit_run(run_dir)
     if not any("never resolved" in f["message"]
                for f in audit.errors()):

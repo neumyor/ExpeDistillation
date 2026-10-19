@@ -57,6 +57,7 @@ scripts and Wave 4's golden regeneration align to that shape), and
 ``learn_summary.json`` mirroring the returned PhaseResult.
 """
 
+import dataclasses
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
@@ -295,9 +296,10 @@ def _read_report(ctx: Any, names: Sequence[str], specs: dict,
             n_attempts_strong=ctx.config.n_attempts_strong,
             n_attempts_weak=ctx.config.n_attempts_weak)
     if spec.role == PHASE_ROLE_EXAM:
-        return acceptance_report(
+        rows = acceptance_report(
             ctx.store, kind="exam", benchmark=ctx.config.benchmark,
             phase_label=label)
+        return _with_phase_verdicts(ctx, label, rows)
     if spec.role == PHASE_ROLE_LIVE:
         return acceptance_report(
             ctx.store, kind="live", benchmark=ctx.config.benchmark,
@@ -305,6 +307,40 @@ def _read_report(ctx: Any, names: Sequence[str], specs: dict,
     raise CodeBugError(
         f"a report was asked for phase {name!r} of role {spec.role!r}; "
         "only baseline / exam / live phases have one")
+
+
+def _with_phase_verdicts(ctx: Any, label: str,
+                         rows: Sequence[AcceptanceReportRow]
+                         ) -> List[AcceptanceReportRow]:
+    """Override the recomputed exam rows with the phase's own verdicts.
+
+    The exam phase records facts the stores cannot carry: a unit whose
+    with-skill answer was SKIPPED because the bare control was perfect
+    has no attempt anywhere, so the recomputed report calls it
+    ``zero_execution`` (work still owed). The phase's minimal verdict
+    file knows better (``not_run_control_perfect`` /
+    ``weak_already_knows``), and the decision table needs that fact to
+    reach "no headroom" and drop the skill.
+
+    Only the status and cause are overridden; every count and artifact
+    stays the recomputation's. A missing file (an interrupted phase, or
+    a verdict written by an older build) leaves the rows unchanged.
+    """
+    path = (phase_bank_dir(ctx.run_dir, label)
+            / "unit_verdicts.jsonl")
+    if not path.exists():
+        return list(rows)
+    stored = {row["unit_id"]: row for row in read_jsonl(path)}
+    out: List[AcceptanceReportRow] = []
+    for row in rows:
+        verdict = stored.get(row.unit_id)
+        if verdict is None:
+            out.append(row)
+            continue
+        out.append(dataclasses.replace(
+            row, status=verdict.get("status", row.status),
+            cause=verdict.get("cause", row.cause)))
+    return out
 
 
 def _live_round(names: Sequence[str], specs: dict, position: int) -> int:

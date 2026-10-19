@@ -686,58 +686,6 @@
     },
     "tasks_digest": "acc365b23957040e3bcf2982fdd1e0ee48767f5f65259e071af281aca036fec3"
   },
-  "phases/p01_baseline/acceptance_report.jsonl": [
-    {
-      "artifacts": {
-        "trajectory_ids": [
-          "traj/fakebench:t1/strong/00"
-        ]
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p01:baseline",
-      "role": "strong",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/strong/00",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 1,
-      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf",
-      "valid_count": 1
-    },
-    {
-      "artifacts": {
-        "trajectory_ids": [
-          "traj/fakebench:t1/weak/00",
-          "traj/fakebench:t1/weak/01"
-        ]
-      },
-      "cause": "",
-      "injected_skills": null,
-      "phase_label": "p01:baseline",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/00",
-          "verdict": "failure"
-        },
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/01",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf",
-      "valid_count": 2
-    }
-  ],
   "phases/p01_baseline/phase.json": {
     "index": 0,
     "label": "p01:baseline",
@@ -745,45 +693,10 @@
     "role": "baseline"
   },
   "phases/p01_baseline/phase_summary.json": {
-    "baseline": {
-      "infra_shortfalls": [],
-      "strong": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "infra_tasks": [],
-        "pass_at_n": 1.0,
-        "tasks": 1
-      },
-      "weak": {
-        "aux": null,
-        "avg_at_n": 0.0,
-        "avg_at_n_conservative": 0.0,
-        "infra_tasks": [],
-        "pass_at_n": 0.0,
-        "tasks": 1
-      }
-    },
     "complete": true,
-    "execution": {
-      "executed": 3,
-      "planned": 3,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 2,
-      "infra_error": 0,
-      "success": 1
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p01:baseline/acceptance_report.jsonl",
-      "row_count": 2
-    },
     "role": "baseline"
   },
   "phases/p01_baseline/strong/redispatch.json": {
@@ -791,6 +704,18 @@
       "passes": 0
     }
   },
+  "phases/p01_baseline/unit_verdicts.jsonl": [
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    }
+  ],
   "phases/p01_baseline/units.jsonl": [
     {
       "aux": {},
@@ -939,50 +864,6 @@
       "target_kind": "task"
     }
   ],
-  "phases/p03_live/acceptance_report.jsonl": [
-    {
-      "artifacts": {
-        "round_dir": "<RUN_DIR>/stage4_acceptance/live_run/round00",
-        "trajectory_ids": [
-          "traj/fakebench:t1/weak/00",
-          "traj/fakebench:t1/weak/01"
-        ]
-      },
-      "cause": "",
-      "injected_skills": [
-        {
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 1
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-          "version": 1
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-          "version": 1
-        }
-      ],
-      "phase_label": "p03:live",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/00",
-          "verdict": "failure"
-        },
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/01",
-          "verdict": "failure"
-        }
-      ],
-      "status": "normal",
-      "success_count": 0,
-      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b",
-      "valid_count": 2
-    }
-  ],
   "phases/p03_live/phase.json": {
     "index": 2,
     "label": "p03:live",
@@ -991,41 +872,18 @@
   },
   "phases/p03_live/phase_summary.json": {
     "complete": true,
-    "execution": {
-      "executed": 2,
-      "planned": 1,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "live": {
-      "dispatched": [
-        "fakebench:t1"
-      ],
-      "improvement_rule": "strict_rate_gain",
-      "n_attempts": 2,
-      "round": 0,
-      "skipped_control_perfect": [],
-      "skipped_injection_overflow": [],
-      "skipped_reused": [],
-      "units": [
-        "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
-      ]
-    },
-    "outcomes": {
-      "failure": 2,
-      "infra_error": 0,
-      "success": 0
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p03:live/acceptance_report.jsonl",
-      "row_count": 1
-    },
     "role": "live"
   },
+  "phases/p03_live/unit_verdicts.jsonl": [
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    }
+  ],
   "phases/p03_live/units.jsonl": [
     {
       "aux": {},
@@ -1225,50 +1083,6 @@
       "target_kind": "group"
     }
   ],
-  "phases/p05_live/acceptance_report.jsonl": [
-    {
-      "artifacts": {
-        "round_dir": "<RUN_DIR>/stage4_acceptance/live_run/round01",
-        "trajectory_ids": [
-          "traj/fakebench:t1/weak/00",
-          "traj/fakebench:t1/weak/01"
-        ]
-      },
-      "cause": "",
-      "injected_skills": [
-        {
-          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-          "version": 2
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-          "version": 2
-        },
-        {
-          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-          "version": 2
-        }
-      ],
-      "phase_label": "p05:live",
-      "role": "weak",
-      "runs": [
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/00",
-          "verdict": "success"
-        },
-        {
-          "basis": "scorer: the benchmark's own scorer",
-          "run": "traj/fakebench:t1/weak/01",
-          "verdict": "success"
-        }
-      ],
-      "status": "normal",
-      "success_count": 2,
-      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6",
-      "valid_count": 2
-    }
-  ],
   "phases/p05_live/phase.json": {
     "index": 4,
     "label": "p05:live",
@@ -1277,41 +1091,18 @@
   },
   "phases/p05_live/phase_summary.json": {
     "complete": true,
-    "execution": {
-      "executed": 2,
-      "planned": 1,
-      "reused": 0,
-      "skipped": 0
-    },
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "live": {
-      "dispatched": [
-        "fakebench:t1"
-      ],
-      "improvement_rule": "strict_rate_gain",
-      "n_attempts": 2,
-      "round": 1,
-      "skipped_control_perfect": [],
-      "skipped_injection_overflow": [],
-      "skipped_reused": [],
-      "units": [
-        "p05:live:fakebench:fakebench:t1:weak:67d449b6"
-      ]
-    },
-    "outcomes": {
-      "failure": 0,
-      "infra_error": 0,
-      "success": 2
-    },
-    "report": {
-      "format": "acceptance_report_v1",
-      "path": "phases/p05:live/acceptance_report.jsonl",
-      "row_count": 1
-    },
     "role": "live"
   },
+  "phases/p05_live/unit_verdicts.jsonl": [
+    {
+      "cause": "",
+      "status": "normal",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    }
+  ],
   "phases/p05_live/units.jsonl": [
     {
       "aux": {},
@@ -1551,57 +1342,41 @@
     "role": "test"
   },
   "phases/p07_test/phase_summary.json": {
+    "bank_reference": "bank:688c3c9c521e",
     "complete": true,
-    "execution": {
-      "executed": 4,
-      "planned": 4,
-      "reused": 0,
-      "skipped": 0
+    "control": {
+      "aux": null,
+      "avg_at_n": 0.0,
+      "avg_at_n_conservative": 0.0,
+      "infra_tasks": [],
+      "pass_at_n": 0.0,
+      "tasks": 1
     },
-    "infra_accepted": [],
-    "infra_missing": [],
+    "control_source": "fresh_bare_run",
+    "delta": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "pass_at_n": 1.0
+    },
+    "infra_accepted": {
+      "control": [],
+      "with_bank": []
+    },
+    "infra_missing": {
+      "control": [],
+      "with_bank": []
+    },
     "infra_shortfall_accepted": false,
-    "outcomes": {
-      "failure": 2,
-      "infra_error": 0,
-      "success": 2
-    },
-    "report": {
-      "format": null,
-      "path": null,
-      "row_count": 0
-    },
+    "mode": "split",
     "role": "test",
-    "test": {
-      "bank_reference": "bank:688c3c9c521e",
-      "control": {
-        "aux": null,
-        "avg_at_n": 0.0,
-        "avg_at_n_conservative": 0.0,
-        "infra_tasks": [],
-        "pass_at_n": 0.0,
-        "tasks": 1
-      },
-      "control_source": "fresh_bare_run",
-      "delta": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "pass_at_n": 1.0
-      },
-      "infra_missing_by_arm": {
-        "control": [],
-        "with_bank": []
-      },
-      "mode": "split",
-      "with_bank": {
-        "aux": null,
-        "avg_at_n": 1.0,
-        "avg_at_n_conservative": 1.0,
-        "infra_tasks": [],
-        "pass_at_n": 1.0,
-        "tasks": 1
-      }
+    "with_bank": {
+      "aux": null,
+      "avg_at_n": 1.0,
+      "avg_at_n_conservative": 1.0,
+      "infra_tasks": [],
+      "pass_at_n": 1.0,
+      "tasks": 1
     }
   },
   "phases/p07_test/units.jsonl": [
@@ -1670,45 +1445,10 @@
     {
       "stage": "p01:baseline",
       "summary": {
-        "baseline": {
-          "infra_shortfalls": [],
-          "strong": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "infra_tasks": [],
-            "pass_at_n": 1.0,
-            "tasks": 1
-          },
-          "weak": {
-            "aux": null,
-            "avg_at_n": 0.0,
-            "avg_at_n_conservative": 0.0,
-            "infra_tasks": [],
-            "pass_at_n": 0.0,
-            "tasks": 1
-          }
-        },
         "complete": true,
-        "execution": {
-          "executed": 3,
-          "planned": 3,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 2,
-          "infra_error": 0,
-          "success": 1
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p01:baseline/acceptance_report.jsonl",
-          "row_count": 2
-        },
         "role": "baseline"
       }
     },
@@ -1741,39 +1481,9 @@
       "stage": "p03:live",
       "summary": {
         "complete": true,
-        "execution": {
-          "executed": 2,
-          "planned": 1,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "live": {
-          "dispatched": [
-            "fakebench:t1"
-          ],
-          "improvement_rule": "strict_rate_gain",
-          "n_attempts": 2,
-          "round": 0,
-          "skipped_control_perfect": [],
-          "skipped_injection_overflow": [],
-          "skipped_reused": [],
-          "units": [
-            "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
-          ]
-        },
-        "outcomes": {
-          "failure": 2,
-          "infra_error": 0,
-          "success": 0
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p03:live/acceptance_report.jsonl",
-          "row_count": 1
-        },
         "role": "live"
       }
     },
@@ -1806,39 +1516,9 @@
       "stage": "p05:live",
       "summary": {
         "complete": true,
-        "execution": {
-          "executed": 2,
-          "planned": 1,
-          "reused": 0,
-          "skipped": 0
-        },
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "live": {
-          "dispatched": [
-            "fakebench:t1"
-          ],
-          "improvement_rule": "strict_rate_gain",
-          "n_attempts": 2,
-          "round": 1,
-          "skipped_control_perfect": [],
-          "skipped_injection_overflow": [],
-          "skipped_reused": [],
-          "units": [
-            "p05:live:fakebench:fakebench:t1:weak:67d449b6"
-          ]
-        },
-        "outcomes": {
-          "failure": 0,
-          "infra_error": 0,
-          "success": 2
-        },
-        "report": {
-          "format": "acceptance_report_v1",
-          "path": "phases/p05:live/acceptance_report.jsonl",
-          "row_count": 1
-        },
         "role": "live"
       }
     },
@@ -1870,57 +1550,41 @@
     {
       "stage": "p07:test",
       "summary": {
+        "bank_reference": "bank:688c3c9c521e",
         "complete": true,
-        "execution": {
-          "executed": 4,
-          "planned": 4,
-          "reused": 0,
-          "skipped": 0
+        "control": {
+          "aux": null,
+          "avg_at_n": 0.0,
+          "avg_at_n_conservative": 0.0,
+          "infra_tasks": [],
+          "pass_at_n": 0.0,
+          "tasks": 1
         },
-        "infra_accepted": [],
-        "infra_missing": [],
+        "control_source": "fresh_bare_run",
+        "delta": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "pass_at_n": 1.0
+        },
+        "infra_accepted": {
+          "control": [],
+          "with_bank": []
+        },
+        "infra_missing": {
+          "control": [],
+          "with_bank": []
+        },
         "infra_shortfall_accepted": false,
-        "outcomes": {
-          "failure": 2,
-          "infra_error": 0,
-          "success": 2
-        },
-        "report": {
-          "format": null,
-          "path": null,
-          "row_count": 0
-        },
+        "mode": "split",
         "role": "test",
-        "test": {
-          "bank_reference": "bank:688c3c9c521e",
-          "control": {
-            "aux": null,
-            "avg_at_n": 0.0,
-            "avg_at_n_conservative": 0.0,
-            "infra_tasks": [],
-            "pass_at_n": 0.0,
-            "tasks": 1
-          },
-          "control_source": "fresh_bare_run",
-          "delta": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "pass_at_n": 1.0
-          },
-          "infra_missing_by_arm": {
-            "control": [],
-            "with_bank": []
-          },
-          "mode": "split",
-          "with_bank": {
-            "aux": null,
-            "avg_at_n": 1.0,
-            "avg_at_n_conservative": 1.0,
-            "infra_tasks": [],
-            "pass_at_n": 1.0,
-            "tasks": 1
-          }
+        "with_bank": {
+          "aux": null,
+          "avg_at_n": 1.0,
+          "avg_at_n_conservative": 1.0,
+          "infra_tasks": [],
+          "pass_at_n": 1.0,
+          "tasks": 1
         }
       }
     }

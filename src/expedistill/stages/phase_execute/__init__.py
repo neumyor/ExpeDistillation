@@ -39,7 +39,7 @@ The frozen companions, wired here:
 
 * rule 1 (unchanged units reuse the last acceptance): the resolved
   units and the acceptance report are persisted per phase
-  (``units.jsonl`` / ``acceptance_report.jsonl`` inside the phase
+  (``units.jsonl`` / ``unit_verdicts.jsonl`` inside the phase
   directory) and :func:`decision.reusable_units` joins the new units
   against every earlier execute phase, most recent first -- a reused
   unit is not re-executed and its new row is the previous row's
@@ -109,7 +109,12 @@ learn-phase half is phase_bank's):
                                   the exam role reads its pre-overwrite
                                   content as the same-phase replay
                                   marker)
-        acceptance_report.jsonl   the phase's report rows (not the C
+        unit_verdicts.jsonl       one (unit_id, status, cause) row per
+                                  planned unit -- the rule-1 reuse input
+                                  and the audit's coverage check. NOT the
+                                  acceptance report the learning phase
+                                  reads (that one is recomputed from the
+                                  store); the C phase writes none.
                                   phase: its numbers go to the summary
                                   alone, the boundaries doc's rule that
                                   test results never flow into learning)
@@ -160,7 +165,7 @@ from expedistill.stages.phase_execute.phase_disk import (
     GENERATION_FAILURES_NAME,
     PHASE_RECORD_NAME,
     REDISPATCH_NAME,
-    REPORT_NAME,
+    VERDICTS_NAME,
     SUMMARY_NAME,
     UNITS_NAME,
     _phase_dir,
@@ -174,7 +179,7 @@ __all__ = [
     "GENERATION_FAILURES_NAME",
     "PHASE_RECORD_NAME",
     "REDISPATCH_NAME",
-    "REPORT_NAME",
+    "VERDICTS_NAME",
     "SUMMARY_NAME",
     "UNITS_NAME",
     "batch_execute",

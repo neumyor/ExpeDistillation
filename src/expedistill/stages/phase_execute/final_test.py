@@ -278,63 +278,27 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     n_missing = sum(len(unit_ids) for unit_ids in missing.values())
     n_new = sum(len(unit_ids) for unit_ids in new_holes.values())
 
-    # Compute execution statistics from the per-task metric counts
-    # (planned counts attempts; a reused control was never executed here).
-    with_bank_attempts = sum(plan.n_attempts for plan in plans)
-    control_attempts = len(expected) * n_attempts
-    control_reused = control_source == "reused_baseline"
-    total_planned = with_bank_attempts + (0 if control_reused
-                                          else control_attempts)
+    summary = {
+        "role": PHASE_ROLE_TEST,
+        "mode": ctx.config.mode,
+        "bank_reference": reference,
+        "control_source": control_source,
+        "with_bank": with_bank_summary,
+        "control": control_summary,
+        "delta": decision.final_test_delta(with_bank_summary,
+                                          control_summary),
+        "infra_missing": missing,
+        "infra_accepted": {arm: sorted(accepted_now[arm])
+                          for arm in ("with_bank", "control")},
+        "complete": not n_missing,
+        "infra_shortfall_accepted": any(accepted_now.values()),
+    }
 
-    with_bank_valid = sum(m["valid"] for m in with_bank_metrics.values())
-    control_valid = sum(m["valid"] for m in control_metrics.values())
-    total_executed = with_bank_valid + control_valid
-    # Both the reused baseline control and the external campaign control
-    # are measurements this phase did not spend execution on.
-    total_reused = (control_valid
-                    if control_reused or external_metrics is not None else 0)
+    if folder_reads is not None:
+        summary["skill_files_read"] = folder_reads
 
-    with_bank_success = sum(m["success"] for m in with_bank_metrics.values())
-    control_success = sum(m["success"] for m in control_metrics.values())
-    total_success = with_bank_success + control_success
-    total_failure = total_executed - total_success
-
-    # Flatten missing dict to list
-    missing_list = []
-    for arm, unit_ids in missing.items():
-        missing_list.extend(f"{arm}:{uid}" for uid in unit_ids)
-
-    summary = engine.build_unified_summary(
-        role=PHASE_ROLE_TEST,
-        execution_planned=total_planned,
-        execution_executed=total_executed,
-        execution_reused=total_reused,
-        execution_skipped=0,
-        outcomes_success=total_success,
-        outcomes_failure=total_failure,
-        outcomes_infra_error=n_missing,
-        infra_missing=missing_list,
-        infra_accepted=[f"{arm}:{uid}"
-                       for arm in ("with_bank", "control")
-                       for uid in accepted_now[arm]],
-        complete=not n_missing,
-        infra_shortfall_accepted=any(accepted_now.values()),
-        # The test phase writes no acceptance report (its numbers go to
-        # the summary alone), so the report metadata is explicitly empty.
-        report_path=None,
-        report_row_count=0,
-        role_specific={
-            "mode": ctx.config.mode,
-            "bank_reference": reference,
-            "control_source": control_source,
-            "infra_missing_by_arm": missing,
-            "with_bank": with_bank_summary,
-            "control": control_summary,
-            "delta": decision.final_test_delta(with_bank_summary,
-                                              control_summary),
-            **({"skill_files_read": folder_reads} if folder_reads else {}),
-            **({"external_control": external_record} if external_record else {}),
-        })
+    if external_record is not None:
+        summary["external_control"] = external_record
 
     write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
                summary, indent=2)

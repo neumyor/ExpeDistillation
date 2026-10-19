@@ -39,7 +39,7 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
-from expedistill.composites import phase_bank
+from expedistill.composites import phase_bank, verdicts
 from expedistill.core.config import ExecutePhaseSpec, ExperimentConfig
 from expedistill.core.ids import (
     make_attempt_id,
@@ -270,6 +270,15 @@ def _attempts_dir(ctx):
     return ctx.run_dir / "stage4_acceptance" / "attempts"
 
 
+def _verdicts(ctx, phase):
+    """The phase's minimal per-unit verdicts, in file order."""
+    from expedistill.stages.phase_execute.phase_disk import VERDICTS_NAME
+    from expedistill.composites import phase_bank
+    from expedistill.infra.store import read_jsonl
+    path = phase_bank.phase_bank_dir(ctx.run_dir, phase.label) / VERDICTS_NAME
+    return list(read_jsonl(path))
+
+
 def _leak_ledger(ctx):
     return ctx.run_dir / "stage4_acceptance" / "leak_verdicts.jsonl"
 
@@ -287,11 +296,14 @@ def test_a_completed_phase_replays_with_zero_model_calls(monkeypatch,
     _write_bank(ctx, "p02:learn", skills)
     phase = _phase()
 
-    first = phase_execute.run(ctx, phase).summary
-    exam_ids = [make_exam_id(skill.subtask_id) for skill in skills]
-    assert first["exam"]["measured"] == [exam_ids[0]]
-    assert first["exam"]["control_perfect"] == [exam_ids[1]]
-    assert first["exam"]["leaked"] == [exam_ids[2]]
+    phase_execute.run(ctx, phase)
+    stored = _verdicts(ctx, phase)
+    assert [row["status"] for row in stored] == [
+        verdicts.STATUS_NORMAL,
+        verdicts.STATUS_NOT_RUN_CONTROL_PERFECT,
+        verdicts.STATUS_NOT_TESTABLE]
+    assert stored[1]["cause"] == verdicts.CAUSE_WEAK_ALREADY_KNOWS
+    assert stored[2]["cause"] == verdicts.CAUSE_LEAK
     # Every unit spent exactly its own calls: three generated exams, the
     # bare answers (t2's was perfect and t3's leaked, so no with-skill
     # answers for them), the judgements and the two leak audits.
@@ -313,7 +325,7 @@ def test_a_completed_phase_replays_with_zero_model_calls(monkeypatch,
                               ("examiner", "answerer", "judge", "auditor")})
     second = phase_execute.run(replay, phase).summary
 
-    assert second == first
+    assert second["complete"] is True
     assert _tree(replay.run_dir / "stage3_generation" / "exams") == \
         before["exams"]
     assert _tree(_attempts_dir(replay)) == before["attempts"]
@@ -374,11 +386,13 @@ def test_a_partial_replay_answers_only_the_unmeasured_units(monkeypatch,
 
     # Any model call for t1 (the replayed, already judged unit) explodes.
     resumed = _ctx(tmp_path, _handles(allowed=("t2",)))
-    second = phase_execute.run(resumed, phase).summary
+    phase_execute.run(resumed, phase)
 
-    assert second["exam"]["measured"] == sorted(
-        [make_exam_id(measured.subtask_id), make_exam_id(owed.subtask_id)])
-    assert second["exam"]["reused"] == []
+    # Both units carry a completed verdict; the measured one was reused
+    # (zero calls) and the owed one ran -- the call counts below pin the
+    # difference.
+    assert [row["status"] for row in _verdicts(resumed, phase)] == [
+        verdicts.STATUS_NORMAL, verdicts.STATUS_NORMAL]
     # The measured unit's artifacts are byte-identical, and only the owed
     # unit spent calls: one exam generation, one leak audit, one bare
     # and one with-skill answer with their judgements.
@@ -439,9 +453,10 @@ def test_a_crash_between_the_answer_and_the_judge_resumes_the_answer(
     ])
     resumed_handles["auditor"] = _auditor()
     resumed = _ctx(tmp_path, resumed_handles)
-    result = phase_execute.run(resumed, phase).summary
+    phase_execute.run(resumed, phase)
 
-    assert result["exam"]["measured"] == [exam_id]
+    assert [row["status"] for row in _verdicts(resumed, phase)] == [
+        verdicts.STATUS_NORMAL]
     # The weak model was never re-asked the bare question: the resumed
     # answerer's only call is the with-skill answer.
     assert len(resumed_handles["answerer"].client.calls) == 1
@@ -468,9 +483,9 @@ def test_a_later_phase_over_a_new_version_remeasures_the_bare_control(
     ctx = _ctx(tmp_path, _handles(allowed=("t1",)))
     skill = _skill_on(ctx, "t1")
     _write_bank(ctx, "p02:learn", [skill])
-    exam_id = make_exam_id(skill.subtask_id)
-    first = phase_execute.run(ctx, _phase(2, "exam")).summary
-    assert first["exam"]["measured"] == [exam_id]
+    phase_execute.run(ctx, _phase(2, "exam"))
+    assert [row["status"] for row in _verdicts(ctx, _phase(2, "exam"))] == [
+        verdicts.STATUS_NORMAL]
     assert {name: len(handle.client.calls)
             for name, handle in ctx.handles.items()} == {
         "examiner": 1, "answerer": 2, "judge": 2, "auditor": 1}
@@ -484,10 +499,10 @@ def test_a_later_phase_over_a_new_version_remeasures_the_bare_control(
                     status="pending")
     _write_bank(ctx, "p04:learn", [revised])
     second_ctx = _ctx(tmp_path, _handles(allowed=("t1",)))
-    second = phase_execute.run(second_ctx, _phase(4, "exam")).summary
+    phase_execute.run(second_ctx, _phase(4, "exam"))
 
-    assert second["exam"]["measured"] == [exam_id]
-    assert second["exam"]["reused"] == []
+    assert [row["status"] for row in _verdicts(second_ctx, _phase(4, "exam"))] == [
+        verdicts.STATUS_NORMAL]
     # The bare control was re-answered, the with-skill answer ran, the
     # new version was audited; only the stored exam was reused.
     assert {name: len(handle.client.calls)

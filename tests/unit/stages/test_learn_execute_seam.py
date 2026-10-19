@@ -14,6 +14,7 @@ to end.
 """
 
 import importlib
+import json
 import importlib.abc
 import importlib.machinery
 import sys
@@ -320,9 +321,7 @@ def test_a_real_learn_add_feeds_a_real_exam_phase(tmp_path, monkeypatch):
     assert artifact[0]["status"] == "pending"
 
     # A: a real exam phase over that artifact's pending member.
-    second = _run(ctx, config, 2)
-    exam_id = ids.make_exam_id(subtask_id)
-    assert second.summary["exam"]["measured"] == [exam_id]
+    _run(ctx, config, 2)
     rows = _report_rows(ctx, "p03:exam")
     with_skill = next(row for row in rows if row.injected_skills)
     assert with_skill.status == verdicts.STATUS_NORMAL
@@ -375,15 +374,74 @@ def test_a_still_failing_skill_is_discarded_at_the_last_check(
     # ... and C runs against an empty bank without raising.
     final = _run(ctx, config, 4)
     assert final.summary["role"] == "test"
-    assert final.summary["test"]["with_bank"]["tasks"] == 3
+    assert final.summary["with_bank"]["tasks"] == 3
+
+
+def test_a_perfect_bare_control_reaches_the_decision_as_no_headroom(
+        tmp_path, monkeypatch):
+    """The exam phase skips the with-skill answer when the BARE control
+    is perfect; that skip leaves no attempt in any store, so the
+    recomputed report alone would call it zero_execution (work still
+    owed) and decide nothing. The phase's minimal verdict file carries
+    the fact, the learn phase merges it into the report, and the
+    decision table deletes the skill as weak_already_knows."""
+    _install_plugin(monkeypatch, PhasePlugin())
+    config = _config(retry_rounds=1)   # [D, L, A, L, C]
+    handles = _handles(
+        examiner=[_exam_generation()],
+        answerer=["bare answer"],       # the with-skill answer never runs
+        judge=[_verdict(True)],         # the bare control is perfect
+        auditor=[],                     # the leak audit never runs
+        author=[_distill()],
+        segmenter=[_segmentation()])
+    ctx = _ctx(tmp_path, config, handles)
+
+    _run(ctx, config, 0)
+    subtask_id = _t1_subtask_id()
+    _run(ctx, config, 1)
+    _run(ctx, config, 2)
+
+    result = _run(ctx, config, 3)
+
+    skill = _load_skill(ctx, ids.make_skill_id(subtask_id))
+    assert skill.status == "discarded"
+    assert skill.discard_reason == "weak_already_knows"
+    assert result.summary["task_list"] == {"delete": 1,
+                                           "superseded_rows": 0}
+    assert load_phase_bank(ctx.run_dir, "p04:learn") == []
 
 
 def _report_rows(ctx, label):
-    from expedistill.core.contracts import AcceptanceReportRow
-    from expedistill.infra.store import read_jsonl
-    path = (phase_bank.phase_bank_dir(ctx.run_dir, label)
-            / "acceptance_report.jsonl")
-    return [AcceptanceReportRow(**row) for row in read_jsonl(path)]
+    """The phase's acceptance report, RECOMPUTED from the store (the
+    execute phases persist only minimal per-unit verdicts now)."""
+    from expedistill.composites.reports import acceptance_report
+    name = label.split(":", 1)[1]
+    benchmark = ctx.config.benchmark
+    if name == "baseline":
+        return acceptance_report(
+            ctx.store, kind="baseline", benchmark=benchmark,
+            phase_label=label,
+            n_attempts_strong=ctx.config.n_attempts_strong,
+            n_attempts_weak=ctx.config.n_attempts_weak)
+    if name == "exam":
+        return acceptance_report(ctx.store, kind="exam",
+                                 benchmark=benchmark, phase_label=label)
+    if name == "live":
+        index = int(label[1:3])
+        earlier = 0
+        for entry in (ctx.run_dir / "phases").iterdir():
+            record_path = entry / "phase.json"
+            if not record_path.exists():
+                continue
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            if (isinstance(record.get("index"), int)
+                    and record["index"] < index
+                    and record.get("role") == "live"):
+                earlier += 1
+        return acceptance_report(ctx.store, kind="live",
+                                 benchmark=benchmark, phase_label=label,
+                                 round_=earlier)
+    raise AssertionError(f"no report kind for {label!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -424,10 +482,10 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
 
     # A2 re-measures the NEW version (the block changed: no rule-1
     # reuse) on the SAME stored exam, and this time it passes.
-    second = _run(ctx, config, 4)
-    exam_id = ids.make_exam_id(subtask_id)
-    assert second.summary["exam"]["measured"] == [exam_id]
-    assert second.summary["exam"]["reused"] == []
+    _run(ctx, config, 4)
+    measured = [row for row in _report_rows(ctx, "p05:exam")
+                if row.injected_skills]
+    assert measured and measured[0].status == verdicts.STATUS_NORMAL
 
     # L3 accepts version 2.
     _run(ctx, config, 5)
@@ -435,9 +493,11 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
 
     # A3: nothing is pending any more -- the universe is empty and the
     # phase measures nothing (the exam method's quiet round).
-    third = _run(ctx, config, 6)
-    assert third.summary["exam"]["universe"] == []
-    assert _report_rows(ctx, "p07:exam") == []
+    _run(ctx, config, 6)
+    from expedistill.infra.store import read_jsonl
+    units = read_jsonl(phase_bank.phase_bank_dir(ctx.run_dir, "p07:exam")
+                       / "units.jsonl")
+    assert units == []
 
     # L4 (the last learn phase) re-curates and C injects the accepted
     # bank over the test set against D's weak arm.
@@ -446,8 +506,8 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     final = _run(ctx, config, 8)
 
     assert final.summary["role"] == "test"
-    assert final.summary["test"]["control_source"] == "baseline_reuse"
-    assert final.summary["test"]["with_bank"]["tasks"] == 3
+    assert final.summary["control_source"] == "baseline_reuse"
+    assert final.summary["with_bank"]["tasks"] == 3
     # The with-bank arm really carried the skill's block.
     with_bank_calls = [call for call in plugin.calls
                        if call["skills_block"]]

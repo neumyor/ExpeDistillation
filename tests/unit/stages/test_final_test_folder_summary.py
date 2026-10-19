@@ -21,7 +21,7 @@ from expedistill.composites import decision
 from expedistill.core import ids
 from expedistill.core.config import CompareSpec, ExecutePhaseSpec, PhaseInstance
 from expedistill.stages import phase_execute
-from expedistill.stages.phase_execute.phase_disk import REPORT_NAME
+from expedistill.stages.phase_execute.phase_disk import VERDICTS_NAME
 from tests.unit.stages.test_final_test_folder_wiring import (
     FolderPlugin,
     TASK_IDS,
@@ -101,7 +101,7 @@ def test_folder_c_phase_reports_the_read_sets_in_its_summary(
 
     # The with-bank arm's units, keyed by trajectory id: t1 cat the
     # first manifest file, t2 both (manifest order), t3 nothing.
-    assert result["test"]["skill_files_read"] == {
+    assert result["skill_files_read"] == {
         _trajectory_id("t1"): [_group_skill("t1").skill_id],
         _trajectory_id("t2"): [_group_skill("t1").skill_id,
                                _group_skill("t2").skill_id],
@@ -128,7 +128,7 @@ def test_an_empty_accepted_bank_reports_empty_read_sets(
 
     result = phase_execute.run(ctx, phase).summary
 
-    assert result["test"]["skill_files_read"] == {
+    assert result["skill_files_read"] == {
         _trajectory_id(task_id): [] for task_id in TASK_IDS}
 
 
@@ -139,8 +139,8 @@ def test_a_resumed_c_phase_recomputes_the_same_read_sets(
     _write_bank(ctx, [_group_skill("t1"), _group_skill("t2")])
     phase = _c_phase()
 
-    first = phase_execute.run(ctx, phase).summary["test"]["skill_files_read"]
-    second = phase_execute.run(ctx, phase).summary["test"]["skill_files_read"]
+    first = phase_execute.run(ctx, phase).summary["skill_files_read"]
+    second = phase_execute.run(ctx, phase).summary["skill_files_read"]
 
     # K1's own resume keeps the stored units, so the same stored
     # trajectories parse to the same read sets (the pure function's
@@ -181,11 +181,11 @@ def test_the_read_set_stays_out_of_the_decision_inputs(
     phase_execute.run(ctx, phase)
 
     # The frozen C rule, pinned from the read set's side: the phase
-    # writes NO acceptance report, so no row (with or without a read
+    # writes NO per-unit verdicts, so no row (with or without a read
     # set) exists for decision to read.
-    report_path = (Path(ctx.run_dir) / "phases" / "p03_test"
-                   / REPORT_NAME)
-    assert not report_path.exists()
+    verdicts_path = (Path(ctx.run_dir) / "phases" / "p03_test"
+                     / VERDICTS_NAME)
+    assert not verdicts_path.exists()
     # And the decision module refuses a test-phase report outright
     # (section 3 rule 9) -- the read set's only carrier, the C
     # summary, is structurally outside decide_task_list's inputs.

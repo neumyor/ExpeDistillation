@@ -142,11 +142,11 @@ def test_a_phase_record_drifted_from_the_sequence_is_an_error(tmp_path):
 def test_an_unplanned_report_row_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
     report_path = (run_dir / "phases" / "p03_live_1"
-                   / audit_live_run.REPORT_NAME)
+                   / audit_live_run.VERDICTS_NAME)
     rows = [json.loads(line) for line in
             report_path.read_text(encoding="utf-8").splitlines() if line]
-    rows.append(audit_live_run._report_row(
-        "p03:live_1:tb:tb:t1:weak:deadbeef", "p03:live_1", "weak", [], 3, 3))
+    rows.append(audit_live_run._verdict_row(
+        "p03:live_1:tb:tb:t1:weak:deadbeef"))
     write_jsonl(report_path, rows)
     assert any("never resolved" in message
                for message in _errors(run_dir))
@@ -155,8 +155,8 @@ def test_an_unplanned_report_row_is_an_error(tmp_path):
 def test_a_final_test_report_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
     write_jsonl(run_dir / "phases" / "p07_test"
-               / audit_live_run.REPORT_NAME, [])
-    assert any("final-test phase wrote an acceptance report" in message
+               / audit_live_run.VERDICTS_NAME, [])
+    assert any("final-test phase wrote per-unit verdicts" in message
                for message in _errors(run_dir))
 
 

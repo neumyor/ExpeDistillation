@@ -30,20 +30,14 @@ from expedistill.blocks.author import gen_exam
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites import decision, verdicts
 from expedistill.composites.acceptance_leak import (
-    find_leak_verdict,
     leak_verdict_for,
 )
 from expedistill.composites.acceptance_skill_status import (
-    exam_attempts,
-    find_bare,
     find_judged_attempt,
 )
-from expedistill.composites.exam_grading import judge_budget_exhausted
 from expedistill.composites.exam_once import exam_once
-from expedistill.composites.reports import run_record_from_attempt
 from expedistill.core import ids
 from expedistill.core.config import PHASE_ROLE_EXAM, ExecutePhaseSpec, PhaseInstance
-from expedistill.core.contracts import AcceptanceReportRow
 from expedistill.core.models import Exam, Skill, Subtask, Trajectory
 from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
@@ -57,6 +51,20 @@ from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
 
 __all__ = ["_run_exam"]
+
+#: One exam unit's outcome -> the minimal verdict row it writes. The
+#: four outcomes are the unit's own disposition from ``exam_unit``;
+#: a reused unit carries the previous phase's verdict instead.
+_STATUS_BY_OUTCOME = {
+    "measured": (verdicts.STATUS_NORMAL, ""),
+    "control_perfect": (verdicts.STATUS_NOT_RUN_CONTROL_PERFECT,
+                        verdicts.CAUSE_WEAK_ALREADY_KNOWS),
+    "leaked": (verdicts.STATUS_NOT_TESTABLE, verdicts.CAUSE_LEAK),
+    "generation_failed": (verdicts.STATUS_NOT_TESTABLE,
+                          verdicts.CAUSE_EXAM_GENERATION_FAILED),
+    "infra_failed": (verdicts.STATUS_NOT_TESTABLE,
+                     verdicts.CAUSE_ZERO_EXECUTION),
+}
 
 
 def _pending_bank_skills(bank: Sequence[Skill]) -> List[Skill]:
@@ -109,7 +117,8 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     replayable = phase_disk._earlier_pass_unit_ids(ctx, phase)
 
     phase_disk._write_units(ctx, phase, [plan.unit for plan in plans])
-    reused = phase_disk._reused_rows(ctx, phase, [plan.unit for plan in plans])
+    reused = phase_disk._reusable_units(ctx, phase,
+                                        [plan.unit for plan in plans])
 
     # ========================================================================
     # 3. LOAD SUPPORTING DATA
@@ -201,58 +210,32 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     outcomes = run_units(exam_unit, plans, ctx.run_settings.workers)
 
     # ========================================================================
-    # 5. GENERATE ACCEPTANCE REPORT
+    # 5. WRITE THE PER-UNIT VERDICTS
     # ========================================================================
-    report = _exam_report(ctx, phase, pending, rule_name, reused)
-    phase_disk._write_report(ctx, phase, report)
+    kind_by_exam = {exam_id: kind for kind, exam_id in outcomes}
+    unit_verdicts: List[Tuple[str, str, str]] = []
+    for plan in plans:
+        unit_id = plan.unit.unit_id
+        if unit_id in reused:
+            status, cause = reused[unit_id]
+        else:
+            status, cause = _STATUS_BY_OUTCOME[
+                kind_by_exam[plan.unit.task_ref]]
+        unit_verdicts.append((unit_id, status, cause))
+    phase_disk._write_verdicts(ctx, phase, unit_verdicts)
 
     # ========================================================================
     # 6. WRITE SUMMARY AND CHECK FAILURES
     # ========================================================================
-    counts: Dict[str, List[str]] = {}
-    for kind, exam_id in outcomes:
-        counts.setdefault(kind, []).append(exam_id)
-
-    # Compute execution statistics
-    universe = [plan.unit.task_ref for plan in plans]
-    measured_list = counts.get("measured", [])
-    reused_list = counts.get("reused", [])
-    control_perfect_list = counts.get("control_perfect", [])
-    leaked_list = counts.get("leaked", [])
-    generation_failed_list = counts.get("generation_failed", [])
-    infra_failed_list = counts.get("infra_failed", [])
-
-    total_executed = sum(row.valid_count for row in report)
-    total_reused = len(reused_list)
-    total_skipped = len(control_perfect_list)
-
-    # Outcome counts come from the report rows' own counts
-    total_success = sum(row.success_count for row in report)
-    total_failure = total_executed - total_success
-
-    summary = engine.build_unified_summary(
-        role=PHASE_ROLE_EXAM,
-        execution_planned=len(universe),
-        execution_executed=total_executed,
-        execution_reused=total_reused,
-        execution_skipped=total_skipped,
-        outcomes_success=total_success,
-        outcomes_failure=total_failure,
-        outcomes_infra_error=len(infra_failed_list),
-        infra_missing=infra_failed_list,
-        infra_accepted=[],
-        complete=not infra_failed_list,
-        infra_shortfall_accepted=False,
-        report_path=f"phases/{phase.label}/acceptance_report.jsonl",
-        report_row_count=len(report),
-        role_specific={
-            "universe": universe,
-            "measured": sorted(measured_list),
-            "reused": sorted(reused_list),
-            "control_perfect": sorted(control_perfect_list),
-            "leaked": sorted(leaked_list),
-            "generation_failed": sorted(generation_failed_list),
-        })
+    infra_failed_list = sorted(
+        exam_id for kind, exam_id in outcomes if kind == "infra_failed")
+    summary = {
+        "role": PHASE_ROLE_EXAM,
+        "infra_missing": infra_failed_list,
+        "infra_accepted": [],
+        "complete": not infra_failed_list,
+        "infra_shortfall_accepted": False,
+    }
 
     write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
                summary, indent=2)
@@ -294,133 +277,3 @@ def _exam_or_generate(ctx: StageContext, exam_id: str, view_rules: Any,
                     usage=ctx.usage, run_dir=ctx.run_dir)
     ctx.store.save(exam, "exams")
     return exam
-
-
-def _exam_report(ctx: StageContext, phase: PhaseInstance,
-                 pending: Sequence[Skill], rule_name: str,
-                 reused: Dict[str, AcceptanceReportRow]
-                 ) -> List[AcceptanceReportRow]:
-    """Generate acceptance report from exam attempts.
-
-    One bare control row per exam, plus one row per measured (skill, version).
-    """
-    rows: List[AcceptanceReportRow] = []
-
-    for skill in pending:
-        exam_id = ids.make_exam_id(skill.subtask_id)
-        injected = [{"skill_id": skill.skill_id, "version": skill.version}]
-
-        unit_id = verdicts.make_unit_id(
-            phase_label=phase.label, benchmark=ctx.config.benchmark,
-            task_ref=exam_id, role="weak", skills_injected=injected)
-
-        # Generation failed: not testable
-        if not ctx.store.exists("exams", exam_id):
-            rows.append(verdicts.summarize_unit(
-                unit_id=unit_id, phase_label=phase.label, role="weak",
-                injected_skills=injected, runs=[],
-                status=verdicts.STATUS_NOT_TESTABLE,
-                cause=verdicts.CAUSE_EXAM_GENERATION_FAILED,
-                artifacts={"skill_id": skill.skill_id}))
-            continue
-
-        attempts = exam_attempts(ctx.store, exam_id)
-
-        # Bare control row
-        bare = find_bare(attempts)
-        bare_runs: List[Dict[str, Any]] = []
-
-        if bare is not None and bare.judge_verdict is not None:
-            verdict, basis = verdicts.verdict_from_run(
-                run_record_from_attempt(bare), rule_name=rule_name)
-            bare_runs.append({"run": bare.attempt_id, "verdict": verdict,
-                             "basis": basis})
-
-        if bare_runs:
-            bare_status, bare_cause = verdicts.STATUS_NORMAL, ""
-        elif any(judge_budget_exhausted(a) for a in attempts
-                if a.purpose == "bare" and a.skill_id is None):
-            bare_status = verdicts.STATUS_NOT_TESTABLE
-            bare_cause = verdicts.CAUSE_EXAM_GENERATION_FAILED
-        else:
-            bare_status = verdicts.STATUS_NOT_TESTABLE
-            bare_cause = verdicts.CAUSE_ZERO_EXECUTION
-
-        rows.append(verdicts.summarize_unit(
-            unit_id=verdicts.make_unit_id(
-                phase_label=phase.label, benchmark=ctx.config.benchmark,
-                task_ref=exam_id, role="weak", skills_injected=None),
-            phase_label=phase.label, role="weak", injected_skills=None,
-            runs=bare_runs, status=bare_status, cause=bare_cause,
-            artifacts={"exam_id": exam_id,
-                      "attempt_ids": [run["run"] for run in bare_runs]}))
-
-        # With-skill row: check reuse, leak, skip, judged, or owed
-        reused_row = reused.get(unit_id)
-        if reused_row is not None:
-            rows.append(phase_disk._rebased_row(reused_row, unit_id=unit_id,
-                                               phase_label=phase.label))
-            continue
-
-        leak = find_leak_verdict(
-            ctx.store, skill.skill_id, skill.version)
-        if leak is not None and leak.get("leaked"):
-            rows.append(verdicts.summarize_unit(
-                unit_id=unit_id, phase_label=phase.label, role="weak",
-                injected_skills=injected, runs=[],
-                status=verdicts.STATUS_NOT_TESTABLE,
-                cause=verdicts.CAUSE_LEAK,
-                artifacts={"exam_id": exam_id}))
-            continue
-
-        judged = sorted(
-            (a for a in attempts
-             if a.purpose == "acceptance"
-             and a.skill_id == skill.skill_id
-             and a.skill_version == skill.version
-             and a.judge_verdict is not None),
-            key=lambda a: ids.parse_attempt_id(a.attempt_id)[1])
-
-        runs: List[Dict[str, Any]] = []
-        for attempt in judged:
-            verdict, basis = verdicts.verdict_from_run(
-                run_record_from_attempt(attempt), rule_name=rule_name)
-            runs.append({"run": attempt.attempt_id, "verdict": verdict,
-                        "basis": basis})
-
-        if runs:
-            rows.append(verdicts.summarize_unit(
-                unit_id=unit_id, phase_label=phase.label, role="weak",
-                injected_skills=injected, runs=runs,
-                status=verdicts.STATUS_NORMAL, cause="",
-                artifacts={"exam_id": exam_id,
-                          "attempt_ids": [run["run"] for run in runs]}))
-            continue
-
-        # Control perfect: with-skill answer was skipped
-        if bare is not None and bare.judge_verdict:
-            rows.append(verdicts.summarize_unit(
-                unit_id=unit_id, phase_label=phase.label, role="weak",
-                injected_skills=injected, runs=[],
-                status=verdicts.STATUS_NOT_RUN_CONTROL_PERFECT,
-                cause=verdicts.CAUSE_WEAK_ALREADY_KNOWS,
-                artifacts={"exam_id": exam_id}))
-            continue
-
-        # Still owed or generation failed
-        status, cause = (
-            (verdicts.STATUS_NOT_TESTABLE,
-             verdicts.CAUSE_EXAM_GENERATION_FAILED)
-            if any(judge_budget_exhausted(a) for a in attempts
-                  if a.purpose == "acceptance"
-                  and a.skill_id == skill.skill_id
-                  and a.skill_version == skill.version)
-            else (verdicts.STATUS_NOT_TESTABLE,
-                  verdicts.CAUSE_ZERO_EXECUTION))
-
-        rows.append(verdicts.summarize_unit(
-            unit_id=unit_id, phase_label=phase.label, role="weak",
-            injected_skills=injected, runs=[], status=status, cause=cause,
-            artifacts={"exam_id": exam_id}))
-
-    return sorted(rows, key=lambda row: row.unit_id)
