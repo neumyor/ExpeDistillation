@@ -7,7 +7,7 @@ loop), ``summary`` against a fabricated manifest + ledger, and
 printing, error contract) and one REAL end-to-end assembly over the
 synthetic source run of tests/unit/stages/test_assemble_reuse.py. The
 loop's own behavior (fake drivers over a fake benchmark) is covered by
-tests/unit/test_w2c_run_loop.py.
+tests/unit/test_cli_run_loop.py.
 """
 
 import json

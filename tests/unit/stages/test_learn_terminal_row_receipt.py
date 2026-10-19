@@ -24,12 +24,13 @@ from expedistill.core.models import Skill
 from expedistill.infra.store import Store, append_jsonl, read_jsonl
 from expedistill.stages import learn_tasks
 from expedistill.stages.context import StageContext
+from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
 TASK_ID = ids.make_task_id(BENCHMARK, "t1")
 LABEL = "p02:L"
 
-_SCRIPT = (Path(__file__).resolve().parents[2]
+_SCRIPT = (Path(__file__).resolve().parents[3]
            / "scripts" / "audit" / "audit_live_run.py")
 
 
@@ -57,9 +58,8 @@ def _skill(segment, status="discarded", version=1):
     live_no_improvement finalize is the shape the final learn phase sees)."""
     subtask_id = ids.make_subtask_id(
         ids.make_trajectory_id(TASK_ID, "strong", 0), segment)
-    return Skill(
-        skill_id=ids.make_skill_id(subtask_id), content="c", subtask_id=subtask_id,
-        source_subtasks=[subtask_id], version=version, status=status,
+    return make_skill(
+        subtask_id, "c", version=version, status=status,
         discard_reason="live_no_improvement" if status == "discarded"
         else None)
 

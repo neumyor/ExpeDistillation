@@ -21,7 +21,6 @@ import pytest
 from expedistill.composites import skill_reads
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.core.ids import (
-    make_skill_id,
     make_subtask_id,
     make_task_id,
     make_trajectory_id,
@@ -30,6 +29,7 @@ from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import CodeBugError
 from expedistill.methods.delivery import FolderParams
 from expedistill.methods.delivery import folder as folder_driver
+from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
 
@@ -46,9 +46,8 @@ def _skill(task_raw: str, *, summary: str = "",
            content: str = MARKED) -> Skill:
     task_id = make_task_id(BENCHMARK, task_raw)
     subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
-    return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 summary=summary, status="accepted")
+    return make_skill(subtask_id, content, summary=summary,
+                      status="accepted")
 
 
 def _manifest(tmp_path):

@@ -293,7 +293,7 @@ def _phase_driver(kind: str) -> Any:
     name the phase that wanted it, not break every CLI invocation.
     ``importlib.import_module`` (not a ``from`` import) so a sys.modules
     entry wins: that entry is the tests' fake-driver seam
-    (tests/unit/test_w2c_run_loop.py), and once the real driver was
+    (tests/unit/test_cli_run_loop.py), and once the real driver was
     imported elsewhere in the process a ``from expedistill.stages import
     phase_execute`` would return the bound package attribute around the
     seam.

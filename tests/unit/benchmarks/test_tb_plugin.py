@@ -8,7 +8,6 @@ No network, no ssh: every remote interaction goes through the fake. The one
 performs) the real manual smoke command.
 """
 
-import importlib
 import json
 import string
 from pathlib import Path
@@ -24,6 +23,7 @@ from expedistill.infra.reliability import ConfigError, InfrastructureError
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.call import ModelHandle
 from expedistill.prompts.registry import PROMPTS, get as get_prompt
+from tests.helpers.plugins import reload_plugin
 from tests.unit.benchmarks.tb_fake_remote import (
     JobsRemoteLink,
     RemoteShellSim,
@@ -941,12 +941,7 @@ def test_import_registers_plugin_and_prompt():
     # Reload the package against a clean registry to prove the import side
     # effects are exactly: plugin registration + prompt registration.
     _reset_registry()
-    PROMPTS.pop("TB_TASK_PROMPT", None)
-    PROMPTS.pop("TB_TASK_PROMPT_FOLDER", None)
-    PROMPTS.pop("TB_TASK_PROMPT_FOLDER_INLINE", None)
-    importlib.reload(importlib.import_module(
-        "expedistill.benchmarks.tb.plugin"))
-    importlib.reload(importlib.import_module("expedistill.benchmarks.tb"))
+    reload_plugin("tb")
     assert get_plugin("tb").name == "tb"
     assert "TB_TASK_PROMPT" in PROMPTS
     assert "TB_TASK_PROMPT_FOLDER" in PROMPTS

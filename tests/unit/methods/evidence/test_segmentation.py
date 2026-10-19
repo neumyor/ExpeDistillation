@@ -16,12 +16,10 @@ mandatory for anything that lands units):
   touches the segmenter (the wiring's laziness).
 """
 
-import importlib
 
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
-from expedistill.benchmarks.registry import get_plugin
 from expedistill.composites.phase_bank import load_phase_bank, phase_bank_dir
 from expedistill.core import ids
 from expedistill.core.config import (
@@ -30,13 +28,14 @@ from expedistill.core.config import (
     LearnPhaseSpec,
     PhaseInstance,
 )
-from expedistill.infra.reliability import ConfigError
 from expedistill.core.models import Skill, Step, Subtask, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import json_script, make_fake_handle
 from expedistill.methods.evidence.segmentation import segment_add_material
 from expedistill.stages import learn_tasks, phase_learn
 from expedistill.stages.context import StageContext
+from tests.helpers.plugins import ensure_plugin
+
 
 BENCHMARK = "tb"
 TASK_ID = ids.make_task_id(BENCHMARK, "t1")
@@ -49,17 +48,8 @@ def _tb_plugin_registered():
     """The phase-level tests render the TB view rules; other suites
     leave the benchmark registry reset behind them (a pre-existing
     pattern), so re-register on demand instead of depending on import
-    order -- the pattern test_w2b_phase_learn.py established."""
-    try:
-        get_plugin(BENCHMARK)
-    except ConfigError:
-        from expedistill.prompts.registry import PROMPTS
-        PROMPTS.pop("TB_TASK_PROMPT", None)
-        PROMPTS.pop("TB_TASK_PROMPT_FOLDER", None)
-        importlib.reload(
-            importlib.import_module("expedistill.benchmarks.tb.plugin"))
-        importlib.reload(
-            importlib.import_module("expedistill.benchmarks.tb"))
+    order -- the pattern tests/unit/stages/test_phase_learn.py established."""
+    ensure_plugin(BENCHMARK)
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +93,7 @@ def _distill_script():
 
 class _Config:
     """The v4 config stand-in: the sequence/phases products plus the
-    globals the drivers read (the same shape test_w2b_phase_learn.py
+    globals the drivers read (the same shape tests/unit/stages/test_phase_learn.py
     uses)."""
 
     def __init__(self, sequence, phases):

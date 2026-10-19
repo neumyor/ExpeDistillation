@@ -30,40 +30,13 @@ from expedistill.benchmarks.base import (
     Task,
     ViewRules,
 )
-from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks.execute import run_one
 from expedistill.infra.reliability import ConfigError
 from expedistill.llm.call import ModelHandle
 from expedistill.prompts.registry import PROMPTS, digest
 from expedistill.stages.stage0_freeze import _prompt_digests
+from tests.helpers.plugins import ensure_plugin
 
-#: Each benchmark's own prompt registrations (the reload pattern below
-#: pops them first: a cached re-import would raise on the duplicate, the
-#: same pre-existing pattern test_tb_plugin.py / test_w2b_phase_learn.py
-#: use for exactly this).
-_PLUGIN_PROMPTS = {
-    "tb": ("TB_TASK_PROMPT", "TB_TASK_PROMPT_FOLDER"),
-    "searchqa": ("SEARCHQA_TASK_PROMPT",),
-    "alfworld": ("ALFWORLD_TASK_PROMPT",),
-}
-
-
-def _ensure_plugin(name):
-    """The registered plugin of a real benchmark, whatever earlier
-    suites did to the global registry (several reset it; a reset strands
-    the already-imported plugin packages, so re-registering needs the
-    reload)."""
-    try:
-        return get_plugin(name)
-    except ConfigError:
-        pass
-    for prompt_name in _PLUGIN_PROMPTS[name]:
-        PROMPTS.pop(prompt_name, None)
-    import importlib
-    importlib.reload(importlib.import_module(
-        f"expedistill.benchmarks.{name}.plugin"))
-    importlib.reload(importlib.import_module(f"expedistill.benchmarks.{name}"))
-    return get_plugin(name)
 
 _FOLDER_MANIFEST = {
     "bank_fingerprint": "bank:000000000000",
@@ -79,7 +52,7 @@ _FOLDER_MANIFEST = {
 # ---------------------------------------------------------------------------
 
 def test_tb_declares_the_capability_and_its_prompt_is_registered():
-    plugin = _ensure_plugin("tb")
+    plugin = ensure_plugin("tb")
     assert plugin.skill_folder_prompt_name == "TB_TASK_PROMPT_FOLDER"
     assert plugin.skill_folder_prompt_name in PROMPTS
 
@@ -89,8 +62,8 @@ def test_searchqa_and_alfworld_do_not_declare_it():
     # the None default and never see a folder unit through the config
     # path (the pairing checks keep folder on the C phase; E1's guard
     # holds the boundary for direct callers).
-    assert _ensure_plugin("searchqa").skill_folder_prompt_name is None
-    assert _ensure_plugin("alfworld").skill_folder_prompt_name is None
+    assert ensure_plugin("searchqa").skill_folder_prompt_name is None
+    assert ensure_plugin("alfworld").skill_folder_prompt_name is None
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +191,7 @@ def test_a_folder_unit_on_a_capable_plugin_reaches_run_unchanged(monkeypatch, tm
 # ---------------------------------------------------------------------------
 
 def test_stage0_freezes_the_folder_prompt_digest():
-    _ensure_plugin("tb")
+    ensure_plugin("tb")
     digests = _prompt_digests("tb")
     assert digests["TB_TASK_PROMPT_FOLDER"] == digest("TB_TASK_PROMPT_FOLDER")
     # And the plain task prompt still freezes beside it.
@@ -227,7 +200,7 @@ def test_stage0_freezes_the_folder_prompt_digest():
 
 def test_stage0_refuses_an_unregistered_folder_prompt_name(
         monkeypatch):
-    plugin = _ensure_plugin("tb")
+    plugin = ensure_plugin("tb")
     monkeypatch.setattr(
         type(plugin), "skill_folder_prompt_name",
         "TB_TASK_PROMPT_MISSING", raising=False)
@@ -239,6 +212,6 @@ def test_stage0_refuses_an_unregistered_folder_prompt_name(
 def test_a_plugin_without_the_capability_freezes_no_extra_prompt():
     # searchqa's frozen surface is exactly the method prompts plus its
     # own task prompt -- the capability adds nothing when absent.
-    _ensure_plugin("searchqa")
+    ensure_plugin("searchqa")
     digests = _prompt_digests("searchqa")
     assert "TB_TASK_PROMPT_FOLDER" not in digests

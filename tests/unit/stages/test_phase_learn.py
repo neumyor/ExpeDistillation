@@ -9,12 +9,10 @@ change), the resume ledgers (crash-window replay, add idempotency),
 and the curation sequence-position branch.
 """
 
-import importlib
 
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
-from expedistill.benchmarks.registry import get_plugin
 from expedistill.composites import live_measurement as lm
 from expedistill.composites.phase_bank import (
     load_phase_bank,
@@ -38,7 +36,6 @@ from expedistill.core.models import (
 )
 from expedistill.infra.reliability import (
     CodeBugError,
-    ConfigError,
     InfrastructureError,
     ModelOutputError,
 )
@@ -47,9 +44,11 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import RevisionOutcome
 from expedistill.methods.curation import none as curation_none
 from expedistill.methods.curation import phase_bank as curation_phase_bank
-from expedistill.prompts.registry import PROMPTS
 from expedistill.stages import learn_tasks, phase_learn
 from expedistill.stages.context import StageContext
+from tests.helpers.plugins import ensure_plugin
+from tests.helpers.skills import make_skill
+
 
 @pytest.fixture(autouse=True)
 def _tb_plugin_registered():
@@ -57,18 +56,7 @@ def _tb_plugin_registered():
     the benchmark registry reset behind them (a pre-existing pattern:
     the registry is global and several tests reset it). Re-register on
     demand instead of depending on import order."""
-    try:
-        get_plugin(BENCHMARK)
-    except ConfigError:
-        # The prompt lives in tb/plugin.py, the PLUGIN registration in the
-        # package __init__ -- reload both (the pattern test_tb_plugin.py
-        # established for exactly this situation).
-        PROMPTS.pop("TB_TASK_PROMPT", None)
-        PROMPTS.pop("TB_TASK_PROMPT_FOLDER", None)
-        importlib.reload(
-            importlib.import_module("expedistill.benchmarks.tb.plugin"))
-        importlib.reload(
-            importlib.import_module("expedistill.benchmarks.tb"))
+    ensure_plugin(BENCHMARK)
 
 
 BENCHMARK = "tb"
@@ -204,9 +192,7 @@ def _install_curation(monkeypatch):
 
 def _skill(content=MARKED_A, version=1, status="pending", segment=0):
     subtask_id = ids.make_subtask_id(TRAJECTORY_ID, segment)
-    return Skill(skill_id=ids.make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 version=version, status=status)
+    return make_skill(subtask_id, content, version=version, status=status)
 
 
 def _seed_baseline(store, weak_correctness=False, attempts=2):

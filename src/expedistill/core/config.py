@@ -147,7 +147,7 @@ class ConfigError(ValueError):
 
 #: R8's explicit phase roles. The decision entry (composites.decision)
 #: receives exactly these words as ``current_kind`` / ``control_kind``;
-# the cross-layer equality is pinned in tests/unit/test_w2c_config_v4.py.
+# the cross-layer equality is pinned in tests/unit/core/test_config_v4.py.
 PHASE_ROLE_BASELINE = "baseline"  # D: the two-arm bare baseline
 PHASE_ROLE_EXAM = "exam"          # A: paper acceptance, one skill per exam
 PHASE_ROLE_LIVE = "live"         # B: live acceptance, a task's whole group

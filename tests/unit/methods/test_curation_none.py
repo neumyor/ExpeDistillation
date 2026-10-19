@@ -3,13 +3,12 @@ stays a hard valve, zero model calls."""
 
 import pytest
 
-from expedistill.core import ids
 from expedistill.core.config import ConfigError, ExperimentConfig
-from expedistill.core.models import Skill
 from expedistill.infra.store import Store
 from expedistill.methods.curation import NoneParams
 from expedistill.methods.curation import none as none_driver
 from expedistill.stages.context import StageContext
+from tests.helpers.skills import make_skill
 
 BIG = 10 ** 6
 
@@ -41,10 +40,7 @@ def _ctx(tmp_path, budget=BIG):
 
 
 def _skill(store, subtask_id, content="skill text", status="accepted"):
-    skill = Skill(skill_id=ids.make_skill_id(subtask_id),
-                  content=content, subtask_id=subtask_id,
-                  source_subtasks=[subtask_id])
-    skill.status = status
+    skill = make_skill(subtask_id, content, status=status)
     store.save(skill, "skills")
     return skill
 

@@ -394,6 +394,8 @@ tests/
   unit/          每块积木的单元测试，目录与 src/expedistill/ 对应
   composites/    组合积木测试（假模型 + 临时 run 目录，含中断续跑）
   fixtures/      构造好的轨迹、段、skill、考题样例；benchmark 原始输出录像
+  helpers/       多个测试文件共用的测试工具（插件重新注册、模型回复样例、
+                 造 skill），一处定义，契约变了只改这里
   test_layering.py
 ```
 
@@ -403,7 +405,10 @@ tests/
 3. 单元测试不发真实模型请求、不连远程。需要真实服务的冒烟测试标记
    `@pytest.mark.live`，默认不跑；
 4. 测试数据放 `tests/fixtures/`，不得从 `runs/` 里直接读；需要真实样例时
-   复制一份脱敏后放进 fixtures。
+   复制一份脱敏后放进 fixtures；
+5. 测试文件按它测的源码放进对应目录、按测试内容命名，不按开发批次命名
+   （不用 `test_w1a_*`、`test_folder_m3_*` 这类名字）；两个以上测试文件要
+   用的辅助代码放进 `tests/helpers/`，不在各文件里各复制一份。
 
 ## 九、外部依赖与远程
 

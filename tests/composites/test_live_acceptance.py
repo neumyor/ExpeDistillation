@@ -814,7 +814,7 @@ def test_clip_view_keeps_head_and_tail_under_budget():
 # the phase world realizes the same fact as rule 1's cross-phase reuse --
 # a revision that produced no new version leaves the block byte-identical
 # and the next live phase reuses the last verdict -- pinned by
-# tests/unit/test_w2a_phase_execute.py's live reuse test.)
+# tests/unit/stages/test_phase_execute.py's live reuse test.)
 
 def verdicts_path(store):
     return (store.run_dir / "stage4_acceptance" / "live_run"

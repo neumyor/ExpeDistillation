@@ -34,7 +34,14 @@ from expedistill.infra.store import (
     read_jsonl,
     write_json,
 )
-from expedistill.llm import json_script, make_fake_handle
+from expedistill.llm import make_fake_handle
+from tests.helpers.replies import (
+    correct as _correct,
+    grouping as _grouping,
+    incorrect as _incorrect,
+    merged as _merged,
+    similarity as _similarity,
+)
 
 
 class Crash(Exception):
@@ -56,27 +63,6 @@ def _sid(index):
 
 M0, M1, M2 = (ids.make_merged_skill_id(n) for n in range(3))
 BUDGET = 600
-
-
-def _correct():
-    return json_script({"verdict": "correct", "error_description": ""})
-
-
-def _incorrect():
-    return json_script({"verdict": "incorrect", "error_description": "wrong"})
-
-
-def _similarity(groups):
-    return json_script({"similar_groups": groups, "conflicts": [],
-                        "low_value": []})
-
-
-def _merged(content):
-    return json_script({"content": content, "summary": "merged summary"})
-
-
-def _grouping(mapping):
-    return json_script({"groups": mapping})
 
 
 def _scripts():

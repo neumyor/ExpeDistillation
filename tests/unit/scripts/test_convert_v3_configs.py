@@ -17,7 +17,7 @@ import yaml
 
 from expedistill.core.config import load_config
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _EXPERIMENTS = _REPO / "configs" / "experiments"
 
 _SPEC = importlib.util.spec_from_file_location(

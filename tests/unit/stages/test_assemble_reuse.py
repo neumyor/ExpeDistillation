@@ -75,6 +75,7 @@ from expedistill.stages.assemble_reuse import (
     skill_lineage_tasks,
 )
 from expedistill.stages.context import StageContext
+from tests.helpers.skills import make_skill
 
 _FAKE = "asmbench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
@@ -363,14 +364,8 @@ def _subtask(task, role, seg, trajectory=None):
 
 
 def _skill(subtask_id, status, merged_from=(), content=None):
-    return Skill(
-        skill_id=f"{subtask_id}/skill",
-        content=content or f"content of {subtask_id}",
-        subtask_id=subtask_id,
-        source_subtasks=[subtask_id],
-        status=status,
-        merged_from=list(merged_from),
-    )
+    return make_skill(subtask_id, content or f"content of {subtask_id}",
+                      status=status, merged_from=list(merged_from))
 
 
 def _merged_skill(serial, anchor_subtask, sources, status="accepted",
@@ -1263,7 +1258,7 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
         Store(run_dir).path_for("skills", s_p.skill_id))
     assert refreshed[2]["status"] == "accepted"
     # The refresh's replay idempotency (a repeated refresh rewrites
-    # nothing) is pinned by test_w1f_phase_bank's refresh tests; a
+    # nothing) is pinned by test_phase_bank's refresh tests; a
     # full pipeline replay would re-enter the exam phase, which re-
     # answers its exams (K3 is not idempotent by design) -- out of this
     # test's scope.

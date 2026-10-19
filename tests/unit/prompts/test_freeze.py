@@ -75,12 +75,14 @@ def test_each_benchmark_registers_at_most_its_declared_prompts():
                         and isinstance(node.func, ast.Name)
                         and node.func.id == "register"):
                     count += 1
-        # One benchmark = one task prompt; the ONE extra registration a
-        # plugin may carry is the skill-folder capability's prompt
-        # (skill_folder_prompt_name, skill-folder M3) -- it freezes with
-        # the task prompt through the plugin's declared names, so it
-        # neither misses the freeze nor leaks. Anything else would.
-        cap = 2 if declares_folder else 1
+        # One benchmark = one task prompt; the extra registrations a
+        # plugin may carry are the skill-folder capability's prompt
+        # (skill_folder_prompt_name, skill-folder M3) and its inline-
+        # catalog companion (the same name + "_INLINE", which stage 0
+        # freezes by that convention when it is registered) -- both
+        # freeze with the task prompt, so they neither miss the freeze
+        # nor leak. Anything else would.
+        cap = 3 if declares_folder else 1
         assert count <= cap, (
             f"benchmark package {package.name} registers {count} prompts; "
             "one benchmark = one task prompt plus at most the declared "

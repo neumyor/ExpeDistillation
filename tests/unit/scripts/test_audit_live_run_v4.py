@@ -20,7 +20,7 @@ from expedistill.core import ids
 from expedistill.core.models import Skill
 from expedistill.infra.store import Store, read_json, write_json, write_jsonl
 
-_SCRIPT = (Path(__file__).resolve().parents[2]
+_SCRIPT = (Path(__file__).resolve().parents[3]
            / "scripts" / "audit" / "audit_live_run.py")
 
 

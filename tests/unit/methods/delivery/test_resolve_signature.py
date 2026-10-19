@@ -18,7 +18,6 @@ from expedistill.composites.live_measurement import pending_groups
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.ids import (
     make_exam_id,
-    make_skill_id,
     make_subtask_id,
     make_task_id,
     make_trajectory_id,
@@ -37,6 +36,7 @@ from expedistill.methods.delivery import (
     WholeBankParams,
 )
 from expedistill.methods.delivery import retrieval, units
+from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
 
@@ -53,9 +53,7 @@ MARKED = "\n".join([
 def _skill(task_id: str, content: str = MARKED, status: str = "pending"
            ) -> Skill:
     subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
-    return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 status=status)
+    return make_skill(subtask_id, content, status=status)
 
 
 def _driver(name: str):

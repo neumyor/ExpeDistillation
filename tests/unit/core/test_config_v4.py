@@ -48,7 +48,7 @@ from expedistill.core.config import (
 )
 
 #: The repository root (the 7 v3 configs live under configs/experiments/).
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[3]
 _CONFIG_DIR = _ROOT / "configs" / "experiments"
 
 

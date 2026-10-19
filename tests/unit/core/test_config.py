@@ -19,7 +19,7 @@ from expedistill.core.config import (
 
 #: The minimal v4 method the fixtures carry: a two-arm baseline, one learn
 #: phase, one final test. Small on purpose -- the sequence/phase-shape
-#: checklist has its own file (tests/unit/test_w2c_config_v4.py); here it
+#: checklist has its own file (tests/unit/core/test_config_v4.py); here it
 #: only needs to be legal.
 MIN_SEQUENCE = ["D", "L", "C"]
 
@@ -565,7 +565,7 @@ class TestPhaseFields:
     raw mappings OR already-parsed specs, everything re-parsed through
     the checklist, and the parsed phases never alias the caller's
     mappings. The checklist itself lives in
-    tests/unit/test_w2c_config_v4.py."""
+    tests/unit/core/test_config_v4.py."""
 
     def test_parsed_specs_are_the_dataclasses(self):
         from expedistill.core.config import (

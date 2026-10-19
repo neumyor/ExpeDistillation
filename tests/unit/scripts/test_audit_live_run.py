@@ -18,7 +18,7 @@ from expedistill.core import ids
 from expedistill.infra.store import Store, write_json
 from expedistill.inject.skills import estimate_tokens, format_skills_block
 
-_SCRIPT = (Path(__file__).resolve().parents[2]
+_SCRIPT = (Path(__file__).resolve().parents[3]
            / "scripts" / "audit" / "audit_live_run.py")
 
 

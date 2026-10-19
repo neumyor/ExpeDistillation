@@ -23,7 +23,6 @@ from expedistill.core.config import (
 )
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.ids import (
-    make_skill_id,
     make_subtask_id,
     make_task_id,
     make_trajectory_id,
@@ -39,6 +38,7 @@ from expedistill.methods.delivery.folder import (
     skill_filename,
     skill_folder_manifest,
 )
+from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
 
@@ -56,9 +56,7 @@ def _skill(task_raw: str, *, summary: str = "", status: str = "accepted",
            content: str = MARKED) -> Skill:
     task_id = make_task_id(BENCHMARK, task_raw)
     subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
-    return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 summary=summary, status=status)
+    return make_skill(subtask_id, content, summary=summary, status=status)
 
 
 def _bank():

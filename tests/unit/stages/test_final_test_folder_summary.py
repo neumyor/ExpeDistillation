@@ -8,7 +8,7 @@ acceptance report (test results never flow into learning) -- the phase
 summary is the C phase's one report output, so the read sets land
 there, next to its existing per-unit facts (``infra_missing`` /
 ``infra_accepted``, keyed by trajectory id over the with-bank arm).
-The fake-plugin route of test_folder_m3_wiring.py (no network).
+The fake-plugin route of tests/unit/stages/test_final_test_folder_wiring.py (no network).
 """
 
 import sys
@@ -22,7 +22,7 @@ from expedistill.core import ids
 from expedistill.core.config import CompareSpec, ExecutePhaseSpec, PhaseInstance
 from expedistill.stages import phase_execute
 from expedistill.stages.phase_execute.phase_disk import REPORT_NAME
-from tests.unit.test_folder_m3_wiring import (
+from tests.unit.stages.test_final_test_folder_wiring import (
     FolderPlugin,
     TASK_IDS,
     _c_phase,
@@ -108,7 +108,7 @@ def test_folder_c_phase_reports_the_read_sets_in_its_summary(
         _trajectory_id("t3"): [],
     }
     # Only the with-bank units carry a manifest (the control arm's
-    # calls never do -- test_folder_m3_wiring's own pin), so the read
+    # calls never do -- test_final_test_folder_wiring's own pin), so the read
     # sets are exactly the parse of the with-bank units' cats.
     with_bank = [call for call in plugin.calls
                  if call["task"].meta.get("skill_folder") is not None]

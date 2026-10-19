@@ -290,7 +290,7 @@ def test_live_folder_remote_smoke(tmp_path):
     Run explicitly with::
 
         .venv/bin/python -m pytest \\
-            tests/unit/test_folder_m3_sandbox.py::test_live_folder_remote_smoke \\
+            tests/unit/benchmarks/test_tb_folder_sandbox.py::test_live_folder_remote_smoke \\
             -m live -s
     """
     import os

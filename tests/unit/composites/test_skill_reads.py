@@ -6,7 +6,7 @@ constant appears in the module, so these tests pin the coarse edges the
 docstring discloses -- a same-named file under another directory
 counts, a longer name containing the manifest's name does not, and
 only cat counts. The real action shape is the one M3 froze
-(test_folder_m3_sandbox._CAT_TRAJECTORY): one rendered tool call per
+(test_tb_folder_sandbox._CAT_TRAJECTORY): one rendered tool call per
 line, ``bash_command({"keystrokes": "cat <path>\\n", ...})``, with the
 newline inside the keystrokes JSON-escaped.
 """

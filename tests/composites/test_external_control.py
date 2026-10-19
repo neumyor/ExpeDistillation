@@ -5,7 +5,7 @@ silently widened or missing task.
 
 The C-phase wiring (control_source, the phase-directory copy, the
 summary's audit record) is covered by the driver tests in
-tests/unit/test_w2a_phase_execute.py; these tests pin the loader's own
+tests/unit/stages/test_phase_execute.py; these tests pin the loader's own
 contract on a small fixture file in the real campaign shape.
 """
 

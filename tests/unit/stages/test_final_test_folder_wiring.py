@@ -10,9 +10,9 @@ every unit (idempotent across resumes), and ``_plan_units`` attaches
 own opaque channel. The bare control arm's rows never carry the
 manifest, so its units stay bare.
 
-The fake-plugin route of test_w2a_phase_execute.py (the real import
+The fake-plugin route of tests/unit/stages/test_phase_execute.py (the real import
 machinery, no network); the TB-specific upload behaviour is
-test_folder_m3_sandbox.py's business.
+tests/unit/benchmarks/test_tb_folder_sandbox.py's business.
 """
 
 import importlib

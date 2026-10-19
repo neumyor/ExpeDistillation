@@ -24,6 +24,14 @@ from expedistill.infra.reliability import ConfigError, ModelOutputError
 from expedistill.infra.store import Store, read_json, read_jsonl, write_json
 from expedistill.inject import count_bank_tokens
 from expedistill.llm import json_script, make_fake_handle
+from tests.helpers.replies import (
+    correct as _CORRECT,
+    grouping as _grouping,
+    incorrect as _INCORRECT,
+    merged as _merged,
+    similarity as _similarity,
+)
+from tests.helpers.skills import make_skill
 
 
 # ---------------------------------------------------------------------------
@@ -40,10 +48,8 @@ def _skill_id(index: int) -> str:
 
 def _add_skill(store: Store, index: int, content: str,
                status: str = "accepted", summary: str = "") -> Skill:
-    skill = Skill(skill_id=_skill_id(index), content=content,
-                  subtask_id=_subtask(index),
-                  source_subtasks=[_subtask(index)], status=status,
-                  summary=summary)
+    skill = make_skill(_subtask(index), content, status=status,
+                       summary=summary)
     store.save(skill, "skills")
     return skill
 
@@ -78,27 +84,6 @@ def _curate(store: Store, handles, *, budget=10 ** 6, rounds=3,
     )
 
 
-
-
-def _similarity(groups=(), conflicts=(), low_value=()):
-    return json_script({
-        "similar_groups": [list(group) for group in groups],
-        "conflicts": [list(pair) for pair in conflicts],
-        "low_value": list(low_value),
-    })
-
-
-def _merged(content, summary="merged skill summary"):
-    """A G8 reply: the merged skill and its one-line summary (JSON)."""
-    return json_script({"content": content, "summary": summary})
-
-
-def _grouping(mapping):
-    return json_script({"groups": mapping})
-
-
-_CORRECT = lambda: json_script({"verdict": "correct", "error_description": ""})  # noqa: E731
-_INCORRECT = lambda: json_script({"verdict": "incorrect", "error_description": "wrong"})  # noqa: E731
 
 
 def _log_of(store):

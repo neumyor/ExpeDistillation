@@ -5,8 +5,8 @@ The boundary doc's table is contract, not convention: every
 consumption rules around it -- the strict short-circuit statuses
 (``not_run_control_perfect``, ``zero_execution``), the compare rules as
 named parameters and the phase-sequence check counter. The end-to-end
-entry lives in test_w1c_decision_entry.py; the section 4.3 companion
-rules in test_w1c_decision_companions.py.
+entry lives in tests/unit/composites/test_decision_entry.py; the section 4.3 companion
+rules in tests/unit/composites/test_decision_companions.py.
 """
 
 import pytest
@@ -195,7 +195,7 @@ def test_perfect_control_under_first_success_gain_is_also_no_headroom():
     # Both registered rules are strict-family (STRICT_SHORT_CIRCUIT_RULES),
     # so a rate-1.0 control is no headroom under either; a hypothetical
     # non-strict rule would let the comparison decide instead -- that gate
-    # is pinned in test_w1c_decision_companions.py's rule-3 tests.
+    # is pinned in tests/unit/composites/test_decision_companions.py's rule-3 tests.
     conclusion, _ = decision.compare_conclusion(
         row=_row(valid=2, success=2), control_valid=2, control_success=2,
         control_cause="", compare_rule="first_success_gain")

@@ -23,9 +23,16 @@ from expedistill.core.config import ConfigError, ExperimentConfig
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import ConfigError as InfraConfigError
 from expedistill.infra.store import Store, read_json, write_jsonl
-from expedistill.llm import json_script, make_fake_handle
+from expedistill.llm import make_fake_handle
 from expedistill.methods.curation import phase_bank as phase_bank_entry
 from expedistill.stages.context import StageContext
+from tests.helpers.replies import (
+    correct as _correct,
+    grouping as _grouping,
+    merged as _merged,
+    similarity as _similarity,
+)
+from tests.helpers.skills import make_skill
 
 BIG = 10 ** 6
 
@@ -44,9 +51,7 @@ def _skill_id(index: int) -> str:
 
 def _add_skill(store: Store, index: int, content: str,
                status: str = "accepted") -> Skill:
-    skill = Skill(skill_id=_skill_id(index), content=content,
-                  subtask_id=_subtask(index),
-                  source_subtasks=[_subtask(index)], status=status)
+    skill = make_skill(_subtask(index), content, status=status)
     store.save(skill, "skills")
     return skill
 
@@ -59,27 +64,6 @@ def _add_exam(store: Store, index: int) -> Exam:
                 skill_id=_skill_id(index))
     store.save(exam, "exams")
     return exam
-
-
-def _similarity(groups=(), conflicts=()):
-    return json_script({
-        "similar_groups": [list(group) for group in groups],
-        "conflicts": [list(pair) for pair in conflicts],
-        "low_value": [],
-    })
-
-
-def _grouping(mapping):
-    return json_script({"groups": mapping})
-
-
-def _merged(content):
-    return json_script({"content": content,
-                        "summary": "read the log before acting"})
-
-
-def _correct():
-    return json_script({"verdict": "correct", "error_description": ""})
 
 
 def _make_ctx(tmp_path, *, curator=(), answerer=(), judge=()):

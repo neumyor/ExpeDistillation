@@ -11,8 +11,8 @@ process's own writes would sit on disk; the phase then "resumes", the
 plugin's call log must prove the stored units never re-ran, and the
 final summary must be byte-identical to the one-shot run's.
 
-The fake-plugin route of test_folder_m3_wiring.py (no network); the
-catting behaviour is test_folder_m4_summary's CattingPlugin, so the
+The fake-plugin route of tests/unit/stages/test_final_test_folder_wiring.py (no network); the
+catting behaviour is test_final_test_folder_summary's CattingPlugin, so the
 read sets under comparison are non-trivial (one unit cats one file,
 one cats both, one cats nothing).
 """
@@ -33,7 +33,7 @@ from expedistill.stages.phase_execute.phase_disk import (
     _arm_dir,
     _phase_dir,
 )
-from tests.unit.test_folder_m3_wiring import (
+from tests.unit.stages.test_final_test_folder_wiring import (
     _FAKE,
     _c_phase,
     _config,
@@ -42,7 +42,7 @@ from tests.unit.test_folder_m3_wiring import (
     _reset_registry,
     _write_bank,
 )
-from tests.unit.test_folder_m4_summary import CattingPlugin, _trajectory_id
+from tests.unit.stages.test_final_test_folder_summary import CattingPlugin, _trajectory_id
 
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
 

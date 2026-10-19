@@ -84,7 +84,7 @@ no DIRECT bank calls -- no ``discard_skill`` / ``accept_skill`` anywhere
 in it. The two sanctioned exceptions are the frozen protocols' own
 commits: the live finalization sweep (the ledger protocol's commit,
 above) and nothing else; every other phase leaves the bank
-byte-identical, pinned by tests/unit/test_w2a_phase_execute.py.
+byte-identical, pinned by tests/unit/stages/test_phase_execute.py.
 
 Phase directory layout (this driver owns the execute-phase half; the
 learn-phase half is phase_bank's):
@@ -182,7 +182,7 @@ __all__ = [
 ]
 
 # ``batch_execute`` is re-exported on purpose: the tests wrap the
-# package-level name as their K1 seam (tests/unit/test_w2a_phase_execute
+# package-level name as their K1 seam (tests/unit/stages/test_phase_execute
 # .py's _pin_k1), and every dispatch inside this package goes through
 # this attribute at call time (engine.py / live.py).
 

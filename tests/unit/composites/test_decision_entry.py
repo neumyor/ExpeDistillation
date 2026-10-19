@@ -6,7 +6,7 @@ and live-kind target mappings, the in-phase vs borrowed control, the
 first-learn-phase baseline path (empty current report, D report as the
 input), the C-phase rejection, the bank's immutability (R4's decision
 side) and the loud failures on wiring bugs. The table itself is pinned
-cell by cell in test_w1c_decision_table.py.
+cell by cell in tests/unit/composites/test_decision_table.py.
 
 Unit ids follow core/contracts.py's frozen construction rule -- the
 report row carries no task_ref field, so its task lives inside the id:
@@ -21,8 +21,8 @@ from expedistill.composites.decision import (
     FinalTestReportRejected,
     decide_task_list,
 )
-from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, ConfigError
+from tests.helpers.skills import make_skill
 
 _EXAM = "traj/tb:t1/strong/00/seg00/exam"
 _SKILL = "traj/tb:t1/strong/00/seg00/skill"
@@ -31,9 +31,7 @@ _BARE_EXAM_UNIT = f"p01:A:tb:{_EXAM}:weak:00000000"
 
 
 def _skill(skill_id=_SKILL):
-    return Skill(skill_id=skill_id, content="do the thing",
-                 subtask_id=skill_id[: -len("/skill")],
-                 source_subtasks=[skill_id[: -len("/skill")]])
+    return make_skill(skill_id[: -len("/skill")], "do the thing")
 
 
 def _row(*, unit_id, role="weak", injected=None, valid=1, success=1,
