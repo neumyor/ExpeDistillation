@@ -196,8 +196,7 @@ src/expedistill/
                           （写新 skill / 组修订 revise_group）
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
-                          成员，待定成员原样透传）+ Params + README.md（使用说明：
-                          参数、默认行为、常见配置与坑）
+                          成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
     delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
                           group_by_task.py、none.py、folder.py（技能文件夹交付：
                           目录清单，M2）+ 各自的 Params
