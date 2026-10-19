@@ -19,7 +19,22 @@ class WholeBankParams:
 
 @dataclass(frozen=True)
 class FolderParams:
-    """No parameters: the whole accepted bank, one catalog injection."""
+    """The folder delivery's parameters.
+
+    ``inline_catalog`` controls where the catalog text reaches the
+    agent. ``False`` (the default, the M2 design) keeps the catalog in
+    ``catalog.md`` inside the mounted folder; the agent must ``cat`` it.
+    ``True`` puts the catalog text directly into the unit row's
+    ``skills_block`` so it rides the task prompt verbatim, while the
+    skill bodies still live in the folder for on-demand ``cat`` -- the
+    catalog is no longer hidden behind a file the agent has to find and
+    open, which the 2026-10-19 folder-run audit found the weak model
+    rarely did (26/84 attempts hit a wrong path and saw no catalog
+    lines). The manifest's ``catalog_text`` is populated either way, so
+    the materialization and the M4 read-stats are unchanged.
+    """
+
+    inline_catalog: bool = False
 
 
 @dataclass(frozen=True)

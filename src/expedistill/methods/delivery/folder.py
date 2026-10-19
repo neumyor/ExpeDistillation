@@ -250,11 +250,36 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
     same fixed (accepted-bank digest, catalog) pair and the folder
     manifest in ``aux["skill_folder"]`` (shared read-only across the
     phase's rows -- it is phase-level data; a per-unit consumer must
-    copy before mutating)."""
+    copy before mutating).
+
+    In both modes ``skills_block`` receives the catalog text and the
+    manifest's ``catalog_text`` is populated, so the materialization
+    path (``composites.skill_folder``) and the M4 read-stats
+    (``composites.skill_reads``) are unaffected by the flag.
+
+    ``params.inline_catalog`` is a signal to the benchmark prompt layer:
+
+    ``False`` (default) -- the catalog text lives in the unit row but
+    the folder prompt template is expected to ignore the block slot; the
+    agent must ``cat`` the catalog file from the mounted folder to see
+    it (the original M2 design).
+
+    ``True`` -- the caller should switch to a prompt template that
+    renders the block slot, so the catalog text rides the task prompt
+    verbatim.  The agent sees the catalog without having to find and cat
+    the catalog file first, which the 2026-10-19 folder-run audit found
+    the weak model rarely did (26/84 attempts hit a wrong path and saw
+    no catalog lines)."""
     accepted = units.accepted_bank(bank)
     manifest = skill_folder_manifest(bank)
     injected = bank_reference(accepted)
+    # inline_catalog=True: the catalog text rides the task prompt directly;
+    # inline_catalog=False (default): the block is still the catalog text, but
+    # the folder prompt template ignores this slot -- the agent is expected to
+    # cat the catalog file from the mounted folder instead.  Either way the
+    # manifest carries catalog_text for materialization and read-stats.
     block = manifest["catalog_text"]
     return [units.make_row(units.task_ref(task), injected, block,
-                           {"skill_folder": manifest})
+                           {"skill_folder": manifest,
+                            "inline_catalog": params.inline_catalog})
             for task in tasks]

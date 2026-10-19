@@ -212,11 +212,10 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 # them. So the guidance's path wording is a remote contract: it must
 # name /opt/openclaw-skills, the mount the vendored environment hardcodes.
 # --------------------------------------------------------------------------
-TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox, under
-/opt/openclaw-skills/ (run `ls /opt/openclaw-skills` to find this task's
-directory). It holds one markdown file per skill plus a catalog, catalog.md.
-Read the catalog first: `cat <directory>/catalog.md`. Every catalog line
-lists one skill as "<skill id> | <file to cat> | <one-line description>".
+TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox.
+Run `ls /opt/openclaw-skills/` to find this task's directory name, then read
+the catalog: `cat /opt/openclaw-skills/<directory>/catalog.md`. Every catalog
+line lists one skill as "<skill id> | <file to cat> | <one-line description>".
 cat only the skill file the current step needs, one at a time; do not open
 many skill files at once; come back to the catalog when a later step needs
 another one. These skills are lessons distilled from earlier runs: use
