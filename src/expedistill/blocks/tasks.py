@@ -36,15 +36,12 @@ from typing import Any, List, Optional, Sequence, Set, Tuple, Union
 
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import resolve_plugin
+from expedistill.core.config import MODES, SPLIT_LIST_KEY_SETS
 from expedistill.infra.reliability import ConfigError
 
-#: Key sets accepted in an explicit-list ``split_spec`` (contract 3): the
-#: two-key form and the three-key form with the held-back ``reserved``
-#: partition. Kept in sync with core.config's ``_SPLIT_LIST_KEY_SETS`` (the
-#: load-time shape check); D2 re-checks here because what reaches it is
-#: data by then, not necessarily a freshly loaded config.
-_TWO_KEY_SET = frozenset({"train", "test"})
-_THREE_KEY_SET = frozenset({"train", "test", "reserved"})
+#: The explicit split lists in report order. D2 re-checks the key sets
+#: (core.config's SPLIT_LIST_KEY_SETS) because what reaches it is data by
+#: then, not necessarily a freshly loaded config.
 _LIST_KEY_ORDER = ("train", "test", "reserved")
 
 __all__ = ["load_tasks", "split_tasks", "tasks_digest"]
@@ -92,10 +89,9 @@ def split_tasks(
     if mode == "full":
         return list(tasks), list(tasks), []
     if mode != "split":
-        raise ConfigError(
-            f"mode must be one of ('split', 'full'), got {mode!r}")
+        raise ConfigError(f"mode must be one of {MODES}, got {mode!r}")
     key_set = frozenset(split_spec) if isinstance(split_spec, dict) else None
-    if key_set not in (_TWO_KEY_SET, _THREE_KEY_SET):
+    if key_set not in SPLIT_LIST_KEY_SETS:
         raise ConfigError(
             "split mode requires split_spec = {'train': [...], "
             "'test': [...]} or {'train': [...], 'test': [...], "

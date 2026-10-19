@@ -11,6 +11,7 @@ from typing import Tuple, Any
 
 from expedistill.composites import decision, verdicts
 from expedistill.core.config import (
+    BASELINE_ARMS,
     ConfigError as CoreConfigError,
     PHASE_ROLE_BASELINE,
     ExecutePhaseSpec,
@@ -21,7 +22,6 @@ from expedistill.methods.execution import RealExecutionParams
 from expedistill.stages.context import StageContext
 
 __all__ = [
-    "_BASELINE_ARMS",
     "_ROLE_OF_ARM",
     "_compare_rule",
     "_execution_params",
@@ -30,9 +30,6 @@ __all__ = [
     "_resolve_verdict_rule",
 ]
 
-#: The baseline phase's two arms (core.config's frozen pair, re-checked
-#: at execution-params parsing).
-_BASELINE_ARMS = ("executor_strong", "executor_weak")
 _ROLE_OF_ARM = {"executor_strong": "strong", "executor_weak": "weak"}
 
 
@@ -64,9 +61,9 @@ def _execution_params(spec: ExecutePhaseSpec) -> Any:
     if not isinstance(params, RealExecutionParams):
         return params
     if spec.role == PHASE_ROLE_BASELINE:
-        if tuple(params.arms or ()) != _BASELINE_ARMS:
+        if tuple(params.arms or ()) != BASELINE_ARMS:
             raise ConfigError(
-                f"execution.arms must be exactly {list(_BASELINE_ARMS)} for "
+                f"execution.arms must be exactly {list(BASELINE_ARMS)} for "
                 f"a baseline phase, got {list(params.arms or ())}")
     elif params.arms is not None:
         raise ConfigError(

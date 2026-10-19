@@ -70,7 +70,6 @@ def _curate(store: Store, handles, *, budget=10 ** 6, rounds=3,
             merge_check="exam"):
     return curate_bank(
         store=store,
-        weak_profile="a weak model that needs short sentences",
         bank_token_budget=budget,
         curation_rounds=rounds,
         merge_check=merge_check,

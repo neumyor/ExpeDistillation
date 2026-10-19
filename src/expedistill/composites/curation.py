@@ -1,7 +1,8 @@
 """K5 bank curation (composite, layer 5): G7 -> G8 -> K3 -> G9 -> D10.
 
-Owns the disk IO, resume and bookkeeping of stage 5 (README section 3): the
-curator NEVER re-judges whether a skill is correct -- that was stage 4's job
+Owns the disk IO, resume and bookkeeping of the curation that ends the
+sequence's last learn phase (README 3.4 and 5.6): the curator NEVER
+re-judges whether a skill is correct -- that is the acceptance phases' job
 -- it only maintains the bank: merge near-duplicates, combine conflicting
 pairs, re-examine merges against every source skill's exam, assign
 capability groups, and keep the injected bank under ``bank_token_budget``.
@@ -125,7 +126,7 @@ failure). The POST-CHECK runs between the G8 output and its commit-step-1
 save: a merged text whose ``skill_markers`` set differs from the sources'
 set is never stored. Both raises sit INSIDE the unit's
 ModelOutputError-to-skip try scope -- outside it run_units would treat
-them as fatal, stop stage 5, and replay the same journaled G7 output into
+them as fatal, stop the curation, and replay the same journaled G7 output into
 the same raise on every resume. A group whose sources are ALL unmarked
 (prose; test fixtures and foreign content, unreachable in a pure v2 run)
 skips both checks: prose merges into prose. The resume reuse branches
@@ -177,12 +178,14 @@ artifact this composite owns: the journal, the bank file
 inside ``dest``, and the run-level ``skill_bank.jsonl`` /
 ``stage5_curation`` journal are never touched -- so a per-phase
 curation (every learn phase ends with its own loadable bank, plan item
-R7) coexists with the frozen stage-5 behaviour. The resume and
+R7) coexists with the run-level mode. The resume and
 staleness machinery is unchanged -- every check is relative to
 ``dest``'s own journal -- with one deliberate difference: an empty
 accepted set still writes an (empty) bank file, because the artifact's
 existence is the point of a phase bank. ``dest=None`` (the default) is
-byte-for-byte the frozen stage-5 path.
+the run-level mode: the run-root bank and ``stage5_curation`` journal.
+The phase pipeline always passes ``dest``; the run-level mode is the
+one the curation tests exercise.
 
 Resume is unit-level. ``curation_log.json`` (schema ``curation-log-v3``;
 v2 journals are refused -- the old run directory stays on the old code)
@@ -214,10 +217,6 @@ phases accept members the source run never knew) reconciles instead of
 refusing; the newly accepted members land uncurated, exactly as the
 assembler's ASSEMBLED_FROM record discloses (the Wave 3 review's B1
 ruling, 2026-10-16).
-
-The ``weak_profile`` parameter is accepted for signature uniformity with
-the stage entry point but unused here: stage 5 runs no leak audit and no
-correctness judgment by design (README stage 5).
 """
 
 import re
@@ -227,6 +226,15 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from expedistill.blocks.author import skill_markers
 from expedistill.blocks.curate import assign_groups, find_similar, merge_skills
 from expedistill.composites.exam_once import exam_once
+from expedistill.composites.phase_bank import BANK_NAME
+from expedistill.composites.curation_waves import (
+    _build_dispatch,
+    _display_sources,
+    _duplicate_record,
+    _duplicate_units,
+    _partition_waves,
+    _round_units,
+)
 from expedistill.core import ids
 from expedistill.core.models import (
     FAILURE_REFERENCE_MARKERS,
@@ -254,20 +262,18 @@ from expedistill.infra.store import (
 from expedistill.inject import count_bank_tokens, format_skills_block
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["curate_bank"]
+__all__ = ["accepted_members", "curate_bank", "within_budget"]
 
-#: Where the curation audit log lives inside the run directory.
+#: Where the curation journal lives in run-level mode (dest mode keeps
+#: the same file name inside ``dest``).
 LOG_DIR = "stage5_curation"
 LOG_NAME = "curation_log.json"
-#: The bank file this composite writes: the run-level stage-5 output, or
-#: the phase artifact in dest mode (composites.phase_bank's layout).
-BANK_NAME = "skill_bank.jsonl"
 #: Journal format; a log without it (or with another value) is refused on
 #: resume rather than misread. v3 adds the per-round dispatch maps (the
 #: in-flight identity of the wave-parallel run); v2 logs stay on the old
 #: code -- no read compatibility.
 LOG_SCHEMA = "curation-log-v3"
-#: Stage label in failed_units.jsonl.
+#: Stage label in failed_units.jsonl (a frozen data value).
 FAILURE_STAGE = "stage5_curation"
 
 _MERGED_ID_RE = re.compile(r"^bank/merge/(\d+)$")
@@ -355,7 +361,7 @@ def _load_log(path: Path) -> Tuple[Dict[str, Any], bool]:
     if not isinstance(log, dict) or log.get("schema") != LOG_SCHEMA:
         raise ConfigError(
             f"curation log {path} is not a {LOG_SCHEMA} journal; cannot "
-            "resume stage 5 from it -- start a new run")
+            "resume the curation from it -- start a new run")
     if not isinstance(log.get("input_skill_ids"), list):
         raise ConfigError(
             f"curation log {path} records no input_skill_ids; cannot check "
@@ -386,7 +392,14 @@ def _read_final_member_ids(path: Path) -> Optional[List[str]]:
 # Store helpers
 # ---------------------------------------------------------------------------
 
-def _accepted_members(store: Store) -> List[Skill]:
+def _accepted_ids_outside(store: Store, known: Set[str]) -> List[str]:
+    """Ids of stored "accepted" skills not in ``known``, sorted."""
+    return [skill_id for skill_id in store.ids("skills")
+            if skill_id not in known
+            and store.load("skills", skill_id, Skill).status == "accepted"]
+
+
+def accepted_members(store: Store) -> List[Skill]:
     """Stored skills with status "accepted", sorted by skill_id.
 
     The fixed order is what makes merged-skill serials (and therefore IDs)
@@ -443,14 +456,14 @@ def _apply_reverted(store: Store, merged: Skill, discard_reason: str) -> None:
 
 def _corrupted(what: str) -> ConfigError:
     return ConfigError(
-        f"corrupted run: {what}; only K5 may change a merged skill -- a "
-        "human must look at this run (start a new run directory)")
+        f"corrupted run: {what}; a human must look at this run (start a "
+        "new run directory)")
 
 
 def _check_merged_versions(store: Store) -> None:
     """A merged skill is written once by K5 at version 1 and never
-    rewritten; any other version means another stage (e.g. a stage-4
-    rewrite) touched it."""
+    rewritten; any other version means something outside the curation
+    (e.g. a rewrite) touched it -- only K5 may change a merged skill."""
     for _, skill_id in _stored_merges(store):
         merged = store.load("skills", skill_id, Skill)
         if merged.version != 1:
@@ -534,139 +547,6 @@ def _recover_pending_merges(store: Store, log: Dict[str, Any],
             "merge at a time, so this run is inconsistent -- a human must "
             "look at it")
     return (legacy[0] if legacy else None), reuse
-
-
-# ---------------------------------------------------------------------------
-# Round helpers
-# ---------------------------------------------------------------------------
-
-def _ordered_groups(groups: Any) -> List[Any]:
-    """Deterministic processing order for one family of G7 groups.
-
-    Sorts by the group's member ids so the merge serials (hence merged-skill
-    IDs) do not depend on the model's listing order. Malformed entries sort
-    first and are recorded as skipped by ``_resolve_group``; a non-list
-    ``groups`` value (a broken G7 contract that escaped the block) is
-    treated as no groups rather than crashing the stage.
-    """
-    if not isinstance(groups, (list, tuple)):
-        return []
-
-    def key(group: Any) -> Tuple[str, ...]:
-        if isinstance(group, (list, tuple)):
-            return tuple(sorted(str(item) for item in group))
-        return ()
-
-    return sorted(groups, key=key)
-
-
-def _round_units(round_record: Dict[str, Any]) -> List[Tuple[str, Any]]:
-    """The round's merge units in processing order: (mode, group)."""
-    units = []
-    for mode, field in (("dedup", "similar_groups"),
-                        ("conflict", "conflicts")):
-        for group in _ordered_groups(round_record.get(field)):
-            units.append((mode, group))
-    return units
-
-
-def _display_sources(group: Any) -> List[str]:
-    """A group rendered for the journal (skip records, dispatch entries)."""
-    if isinstance(group, (list, tuple)):
-        return [str(item) for item in group]
-    return [repr(group)]
-
-
-def _unit_member_ids(group: Any) -> Set[str]:
-    """The member ids one unit's group names (its wave-conflict set)."""
-    if isinstance(group, (list, tuple)):
-        return {str(item) for item in group}
-    return {repr(group)}
-
-
-def _partition_waves(units: Sequence[Tuple[str, Any]]) -> List[List[int]]:
-    """Greedy wave assignment that preserves serial first-wins.
-
-    Unit j joins the earliest wave that commits it after every EARLIER unit
-    it shares a member with (0 when it overlaps nothing earlier); waves are
-    filled in unit order, so a wave only ever holds member-disjoint units
-    and overlapping pairs keep their serial order. Pure function of the
-    round's units (hence of the journaled G7 output); deterministic. See
-    the module docstring for why the unconstrained "earliest wave with no
-    shared member" rule is not enough.
-    """
-    member_sets = [_unit_member_ids(group) for _, group in units]
-    waves: List[List[int]] = []
-    wave_of: List[int] = []
-    for index, member_set in enumerate(member_sets):
-        target = 0
-        for prior in range(index):
-            if member_set & member_sets[prior]:
-                target = max(target, wave_of[prior] + 1)
-        while len(waves) <= target:
-            waves.append([])
-        waves[target].append(index)
-        wave_of.append(target)
-    return waves
-
-
-def _dedup_key(mode: str, group: Any) -> Tuple[str, Any]:
-    """Duplicate units = same mode and same source set (module docstring)."""
-    if isinstance(group, (list, tuple)):
-        return (mode, frozenset(str(item) for item in group))
-    return (mode, repr(group))
-
-
-def _duplicate_units(units: Sequence[Tuple[str, Any]],
-                     ) -> List[Tuple[int, int]]:
-    """(unit index, first unit with the same (mode, source set)) pairs.
-
-    Pure function of the round's units (the block's validation allows G7 to
-    emit one pair twice); duplicates never run (module docstring).
-    """
-    first_of: Dict[Tuple[str, Any], int] = {}
-    duplicates: List[Tuple[int, int]] = []
-    for unit_index, (mode, group) in enumerate(units):
-        key = _dedup_key(mode, group)
-        if key in first_of:
-            duplicates.append((unit_index, first_of[key]))
-        else:
-            first_of[key] = unit_index
-    return duplicates
-
-
-def _duplicate_record(round_index: int, unit_index: int, first_index: int,
-                      mode: str, group: Any) -> Dict[str, Any]:
-    return {
-        "round": round_index, "unit": unit_index, "mode": mode,
-        "serial": None, "sources": _display_sources(group),
-        "skill_id": None, "outcome": "skipped",
-        "reason": f"duplicate source set of unit {first_index:03d}",
-    }
-
-
-def _build_dispatch(round_index: int, units: Sequence[Tuple[str, Any]],
-                    next_serial: int,
-                    ) -> Tuple[List[Dict[str, Any]], int]:
-    """The round's dispatch plan: serials for every unit, in unit order.
-
-    Returns (dispatch entries, the next unallocated serial). Entries carry
-    the unit index, mode, raw source ids and the allocated serial (None for
-    duplicates, which never run). Pure function of the units and the serial
-    continuation, so a crash between the G7 journal write and this write
-    re-derives the same map.
-    """
-    dispatch: List[Dict[str, Any]] = []
-    duplicates = {unit for unit, _ in _duplicate_units(units)}
-    for unit_index, (mode, group) in enumerate(units):
-        dispatch.append({
-            "unit": unit_index, "mode": mode,
-            "sources": _display_sources(group),
-            "serial": None if unit_index in duplicates else next_serial,
-        })
-        if unit_index not in duplicates:
-            next_serial += 1
-    return dispatch, next_serial
 
 
 def _dispatch_serial_index(log: Dict[str, Any]) -> Dict[int, Tuple[int, int]]:
@@ -849,8 +729,8 @@ def _regression_passes(merged: Skill, exams: Sequence[Exam], store: Store,
                        ) -> Tuple[bool, str]:
     """Re-examine the merged skill against every source exam (K3 regression).
 
-    The merged skill is injected alone, the same one-skill injection stage 4
-    used to accept each source, so "the merge kept the capability" is tested
+    The merged skill is injected alone, the same one-skill injection the
+    exam phases used to accept each source, so "the merge kept the capability" is tested
     under acceptance-time conditions. Attempts stored before a crash are
     reused. Exams run SEQUENTIALLY with the first-failure early exit (see
     the module docstring). Returns (passed, failure reason); K3's
@@ -905,16 +785,16 @@ def _check_store_matches_log(store: Store, log: Dict[str, Any]) -> None:
     """The accepted skills in the store must be exactly what the journal
     says (run AFTER finalisation, so no commit is half-applied).
 
-    An extra stage-3 skill was accepted after curation started (a resumed
-    stage 3/4 re-offered a failed unit): the curation is stale and must not
-    absorb it uncurated. An extra merged skill (accepted without a logged
+    An extra authored skill was accepted after curation started (a resumed
+    earlier phase re-offered a failed unit): the curation is stale and must
+    not absorb it uncurated. An extra merged skill (accepted without a logged
     keep decision) or a missing one means something outside K5 changed a
     status: the run is corrupted. Either way, ConfigError -- never a silent
     member. The formula (see module docstring) is blind to serials and
     waves: burned serials never enter it and never-run units leave no
     record.
     """
-    actual = {skill.skill_id for skill in _accepted_members(store)}
+    actual = {skill.skill_id for skill in accepted_members(store)}
     expected = set(_expected_accepted(log))
     extra = actual - expected
     extra_merged = sorted(i for i in extra if _merge_serial(i) is not None)
@@ -981,11 +861,8 @@ def _refresh_dest_artifact(store: Store,
             row = record_of(skill_id)
             changed = True
         refreshed.append(row)
-    present = {row.get("skill_id") for row in refreshed}
-    missing = sorted(
-        skill_id for skill_id in stored_ids
-        if skill_id not in present
-        and store.load("skills", skill_id, Skill).status == "accepted")
+    missing = _accepted_ids_outside(
+        store, {row.get("skill_id") for row in refreshed})
     if missing:
         refreshed.extend(record_of(skill_id) for skill_id in missing)
         changed = True
@@ -997,29 +874,72 @@ def _check_bank_not_stale(store: Store,
                           bank: Sequence[Dict[str, Any]]) -> None:
     """Refuse a finished bank that no longer covers the accepted skills.
 
-    Earlier stages re-offer their failed units on every resume, so a resume
-    after the bank was written can accept NEW skills in stage 4. Returning
-    the old bank would drop them silently; merging them into a finished
-    bank would bypass curation. Only status "accepted" counts: merged
-    sources, discarded versions and pending skills (including an in-flight
-    merged skill) are never bank candidates. The only remedy offered is a
-    new run directory: re-curating in place would leave stage 6's stored
+    Earlier phases re-offer their failed units on every resume, so a
+    resume after the bank was written can accept NEW skills. Returning the
+    old bank would drop them silently; merging them into a finished bank
+    would bypass curation. Only status "accepted" counts: merged sources,
+    discarded versions and pending skills (including an in-flight merged
+    skill) are never bank candidates. The only remedy offered is a new run
+    directory: re-curating in place would leave the final test's stored
     trajectories carrying the old bank.
     """
-    known = set(_bank_ids(bank))
-    stale = sorted(
-        skill_id for skill_id in store.ids("skills")
-        if skill_id not in known
-        and store.load("skills", skill_id, Skill).status == "accepted")
+    stale = _accepted_ids_outside(store, set(_bank_ids(bank)))
     if stale:
         raise _stale_error(stale)
+
+
+def _skipped(base: Dict[str, Any], reason: str,
+             sources: List[str]) -> Dict[str, Any]:
+    """A unit outcome that ends without a merge (recorded as skipped)."""
+    return {"status": "skipped", "base": base, "reason": reason,
+            "sources": sources, "merged": None}
+
+
+def _finish_written_bank(store: Store, dest: Optional[Union[str, Path]],
+                         log_path: Path, bank: List[Dict[str, Any]],
+                         ) -> List[Dict[str, Any]]:
+    """The short-circuit for a non-empty written ``bank``: complete a
+    final append a crash interrupted, refresh a dest artifact, refuse a
+    stale bank, and return the bank. No model call."""
+    final_ids = _read_final_member_ids(log_path)
+    if final_ids is not None:
+        have = set(_bank_ids(bank))
+        if not have <= set(final_ids):
+            raise ConfigError(
+                "skill_bank.jsonl contains rows that are not in "
+                "curation_log.json final_member_ids "
+                f"({sorted(have - set(final_ids))}); the bank and the "
+                "curation log disagree -- a human must look at this run")
+        for skill_id in (i for i in final_ids if i not in have):
+            # Crash inside the final append loop: the ledger holds a
+            # prefix of the deterministic rows. Complete it from the
+            # stored records in their OWN on-disk form (same dicts,
+            # same order, no model call): the prefix rows were written
+            # from these same records, so the raw record is the only
+            # form guaranteed to match them across schema versions --
+            # the from_dict roundtrip would migrate a v1 record to v2
+            # (a mixed-version bank) and cannot load a v1 merge
+            # product at all (from_dict lacks the sibling records).
+            _append_bank_row(store, dest,
+                             read_json(store.path_for("skills", skill_id)))
+    if dest is not None:
+        # The assembled-run case (B1 fix): a pre-seeded artifact predates
+        # the run's own acceptances. The refresh reconciles it with the
+        # store BEFORE the staleness check, so the short-circuit stays a
+        # short-circuit. Run mode keeps the refusal: a run-level bank
+        # never has a pre-seeding author, and the final test's stored
+        # trajectories would silently diverge from a patched bank.
+        _refresh_dest_artifact(store, dest)
+    bank = _read_bank(store, dest)
+    _check_bank_not_stale(store, bank)
+    return bank
 
 
 def _describe(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _within_budget(tokens: int, budget: Optional[int]) -> bool:
+def within_budget(tokens: int, budget: Optional[int]) -> bool:
     """True when the bank fits the budget. A ``None`` budget is no fender
     at all (user ruling 2026-10-16: the token ceilings left the
     pre-registered parameter set) -- present values still gate, so frozen
@@ -1030,7 +950,6 @@ def _within_budget(tokens: int, budget: Optional[int]) -> bool:
 def curate_bank(
     *,
     store: Store,
-    weak_profile: str,
     answerer_handle: ModelHandle,
     judge_handle: ModelHandle,
     curator_handle: ModelHandle,
@@ -1042,10 +961,11 @@ def curate_bank(
     workers: int = 1,
     dest: Optional[Union[str, Path]] = None,
 ) -> List[Dict[str, Any]]:
-    """Curate the accepted skills into the final bank (README stage 5).
+    """Curate the accepted skills into the final bank (README 5.6).
 
-    Returns ``store.bank()``: the final member rows in sorted skill_id
-    order. Idempotent at the stage level -- a non-empty bank (completed
+    Returns the final member rows in sorted skill_id order: the run-root
+    bank, or in dest mode the artifact's non-pending rows. Idempotent --
+    a non-empty bank (completed
     from the log first if a crash interrupted the final append) is returned
     without any model call, unless the store holds accepted skills the bank
     does not cover (ConfigError: the bank is stale; in dest mode the
@@ -1064,8 +984,6 @@ def curate_bank(
 
     ``workers`` bounds the parallelism of one wave's units (B5 run_units);
     any output is bit-identical to the serial run (module docstring).
-    ``weak_profile`` is part of the frozen stage signature but unused
-    (see module docstring).
 
     ``dest`` (R7): the phase-directory mode -- when given, the journal,
     the bank file and the unit-failure records all land inside ``dest``
@@ -1082,41 +1000,10 @@ def curate_bank(
         raise ConfigError(f"workers must be >= 1, got {workers}")
     log_path = _log_path(store, run_dir, dest)
 
-    # -- resume: a written bank means the stage already finished -----------
+    # -- resume: a written bank means the curation already finished -------
     bank = _read_bank(store, dest)
     if bank:
-        final_ids = _read_final_member_ids(log_path)
-        if final_ids is not None:
-            have = set(_bank_ids(bank))
-            if not have <= set(final_ids):
-                raise ConfigError(
-                    "skill_bank.jsonl contains rows that are not in "
-                    "curation_log.json final_member_ids "
-                    f"({sorted(have - set(final_ids))}); the bank and the "
-                    "curation log disagree -- a human must look at this run")
-            for skill_id in (i for i in final_ids if i not in have):
-                # Crash inside the final append loop: the ledger holds a
-                # prefix of the deterministic rows. Complete it from the
-                # stored records in their OWN on-disk form (same dicts,
-                # same order, no model call): the prefix rows were written
-                # from these same records, so the raw record is the only
-                # form guaranteed to match them across schema versions --
-                # the from_dict roundtrip would migrate a v1 record to v2
-                # (a mixed-version bank) and cannot load a v1 merge
-                # product at all (from_dict lacks the sibling records).
-                _append_bank_row(store, dest,
-                                read_json(store.path_for("skills", skill_id)))
-        if dest is not None:
-            # The assembled-run case (B1 fix): a pre-seeded artifact predates
-            # the run's own acceptances. The refresh reconciles it with the
-            # store BEFORE the staleness check, so the short-circuit stays a
-            # short-circuit. Run mode keeps the refusal: a run-level bank
-            # never has a pre-seeding author, and stage 6's stored
-            # trajectories would silently diverge from a patched bank.
-            _refresh_dest_artifact(store, dest)
-        bank = _read_bank(store, dest)
-        _check_bank_not_stale(store, bank)
-        return bank
+        return _finish_written_bank(store, dest, log_path, bank)
 
     # -- resume: carry the journal forward, finish interrupted commits ------
     log, fresh = _load_log(log_path)
@@ -1126,7 +1013,7 @@ def curate_bank(
         # The curation's input set, fixed at first start: every later
         # resume checks the store against it (stale / corrupted run).
         log["input_skill_ids"] = sorted(
-            skill.skill_id for skill in _accepted_members(store))
+            skill.skill_id for skill in accepted_members(store))
         _write_log(log, log_path)
     else:
         _check_store_matches_log(store, log)
@@ -1135,7 +1022,7 @@ def curate_bank(
         Path(dest) if dest is not None
         else (Path(run_dir) if run_dir is not None else store.run_dir))
 
-    members = _accepted_members(store)
+    members = accepted_members(store)
     if not members:
         # An empty bank is a valid bank; nothing to curate or append. (An
         # in-flight merge implies accepted sources, so none can be
@@ -1161,7 +1048,16 @@ def curate_bank(
     def record_failure(unit_id: str, exc: BaseException) -> None:
         recorder.record(unit_id, FAILURE_STAGE, exc, str(exc))
 
-    def commit(unit_index: int, outcome: Dict[str, Any]) -> None:
+    def finish_round(round_record: Dict[str, Any]) -> bool:
+        # Journal the round as done, with whether the bank now fits the
+        # budget; True ends the round loop.
+        round_record["done"] = True
+        round_record["stop"] = within_budget(
+            count_bank_tokens(members), bank_token_budget)
+        _write_log(log, log_path)
+        return round_record["stop"]
+
+    def commit(outcome: Dict[str, Any]) -> None:
         # Ordered commit, main thread, one unit at a time: record first
         # (crash-safe, a resumed call finalises from the record), then the
         # store effect, then the member list.
@@ -1219,13 +1115,9 @@ def curate_bank(
         if not units and len(members) < 2:
             # No merge candidates and a bank of fewer than two skills:
             # nothing to merge, and grouping a single skill (or nothing) is
-            # meaningless, so the round ends without G9 (README stage 5
-            # step 4 runs G9 whenever the bank has >= 2 members).
-            round_record["done"] = True
-            round_record["stop"] = _within_budget(
-                count_bank_tokens(members), bank_token_budget)
-            _write_log(log, log_path)
-            if round_record["stop"]:
+            # meaningless, so the round ends without G9 (G9 runs whenever
+            # the bank has >= 2 members).
+            if finish_round(round_record):
                 break
             continue
 
@@ -1235,8 +1127,7 @@ def curate_bank(
         # re-derived on replay for any the crash interrupted), because a
         # duplicate is decided at dispatch and never runs.
         if round_record.get("dispatch") is None:
-            dispatch, next_serial = _build_dispatch(
-                round_index, units, next_serial)
+            dispatch, next_serial = _build_dispatch(units, next_serial)
             round_record["dispatch"] = dispatch
             _write_log(log, log_path)
         dispatch = round_record["dispatch"]
@@ -1285,13 +1176,10 @@ def curate_bank(
                     # the exams would skip EVERY merge -- the very merges
                     # the round-1 group re-execution is the proof of).
                     exams, skip = _source_exams(store, sources)
-                if skip is not None:
-                    return {"status": "skipped", "base": base, "reason": skip,
-                            "sources": ([source.skill_id for source in sources]
-                                        if sources
-                                        else _display_sources(group)),
-                            "merged": None}
                 source_ids = [source.skill_id for source in sources]
+                if skip is not None:
+                    return _skipped(base, skip, source_ids if sources
+                                    else _display_sources(group))
                 # Reused in-flight merges skip the K5 marker checks: a
                 # pending merge passed the post-check before it was ever
                 # written to disk (module docstring).
@@ -1319,7 +1207,7 @@ def curate_bank(
                             # K5 pre-check (protocol v2): the raise must
                             # stay inside this ModelOutputError-to-skip try
                             # scope -- outside it run_units would treat it
-                            # as fatal, stop stage 5, and replay the same
+                            # as fatal, stop the curation, and replay the same
                             # journaled G7 output into the same raise on
                             # every resume.
                             raise ModelOutputError(kind_conflict)
@@ -1349,9 +1237,7 @@ def curate_bank(
                         # a G8 output failure.
                         reason = (_describe(exc) if kind_conflict is not None
                                   else f"G8 merge failed: {_describe(exc)}")
-                        return {"status": "skipped", "base": base,
-                                "reason": reason,
-                                "sources": source_ids, "merged": None}
+                        return _skipped(base, reason, source_ids)
                     merged = Skill(
                         skill_id=ids.make_merged_skill_id(base["serial"]),
                         content=content,
@@ -1427,16 +1313,16 @@ def curate_bank(
                 for unit_index, outcome in zip(todo, outcomes):
                     if outcome is UnitSkipped:
                         continue
-                    commit(unit_index, outcome)
+                    commit(outcome)
                     decided.add(unit_index)
             if fatal is not None:
                 raise fatal
 
         # G9 grouping over the surviving members (this round's merges
         # included). G9 runs even on a revert-only or zero-merge round
-        # (README stage 5 step 4 groups the bank whenever it has >= 2
-        # members): the members are the same but their groups are still
-        # part of the bank's shape.
+        # (the bank is grouped whenever it has >= 2 members): the members
+        # are the same but their groups are still part of the bank's
+        # shape.
         if round_record.get("grouping") is None:
             try:
                 group_map = assign_groups(
@@ -1453,11 +1339,7 @@ def curate_bank(
             skill.group = group if isinstance(group, str) and group else None
             store.save(skill, "skills")
 
-        round_record["done"] = True
-        round_record["stop"] = _within_budget(
-            count_bank_tokens(members), bank_token_budget)
-        _write_log(log, log_path)
-        if round_record["stop"]:
+        if finish_round(round_record):
             break
 
     if legacy_in_flight is not None:
@@ -1468,8 +1350,8 @@ def curate_bank(
     log["bank_tokens"] = bank_tokens
     log["final_member_ids"] = [skill.skill_id for skill in members]
 
-    if not _within_budget(bank_tokens, bank_token_budget):
-        # Over budget after the round cap: the stage stops, nothing is
+    if not within_budget(bank_tokens, bank_token_budget):
+        # Over budget after the round cap: the curation stops, nothing is
         # auto-deleted; a human decides (new budget or new merge strategy).
         # A None budget (the 2026-10-16 ruling) never stops here.
         _write_log(log, log_path)

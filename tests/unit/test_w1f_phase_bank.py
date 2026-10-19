@@ -89,7 +89,6 @@ def _make_ctx(tmp_path, *, curator=(), answerer=(), judge=()):
     config = ExperimentConfig(
         benchmark="tb", mode="split",
         models={"executor_strong": "strong-x", "executor_weak": "weak-7b"},
-        weak_profile="a weak model that needs short sentences",
         sequence=["D", "L", "C"],
         phases={
             "D": {"kind": "execute", "role": "baseline",
@@ -532,7 +531,7 @@ def test_the_dest_short_circuit_refreshes_a_pre_seeded_artifact(tmp_path):
     late = _add_skill(ctx.store, 2, "Accepted after the seeding.")
 
     bank = curation.curate_bank(
-        store=ctx.store, weak_profile="",
+        store=ctx.store,
         answerer_handle=make_fake_handle("weak", []),
         judge_handle=make_fake_handle("judge", []),
         curator_handle=make_fake_handle("curator", []),
@@ -596,7 +595,7 @@ def test_the_run_mode_staleness_refusal_stands(tmp_path):
 
     with pytest.raises(InfraConfigError, match="skill bank is stale"):
         curation.curate_bank(
-            store=ctx.store, weak_profile="",
+            store=ctx.store,
             answerer_handle=make_fake_handle("weak", []),
             judge_handle=make_fake_handle("judge", []),
             curator_handle=make_fake_handle("curator", []),

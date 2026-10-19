@@ -947,11 +947,67 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件:`scripts/audit/audit_live_run.py`（check_group_terminals_v4 的 assembled 参数）、`tests/unit/test_w3b_audit_v4.py`（+2 例）、`runs/tb21_split_folder_smoke2_20261017_1729`（小样本 run，保留作证据）、`tmp/supervise_folder_run.py`（一次性监督者，不进 git）、本条对应 commit
 
+
+## 2026-10-18 16:58 — 清理装配工具 assemble_reuse.py 的错误与冗余内容，删除装配校验和
+
+一段话摘要：按用户要求对 stages/assemble_reuse.py 做内容清理，不拆分文件，文件从 1760 行降到 1257 行。用户决定删除装配产生的全部 sha256 校验和（返回值的 checksums 字段与 ASSEMBLED_FROM.md 的校验和列），依据是行为规范禁止给数据加哈希值和校验和；逐类计数保留。删除的错误内容：ASSEMBLED_FROM.md 无条件写入的 AgentBrew 划分来源（seed 42、41/28/20、revision 2fd12b8），换一个划分装配时会与实际数量矛盾；同一性校验说明漏写后来进白名单的 execution.name；模块说明里"写成 composite 而非脚本""composites 不能 import stages 所以复制"等移层之前的过时理由。删除的冗余：从未被调用的 _canonical；与 store.write_jsonl 相同的 _write_jsonl_atomic；与 stage0 重复的任务加载规则（stage0_freeze._tasks_spec 改为公开函数 tasks_spec 供装配复用）；两个档位各写一遍的加锁与锁内 manifest 复查（合并为 _locked_fresh_run_dir）；复制前后各做一次的"已接受集合等于库内已接受行"检查与"库过滤与拷贝集一致"检查、对按 train 条件筛出的轨迹和切段再查一遍 train 的泄题检查（这些检查的输入在两次之间没有变化，第二次必然通过）；库行的保留改为直接看同 id 的存储 skill 是否保留。与仓库其他模块重复的辅助函数改为共用：键路径比较合并进 infra/manifest.py 的公开函数 differing_keys（参数 mark_one_sided 保留冻结报错的原有文字）；对象文件名编码解码提成 infra/store.py 的 object_filename 与 object_id_of_file，Store 自身也改用它们；shortfall 记录的读写与路径改用 composites/shortfall.py（顺带获得它对格式错误记录的检查）；segmentation_audit 路径改用 segment_checked.AUDIT_PATH。管理者会话裁决后，同类重复 composites/live_measurement.py 的 _read_stage1_accepted 一并改用 shortfall.stage1_accepted_unit_ids，它注释里的分层理由早已不成立。库指纹、金矩阵与 scripts/audit 的审计检查均未触碰。另发现新目录 ExpeDistillation-MM-dev 的 .venv 可编辑安装仍指向旧目录 src，已只改本目录 .venv 的 .pth，旧目录与其上正在运行的实验不受影响。验收：全套 2204 passed + 4 deselected，ruff 全过。尚未提交。
+
+工件：`src/expedistill/stages/assemble_reuse.py`、`src/expedistill/stages/stage0_freeze.py`（tasks_spec 公开）、`src/expedistill/infra/manifest.py`（differing_keys）、`src/expedistill/infra/store.py`（object_filename、object_id_of_file）、`src/expedistill/composites/live_measurement.py`（改用 shortfall 读取）、`src/expedistill/cli.py`（说明文字去掉校验和）、`tests/unit/stages/test_assemble_reuse.py`、`tests/unit/test_cli.py`、`scripts/run/build_skillopt_split_configs.py`（注释里的函数名）
+
+## 2026-10-18 17:16 — 评审 config.py 与 curation.py 的冗余与校验
+
+一段话摘要：按用户经管理者会话转达的指示，对 core/config.py 与 composites/curation.py 做纯静态评审，只出报告不改代码。config.py 发现四项校验缺口，均在 .venv 中复现：测试相位可以配成考试执行而运行时照常真实执行；__post_init__ 先做类型转换，使 sequence 写成字符串被拆成字母、写成 null 抛出调用栈；n_attempts 的检查放过 True 与 1.5；scripts/run/convert_v2_configs.py 对每个 v2 文件都拒绝，已经失效。现有全部 v4 配置都不触发这些缺口，补上校验不影响任何现存配置。curation.py 的主要发现是：正式运行只走 dest 模式，run 模式只剩测试在用；文件内有多处可合并的重复，和 methods/curation/none.py 有两处相同逻辑；多处说明还在用已删除的 stage 编号。报告逐项标出不能动的内容：manifest 冻结字段、升级函数输出、外部对照 sha256、整理日志与技能库文件的字节内容和顺序、断点续跑的保存顺序，以及测试对 curation._write_log 的拦截。建议的处理顺序是先补四项校验缺口，再清理过时说明与无用代码，再合并重复，最后做原样搬移的拆分。尚未改动任何代码。
+
+工件：`docs/reviews/config_curation_redundancy_review_20261018.md`
+
+## 2026-10-18 17:23 — 补上 config.py 的四处校验缺口，删除失效的 v2 转换脚本
+
+一段话摘要：按评审报告的处理顺序做第一步，用户已同意推进。补上的四处：测试相位只允许 real 或 real_folder 执行，原来写成 exam 也能加载、运行时却照常真实执行；__post_init__ 在转换之前先检查 sequence 是非空列表、phases 是非空映射，原来字符串会被拆成单个字母、null 会抛出调用栈；n_attempts_strong 与 n_attempts_weak 改用 _is_positive_int，原来 True 与 1.5 能通过、"2" 抛出类型错误，错误类型仍为 ValueError；scripts/run/convert_v2_configs.py 在 v4 代码下对每个 v2 文件都拒绝，已删除，README 2.5 节与 AGENTS.md 第五、六节同步更新，需要时从 commit 78db71f 取回。红线核对：仓库全部 9 份 v4 配置改动前后都能加载，to_dict 输出逐字节相同，manifest 冻结字段不受影响；未改动升级函数、外部对照 sha256、金矩阵与审计文件。验收：全套 2214 passed + 4 deselected（新增 10 个测试用例），ruff 全过。
+
+工件：`src/expedistill/core/config.py`、`tests/unit/core/test_config.py`、`scripts/run/convert_v2_configs.py`（删除）、`scripts/run/convert_v3_configs.py`（说明）、`README.md`、`AGENTS.md`
+
+## 2026-10-18 17:30 — 清理 config.py 与 curation.py 的过时说明和无用代码
+
+一段话摘要：评审报告处理顺序的第二步，只改说明和无用代码，不改行为。config.py：删除没有业务调用方的 ExperimentConfig.model_for 及其测试；ROLE_DEFAULTS 去掉“角色可以映射为 None”的类型标注、跳过分支和注释（没有任何角色映射为 None）；改正过时说明——ConfigError 说明里的 pipeline.py 改为 cli.run_experiment、DEFAULT_RULES 注释去掉已删除的 stage 编号、frozen=True 的作用如实描述（只阻止属性重新赋值）、_method_mapping 说明改为一层浅拷贝、parse_phases 与 _check_compare_targets 的说明和报错补上 external_campaign、upgrade_v3_config 说明删去“输出还不能加载”。curation.py：模块说明与各处注释、报错里的 stage 3–6 改为按相位描述，run 模式如实写成“正式运行不用、测试在用”的模式，删去 weak_profile 的过时说明，_corrupted 的报错不再对与合并无关的损坏附加“只有 K5 可以修改合并产物”，删除 _build_dispatch 的 round_index 与内部 commit 的 unit_index 两个未使用参数。评审报告里“cli._build_handles 的角色缺失检查永远不会触发”这一条有误：配置里显式写成空字符串、null 或 0 的模型名能通过加载，那个检查是唯一拦住它们的地方，已保留检查并把报告该条改到“需要保留的检查”。curate_bank 的 weak_profile 参数与 parse_phases 的 n_attempts_strong 参数没有删除，前者有 7 处调用、后者有 35 处测试调用，留给合并重复那一步一起处理。红线核对：按语法树比较，curation.py 只有 _build_dispatch、_corrupted、_load_log、curate_bank 四个函数有代码变化，分别是删除参数和改报错文字，整理日志字段、保存顺序、技能库文件均不受影响；金矩阵与整理测试 184 个全部通过。验收：全套 2213 passed + 4 deselected（删除 model_for 的 1 个测试），ruff 全过。
+
+工件：`src/expedistill/core/config.py`、`src/expedistill/composites/curation.py`、`tests/unit/core/test_config.py`、`docs/reviews/config_curation_redundancy_review_20261018.md`（更正一条）
+
+## 2026-10-18 17:44 — 合并 config.py 与 curation.py 的重复代码
+
+一段话摘要：评审报告处理顺序的第三步。config.py：两处版本号检查合并为 _check_schema_version，调用方各自保留缺省版本（YAML 文件缺省 3 即拒绝、manifest 字典缺省 4）；tasks 与外部对照文件的路径解析合并为 _absolute_path，pathlib 移到模块顶部；upgrade_v2_config 的缺省值改为从 _V3_METHOD_DEFAULTS 读取；基线双臂常量公开为 BASELINE_ARMS，stages/phase_execute/resolve.py 改为导入；划分键集合公开为 SPLIT_LIST_KEY_SETS，blocks/tasks.py 的 split_tasks 改为导入它和 MODES。合并划分校验时发现一处不一致：core 放过 train 或 test 写成 null，而 split_tasks 会拒绝，现在 core 只放过 reserved 为 null，新增 3 个测试用例。curation.py：BANK_NAME 改为从 composites/phase_bank 导入；_unit_member_ids 改为复用 _display_sources；“已接受但不在某集合里”的扫描合并为 _accepted_ids_outside；“跳过”结果合并为 _skipped；每轮结束的收尾合并为 finish_round 闭包；_accepted_members 与 _within_budget 公开为 accepted_members 与 within_budget，methods/curation/none.py 改为复用，删去其中相同的扫描和预算判断。“未知键拒绝”的 14 处没有合并：每处的报错文字各不相同，测试按这些文字断言，合并后报错要么变差要么只省几行，不值得。“记录失败后重新抛出”的 4 处也没有合并，每处都只有两行。红线核对：9 份 v4 配置的 to_dict、17 份旧版配置经升级函数的输出，改动前后逐字节相同；curation 测试套件运行中的 193 次日志写入，改动前后顺序和内容逐字节相同；store.save、追加库行、write_jsonl 的调用处数量不变；金矩阵与整理相关测试 189 个通过。验收：全套 2216 passed + 4 deselected（新增 3 个测试用例），ruff 全过。
+
+工件：`src/expedistill/core/config.py`、`src/expedistill/composites/curation.py`、`src/expedistill/methods/curation/none.py`、`src/expedistill/stages/phase_execute/resolve.py`、`src/expedistill/blocks/tasks.py`、`tests/unit/core/test_config.py`
+
+## 2026-10-18 17:49 — config.py 的升级纯函数原样搬到 core/config_upgrade.py
+
+一段话摘要：评审报告处理顺序第四步的第一部分。把 _V3_METHOD_DEFAULTS、upgrade_v2_config、_refuse_unmapped_keys、_v3_methods、upgrade_v3_config 原样搬进新文件 core/config_upgrade.py（402 行），config.py 在末尾重新导出两个公开函数，10 个导入方一行不改；config.py 从 1696 行（评审时）降到 1326 行。逐字节核对：搬出的两段代码与搬移前的文本完全相同。红线核对：9 份 v4 配置的 to_dict 与 17 份旧版配置的升级输出改动前后逐字节相同，分层检查通过（新文件只依赖 core.config 与标准库）。README 2.5 节、装配工具一行与 AGENTS.md 第四节同步改为新文件。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/core/config_upgrade.py`（新建）、`src/expedistill/core/config.py`、`README.md`、`AGENTS.md`
+
+## 2026-10-18 18:01 — curation.py 的单元规划原样搬到 composites/curation_waves.py
+
+一段话摘要：评审报告处理顺序第四步的第二部分，只做搬移。把每轮单元规划的 9 个纯函数（_ordered_groups、_round_units、_display_sources、_unit_member_ids、_partition_waves、_dedup_key、_duplicate_units、_duplicate_record、_build_dispatch）原样搬进新文件 composites/curation_waves.py（139 行），curation.py 只新增导入其中 6 个名字的一段 import；测试通过 curation 模块引用的 _round_units 与 _partition_waves 解析为同一个对象，测试一行不改。纯搬移的证据：按语法树逐个取函数源码比较，搬出的 9 个函数与搬移前逐字相同，curation.py 留下的函数全部逐字未变，两边函数集合的并集正好等于搬移前的集合。管理者会话要求搬移提交里只能有搬移，所以本条取代上一版提交 c38b695（它在搬移之外还把 curate_bank 的已写库短路提成了函数，那部分另做一个提交）；c38b695 保留在分支 backup/before-split-c38b695。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/composites/curation_waves.py`（新建）、`src/expedistill/composites/curation.py`、`AGENTS.md`
+
+## 2026-10-18 18:03 — curate_bank 的“已写库直接返回”提成 _finish_written_bank
+
+一段话摘要：从 curate_bank 里提出一段顺序执行的代码：库已经写好时，补全被崩溃打断的追加、在 dest 模式下刷新产物、做过期检查，然后返回库。已读出的库行作为参数传入，读盘次数不变；curate_bank 从 457 行降到 420 行。这一步改变了代码组织，所以和上一条纯搬移分成两个提交。红线核对：curation 测试套件的 193 次日志写入改动前后顺序和内容逐字节相同。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/composites/curation.py`
+
+## 2026-10-18 18:04 — 删除 curate_bank 的 weak_profile 参数与 parse_phases 的 n_attempts_strong 参数
+
+一段话摘要：前面几步留下的两个未使用参数，只改函数签名，不改行为。curate_bank 的 weak_profile 从来没有被读取（它自己的说明也写明了这一点），删去参数和 methods/curation/agentbrew.py 的 2 处传参、4 个测试文件的 5 处传参；parse_phases 的 n_attempts_strong 在函数体里没有用到，删去参数、ExperimentConfig.__post_init__ 的 1 处传参和 3 个测试文件的 35 处传参。配置对象自身的 n_attempts_strong 字段不受影响，它仍然进 manifest。验收：全套 2216 passed + 4 deselected，ruff 全过。
+
+工件：`src/expedistill/composites/curation.py`、`src/expedistill/core/config.py`、`src/expedistill/methods/curation/agentbrew.py`、`tests/composites/test_curation.py`、`tests/composites/test_curation_parallel.py`、`tests/composites/test_curation_resume.py`、`tests/unit/test_w1f_phase_bank.py`、`tests/unit/test_w2c_config_v4.py`、`tests/unit/test_folder_m2_delivery.py`、`tests/unit/test_folder_m3_pairing.py`
+
 ## 2026-10-18 19:40 — folder 上传改相位一次 tar 缓存 + 滚动准入闸门(连接风暴修复)
 
 一段话摘要:全量 84 单元启动后 74 个单元 infra 失败,根因是 folder 交付的每单元 141 个技能文件逐个 per-file scp(84 单元 × 141 ≈ 上万次 SSH 连接),node29 的 sshd MaxStartups 把并发未认证连接整批掐断;小样本 6 单元没暴露。传输层修复(两道防线,均不碰模块边界、不改测量口径):一,相位只传一次——物化的技能文件夹打成单个 tar、单次 scp 到 <root>/skills_cache/<内容摘要>/ 远端缓存(原子 mv 为存在标记,幂等;摘要按文件名+字节排序哈希,换库即换缓存),每单元的 staging 改为一次 ssh(mkdir -p + cp -r 从缓存到任务目录与双拼写别名目录,cp 保字节,沙箱内 /opt/openclaw-skills/<任务>/ 内容与逐文件路径逐字节相同;双拼写逻辑原样迁移);连接数从上万降到每单元约 5 次。二,滚动准入闸门(用户飞书裁决:以"上传完成"为准放下一批,不能只靠 stagger 定时错开)——TB 插件加 BoundedSemaphore(宽 8,环境变量 EXPEDISTILL_TB_UPLOAD_GATE 可调,复用判定:父工作区 scripts/tb21/recover_rolling.py 是 campaign 层定时喂队列、K1 的 stagger 是定时错开,都不是按上传完成放行,无可直接复用的现成机制,故在传输层新造),新鲜启动的 upload+submit 整段持闸、下一个单元仅在先前单元上传完成后获准,续跑单元与轮询不占位(长等待不持闸)。测试:假链路升级为带真实 shell 语义的模拟器(test -d/mkdir/rm/mv/tar -xf/cp -r,按命令首词白名单认领,修掉 "skills_cache 含子串 kill" 的误判),重写三例 folder 沙箱测试到新契约(tar 字节逐一比对、staging 后任务目录字节等同物化目录、双拼写两侧),新增两例:两单元共享一次缓存上传(核心断言:全局恰好一个 tar、第二个单元仅 cp 无重传)、闸门只准新鲜启动(续跑零闸门流量)+ 环境变量解析。监督者巡检行补失败数("N stored / M failed",以后不许失败却显示正常)。验收:全套 2209 passed + 4 deselected,ruff 全过。
 
 工件:`src/expedistill/benchmarks/tb/plugin.py`(_folder_dir_digest、_ship_folder_cache、_upload_folder_files 重写、_UPLOAD_GATE、_env_int)、`tests/unit/benchmarks/tb_fake_remote.py`(RemoteShellSim 模拟器 + JobsRemoteLink 接线)、`tests/unit/benchmarks/test_tb_plugin.py`(FakeRemoteLink 接线 + uploads 快照)、`tests/unit/test_folder_m3_sandbox.py`(三例重写 + 两例新增)、`tmp/supervise_folder_run.py`(巡检行,不进 git)、本条对应 commit
+
 
 ## 2026-10-18 21:35 — 监督者升格为正式脚本并修巡检失败数口径(管理者已批监控类修正)
 
@@ -959,11 +1015,13 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件:`scripts/run/supervise_tb_run.py`(新建,自 tmp/supervise_folder_run.py 升格并修口径)、`tests/unit/scripts/test_supervise_tb_run.py`(新建 3 例)、`tmp/supervise_folder_run.py`(退役)、本条对应 commit
 
+
 ## 2026-10-19 01:20 — 监督者重启路径修复:绝对命令 + 失败必落日志(管理者已批)
 
 一段话摘要:00:37 驱动第二次退出(15 单元 infra 耗尽)触发监督者首次重启即崩——os.chdir 的目标算错一级(parent.parent 落在 scripts/ 而非仓库根),重启命令的相对路径 .venv/bin/expedistill 在那里不存在,FileNotFoundError 未捕获直接杀死监督者本身,00:38–00:55 无守护无告警。按管理者批准(附两点补充)修复:chdir 目标改为 parents[2](仓库根,提取为 repo_root());重启命令首项绝对化(cli_command() 从脚本位置推仓库根拼接,不再依赖任何 cwd);重启执行包进 relaunch_driver(),失败捕获 OSError、写入 supervisor.log 与 stdout 后才退出——不许静默死。新增 3 例单测:命令绝对且可解析、失败必留 "relaunch FAILED" 日志、成功写 pidfile。验收:全套 2215 passed + 4 deselected,ruff 全过。纯运维脚本修复,不碰实验运行与测量口径;真实重启路径的验证结果待下次驱动退出时回报。
 
 工件:`scripts/run/supervise_tb_run.py`(repo_root/cli_command/relaunch_driver + chdir 修正)、`tests/unit/scripts/test_supervise_tb_run.py`(+3 例)、本条对应 commit
+
 
 ## 2026-10-19 03:30 — folder 版 C 终测完成:三口径持平,弱模型几乎不读技能文件(84 试 8 读)
 

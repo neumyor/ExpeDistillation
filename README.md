@@ -277,13 +277,16 @@ phases:
 v3 及更早的配置文件是冻结的实验记录，不修改。转换工具写新文件：
 
 ```
-scripts/run/convert_v2_configs.py    # v2 → v3（一次性，已完成）
 scripts/run/convert_v3_configs.py   # v3 → v4（写出 <原名>_v4.yaml；
                                     # 显式传入 v2 文件时在内存里链式
                                     # 走 v2→v3→v4）
 ```
 
-转换映射是 `core/config.py` 的纯函数 `upgrade_v2_config` / `upgrade_v3_config`
+v2 → v3 的一次性转换在 commit `78db71f` 完成，当时的转换脚本
+`convert_v2_configs.py` 在 v4 代码下已无法转换任何文件，现已删除，需要时从该
+提交取回。
+
+转换映射是 `core/config_upgrade.py` 的纯函数 `upgrade_v2_config` / `upgrade_v3_config`
 （装配器读旧 run 的 manifest 时走同一函数）。v3 → v4 的身份变化：
 acceptance 槽位溶进序列（exam 的 `retry_limit = R` 变成 R+1 个 A 相位；
 live_run 的 `n_attempts` / `improvement` / `max_injection_tokens` 移进
@@ -481,7 +484,7 @@ E1 内部的 runner：
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
 | — | 空洞记录 | 已接受基础设施空洞（什么叫空洞见 5.9）的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
 | — | 考卷状态读取 | 从存量记录读出考题的已判作答与裸答 | `composites/acceptance_skill_status.py` |
-| — | 装配工具 | 从源 run 按 train 溯源装配新 run（`assemble-reuse` 子命令；读旧版本源 manifest 时经 `core/config.py` 的升级纯函数做身份核对） | `stages/assemble_reuse.py` |
+| — | 装配工具 | 从源 run 按 train 溯源装配新 run（`assemble-reuse` 子命令；读旧版本源 manifest 时经 `core/config_upgrade.py` 的升级纯函数做身份核对） | `stages/assemble_reuse.py` |
 
 组合积木负责落盘和续跑：每一步的产物按确定 ID 存进 B3，再次运行时已完成的
 单元直接读盘跳过。功能积木本身不读写磁盘。总要求：**在任何一处崩溃后续跑，

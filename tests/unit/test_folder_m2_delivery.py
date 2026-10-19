@@ -293,8 +293,7 @@ def _parse_with(role_phase, sequence):
     phases = {"D": _execute("baseline", "train", {"name": "none"}),
               "L": _LEARN}
     phases.update(role_phase)
-    return parse_phases(phases, sequence, n_attempts_strong=1,
-                        n_attempts_weak=1)
+    return parse_phases(phases, sequence, n_attempts_weak=1)
 
 
 def test_a_test_role_phase_may_deliver_the_folder():

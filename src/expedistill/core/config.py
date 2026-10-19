@@ -38,10 +38,9 @@ the real one depending on merge order.
 Config files fail loud: unknown top-level keys and schema versions other
 than this code's are ConfigErrors instead of being silently dropped. The
 trap this closes: a new config run by old code dropped ``token_budgets``
-without a trace and fell back to the dead 5120 default. ``upgrade_v2_config``
-and ``upgrade_v3_config`` are the pure stdlib mappings the one-time
-converters and the reuse assembler (reading an old source run's manifest)
-share.
+without a trace and fell back to the dead 5120 default. The pure
+mappings from older schemas (``upgrade_v2_config`` / ``upgrade_v3_config``)
+live in ``core.config_upgrade`` and are re-exported here.
 
 Deviation from the layer rule "core depends on stdlib only": ``load_config`` /
 ``save_config`` need YAML, and the wave spec places them here. The ``yaml``
@@ -49,54 +48,40 @@ import is function-local so that importing the data model never pulls the
 dependency in.
 """
 
-import copy
 import dataclasses
 import json
 import re
 from dataclasses import dataclass, field, fields
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 #: Experiment modes (README stage 0). ``split`` divides the task set into
 #: train/test; ``full`` distills on everything and re-runs with the bank.
 MODES = ("split", "full")
 
+#: The two legal key sets of an explicit split (``reserved`` optional).
+SPLIT_LIST_KEY_SETS = (frozenset({"train", "test"}),
+                       frozenset({"train", "test", "reserved"}))
+
 #: Keys of the named-rule selections.
 RULE_KEYS = ("task_select", "segment_select", "trajectory_select")
 
-#: Rule name per key when the config names none: the stage 2/3 protocol v2
-#: definitions of stage 1 (D4) and stage 3 (D6), plus stage 2's frozen
-#: default (all trajectories). The defaults ARE the method canon (every
-#: formal series config names them explicitly anyway), so switching them
-#: declares v2 rather than migrating anything; the v1 names stay registered
-#: in ``blocks/rules.py`` (old configs are historical records).
+#: Rule name per key when the config names none: the protocol-v2 task
+#: selection (D4) and segment selection (D6), plus the trajectory
+#: selection's frozen default (all trajectories). The defaults ARE the
+#: method canon (every formal series config names them explicitly
+#: anyway); the v1 names stay registered in ``blocks/rules.py`` (old
+#: configs are historical records).
 DEFAULT_RULES = {
     "task_select": "any_weak_failed",
     "segment_select": "strong_success_weak_failed",
     "trajectory_select": "all",
 }
 
-#: The v3 slot defaults -- schema-v3 knowledge, kept ONLY for
-#: ``upgrade_v3_config`` (the v4 loader has no slots; an absent phase
-#: family is a load-time error, not a default). These must match what
-#: the v3 loader froze for an absent slot; the upgrade's tests pin that.
-_V3_METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "segmentation": {"K": 5, "retry_limit": 2},
-    "authoring": {"exams": True},
-    "acceptance": {"name": "exam", "retry_limit": 2},
-    "curation": {"name": "agentbrew", "token_budget": 4096,
-                "rounds": 3},
-    "delivery": {"name": "whole_bank"},
-}
-
-#: Job role -> the executor anchor it defaults to: "strong", "weak", or
-#: None -- None means the config MUST name the model explicitly (the
-#: pipeline's handle builder refuses a missing role; nothing here
-#: guesses). The answerer uses the weak model by design (the exam probes
-#: what the weak model can do); everything else answers with the strong
-#: one. A dict on purpose -- the defaults are data, and the old name
-#: (MODEL_ROLES, a plain tuple) was a permanent namesake of
-#: core.models' trajectory roles.
-ROLE_DEFAULTS: Dict[str, Optional[str]] = {
+#: Job role -> the executor anchor it defaults to, "strong" or "weak".
+#: The answerer uses the weak model by design (the exam probes what the
+#: weak model can do); everything else answers with the strong one.
+ROLE_DEFAULTS: Dict[str, str] = {
     "executor_strong": "strong",
     "executor_weak": "weak",
     "segmenter": "strong",
@@ -135,8 +120,8 @@ class ConfigError(ValueError):
 
     Defined in core (not imported from infra.reliability) because core is
     stdlib-only. Subclassing ValueError keeps every existing contract:
-    pipeline.py wraps load_config's ValueErrors into infra's ConfigError for
-    the CLI, and callers matching ValueError keep matching.
+    ``cli.run_experiment`` wraps load_config's ValueErrors into infra's
+    ConfigError, and callers matching ValueError keep matching.
     """
 
 
@@ -155,10 +140,10 @@ class ConfigError(ValueError):
 #
 # Phase specs are DATACLASSES, not TypedDicts, for the same reason the
 # rest of core's records are: ``__post_init__`` is where the load-time
-# checklist lives (a TypedDict validates nothing at runtime), the frozen
-# manifest serialises them through ``dataclasses.fields`` exactly like
-# every other ExperimentConfig field, and frozen=True keeps a parsed
-# config from being mutated after the manifest comparison.
+# checklist lives (a TypedDict validates nothing at runtime), and the
+# frozen manifest serialises them through ``dataclasses.fields`` exactly
+# like every other ExperimentConfig field. frozen=True stops attribute
+# reassignment on a parsed spec; its mapping fields stay mutable dicts.
 
 #: R8's explicit phase roles. The decision entry (composites.decision)
 #: receives exactly these words as ``current_kind`` / ``control_kind``;
@@ -394,14 +379,14 @@ _LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author", "curate"})
 
 #: The baseline phase's two arms: fixed by design (the strong arm feeds
 #: the add path, the weak arm is every later comparison's control).
-_BASELINE_ARMS = ("executor_strong", "executor_weak")
+BASELINE_ARMS = ("executor_strong", "executor_weak")
 
 
 def _method_mapping(raw: Any, where: str) -> Dict[str, Any]:
     """One nested method mapping: a dict naming its method. The deep
     validation belongs to the family's contract in the methods layer
     (resolution, stage 0); here only the shape and the ``name`` are
-    checked, the same split as v3's ``_validate_methods``."""
+    checked. The returned dict is a one-level copy."""
     if not isinstance(raw, dict):
         raise ConfigError(
             f"{where} must be a mapping of the method's parameter names "
@@ -474,20 +459,21 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             f"{FOLDER_EXECUTION_NAME!r}, and nothing else (the other "
             "deliveries run the plain real execution)")
     # The exam execution is what the exam ROLE measures with; every
-    # non-test role runs the benchmark for real; a test role may also
-    # run the folder execution (checklist item 8 keeps the folder
+    # other role runs the benchmark for real, and a test role may run
+    # the folder execution instead (checklist item 8 keeps the folder
     # delivery -- and with the pairing above, real_folder -- on the
     # test role alone).
     if role == PHASE_ROLE_EXAM:
-        expected_exec = EXECUTION_NAMES[1]
+        expected_execs = (EXECUTION_NAMES[1],)
     elif role == PHASE_ROLE_TEST:
-        expected_exec = None  # real or real_folder, the pairing above
+        expected_execs = (EXECUTION_NAMES[0], FOLDER_EXECUTION_NAME)
     else:
-        expected_exec = EXECUTION_NAMES[0]
-    if expected_exec is not None and exec_name != expected_exec:
+        expected_execs = (EXECUTION_NAMES[0],)
+    if exec_name not in expected_execs:
         raise ConfigError(
             f"phases.{name} declares role {role!r} but execution name "
-            f"{exec_name!r}; that role runs {expected_exec!r}")
+            f"{exec_name!r}; that role runs "
+            f"{' or '.join(repr(e) for e in expected_execs)}")
     if "n_attempts" in execution and role == PHASE_ROLE_EXAM:
         raise ConfigError(
             f"phases.{name}.execution carries n_attempts but an exam phase "
@@ -496,10 +482,10 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
         # The two-arm phase: both arms, no per-arm depth (the global
         # n_attempts_strong / n_attempts_weak decide the two depths).
         arms = execution.get("arms")
-        if not (isinstance(arms, list) and tuple(arms) == _BASELINE_ARMS):
+        if not (isinstance(arms, list) and tuple(arms) == BASELINE_ARMS):
             raise ConfigError(
                 f"phases.{name}.execution.arms must be exactly "
-                f"{list(_BASELINE_ARMS)} (a baseline phase runs both arms; "
+                f"{list(BASELINE_ARMS)} (a baseline phase runs both arms; "
                 "their depths come from the global n_attempts_strong / "
                 "n_attempts_weak)")
         if "n_attempts" in execution:
@@ -623,7 +609,6 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
 
 
 def parse_phases(raw_phases: Any, raw_sequence: Any, *,
-                 n_attempts_strong: int,
                  n_attempts_weak: int) -> Dict[str, PhaseSpec]:
     """Validate the v4 ``sequence`` / ``phases`` pair and return the
     parsed specs, keyed by local name (the sequence may repeat a name;
@@ -640,9 +625,10 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
        the field values (test role <-> test tasks, exam role <-> exam
        execution, baseline <-> both arms, single-arm depth limits);
     4. ``compare.against`` names a phase that appears EARLIER in the
-       sequence, or is exactly ``fresh_bare``; the named control is a
-       baseline phase; a single-arm real phase's ``n_attempts`` never
-       exceeds its control's weak-model depth;
+       sequence, or is exactly ``fresh_bare``, or (test role only)
+       ``external_campaign`` with its ``external`` block; the named
+       control is a baseline phase; a single-arm real phase's
+       ``n_attempts`` never exceeds its control's weak-model depth;
     5. ``curate.merge_check: exam`` requires an exam-role execute phase
        somewhere in the sequence (the merges' regression exams come from
        the A phases);
@@ -735,8 +721,8 @@ def _check_first_phase_is_execute(raw_sequence: List[str],
 def _check_compare_targets(raw_sequence: List[str],
                            specs: Dict[str, PhaseSpec]) -> None:
     """Checklist item 4, first half: ``against`` is an earlier sequence
-    name or exactly ``fresh_bare``, and the named control is a BASELINE
-    phase. A baseline's weak bare arm is the only report whose rows are
+    name, ``fresh_bare`` or ``external_campaign``, and a named control is
+    a BASELINE phase. A baseline's weak bare arm is the only report whose rows are
     bare measurements; a live phase's report rows all carry the
     injected group, and comparing against one would read a with-skill
     arm as the control."""
@@ -753,8 +739,9 @@ def _check_compare_targets(raw_sequence: List[str],
         if against not in raw_sequence[:position]:
             raise ConfigError(
                 f"phases.{name}.compare.against is {against!r}, which is "
-                "not 'fresh_bare' and does not appear earlier in the "
-                f"sequence; earlier phases: {raw_sequence[:position]}")
+                "not 'fresh_bare' or 'external_campaign' and does not "
+                "appear earlier in the sequence; earlier phases: "
+                f"{raw_sequence[:position]}")
         target = specs[against]
         if not isinstance(target, ExecutePhaseSpec) or \
                 target.role != PHASE_ROLE_BASELINE:
@@ -874,11 +861,11 @@ def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:
 
 def _validate_split(split: Dict[str, Any]) -> None:
     keys = frozenset(split)
-    if keys in (frozenset({"train", "test"}),
-                frozenset({"train", "test", "reserved"})):
+    if keys in SPLIT_LIST_KEY_SETS:
         for name in ("train", "test", "reserved"):
             value = split.get(name)
-            if value is None:
+            if value is None and name == "reserved":
+                # Held back means empty (split_tasks reads it as []).
                 continue
             if (not isinstance(value, list)
                     or not all(isinstance(t, str) for t in value)):
@@ -1048,16 +1035,29 @@ class ExperimentConfig:
             raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
         if not self.benchmark:
             raise ValueError("benchmark is required")
-        if self.n_attempts_strong < 1 or self.n_attempts_weak < 1:
-            raise ValueError("n_attempts_strong and n_attempts_weak must be >= 1")
+        if not (_is_positive_int(self.n_attempts_strong)
+                and _is_positive_int(self.n_attempts_weak)):
+            raise ValueError(
+                "n_attempts_strong and n_attempts_weak must be positive "
+                f"ints, got {self.n_attempts_strong!r} and "
+                f"{self.n_attempts_weak!r}")
         if self.split is not None:
             _validate_split(self.split)
         self.tasks = _normalise_tasks(self.tasks)
         # The phase sequence: parsed here (the load-time checklist runs
         # before anything freezes), whether the caller handed raw
         # mappings (YAML / a frozen manifest) or already-parsed specs
-        # (dataclasses.replace on a loaded config). Deep-copied inside,
-        # so the frozen value never aliases the caller's mapping.
+        # (dataclasses.replace on a loaded config). The types are checked
+        # before anything is converted, so a string sequence is refused
+        # instead of split into letters.
+        if not isinstance(self.sequence, (list, tuple)) or not self.sequence:
+            raise ConfigError(
+                "sequence must be a non-empty list of phase names, got "
+                f"{self.sequence!r}")
+        if not isinstance(self.phases, dict) or not self.phases:
+            raise ConfigError(
+                "phases must be a non-empty mapping of phase name -> "
+                f"definition, got {self.phases!r}")
         self.sequence = list(self.sequence)
         raw_phases = {
             name: (phase_spec_to_raw(spec)
@@ -1066,7 +1066,6 @@ class ExperimentConfig:
             for name, spec in self.phases.items()}
         self.phases = parse_phases(
             raw_phases, self.sequence,
-            n_attempts_strong=self.n_attempts_strong,
             n_attempts_weak=self.n_attempts_weak)
         if not _is_positive_int(self.invalid_redispatch_limit):
             raise ConfigError(
@@ -1099,12 +1098,8 @@ class ExperimentConfig:
                 "models must define 'executor_strong' and 'executor_weak'")
         # Fill the role table from the data defaults: the answerer uses
         # the weak model by design, everything else answers with the
-        # strong one; a None anchor stays absent -- the pipeline's
-        # handle builder refuses a missing role, so a must-configure
-        # role cannot silently fall back.
+        # strong one.
         for role, anchor in ROLE_DEFAULTS.items():
-            if anchor is None:
-                continue
             self.models.setdefault(role, weak if anchor == "weak" else strong)
         # Extra per-model chat-call parameters: keyed by model NAME, so they
         # are validated against the completed role table (any model a role
@@ -1156,14 +1151,6 @@ class ExperimentConfig:
         # re-validation is a no-op on an already-valid structure.
         self.token_budgets = _validate_token_budgets(self.token_budgets)
 
-    def model_for(self, role: str) -> str:
-        """Model name for a role (KeyError with the known roles on a typo)."""
-        try:
-            return self.models[role]
-        except KeyError:
-            raise KeyError(
-                f"unknown model role {role!r}; known: {sorted(self.models)}") from None
-
     def max_output_tokens_for(self, role: str) -> int:
         """Effective output cap for a role.
 
@@ -1208,25 +1195,8 @@ class ExperimentConfig:
         # config IS the experiment's identity: an unknown key is a typo or
         # a version mismatch, and dropping it silently once ran a new config
         # on old code with dead defaults.
-        version = data.get("schema_version", CONFIG_SCHEMA_VERSION)
-        if not isinstance(version, int) or isinstance(version, bool):
-            raise ConfigError(
-                f"schema_version must be an int, got {version!r}")
-        if version > CONFIG_SCHEMA_VERSION:
-            raise ConfigError(
-                f"config schema_version is {version}, newer than this code's "
-                f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
-                "update the repository and retry")
-        if version < CONFIG_SCHEMA_VERSION:
-            raise ConfigError(
-                f"config schema_version is {version}; this code speaks "
-                f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
-                "convert the config with upgrade_v3_config (the converter "
-                "script scripts/run/convert_v3_configs.py writes NEW file "
-                "names; v3 files are frozen experiment records; a v2 file "
-                "chains through upgrade_v2_config first), and resume runs "
-                "frozen under an older schema on their maintenance branch "
-                "(AGENTS section 6)")
+        _check_schema_version(
+            data.get("schema_version", CONFIG_SCHEMA_VERSION), "config")
         unknown = [key for key in data if key not in known]
         if unknown:
             raise ConfigError(
@@ -1235,364 +1205,37 @@ class ExperimentConfig:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def upgrade_v2_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Map a schema-v2 CONFIG dict (a raw YAML mapping, or a frozen
-    manifest's ``config`` entry) to the v3 shape. Pure stdlib, copy in /
-    copy out; the two users are the one-time converter script and
-    ``assemble_reuse`` reading a v2 source run's manifest for the identity
-    walk.
-
-    Deliberate identity changes, disclosed here and in the converter's
-    diff output: (1) the v2 top-level ``retry_limit`` was the exam
-    protocol's rewrite budget, unused by live_run -- a v2 live_run config's
-    value is DROPPED; (2) the three v2 spellings of "exam" (the key
-    absent, ``{}``, ``{mode: exam}``) map to the same v3 value; (3) v2's
-    ``{mode: whole_bank}`` becomes ``{name: whole_bank}``. Everything
-    else moves key-for-key into the slot that owns it.
-    """
-    v2 = copy.deepcopy(data)
-    methods: Dict[str, Dict[str, Any]] = {
-        "segmentation": {
-            "K": v2.pop("K", 5),
-            "retry_limit": v2.pop("segment_retry_limit", 2),
-        },
-        "authoring": {"exams": True},
-        "curation": {
-            "name": "agentbrew",
-            "token_budget": v2.pop("bank_token_budget", 4096),
-            "rounds": v2.pop("curation_rounds", 3),
-        },
-    }
-    acceptance = v2.pop("acceptance", None)
-    if acceptance is None or not acceptance or acceptance.get(
-            "mode", "exam") == "exam":
-        # All three v2 spellings of the exam protocol map to one value.
-        methods["acceptance"] = {
-            "name": "exam",
-            "retry_limit": v2.pop("retry_limit", 2),
-        }
-    else:
-        # live_run never read the top-level retry_limit; dropping it is a
-        # disclosed identity change, not a loss.
-        v2.pop("retry_limit", None)
-        methods["acceptance"] = {
-            "name": "live_run",
-            **{key: acceptance[key] for key in
-               ("n_attempts", "improvement", "max_injection_tokens")
-               if key in acceptance},
-        }
-    delivery = v2.pop("skill_delivery", None) or {"mode": "whole_bank"}
-    if delivery.get("mode", "whole_bank") == "whole_bank":
-        methods["delivery"] = {"name": "whole_bank"}
-    else:
-        methods["delivery"] = {
-            "name": delivery["mode"],
-            **{key: delivery[key] for key in
-               ("top_k", "max_categories", "min_score") if key in delivery},
-        }
-    v2["methods"] = methods
-    v2["schema_version"] = 3
-    return v2
-
-
-def _refuse_unmapped_keys(slot: str, given: Dict[str, Any],
-                          mapped: Any) -> None:
-    """Refuse slot keys the v3 -> v4 mapping has no destination for.
-
-    A key that neither moves into a phase nor is copied verbatim would
-    be silently dropped, and a dropped config key is a changed
-    experiment identity -- the same trap as the unknown top-level key.
-    """
-    unknown = sorted(set(given) - set(mapped), key=str)
-    if unknown:
+def _check_schema_version(version: Any, where: str) -> None:
+    """Refuse a schema version other than this code's, naming the remedy:
+    newer code for a newer config, the converter for an older one."""
+    if not isinstance(version, int) or isinstance(version, bool):
         raise ConfigError(
-            f"methods.{slot} has key(s) {unknown} with no v4 destination; "
-            f"the mapping moves {list(mapped)} -- refusing rather than "
-            "dropping them")
-
-
-def _v3_methods(methods: Any) -> Dict[str, Dict[str, Any]]:
-    """Validate and complete a v3 ``methods`` mapping (upgrade_v3_config's
-    input side; the v4 loader has no slots). Same contract the v3 loader's
-    ``_validate_methods`` had: five known slots, an absent/null/empty slot
-    completes from ``_V3_METHOD_DEFAULTS``, a non-empty mapping freezes
-    verbatim."""
-    if not isinstance(methods, dict):
+            f"{where}: schema_version must be an int, got {version!r}")
+    if version > CONFIG_SCHEMA_VERSION:
         raise ConfigError(
-            f"methods must be a mapping, got {type(methods).__name__}")
-    unknown = sorted(set(methods) - set(_V3_METHOD_DEFAULTS), key=str)
-    if unknown:
+            f"{where} has schema_version {version}, newer than this code's "
+            f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
+            "update the repository and retry")
+    if version < CONFIG_SCHEMA_VERSION:
         raise ConfigError(
-            f"methods has unknown slot(s) {unknown}; the slots are "
-            f"{list(_V3_METHOD_DEFAULTS)}")
-    completed: Dict[str, Dict[str, Any]] = {}
-    for slot, default in _V3_METHOD_DEFAULTS.items():
-        given = methods.get(slot)
-        if given is not None and not isinstance(given, dict):
-            raise ConfigError(
-                f"methods.{slot} must be a mapping of parameter names to "
-                f"values, got {type(given).__name__}")
-        completed[slot] = dict(given) if given else dict(default)
-    return completed
+            f"{where} has schema_version {version}; this code speaks "
+            f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
+            "convert it with upgrade_v3_config (the converter script "
+            "scripts/run/convert_v3_configs.py writes NEW file names; "
+            "v3 files are frozen experiment records; a v2 file chains "
+            "through upgrade_v2_config first), and resume runs frozen "
+            "under an older schema on their maintenance branch "
+            "(AGENTS section 6)")
 
 
-def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Map a schema-v3 CONFIG dict (a raw YAML mapping, or a frozen v3
-    manifest's ``config`` entry) to the v4 phase-sequence shape (docs/
-    decisions/execute_learn_implementation_20261015.md section 4). Pure
-    stdlib, copy in / copy out; the consumers are the one-time v3 -> v4
-    converter and the reuse assembler's identity walk, both of which
-    chain v1/v2 sources through ``upgrade_v2_config`` first.
-
-    The result carries ``schema_version: 4`` as DATA only: this code
-    still speaks v3 (``CONFIG_SCHEMA_VERSION`` flips with the M4.3
-    core, whose loader learns ``sequence``/``phases``), so the output
-    does not load yet and the converter writes it under new file names.
-
-    The emitted shapes are exactly what schema v4's ``parse_phases``
-    accepts: every phase declares its R8 role (D baseline, A exam, B
-    live, C test, L learn), and the v4-only global
-    ``invalid_redispatch_limit`` is emitted at its default.
-
-    Deliberate identity changes, disclosed here and in the converter's
-    diff output:
-
-    * the acceptance method dissolves into the SEQUENCE -- exam with
-      ``retry_limit=R`` becomes ``[D, L] + [A, L] x (R+1) + [C]`` (the
-      K4 answer rounds), live_run becomes ``[D, L, B, L, B, L, C]`` --
-      and live_run's ``n_attempts`` / ``improvement`` /
-      ``max_injection_tokens`` move into the B phase;
-    * a live_run config's merges are no longer proven on regression
-      exams: ``L.curate.merge_check = none`` (the live sequence has no
-      exam phase to check against; merges are proven by the round-1
-      group re-execution instead). An explicit ``merge_check`` in the
-      curation slot is preserved -- except ``exam`` under live_run,
-      which has no v4 image and is refused;
-    * the authoring ``exams`` switch is deleted: true is implied by
-      every emitted sequence; false converts only as the one legal
-      ablation pair (live_run acceptance + curation ``none`` -- the
-      same boundary v3's own cross-slot check draws) and is refused
-      otherwise. A live sequence has no A phase either way, so the
-      ablation pair upgrades to the identical shape;
-    * the five ``methods`` slots are deleted; delivery and curation
-      params move key-for-key into the C and L phases.
-
-    Absent, null or empty slots complete from the v3 defaults
-    (``_V3_METHOD_DEFAULTS``) exactly as the v3 loader froze them, so the output is the v4
-    identity of what the same file loads as. Everything else -- rules,
-    budgets, the role table, weak_profile, mode, split, tasks,
-    model_options, prompts_digests -- passes through untouched. Inputs
-    that are not v3-shaped fail loudly: a non-mapping (TypeError, the
-    ``from_dict`` precedent), a config already carrying v4 keys, and a
-    config without a ``methods`` mapping (a v1/v2 config: chain
-    ``upgrade_v2_config`` first).
-    """
-    if not isinstance(data, dict):
-        raise TypeError(
-            f"config must be a mapping, got {type(data).__name__}")
-    carried = [key for key in ("sequence", "phases") if key in data]
-    if carried:
-        raise ConfigError(
-            f"the config already carries {carried} -- v4 keys naming the "
-            "phases; upgrade_v3_config maps v3 -> v4 and an already-v4 "
-            "config has nothing to upgrade")
-    methods_given = data.get("methods")
-    if not isinstance(methods_given, dict):
-        raise ConfigError(
-            "upgrade_v3_config needs a schema-v3 config (the method "
-            "parameters live under 'methods', got "
-            f"{type(methods_given).__name__}); a v1 or v2 config chains "
-            "through upgrade_v2_config first, and a v4 config is already "
-            "upgraded")
-    mode = data.get("mode")
-    if mode not in MODES:
-        raise ConfigError(f"mode must be one of {MODES}, got {mode!r}")
-    v4 = copy.deepcopy(data)
-    methods = _v3_methods(v4.pop("methods"))
-
-    # -- segmentation -> L.evidence (the add path's cutting budget) -----
-    segmentation = methods["segmentation"]
-    seg_name = segmentation.get("name", "llm")
-    if seg_name != "llm":
-        raise ConfigError(
-            f"methods.segmentation name {seg_name!r} has no v4 mapping; "
-            "the v3 LLM splitter is the evidence method 'segment'")
-    _refuse_unmapped_keys("segmentation", segmentation,
-                          ("name", "K", "retry_limit"))
-    if "K" not in segmentation:
-        raise ConfigError(
-            "methods.segmentation method 'llm' is missing required "
-            "parameter 'K'")
-    evidence = {
-        "name": "segment",
-        "K": segmentation["K"],
-        "retry_limit": segmentation.get(
-            "retry_limit", _V3_METHOD_DEFAULTS["segmentation"]["retry_limit"]),
-    }
-
-    # -- authoring -> L.author (the exams switch dies with the slot) ----
-    authoring = methods["authoring"]
-    auth_name = authoring.get("name", "distill_diagnose")
-    if auth_name != "distill_diagnose":
-        raise ConfigError(
-            f"methods.authoring name {auth_name!r} has no v4 mapping; the "
-            "v3 authoring method is the author family's "
-            "'distill_diagnose'")
-    _refuse_unmapped_keys("authoring", authoring, ("name", "exams"))
-    exams = authoring.get("exams", _V3_METHOD_DEFAULTS["authoring"]["exams"])
-    if not isinstance(exams, bool):
-        raise ConfigError(
-            f"methods.authoring.exams must be a bool, got {exams!r}")
-
-    # -- acceptance -> the sequence (and the B phase for live_run) ------
-    acceptance = methods["acceptance"]
-    kind = acceptance.get("name")
-    if kind is None:
-        raise ConfigError(
-            "methods.acceptance needs a name; known: ['exam', 'live_run']")
-    if kind not in ("exam", "live_run"):
-        raise ConfigError(
-            f"methods.acceptance name {kind!r} has no v4 mapping; the "
-            "sequence derives from 'exam' or 'live_run'")
-
-    # -- curation -> L.curate (merge_check follows the acceptance) ------
-    curation = methods["curation"]
-    curate_name = curation.get("name")
-    if curate_name is None:
-        raise ConfigError(
-            "methods.curation needs a name; known: ['agentbrew', 'none']")
-    if curate_name == "agentbrew":
-        _refuse_unmapped_keys("curation", curation,
-                              ("name", "token_budget", "rounds",
-                               "merge_check"))
-        if "token_budget" not in curation:
-            raise ConfigError(
-                "methods.curation method 'agentbrew' is missing required "
-                "parameter 'token_budget'")
-        merge_check = curation.get("merge_check")
-        if merge_check is None:
-            # The mapping's derivation: exam acceptance proves merges on
-            # the generated exams; live_run has no exam phase (merges are
-            # proven by the round-1 group re-execution instead).
-            merge_check = "exam" if kind == "exam" else "none"
-        elif kind == "live_run" and merge_check == "exam":
-            raise ConfigError(
-                "methods.curation.agentbrew merge_check is 'exam' but the "
-                "acceptance method is 'live_run': the v4 live sequence "
-                "generates no exams to check merges against (drop the "
-                "explicit merge_check or use exam acceptance)")
-        curate = {
-            "name": "agentbrew",
-            "merge_check": merge_check,
-            "token_budget": curation["token_budget"],
-            "rounds": curation.get(
-                "rounds", _V3_METHOD_DEFAULTS["curation"]["rounds"]),
-        }
-    elif curate_name == "none":
-        _refuse_unmapped_keys("curation", curation,
-                              ("name", "token_budget"))
-        if "token_budget" not in curation:
-            raise ConfigError(
-                "methods.curation method 'none' is missing required "
-                "parameter 'token_budget'")
-        curate = {"name": "none", "token_budget": curation["token_budget"]}
-    else:
-        raise ConfigError(
-            f"methods.curation name {curate_name!r} has no v4 mapping; "
-            "the curate family offers 'agentbrew' and 'none'")
-
-    if not exams and not (kind == "live_run" and curate_name == "none"):
-        raise ConfigError(
-            "methods.authoring.exams is false but the combination "
-            f"(acceptance {kind!r}, curation {curate_name!r}) has no v4 "
-            "image: exam generation off converts only with live_run "
-            "acceptance and curation 'none' -- the one legal ablation "
-            "pair, the same boundary v3's own cross-slot check draws")
-
-    # -- delivery -> C.delivery, verbatim (same name, same params) ------
-    delivery = methods["delivery"]
-    if "name" not in delivery:
-        raise ConfigError(
-            "methods.delivery needs a name; known: ['whole_bank', "
-            "'retrieval', 'none', 'per_skill', 'group_by_task']")
-
-    # -- the phases (section 4's shapes, fixed construction order) ------
-    phases: Dict[str, Any] = {
-        "D": {
-            "kind": "execute",
-            "role": PHASE_ROLE_BASELINE,
-            "tasks": "train",
-            "delivery": {"name": "none"},
-            "execution": {"name": "real",
-                          "arms": ["executor_strong", "executor_weak"]},
-        },
-        "L": {
-            "kind": "learn",
-            "role": PHASE_ROLE_LEARN,
-            "evidence": evidence,
-            "author": {"name": "distill_diagnose"},
-            "curate": curate,
-        },
-    }
-    if kind == "exam":
-        _refuse_unmapped_keys("acceptance", acceptance,
-                              ("name", "retry_limit"))
-        retry_limit = acceptance.get(
-            "retry_limit", _V3_METHOD_DEFAULTS["acceptance"]["retry_limit"])
-        if (not isinstance(retry_limit, int) or isinstance(retry_limit, bool)
-                or retry_limit < 0):
-            raise ConfigError(
-                "methods.acceptance.exam retry_limit must be an int >= 0 "
-                f"(the sequence carries retry_limit + 1 A phases), got "
-                f"{retry_limit!r}")
-        phases["A"] = {
-            "kind": "execute",
-            "role": PHASE_ROLE_EXAM,
-            "delivery": {"name": "per_skill"},
-            "execution": {"name": "exam"},
-        }
-        sequence = ["D", "L"] + ["A", "L"] * (retry_limit + 1) + ["C"]
-    else:
-        _refuse_unmapped_keys("acceptance", acceptance,
-                              ("name", "n_attempts", "improvement",
-                               "max_injection_tokens"))
-        for key in ("n_attempts", "improvement"):
-            if key not in acceptance:
-                raise ConfigError(
-                    "methods.acceptance method 'live_run' is missing "
-                    f"required parameter {key!r}")
-        phases["B"] = {
-            "kind": "execute",
-            "role": PHASE_ROLE_LIVE,
-            "delivery": {"name": "group_by_task"},
-            "execution": {
-                "name": "real",
-                "n_attempts": acceptance["n_attempts"],
-                "max_injection_tokens": acceptance.get(
-                    "max_injection_tokens"),
-            },
-            "compare": {"against": "D", "rule": acceptance["improvement"]},
-        }
-        sequence = ["D", "L", "B", "L", "B", "L", "C"]
-    phases["C"] = {
-        "kind": "execute",
-        "role": PHASE_ROLE_TEST,
-        "tasks": "test",
-        "delivery": delivery,
-        "execution": {"name": "real"},
-        # Split mode runs its own fresh bare control arm on the test set;
-        # full mode reuses D's weak arm (and its accepted holes).
-        "compare": ({"against": "D"} if mode == "full"
-                    else {"against": "fresh_bare"}),
-    }
-    v4["sequence"] = sequence
-    v4["phases"] = phases
-    # The v4-only global the v3 file cannot name: emit the default so the
-    # converted identity is complete (complete-don't-reject) and a later
-    # default change never silently re-identifies a converted config.
-    v4["invalid_redispatch_limit"] = DEFAULT_INVALID_REDISPATCH_LIMIT
-    v4["schema_version"] = 4
-    return v4
+def _absolute_path(value: str, config_dir: Path) -> str:
+    """A path from the config file as the absolute string the manifest
+    freezes: ``~`` expanded, a relative path taken relative to the config
+    file's directory (never the cwd a run or resume started from)."""
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = config_dir / path
+    return str(path.resolve())
 
 
 def load_config(path: str) -> ExperimentConfig:
@@ -1616,8 +1259,6 @@ def load_config(path: str) -> ExperimentConfig:
     """
     import yaml  # function-local: see the module docstring
 
-    from pathlib import Path
-
     config_path = Path(path)
     # Relative paths inside the config are relative to the REAL config
     # file: loading it through a symlink must not change what they name.
@@ -1626,25 +1267,8 @@ def load_config(path: str) -> ExperimentConfig:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
-    version = data.get("schema_version", 3)
-    if not isinstance(version, int) or isinstance(version, bool):
-        raise ConfigError(
-            f"{path}: schema_version must be an int, got {version!r}")
-    if version > CONFIG_SCHEMA_VERSION:
-        raise ConfigError(
-            f"{path} has schema_version {version}, newer than this code's "
-            f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
-            "update the repository and retry")
-    if version < CONFIG_SCHEMA_VERSION:
-        raise ConfigError(
-            f"{path} has schema_version {version}; this code speaks "
-            f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
-            "convert it with upgrade_v3_config (the converter script "
-            "scripts/run/convert_v3_configs.py writes NEW file names; "
-            "v3 files are frozen experiment records; a v2 file chains "
-            "through upgrade_v2_config first), and resume runs frozen "
-            "under an older schema on their maintenance branch "
-            "(AGENTS section 6)")
+    # A file without schema_version predates v4, so it is refused.
+    _check_schema_version(data.get("schema_version", 3), str(path))
     known_file_keys = ({f.name for f in fields(ExperimentConfig)}
                        | {"weak_profile_file"})
     unknown = [key for key in data if key not in known_file_keys]
@@ -1664,10 +1288,7 @@ def load_config(path: str) -> ExperimentConfig:
             data["weak_profile"] = fh.read()
     tasks = data.get("tasks")
     if isinstance(tasks, str) and tasks.strip():
-        tasks_path = Path(tasks).expanduser()
-        if not tasks_path.is_absolute():
-            tasks_path = config_dir / tasks_path
-        data["tasks"] = str(tasks_path.resolve())
+        data["tasks"] = _absolute_path(tasks, config_dir)
     # The external-campaign score file follows the tasks-path rule: a
     # relative path names a file relative to the config file, and the
     # frozen value is absolute, so the control's identity never depends
@@ -1681,10 +1302,7 @@ def load_config(path: str) -> ExperimentConfig:
         external = compare.get("external")
         if not isinstance(external, dict) or "path" not in external:
             continue
-        external_path = Path(external["path"]).expanduser()
-        if not external_path.is_absolute():
-            external_path = config_dir / external_path
-        external["path"] = str(external_path.resolve())
+        external["path"] = _absolute_path(external["path"], config_dir)
     return ExperimentConfig.from_dict(data)
 
 
@@ -1694,3 +1312,12 @@ def save_config(config: ExperimentConfig, path: str) -> None:
 
     with open(path, "w", encoding="utf-8") as fh:
         yaml.safe_dump(config.to_dict(), fh, sort_keys=True, allow_unicode=True)
+
+
+# The upgrade mappings live in core.config_upgrade; re-exported so callers
+# keep importing them from core.config. Imported last: that module needs
+# the names defined above.
+from expedistill.core.config_upgrade import (  # noqa: E402
+    upgrade_v2_config as upgrade_v2_config,
+    upgrade_v3_config as upgrade_v3_config,
+)

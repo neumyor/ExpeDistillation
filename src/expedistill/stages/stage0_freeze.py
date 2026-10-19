@@ -172,7 +172,7 @@ def _explicit_split_ids(config: Any) -> Optional[List[str]]:
     return None
 
 
-def _tasks_spec(config: Any) -> Union[None, str, List[str]]:
+def tasks_spec(config: Any) -> Union[None, str, List[str]]:
     """What D1 should load: ``config.tasks`` if given, else the union of
     explicit split lists, else the plugin's full set (None)."""
     if config.tasks is not None:
@@ -359,7 +359,7 @@ def run(ctx: StageContext) -> Dict[str, Any]:
                 "continue it on its maintenance branch (the run's own "
                 "checkout, AGENTS section 6), or assemble a new run from "
                 "it")
-    tasks = tasks_block.load_tasks(config.benchmark, _tasks_spec(config))
+    tasks = tasks_block.load_tasks(config.benchmark, tasks_spec(config))
     _check_unique_ids(tasks)
     _check_split_covers_task_set(config, tasks)
 

@@ -34,13 +34,14 @@ from typing import (
 )
 
 from expedistill.blocks.metrics import compute_task_metrics
+from expedistill.composites import shortfall
 from expedistill.core import ids
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
 )
-from expedistill.infra.store import Store, read_json, read_jsonl
+from expedistill.infra.store import Store, read_jsonl
 from expedistill.inject.skills import estimate_tokens, format_skills_block
 
 __all__ = [
@@ -169,25 +170,6 @@ def _parse_unit(unit_id: str) -> Tuple[str, str, int]:
         raise CodeBugError(
             f"malformed trajectory unit id {unit_id!r} in a shortfall "
             "record") from None
-
-
-def _read_stage1_accepted(store: Store) -> List[str]:
-    """Stage 1's accepted-hole unit ids (both arms, all tasks) from the
-    durable record. Composites may not import the stage that owns the
-    writer, so the reader is restated here with the same fail-loud
-    contract."""
-    path = store.run_dir / "stage1_baseline" / "accepted_infra_shortfall.json"
-    if not path.exists():
-        return []
-    try:
-        unit_ids = read_json(path)["unit_ids"]
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CodeBugError(
-            f"unreadable accepted-shortfall record {path}: {exc}") from None
-    if not isinstance(unit_ids, list) or not all(
-            isinstance(unit_id, str) for unit_id in unit_ids):
-        raise CodeBugError(f"invalid accepted-shortfall record {path}")
-    return unit_ids
 
 
 def _unit_ids(task_id: str, n_attempts: int) -> List[str]:
@@ -323,7 +305,7 @@ def load_baseline(
     the rate comparison stays aligned (decision section 2.4).
     """
     accepted = set()
-    for unit_id in _read_stage1_accepted(store):
+    for unit_id in shortfall.stage1_accepted_unit_ids(store.run_dir):
         unit_task, role, _ = _parse_unit(unit_id)
         if role == "weak" and unit_task == task_id:
             accepted.add(unit_id)

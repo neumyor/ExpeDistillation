@@ -109,10 +109,6 @@ class TestRoleTable:
                                   "answerer": "model-s"})
         assert cfg.models["answerer"] == "model-s"
 
-    def test_model_for_reports_typo(self):
-        with pytest.raises(KeyError, match="known"):
-            make_config().model_for("juge")
-
     def test_unknown_role_rejected(self):
         with pytest.raises(ValueError, match="oracle"):
             make_config(models={"executor_strong": "model-s",
@@ -153,10 +149,42 @@ class TestValidation:
         with pytest.raises(ConfigError, match="leak_threshold"):
             load_config(str(cfg_file))
 
-    @pytest.mark.parametrize("attempts", [0, -1])
+    @pytest.mark.parametrize("attempts", [0, -1, True, 1.5, "2"])
     def test_attempts_must_be_positive(self, attempts):
         with pytest.raises(ValueError, match="n_attempts"):
             make_config(n_attempts_weak=attempts)
+
+    @pytest.mark.parametrize("split", [
+        {"train": None, "test": ["a"]},
+        {"train": ["a"], "test": None},
+    ])
+    def test_split_train_and_test_lists_are_required(self, split):
+        # Only the held-back reserved list may be null.
+        with pytest.raises(ValueError, match="must be a list"):
+            make_config(mode="split", split=split)
+
+    def test_split_reserved_may_be_null(self):
+        make_config(mode="split",
+                    split={"train": ["a"], "test": ["b"], "reserved": None})
+
+    @pytest.mark.parametrize("sequence", ["DLC", None, []])
+    def test_sequence_must_be_a_list_before_parsing(self, sequence):
+        # A string must not be split into one-letter phase names, and a
+        # null must surface as a ConfigError, not a TypeError.
+        with pytest.raises(ConfigError, match="sequence must be"):
+            make_config(sequence=sequence)
+
+    @pytest.mark.parametrize("phases", [[], None, {}])
+    def test_phases_must_be_a_mapping_before_parsing(self, phases):
+        with pytest.raises(ConfigError, match="phases must be"):
+            make_config(phases=phases)
+
+    def test_test_role_refuses_the_exam_execution(self):
+        phases = copy.deepcopy(MIN_PHASES)
+        phases["C"]["execution"] = {"name": "exam"}
+        with pytest.raises(ConfigError,
+                           match="that role runs 'real' or 'real_folder'"):
+            make_config(phases=phases)
 
     def test_split_explicit_lists(self):
         cfg = make_config(mode="split",
@@ -376,7 +404,7 @@ class TestTokenBudgets:
 
     def test_unknown_helper_role_is_a_caller_bug(self):
         # A typo'd role silently falling back to the default cap would make
-        # a budget bug invisible; like model_for, it is a KeyError.
+        # a budget bug invisible; it is a KeyError.
         cfg = make_config(token_budgets=FULL_BUDGETS)
         with pytest.raises(KeyError, match="known"):
             cfg.max_output_tokens_for("juge")

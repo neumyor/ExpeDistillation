@@ -100,6 +100,17 @@ def object_id(obj: Any, kind: Optional[str] = None) -> str:
         f"{_ID_FIELDS}; it cannot be stored")
 
 
+def object_filename(obj_id: str) -> str:
+    """Filename of a stored object: the percent-encoded ID (IDs contain '/'
+    and ':', which are fine in JSON but not as path segments)."""
+    return urllib.parse.quote(obj_id, safe="") + ".json"
+
+
+def object_id_of_file(path: Path) -> str:
+    """The object ID a stored object's file name encodes."""
+    return urllib.parse.unquote(Path(path).stem)
+
+
 def kind_for(obj: Any) -> str:
     """The store kind of ``obj`` by its type (cheap convenience for callers)."""
     for cls, kind in _TYPE_KINDS:
@@ -365,10 +376,7 @@ class Store:
                 f"unknown object kind {kind!r}; known kinds: {known}") from None
 
     def path_for(self, kind: str, obj_id: str) -> Path:
-        """Filename is the percent-encoded ID: IDs contain '/' and ':' which
-        are fine in JSON but not as path segments."""
-        return self.dir_for(kind) / (urllib.parse.quote(obj_id, safe="")
-                                     + ".json")
+        return self.dir_for(kind) / object_filename(obj_id)
 
     def save(self, obj: Any, kind: str) -> Path:
         """Atomically write ``obj``; returns the path written."""
@@ -390,8 +398,7 @@ class Store:
         """All stored object IDs of ``kind``, sorted (decoded, not encoded)."""
         directory = self.dir_for(kind)
         return sorted(
-            urllib.parse.unquote(path.stem)
-            for path in directory.glob("*.json"))
+            object_id_of_file(path) for path in directory.glob("*.json"))
 
     def append_bank(self, skill_dict: Dict[str, Any]) -> None:
         """Append one accepted skill to skill_bank.jsonl (stage 5 output).

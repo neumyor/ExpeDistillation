@@ -89,8 +89,8 @@ src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     ids.py                确定性 ID 规则
-    config.py             实验配置结构（schema v4：sequence + phases）、模型角色表、
-                          v2→v3→v4 升级纯函数
+    config.py             实验配置结构（schema v4：sequence + phases）、模型角色表
+    config_upgrade.py     v2→v3→v4 升级纯函数（config.py 重新导出）
     contracts.py          执行—学习循环的四个交接数据类（执行单元行 / 运行记录 /
                           验收报告行 / 任务清单行，R0 冻结的接口形状）
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
@@ -153,6 +153,7 @@ src/expedistill/
     acceptance_skill_status.py  从存量记录读出 skill 状态、考题的已判作答
                           序列与裸答（报告读取器与 A 相位驱动共用）
     curation.py           K5
+    curation_waves.py     K5 每轮的单元规划（纯函数：分波、去重、派发编号）
     live_measurement.py   K6 测量部分（R0 拆分：live_run 路径与账本名、组推导、
                           基线读取、注入审计行、幸存组推导、轨迹视图的
                           预算裁剪）
@@ -278,7 +279,6 @@ scripts/
   run/        启动实验：按配置调用 cli，例如 run_experiment.sh <配置名>
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
               freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
-              convert_v2_configs.py：一次性 schema v2→v3 配置转换（写新文件名）
               convert_v3_configs.py：一次性 schema v3→v4 配置转换（写新文件名；
                                   显式传入 v2 文件时在内存里链式走 v2→v3→v4）
               launch_tb21_live_run.py：正式实验的 detached 启动器
@@ -310,8 +310,7 @@ configs/
                  采样次数、相位序列（sequence + phases，方法参数全部在相位
                  定义里）、无效重派预算、具名规则的名字；
                  schema_version 4（v1/v2/v3 文件是冻结的历史记录，转换走
-                 scripts/run/convert_v2_configs.py 与 convert_v3_configs.py，
-                 结果写新文件名）
+                 scripts/run/convert_v3_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
   seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，
                  字节级拷贝 + sha256 由实验配置钉住；本仓库不修改它，
