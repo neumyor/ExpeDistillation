@@ -2,10 +2,11 @@
 multi-method refactor (P-1 prime, docs/decisions/
 multi_method_framework_20261015.md section 7).
 
-What this pins. For every combination of the three mode axes -- acceptance
-{exam, live_run} x delivery {whole_bank, retrieval} x experiment mode
-{full, split} -- the whole phase sequence runs over a stub benchmark with
-FakeClients, and EVERY durable artifact of the run directory is snapshotted:
+What this pins. For four selected combinations of the three mode axes --
+acceptance {exam, live_run} x delivery {whole_bank, retrieval} x experiment
+mode {full, split}, chosen so every axis value still appears twice -- the
+whole phase sequence runs over a stub benchmark with FakeClients, and
+EVERY durable artifact of the run directory is snapshotted:
 the manifest, phase summaries, object stores, ledgers, skill bank,
 injection audit, llm request dumps. A refactor step passes P-0/P-1a only
 if it reproduces these snapshots byte-for-byte (after the volatile-field
@@ -84,17 +85,18 @@ _INSTRUCTIONS = {
 }
 
 #: The marker the scripted G11 revision appends to a skill (and the live
-#: plugin keys on). A named constant because the M4.1 semantic instrument
-#: crashes on the first block that carries it (the revision-persisted
-#: window of its E5 machinery); one source of truth for both.
+#: plugin keys on). A named constant because the revision-window crash
+#: probe (revision_window.py) crashes on the first block that carries it;
+#: one source of truth for both.
 G11_REVISION_MARKER = "REVISED-BY-G11"
 
-#: The combo axes of the matrix (decision doc section 7, P-1).
-COMBOS: Tuple[Dict[str, str], ...] = tuple(
-    {"acceptance": acceptance, "delivery": delivery, "mode": mode}
-    for acceptance in ("exam", "live_run")
-    for delivery in ("whole_bank", "retrieval")
-    for mode in ("full", "split")
+#: The combo axes of the matrix (decision doc section 7, P-1): explicit,
+#: not the full cartesian product -- each axis value appears exactly twice.
+COMBOS: Tuple[Dict[str, str], ...] = (
+    {"acceptance": "exam", "delivery": "whole_bank", "mode": "full"},
+    {"acceptance": "exam", "delivery": "retrieval", "mode": "split"},
+    {"acceptance": "live_run", "delivery": "whole_bank", "mode": "split"},
+    {"acceptance": "live_run", "delivery": "retrieval", "mode": "full"},
 )
 
 

@@ -11,7 +11,7 @@ Three subcommands:
   not from a progress guess). The ledger row's key stays ``"stage"``
   (consumer compatibility): its value is ``p00:freeze`` for the freeze
   step, then ``pNN:<local name>`` for sequence entry i (0-based), with
-  ``NN = i + 1`` -- the numbering tests/golden/semantics.py froze.
+  ``NN = i + 1`` -- the frozen phase numbering.
   ``--until-phase N`` stops after sequence entry N (0-based) for smoke
   tests and pilots; ``-1`` stops right after the freeze step (the task
   table and the manifest on disk, no phase dispatched -- the pre-run

@@ -1278,46 +1278,32 @@ def _assemble_with_config(tmp_path, config):
     return source, config_path, tmp_path / "assembled"
 
 
-def test_identity_diff_rejects_a_changed_method_key(tmp_path):
+@pytest.mark.parametrize(
+    ("path", "key", "value", "match", "refused_before_write"),
+    [
+        (("phases", "learn", "evidence"), "K", 9,
+         r"config\.phases\.learn\.evidence\.K", True),
+        (("models",), "executor_strong", "other-strong",
+         "model_roles.executor_strong", False),
+        (("rules",), "task_select", "any_weak_failed", "rules", False),
+        ((), "weak_profile", "another profile", "weak_profile", False),
+        ((), "benchmark", "otherbench", "benchmark", False),
+    ],
+    ids=["method_key", "model_name", "rule_name", "weak_profile",
+         "benchmark"],
+)
+def test_identity_diff_rejects_a_changed_key(tmp_path, path, key, value,
+                                             match, refused_before_write):
     config = reuse_config_dict()
-    config["phases"]["learn"]["evidence"]["K"] = 9
+    target = config
+    for name in path:
+        target = target[name]
+    target[key] = value
     source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError,
-                       match=r"config\.phases\.learn\.evidence\.K"):
+    with pytest.raises(ConfigError, match=match):
         assemble_reuse(source.run_dir, config_path, run_dir)
-    assert not run_dir.exists()  # refused before anything was written
-
-
-def test_identity_diff_rejects_a_changed_model_name(tmp_path):
-    config = reuse_config_dict()
-    config["models"]["executor_strong"] = "other-strong"
-    source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="model_roles.executor_strong"):
-        assemble_reuse(source.run_dir, config_path, run_dir)
-
-
-def test_identity_diff_rejects_a_changed_rule_name(tmp_path):
-    config = reuse_config_dict()
-    config["rules"]["task_select"] = "any_weak_failed"
-    source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="rules"):
-        assemble_reuse(source.run_dir, config_path, run_dir)
-
-
-def test_identity_diff_rejects_a_changed_weak_profile(tmp_path):
-    config = reuse_config_dict()
-    config["weak_profile"] = "another profile"
-    source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="weak_profile"):
-        assemble_reuse(source.run_dir, config_path, run_dir)
-
-
-def test_identity_diff_rejects_a_changed_benchmark(tmp_path):
-    config = reuse_config_dict()
-    config["benchmark"] = "otherbench"
-    source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="benchmark"):
-        assemble_reuse(source.run_dir, config_path, run_dir)
+    if refused_before_write:
+        assert not run_dir.exists()  # refused before anything was written
 
 
 def test_identity_diff_rejects_a_renamed_test_phase(tmp_path):
@@ -1707,34 +1693,27 @@ def test_baseline_level_copies_only_trajectories_and_shortfall(tmp_path):
     assert "| trajectories | 2 |" in text
 
 
-def test_baseline_refuses_a_changed_executor_model(tmp_path):
+@pytest.mark.parametrize(
+    ("path", "key", "value", "match"),
+    [
+        (("models",), "executor_weak", "other-weak", "executor_weak"),
+        ((), "n_attempts_weak", 2, "n_attempts_weak"),
+        ((), "benchmark", "otherbench", "otherbench"),
+    ],
+    ids=["executor_model", "n_attempts", "benchmark"],
+)
+def test_baseline_refuses_a_changed_pinned_key(tmp_path, path, key, value,
+                                               match):
     config = baseline_config_dict()
-    config["models"]["executor_weak"] = "other-weak"
+    target = config
+    for name in path:
+        target = target[name]
+    target[key] = value
     source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="executor_weak"):
+    with pytest.raises(ConfigError, match=match):
         assemble_reuse(source.run_dir, config_path, run_dir,
                        level="baseline")
     assert not run_dir.exists()  # refused before anything was written
-
-
-def test_baseline_refuses_changed_n_attempts(tmp_path):
-    config = baseline_config_dict()
-    config["n_attempts_weak"] = 2
-    source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="n_attempts_weak"):
-        assemble_reuse(source.run_dir, config_path, run_dir,
-                       level="baseline")
-    assert not run_dir.exists()
-
-
-def test_baseline_refuses_a_changed_benchmark(tmp_path):
-    config = baseline_config_dict()
-    config["benchmark"] = "otherbench"
-    source, config_path, run_dir = _assemble_with_config(tmp_path, config)
-    with pytest.raises(ConfigError, match="otherbench"):
-        assemble_reuse(source.run_dir, config_path, run_dir,
-                       level="baseline")
-    assert not run_dir.exists()
 
 
 def test_baseline_refuses_train_outside_the_source_task_set(tmp_path):
@@ -1850,23 +1829,21 @@ def test_baseline_level_allows_exam_and_live_targets(tmp_path, live):
         "trajectories": 2, "accepted_infra_shortfall_units": 1}
 
 
-def test_bank_level_refuses_an_exam_to_live_target(tmp_path):
-    """The bank's method identity cannot be swapped: the copied objects
-    were produced under the source run's exam sequence, and a live
-    target would re-freeze a different sequence over them."""
-    source = build_source_run(tmp_path)
-    config_path = write_reuse_config(tmp_path, reuse_config_dict(live=True))
-    run_dir = tmp_path / "assembled"
-    with pytest.raises(ConfigError, match=r"config\.(sequence|phases)"):
-        assemble_reuse(source.run_dir, config_path, run_dir)
-    assert not run_dir.exists()
-
-
-def test_bank_level_refuses_a_live_to_exam_target(tmp_path):
-    """The reverse direction is refused by the same identity walk: a
-    live-method bank cannot be re-frozen as an exam-method one."""
-    source = build_source_run(tmp_path, live=True)
-    config_path = write_reuse_config(tmp_path)
+@pytest.mark.parametrize(
+    ("source_live", "target_live"),
+    [(False, True), (True, False)],
+    ids=["exam_to_live", "live_to_exam"],
+)
+def test_bank_level_refuses_a_method_swap(tmp_path, source_live,
+                                          target_live):
+    """The bank's method identity cannot be swapped in either direction:
+    the copied objects were produced under the source run's sequence, so
+    an exam source with a live target would re-freeze a different
+    sequence over them, and a live-method bank cannot be re-frozen as an
+    exam-method one -- the identity walk refuses instead."""
+    source = build_source_run(tmp_path, live=source_live)
+    config_path = write_reuse_config(
+        tmp_path, reuse_config_dict(live=target_live))
     run_dir = tmp_path / "assembled"
     with pytest.raises(ConfigError, match=r"config\.(sequence|phases)"):
         assemble_reuse(source.run_dir, config_path, run_dir)

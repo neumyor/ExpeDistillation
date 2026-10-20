@@ -5,6 +5,7 @@ finder pattern of tests/unit/blocks/test_execute.py); no real plugins, no
 network, no model calls (stage 0 executes nothing)."""
 
 import copy
+import dataclasses
 import importlib
 import importlib.abc
 import importlib.machinery
@@ -668,156 +669,126 @@ def test_duplicate_ids_in_task_file_rejected_before_split(
 
 
 # ---------------------------------------------------------------------------
-# Acceptance protocol (decision doc 2026-10-14): the manifest golden, the
-# live_run digest branch and the improve-rule name check
+# Acceptance protocol (decision doc 2026-10-14): the manifest freeze
+# contract, the live_run digest branch and the improve-rule name check
 # ---------------------------------------------------------------------------
 
-#: Golden baselines for OLD-STYLE configs (no acceptance key), captured from
-#: a pre-acceptance-code freeze of this exact fixture and hardcoded as
-#: literals -- never regenerated at run time, or the test would bless
-#: whatever the new code produces (the same discipline as the to_dict
-#: golden in tests/unit/core/test_config.py). Key set, every value and the
-#: nested prompts_digests map must stay identical: this is the frozen
-#: manifest surface an in-flight exam run byte-compares on every resume.
-#: A deliberate prompt-text change is a new experiment and must
-#: consciously update these digests. Two shapes because the trap is
-#: shape-specific: full mode freezes split/tasks as null (a generic None
-#: filter would delete them and kill the resume); the split shape pins the
-#: explicit-list form.
-_GOLDEN_PROMPT_DIGESTS = {
-    "ANSWER": "35bc0de88ed2152f1605c01da693cddf976733995950f10919dd146bc6113f42",
-    "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
-    "EXAM_GEN": "54e6f98deed982d76bd652c23170ca73a9f090a22790c703f297294b331aa3b6",
-    "FAKE_TASK": None,
-    "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
-    "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
-    "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
-    "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
-    "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
-    "REWRITE": "48fae498a6eb676a4d4931070a484485ee36ff8b8e75a05bc4084b4cbc7f18dc",
-    "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
-    "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
-    "SKILL_DIAGNOSE": "7e1b50d70ec74af836ba9f3d0327435acc411a6b057c1f1613d5b93c8da295f9",
-    "SKILL_DISTILL": "b1fdf5df62973d4d36530a6596ed84b30e00d44d62cf8473ae527f20a3482dff",
-    # v3 full freeze: the two live prompts register at prompts/__init__
-    # import like every method prompt, so their digests are frozen on
-    # every run -- exam runs included.
-    "LIVE_RUN_ATTRIBUTION": prompts.digest("LIVE_RUN_ATTRIBUTION"),
-    "LIVE_SKILL_REVISION": prompts.digest("LIVE_SKILL_REVISION"),
-}
-
-_GOLDEN_MODEL_ROLES = {
-    "executor_strong": "big-model",
-    "executor_weak": "weak-7b",
-    "segmenter": "big-model",
-    "author": "big-model",
-    "examiner": "big-model",
-    "answerer": "weak-7b",
-    "judge": "big-model",
-    "rewriter": "big-model",
-    "curator": "big-model",
-    "auditor": "big-model",
-}
-
-_GOLDEN_RULES = {
-    "task_select": "all_valid_failed",
-    "segment_select": "strong_success_weak_failed",
-    "trajectory_select": "all",
-}
+#: The frozen prompt surface: every method prompt registered at
+#: ``prompts/__init__`` import, plus the fake plugin's task prompt. The NAME
+#: SET stays a literal on purpose -- a prompt accidentally registered or
+#: dropped is a change of the frozen protocol surface and must be an
+#: explicit, reviewed edit, not a silent pass. The VALUES are never captured
+#: hashes: each is checked against ``prompts.digest`` at run time, so
+#: editing a prompt's text does not require touching this file (the digest
+#: moves with the text, and the freeze still refuses an old run directory:
+#: a deliberate text change is a new experiment).
+FROZEN_PROMPT_NAMES = frozenset({
+    "ANSWER",
+    "DEFAULT_SYSTEM",
+    "EXAM_GEN",
+    "FAKE_TASK",
+    "GROUP",
+    "JUDGE",
+    "LEAK_AUDIT_JUDGE",
+    "LIVE_RUN_ATTRIBUTION",
+    "LIVE_SKILL_REVISION",
+    "MERGE",
+    "REPAIR_INSTRUCTION",
+    "REWRITE",
+    "SEGMENT",
+    "SIMILARITY",
+    "SKILL_DIAGNOSE",
+    "SKILL_DISTILL",
+})
 
 
-def _golden_config(split):
-    return {
-        "benchmark": "fakebench",
-        "mode": "full" if split is None else "split",
-        "models": dict(_GOLDEN_MODEL_ROLES),
-        "weak_profile": "a weak model",
-        "use_weak_profile": False,
-        "n_attempts_strong": 1,
-        "n_attempts_weak": 2,
-        "split": split,
-        "tasks": None,
-        "sequence": ["baseline", "learn", "exam", "learn", "test"],
-        "phases": {
-            "baseline": {"role": "baseline", "tasks": "train",
-                  "delivery": {"name": "none"},
-                  "execution": {"name": "real",
-                                "arms": ["executor_strong",
-                                         "executor_weak"]},
-                  "compare": None, "acceptance": None,
-                  "kind": "execute"},
-            "learn": {"evidence": {"name": "segment", "K": 4},
-                  "author": {"name": "distill_diagnose"},
-                  "curate": {"name": "agentbrew", "token_budget": 4096,
-                             "rounds": 3, "merge_check": "exam"},
-                  "kind": "learn", "role": "learn"},
-            "exam": {"role": "exam", "tasks": "train",
-                  "delivery": {"name": "per_skill"},
-                  "execution": {"name": "exam"},
-                  "compare": None, "acceptance": None,
-                  "kind": "execute"},
-            "test": {"role": "test", "tasks": "test",
-                  "delivery": {"name": "whole_bank"},
-                  "execution": {"name": "real"},
-                  "compare": {"against": "fresh_bare", "rule": None,
-                              "external": None},
-                  "acceptance": None, "kind": "execute"},
-        },
-        "invalid_redispatch_limit": 1,
-        "rules": dict(_GOLDEN_RULES),
-        "prompts_digests": dict(_GOLDEN_PROMPT_DIGESTS),
-        "model_options": {},
-        "token_budgets": {},
-        "schema_version": 5,
-    }
+def _expected_prompt_digests():
+    """The contract the freeze must satisfy: the fixed name set, every value
+    the registry's current digest (``None`` for the fake's unregistered task
+    prompt)."""
+    return {name: (prompts.digest(name) if name in prompts.PROMPTS else None)
+            for name in FROZEN_PROMPT_NAMES}
 
 
-def _golden_manifest(split, train, test):
-    return {
-        "benchmark": "fakebench",
-        "mode": "full" if split is None else "split",
-        "split": {"train": train, "test": test, "reserved": []},
-        "config": _golden_config(split),
-        "prompt_digests": dict(_GOLDEN_PROMPT_DIGESTS),
-        "rules": dict(_GOLDEN_RULES),
-        "model_roles": dict(_GOLDEN_MODEL_ROLES),
-        "tasks_digest": "79e8c92ae85de702de682e2eb31790859c41340d6d7f296b041cd3bd6d003553",
-        "aux_metric": None,
-    }
+def _loaded_tasks():
+    """What StagePlugin loads: the fixed task set with its default text."""
+    return [Task(task_id=i, instruction=f"do {i}") for i in TASK_IDS]
 
 
 @pytest.mark.parametrize("shape", ["full", "split"])
 def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
         monkeypatch, tmp_path, shape):
-    """The frozen manifest matches the pinned v4 literal: the parsed
-    phase definitions (canonical form), and the prompt_digests KEY SET
-    of every registered method prompt (the full freeze -- the two live
-    names included by design, their digests never called by an exam
-    run)."""
+    """The manifest freezes exactly the run that is about to execute.
+
+    Each frozen surface is checked against its live source rather than a
+    captured literal, so prompt-text edits and new defaulted config fields
+    need no manual sync here: ``config`` equals ``to_dict()`` of the same
+    config with the digests filled (what the freeze builds); the
+    ``prompt_digests`` name set is pinned while every value equals
+    ``prompts.digest`` (the full freeze -- the two live names included by
+    design, their digests never called by an exam run); ``rules`` and
+    ``model_roles`` are the config's completed tables; ``tasks_digest`` is
+    recomputed with the stage's own digest. The split shapes stay explicit
+    contract assertions: full mode (config split null) freezes the whole set
+    in both arms, split mode the explicit lists, and ``reserved`` is always
+    present.
+    """
     _install_plugin(monkeypatch, StagePlugin())
     if shape == "full":
         config = make_config(mode="full", split=None)
-        expected = _golden_manifest(None, list(TASK_IDS), list(TASK_IDS))
+        assert config.split is None
+        expected_split = {"train": list(TASK_IDS), "test": list(TASK_IDS),
+                          "reserved": []}
     else:
         config = make_config()
-        expected = _golden_manifest({"train": ["t1", "t2"],
-                                     "test": ["t3"]},
-                                    ["t1", "t2"], ["t3"])
+        expected_split = {"train": ["t1", "t2"], "test": ["t3"],
+                          "reserved": []}
     ctx = make_ctx(tmp_path, config)
 
     stage0_freeze.run(ctx)
+    manifest = load_manifest(ctx.run_dir)
 
-    assert load_manifest(ctx.run_dir) == expected
-    # The pinned name set, spelled out: the two live prompts ARE part of
-    # every manifest now (the full freeze), with their real digests.
-    frozen = load_manifest(ctx.run_dir)["prompt_digests"]
-    assert frozen["LIVE_RUN_ATTRIBUTION"] == prompts.digest(
-        "LIVE_RUN_ATTRIBUTION")
-    assert frozen["LIVE_SKILL_REVISION"] == prompts.digest(
-        "LIVE_SKILL_REVISION")
+    # The manifest's exact top-level key set is part of the frozen
+    # protocol: an added or dropped key changes every resume comparison.
+    assert set(manifest) == {
+        "benchmark", "mode", "split", "config", "prompt_digests", "rules",
+        "model_roles", "tasks_digest", "aux_metric"}
+    assert manifest["benchmark"] == config.benchmark
+    assert manifest["mode"] == config.mode
+    # Split shapes are contract, not captured data (ruling 7): full mode
+    # freezes the whole set in both arms, split mode the explicit lists,
+    # and `reserved` is [] but never absent.
+    assert manifest["split"] == expected_split
+    assert set(manifest["split"]) == {"train", "test", "reserved"}
+    assert manifest["config"]["split"] == config.split
+
+    # Fixed name set, live values: a dropped/extra registration or a wrong
+    # digest is red; a prompt-text edit is not (the digest moves with it).
+    expected_digests = _expected_prompt_digests()
+    assert set(manifest["prompt_digests"]) == FROZEN_PROMPT_NAMES
+    assert manifest["prompt_digests"] == expected_digests
+    assert manifest["prompt_digests"]["FAKE_TASK"] is None
+    assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
+
+    # The frozen config is the running config, compared through to_dict:
+    # every field (including one added later with a default) flows through,
+    # while any field the freeze dropped, normalised differently or changed
+    # still differs.
+    assert manifest["config"] == dataclasses.replace(
+        config, prompts_digests=expected_digests).to_dict()
+    assert manifest["rules"] == config.rules
+    assert manifest["config"]["rules"] == config.rules
+    assert manifest["model_roles"] == config.models
+    assert manifest["config"]["models"] == config.models
+
+    # Recompute with the stage's own digest implementation: the frozen value
+    # must be the digest of the tasks D1 actually loaded.
+    assert manifest["tasks_digest"] == stage0_freeze.tasks_digest(
+        _loaded_tasks())
+    assert manifest["aux_metric"] is None
     # The exam phase's exam execution freezes like every phase definition.
-    assert (load_manifest(ctx.run_dir)["config"]["phases"]["exam"]
-            ["execution"] == {"name": "exam"})
+    assert (manifest["config"]["phases"]["exam"]["execution"]
+            == {"name": "exam"})
 
 
 def test_the_full_prompt_freeze_covers_the_live_digests(

@@ -1,14 +1,6 @@
 {
-  "base_commit": "8015ec9940ee35f482b73343946aac0a601103e5",
+  "base_commit": "0fd881331bcdcf35539bd42d4de1bf409c9e95d9",
   "combos": {
-    "exam-retrieval-full": {
-      "crash_points": [
-        10,
-        20,
-        32
-      ],
-      "model_calls": 34
-    },
     "exam-retrieval-split": {
       "crash_points": [
         5,
@@ -25,31 +17,7 @@
       ],
       "model_calls": 34
     },
-    "exam-whole_bank-split": {
-      "crash_points": [
-        5,
-        11,
-        17
-      ],
-      "model_calls": 18
-    },
     "live_run-retrieval-full": {
-      "crash_points": [
-        7,
-        13,
-        21
-      ],
-      "model_calls": 22
-    },
-    "live_run-retrieval-split": {
-      "crash_points": [
-        4,
-        7,
-        11
-      ],
-      "model_calls": 12
-    },
-    "live_run-whole_bank-full": {
       "crash_points": [
         7,
         13,

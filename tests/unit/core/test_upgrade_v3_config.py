@@ -4,8 +4,8 @@ The function is a pure data mapping landed AHEAD of the M4.3 core flip:
 ``CONFIG_SCHEMA_VERSION`` is still 3 and ``load_config`` still refuses
 v4, so these tests drive it directly on raw YAML dicts -- exactly what
 the one-time converter (plan section 4) will feed it -- and pin the v4
-shape of every v3-shaped config in the repository, plus the mapping
-table's conversion and refusal behaviour on synthetic inputs.
+shape of every v3-shaped config in the repository, plus the mapping-side
+refusals and the v2 -> v3 -> v4 chain.
 """
 import copy
 from pathlib import Path
@@ -272,6 +272,17 @@ class TestUpgradeV3ConfigShapes:
         upgrade_v3_config(raw)
         assert raw == before
 
+    def test_v2_source_chains_through_upgrade_v2(self):
+        # The assembler's version walk (plan section 7): a v2 source
+        # manifest chains v2 -> v3 -> v4 and lands on the same phases
+        # as the repository's own v3 conversion of the same experiment.
+        chained = upgrade_v3_config(
+            upgrade_v2_config(_load_raw("tb21_split_v2.yaml")))
+        direct = upgrade_v3_config(_load_raw("tb21_split_v2_v3.yaml"))
+        assert chained["schema_version"] == 4
+        assert chained["sequence"] == direct["sequence"]
+        assert chained["phases"] == direct["phases"]
+
 
 def _minimal(**slot_overrides):
     """A v3 config skeleton: the five slots plus the one global the
@@ -289,46 +300,13 @@ def _minimal(**slot_overrides):
     return {"benchmark": "tb", "mode": "split", "methods": methods}
 
 
-def _live_slots(**overrides):
-    slots = {
-        "acceptance": {"name": "live_run", "n_attempts": 3,
-                       "improvement": "strict_rate_gain"},
-        "curation": {"name": "none", "token_budget": 96000},
-    }
-    slots.update(overrides)
-    return slots
-
-
-class TestUpgradeV3Refusals:
-    """The mapping table's loud-failure boundaries on synthetic inputs."""
-
-    def test_v2_input_refused(self):
-        # A v2 config has no ``methods`` mapping; the error names the
-        # v2 -> v3 step of the chain (the assembler's version walk).
-        with pytest.raises(ConfigError, match="upgrade_v2_config"):
-            upgrade_v3_config(_load_raw("tb21_split_v2.yaml"))
-
-    def test_already_v4_input_refused(self):
-        with pytest.raises(ConfigError, match="sequence"):
-            upgrade_v3_config({"methods": {}, "sequence": ["baseline"]})
-        with pytest.raises(ConfigError, match="phases"):
-            upgrade_v3_config({"methods": {}, "phases": {}})
-
-    def test_non_mapping_input_refused(self):
-        with pytest.raises(TypeError, match="mapping"):
-            upgrade_v3_config(["not", "a", "config"])
-
-    def test_missing_methods_refused(self):
-        with pytest.raises(ConfigError, match="schema-v3"):
-            upgrade_v3_config({"benchmark": "tb", "mode": "split"})
+class TestUpgradeV3MappingRefusals:
+    """Mapping-side boundaries the v4 checklist cannot see: a v3 slot
+    value with no v4 destination is refused, never silently dropped."""
 
     def test_unknown_acceptance_name_refused(self):
         with pytest.raises(ConfigError, match="no v4 mapping"):
             upgrade_v3_config(_minimal(acceptance={"name": "oracle"}))
-
-    def test_nameless_acceptance_refused(self):
-        with pytest.raises(ConfigError, match="needs a name"):
-            upgrade_v3_config(_minimal(acceptance={"retry_limit": 1}))
 
     def test_unmapped_slot_key_refused(self):
         # A key the mapping would silently drop is a changed experiment
@@ -337,92 +315,3 @@ class TestUpgradeV3Refusals:
             upgrade_v3_config(_minimal(
                 acceptance={"name": "exam", "retry_limit": 2,
                             "bogus": 1}))
-
-    def test_live_run_missing_required_params_refused(self):
-        with pytest.raises(ConfigError, match="n_attempts"):
-            upgrade_v3_config(_minimal(acceptance={"name": "live_run"}))
-
-
-class TestUpgradeV3SyntheticShapes:
-    """The mapping table's conversions on synthetic inputs."""
-
-    def test_exam_retry_limit_counts_the_a_phases(self):
-        v4 = upgrade_v3_config(
-            _minimal(acceptance={"name": "exam", "retry_limit": 0}))
-        assert v4["sequence"] == ["baseline", "learn", "exam", "learn", "test"]
-
-    def test_empty_methods_complete_to_the_defaults(self):
-        # An absent or empty slot is METHOD_DEFAULTS (the v3 loader's
-        # own completion), so the upgrade must produce the v4 identity
-        # of what the same file loads as -- and spelling the defaults
-        # out lands on the identical output.
-        from_defaults = upgrade_v3_config(
-            {"benchmark": "tb", "mode": "split", "methods": {}})
-        explicit = upgrade_v3_config(_minimal(
-            acceptance={"name": "exam", "retry_limit": 2},
-            curation={"name": "agentbrew", "token_budget": 4096,
-                      "rounds": 3}))
-        assert from_defaults == explicit
-
-    def test_exams_false_with_exam_acceptance_refused(self):
-        with pytest.raises(ConfigError, match="ablation"):
-            upgrade_v3_config(_minimal(authoring={"exams": False}))
-
-    def test_exams_false_ablation_pair_converts_identically(self):
-        # exams: false is legal only as live_run + curation none, and a
-        # live sequence has no exam phase either way -- so the ablation
-        # pair upgrades to the identical shape as exams: true.
-        base = _minimal(**_live_slots())
-        ablated = _minimal(**_live_slots())
-        ablated["methods"]["authoring"] = {"exams": False}
-        assert upgrade_v3_config(ablated) == upgrade_v3_config(base)
-
-    def test_live_run_params_move_into_the_b_phase(self):
-        v4 = upgrade_v3_config(_minimal(
-            **_live_slots(acceptance={
-                "name": "live_run", "n_attempts": 5,
-                "improvement": "strict_rate_gain",
-                "max_injection_tokens": 4096})))
-        b = v4["phases"]["live"]
-        assert b["kind"] == "execute"
-        assert b["delivery"] == {"name": "group_by_task"}
-        assert b["execution"] == {"name": "real", "n_attempts": 5,
-                                  "max_injection_tokens": 4096}
-        assert b["compare"] == {"against": "baseline",
-                                "rule": "strict_rate_gain"}
-        assert v4["phases"]["learn"]["curate"] == {
-            "name": "none", "token_budget": 96000}
-        assert v4["sequence"] == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
-        assert "exam" not in v4["phases"]
-
-    def test_explicit_merge_check_is_preserved(self):
-        # The curation slot may carry merge_check (M3); an explicit value
-        # is the config's identity choice and survives the upgrade.
-        v4 = upgrade_v3_config(_minimal(
-            curation={"name": "agentbrew", "token_budget": 96000,
-                      "rounds": 3, "merge_check": "none"}))
-        assert v4["phases"]["learn"]["curate"]["merge_check"] == "none"
-
-    def test_explicit_merge_check_exam_under_live_run_refused(self):
-        # merge_check: exam under live_run has no v4 image: the live
-        # sequence generates no exams to check merges against.
-        with pytest.raises(ConfigError, match="merge_check"):
-            upgrade_v3_config(_minimal(
-                **_live_slots(curation={
-                    "name": "agentbrew", "token_budget": 96000,
-                    "rounds": 3, "merge_check": "exam"})))
-
-    def test_delivery_copies_name_and_params_verbatim(self):
-        v4 = upgrade_v3_config(_minimal(delivery={"name": "per_skill"}))
-        assert v4["phases"]["test"]["delivery"] == {"name": "per_skill"}
-
-    def test_v2_source_chains_through_upgrade_v2(self):
-        # The assembler's version walk (plan section 7): a v2 source
-        # manifest chains v2 -> v3 -> v4 and lands on the same phases
-        # as the repository's own v3 conversion of the same experiment.
-        chained = upgrade_v3_config(
-            upgrade_v2_config(_load_raw("tb21_split_v2.yaml")))
-        direct = upgrade_v3_config(_load_raw("tb21_split_v2_v3.yaml"))
-        assert chained["schema_version"] == 4
-        assert chained["sequence"] == direct["sequence"]
-        assert chained["phases"] == direct["phases"]

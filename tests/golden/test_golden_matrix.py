@@ -2,8 +2,9 @@
 
 Every combo's fresh run must stay identical to the checked-in golden
 matrix (after the harness's volatile-field normalisation), and a
-crash+resume of two representative combos must land on the same golden
--- ordinary snapshot tests, members of the standing suite.
+crash+resume of every combo must land on the same golden -- ordinary
+snapshot tests, members of the standing suite. The live combos also crash
+in the "revision persisted, re-answer not yet run" window (C-1).
 
 A failure after a refactor step means the step changed run artifacts:
 either accidentally (fix the step) or deliberately (regenerate the
@@ -27,12 +28,13 @@ from tests.golden.harness import (
     snapshot,
     write_config,
 )
+from tests.golden.revision_window import _crash_in_revision_window
 
 GOLDEN_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "golden"
 
-#: One exam-path and one live-path combo re-run the crash+resume variant
-#: on every suite run (generation covers all eight; see generate.py).
-CRASH_RESUME_COMBOS = ("exam-whole_bank-full", "live_run-retrieval-split")
+#: Every combo re-runs the crash+resume variant on every suite run
+#: (generation covers the same four; see generate.py).
+CRASH_RESUME_COMBOS = tuple(combo_label(combo) for combo in COMBOS)
 
 
 def _golden(label: str) -> dict:
@@ -63,6 +65,31 @@ def test_crash_resume_matches_golden(label, tmp_path):
         run_crash_and_resume(config, tmp_path / "run", crash_at)
         resumed = snapshot(tmp_path / "run")
     assert_resume_equivalent(_golden(label), resumed)
+
+
+def test_revision_window_crash_lands_mid_reanswer(tmp_path):
+    """The window crash's meaning, checked at the crash point itself:
+    the revision IS in the skills store and NOTHING of the re-answer
+    round has persisted (zero round-1 trajectories -- the K1 dispatch
+    stops at the raise). Resuming must then land on the straight run's
+    snapshot."""
+    combo = next(c for c in COMBOS
+                 if combo_label(c) == "live_run-whole_bank-split")
+    config = write_config(tmp_path / "config.yaml", combo)
+    with installed_plugin(plugin_for(combo)):
+        run_straight(config, tmp_path / "straight")
+        golden = snapshot(tmp_path / "straight")
+    _crash_in_revision_window(config, combo, tmp_path / "run")
+    skills = (tmp_path / "run" / "stage3_generation" / "skills")
+    revised = [path.name for path in skills.glob("*.json")
+               if "REVISED-BY-G11" in path.read_text(encoding="utf-8")]
+    assert revised
+    round01 = (tmp_path / "run" / "stage4_acceptance" / "live_run"
+               / "round01" / "stage1_baseline" / "trajectories")
+    assert list(round01.glob("*.json")) == []
+    with installed_plugin(plugin_for(combo)):
+        run_straight(config, tmp_path / "run")
+    assert_resume_equivalent(golden, snapshot(tmp_path / "run"))
 
 
 def test_ignore_keys_comparison_covers_only_the_named_keys():

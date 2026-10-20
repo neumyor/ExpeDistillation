@@ -1068,7 +1068,156 @@ none：原样入库，预算仍是硬阀），中间的学习相位写原样工�
 
 ---
 
-## 六、运行规则：命令行、运行设置与退出码
+## 六、测试系统
+
+### 6.1 三层测试架构
+
+```
+tests/
+  unit/          单元测试：每个积木的行为契约（106 个文件，1794 个函数）
+  composites/    组合测试：多模块协作与崩溃续跑验证
+  golden/        回归测试：4 组合端到端矩阵 + 修订窗口探针
+  fixtures/      测试数据：轨迹、段、skill、考题样例；golden 矩阵快照
+  helpers/       共用工具：插件注册、模型回复样例、skill 构造器
+```
+
+**单元测试**（`tests/unit/`）：
+- 目录结构与 `src/expedistill/` 对应
+- 每个积木（block、method、stage、prompt）至少一个测试文件
+- 调模型的用 `llm/fake.py`，不发真实请求
+- 测试数据从 `tests/fixtures/` 读取，不直接读 `runs/`
+
+**组合测试**（`tests/composites/`）：
+- 用假模型 + 临时 run 目录验证多模块协作
+- 必须包含"中途中断再续跑，结果与一次跑完相同"的用例
+- 覆盖关键路径：baseline → exam → live → test 全流程
+
+**Golden 矩阵**（`tests/golden/`）：
+- **4 个组合**（从 8 个精简）：
+  - `exam-whole_bank-full`
+  - `exam-retrieval-split`
+  - `live_run-whole_bank-split`
+  - `live_run-retrieval-full`
+- 每个轴（acceptance/delivery/mode）的两个取值各出现 2 次
+- 全部 4 个组合都跑崩溃续跑验证（3 档进度：0.3/0.6/0.95）
+- `revision_window.py`：保留"修订已落盘、重答未开始"的特殊崩溃点覆盖
+
+### 6.2 契约测试原则
+
+**断言契约，而非捕获字面量**：
+- ❌ **不推荐**：硬编码 14 个 sha256 字面量，每次改提示词都要人工同步
+- ✅ **推荐**：固定名称集合，digest 值从 `prompts.digest(name)` 重新计算
+- **冻结协议表面**：只有真正需要固定的接口（manifest 顶层键集合、prompt 名称集合）才写字面量
+
+**实例**（`tests/unit/stages/test_stage0.py`）：
+```python
+# 名称集合固定（协议表面）
+FROZEN_PROMPT_NAMES = frozenset({
+    "ANSWER", "EXAM_GEN", "SEGMENT", ...  # 16 个名称
+})
+
+# digest 值重新计算（不捕获字面量）
+def _expected_prompt_digests():
+    return {name: prompts.digest(name) for name in FROZEN_PROMPT_NAMES}
+
+# 断言
+assert manifest["prompt_digests"] == _expected_prompt_digests()
+```
+
+**好处**：
+- 改提示词文本，测试不需要人工同步
+- 加带默认值的配置字段，测试自动通过
+- 测试意图清晰：在测"名称集合固定，值与注册函数一致"
+
+### 6.3 Schema 版本规则
+
+**什么时候升 `CONFIG_SCHEMA_VERSION`**：
+- ✅ 改字段含义、删除字段、改类型/必填性/语义
+- ❌ 新增可选字段且带默认值，旧代码能忽略未知键、新代码能补全缺省键
+
+**判断标准**：
+- **元数据字段**（如 `description: str = ""`）：不影响运行行为，不升版本
+- **行为开关**（如 `use_weak_profile: bool = False`）：影响运行结果，升版本
+- **可选参数**（如 `max_retries: int = 3`）：旧代码能用默认值正确运行，不升版本
+
+**升级函数**：
+- 每个版本的升级函数是纯函数：`upgrade_vN_config(old: dict) -> dict`
+- 放在 `src/expedistill/core/config_upgrade.py`
+- 必须有测试覆盖：仓库全部历史配置的升级加载往返
+
+### 6.4 如何为新功能添加测试
+
+**步骤 1：单元测试**
+1. 在 `tests/unit/` 对应目录创建 `test_<模块名>.py`
+2. 用 `llm/fake.py` 构造模型回复，不发真实请求
+3. 覆盖正常路径 + 边界情况 + 错误处理
+
+**步骤 2：组合测试**（如果改了多模块协作）
+1. 在 `tests/composites/` 创建测试
+2. 用 `tests/helpers/` 的工具构造 skill、轨迹、考题
+3. 必须包含崩溃续跑用例
+
+**步骤 3：Golden 矩阵**（如果改了端到端行为）
+1. 修改提示词或配置后，重新生成 golden 矩阵：
+   ```bash
+   python tests/golden/generate.py
+   ```
+2. 检查生成的 4 个组合 + `provenance.json`
+3. 运行回归测试确认通过：
+   ```bash
+   pytest tests/golden -q
+   ```
+
+**步骤 4：更新 schema 历史**（如果升了版本）
+1. 在 README.md 第四节补充 schema 历史
+2. 更新 `config_upgrade.py` 的升级函数
+3. 添加升级函数的测试用例
+
+### 6.5 测试数据管理
+
+**测试夹具**（`tests/fixtures/`）：
+- `golden/`：4 个组合的完整快照（588 KB）
+- `benchmark/`：原始输出录像（TB、ALFWorld、SearchQA）
+- 其他：构造好的轨迹、段、skill、考题样例
+
+**不要做的事**：
+- ❌ 从 `runs/` 里直接读真实运行数据
+- ❌ 在多个测试文件里各复制一份辅助代码
+- ❌ 测试文件按开发批次命名（如 `test_w1a_*`）
+
+**应该做的事**：
+- ✅ 需要真实样例时，复制一份脱敏后放进 `fixtures/`
+- ✅ 共用代码放进 `tests/helpers/`，一处定义
+- ✅ 测试文件按它测的源码放进对应目录、按测试内容命名
+
+### 6.6 运行与验收
+
+**本地开发**：
+```bash
+# 全量测试（约 45 秒）
+pytest tests -q
+
+# 只跑单元测试
+pytest tests/unit -q
+
+# 只跑 golden 矩阵
+pytest tests/golden -q
+
+# 静态检查
+ruff check src tests scripts
+```
+
+**提交前检查清单**：
+- [ ] `pytest tests` 全绿
+- [ ] `ruff check src tests scripts` 通过（`E9` 和 `F` 类错误）
+- [ ] `pytest tests/test_layering.py` 通过（分层检查）
+- [ ] 新功能有对应的单元测试
+- [ ] 改了多模块协作有组合测试
+- [ ] 改了端到端行为重新生成了 golden 矩阵
+
+---
+
+## 七、运行规则：命令行、运行设置与退出码
 
 ### 命令行
 

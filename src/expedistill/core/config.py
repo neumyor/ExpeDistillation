@@ -220,7 +220,7 @@ PHASE_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 #: The pipeline_log stage value of the freeze step: freeze is always
 #: ``p00`` and every sequence phase's number is its 0-based sequence
-#: index plus one (the frozen derivation in tests/golden/semantics.py:
+#: index plus one (the frozen phase numbering:
 #: ``phases/p{index + 1:02d}_<name>``; D, the first sequence entry, is
 #: ``p01_D``).
 FREEZE_LABEL = "p00:freeze"

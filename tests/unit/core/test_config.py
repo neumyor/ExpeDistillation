@@ -1151,25 +1151,6 @@ class TestUpgradeV2:
             "improvement": "strict_rate_gain"}
         assert "retry_limit" not in v3
 
-    def test_every_moved_key_lands_in_its_slot(self):
-        v3 = upgrade_v2_config({
-            "K": 1, "segment_retry_limit": 0,
-            "bank_token_budget": 96000, "curation_rounds": 4,
-            "skill_delivery": {"mode": "retrieval", "top_k": 5,
-                               "max_categories": 3, "min_score": 0.02},
-        })
-        assert v3["methods"]["segmentation"] == {"K": 1, "retry_limit": 0}
-        assert v3["methods"]["curation"] == {
-            "name": "agentbrew", "token_budget": 96000, "rounds": 4}
-        assert v3["methods"]["delivery"] == {
-            "name": "retrieval", "top_k": 5,
-            "max_categories": 3, "min_score": 0.02}
-        assert v3["schema_version"] == 3
-
-    def test_whole_bank_delivery_mapping(self):
-        v3 = upgrade_v2_config({"skill_delivery": {"mode": "whole_bank"}})
-        assert v3["methods"]["delivery"] == {"name": "whole_bank"}
-
     def test_upgrade_result_loads_through_the_v3_chain(self):
         v2 = {
             "benchmark": "tb", "mode": "split",

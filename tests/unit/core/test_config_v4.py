@@ -2,7 +2,7 @@
 
 Pins the phase vocabulary (the five R8 roles, shared with the decision
 layer's words), the ``pNN:<name>`` label derivation (the frozen
-numbering in tests/golden/semantics.py: freeze is p00, sequence entry i
+numbering in core.config: freeze is p00, sequence entry i
 is p{i+1:02d}), the parsed phase specs' shape, the load-time checklist
 of ``parse_phases`` (plan R9 item 4, every check a loud ConfigError),
 the hand-off contract types the phase drivers receive and return, and
