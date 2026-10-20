@@ -48,7 +48,7 @@ delivery:
 
 | 参数 | 含义 | 可选项 | 默认 |
 |---|---|---|---|
-| `inline_catalog` | 技能目录放在哪 | `false` 目录是文件夹里的 `catalog.md`，模型要自己打开；`true` 目录直接写进题目提示里，正文仍在文件夹里 | `false` |
+| `inline_catalog` | 技能目录放在哪 | `false` 目录是文件夹里的 `catalog.md`，模型要自己打开；`true` 目录写进远端 `SKILL.md`（模型被要求先读的那个文件），正文仍在文件夹里按需读 | `false` |
 
 模块边界见 `docs/decisions/execute_learn_module_boundaries_20261016.md`，
 检索的设计见 `docs/decisions/retrieval_delivery_tb_split_20261013.md`。

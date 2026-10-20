@@ -574,8 +574,8 @@ E1 内部的 runner：
 | 合并 skill | G8 | curator（最末学习相位） |
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
-| 执行任务·技能文件夹——目录靠 cat（`TB_TASK_PROMPT_FOLDER`，`inline_catalog=False`，默认） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
-| 执行任务·技能文件夹——目录内嵌提示词（`TB_TASK_PROMPT_FOLDER_INLINE`，`inline_catalog=True`） | E1 的 TB runner（folder 单元，inline_catalog 变体） | executor_weak（test 相位 real_folder，FolderParams.inline_catalog=True） |
+| 执行任务·技能文件夹——目录靠 cat（`TB_SKILL_FOLDER_GUIDANCE` 作为远端 `SKILL.md`，`inline_catalog=False`，默认） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
+| 执行任务·技能文件夹——目录内嵌 `SKILL.md`（`TB_TASK_PROMPT_FOLDER_INLINE` 作为远端 `SKILL.md` 正文，`inline_catalog=True`） | E1 的 TB runner（folder 单元，inline_catalog 变体） | executor_weak（test 相位 real_folder，FolderParams.inline_catalog=True） |
 | LIVE_RUN_ATTRIBUTION | G10 | author（学习相位 revise，live 组证据） |
 | LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，live 组修订） |
 
@@ -877,10 +877,14 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   的每个单元在 `aux["skill_folder"]` 里带一份清单：目录文本、每条已接受
   技能的文件名映射、库指纹——不带技能正文（正文的唯一来源是相位技能库，
   渐进读取是这个玩法的核心）。`FolderParams.inline_catalog` 控制目录文本
-  出现的位置：`False`（默认）目录只在 `catalog.md` 文件里，agent 自己 cat；
-  `True` 目录文本通过提示词模板的 `{skills_block}` 槽直接进提示词，agent
-  无需先找目录文件（这两个模式都把目录文本写进 `aux["skill_folder"]` 的
-  `catalog_text`，物化和读取统计不受影响）。目录文件 catalog.md 每行是
+  出现的位置：`False`（默认）目录只在 `catalog.md` 文件里，`SKILL.md`
+  只带固定指引，agent 自己 cat 目录；`True` 目录文本被写进远端
+  `SKILL.md`（模型被要求先读的那个文件），agent 读 `SKILL.md` 就能看到
+  目录，正文仍在文件夹里按需 cat（两个模式都把目录文本写进
+  `aux["skill_folder"]` 的 `catalog_text`，物化和读取统计不受影响）。
+  第一轮任务提示词不因 `inline_catalog` 改变，仍是 Harbor/Terminus 自己
+  拼的任务说明；`TB_TASK_PROMPT_FOLDER_INLINE` 现在是 inline 模式的
+  `SKILL.md` 正文模板，不是第一轮提示词。目录文件 catalog.md 每行是
   "技能编号 | 要 cat 的文件名 | 一句话摘要"，开头是使用规则（先看目录、
   按需打开、别一次开太多）。派发前相位驱动把清单物化成真实目录（相位
   目录下的 `skill_folder/`，`materialize_skill_folder` 幂等：内容不变
@@ -888,10 +892,9 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   目录送进执行环境（TB：目录随既有 skills 上传链进沙箱
   `/opt/openclaw-skills/`，零远端改动）。插件用能力位
   `skill_folder_prompt_name` 声明支持（目前只有 tb 声明，默认指向
-  `TB_TASK_PROMPT_FOLDER`，目录文本不进提示词、无 `{skills_block}` 槽）；
-  `inline_catalog=True` 时 `run()` 切换到配套的 `TB_TASK_PROMPT_FOLDER_INLINE`
-  提示词（带 `{skills_block}` 槽渲染目录文本，guidance 段仍保留以指明文件
-  夹路径），两个提示词的 digest 都进 manifest 冻结面（stage0 在
+  `TB_TASK_PROMPT_FOLDER`）；实际上传的 `SKILL.md` 在 false 时是
+  `TB_SKILL_FOLDER_GUIDANCE`，true 时由 `TB_TASK_PROMPT_FOLDER_INLINE`
+  模板填入目录文本，两个模板的 digest 都进 manifest 冻结面（stage0 在
   `skill_folder_prompt_name` 后按 `_INLINE` 约定查配套名并加入冻结面）；
   folder 相位落到不支持的插件，test 相位
   驱动在派发前就报配置错误停机——与技能库空不空无关，逐单元的 E1 守卫

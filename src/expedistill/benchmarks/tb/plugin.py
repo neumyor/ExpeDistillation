@@ -17,12 +17,14 @@ runner script there is the real remote entry point):
    task prompt. Bare runs (empty block) use ``TBENCH_EVAL_MODE=bare``.
    **Skill-folder units (the real_folder execution, M3)** ride the same
    mechanism: the SKILL.md carries the folder GUIDANCE
-   (``TB_SKILL_FOLDER_GUIDANCE`` -- never the catalog text), and the
-   manifest's catalog.md and skill files are uploaded beside it into the
-   same per-run directory, which the environment mounts into the sandbox
-   read-only at ``/opt/openclaw-skills/<task>/``; the agent cats what it
-   needs, every command stays in the recorded terminal session, and the
-   plugin neither intercepts nor budgets the reads (M4 parses them).
+   (``TB_SKILL_FOLDER_GUIDANCE``); with ``inline_catalog=True`` the same
+   file also carries the full catalog text (built from
+   ``TB_TASK_PROMPT_FOLDER_INLINE``), while the manifest's catalog.md and
+   skill files are uploaded beside it into the same per-run directory,
+   which the environment mounts into the sandbox read-only at
+   ``/opt/openclaw-skills/<task>/``; the agent cats what it needs, every
+   command stays in the recorded terminal session, and the plugin neither
+   intercepts nor budgets the reads (M4 parses them).
 2. **Launch**: one ssh round trip runs ``nohup setsid env <VARS> bash
    <runner> > <root>/logs/<run_id>.log 2>&1 < /dev/null & echo $!``. The
    runner is detached from the ssh session, so a dropped connection cannot
@@ -138,7 +140,7 @@ from expedistill.infra.reliability import (
     InfrastructureError,
 )
 from expedistill.infra.store import write_json
-from expedistill.prompts.registry import PromptSpec, register
+from expedistill.prompts.registry import PromptSpec, get as get_prompt, register
 
 __all__ = [
     "TBPlugin",
@@ -208,11 +210,12 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 # tencent_tb2_skill_env.py) uploads that WHOLE directory -- SKILL.md and
 # every other file in it -- into the sandbox read-only at
 # ``/opt/openclaw-skills/<task_name>/``. The folder play uses exactly
-# that: SKILL.md carries the GUIDANCE below (the prompt-side injection --
-# the catalog text is never injected), and catalog.md plus the skill
-# files ride the same directory into the sandbox, where the agent cats
-# them. So the guidance's path wording is a remote contract: it must
-# name /opt/openclaw-skills, the mount the vendored environment hardcodes.
+# that: SKILL.md carries the GUIDANCE below; with inline_catalog=True it
+# also carries the catalog text (the SKILL.md body is built from
+# TB_TASK_PROMPT_FOLDER_INLINE), while catalog.md plus the skill files
+# ride the same directory into the sandbox, where the agent cats them.
+# So the guidance's path wording is a remote contract: it must name
+# /opt/openclaw-skills, the mount the vendored environment hardcodes.
 # --------------------------------------------------------------------------
 TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox.
 Run `ls /opt/openclaw-skills/` to find this task's directory name, then read
@@ -260,9 +263,10 @@ TB_TASK_PROMPT_FOLDER = register(
             "SKILLS slot is replaced by the folder guidance section "
             "(TB_SKILL_FOLDER_GUIDANCE verbatim, which is also what the "
             "remote skill agent injects as the trial's SKILL.md); the "
-            "catalog text is never part of the prompt. No "
+            "catalog text is not part of this task prompt. No "
             "{skills_block} slot: nothing variable is injected. See "
-            "TB_TASK_PROMPT_FOLDER_INLINE for the inline-catalog variant."
+            "TB_TASK_PROMPT_FOLDER_INLINE for the inline-catalog SKILL.md "
+            "body."
         ),
     )
 )
@@ -275,46 +279,33 @@ TB_TASK_PROMPT_FOLDER_INLINE = register(
     PromptSpec(
         name=TB_TASK_PROMPT_FOLDER_INLINE_NAME,
         template=(
-            "You are an AI assistant solving a command-line task inside a "
-            "Linux sandbox.\n"
-            "You act through a terminal: inspect the environment, run "
-            "shell commands, read\n"
-            "their output, and iterate until the task is done.\n"
+            "Your task's skill folder is mounted read-only inside this "
+            "sandbox.\n"
+            "The skill files sit beside this SKILL.md in the same mounted "
+            "folder.\n"
+            "The catalog of available skills is included below. Each line "
+            "lists one skill as\n"
+            "\"<skill id> | <file to cat> | <one-line description>\".\n"
+            "cat only the skill file the current step needs, one at a time; "
+            "do not open many\n"
+            "skill files at once; come back to this catalog when a later step "
+            "needs another one.\n"
+            "These skills are lessons distilled from earlier runs: use them "
+            "as references when\n"
+            "they apply to the current task, and ignore them when they do "
+            "not.\n"
             "\n"
-            "SKILL FOLDER (lessons distilled from earlier runs; use them "
-            "as references\n"
-            "when they apply to the current task, and ignore them when "
-            "they do not):\n"
-            + TB_SKILL_FOLDER_GUIDANCE + "\n"
-            "\n"
-            "SKILL CATALOG (every skill available in the folder is listed "
-            "below; cat only\n"
-            "the skill file the current step needs, one at a time):\n"
-            "{skills_block}\n"
-            "\n"
-            "TASK:\n"
-            "{instruction}\n"
-            "\n"
-            "TERMINAL HISTORY (most recent state last):\n"
-            "{history}\n"
-            "Decide your next action from the terminal state above. Work "
-            "in small,\n"
-            "verifiable steps, check the effect of each command before "
-            "moving on, and do\n"
-            "not declare the task complete until you have verified the "
-            "goal against\n"
-            "the task description.\n"
+            "{catalog}\n"
         ),
         description=(
             "E1 TB runner, skill-folder mode (the real_folder execution, "
-            "inline_catalog=True): the folder unit's task prompt with the "
-            "catalog text injected verbatim into {skills_block}, so the "
-            "agent sees the full catalog in the prompt without needing to "
-            "cat catalog.md first. The skill bodies still live in the "
-            "mounted folder for on-demand cat. The guidance section "
-            "(TB_SKILL_FOLDER_GUIDANCE) also appears so the agent knows "
-            "the folder path. See TB_TASK_PROMPT_FOLDER for the "
-            "file-only variant where the agent must cat the catalog."
+            "inline_catalog=True): the body uploaded as the folder unit's "
+            "SKILL.md -- the folder guidance plus the full catalog text "
+            "({catalog}). The remote task prompt tells the agent to read "
+            "this SKILL.md, so the catalog is visible without finding and "
+            "catting catalog.md. The skill bodies still live in the mounted "
+            "folder for on-demand cat. This is NOT the first-turn task "
+            "prompt; Harbor's Terminus prompt remains that."
         ),
     )
 )
@@ -755,12 +746,11 @@ class TBPlugin(BenchmarkPlugin):
         workdir.mkdir(parents=True, exist_ok=True)
         link = self._link if self._link is not None else RemoteLink()
         run_id = self._make_run_id(task_name, task)
-        # A folder unit rides the skills-mode mechanism with the GUIDANCE
-        # as its SKILL.md (the catalog text is never part of SKILL.md;
-        # the catalog lives in catalog.md inside the same directory).
-        # inline_catalog=True: the catalog text was placed in skills_block
-        # by the delivery driver; the INLINE prompt template renders it
-        # via {skills_block} so the agent sees it without catting a file.
+        # A folder unit rides the skills-mode mechanism with the folder
+        # guidance as its SKILL.md. inline_catalog=True also appends the
+        # catalog text to that same SKILL.md, so the agent sees the catalog
+        # when it reads the SKILL.md the remote task prompt tells it to
+        # read; the catalog lives in catalog.md too, as a fallback.
         # inline_catalog=False (default): the SKILL.md carries guidance
         # only; the agent must cat catalog.md from the mounted folder.
         folder = _folder_of(task)
@@ -769,7 +759,8 @@ class TBPlugin(BenchmarkPlugin):
             if isinstance(task.meta, dict) else False
         ) if folder is not None else False
         if folder is not None and inline_catalog:
-            skill_md = TB_SKILL_FOLDER_GUIDANCE
+            skill_md = get_prompt(TB_TASK_PROMPT_FOLDER_INLINE_NAME).format(
+                catalog=skills_block)
             folder_prompt_name = TB_TASK_PROMPT_FOLDER_INLINE_NAME
         elif folder is not None:
             skill_md = TB_SKILL_FOLDER_GUIDANCE
@@ -970,9 +961,11 @@ class TBPlugin(BenchmarkPlugin):
         uploading anything.
 
         A folder unit (``folder`` is its (manifest, local directory)) rides
-        the skills mode: its SKILL.md is the GUIDANCE (the caller passes
-        it as ``skill_md``), and the manifest's catalog and skill files
-        reach the sandbox beside it through the same per-run directory.
+        the skills mode: its SKILL.md is the folder guidance (with the
+        catalog appended when inline_catalog is on; the caller passes the
+        finished body as ``skill_md``), and the manifest's catalog and skill
+        files reach the sandbox beside it through the same per-run
+        directory.
         The trajectory keeps every terminal command, so what the agent
         actually cat'd stays in the record for M4's parsing -- execution
         here neither intercepts nor budgets the reads."""
@@ -1015,12 +1008,12 @@ class TBPlugin(BenchmarkPlugin):
                              folder: Optional[Tuple[Dict[str, Any], Path]]
                              ) -> None:
         """Fresh launches only: upload the run's SKILL.md (the D9 block
-        verbatim, or the folder GUIDANCE for a folder unit; the remote
-        skill agent wraps it into the agent's task prompt), a folder
-        unit's catalog and skill files beside it (the whole per-run
-        directory reaches the sandbox -- module docstring), then the
-        remote submit meta -- last, so a meta on the remote side means
-        everything else is already there."""
+        verbatim, or the folder guidance for a folder unit -- guidance plus
+        the catalog when inline_catalog is on; the remote skill agent wraps
+        it into the agent's task prompt), a folder unit's catalog and skill
+        files beside it (the whole per-run directory reaches the sandbox --
+        module docstring), then the remote submit meta -- last, so a meta on
+        the remote side means everything else is already there."""
         dirs = [f"{root}/jobs"]
         if skill_meta["eval_mode"] == "skills":
             dirs.append(f"{skill_meta['remote_skill_root']}/{task_name}")
@@ -1171,9 +1164,9 @@ class TBPlugin(BenchmarkPlugin):
 
         Skills mode digests the SKILL.md; a folder unit additionally
         folds in the manifest's bank fingerprint and catalog text -- the
-        guidance alone is a constant, and a run id whose folder changed
-        (a re-curated bank) must not be reused as if it were the same
-        trial."""
+        SKILL.md bytes alone are not enough, and a run id whose folder
+        changed (a re-curated bank) must not be reused as if it were the
+        same trial."""
         knobs = {knob: os.environ.get(knob) or "" for knob in _FORWARDED_KNOBS}
         env_digest = hashlib.sha256(json.dumps(
             knobs, sort_keys=True, separators=(",", ":")).encode("utf-8"))

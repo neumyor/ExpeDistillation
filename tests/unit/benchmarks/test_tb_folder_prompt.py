@@ -1,6 +1,7 @@
-"""Skill-folder M3, the prompt: the folder unit's task prompt is the
-plain TB task prompt with its SKILLS slot replaced by the folder
-guidance -- the catalog text is never part of any prompt.
+"""Skill-folder M3, the prompt: the default (inline_catalog=False) folder
+unit's task prompt is the plain TB task prompt with its SKILLS slot
+replaced by the folder guidance -- the catalog text is never part of that
+task prompt.
 
 The registered template is the frozen protocol of what the remote agent
 effectively receives (the Terminus agent composes its own prompt; the
@@ -8,11 +9,16 @@ guidance reaches it as the trial's SKILL.md injection), so what these
 tests pin is the text itself: the guidance section embedded verbatim,
 no {skills_block} slot for a catalog to leak through, and the bare /
 plain-skills prompt untouched by any folder wording.
+
+The inline_catalog=True variant is a different artifact: it is the body
+of the SKILL.md the agent is told to read, not the first-turn task
+prompt. Its {catalog} slot is pinned in test_tb_plugin.py.
 """
 
 from expedistill.benchmarks.tb.plugin import (
     TB_SKILL_FOLDER_GUIDANCE,
     TB_TASK_PROMPT,
+    TB_TASK_PROMPT_FOLDER_INLINE_NAME,
 )
 from expedistill.prompts.registry import PROMPTS, digest, get
 
@@ -53,6 +59,19 @@ def test_the_catalog_cannot_leak_into_the_prompt():
                "- Read this catalog before acting.")
     assert catalog not in rendered
     assert "{instruction}" in template and "{history}" in template
+
+
+def test_the_inline_template_is_the_skill_md_body():
+    # inline_catalog=True is not a task prompt: it is the body uploaded as
+    # the folder unit's SKILL.md, so it carries the catalog slot and none
+    # of the first-turn prompt's instruction/history slots.
+    name = TB_TASK_PROMPT_FOLDER_INLINE_NAME
+    assert name in PROMPTS
+    template = get(name)
+    assert "{catalog}" in template
+    assert "{instruction}" not in template
+    assert "{history}" not in template
+    assert "included below" in template
 
 
 def test_the_plain_task_prompt_carries_no_folder_wording():

@@ -24,14 +24,15 @@ class FolderParams:
     ``inline_catalog`` controls where the catalog text reaches the
     agent. ``False`` (the default, the M2 design) keeps the catalog in
     ``catalog.md`` inside the mounted folder; the agent must ``cat`` it.
-    ``True`` puts the catalog text directly into the unit row's
-    ``skills_block`` so it rides the task prompt verbatim, while the
-    skill bodies still live in the folder for on-demand ``cat`` -- the
-    catalog is no longer hidden behind a file the agent has to find and
-    open, which the 2026-10-19 folder-run audit found the weak model
-    rarely did (26/84 attempts hit a wrong path and saw no catalog
-    lines). The manifest's ``catalog_text`` is populated either way, so
-    the materialization and the M4 read-stats are unchanged.
+    ``True`` puts the catalog text into the unit row's ``skills_block``
+    so the benchmark can include it in the remote skill file the agent is
+    told to read (the TB plugin writes it into ``SKILL.md``); the skill
+    bodies still live in the folder for on-demand ``cat`` -- the catalog
+    is no longer hidden behind a file the agent has to find and open,
+    which the 2026-10-19 folder-run audit found the weak model rarely did
+    (26/84 attempts hit a wrong path and saw no catalog lines). The
+    manifest's ``catalog_text`` is populated either way, so the
+    materialization and the M4 read-stats are unchanged.
     """
 
     inline_catalog: bool = False

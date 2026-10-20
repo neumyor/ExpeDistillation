@@ -1,7 +1,9 @@
 """Skill-folder M3, the TB sandbox leg: the folder rides the per-run
-skills directory into the sandbox, the guidance (never the catalog) is
-the injected SKILL.md, and the recorded trajectory keeps the agent's
-cat commands for M4's parsing.
+skills directory into the sandbox, the default (inline_catalog=False)
+mode uploads the guidance as SKILL.md and leaves the catalog in
+catalog.md, and the recorded trajectory keeps the agent's cat commands
+for M4's parsing. The inline_catalog=True SKILL.md body is pinned in
+test_tb_plugin.py.
 
 Everything goes through the fake links of test_tb_plugin.py (no
 network, no ssh). The remote contract this pins: the plugin uploads

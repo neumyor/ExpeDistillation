@@ -17,7 +17,12 @@ import pytest
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import _reset_registry, get_plugin
 from expedistill.benchmarks.tb import TBPlugin
-from expedistill.benchmarks.tb.plugin import classify_result, result_facts
+from expedistill.benchmarks.tb.plugin import (
+    TB_SKILL_FOLDER_GUIDANCE,
+    TB_TASK_PROMPT_FOLDER_INLINE_NAME,
+    classify_result,
+    result_facts,
+)
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
 from expedistill.infra.reliability import ConfigError, InfrastructureError
 from expedistill.infra.usage import UsageRecorder
@@ -935,6 +940,78 @@ def test_task_prompt_registered_with_exactly_three_variables():
                                   skills_block="## Skill rules\n- be careful",
                                   history="")
     assert "## Skill rules" in with_skills
+
+
+def _folder_task(tmp_path, *, inline_catalog):
+    """One folder unit: a materialized folder plus the sale manifest."""
+    folder_dir = tmp_path / "folder"
+    folder_dir.mkdir()
+    catalog = "## Skill folder catalog\n\nbank/x | x.md | example\n"
+    (folder_dir / "catalog.md").write_text(catalog, encoding="utf-8")
+    (folder_dir / "x.md").write_text(
+        "[When to use] example\n[Steps]\n1. do it\n[Verify] done\n"
+        "[Do not use when] never\n",
+        encoding="utf-8")
+    manifest = {
+        "bank_fingerprint": "bank:test",
+        "catalog_filename": "catalog.md",
+        "catalog_text": catalog,
+        "files": [{"skill_id": "bank/x", "version": 1, "filename": "x.md"}],
+    }
+    task = Task(task_id="train-fasttext", instruction="train-fasttext",
+                meta={"task_name": "train-fasttext",
+                      "attempt_token": "tok",
+                      "skill_folder": manifest,
+                      "skill_folder_dir": str(folder_dir),
+                      "inline_catalog": inline_catalog})
+    return task, catalog
+
+
+def _run_folder(tmp_path, *, inline_catalog):
+    task, catalog = _folder_task(
+        tmp_path, inline_catalog=inline_catalog)
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files=_completed_trial_files())
+    outcome = _make_plugin(link).run(
+        task, HANDLE, catalog, tmp_path / "work")
+    uploads = [(remote, payload) for remote, payload in link.uploads
+               if remote.endswith("/SKILL.md")]
+    assert len(uploads) == 1
+    return uploads[0][1].decode("utf-8"), catalog, outcome
+
+
+def test_folder_inline_skill_md_includes_the_catalog(tmp_path):
+    # inline_catalog=True: the catalog rides the SKILL.md the remote task
+    # prompt tells the agent to read. The first-turn prompt is unchanged;
+    # the skill bodies remain files in the mounted folder.
+    text, catalog, outcome = _run_folder(tmp_path, inline_catalog=True)
+    assert "The catalog of available skills is included below" in text
+    assert "## Skill folder catalog" in text
+    assert "bank/x | x.md | example" in text
+    # It no longer tells the agent to find and cat catalog.md first.
+    assert "cat /opt/openclaw-skills/<directory>/catalog.md" not in text
+    assert outcome.meta["prompt_name"] == TB_TASK_PROMPT_FOLDER_INLINE_NAME
+
+
+def test_folder_non_inline_skill_md_is_guidance_only(tmp_path):
+    # inline_catalog=False keeps the original behavior: guidance only;
+    # the catalog lives in catalog.md and the agent must cat it.
+    text, catalog, outcome = _run_folder(tmp_path, inline_catalog=False)
+    assert text == TB_SKILL_FOLDER_GUIDANCE
+    assert "## Skill folder catalog" not in text
+    assert "bank/x | x.md | example" not in text
+    assert outcome.meta["prompt_name"] == "TB_TASK_PROMPT_FOLDER"
+
+
+def test_folder_inline_skill_template_has_only_catalog_variable():
+    template = get_prompt(TB_TASK_PROMPT_FOLDER_INLINE_NAME)
+    fields = {fname for _, fname, _, _ in string.Formatter().parse(template)
+              if fname}
+    assert fields == {"catalog"}
+    rendered = template.format(catalog="## Skill folder catalog\n")
+    assert "The catalog of available skills is included below" in rendered
+    assert "## Skill folder catalog" in rendered
 
 
 def test_import_registers_plugin_and_prompt():
