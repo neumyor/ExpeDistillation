@@ -29,6 +29,7 @@ from expedistill.prompts import (  # noqa: F401
     curate,
     exam,
     llm,
+    profile,
     segment,
 )
 

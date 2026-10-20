@@ -256,25 +256,25 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -482,13 +482,13 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -644,25 +644,25 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -810,13 +810,13 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -1276,49 +1276,49 @@
             {
               "prompt": "LIVE_RUN_ATTRIBUTION",
               "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
-              "request_text_sha256": "4ac6b4665cc8a01600b66b6c26d060982ff9b0e52827909b7f4640d7b8baf2d8",
+              "request_text_sha256": "6a6598ddf09ce04a0a5a622dab91e4e55c116160fdc05a2d765272dede399aea",
               "role": "author"
             },
             {
               "prompt": "LIVE_RUN_ATTRIBUTION",
               "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
-              "request_text_sha256": "0324a3aae4f0e49e99eb78878da8e71c8a452e261eb2a4f9ee89119a171d53e5",
+              "request_text_sha256": "0594f23be1c998dbfc1926f9aa37ce5e01df49b1395d349abe071417e953aa0c",
               "role": "author"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "544ebf9e563005e475fc8f55427951b7b4962b7d9c639d7f04e4d5207afd6563",
+              "request_text_sha256": "f34a852e9e456c5751152df8a2c82db6a78e30d9453849a4baa075d0f4324d19",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "544ebf9e563005e475fc8f55427951b7b4962b7d9c639d7f04e4d5207afd6563",
+              "request_text_sha256": "f34a852e9e456c5751152df8a2c82db6a78e30d9453849a4baa075d0f4324d19",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "757d18e0bb71da674164a95f47404d6e0ad435ac637b1a77969fa5a13cdc91d0",
+              "request_text_sha256": "af32f9b92f48d43c706e685dcc0da5a45c7ef96fd885746e6242a0f6057de754",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f12a89075759ee30a6c0e816dc1e19a01f64c4cb294a1acd5edd609ffbee69a",
+              "request_text_sha256": "694111bde9ea1133a13396e16037407c7a0f93de156a0e90da39348d6462c6ef",
               "role": "rewriter"
             },
             {
@@ -1330,37 +1330,37 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -1709,25 +1709,25 @@
             {
               "prompt": "LIVE_RUN_ATTRIBUTION",
               "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
-              "request_text_sha256": "4ac6b4665cc8a01600b66b6c26d060982ff9b0e52827909b7f4640d7b8baf2d8",
+              "request_text_sha256": "6a6598ddf09ce04a0a5a622dab91e4e55c116160fdc05a2d765272dede399aea",
               "role": "author"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "757d18e0bb71da674164a95f47404d6e0ad435ac637b1a77969fa5a13cdc91d0",
+              "request_text_sha256": "af32f9b92f48d43c706e685dcc0da5a45c7ef96fd885746e6242a0f6057de754",
               "role": "rewriter"
             },
             {
@@ -1739,19 +1739,19 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -2071,49 +2071,49 @@
             {
               "prompt": "LIVE_RUN_ATTRIBUTION",
               "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
-              "request_text_sha256": "4ac6b4665cc8a01600b66b6c26d060982ff9b0e52827909b7f4640d7b8baf2d8",
+              "request_text_sha256": "6a6598ddf09ce04a0a5a622dab91e4e55c116160fdc05a2d765272dede399aea",
               "role": "author"
             },
             {
               "prompt": "LIVE_RUN_ATTRIBUTION",
               "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
-              "request_text_sha256": "0324a3aae4f0e49e99eb78878da8e71c8a452e261eb2a4f9ee89119a171d53e5",
+              "request_text_sha256": "0594f23be1c998dbfc1926f9aa37ce5e01df49b1395d349abe071417e953aa0c",
               "role": "author"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "544ebf9e563005e475fc8f55427951b7b4962b7d9c639d7f04e4d5207afd6563",
+              "request_text_sha256": "f34a852e9e456c5751152df8a2c82db6a78e30d9453849a4baa075d0f4324d19",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "544ebf9e563005e475fc8f55427951b7b4962b7d9c639d7f04e4d5207afd6563",
+              "request_text_sha256": "f34a852e9e456c5751152df8a2c82db6a78e30d9453849a4baa075d0f4324d19",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "757d18e0bb71da674164a95f47404d6e0ad435ac637b1a77969fa5a13cdc91d0",
+              "request_text_sha256": "af32f9b92f48d43c706e685dcc0da5a45c7ef96fd885746e6242a0f6057de754",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f12a89075759ee30a6c0e816dc1e19a01f64c4cb294a1acd5edd609ffbee69a",
+              "request_text_sha256": "694111bde9ea1133a13396e16037407c7a0f93de156a0e90da39348d6462c6ef",
               "role": "rewriter"
             },
             {
@@ -2125,37 +2125,37 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -2436,25 +2436,25 @@
             {
               "prompt": "LIVE_RUN_ATTRIBUTION",
               "request_text_prefix": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the base",
-              "request_text_sha256": "4ac6b4665cc8a01600b66b6c26d060982ff9b0e52827909b7f4640d7b8baf2d8",
+              "request_text_sha256": "6a6598ddf09ce04a0a5a622dab91e4e55c116160fdc05a2d765272dede399aea",
               "role": "author"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "8f5155b61c920180394e38f0d1e4d38dbba40d380b8042a2b9db84e593418e0a",
+              "request_text_sha256": "3fc437964420b82803513e031db56422856e6b753d1b408d70d21fb3680c536f",
               "role": "rewriter"
             },
             {
               "prompt": "LIVE_SKILL_REVISION",
               "request_text_prefix": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. ",
-              "request_text_sha256": "757d18e0bb71da674164a95f47404d6e0ad435ac637b1a77969fa5a13cdc91d0",
+              "request_text_sha256": "af32f9b92f48d43c706e685dcc0da5a45c7ef96fd885746e6242a0f6057de754",
               "role": "rewriter"
             },
             {
@@ -2466,19 +2466,19 @@
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DIAGNOSE",
               "request_text_prefix": "You are writing a skill for a weaker model, learned from ONE subtask of the\nweak model's own trajectory where it went wr",
-              "request_text_sha256": "d6a4c8ab7642ccb1cabda9c5ca6c9e4f5ae3622c81d42a99c8dabb8acbc9e39a",
+              "request_text_sha256": "300cf5ced28c99f47d0b3932ad8b19be4a15d26e3794b5e7d51e69bf562fba07",
               "role": "author"
             },
             {
               "prompt": "SKILL_DISTILL",
               "request_text_prefix": "You are writing a skill for a weaker model, distilled from ONE subtask of a\nstrong model's trajectory. The subtask SUCCE",
-              "request_text_sha256": "9a18711c3139055d6477085ef26afefd68e66ba4d53ab6dedde2b2874fef3aca",
+              "request_text_sha256": "99bfe8cb90853e6e235c8b4973eb540cc9f6664a5d93214ff97c7148e7e8f086",
               "role": "author"
             }
           ],
@@ -2560,13 +2560,14 @@
       }
     }
   },
-  "golden_matrix_base_commit": "4b14489ba0e536c2b5786b8c4dc74bd38e366475",
+  "golden_matrix_base_commit": "8015ec9940ee35f482b73343946aac0a601103e5",
   "root_causes": {
     "LAYOUT": "The phase-world artifact locations (C summary, per-phase bank, A-phase generation failures, learn ledgers) are aligned onto the canonical names by v4_layout -- the alignment itself is the disclosure; these paths never reach the comparators.",
     "R8_EXAM_GENERATION_IN_A": "The R8 ruling moved exam generation into the A phase; the live sequence has no A phase, so its EXAM_GEN calls are gone (whitelist 1, pre-registered).",
     "R9_LABELS": "R9's pNN phase labels: control_source is '<phase>_reuse' (D_reuse) where the stage world wrote 'stage1_reuse'; the alias table canonicalises both.",
     "UNIFIED_SKILL_STRUCTURE": "The 2026-10-19 ruling (docs/decisions/unified_skill_structure_20261019.md): every skill carries the four [When to use]/[Steps]/[Verify]/[Do not use when] sections, so a skill written from a weak failure no longer uses the 69904f7 world's [Trigger]/[Why it fails]/[Do instead] layout. The same ruling restored the weak-failure add path (evidence write_lessons, default on) that repair plan R6 had narrowed to strong segments, so the bank holds the same skills, terminal states and attribution traces as the baseline (E2/E6 green); E1 differs only in those skills' content, and E4 only in the text of the calls that carry a skill or a changed prompt.",
-    "W2B_LEARN_LEDGERS": "W2-B replaced attributions.jsonl with the learn phase's task_list/revisions/outcomes ledgers; E6 compares the aligned (task, round, skill, version) traces, and the fields the ledgers no longer persist are disclosed at the comparator."
+    "W2B_LEARN_LEDGERS": "W2-B replaced attributions.jsonl with the learn phase's task_list/revisions/outcomes ledgers; E6 compares the aligned (task, round, skill, version) traces, and the fields the ledgers no longer persist are disclosed at the comparator.",
+    "WEAK_PROFILE_SWITCH": "Schema v5's use_weak_profile defaults false: the weak-profile text stays in the config for provenance and opt-in, but the authoring/rewriting prompts receive a neutral profile_section instead. E1/E4 differ only in that section's text (skills and call counts are unchanged); setting use_weak_profile true restores the profile-conditioned prompts."
   },
   "what": "Wave 4 golden regeneration: the E1-E6 semantic comparison of the phase world's regenerated golden matrix against the archived 69904f7 baseline bundle. Red criteria are DISCLOSED differences with their complete enumerations; the standing test pins this file byte for byte, so any drift beyond (or a regression of) the disclosed set fails the suite."
 }

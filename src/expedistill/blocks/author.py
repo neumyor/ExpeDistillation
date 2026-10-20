@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
 from expedistill.core.ids import make_exam_id, make_skill_id
+from expedistill.prompts.profile import profile_section
 from expedistill.core.models import (
     SKILL_MARKERS,
     SKILL_SUMMARY_MAX_CHARS,
@@ -348,7 +349,9 @@ def write_skill(
             "label": subtask.label,
             "description": subtask.description,
             "steps_view": steps_view,
-            "weak_profile": weak_profile,
+            "profile_section": profile_section(
+                "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+                weak_profile),
         }
     else:
         variables = {
@@ -356,7 +359,9 @@ def write_skill(
             "description": subtask.description,
             "steps_view": steps_view,
             "context_summary": subtask.context_summary,
-            "weak_profile": weak_profile,
+            "profile_section": profile_section(
+                "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+                weak_profile),
         }
 
     if mode == "distill" and subtask.success is not True:
@@ -474,7 +479,9 @@ def rewrite_skill(
         "question_text": question_text,
         "weak_answer": weak_answer,
         "error_description": error_description,
-        "weak_profile": weak_profile,
+        "profile_section": profile_section(
+            "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+            weak_profile),
     }
     parsed = call_model(
         handle, "REWRITE", variables,

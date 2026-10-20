@@ -45,6 +45,7 @@ from expedistill.core.config import (
     phase_label,
     phase_spec_to_raw,
     upgrade_v3_config,
+    upgrade_v4_config,
 )
 
 #: The repository root (the 7 v3 configs live under configs/experiments/).
@@ -438,22 +439,23 @@ class TestCheckedInConfigs:
         for path in v3:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             v4 = upgrade_v3_config(raw)
-            specs = _parse(v4)
-            assert set(specs) == set(v4["phases"]) == set(v4["sequence"])
+            v5 = upgrade_v4_config(v4)
+            specs = _parse(v5)
+            assert set(specs) == set(v5["phases"]) == set(v5["sequence"])
             # Every emitted phase carries its R8 role, and the v4-only
             # global is pinned at the default.
             for spec in specs.values():
                 assert spec.role in (PHASE_ROLE_BASELINE, PHASE_ROLE_EXAM,
                                      PHASE_ROLE_LIVE, PHASE_ROLE_TEST,
                                      PHASE_ROLE_LEARN)
-            assert v4["invalid_redispatch_limit"] == \
+            assert v5["invalid_redispatch_limit"] == \
                 DEFAULT_INVALID_REDISPATCH_LIMIT
-            # The whole converted identity loads under the v4 gate: the
+            # The whole converted identity loads under the v5 gate: the
             # checklist runs from ExperimentConfig's own __post_init__,
             # role tables and token budgets included.
             from expedistill.core.config import ExperimentConfig
-            cfg = ExperimentConfig.from_dict(v4)
-            assert cfg.sequence == v4["sequence"]
+            cfg = ExperimentConfig.from_dict(v5)
+            assert cfg.sequence == v5["sequence"]
             # The canonical (all-keys) to_dict round-trips: the frozen
             # manifest of a converted run compares equal on resume.
             assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg

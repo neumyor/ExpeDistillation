@@ -26,6 +26,7 @@ from expedistill.core.models import Skill
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts import get as get_prompt
+from expedistill.prompts.profile import profile_section
 from expedistill.prompts import METHOD_PROMPT_NAMES, PROMPTS
 from expedistill.blocks.attribution import (
     FAILURE_CATEGORIES,
@@ -184,7 +185,9 @@ def test_attribute_failure_wiring_and_result():
         baseline_summary=BASELINE_SUMMARY,
         live_views=LIVE_VIEWS,
         skills_listing=expected_listing,
-        weak_profile=WEAK_PROFILE,
+        profile_section=profile_section(
+            "THE MODEL THAT EXECUTED THE TASK (weak model profile):",
+            WEAK_PROFILE),
     )
     assert handle.client.calls[0]["user"] == expected
 
@@ -424,7 +427,9 @@ def test_revise_skill_wiring_and_result():
         skill_text=SKILL_A_CONTENT,
         attribution_report=ATTRIBUTION_REPORT,
         failure_view=FAILURE_VIEW,
-        weak_profile=WEAK_PROFILE,
+        profile_section=profile_section(
+            "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+            WEAK_PROFILE),
     )
     assert handle.client.calls[0]["user"] == expected
 

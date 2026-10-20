@@ -31,6 +31,7 @@ from expedistill.core.models import (
 )
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
+from expedistill.prompts.profile import NO_WEAK_PROFILE_SECTION, profile_section
 from expedistill.prompts.registry import get as get_prompt
 from expedistill.blocks.author import (
     gen_exam,
@@ -43,6 +44,13 @@ from expedistill.blocks.author import (
 
 STEPS_VIEW = "step 0: read config\nstep 1: restart the service"
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
+
+
+def _profile_section(weak_profile=WEAK_PROFILE):
+    return profile_section(
+        "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+        weak_profile,
+    )
 
 DISTILL_SECTIONS = {
     "when_to_use": "When the service rejects a login.",
@@ -185,7 +193,7 @@ def test_write_skill_distill_wiring_and_fields():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
-        weak_profile=WEAK_PROFILE,
+        profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
 
@@ -206,6 +214,23 @@ def test_write_skill_distill_wiring_and_fields():
     assert has_skill_sections(skill.content)
 
 
+def test_write_skill_without_profile_sends_the_neutral_section():
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
+
+    write_skill(subtask, STEPS_VIEW, "", "distill", handle)
+
+    user = handle.client.calls[0]["user"]
+    expected = get_prompt("SKILL_DISTILL").format(
+        label=subtask.label,
+        description=subtask.description,
+        steps_view=STEPS_VIEW,
+        profile_section=NO_WEAK_PROFILE_SECTION,
+    )
+    assert user == expected
+    assert WEAK_PROFILE not in user
+
+
 def test_write_skill_prompt_name_override_keeps_the_mode_contract(monkeypatch):
     # A prompt-strategy variant passes its own registered prompt; the
     # sections contract stays the mode's (validation and rendering key
@@ -215,7 +240,7 @@ def test_write_skill_prompt_name_override_keeps_the_mode_contract(monkeypatch):
     monkeypatch.setitem(PROMPTS, "SKILL_DISTILL_VARIANT", PromptSpec(
         name="SKILL_DISTILL_VARIANT",
         template="VARIANT PROMPT for {label}: {description}\n{steps_view}\n"
-                 "{weak_profile}",
+                 "{profile_section}",
         description="test-only distill variant"))
     subtask = make_subtask()
     handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
@@ -227,7 +252,7 @@ def test_write_skill_prompt_name_override_keeps_the_mode_contract(monkeypatch):
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
-        weak_profile=WEAK_PROFILE,
+        profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
     # The mode's marker rendering, not the variant prompt's prose shape.
@@ -251,7 +276,7 @@ def test_write_skill_diagnose_wiring_and_fields():
         description=subtask.description,
         steps_view=STEPS_VIEW,
         context_summary=subtask.context_summary,
-        weak_profile=WEAK_PROFILE,
+        profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
     assert skill.content == DIAGNOSE_CONTENT
@@ -733,7 +758,7 @@ def test_rewrite_skill_wiring_and_result():
         question_text="What should you do when X?",
         weak_answer="I would do X.",
         error_description="The answer skips the verification step.",
-        weak_profile=WEAK_PROFILE,
+        profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
 

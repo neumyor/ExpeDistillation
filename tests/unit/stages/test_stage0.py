@@ -694,11 +694,11 @@ _GOLDEN_PROMPT_DIGESTS = {
     "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
     "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
     "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
-    "REWRITE": "5f7c0eff8c77274db2dd0b50c18f1ce1c6d9adc88362ade74b0bc419c9bd9d52",
+    "REWRITE": "48fae498a6eb676a4d4931070a484485ee36ff8b8e75a05bc4084b4cbc7f18dc",
     "SEGMENT": "19c5562a02b93c11a8c0475d057154e17bd0c8f6b1bf017f1f274cdea798cc8b",
     "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
-    "SKILL_DIAGNOSE": "623162e49bb5f71df3fa4e8d0a0ad061ce3d730947c242ef3913fc7710272b67",
-    "SKILL_DISTILL": "48bfbaea7780ad51b4e1e586aef843b140a0e7157187086f99188da61830b00d",
+    "SKILL_DIAGNOSE": "7e1b50d70ec74af836ba9f3d0327435acc411a6b057c1f1613d5b93c8da295f9",
+    "SKILL_DISTILL": "b1fdf5df62973d4d36530a6596ed84b30e00d44d62cf8473ae527f20a3482dff",
     # v3 full freeze: the two live prompts register at prompts/__init__
     # import like every method prompt, so their digests are frozen on
     # every run -- exam runs included.
@@ -732,6 +732,7 @@ def _golden_config(split):
         "mode": "full" if split is None else "split",
         "models": dict(_GOLDEN_MODEL_ROLES),
         "weak_profile": "a weak model",
+        "use_weak_profile": False,
         "n_attempts_strong": 1,
         "n_attempts_weak": 2,
         "split": split,
@@ -767,7 +768,7 @@ def _golden_config(split):
         "prompts_digests": dict(_GOLDEN_PROMPT_DIGESTS),
         "model_options": {},
         "token_budgets": {},
-        "schema_version": 4,
+        "schema_version": 5,
     }
 
 

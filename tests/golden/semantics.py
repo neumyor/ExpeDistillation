@@ -1025,6 +1025,13 @@ ROOT_CAUSES = {
         "A-phase generation failures, learn ledgers) are aligned onto "
         "the canonical names by v4_layout -- the alignment itself is "
         "the disclosure; these paths never reach the comparators."),
+    "WEAK_PROFILE_SWITCH": (
+        "Schema v5's use_weak_profile defaults false: the weak-profile "
+        "text stays in the config for provenance and opt-in, but the "
+        "authoring/rewriting prompts receive a neutral profile_section "
+        "instead. E1/E4 differ only in that section's text (skills and "
+        "call counts are unchanged); setting use_weak_profile true "
+        "restores the profile-conditioned prompts."),
 }
 
 

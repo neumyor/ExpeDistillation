@@ -402,7 +402,7 @@ def _land_add(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     skills = author.write_new(
         task_row=row, package=filtered,
         author_handle=ctx.handle("author"),
-        weak_profile=ctx.config.weak_profile, usage=ctx.usage,
+        weak_profile=ctx.config.effective_weak_profile(), usage=ctx.usage,
         run_dir=ctx.run_dir)
     for skill in skills:
         store.save(skill, "skills")
@@ -468,7 +468,7 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
             task_row=row, store=store, round_=current_round,
             n_attempts=_n_attempts(ctx, current_spec),
             task_instruction=_task_instruction(ctx, row.target_id),
-            weak_profile=ctx.config.weak_profile,
+            weak_profile=ctx.config.effective_weak_profile(),
             author_handle=ctx.handle("author"),
             view_rules=get_plugin(ctx.config.benchmark).view_rules,
             usage=ctx.usage, run_dir=ctx.run_dir)
@@ -505,7 +505,7 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
     outcomes = author.revise_group(
         task_row=row, packages=to_author,
         rewriter_handle=ctx.handle("rewriter"),
-        weak_profile=ctx.config.weak_profile, decide=decide,
+        weak_profile=ctx.config.effective_weak_profile(), decide=decide,
         usage=ctx.usage, run_dir=ctx.run_dir)
     by_target = {package.target: package for package in to_author}
     for outcome in outcomes:

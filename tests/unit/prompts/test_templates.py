@@ -17,14 +17,14 @@ from expedistill.prompts import PROMPTS, get
 # name -> (owning block, documented variables)
 EXPECTED = {
     "SEGMENT": ("G1", {"trajectory_view", "K"}),
-    "SKILL_DISTILL": ("G2", {"label", "description", "steps_view", "weak_profile"}),
+    "SKILL_DISTILL": ("G2", {"label", "description", "steps_view", "profile_section"}),
     "SKILL_DIAGNOSE": (
         "G2",
-        {"label", "description", "steps_view", "context_summary", "weak_profile"},
+        {"label", "description", "steps_view", "context_summary", "profile_section"},
     ),
     "REWRITE": (
         "G6",
-        {"skill_text", "question_text", "weak_answer", "error_description", "weak_profile"},
+        {"skill_text", "question_text", "weak_answer", "error_description", "profile_section"},
     ),
     "EXAM_GEN": ("G3", {"label", "description", "steps_view"}),
     "ANSWER": ("G4", {"question_text", "skills_block"}),
@@ -86,6 +86,16 @@ def test_format_with_dummy_values_succeeds():
     for name, (_, variables) in EXPECTED.items():
         rendered = get(name).format(**{var: DUMMY for var in variables})
         assert rendered.strip()
+
+
+def test_profile_section_off_is_neutral():
+    from expedistill.prompts.profile import (
+        NO_WEAK_PROFILE_SECTION,
+        profile_section,
+    )
+    assert profile_section("HEADER", "") == NO_WEAK_PROFILE_SECTION
+    assert profile_section("HEADER", None) == NO_WEAK_PROFILE_SECTION
+    assert profile_section("HEADER", "a profile") == "HEADER\na profile"
 
 
 def test_answer_template_renders_with_empty_skills_block():

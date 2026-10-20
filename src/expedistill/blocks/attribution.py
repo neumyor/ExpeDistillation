@@ -45,6 +45,7 @@ from typing import Any, Dict, List, Optional, Union
 from expedistill.core.models import SKILL_SUMMARY_MAX_CHARS, Skill
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm.call import ModelHandle, call_model
+from expedistill.prompts.profile import profile_section
 
 __all__ = [
     "FAILURE_CATEGORIES",
@@ -157,7 +158,9 @@ def attribute_failure(
         "baseline_summary": baseline_summary,
         "live_views": live_views,
         "skills_listing": _skills_listing(skills),
-        "weak_profile": weak_profile,
+        "profile_section": profile_section(
+            "THE MODEL THAT EXECUTED THE TASK (weak model profile):",
+            weak_profile),
     }
     parsed = call_model(
         handle, "LIVE_RUN_ATTRIBUTION", variables,
@@ -266,7 +269,9 @@ def revise_skill(
         "skill_text": skill_text,
         "attribution_report": attribution_report,
         "failure_view": failure_view,
-        "weak_profile": weak_profile,
+        "profile_section": profile_section(
+            "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+            weak_profile),
     }
     parsed = call_model(
         handle, "LIVE_SKILL_REVISION", variables,

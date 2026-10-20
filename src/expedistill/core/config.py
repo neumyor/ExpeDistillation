@@ -112,7 +112,7 @@ _ROLE_BUDGET_KEYS = ("max_output_tokens", "max_input_tokens")
 #: v4: the method is a ``sequence`` of phases; every method parameter
 #: lives in the phase definitions under ``phases`` (R9). v3 and older
 #: are refused with a pointer at the upgrade mapping and the converter.
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 
 
 class ConfigError(ValueError):
@@ -982,6 +982,10 @@ class ExperimentConfig:
     mode: str
     models: Dict[str, str]
     weak_profile: str = ""
+    #: Whether the weak-model profile conditions authoring/rewriting.
+    #: False is the default for new experiments: the profile text stays in
+    #: the config for provenance and opt-in, but is not passed to prompts.
+    use_weak_profile: bool = False
     n_attempts_strong: int = 1
     n_attempts_weak: int = 1
     #: None in ``full`` mode; task-id lists or ratio+seed in ``split`` mode.
@@ -1035,6 +1039,10 @@ class ExperimentConfig:
             raise ValueError(f"mode must be one of {MODES}, got {self.mode!r}")
         if not self.benchmark:
             raise ValueError("benchmark is required")
+        if not isinstance(self.use_weak_profile, bool):
+            raise ValueError(
+                "use_weak_profile must be a bool, got "
+                f"{self.use_weak_profile!r}")
         if not (_is_positive_int(self.n_attempts_strong)
                 and _is_positive_int(self.n_attempts_weak)):
             raise ValueError(
@@ -1173,6 +1181,10 @@ class ExperimentConfig:
             return entry["max_output_tokens"]
         return self.token_budgets["default_max_output_tokens"]
 
+    def effective_weak_profile(self) -> str:
+        """The weak-profile text prompts receive (empty when disabled)."""
+        return self.weak_profile if self.use_weak_profile else ""
+
     def to_dict(self) -> Dict[str, Any]:
         """The freezable payload: every field, values included as they are,
         with the parsed phase specs back in their raw (JSON-safe) form so
@@ -1217,14 +1229,16 @@ def _check_schema_version(version: Any, where: str) -> None:
             f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
             "update the repository and retry")
     if version < CONFIG_SCHEMA_VERSION:
+        remedy = ("upgrade_v4_config" if version == 4
+                  else "upgrade_v3_config (a v2 file chains through "
+                       "upgrade_v2_config first)")
         raise ConfigError(
             f"{where} has schema_version {version}; this code speaks "
-            f"schema {CONFIG_SCHEMA_VERSION} (the phase sequence) -- "
-            "convert it with upgrade_v3_config (the converter script "
+            f"schema {CONFIG_SCHEMA_VERSION} -- "
+            f"convert it with {remedy} (the converter script "
             "scripts/run/convert_v3_configs.py writes NEW file names; "
-            "v3 files are frozen experiment records; a v2 file chains "
-            "through upgrade_v2_config first), and resume runs frozen "
-            "under an older schema on their maintenance branch "
+            "older files are frozen experiment records), and resume runs "
+            "frozen under an older schema on their maintenance branch "
             "(AGENTS section 6)")
 
 
@@ -1252,10 +1266,10 @@ def load_config(path: str) -> ExperimentConfig:
     expanded), so the frozen value does not depend on the cwd a run or a
     resume was started from. A ``tasks`` list is kept as is.
 
-    v4 fails loud on the RAW mapping: unknown top-level keys, future
-    schema versions, and older-schema files (convert them first -- the
-    error names the upgrade mapping and the converter) are ConfigErrors
-    naming the offender.
+    Schema v4 files are upgraded in memory to v5 (``use_weak_profile``
+    defaults false); older-schema files still fail loud with the upgrade
+    remedy. Unknown top-level keys and future schema versions are
+    ConfigErrors naming the offender.
     """
     import yaml  # function-local: see the module docstring
 
@@ -1267,6 +1281,8 @@ def load_config(path: str) -> ExperimentConfig:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
+    if data.get("schema_version") == 4:
+        data = upgrade_v4_config(data)
     # A file without schema_version predates v4, so it is refused.
     _check_schema_version(data.get("schema_version", 3), str(path))
     known_file_keys = ({f.name for f in fields(ExperimentConfig)}
@@ -1320,4 +1336,5 @@ def save_config(config: ExperimentConfig, path: str) -> None:
 from expedistill.core.config_upgrade import (  # noqa: E402
     upgrade_v2_config as upgrade_v2_config,
     upgrade_v3_config as upgrade_v3_config,
+    upgrade_v4_config as upgrade_v4_config,
 )

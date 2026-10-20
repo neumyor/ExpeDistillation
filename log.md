@@ -1119,3 +1119,27 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件：`src/expedistill/methods/curation/__init__.py`、`src/expedistill/methods/curation/agentbrew.py`、`src/expedistill/composites/curation.py`、`src/expedistill/blocks/curate.py`、`tests/unit/methods/test_params.py`、`tests/unit/blocks/test_curate.py`、`tests/composites/test_curation.py`、`src/expedistill/methods/curation/README.md`、`README.md`、`docs/decisions/curation_grouping_input_20261020.md`（新建）、`docs/decisions/curation_generalize_20261019.md`
 
+## 2026-10-19 20:52 — TB21 完整实验重跑启动（仅复用训练集裸跑轨迹）
+
+一段话摘要：用户决定重跑 TB21 完整实验，只复用旧 run 的 246 条训练集裸跑轨迹（41 个任务 × 强/弱两臂 × 3 次），其余切段、写作、实战验收、整理和终测全部重新执行。新建配置 `configs/experiments/tb21_split_folder_rerun_20261019.yaml`：相似度输入只看摘要（similarity_input=summary）、所有模型输出上限统一 65536、轨迹选择改为 all、开启 --allow-infra-shortfall、终测目录内联（inline_catalog=true）；其余参数沿用旧配置。用 `assemble-reuse --level baseline` 装配到 `runs/tb21_split_folder_rerun_20261019_2050`，只拷贝 246 条轨迹和 0 个已接受空洞，没有拷贝任何技能、子任务、考题或旧相位记录。预检只跑到基线相位：新增模型调用为 0，82 个单元全部正常，强模型 avg@3=0.6341、弱模型 avg@3=0.4228，与旧 run 逐位一致。随后以 PID 51038 脱离会话启动完整 7 相位序列，已进入首个学习相位，初始任务清单 30 条 add。实验仍在运行，结果未审计，数字不得引用。
+
+工件：`configs/experiments/tb21_split_folder_rerun_20261019.yaml`（新建，未提交）、run `runs/tb21_split_folder_rerun_20261019_2050/`（运行中）
+
+## 2026-10-19 22:05 — 停止首个重跑，轨迹选择改为 strong1_weak1 后重开
+
+一段话摘要：首个重跑 run（`runs/tb21_split_folder_rerun_20261019_2050`）在 p02 学习阶段按用户要求于 22:02 停止；原因是 `trajectory_select=all` 下首轮学习按当前串行速度估算需 20–30 小时、整个 run 可能 3–5 天，用户要求把 `rules.trajectory_select` 调整为 1。代码里没有名为“1”的现成规则，新增具名规则 `strong1_weak1`：每任务最多 1 条强模型轨迹（成功优先）、最多 1 条弱模型轨迹（失败优先），偏好序与 `strong2_weak2` 相同。新增两个单元测试，规则测试 19 passed，ruff 通过。旧 run 已写 `INVALID.md` 作废，不用于结果。新配置 `configs/experiments/tb21_split_folder_rerun1_20261019.yaml` 只把 `trajectory_select` 改为 `strong1_weak1`，其余参数不变；装配到 `runs/tb21_split_folder_rerun1_20261019_2205`，预检同样零模型调用、82 个基线单元 normal、强弱指标逐位一致，随后以 PID 18846 启动完整 7 相位序列。实验仍在运行，结果未审计，数字不得引用。
+
+工件：`src/expedistill/blocks/rules.py`（新增 strong1_weak1）、`tests/unit/blocks/test_rules.py`（新增两个测试）、`configs/experiments/tb21_split_folder_rerun1_20261019.yaml`（新建，未提交）、run `runs/tb21_split_folder_rerun1_20261019_2205/`（运行中）、旧 run 的 `INVALID.md`
+
+## 2026-10-20 11:39 — curation 新增 grouping_input 开关
+
+一段话摘要：用户要求给整理模块的 G9 分组增加独立的输入开关，与 G7 的 `similarity_input` 分开。实现：`AgentBrewParams` 新增 `grouping_input`，取值 `full` / `summary`，默认 `full`；`curate_bank` 校验并透传；`assign_groups` 用 `_listing(skills, grouping_input)` 渲染 `GROUP` 输入；`summary` 时任何已接受技能缺摘要都会在 G9 模型调用前报 `ConfigError`。`GROUP` 提示词文本未改，因此 prompt digest 不变；参数只存在于 `phases.learn.curate`，不进顶层配置，不需要 schema 升版。文档同步：模块 README 增加参数行和 YAML 示例、主 README 的 `curate` 行更新、新建 `docs/decisions/curation_grouping_input_20261020.md`、在 `curation_generalize_20261019.md` 末尾加后续指引。测试：定向 148 passed；在 HEAD 的干净 worktree 只应用本补丁跑全套，2261 passed + 4 deselected，唯一失败是临时 worktree 没有 `.venv/bin/expedistill` 的环境性检查，与本改动无关；ruff 全过。当前主工作树另有一批未提交的 schema v5 / `use_weak_profile` 改动，导致 golden、配置升级、assemble_reuse 等 51 个测试失败；这些失败在应用本补丁前就存在，未修改那些文件。未提交。
+
+工件：`src/expedistill/methods/curation/__init__.py`、`src/expedistill/methods/curation/agentbrew.py`、`src/expedistill/composites/curation.py`、`src/expedistill/blocks/curate.py`、`tests/unit/methods/test_params.py`、`tests/unit/blocks/test_curate.py`、`tests/composites/test_curation.py`、`src/expedistill/methods/curation/README.md`、`README.md`、`docs/decisions/curation_grouping_input_20261020.md`（新建）、`docs/decisions/curation_generalize_20261019.md`
+
+## 2026-10-20 12:07 — 新增弱模型画像开关 use_weak_profile，默认关闭
+
+一段话摘要：用户决定新增实验级开关 `use_weak_profile`，默认 `false`；之后的实验除非显式写 `true`，都不再把弱模型画像正文送进写作/改写/归因/修订提示词。开关放在 `ExperimentConfig`，与 `weak_profile` 相邻并冻结进 manifest；`effective_weak_profile()` 在阶段层投影，关闭时返回空字符串。提示词的画像块改成 `profile_section` 变量：开启时是“画像标题 + 正文”，关闭时是“没有画像，按一般能力终端 agent 写”的中性段落；只传空字符串会留下“先读画像”的矛盾指令，因此没有采用。schema 升到 v5，新增纯函数 `upgrade_v4_config`：v4 配置升级时 `use_weak_profile` 默认 false、画像文本原样保留；`load_config` 对 v4 文件做内存升级，旧 run 的 v4 manifest 仍拒绝直接续跑、按维护分支处理。转换脚本改为 v3/v2→v5、输出 `_v5.yaml`；装配器支持 v2/v3/v4/v5 源。golden 矩阵按新提示词重新生成，模型调用数仍是 34/18/22/12；Wave 4 披露新增 `WEAK_PROFILE_SWITCH` 根因并重新生成。测试新增开关默认值、显式开启、非 bool 拒绝、v4→v5 升级、关闭时中性画像段等用例；当前工作树（含另一会话的 curation `grouping_input` 改动）全套 2264 passed + 4 deselected，ruff 全过。未提交。
+
+工件：`src/expedistill/core/config.py`、`src/expedistill/core/config_upgrade.py`、`src/expedistill/prompts/profile.py`（新建）、`src/expedistill/prompts/author.py`、`src/expedistill/prompts/attribution.py`、`src/expedistill/prompts/__init__.py`、`src/expedistill/blocks/author.py`、`src/expedistill/blocks/attribution.py`、`src/expedistill/stages/learn_tasks.py`、`src/expedistill/stages/assemble_reuse.py`、`scripts/run/convert_v3_configs.py`、`tests/unit/core/test_config.py`、`tests/unit/core/test_config_v4.py`、`tests/unit/prompts/test_templates.py`、`tests/unit/blocks/test_author.py`、`tests/unit/blocks/test_attribution.py`、`tests/unit/llm/test_fake_provider.py`、`tests/unit/stages/test_phase_learn.py`、`tests/unit/methods/evidence/test_segmentation.py`、`tests/unit/stages/test_learn_terminal_row_receipt.py`、`tests/unit/stages/test_assemble_reuse.py`、`tests/unit/scripts/test_convert_v3_configs.py`、`tests/golden/harness.py`、`tests/golden/semantics.py`、`tests/fixtures/golden/`（重生成）、`tests/fixtures/golden_acceptance/wave4_e1_e6_disclosure.json`（重生成）、`README.md`、`AGENTS.md`、`src/expedistill/methods/author/README.md`、`docs/decisions/weak_profile_switch_20261020.md`（新建）
+

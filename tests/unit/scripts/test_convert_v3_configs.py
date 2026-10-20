@@ -75,7 +75,7 @@ def test_every_repository_v3_config_converts_and_loads(tmp_path):
         status = CONVERTER.convert_file(_EXPERIMENTS / name,
                                         out_dir=tmp_path)
         assert status.startswith(f"{name} -> "), status
-        out = tmp_path / f"{Path(name).stem}_v4.yaml"
+        out = tmp_path / f"{Path(name).stem}_v5.yaml"
         # The real loader on the written file: the YAML round-trip and
         # the whole v4 load-time checklist.
         config = load_config(str(out))
@@ -98,7 +98,7 @@ def test_v2_exam_input_chains_through_both_upgrades(tmp_path, retry_limit,
     path = _write(tmp_path / "chain_v2.yaml", raw)
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
     assert status.startswith("chain_v2.yaml -> "), status
-    config = load_config(str(tmp_path / "chain_v2_v4.yaml"))
+    config = load_config(str(tmp_path / "chain_v2_v5.yaml"))
     assert config.sequence == expected
     # The chained output carries the v4-only global at its default, so
     # the converted identity never depends on the default.
@@ -113,7 +113,7 @@ def test_v2_live_run_input_chains_through_both_upgrades(tmp_path):
     path = _write(tmp_path / "chain_v2.yaml", raw)
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
     assert status.startswith("chain_v2.yaml -> "), status
-    config = load_config(str(tmp_path / "chain_v2_v4.yaml"))
+    config = load_config(str(tmp_path / "chain_v2_v5.yaml"))
     assert config.sequence == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
     live = config.phases["live"]
     assert live.role == "live"
@@ -129,21 +129,23 @@ def test_v2_file_with_an_existing_v3_record_is_refused(tmp_path):
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
     assert status.startswith("old.yaml: REFUSED")
     assert "old_v3.yaml" in status
-    assert not (tmp_path / "old_v4.yaml").exists()
+    assert not (tmp_path / "old_v5.yaml").exists()
 
 
 def test_v4_input_is_skipped(tmp_path):
     path = _write(tmp_path / "done_v4.yaml", {"schema_version": 4})
-    assert CONVERTER.convert_file(path, out_dir=tmp_path) == \
-        "done_v4.yaml: already schema v4, skipped"
+    assert CONVERTER.convert_file(path, out_dir=tmp_path) == (
+        "done_v4.yaml: schema v4, skipped (load_config upgrades it in "
+        "memory; upgrade_v4_config writes a v5 file when a frozen record "
+        "is needed)")
 
 
 def test_existing_output_is_never_overwritten(tmp_path):
     path = _write(tmp_path / "old.yaml", _MINIMAL_V2)
-    out = tmp_path / "old_v4.yaml"
+    out = tmp_path / "old_v5.yaml"
     out.write_text("sentinel\n", encoding="utf-8")
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
-    assert status == "old_v4.yaml: exists, left untouched"
+    assert status == "old_v5.yaml: exists, left untouched"
     assert out.read_text(encoding="utf-8") == "sentinel\n"
 
 
@@ -153,7 +155,7 @@ def test_invalid_v3_input_is_refused_per_file(tmp_path):
     path = _write(tmp_path / "broken.yaml", raw)
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
     assert status.startswith("broken.yaml: REFUSED")
-    assert not (tmp_path / "broken_v4.yaml").exists()
+    assert not (tmp_path / "broken_v5.yaml").exists()
 
 
 def test_directory_scan_picks_exactly_the_schema_3_files(tmp_path,
@@ -207,5 +209,5 @@ def test_the_write_is_atomic_no_temp_left_behind(tmp_path):
     status = CONVERTER.convert_file(path, out_dir=tmp_path)
     assert status.startswith("old.yaml -> "), status
     assert sorted(p.name for p in tmp_path.glob("*")) == [
-        "old.yaml", "old_v4.yaml"]
-    load_config(str(tmp_path / "old_v4.yaml"))
+        "old.yaml", "old_v5.yaml"]
+    load_config(str(tmp_path / "old_v5.yaml"))

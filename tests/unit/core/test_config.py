@@ -1,4 +1,4 @@
-"""Unit tests for ExperimentConfig and its YAML round trip (schema v4)."""
+"""Unit tests for ExperimentConfig and its YAML round trip (schema v5)."""
 import copy
 import dataclasses
 
@@ -15,6 +15,7 @@ from expedistill.core.config import (
     save_config,
     upgrade_v2_config,
     upgrade_v3_config,
+    upgrade_v4_config,
 )
 
 #: The minimal v4 method the fixtures carry: a two-arm baseline, one learn
@@ -691,10 +692,9 @@ class TestSerialisation:
         with pytest.raises(ConfigError, match="future_field"):
             ExperimentConfig.from_dict(payload)
 
-    def test_schema_version_is_four(self):
-        # v4: the method is a phase sequence; every method parameter lives
-        # in the phase definitions.
-        assert CONFIG_SCHEMA_VERSION == 4
+    def test_schema_version_is_five(self):
+        # v5: the phase sequence plus the weak-profile switch.
+        assert CONFIG_SCHEMA_VERSION == 5
 
     def test_future_schema_version_rejected_by_load_config(self, tmp_path):
         cfg_file = tmp_path / "future.yaml"
@@ -958,7 +958,7 @@ class TestSerialisation:
 #: filter would delete them and kill the resume); the split shape pins the
 #: explicit-list form.
 GOLDEN_TO_DICT_KEY_ORDER = [
-    "benchmark", "mode", "models", "weak_profile",
+    "benchmark", "mode", "models", "weak_profile", "use_weak_profile",
     "n_attempts_strong", "n_attempts_weak", "split", "tasks",
     "sequence", "phases", "invalid_redispatch_limit",
     "rules", "prompts_digests",
@@ -1000,6 +1000,7 @@ GOLDEN_TO_DICT_FULL_FORM = {
         "auditor": "model-s",
     },
     "weak_profile": "",
+    "use_weak_profile": False,
     "n_attempts_strong": 1,
     "n_attempts_weak": 1,
     "split": None,
@@ -1015,7 +1016,7 @@ GOLDEN_TO_DICT_FULL_FORM = {
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {},
-    "schema_version": 4,
+    "schema_version": 5,
 }
 
 GOLDEN_TO_DICT_SPLIT_FORM = {
@@ -1034,6 +1035,7 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
         "auditor": "model-s",
     },
     "weak_profile": "model-w is easily confused by multi-step operations.",
+    "use_weak_profile": False,
     "n_attempts_strong": 3,
     "n_attempts_weak": 5,
     "split": {"train": ["tb:1"], "test": ["tb:2"], "reserved": ["tb:3"]},
@@ -1058,8 +1060,40 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {"default_max_output_tokens": 65536},
-    "schema_version": 4,
+    "schema_version": 5,
 }
+
+
+class TestWeakProfileSwitch:
+    def test_default_is_off_and_projects_empty(self):
+        cfg = make_config(weak_profile="a profile")
+        assert cfg.use_weak_profile is False
+        assert cfg.effective_weak_profile() == ""
+
+    def test_enabled_projects_the_profile(self):
+        cfg = make_config(weak_profile="a profile", use_weak_profile=True)
+        assert cfg.effective_weak_profile() == "a profile"
+
+    def test_non_bool_is_rejected(self):
+        with pytest.raises(ValueError, match="use_weak_profile"):
+            make_config(use_weak_profile="yes")
+
+    def test_upgrade_v4_defaults_off_and_keeps_the_text(self):
+        v5 = upgrade_v4_config({"schema_version": 4,
+                                "weak_profile": "a profile"})
+        assert v5["schema_version"] == 5
+        assert v5["use_weak_profile"] is False
+        assert v5["weak_profile"] == "a profile"
+
+    def test_upgrade_v4_keeps_an_explicit_true(self):
+        v5 = upgrade_v4_config({"schema_version": 4,
+                                "weak_profile": "a profile",
+                                "use_weak_profile": True})
+        assert v5["use_weak_profile"] is True
+
+    def test_upgrade_v4_refuses_another_schema(self):
+        with pytest.raises(ConfigError, match="schema-v4"):
+            upgrade_v4_config({"schema_version": 5})
 
 
 class TestToDictGolden:
@@ -1150,7 +1184,7 @@ class TestUpgradeV2:
             "token_budgets": {"default_max_output_tokens": 65536},
         }
         cfg = ExperimentConfig.from_dict(
-            upgrade_v3_config(upgrade_v2_config(v2)))
+            upgrade_v4_config(upgrade_v3_config(upgrade_v2_config(v2))))
         assert cfg.sequence == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
         assert cfg.phases["live"].execution["n_attempts"] == 3
         assert cfg.phases["learn"].curate["token_budget"] == 96000
@@ -1204,7 +1238,8 @@ class TestUpgradeCoversEveryV2Config:
                 assert slot in upgraded["methods"], (path.name, slot)
             if path.name not in self.PRE_V2_MODELS_OPTIONS:
                 # The config was valid under v2; the chained upgrade loads.
-                ExperimentConfig.from_dict(upgrade_v3_config(upgraded))
+                ExperimentConfig.from_dict(
+                    upgrade_v4_config(upgrade_v3_config(upgraded)))
             checked += 1
         assert checked >= 8, f"expected the v2 record set, got {checked}"
 

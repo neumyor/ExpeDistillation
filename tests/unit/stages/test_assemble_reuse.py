@@ -55,6 +55,7 @@ from expedistill.core.config import (
     load_config,
     phase_label,
     upgrade_v3_config,
+    upgrade_v4_config,
 )
 from expedistill.core.models import (
     Attempt,
@@ -652,7 +653,8 @@ def build_v3_source_run(tmp_path: Path, source_tasks=None) -> SourceRun:
     # must reproduce the frozen v4 identity (through the canonical
     # parse the identity walk itself uses).
     assert ExperimentConfig.from_dict(
-        upgrade_v3_config(v3_config)).to_dict() == manifest["config"]
+        upgrade_v4_config(upgrade_v3_config(v3_config))).to_dict() == \
+        manifest["config"]
     manifest["config"] = v3_config
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     # The bank back to the run root (where a v3 run froze it) and the
@@ -708,7 +710,7 @@ def test_assembles_train_lineage_with_full_chain_bank_filter(tmp_path):
     assert counts["generation_failure_rows"] == 0  # a v4 source has none
     assert counts["accepted_infra_shortfall_units"] == 1  # train unit only
     assert summary["split_sizes"] == {"train": 1, "test": 1, "reserved": 1}
-    assert summary["source_schema"] == 4
+    assert summary["source_schema"] == 5
     assert summary["preseeded_phase_bank"] == "p08:learn"
 
     # The full-chain criterion (the "42-equivalent" assertion): the mixed

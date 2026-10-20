@@ -117,7 +117,7 @@ def test_segment_reads_a_failure_view(client):
 
 def test_distill_returns_the_protocol_v2_contract(client):
     user = get_prompt("SKILL_DISTILL").format(
-        label="l", description="d", steps_view="s", weak_profile="w")
+        label="l", description="d", steps_view="s", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed) == {"when_to_use", "steps", "verify",
                            "not_applicable_when", "summary"}
@@ -127,7 +127,7 @@ def test_distill_returns_the_protocol_v2_contract(client):
 def test_diagnose_returns_the_protocol_v2_contract(client):
     user = get_prompt("SKILL_DIAGNOSE").format(
         label="l", description="d", context_summary="c", steps_view="s",
-        weak_profile="w")
+        profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed) == {"when_to_use", "steps", "verify",
                            "not_applicable_when", "summary"}
@@ -137,7 +137,7 @@ def test_attribution_revises_every_listed_skill(client):
     listing = "skill_id: s1\n[When to use] x\n\nskill_id: s2\n[When to use] y"
     user = get_prompt("LIVE_RUN_ATTRIBUTION").format(
         task_instruction="ti", baseline_summary="b", live_views="v",
-        skills_listing=listing, weak_profile="w")
+        skills_listing=listing, profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert parsed["diagnosis"].strip()
     assert parsed["skill_actions"] == [
@@ -154,7 +154,7 @@ def test_revision_appends_the_marker_and_keeps_the_skill(client):
                 "[Verify] done\n[Do not use when] never")
     user = get_prompt("LIVE_SKILL_REVISION").format(
         skill_text=original, attribution_report="r", failure_view="f",
-        weak_profile="w")
+        profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert parsed["failure_category"] == "wrong_trigger"
     assert parsed["skill_text"] == (
@@ -168,7 +168,7 @@ def test_rewrite_appends_the_marker(client):
                 "[Verify] done\n[Do not use when] never")
     user = get_prompt("REWRITE").format(
         skill_text=original, question_text="q", weak_answer="a",
-        error_description="e", weak_profile="w")
+        error_description="e", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert REVISION_MARKER in parsed["skill_text"]
     assert parsed["skill_text"].startswith("[When to use]")
@@ -284,6 +284,6 @@ def test_a_method_prompt_embedding_the_question_is_not_execution(client):
     listing = "skill_id: s1\n[When to use] x"
     user = get_prompt("LIVE_RUN_ATTRIBUTION").format(
         task_instruction=_execution_user(), baseline_summary="b",
-        live_views="v", skills_listing=listing, weak_profile="w")
+        live_views="v", skills_listing=listing, profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert parsed["skill_actions"][0]["skill_id"] == "s1"

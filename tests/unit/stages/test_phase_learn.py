@@ -132,12 +132,16 @@ class _Config:
         self.phases = phases
         self.benchmark = BENCHMARK
         self.weak_profile = WEAK_PROFILE
+        self.use_weak_profile = True
         self.n_attempts_strong = 1
         self.n_attempts_weak = 2
         self.rules = {"task_select": "any_weak_failed",
                       "segment_select": "strong_success_weak_failed",
                       "trajectory_select": "all"}
         self.methods = {"curation": {"name": "none", "token_budget": BIG}}
+
+    def effective_weak_profile(self):
+        return self.weak_profile if self.use_weak_profile else ""
 
 
 def _exam_sequence(retry_limit=1):

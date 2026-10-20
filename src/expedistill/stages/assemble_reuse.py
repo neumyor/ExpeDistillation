@@ -87,6 +87,7 @@ from expedistill.core.config import (
     phase_label,
     upgrade_v2_config,
     upgrade_v3_config,
+    upgrade_v4_config,
 )
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import (
@@ -289,7 +290,7 @@ def _last_learn_label(config: ExperimentConfig) -> Optional[str]:
 
 def _source_config(source_manifest: Mapping[str, Any],
                    source_run: Path) -> "tuple[ExperimentConfig, int]":
-    """The source run's frozen config parsed as v4 (upgraded through the
+    """The source run's frozen config parsed as v5 (upgraded through the
     pure core mappings when frozen under an older schema), plus the
     original schema version."""
     raw = source_manifest.get("config")
@@ -299,22 +300,24 @@ def _source_config(source_manifest: Mapping[str, Any],
             "frozen config; only a run frozen by stage 0 can be reused")
     version = raw.get("schema_version", 3)
     if not isinstance(version, int) or isinstance(version, bool) \
-            or version not in (2, 3, 4):
+            or version not in (2, 3, 4, 5):
         raise ConfigError(
             f"the source run {source_run} froze config schema v{version!r}; "
-            "only schema v2, v3 and v4 source runs can be reused (v2 "
-            "chains through upgrade_v2_config, v3 through "
-            "upgrade_v3_config)")
+            "only schema v2, v3, v4 and v5 source runs can be reused (the "
+            "older ones chain through upgrade_v2_config, upgrade_v3_config "
+            "and upgrade_v4_config)")
     try:
         if version == 2:
             raw = upgrade_v2_config(raw)
         if version in (2, 3):
             raw = upgrade_v3_config(raw)
+        if version in (2, 3, 4):
+            raw = upgrade_v4_config(raw)
         return ExperimentConfig.from_dict(raw), version
     except ValueError as exc:
         raise ConfigError(
             f"the source run {source_run} has a config that cannot be "
-            f"upgraded to schema v4 for the identity walk: {exc}; the "
+            f"upgraded to schema v5 for the identity walk: {exc}; the "
             "source is corrupt or of an unsupported shape") from exc
 
 
@@ -323,7 +326,7 @@ def _source_bank_rows(source_run: Path, source_config: ExperimentConfig,
     """The source run's curated bank rows: the last learn phase's
     artifact for a v4 source, the run-root file for an older one. A
     missing bank is a refusal, never an empty read."""
-    if source_version == 4:
+    if source_version >= 4:
         label = _last_learn_label(source_config)
         if label is None:
             raise ConfigError(
@@ -1003,7 +1006,7 @@ def _kept_generation_failures(source_run: Path, source_version: int,
     """Train-side rows of the stage-world generation-failure ledger
     (counted and disclosed, never copied: module docstring). A v4 source
     has no such ledger."""
-    if source_version == 4:
+    if source_version >= 4:
         return []
     kept: List[Dict[str, Any]] = []
     for row in read_jsonl(source_run / "stage3_generation"

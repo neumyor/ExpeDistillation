@@ -39,8 +39,7 @@ SUBTASK DESCRIPTION: {description}
 STEPS OF THE SUBTASK:
 {steps_view}
 
-THE MODEL THAT WILL READ THE SKILL (weak model profile):
-{weak_profile}
+{profile_section}
 
 Read the weak model profile FIRST. It is the capability boundary of your
 reader: every step you write must be an action this exact model can carry out
@@ -109,8 +108,7 @@ WHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING (context summary):
 STEPS OF THE SUBTASK:
 {steps_view}
 
-THE MODEL THAT WILL READ THE SKILL (weak model profile):
-{weak_profile}
+{profile_section}
 
 Work in three passes:
 1. Diagnose: find where the weak model started going wrong -- which step or
@@ -185,8 +183,7 @@ WEAK MODEL'S ANSWER:
 WHAT WAS WRONG WITH THE ANSWER:
 {error_description}
 
-THE MODEL THAT WILL READ THE SKILL (weak model profile):
-{weak_profile}
+{profile_section}
 
 No reference answer is available to you, and you must not invent or guess one.
 When a weak model fails an exam, the skill's idea is usually not wrong; the

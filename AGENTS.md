@@ -89,8 +89,8 @@ src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     ids.py                确定性 ID 规则
-    config.py             实验配置结构（schema v4：sequence + phases）、模型角色表
-    config_upgrade.py     v2→v3→v4 升级纯函数（config.py 重新导出）
+    config.py             实验配置结构（schema v5：sequence + phases + use_weak_profile 开关）、模型角色表
+    config_upgrade.py     v2→v3→v4→v5 升级纯函数（config.py 重新导出）
     contracts.py          执行—学习循环的四个交接数据类（执行单元行 / 运行记录 /
                           验收报告行 / 任务清单行，R0 冻结的接口形状）
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
@@ -282,8 +282,8 @@ scripts/
   run/        启动实验：按配置调用 cli，例如 run_experiment.sh <配置名>
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
               freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
-              convert_v3_configs.py：一次性 schema v3→v4 配置转换（写新文件名；
-                                  显式传入 v2 文件时在内存里链式走 v2→v3→v4）
+              convert_v3_configs.py：一次性 schema v3→v5 配置转换（写新文件名；
+                                  显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5）
               launch_tb21_live_run.py：正式实验的 detached 启动器
   remote/     远程（node29）相关：部署代码、同步产物、查看进度、停止任务
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
@@ -312,7 +312,7 @@ configs/
   experiments/   每个实验一份配置：benchmark、模式（split / full）、模型角色表、
                  采样次数、相位序列（sequence + phases，方法参数全部在相位
                  定义里）、无效重派预算、具名规则的名字；
-                 schema_version 4（v1/v2/v3 文件是冻结的历史记录，转换走
+                 schema_version 5（v1/v2/v3/v4 文件是冻结的历史记录，转换走
                  scripts/run/convert_v3_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
   seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，

@@ -135,11 +135,12 @@
 
 ---
 
-## 二、方法 = 相位序列（配置 schema v4）
+## 二、方法 = 相位序列（配置 schema v5）
 
 一种方法写成配置里的两块内容：`sequence`（相位名单，可重复）和
-`phases`（每个名字一份相位定义）。旧版本（v1/v2/v3）的配置是冻结的历史
-记录，加载器直接拒收并指向转换工具（见 2.5）。
+`phases`（每个名字一份相位定义）。旧版本（v1/v2/v3/v4）的配置是冻结的历史
+记录：v4 由加载器在内存里升级，v3 及更早的加载器直接拒收并指向转换工具
+（见 2.5）。
 
 ### 2.1 配置字段
 
@@ -150,7 +151,8 @@
 | `benchmark` | benchmark 名字（tb / searchqa / alfworld） |
 | `mode` | `split`（划分 train/test）或 `full`（全部题目一起蒸馏） |
 | `models` | 模型角色表：角色 → 模型名。必须给出 `executor_strong` 与 `executor_weak` 两个锚点，其余角色按 `ROLE_DEFAULTS` 补齐（answerer 用弱模型，其余用强模型） |
-| `weak_profile`（或 `weak_profile_file`） | 弱模型画像：一段描述弱模型是谁、已知弱点的文本，是写技能（G2）与改写（G6/G11）的输入。两者二选一：`weak_profile_file` 是画像文本文件的路径，相对路径相对配置文件所在目录解析 |
+| `weak_profile`（或 `weak_profile_file`） | 弱模型画像：一段描述弱模型是谁、已知弱点的文本。画像文本保留在配置里，作为来源记录和 opt-in 素材；两者二选一：`weak_profile_file` 是画像文本文件的路径，相对路径相对配置文件所在目录解析 |
+| `use_weak_profile` | 是否把弱模型画像送进写作/改写提示。默认 `false`：新实验默认关闭画像，提示词收到的是“没有画像，按一般能力终端 agent 写”的中性段落。只有显式写 `true` 才启用画像 |
 | `n_attempts_strong` / `n_attempts_weak` | 摸底相位两臂各自的采样次数 |
 | `split` | `split` 模式的划分：显式 train/test/reserved 列表，或 `{ratio, seed}` |
 | `tasks` | 任务集：不写（插件全集）、任务 ID 列表、或任务文件路径 |
@@ -160,7 +162,7 @@
 | `rules` | 具名规则的选择（`task_select` / `segment_select` / `trajectory_select`），缺项由 `DEFAULT_RULES` 补齐 |
 | `model_options` | 按模型名给出的额外调用参数（如 `reasoning_effort`）；不得携带 `max_tokens`（token 上限只归 `token_budgets` 管） |
 | `token_budgets` | 每个角色的 token 上限（`default_max_output_tokens` 必填，`roles.<role>` 可逐角色覆盖） |
-| `schema_version` | 当前为 4 |
+| `schema_version` | 当前为 5；v4 文件由 `load_config` 在内存里升级（`use_weak_profile` 默认 false），v3/v2 文件先用转换脚本转成新文件 |
 
 **执行相位的字段**（`kind: execute`）：
 
@@ -277,20 +279,23 @@ phases:
 
 ### 2.5 旧版本配置的转换
 
-v3 及更早的配置文件是冻结的实验记录，不修改。转换工具写新文件：
+v4 及更早的配置文件是冻结的实验记录，不修改：v4 由加载器在内存里升级
+（`upgrade_v4_config`，`use_weak_profile` 默认 false），v3 及更早用转换工具
+写新文件：
 
 ```
-scripts/run/convert_v3_configs.py   # v3 → v4（写出 <原名>_v4.yaml；
+scripts/run/convert_v3_configs.py   # v3 → v5（写出 <原名>_v5.yaml；
                                     # 显式传入 v2 文件时在内存里链式
-                                    # 走 v2→v3→v4）
+                                    # 走 v2→v3→v4→v5）
 ```
 
 v2 → v3 的一次性转换在 commit `78db71f` 完成，当时的转换脚本
-`convert_v2_configs.py` 在 v4 代码下已无法转换任何文件，现已删除，需要时从该
+`convert_v2_configs.py` 在当前 v5 代码下已无法转换任何文件，现已删除，需要时从该
 提交取回。
 
-转换映射是 `core/config_upgrade.py` 的纯函数 `upgrade_v2_config` / `upgrade_v3_config`
-（装配器读旧 run 的 manifest 时走同一函数）。v3 → v4 的身份变化：
+转换映射是 `core/config_upgrade.py` 的纯函数 `upgrade_v2_config` /
+`upgrade_v3_config` / `upgrade_v4_config`（装配器读旧 run 的 manifest 时走
+同一组函数）。v3 → v4 的身份变化：
 acceptance 槽位溶进序列（exam 的 `retry_limit = R` 变成 R+1 个 exam 相位；
 live_run 的 `n_attempts` / `improvement` / `max_injection_tokens` 移进
 live 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没有 exam 相位，
@@ -299,6 +304,10 @@ live 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没�
 其余拒绝）；delivery 原样移进 test 相位；segmentation 的 `K` / `retry_limit`
 移进 learn 相位的 evidence。转换结果带上 v4 新全局 `invalid_redispatch_limit`
 的缺省值 1，使转换后的身份不依赖缺省值。
+
+v4 → v5 的身份变化：新增全局 `use_weak_profile`，升级时取 `false`——画像
+文本原样保留，但写作、改写、live 归因与 live 修订的提示词收到中性段落；
+要复现 v4 的画像行为必须显式写 `true`。
 
 ### 2.6 方法组合的计数
 
@@ -467,7 +476,7 @@ E1 内部的 runner：
 | G10 | live 归因 | （任务 prompt 渲染产物, 基线状态行, 本轮全部尝试的轨迹视图, skill 组列表, 弱模型画像, author 模型）→ 组级诊断 + 逐 skill 的问题事实（相位世界里只报告事实，动作归决策与写作） |
 | G11 | live 修订 | （skill 现文本, 归因事实, 失败尝试视图摘录, 弱模型画像, rewriter 模型）→ 保节结构的新正文 + 错因归类 + 修订理由。修订纪律：不得写入本题的具体数值 / 文件名 / 实体名（检索交付会把技能注入其他任务，任务局部化的内容对别的任务有害） |
 
-"弱模型画像"是配置里的一段文字，换弱模型时只换这段配置。
+"弱模型画像"是配置里的一段文字，换弱模型时只换这段配置。`use_weak_profile` 默认关闭：画像文本留在配置里，但写作、改写、live 归因和 live 修订的提示词收到的是中性段落；只有显式打开时才把画像正文送进提示词。
 
 ### 3.4 组合积木
 

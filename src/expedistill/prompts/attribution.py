@@ -55,8 +55,7 @@ alike):
 SKILLS (the group that was injected; each skill's id, then its full text):
 {skills_listing}
 
-THE MODEL THAT EXECUTED THE TASK (weak model profile):
-{weak_profile}
+{profile_section}
 
 Work in two steps:
 
@@ -115,8 +114,7 @@ ATTRIBUTION REPORT (the group's diagnosis and this skill's problem):
 WHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):
 {failure_view}
 
-THE MODEL THAT WILL READ THE SKILL (weak model profile):
-{weak_profile}
+{profile_section}
 
 Work in two steps:
 

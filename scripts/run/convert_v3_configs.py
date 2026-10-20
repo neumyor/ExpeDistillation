@@ -1,4 +1,4 @@
-"""Convert schema-v3 experiment configs to v4 (one-time, the phase world).
+"""Convert schema-v3/v2 experiment configs to v5 (the current schema).
 
 Usage:
     .venv/bin/python scripts/run/convert_v3_configs.py [--dir configs/experiments] [files...]
@@ -6,25 +6,27 @@ Usage:
 Input: explicit file paths, or (the default) every schema_version: 3
 config in --dir -- the seven frozen v3 experiment records. A v2 (or
 pre-schema) file may be passed EXPLICITLY; it chains upgrade_v2_config ->
-upgrade_v3_config in memory. A v2 file whose <stem>_v3.yaml already
-exists is refused with a pointer at that v3 record: the one-time v2 -> v3
-conversion already wrote the file of record, and converting the v2 file
-again would freeze a second identity for the same experiment.
+upgrade_v3_config -> upgrade_v4_config in memory. A v2 file whose
+<stem>_v3.yaml already exists is refused with a pointer at that v3
+record: the one-time v2 -> v3 conversion already wrote the file of
+record, and converting the v2 file again would freeze a second identity
+for the same experiment.
 
-Output: <stem>_v4.yaml next to the input (NEVER overwritten; v3 files
+Output: <stem>_v5.yaml next to the input (NEVER overwritten; v3 files
 are frozen experiment records, AGENTS section 6). The write is atomic
 (temp file + rename, the Wave 3 review O4 ruling): an interrupted run
-leaves the previous state, never a half-written *_v4.yaml that the
+leaves the previous state, never a half-written *_v5.yaml that the
 never-overwrite rule would then lock in. The mapping is
-core.config.upgrade_v3_config -- the same pure function the reuse
-assembler applies to a v3 source run's manifest.
+core.config.upgrade_v3_config then upgrade_v4_config -- the same pure
+functions the reuse assembler applies to an older source run's manifest.
 
 Every written file is verified by loading it back through load_config,
-which runs the full v4 load-time checklist (the phase sequence, the
+which runs the full current load-time checklist (the phase sequence, the
 role/field consistency, the compare targets). The per-file summary
 prints the emitted sequence and the disclosed identity changes (the
 acceptance slot dissolving into the sequence, live_run's params moving
-into the live phase, merge_check following the acceptance kind).
+into the live phase, merge_check following the acceptance kind, and the
+weak-profile switch defaulting off).
 """
 
 import os
@@ -43,6 +45,7 @@ from expedistill.core.config import (  # noqa: E402
     save_config,
     upgrade_v2_config,
     upgrade_v3_config,
+    upgrade_v4_config,
 )
 
 
@@ -79,6 +82,10 @@ def convert_file(path: Path, *, out_dir=None) -> str:
     version = detect_version(raw)
     if version >= CONFIG_SCHEMA_VERSION:
         return f"{path.name}: already schema v{version}, skipped"
+    if version == 4:
+        return (f"{path.name}: schema v4, skipped (load_config upgrades "
+                "it in memory; upgrade_v4_config writes a v5 file when a "
+                "frozen record is needed)")
     if version < 3:
         v3_record = path.with_name(path.stem + "_v3.yaml")
         if v3_record.exists():
@@ -92,13 +99,14 @@ def convert_file(path: Path, *, out_dir=None) -> str:
     try:
         upgraded = (upgrade_v3_config(upgrade_v2_config(raw))
                     if version < 3 else upgrade_v3_config(raw))
-        # from_dict runs the whole v4 load-time checklist (parse_phases
-        # included) BEFORE anything is written.
+        upgraded = upgrade_v4_config(upgraded)
+        # from_dict runs the whole current load-time checklist
+        # (parse_phases included) BEFORE anything is written.
         config = ExperimentConfig.from_dict(upgraded)
     except (ValueError, TypeError) as exc:
         return f"{path.name}: REFUSED ({exc})"
     out = (Path(out_dir) if out_dir is not None
-           else path.parent) / f"{path.stem}_v4.yaml"
+           else path.parent) / f"{path.stem}_v5.yaml"
     if out.exists():
         return f"{out.name}: exists, left untouched"
     # Atomic write (O4): a temp file in the destination directory, then

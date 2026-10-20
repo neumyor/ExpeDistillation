@@ -23,7 +23,7 @@ from expedistill.core.config import (
     ConfigError,
 )
 
-__all__ = ["upgrade_v2_config", "upgrade_v3_config"]
+__all__ = ["upgrade_v2_config", "upgrade_v3_config", "upgrade_v4_config"]
 
 #: The v3 slot defaults -- schema-v3 knowledge, kept ONLY for
 #: ``upgrade_v3_config`` (the v4 loader has no slots; an absent phase
@@ -410,3 +410,36 @@ def upgrade_v3_config(data: Dict[str, Any]) -> Dict[str, Any]:
     v4["invalid_redispatch_limit"] = DEFAULT_INVALID_REDISPATCH_LIMIT
     v4["schema_version"] = 4
     return v4
+
+
+def upgrade_v4_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a schema-v4 CONFIG dict to v5 (the weak-profile switch).
+
+    Pure stdlib, copy in / copy out. Schema v5 adds
+    ``use_weak_profile``: the weak-profile text stays in ``weak_profile``
+    for provenance and opt-in, but authoring and rewriting only receive
+    it when the switch is true. The v4 loader always used the text, so
+    the upgrade's default (false) is a disclosed behaviour change: an
+    old v4 config that must reproduce its original authoring behaviour
+    has to add ``use_weak_profile: true`` explicitly.
+
+    A v4 config that already carries the key keeps its value (a v5 key
+    in a v4 file is unusual but harmless); every other key passes
+    through untouched.
+    """
+    if not isinstance(data, dict):
+        raise TypeError(
+            f"config must be a mapping, got {type(data).__name__}")
+    if data.get("schema_version") != 4:
+        raise ConfigError(
+            "upgrade_v4_config needs a schema-v4 config, got "
+            f"schema_version {data.get('schema_version')!r}")
+    v5 = copy.deepcopy(data)
+    value = v5.get("use_weak_profile", False)
+    if not isinstance(value, bool):
+        raise ConfigError(
+            "use_weak_profile must be a bool, got "
+            f"{value!r}")
+    v5["use_weak_profile"] = value
+    v5["schema_version"] = 5
+    return v5

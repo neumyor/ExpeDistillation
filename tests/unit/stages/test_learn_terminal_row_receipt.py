@@ -47,10 +47,14 @@ class _Config:
 
     benchmark = BENCHMARK
     weak_profile = "a weak model that needs short sentences"
+    use_weak_profile = True
     n_attempts_strong = 1
     n_attempts_weak = 2
     rules = {}
     methods = {}
+
+    def effective_weak_profile(self):
+        return self.weak_profile if self.use_weak_profile else ""
 
 
 def _skill(segment, status="discarded", version=1):
