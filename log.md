@@ -1088,3 +1088,16 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：用户要求让相位名更可读，选定"相位名与 role 同名"：D→baseline、A→exam、B→live、C→test、L→learn，运行后标签与目录随之变为 `p01:baseline` / `phases/p01_baseline`。代码本来只按 `role` 分发，相位名是自由字符串，所以这是命名约定的改动，不改行为。改动：`core/config_upgrade.py` 用 role 常量作相位名（转换出的序列如 `[baseline, learn, live, learn, live, learn, test]`）；9 份 v4 配置的 sequence、phases 键与 `compare.against` 同步改名，逐份 `load_config` 通过，7 份转换配置的序列、相位名集合、对照指向与转换函数输出一致；src 与 scripts 中"X phase / X-phase / X 相位"式的说明与报错文字（86 处）和装配器写进 ASSEMBLED_FROM.md 的中文改为新名；审计脚本自检夹具的自定义名改为 learn_seed / live_1 / learn_mid / live_2 / learn_final（保留"相位名可自由起"的覆盖）；supervise_tb_run 默认标签改为 `p07:test`；测试 36 个文件的手写序列、相位标签与说明同步改名（排查出两处非相位的单字母误改——截断测试的 "A"*600 文本与并发测试的线程名——已还原）；金矩阵重生成，模型调用数与改名前完全相同（34/18/22/12），wave4 披露把新名映射回字母后与改名前逐字节相同。金基线对照来源别名表保留字母键与 `D_weak_arm` 规范值（冻结的 69904f7 基线包存的是它），新增 baseline 系列键。README、AGENTS.md、五个模块 README 改用新名；历史决策文档与 log 不改。旧 run（6 个）的 manifest 与相位目录仍是字母，用新配置续跑会被 manifest 冻结检查拒绝，这些 run 都已结束。测试 2255 passed + 4 deselected，ruff 全过，审计自检通过。未提交。
 
 工件：`src/expedistill/core/config_upgrade.py`、`configs/experiments/*_v4.yaml`（9 份）、src 与 scripts 中的说明文字（多个文件）、`scripts/audit/audit_live_run.py`、`scripts/run/supervise_tb_run.py`、`tests/golden/semantics.py`、36 个测试文件、`tests/fixtures/golden/`（重生成）、`tests/fixtures/golden_acceptance/wave4_e1_e6_disclosure.json`（重生成）、`README.md`、`AGENTS.md`、`src/expedistill/methods/*/README.md`
+
+## 2026-10-19 20:52 — TB21 完整实验重跑启动（仅复用训练集裸跑轨迹）
+
+一段话摘要：用户决定重跑 TB21 完整实验，只复用旧 run 的 246 条训练集裸跑轨迹（41 个任务 × 强/弱两臂 × 3 次），其余切段、写作、实战验收、整理和终测全部重新执行。新建配置 `configs/experiments/tb21_split_folder_rerun_20261019.yaml`：相似度输入只看摘要（similarity_input=summary）、所有模型输出上限统一 65536、轨迹选择改为 all、开启 --allow-infra-shortfall、终测目录内联（inline_catalog=true）；其余参数沿用旧配置。用 `assemble-reuse --level baseline` 装配到 `runs/tb21_split_folder_rerun_20261019_2050`，只拷贝 246 条轨迹和 0 个已接受空洞，没有拷贝任何技能、子任务、考题或旧相位记录。预检只跑到基线相位：新增模型调用为 0，82 个单元全部正常，强模型 avg@3=0.6341、弱模型 avg@3=0.4228，与旧 run 逐位一致。随后以 PID 51038 脱离会话启动完整 7 相位序列，已进入首个学习相位，初始任务清单 30 条 add。实验仍在运行，结果未审计，数字不得引用。
+
+工件：`configs/experiments/tb21_split_folder_rerun_20261019.yaml`（新建，未提交）、run `runs/tb21_split_folder_rerun_20261019_2050/`（运行中）
+
+## 2026-10-19 22:05 — 停止首个重跑，轨迹选择改为 strong1_weak1 后重开
+
+一段话摘要：首个重跑 run（`runs/tb21_split_folder_rerun_20261019_2050`）在 p02 学习阶段按用户要求于 22:02 停止；原因是 `trajectory_select=all` 下首轮学习按当前串行速度估算需 20–30 小时、整个 run 可能 3–5 天，用户要求把 `rules.trajectory_select` 调整为 1。代码里没有名为“1”的现成规则，新增具名规则 `strong1_weak1`：每任务最多 1 条强模型轨迹（成功优先）、最多 1 条弱模型轨迹（失败优先），偏好序与 `strong2_weak2` 相同。新增两个单元测试，规则测试 19 passed，ruff 通过。旧 run 已写 `INVALID.md` 作废，不用于结果。新配置 `configs/experiments/tb21_split_folder_rerun1_20261019.yaml` 只把 `trajectory_select` 改为 `strong1_weak1`，其余参数不变；装配到 `runs/tb21_split_folder_rerun1_20261019_2205`，预检同样零模型调用、82 个基线单元 normal、强弱指标逐位一致，随后以 PID 18846 启动完整 7 相位序列。实验仍在运行，结果未审计，数字不得引用。
+
+工件：`src/expedistill/blocks/rules.py`（新增 strong1_weak1）、`tests/unit/blocks/test_rules.py`（新增两个测试）、`configs/experiments/tb21_split_folder_rerun1_20261019.yaml`（新建，未提交）、run `runs/tb21_split_folder_rerun1_20261019_2205/`（运行中）、旧 run 的 `INVALID.md`
+

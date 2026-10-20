@@ -187,6 +187,58 @@ def test_strong2_weak2_is_deterministic_under_input_order():
     assert rule(reversed(trajectories)) == first
 
 
+def test_strong1_weak1_takes_one_per_role_with_correctness_preference():
+    rule = get_trajectory_select("strong1_weak1")
+    strong = [
+        _trajectory(False, role="strong", attempt=0),
+        _trajectory(True, role="strong", attempt=1),
+        _trajectory(True, role="strong", attempt=2),
+    ]
+    weak = [
+        _trajectory(True, role="weak", attempt=0),
+        _trajectory(False, role="weak", attempt=1),
+        _trajectory(False, role="weak", attempt=2),
+    ]
+    selected = rule(strong + weak)
+    # Strong arm: the first success in id order; weak arm: the first
+    # failure in id order.
+    assert [t.trajectory_id for t in selected] == [
+        "traj/tb:t/strong/01", "traj/tb:t/weak/01"]
+
+
+def test_strong1_weak1_clamps_to_one_and_is_total():
+    rule = get_trajectory_select("strong1_weak1")
+    one_strong_three_weak = [
+        _trajectory(True, role="strong", attempt=0),
+        _trajectory(False, role="weak", attempt=0),
+        _trajectory(False, role="weak", attempt=1),
+        _trajectory(False, role="weak", attempt=2),
+    ]
+    assert [t.trajectory_id for t in rule(one_strong_three_weak)] == [
+        "traj/tb:t/strong/00", "traj/tb:t/weak/00"]
+    # Only weak trajectories: one weak, no strong.
+    only_weak = [_trajectory(False, role="weak", attempt=i)
+                 for i in range(3)]
+    assert [t.trajectory_id for t in rule(only_weak)] == [
+        "traj/tb:t/weak/00"]
+    # A weak arm with no failures (impossible on F, but the rule must be
+    # total): the quota falls back to the first weak success.
+    weak_successes = [_trajectory(True, role="weak", attempt=i)
+                      for i in range(3)]
+    assert [t.trajectory_id for t in rule(weak_successes)] == [
+        "traj/tb:t/weak/00"]
+    assert rule([]) == []
+    # A one-shot iterable is materialized once for both role passes.
+    trajectories = [
+        _trajectory(False, role="weak", attempt=2),
+        _trajectory(True, role="strong", attempt=0),
+        _trajectory(True, role="weak", attempt=1),
+        _trajectory(False, role="strong", attempt=1),
+    ]
+    first = rule(trajectories)
+    assert rule(reversed(trajectories)) == first
+
+
 def test_acceptance_improve_strict_rate_gain_truth_table():
     rule = get_acceptance_improve("strict_rate_gain")
     # Rise at equal depths.

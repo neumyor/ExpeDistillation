@@ -233,6 +233,31 @@ def _strong2_weak2(
     return selected
 
 
+@TRAJECTORY_SELECT.register("strong1_weak1")
+def _strong1_weak1(
+    trajectories: Sequence[Trajectory],
+) -> List[Trajectory]:
+    """Stage-2 quota rule: up to 1 strong + up to 1 weak per task.
+
+    The one-per-role cost floor: the same correctness preference as
+    ``strong2_weak2`` (strong successes first, weak failures first),
+    with a quota of one per role. Fewer available than the quota is
+    fine; an unscored trajectory sorts last.
+    """
+    selected: List[Trajectory] = []
+    available = list(trajectories)
+    for role, prefer_success in (("strong", True), ("weak", False)):
+        of_role = sorted(
+            (trajectory for trajectory in available
+             if trajectory.model_role == role),
+            key=lambda trajectory: (
+                trajectory.correctness is not prefer_success,
+                trajectory.trajectory_id),
+        )
+        selected.extend(of_role[:1])
+    return selected
+
+
 @ACCEPTANCE_IMPROVE.register("strict_rate_gain")
 def _strict_rate_gain(
     baseline: Mapping[str, int],
