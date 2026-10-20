@@ -276,6 +276,7 @@ def assign_groups(
     skills: List[Skill],
     handle: ModelHandle,
     *,
+    grouping_input: str = "full",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, str]:
@@ -286,12 +287,22 @@ def assign_groups(
     prompt): every input skill id appears exactly once, mapped to a
     non-empty string; missing, unknown or empty mappings raise
     ModelOutputError listing the offenders.
+
+    ``grouping_input`` picks what G9 sees of each skill: ``full``
+    (default, the content) or ``summary`` (the one-line summary; a skill
+    without one is refused before the model call). It is independent of
+    G7's ``similarity_input``.
     """
+    if grouping_input not in SIMILARITY_INPUTS:
+        raise ConfigError(
+            "GROUP: grouping_input must be one of "
+            f"{list(SIMILARITY_INPUTS)}, got {grouping_input!r}")
     if not skills:
         return {}
 
     parsed = call_model(
-        handle, "GROUP", {"skills_listing": _listing(skills)},
+        handle, "GROUP",
+        {"skills_listing": _listing(skills, grouping_input)},
         output_json=True, usage=usage, run_dir=run_dir,
     )
     if not isinstance(parsed, dict):

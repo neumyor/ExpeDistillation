@@ -267,6 +267,36 @@ def test_assign_groups_wiring_and_result():
     assert result == mapping
 
 
+def test_assign_groups_summary_input_lists_summaries():
+    skills = [make_skill("s0", "Long content zero."),
+              make_skill("s1", "Long content one.")]
+    skills[0].summary = "check the log"
+    skills[1].summary = "restart\nsafely"
+    handle = make_fake_handle(script=json_script(
+        {"groups": {"s0": "a", "s1": "a"}}))
+
+    result = assign_groups(skills, handle, grouping_input="summary")
+
+    expected = get_prompt("GROUP").format(
+        skills_listing="- s0: check the log\n- s1: restart safely")
+    assert handle.client.calls[0]["user"] == expected
+    assert result == {"s0": "a", "s1": "a"}
+
+
+def test_assign_groups_summary_input_refuses_a_missing_summary():
+    handle = make_fake_handle(script=[])
+    with pytest.raises(ConfigError, match="s0"):
+        assign_groups(SKILLS, handle, grouping_input="summary")
+    assert handle.client.calls == []
+
+
+def test_assign_groups_unknown_grouping_input_is_refused():
+    handle = make_fake_handle(script=[])
+    with pytest.raises(ConfigError, match="grouping_input"):
+        assign_groups(SKILLS[:1], handle, grouping_input="titles")
+    assert handle.client.calls == []
+
+
 def test_assign_groups_strips_names():
     handle = make_fake_handle(script=json_script(
         {"groups": {"s0": "  file inspection  "}}))

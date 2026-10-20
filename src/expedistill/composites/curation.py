@@ -954,6 +954,7 @@ def curate_bank(
     merge_check: str = "none",
     drop_low_value: bool = False,
     similarity_input: str = "full",
+    grouping_input: str = "full",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
@@ -987,6 +988,8 @@ def curate_bank(
     ``similarity_input`` picks what G7 sees of each skill: ``full``
     (default) the content, ``summary`` the one-line summary (a skill
     without one stops the curation with a ConfigError before the call).
+    ``grouping_input`` does the same for G9, independently: ``full``
+    (default) or ``summary`` (same missing-summary refusal).
 
     ``workers`` bounds the parallelism of one wave's units (B5 run_units);
     any output is bit-identical to the serial run (module docstring).
@@ -1006,6 +1009,10 @@ def curate_bank(
         raise ConfigError(
             f"similarity_input must be one of {list(SIMILARITY_INPUTS)}, "
             f"got {similarity_input!r}")
+    if grouping_input not in SIMILARITY_INPUTS:
+        raise ConfigError(
+            f"grouping_input must be one of {list(SIMILARITY_INPUTS)}, "
+            f"got {grouping_input!r}")
     if workers < 1:
         raise ConfigError(f"workers must be >= 1, got {workers}")
     log_path = _log_path(store, run_dir, dest)
@@ -1327,7 +1334,9 @@ def curate_bank(
         if round_record.get("grouping") is None:
             try:
                 group_map = assign_groups(
-                    members, curator_handle, usage=usage, run_dir=run_dir)
+                    members, curator_handle,
+                    grouping_input=grouping_input,
+                    usage=usage, run_dir=run_dir)
             except (InfrastructureError, ModelOutputError) as exc:
                 record_failure(f"{unit_prefix}/grouping", exc)
                 raise

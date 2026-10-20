@@ -49,6 +49,11 @@ class AgentBrewParams:
     ``similarity_input``: what G7 sees of each skill -- ``full``
     (default, the content) or ``summary`` (the one-line summary; a skill
     without one stops the curation loudly).
+
+    ``grouping_input``: what G9 sees of each skill -- ``full`` (default,
+    the content) or ``summary`` (the one-line summary; a skill without
+    one stops the curation loudly). Independent of ``similarity_input``:
+    G7 and G9 have different input sizes and failure modes.
     """
 
     token_budget: Optional[int]
@@ -56,6 +61,7 @@ class AgentBrewParams:
     merge_check: str = "none"
     drop_low_value: bool = False
     similarity_input: str = "full"
+    grouping_input: str = "full"
 
     def __post_init__(self) -> None:
         if self.token_budget is not None and self.token_budget < 1:
@@ -74,6 +80,10 @@ class AgentBrewParams:
             raise ConfigError(
                 "methods.curation.agentbrew similarity_input must be 'full' "
                 f"or 'summary', got {self.similarity_input!r}")
+        if self.grouping_input not in ("full", "summary"):
+            raise ConfigError(
+                "methods.curation.agentbrew grouping_input must be 'full' "
+                f"or 'summary', got {self.grouping_input!r}")
 
 
 @dataclass(frozen=True)

@@ -203,21 +203,28 @@ class TestCurationParams:
                 "merge_check": "regression"})
 
 
-    def test_agentbrew_low_value_and_similarity_input_params(self):
-        # The 2026-10-19 switches: both default to today's behaviour.
+    def test_agentbrew_low_value_similarity_and_grouping_params(self):
+        # The 2026-10-19/20 switches: all default to today's behaviour.
         default = resolve_params("curation", {"name": "agentbrew",
                                               "token_budget": None})
         assert default.drop_low_value is False
         assert default.similarity_input == "full"
+        assert default.grouping_input == "full"
         params = resolve_params("curation", {
             "name": "agentbrew", "token_budget": None,
-            "drop_low_value": True, "similarity_input": "summary"})
+            "drop_low_value": True, "similarity_input": "summary",
+            "grouping_input": "summary"})
         assert params.drop_low_value is True
         assert params.similarity_input == "summary"
+        assert params.grouping_input == "summary"
         with pytest.raises(ConfigError, match="similarity_input"):
             resolve_params("curation", {
                 "name": "agentbrew", "token_budget": None,
                 "similarity_input": "titles"})
+        with pytest.raises(ConfigError, match="grouping_input"):
+            resolve_params("curation", {
+                "name": "agentbrew", "token_budget": None,
+                "grouping_input": "titles"})
         with pytest.raises(ConfigError, match="drop_low_value"):
             resolve_params("curation", {
                 "name": "agentbrew", "token_budget": None,

@@ -112,3 +112,9 @@ folder 版 C 终测（`runs/tb21_split_folder_20261017_1339`）复用了源 run
   只有：回归考试默认关闭、G7/G8 提示词文本变化、G8 输出带摘要；
 - 本裁决不改动找证据、写作、决策、验收的边界；"整理不重新判定技能是否有效"
   这一边界由 `low_value` 开关在 G7 层面放宽，只在显式开启时生效。
+
+## 5. 后续：G9 的输入开关
+
+2026-10-20 新增独立的 `grouping_input`，只控制 G9 看正文还是摘要；本文件的
+`similarity_input` 仍然只控制 G7。见
+`docs/decisions/curation_grouping_input_20261020.md`。

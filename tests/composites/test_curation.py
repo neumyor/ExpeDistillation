@@ -317,7 +317,8 @@ def test_similarity_input_summary_lists_the_summaries(store):
     g7_user = handles["curator_handle"].client.calls[0]["user"]
     assert f"- {_skill_id(0)}: check the log" in g7_user
     assert "long content" not in g7_user
-    # G9 still sees the content: the switch is G7's only.
+    # G9 still sees the content: this switch is G7's only; G9 has its own
+    # grouping_input switch.
     g9_user = handles["curator_handle"].client.calls[1]["user"]
     assert "long content 0" in g9_user
 
@@ -341,6 +342,50 @@ def test_an_unknown_similarity_input_is_refused(store):
         curate_bank(store=store, bank_token_budget=10 ** 6,
                     curation_rounds=1, similarity_input="titles",
                     run_dir=store.run_dir, **handles)
+
+
+def test_grouping_input_summary_lists_the_summaries(store):
+    for index, summary in enumerate(("check the log", "restart safely")):
+        _add_skill(store, index, f"long content {index}", summary=summary)
+    handles = _handles(
+        curator_script=[_similarity(),
+                        _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[], judge_script=[])
+
+    curate_bank(store=store, bank_token_budget=10 ** 6, curation_rounds=1,
+                similarity_input="full", grouping_input="summary",
+                run_dir=store.run_dir, **handles)
+
+    # G7 keeps its full input; G9 alone sees the summaries.
+    g7_user = handles["curator_handle"].client.calls[0]["user"]
+    assert "long content 0" in g7_user
+    g9_user = handles["curator_handle"].client.calls[1]["user"]
+    assert f"- {_skill_id(0)}: check the log" in g9_user
+    assert "long content" not in g9_user
+
+
+def test_grouping_input_summary_refuses_a_skill_without_summary(store):
+    _add_skill(store, 0, "content 0", summary="check the log")
+    _add_skill(store, 1, "content 1")  # no summary
+    handles = _handles(curator_script=[_similarity()],
+                       answer_script=[], judge_script=[])
+
+    with pytest.raises(ConfigError, match="summary"):
+        curate_bank(store=store, bank_token_budget=10 ** 6,
+                    curation_rounds=1, grouping_input="summary",
+                    run_dir=store.run_dir, **handles)
+    # G7 ran; G9 refused before its model call.
+    assert len(handles["curator_handle"].client.calls) == 1
+
+
+def test_an_unknown_grouping_input_is_refused(store):
+    _add_skill(store, 0, "content 0")
+    handles = _handles(curator_script=[], answer_script=[], judge_script=[])
+    with pytest.raises(ConfigError, match="grouping_input"):
+        curate_bank(store=store, bank_token_budget=10 ** 6,
+                    curation_rounds=1, grouping_input="titles",
+                    run_dir=store.run_dir, **handles)
+    assert handles["curator_handle"].client.calls == []
 
 
 # ---------------------------------------------------------------------------
