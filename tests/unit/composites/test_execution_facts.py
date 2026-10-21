@@ -5,9 +5,10 @@ execute_learn_repair_plan_20261016.md, boundaries doc section 3 rule 2):
 
 1. The TB plugin passes the benchmark scorer's verdict through verbatim
    (``correctness``) and reports raw facts beside it (``verifier_ran``,
-   the trial's exception); a reward without verifier evidence carries NO
-   verdict (``correctness=None``, stored, never mechanically retried) --
-   judging it is acceptance's named rule.
+   the trial's exception); a reward without verifier evidence raises
+   ``InfrastructureError`` so K1 retries it, and a model-side no-verdict
+   trial is stored with ``correctness=None`` -- judging the stored cases
+   is acceptance's named rule.
 2. K1's retry stays mechanical: a run that came back with a scorer
    verdict -- however suspicious its facts look -- is never retried;
    only a run that raised an infrastructure failure is.
@@ -23,6 +24,8 @@ import importlib.abc
 import importlib.machinery
 import sys
 import types
+
+import pytest
 
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
@@ -116,34 +119,27 @@ def test_scorer_verdict_passes_through_when_the_verifier_ran(tmp_path):
     assert outcome.correctness is True
 
 
-def test_a_reward_without_verifier_evidence_carries_no_verdict(tmp_path):
+def test_a_reward_without_verifier_evidence_raises_for_k1_retry(tmp_path):
     # The pseudo-zero pattern (reward present, pytest never collected) is
-    # no verdict in EITHER reward direction (R2b): the run is stored with
-    # correctness=None and the raw facts beside it -- never invalidated by
-    # the plugin, never mechanically retried, judged by acceptance's
-    # named rule.
+    # not usable verifier evidence in EITHER reward direction: the plugin
+    # raises so K1 retries the unit under a fresh token.
     link = JobsRemoteLink(on_submit=lambda run_id, task, model: trial_files(
         run_id, task, result="result_failure.json",
         verifier_log="verifier_not_collected.txt"))
-    outcome = _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
-    assert outcome.meta["reward"] == 0.0
-    assert outcome.meta["verifier_ran"] is False
-    assert "verdict_reason" not in outcome.meta
-    assert outcome.correctness is None
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
 
 
-def test_a_positive_reward_without_verifier_evidence_carries_no_verdict(
+def test_a_positive_reward_without_verifier_evidence_raises_for_k1_retry(
         tmp_path):
     # The historically dangerous direction (2026-10-16 review D2): a
     # POSITIVE reward with no verifier evidence must not score as a
-    # success -- the guard is symmetric in the reward value.
+    # success -- the retry guard is symmetric in the reward value.
     link = JobsRemoteLink(on_submit=lambda run_id, task, model: trial_files(
         run_id, task, result="result_success.json",
         verifier_log="verifier_not_collected.txt"))
-    outcome = _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
-    assert outcome.meta["reward"] == 1.0
-    assert outcome.meta["verifier_ran"] is False
-    assert outcome.correctness is None
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        _tb_plugin(link).run(_tb_task(), _HANDLE, "", tmp_path / "work")
 
 
 def test_reward_absent_trial_reports_no_verdict_and_raw_exception_facts(

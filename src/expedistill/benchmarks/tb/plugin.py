@@ -86,17 +86,26 @@ acceptance judges -- boundaries doc sections 2.2 and 2.3):
   something) carries the benchmark scorer's verdict and it passes through
   verbatim as ``correctness`` (reward > 0 -> True, reward == 0 -> False),
   whatever the verifier log looks like beyond that;
-- a trial with no reward, or a reward claimed without verifier evidence
-  (the campaign's "pseudo zero" -- the verifier log missing or pytest
-  never collected anything, in EITHER reward direction), carries no
-  scorer verdict: the run is stored with ``correctness=None`` and the
-  trial's exception_type / exception_message / ``verifier_ran`` as raw
-  facts. Execution does not mechanically retry it and does not reclassify
-  the model-vs-infra exceptions (AgentTimeoutError et al.); judging
-  those runs is acceptance's named-rule decision;
-- infrastructure failures (transport, deadline, dead runner, an
-  untrusted pre-existing run id) raise ``InfrastructureError`` -- K1's
-  mechanical retry, never a stored record.
+- a trial with no reward whose exception is infrastructure (anything
+  outside the model-exception set below: sandbox/setup timeouts, quota,
+  transport, or no exception at all) raises ``InfrastructureError``:
+  K1 retries the unit under a fresh attempt token, exactly like the
+  transport/deadline failures; an exhausted retry budget leaves the
+  unit missing (K1's failure ledger), never a stored pseudo-verdict;
+- a reward claimed without verifier evidence (the campaign's "pseudo
+  zero", in either reward direction) is an infrastructure failure too:
+  the reward cannot be trusted without the evidence, so it raises and
+  K1 retries the unit;
+- a model-side no-verdict trial (AgentTimeoutError,
+  ContextLengthExceededError, OutputLengthExceededError, or a broken
+  tmux RuntimeError) carries no scorer verdict: the run is stored with
+  ``correctness=None`` and the trial's exception_type /
+  exception_message / ``verifier_ran`` as raw facts. Execution does not
+  mechanically retry those; judging them is acceptance's named-rule
+  decision;
+- infrastructure failures before a trial result exists (transport,
+  deadline, dead runner, an untrusted pre-existing run id) raise
+  ``InfrastructureError`` -- K1's mechanical retry, never a stored record.
 
 ``classify_result`` below keeps the pre-R2 classification ONLY as the
 archive validator's historical lens (scripts/analysis/
@@ -151,6 +160,7 @@ __all__ = [
     "TB_TASK_PROMPT_FOLDER_INLINE_NAME",
     "classify_result",
     "result_facts",
+    "retryable_unscored",
     "runner_env",
 ]
 
@@ -420,6 +430,35 @@ def result_facts(result: Dict[str, Any],
     }
 
 
+def retryable_unscored(facts: Dict[str, Any]) -> bool:
+    """True when a no-verdict trial failed on infrastructure, not the model.
+
+    The live counterpart of ``classify_result``'s infra branch: a trial
+    that came back without usable verifier evidence is an infrastructure
+    failure even though Harbor returned a result.json. That covers a
+    missing reward and a pseudo zero (a reward claimed while pytest never
+    collected -- the reward is meaningless without the evidence). Raising
+    ``InfrastructureError`` lets K1 retry the unit under a fresh token;
+    the retry runs the whole trial again. A model-side no-verdict trial
+    stays a stored ``correctness=None`` fact for acceptance.
+
+    Keep the model predicates in sync with ``classify_result`` below:
+    that function is frozen for the archive validator and must reproduce
+    the historical campaign, so it cannot call this live policy.
+    """
+    if (facts.get("reward") is not None
+            and facts.get("verifier_ran") is True):
+        return False  # scored: reward plus verifier evidence
+    exception_type = str(facts.get("exception_type") or "")
+    message = str(facts.get("exception_message") or "")
+    if exception_type in _MODEL_EXCEPTIONS:
+        return False
+    if (exception_type == _TMUX_ERROR_TYPE
+            and _TMUX_ERROR_RE.search(message)):
+        return False
+    return True
+
+
 def classify_result(result: Dict[str, Any],
                     verifier_log: Optional[str]) -> Tuple[str, Optional[float], Dict[str, Any]]:
     """The pre-R2 verdict classification, kept ONLY as the archive
@@ -427,8 +466,9 @@ def classify_result(result: Dict[str, Any],
     re-derives the status an archived trial was produced under and checks
     it against the campaign audit. ``run`` no longer calls this -- the
     execution path passes the scorer's verdict through and reports raw
-    facts (:func:`result_facts`); validity judgments (pseudo zero,
-    model-vs-infra exceptions) live with acceptance's named rules now.
+    facts (:func:`result_facts`); the live infrastructure-retry predicate
+    is :func:`retryable_unscored` above, and pseudo-zero / model-side
+    validity judgments live with acceptance's named rules now.
     Returns (status, reward, info). Pure.
     """
     # The reward/exception parsing below is a FROZEN copy of
@@ -1469,6 +1509,20 @@ class TBPlugin(BenchmarkPlugin):
         meta.update(facts)
         reward = facts["reward"]
 
+        if retryable_unscored(facts):
+            # A no-verdict trial whose failure is infrastructure is not a
+            # measurement fact: raise so K1 retries the unit under a fresh
+            # token (the retry runs the whole trial again). Model-side
+            # no-verdict trials fall through to the stored
+            # correctness=None fact below.
+            raise InfrastructureError(
+                f"TB trial {run_id} ({task_name}): no scorer verdict from "
+                f"an infrastructure failure (exception_type="
+                f"{facts['exception_type']!r}, exception_message="
+                f"{facts['exception_message']!r}, verifier_ran="
+                f"{facts['verifier_ran']!r}); retrying the unit under a "
+                "fresh attempt token")
+
         steps, usage_pair = self._fetch_steps(link, workdir, meta)
 
         if meta.get("resumed") in ("result", "alive"):
@@ -1491,11 +1545,9 @@ class TBPlugin(BenchmarkPlugin):
 
         # The scorer verdict, or its absence, as a fact (R2b, module
         # docstring): a reward whose verifier actually ran passes through
-        # verbatim; anything else (no reward, or a reward claimed without
-        # verifier evidence -- the pseudo zero, in either reward direction)
-        # carries NO verdict, so correctness stays None with the facts
-        # riding in meta. No mechanical retry either way: the run is
-        # stored and acceptance's named rule decides what it counts as.
+        # verbatim; the remaining no-verdict cases are model-side
+        # exceptions, stored as correctness=None with their raw facts in
+        # meta. Acceptance's named rule decides what they count as.
         if reward is not None and facts["verifier_ran"] is True:
             correctness: Optional[bool] = reward > 0.0
             usage_status = "ok"

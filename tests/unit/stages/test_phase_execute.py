@@ -627,6 +627,53 @@ def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
     assert [row["round"] for row in ledger] == [0]
 
 
+def test_live_shortfall_accepts_the_missing_attempt_of_a_partial_group(
+        monkeypatch, tmp_path):
+    """A group with one stored attempt and one infra-missing attempt must
+    have the missing unit accepted under --allow-infra-shortfall; the
+    group-level "any trajectory stored" test used to skip it, so the
+    phase raised after writing its summary."""
+    _pin_k1(monkeypatch)
+    live_t1_calls = {"n": 0}
+
+    def behavior(record):
+        task = record["task_id"]
+        if record["handle"].role == "strong":
+            return _outcome(task, True)
+        if record["skills_block"]:  # the live arm
+            if task == "t1":
+                live_t1_calls["n"] += 1
+                if live_t1_calls["n"] > 1:
+                    raise InfrastructureError("sandbox exploded")
+            return _outcome(task, True)
+        return _outcome(task, task != "t1")  # baseline weak
+
+    _install_plugin(monkeypatch, PhasePlugin(behavior))
+    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=2),
+                   allow_infra_shortfall=True)
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
+    ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
+
+    phase = phase_of(2, "live", live_spec(
+        execution={"name": "real", "n_attempts": 2}))
+    summary = phase_execute.run(ctx, phase).summary
+
+    assert summary["complete"] is True
+    assert summary["infra_shortfall_accepted"] is True
+    accepted = read_json(
+        ctx.run_dir / "stage4_acceptance" / "live_run" / "round00"
+        / shortfall.SHORTFALL_NAME)["unit_ids"]
+    assert accepted == ["traj/fakebench:t1/weak/01"]
+    rows = report_rows(ctx, phase)
+    assert len(rows) == 1
+    assert rows[0].status == verdicts.STATUS_NORMAL
+    assert rows[0].success_count == 1
+    assert rows[0].valid_count == 1
+    ledger = read_jsonl(ctx.run_dir / "stage4_acceptance" / "live_run"
+                        / "verdicts.jsonl")
+    assert ledger[-1]["judged_with_shortfall"] is True
+
+
 def test_live_phase_with_an_empty_group_universe_completes(
         monkeypatch, tmp_path):
     """The assembled-run shape: every bank member accepted, no pending

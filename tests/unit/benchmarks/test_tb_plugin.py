@@ -22,6 +22,7 @@ from expedistill.benchmarks.tb.plugin import (
     TB_TASK_PROMPT_FOLDER_INLINE_NAME,
     classify_result,
     result_facts,
+    retryable_unscored,
 )
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
 from expedistill.infra.reliability import ConfigError, InfrastructureError
@@ -246,6 +247,39 @@ def test_result_facts_report_exception_verbatim():
     assert facts["verifier_ran"] is None
 
 
+def test_retryable_unscored_includes_pseudo_zero():
+    # No usable verifier evidence (missing reward or a pseudo zero) plus
+    # no model-side exception: K1 gets a fresh attempt. Model-side
+    # exceptions and tmux breakage stay stored facts.
+    assert retryable_unscored(_facts("result_infra.json", None)) is True
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "TimeoutException",
+                          "exception_message": "context deadline exceeded"}},
+                     None)) is True
+    assert retryable_unscored(
+        result_facts({"verifier_result": None, "exception_info": None},
+                     None)) is True
+    assert retryable_unscored(
+        _facts("result_failure.json", "verifier_not_collected.txt")) is True
+    assert retryable_unscored(
+        _facts("result_success.json", "verifier_not_collected.txt")) is True
+    assert retryable_unscored(_facts("result_model_fail.json", None)) is False
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "ContextLengthExceededError",
+                          "exception_message": "too long"}},
+                     None)) is False
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "RuntimeError",
+                          "exception_message": "tmux: send keys failed"}},
+                     None)) is False
+
+
 # ---------------------------------------------------------------------------
 # classify_result (pure): the archive validator's historical lens
 # ---------------------------------------------------------------------------
@@ -462,29 +496,33 @@ def test_run_deadline_raises(tmp_path):
         plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
 
-def test_run_infra_exception_result_is_unscored_not_retried(tmp_path):
-    # R2b: a trial that came back without a scorer verdict is a STORED
-    # correctness=None run with the exception as a raw fact -- no
-    # mechanical retry; acceptance's named rule judges it.
+def test_run_infra_exception_result_raises_for_k1_retry(tmp_path):
+    # A no-reward infrastructure exception is not a stored unscored fact:
+    # it raises so K1 retries the unit under a fresh attempt token. The
+    # failed attempt's usage row carries null totals (the retry path does
+    # not account the discarded trial's tokens).
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
             f"{TRIAL}/result.json": _fixture_text("result_infra.json"),
-            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.correctness is None
-    assert outcome.meta["exception_type"] == "AgentSetupTimeoutError"
-    # The stepwise view is still rebuilt and kept.
-    assert len(outcome.steps) == 2
+    recorder = UsageRecorder(tmp_path / "usage.jsonl")
+    plugin = _make_plugin(link, recorder)
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        plugin.run(TASK, HANDLE, "", tmp_path / "work")
+
+    lines = (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["status"] == "infra"
+    assert row["in_tokens"] is None
+    assert row["out_tokens"] is None
 
 
 def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
-    # R2/R2b: the model-vs-infra exception reclassification is gone from the
-    # execution path and so is the mechanical retry. A timed-out agent
-    # produced no scorer verdict, so the run is stored with
-    # correctness=None and the exception as a raw fact (acceptance's named
-    # rules judge it from there).
+    # A model-side no-verdict trial stays a stored fact: AgentTimeoutError
+    # is in the model exception set, so the retry predicate does not fire
+    # and acceptance's named rules judge the stored run.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
@@ -497,48 +535,43 @@ def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
     assert outcome.meta["reward"] is None
 
 
-def test_run_pseudo_zero_carries_no_scorer_verdict(tmp_path):
-    # R2b: a reward claimed without pytest ever collecting anything (the
-    # campaign's "fake zero") carries no scorer verdict, in either reward
-    # direction -- the plugin stores correctness=None with the raw facts
-    # (reward, verifier_ran) beside it; whether the run counts is
-    # acceptance's named-rule decision, and it is never mechanically
-    # retried.
+def test_run_pseudo_zero_raises_for_k1_retry(tmp_path):
+    # A reward claimed without pytest ever collecting anything (the
+    # campaign's "fake zero") is not usable verifier evidence: the plugin
+    # raises so K1 retries the unit under a fresh token.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files(result="result_failure.json",
                                             verifier_log="verifier_not_collected.txt"))
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.correctness is None
-    assert outcome.meta["reward"] == 0.0
-    assert outcome.meta["verifier_ran"] is False
-    assert "verdict_reason" not in outcome.meta
+    recorder = UsageRecorder(tmp_path / "usage.jsonl")
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        _make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
+    rows = [json.loads(line) for line in
+            (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["status"] for row in rows] == ["infra"]
+    assert rows[0]["in_tokens"] is None
 
 
-def test_run_pseudo_zero_positive_direction_carries_no_scorer_verdict(
-        tmp_path):
+def test_run_pseudo_zero_positive_direction_raises_for_k1_retry(tmp_path):
     # The historically dangerous direction (2026-10-16 review D2): a
     # POSITIVE reward claimed without pytest ever collecting anything
-    # must not score as a success either -- the guard is symmetric in
-    # the reward value.
+    # must not score as a success either -- the retry guard is symmetric
+    # in the reward value.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files(result="result_success.json",
                                             verifier_log="verifier_not_collected.txt"))
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.correctness is None
-    assert outcome.meta["reward"] == 1.0
-    assert outcome.meta["verifier_ran"] is False
-    assert "verdict_reason" not in outcome.meta
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
 
 
 def test_run_verifier_log_fetch_failure_is_infra_and_retried(tmp_path):
     # 2026-10-16 ruling 4 (C-path offset 1): the verifier log is the
     # scorer's evidence, so a transport failure fetching it is an
     # infrastructure failure -- K1 retries the unit, and a scored
-    # rollout is not silently voided as unscored. Only a log that
-    # arrives and shows pytest never collected may leave correctness
-    # None (the pseudo zero above).
+    # rollout is not silently voided as unscored. A log that arrives and
+    # shows pytest never collected is the pseudo zero above, retried the
+    # same way.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
