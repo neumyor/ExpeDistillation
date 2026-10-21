@@ -84,24 +84,31 @@ def test_find_similar_empty_input_short_circuits():
     assert handle.client.calls == []
 
 
-def test_find_similar_unknown_id_in_group():
+def test_find_similar_drops_an_unknown_id_and_keeps_the_group(capsys):
+    handle = make_fake_handle(script=json_script({
+        "similar_groups": [["s0", "s1", "nope"]],
+        "conflicts": [], "low_value": [],
+    }))
+    groups, conflicts, low_value = find_similar(SKILLS, handle)
+    assert groups == [["s0", "s1"]]
+    assert conflicts == [] and low_value == []
+    assert "nope" in capsys.readouterr().err
+
+
+def test_find_similar_skips_a_group_left_too_small_by_a_dropped_id(capsys):
     handle = make_fake_handle(script=json_script({
         "similar_groups": [["s0", "nope"]], "conflicts": [], "low_value": [],
     }))
-    with pytest.raises(ModelOutputError) as excinfo:
-        find_similar(SKILLS, handle)
-    assert "nope" in str(excinfo.value)
-    assert "similar_groups" in str(excinfo.value)
+    assert find_similar(SKILLS, handle) == ([], [], [])
+    assert "nope" in capsys.readouterr().err
 
 
-def test_find_similar_unknown_id_in_conflict():
+def test_find_similar_skips_a_conflict_with_an_unknown_id(capsys):
     handle = make_fake_handle(script=json_script({
         "similar_groups": [], "conflicts": [["s0", "ghost"]], "low_value": [],
     }))
-    with pytest.raises(ModelOutputError) as excinfo:
-        find_similar(SKILLS, handle)
-    assert "ghost" in str(excinfo.value)
-    assert "conflicts" in str(excinfo.value)
+    assert find_similar(SKILLS, handle) == ([], [], [])
+    assert "ghost" in capsys.readouterr().err
 
 
 def test_find_similar_group_too_small():
@@ -145,12 +152,20 @@ def test_find_similar_missing_low_value_field():
         find_similar(SKILLS, handle)
 
 
-@pytest.mark.parametrize("low_value", [["ghost"], "s0", [["s0"]]])
+@pytest.mark.parametrize("low_value", ["s0", [["s0"]]])
 def test_find_similar_bad_low_value(low_value):
     handle = make_fake_handle(script=json_script(
         {"similar_groups": [], "conflicts": [], "low_value": low_value}))
     with pytest.raises(ModelOutputError, match="low_value"):
         find_similar(SKILLS, handle)
+
+
+def test_find_similar_drops_unknown_low_value_ids(capsys):
+    handle = make_fake_handle(script=json_script({
+        "similar_groups": [], "conflicts": [], "low_value": ["s0", "ghost"],
+    }))
+    assert find_similar(SKILLS, handle) == ([], [], ["s0"])
+    assert "ghost" in capsys.readouterr().err
 
 
 def test_find_similar_summary_input_lists_summaries():
@@ -392,8 +407,8 @@ def test_find_similar_normalizes_missing_skill_suffix():
     assert low_value == ["traj/tb:t1/strong/00/seg01/skill"]
 
 
-def test_find_similar_rejects_ambiguous_suffix_free_ids():
-    """A suffix-free id that matches nothing even after '/skill' is still an error."""
+def test_find_similar_drops_a_suffix_free_id_that_matches_nothing(capsys):
+    """Suffix recovery runs first; a genuinely unknown id is then dropped."""
     from expedistill.core.models import Skill
     from expedistill.blocks.curate import find_similar
 
@@ -405,5 +420,5 @@ def test_find_similar_rejects_ambiguous_suffix_free_ids():
         "conflicts": [], "low_value": [],
     })]
     handle = make_fake_handle(script=script)
-    with pytest.raises(ModelOutputError, match="traj/tb:t9/nope"):
-        find_similar([s1], handle)
+    assert find_similar([s1], handle) == ([], [], [])
+    assert "traj/tb:t9/nope" in capsys.readouterr().err

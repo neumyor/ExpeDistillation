@@ -287,16 +287,20 @@ def test_a_crash_after_the_drop_journal_resumes_the_drop(store):
         "low_value"
 
 
-def test_a_low_value_id_outside_the_input_stops_the_curation(store):
+def test_a_low_value_id_outside_the_input_is_dropped(store):
     for index in range(2):
         _add_skill(store, index, f"skill {index}")
     reply = _similarity(low_value=["traj/tb:ghost/strong/00/seg00/skill"])
-    handles = _handles(curator_script=[reply],
-                       answer_script=[], judge_script=[])
+    handles = _handles(
+        curator_script=[reply,
+                        _grouping({_skill_id(0): "a", _skill_id(1): "a"})],
+        answer_script=[], judge_script=[])
 
-    with pytest.raises(ModelOutputError, match="low_value"):
-        _curate_low_value(store, handles, drop=True)
+    # The fabricated id is dropped; neither real skill is low-value, so the
+    # curation completes with both accepted.
+    _curate_low_value(store, handles, drop=True)
     assert store.load("skills", _skill_id(0), Skill).status == "accepted"
+    assert store.load("skills", _skill_id(1), Skill).status == "accepted"
 
 
 # ---------------------------------------------------------------------------

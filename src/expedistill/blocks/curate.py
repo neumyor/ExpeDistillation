@@ -4,15 +4,19 @@ Curation maintains the bank without re-judging correctness (README stage 5).
 The blocks are pure model-call plumbing per AGENTS.md block rules: assemble
 the template variables from the Skill objects, call the model through
 ``llm.call.call_model`` with a named prompt, and validate the declared
-output loudly -- an id that is not in the input or a group the prompt forbids
-is a ModelOutputError, never a silently dropped entry. All bookkeeping (IDs,
-statuses, exams, disk) belongs to the composite (K5).
+output loudly -- a malformed shape or a group the prompt forbids is a
+ModelOutputError. An id that is not in the input is dropped with a stderr
+note: at large bank sizes the model fabricates near-miss ids, and failing
+the whole call over one of them stalls curation permanently (see
+``_filter_unknown``). All bookkeeping (IDs, statuses, exams, disk) belongs
+to the composite (K5).
 
 D10 (bank token count) is a pure function and lives in ``expedistill.inject``
 (``count_bank_tokens``); K5 imports it from there, so it is not duplicated
 here.
 """
 
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -68,27 +72,32 @@ def _listing(skills: List[Skill], similarity_input: str = "full") -> str:
 _STAGE3_ID_SUFFIX = "/skill"
 
 
-def _normalize_ids(entry: List[str], known: Set[str]) -> Optional[str]:
-    """Deterministic recovery for the mixed-format listing failure mode.
+def _filter_unknown(entry: List[str],
+                    known: Set[str]) -> Tuple[List[str], List[str]]:
+    """(kept known ids, dropped unknown ids) for one model-listed entry.
 
-    Round-1+ G7/G9 listings mix stage-3 skill ids (``traj/.../segNN/skill``)
-    with merge ids (``bank/merge/NNNN``, no suffix); models then tend to
-    harmonize to the SHORTER style and drop the ``/skill`` suffix from every
-    stage-3 id (observed on the TB v3 run: all 68 output ids suffix-free,
-    2026-10-12). An unknown id that matches exactly one known id after
-    appending the stage-3 suffix is that id -- the model's grouping intent
-    is recovered, not guessed. Returns the id of the first unrecoverable
-    entry (for the error message), or None when the whole entry normalizes.
+    Two recoveries, both deterministic: an unknown id that matches exactly
+    one known id after appending the stage-3 suffix is that id (the
+    mixed-format listing failure mode observed on the TB v3 run, all 68
+    suffix-free ids, 2026-10-12); any other unknown id is dropped. The second
+    recovery exists for the large-bank failure mode (SearchQA, 2026-10-21):
+    with hundreds of long ids in the listing the model invents a near-miss
+    id (``.../strong/00/...`` for a listed ``.../strong/01/...``), and
+    rejecting the whole call over one fabricated id stalls curation forever.
+    The dropped ids are printed to stderr so the loss is visible.
     """
-    for position, item in enumerate(entry):
+    kept: List[str] = []
+    dropped: List[str] = []
+    for item in entry:
         if item in known:
+            kept.append(item)
             continue
         candidate = item + _STAGE3_ID_SUFFIX
         if candidate in known:
-            entry[position] = candidate
-            continue
-        return item
-    return None
+            kept.append(candidate)
+        else:
+            dropped.append(item)
+    return kept, dropped
 
 
 def _validate_id_entries(
@@ -96,53 +105,54 @@ def _validate_id_entries(
         size_ok: Callable[[int], bool], size_message: str) -> List[List[str]]:
     """Validate one SIMILARITY output field: a list of skill-id lists.
 
-    Every entry must be a list of strings drawn from ``known`` and satisfy
-    ``size_ok``. Violations raise ModelOutputError naming the offending
-    entry: model output validation is loud (AGENTS.md block rules), the
-    composite's lenient re-resolution (dropping stale ids) happens later,
-    on our verified output.
+    Unknown ids are dropped per entry with a stderr note (the large-bank
+    hallucination recovery in :func:`_filter_unknown`). A malformed entry or
+    an entry that misses ``size_ok`` while carrying only known ids raises
+    ModelOutputError; an entry whose dropped ids pushed it below the size
+    floor is skipped, because the model's usable intent no longer exists.
     """
     if not isinstance(value, list):
         raise ModelOutputError(
             f"SIMILARITY: field {field!r} must be a list of skill-id lists, "
             f"got {type(value).__name__}")
+    kept_entries: List[List[str]] = []
     for entry in value:
         if (not isinstance(entry, list) or not entry
                 or not all(isinstance(item, str) for item in entry)):
             raise ModelOutputError(
                 f"SIMILARITY: {field} entry must be a non-empty list of "
                 f"skill ids, got {entry!r}")
-        unknown = sorted(item for item in entry if item not in known)
-        if unknown:
-            # The mixed-format recovery runs per entry before the hard error.
-            unrecoverable = _normalize_ids(entry, known)
-            if unrecoverable is not None:
-                raise ModelOutputError(
-                    f"SIMILARITY: {field} entry {entry!r} references skill ids "
-                    f"that are not in the input: {[unrecoverable]!r}")
-        if not size_ok(len(entry)):
+        kept, dropped = _filter_unknown(entry, known)
+        if dropped:
+            print(f"SIMILARITY: dropped unknown skill ids {sorted(dropped)} "
+                  f"from field {field!r}", file=sys.stderr)
+        if not size_ok(len(kept)):
+            if dropped:
+                # A fabricated id cost the entry its usable members; skip
+                # it instead of failing the whole call.
+                continue
             raise ModelOutputError(
                 f"SIMILARITY: {field} entry {entry!r} is invalid: "
                 f"{size_message}")
-    return value
+        kept_entries.append(kept)
+    return kept_entries
 
 
 def _validate_low_value(value: Any, known: Set[str]) -> List[str]:
     """Validate the SIMILARITY ``low_value`` field: a flat list of known
-    skill ids (the same loud rule and ``/skill`` suffix recovery as the
-    group fields). A repeated id collapses to its first position."""
+    skill ids (the same ``/skill`` suffix recovery and unknown-id drop as
+    the group fields, with a stderr note). A repeated id collapses to its
+    first position."""
     if not isinstance(value, list) or \
             not all(isinstance(item, str) for item in value):
         raise ModelOutputError(
             "SIMILARITY: field 'low_value' must be a list of skill ids, "
             f"got {value!r}")
-    entry = list(value)
-    unrecoverable = _normalize_ids(entry, known)
-    if unrecoverable is not None:
-        raise ModelOutputError(
-            f"SIMILARITY: low_value references a skill id that is not in "
-            f"the input: {unrecoverable!r}")
-    return list(dict.fromkeys(entry))
+    kept, dropped = _filter_unknown(list(value), known)
+    if dropped:
+        print(f"SIMILARITY: dropped unknown low_value skill ids "
+              f"{sorted(dropped)}", file=sys.stderr)
+    return list(dict.fromkeys(kept))
 
 
 def find_similar(
