@@ -10,6 +10,8 @@ and the curation sequence-position branch.
 """
 
 
+import threading
+
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
@@ -45,7 +47,7 @@ from expedistill.methods.author.write import RevisionOutcome
 from expedistill.methods.curation import none as curation_none
 from expedistill.methods.curation import phase_bank as curation_phase_bank
 from expedistill.stages import learn_tasks, phase_learn
-from expedistill.stages.context import StageContext
+from expedistill.stages.context import RunSettings, StageContext
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
 
@@ -159,11 +161,12 @@ def _live_sequence():
              "test": _test_spec(against="baseline", delivery="whole_bank")})
 
 
-def _make_ctx(tmp_path, sequence, phases, handles):
+def _make_ctx(tmp_path, sequence, phases, handles, workers=1):
     return StageContext(
         run_dir=tmp_path / "run", store=Store(tmp_path / "run"),
         config=_Config(sequence, phases), usage=None, handles=handles,
-        workdir_root=tmp_path / "work")
+        workdir_root=tmp_path / "work",
+        run_settings=RunSettings(workers=workers))
 
 
 def _phase(sequence, phases, index):
@@ -418,6 +421,37 @@ def test_a_label_off_the_frozen_derivation_is_refused(tmp_path):
 # ---------------------------------------------------------------------------
 # The first learn phase: the baseline gap -> add path
 # ---------------------------------------------------------------------------
+
+def test_execute_rows_parallelizes_independent_targets(tmp_path, monkeypatch):
+    sequence, phases = _exam_sequence()
+    handles = {"author": make_fake_handle("author", []),
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter", [])}
+    ctx = _make_ctx(tmp_path, sequence, phases, handles, workers=4)
+    phase = _phase(sequence, phases, 1)
+    phase_bank_dir(ctx.run_dir, phase.label).mkdir(parents=True, exist_ok=True)
+    rows = [TaskListRow(target_kind="task", target_id=f"t{index}",
+                        action="add", reason="", basis_unit="")
+            for index in range(4)]
+    barrier = threading.Barrier(len(rows))
+    seen = []
+    lock = threading.Lock()
+
+    def fake_execute(ctx, phase, row, current_rows, current_spec,
+                     current_round, phase_dir):
+        with lock:
+            seen.append(row.target_id)
+        # Four rows and four workers: the pool must hold all four at once.
+        barrier.wait(timeout=5)
+
+    monkeypatch.setattr(learn_tasks, "_execute_row", fake_execute)
+    failed = learn_tasks.execute_rows(
+        ctx, phase, rows, None, phases["learn"], 0, [])
+
+    assert failed == set()
+    assert sorted(seen) == ["t0", "t1", "t2", "t3"]
+    assert len(_task_list_rows(ctx.run_dir, "p02:learn")) == 4
+
 
 def test_the_first_learn_phase_adds_skills_for_failed_bare_tasks(
         tmp_path, monkeypatch):

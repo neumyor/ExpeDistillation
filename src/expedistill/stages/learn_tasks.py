@@ -87,6 +87,7 @@ from expedistill.core import ids
 from expedistill.core.config import ExecutePhaseSpec, PhaseInstance
 from expedistill.core.contracts import AcceptanceReportRow, TaskListRow
 from expedistill.core.models import Skill
+from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -177,7 +178,7 @@ def merge_task_list(rows: Sequence[TaskListRow],
 
 
 # ---------------------------------------------------------------------------
-# The executor: one row at a time
+# The executor: independent rows land in a bounded pool
 # ---------------------------------------------------------------------------
 
 def execute_rows(ctx: Any, phase: PhaseInstance,
@@ -188,6 +189,14 @@ def execute_rows(ctx: Any, phase: PhaseInstance,
     """Land every effective task-list row; return the infra-failed
     target ids (the caller raises on them after its summary).
 
+    Rows are independent by target and run through B5's thread pool with
+    the run's ``--workers`` setting; ``workers == 1`` keeps the old serial
+    order. Each row's model calls dominate, so the pool is what turns a
+    learn phase from a serial sweep into parallel work. The ledger writes
+    stay safe under concurrency: ``append_jsonl`` locks its file, the
+    store writes are atomic per object, and a target is landed by exactly
+    one row. Append order of the outcome/revision receipts is therefore
+    completion order, not task-list order; readers key by target/skill id.
     The ledger is written BEFORE the first landing. Per target: an
     InfrastructureError is recorded and the target keeps its state (the
     phase raises at its end -- exit 3, resumable as-is); a
@@ -198,17 +207,31 @@ def execute_rows(ctx: Any, phase: PhaseInstance,
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     recorder = UnitFailureRecorder(ctx.run_dir)
     _write_task_list(phase_dir, phase.label, rows, superseded)
-    infra_failed: Set[str] = set()
-    for row in rows:
+    targets = [row.target_id for row in rows]
+    if len(set(targets)) != len(targets):
+        raise CodeBugError(
+            "the effective task list carries duplicate target ids; each "
+            "target must have exactly one row before rows land in parallel")
+
+    def land(row: TaskListRow) -> Tuple[str, Optional[BaseException]]:
         try:
             _execute_row(ctx, phase, row, current_rows, current_spec,
                          current_round, phase_dir)
+            return row.target_id, None
         except InfrastructureError as exc:
             recorder.record(row.target_id, phase.label, exc, exc)
-            infra_failed.add(row.target_id)
+            return row.target_id, exc
         except ModelOutputError as exc:
             recorder.record(row.target_id, phase.label, exc, exc)
-    return infra_failed
+            return row.target_id, None
+
+    workers = max(1, int(getattr(ctx.run_settings, "workers", 1) or 1))
+    if workers == 1 or len(rows) <= 1:
+        results = [land(row) for row in rows]
+    else:
+        results = run_parallel(land, list(rows), workers, thread=True)
+    return {target_id for target_id, failure in results
+            if failure is not None}
 
 
 def _execute_row(ctx: Any, phase: PhaseInstance, row: TaskListRow,
