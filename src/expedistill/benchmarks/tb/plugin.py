@@ -228,14 +228,18 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 # /opt/openclaw-skills, the mount the vendored environment hardcodes.
 # --------------------------------------------------------------------------
 TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox.
-Run `ls /opt/openclaw-skills/` to find this task's directory name, then read
-the catalog: `cat /opt/openclaw-skills/<directory>/catalog.md`. Every catalog
-line lists one skill as "<skill id> | <file to cat> | <one-line description>".
-cat only the skill file the current step needs, one at a time; do not open
-many skill files at once; come back to the catalog when a later step needs
-another one. These skills are lessons distilled from earlier runs: use
-them as references when they apply to the current task, and ignore them
-when they do not."""
+MANDATORY FIRST STEP: before starting the task itself, run
+`ls /opt/openclaw-skills/` to find this task's directory name, read
+`/opt/openclaw-skills/<directory>/SKILL.md` in full, then read the catalog:
+`cat /opt/openclaw-skills/<directory>/catalog.md`. Every catalog line lists
+one skill as "<skill id> | <file to cat> | <one-line description>". Choose at
+least one skill that could plausibly help with the task and `cat` that skill
+file's full content. You MUST do this at least once before running any command
+for the task itself, even if the task looks simple. After that, cat only the
+skill file the current step needs, one at a time; do not open many skill files
+at once; come back to the catalog when a later step needs another one. These
+skills are lessons distilled from earlier runs: use them as references when
+they apply to the current task, and ignore them when they do not."""
 
 TB_TASK_PROMPT_FOLDER = register(
     PromptSpec(
@@ -296,14 +300,22 @@ TB_TASK_PROMPT_FOLDER_INLINE = register(
             "The catalog of available skills is included below. Each line "
             "lists one skill as\n"
             "\"<skill id> | <file to cat> | <one-line description>\".\n"
-            "cat only the skill file the current step needs, one at a time; "
-            "do not open many\n"
-            "skill files at once; come back to this catalog when a later step "
-            "needs another one.\n"
-            "These skills are lessons distilled from earlier runs: use them "
-            "as references when\n"
-            "they apply to the current task, and ignore them when they do "
-            "not.\n"
+            "\n"
+            "MANDATORY FIRST STEP: read this SKILL.md in full (it is the "
+            "task prompt you are\n"
+            "reading now). Then choose at least one skill from the catalog "
+            "below that could\n"
+            "plausibly help with the task and run `cat <file to cat>` to read "
+            "that skill's\n"
+            "complete content. You MUST cat at least one skill file before "
+            "starting the task\n"
+            "itself, even if the task looks simple. After that, cat more skill "
+            "files when a\n"
+            "later step needs them; do not open many skill files at once. "
+            "These skills are\n"
+            "lessons distilled from earlier runs: use them as references when "
+            "they apply to the\n"
+            "current task, and ignore them when they do not.\n"
             "\n"
             "{catalog}\n"
         ),

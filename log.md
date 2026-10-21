@@ -1154,3 +1154,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：node29 于 10:20 左右恢复（TCP 22 可达、ssh 返回 OK）。用户确认放弃直接续跑旧 run，改用 P04 分叉方案：旧 run 的 P05 27 个空洞已被接受、18 个 group 已有 round1 判定且技能状态已提交，普通续跑无法回填。新建 `runs/tb21_split_folder_rerun3_20261021_1015`，用一次性脚本 `tmp/fork_p04_run.py` 复用 p01 246 条基线轨迹、p02 282 条子任务、p03 round00 87 条轨迹与 29 条判定行、p04 技能库 182 条（115 pending / 67 accepted）、p05 已测的 27 条有效轨迹和 18 条注入审计行；不复制 p05 空洞记录、p06 库、p07 产物。校验：P05 已存 27 条加接受空洞 27 条恰好等于 54 个期望单元，P04 库重算 18 条 audit 行零差异，提示词 digest 无漂移。先以 `--until-phase 3` 干跑，p01-p04 全部零模型调用（usage 与原 run 逐字节相同）；10:22 以 PID 79706 启动完整序列，64 workers、k1-stagger 20、不加 `--allow-infra-shortfall`。P05 正在补 27 个缺失单元（11 个 group），round01 已有 27 条轨迹、无 shortfall 文件。旧 run 保持不动，p06/p07 的数字作废。
 
 工件：run `runs/tb21_split_folder_rerun3_20261021_1015/`（含 `FORKED_FROM.md`）、`tmp/fork_p04_run.py`（一次性分叉脚本，未进 git）、`driver.pid`、`console.log`
+
+## 2026-10-21 19:27 — 停止 rerun3，提交恢复代码，给 P07 加技能读取强制要求
+
+一段话摘要：用户要求先停止本次实验并提交当前代码版本。rerun3 的 P07 在 79/84 条轨迹时被停止；这批 P07 作废，新的 P07 会在独立 run 中重跑。提交 `2f7d004`（TB 无判定重试、live 部分组空洞接受、rerun2 配置与日志）。用户观察到 P07 中弱模型很少真正读取技能，要求强制 agent 先读 SKILL.md、至少选择一个 skill 并 cat 其内容。已修改 `TB_TASK_PROMPT_FOLDER_INLINE` 和 `TB_SKILL_FOLDER_GUIDANCE`，把读取 SKILL.md、从 catalog 选至少一个 skill 并 cat 其全文写成 MANDATORY FIRST STEP；全量测试 2213 passed，ruff 通过。下一步从 P06 bank `bank:1d5b0f718266` 分叉新 run，只重跑 P07，使用 16 workers / stagger 40，并用 `skill_files_read` 统计确认读取率。
+
+工件：`src/expedistill/benchmarks/tb/plugin.py`、commit `2f7d004`、run `runs/tb21_split_folder_rerun3_20261021_1015/`（P07 停止在 79/84，作废）
