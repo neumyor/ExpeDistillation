@@ -1160,3 +1160,9 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：用户要求先停止本次实验并提交当前代码版本。rerun3 的 P07 在 79/84 条轨迹时被停止；这批 P07 作废，新的 P07 会在独立 run 中重跑。提交 `2f7d004`（TB 无判定重试、live 部分组空洞接受、rerun2 配置与日志）。用户观察到 P07 中弱模型很少真正读取技能，要求强制 agent 先读 SKILL.md、至少选择一个 skill 并 cat 其内容。已修改 `TB_TASK_PROMPT_FOLDER_INLINE` 和 `TB_SKILL_FOLDER_GUIDANCE`，把读取 SKILL.md、从 catalog 选至少一个 skill 并 cat 其全文写成 MANDATORY FIRST STEP；全量测试 2213 passed，ruff 通过。下一步从 P06 bank `bank:1d5b0f718266` 分叉新 run，只重跑 P07，使用 16 workers / stagger 40，并用 `skill_files_read` 统计确认读取率。
 
 工件：`src/expedistill/benchmarks/tb/plugin.py`、commit `2f7d004`、run `runs/tb21_split_folder_rerun3_20261021_1015/`（P07 停止在 79/84，作废）
+
+## 2026-10-22 02:39 — 新 prompt 的 P07 完成，技能读取率约 42%，全样本 delta 接近零
+
+一段话摘要：从 rerun3 的 P06 分叉新建 `runs/tb21_split_folder_rerun4_20261021_1927`，复用 p01-p06 产物和 `bank:1d5b0f718266`（60 个 accepted skill），p01-p06 回放零模型调用。P07 用新 prompt（MANDATORY FIRST STEP：先读 SKILL.md，至少选一个 skill 并 cat 全文）以 16 workers / stagger 40 重跑 84 个单元，最后剩 `pytorch-model-cli/00` 一个无 scorer verdict 单元，低并发补跑后 84/84 完成，`complete=true`、`infra_missing=0`。最终全样本：with_bank avg@N=0.4643、pass@N=0.7143；control avg@N=0.4762、pass@N=0.6429；delta avg@N=-0.0119、pass@N=+0.0714。技能读取：35/84 条轨迹至少读 1 个技能正文（42%），分布 0 个=49、1 个=26、2 个=7、3 个=1、4 个=1；19/28 个 task 至少有一次读取，9 个 task 三次都没读。按 task 事后切分：有读取的 19 个 task，with_bank avg=0.4123、control avg=0.4912、delta=-0.0789，pass 双方都是 0.6316；零读取的 9 个 task，with_bank avg=0.5741、control avg=0.4444、delta=+0.1296，pass 0.8889 vs 0.6667。这个子样本切分是事后选择，读取与否和 task 难度相关，“读取组更差”不能解释为因果。完整性审计：0 error / 0 warn / 1 info（run 根 failed_units 有一条 learn 阶段历史失败记录，属于信息项）。结论：prompt 把“几乎不读”提升到约 42%，但没有做到每条必读；全样本结果接近零（avg 略负、pass 略正）。若要做“必须读”的干净因果对比，仍需 A（试后重派）或 B（远端 shell 拦截）硬门禁并新开 run。
+
+工件：run `runs/tb21_split_folder_rerun4_20261021_1927/`（含 `FORKED_FROM.md`）、`phases/p07_test/phase_summary.json`、`tmp/audit_rerun4_20261022.json`、`tmp/fork_p06_run.py`（一次性分叉脚本，未进 git）、commit `61314ac`

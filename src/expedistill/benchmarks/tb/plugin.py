@@ -227,13 +227,16 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 # So the guidance's path wording is a remote contract: it must name
 # /opt/openclaw-skills, the mount the vendored environment hardcodes.
 # --------------------------------------------------------------------------
+TB_FOLDER_FILE_PATH_NOTE = """The skill files are in the same folder as this SKILL.md (for example /opt/openclaw-skills/<task-directory>/). The catalog's second column is the exact file name to cat; the first column is a skill id, not a path. Replace <task-directory> with the directory that contains this SKILL.md. For example, `bank/merge/0000 | bank_merge_0000.md | ...` means `cat /opt/openclaw-skills/<task-directory>/bank_merge_0000.md`, never `cat /opt/openclaw-skills/<task-directory>/bank/merge/0000.md`."""
+
 TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox.
 MANDATORY FIRST STEP: before starting the task itself, run
 `ls /opt/openclaw-skills/` to find this task's directory name, read
 `/opt/openclaw-skills/<directory>/SKILL.md` in full, then read the catalog:
 `cat /opt/openclaw-skills/<directory>/catalog.md`. Every catalog line lists
-one skill as "<skill id> | <file to cat> | <one-line description>". Choose at
-least one skill that could plausibly help with the task and `cat` that skill
+one skill as "<skill id> | <file to cat> | <one-line description>".
+""" + TB_FOLDER_FILE_PATH_NOTE + """
+Choose at least one skill that could plausibly help with the task and `cat` that skill
 file's full content. You MUST do this at least once before running any command
 for the task itself, even if the task looks simple. After that, cat only the
 skill file the current step needs, one at a time; do not open many skill files
@@ -300,6 +303,8 @@ TB_TASK_PROMPT_FOLDER_INLINE = register(
             "The catalog of available skills is included below. Each line "
             "lists one skill as\n"
             "\"<skill id> | <file to cat> | <one-line description>\".\n"
+            "\n"
+            + TB_FOLDER_FILE_PATH_NOTE + "\n"
             "\n"
             "MANDATORY FIRST STEP: read this SKILL.md in full (it is the "
             "task prompt you are\n"
