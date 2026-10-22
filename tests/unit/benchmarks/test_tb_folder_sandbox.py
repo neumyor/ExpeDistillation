@@ -365,11 +365,11 @@ def test_two_folder_units_share_one_cache_upload(tmp_path):
     assert second.meta["skill_folder"] == first.meta["skill_folder"]
 
 
-def test_the_upload_gate_admits_fresh_launches_only(tmp_path, monkeypatch):
-    """The rolling admission: a fresh launch's upload+submit runs under
-    the gate, a resumed unit (state=result, only polling) never touches
-    it -- the long waits hold no slot, so admission is by upload
-    completion alone."""
+def test_the_gate_covers_the_probe_and_fresh_launch(tmp_path, monkeypatch):
+    """The rolling admission covers every connection-building step: the
+    pre-submit probe, then a fresh launch's upload+submit, each take a
+    gate slot. A resumed unit (state=result) still probes under the gate
+    but performs no upload -- the long poll wait holds no slot."""
     from expedistill.benchmarks.tb import plugin as tb_plugin
 
     events = []
@@ -391,11 +391,12 @@ def test_the_upload_gate_admits_fresh_launches_only(tmp_path, monkeypatch):
     task = _folder_task(tmp_path)
 
     first = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
-    assert events == ["enter", "exit"]
-    # The finished trial is reused on the second call: no upload, no
-    # gate traffic.
+    # Probe, then upload+submit.
+    assert events == ["enter", "exit", "enter", "exit"]
+    # The finished trial is reused on the second call: the probe is
+    # gated, the upload is not performed.
     second = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
-    assert events == ["enter", "exit"]
+    assert events == ["enter", "exit", "enter", "exit", "enter", "exit"]
     assert second.meta["resumed"] == "result"
     assert first.meta["resumed"] is None
 

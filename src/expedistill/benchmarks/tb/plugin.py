@@ -534,14 +534,15 @@ def _env_float(name: str, default: float, override: Optional[float]) -> float:
 #: lock already serialises whole drivers).
 _FOLDER_CACHE_LOCK = threading.Lock()
 
-#: Rolling upload admission (user ruling 2026-10-18): at most this many
-#: units may be between "started building connections" and "the submit
-#: returned" at once, and the next unit is admitted only when an earlier
-#: one's upload COMPLETES -- never by a timer alone. A transport-shape
-#: guard (the 2026-10-18 storm was 84 units x 141 per-file scp
-#: connections and node29's sshd MaxStartups dropped them): it changes
-#: when units start, never what they measure. Resumed units skip it
-#: (they only poll); polls run outside it (one ssh per poll period).
+#: Rolling connection admission (user ruling 2026-10-18): at most this
+#: many units may be between "started building connections" and "the
+#: submit returned" at once, and the next unit is admitted only when an
+#: earlier one's upload COMPLETES -- never by a timer alone. A
+#: transport-shape guard (the 2026-10-18 storm was 84 units x 141
+#: per-file scp connections and node29's sshd MaxStartups dropped them):
+#: it changes when units start, never what they measure. The fresh-unit
+#: probe, upload and submit all sit inside it; resumed units' result
+#: probes do too. Polls run outside it (one ssh per poll period).
 _UPLOAD_GATE_WIDTH = _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8)
 _UPLOAD_GATE = threading.BoundedSemaphore(_UPLOAD_GATE_WIDTH)
 
@@ -804,8 +805,14 @@ class TBPlugin(BenchmarkPlugin):
             conditions = self._conditions(run_id, eval_mode, skill_md, folder)
             record = self._read_record(record_file, run_id)
             recorded_pid = record.get("pid") if record else None
-            state, found, remote_meta = self._probe(
-                link, root, run_id, task_name, recorded_pid)
+            # The pre-submit probe is a connection too: gate it with the
+            # upload/submit burst so 32 workers cannot open 32 ssh
+            # connections at once (the 2026-10-22 32+32 storm: the probe
+            # sat outside this gate and 37 units timed out before any job
+            # directory existed).
+            with _UPLOAD_GATE:
+                state, found, remote_meta = self._probe(
+                    link, root, run_id, task_name, recorded_pid)
             if state != "absent":
                 problem = self._untrusted(state, record, remote_meta,
                                           conditions, recorded_pid)
