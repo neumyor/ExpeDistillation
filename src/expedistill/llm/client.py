@@ -238,7 +238,7 @@ class OpenAICompatClient:
         system: str,
         user: str,
         *,
-        temperature: float = 0.0,
+        temperature: float = 1.0,
         max_tokens: Optional[int] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> CompletionResult:

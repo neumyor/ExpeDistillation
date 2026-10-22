@@ -101,7 +101,7 @@ class ModelHandle:
     name: str
     role: str
     client: Any
-    temperature: float = 0.0
+    temperature: float = 1.0
     max_tokens: Optional[int] = 5120
     # Measure-only input ceiling; None = measure nothing (see class doc).
     max_input_tokens: Optional[int] = None
@@ -427,6 +427,18 @@ def _scan_next_seq(directory: Path) -> int:
     return seq + 1
 
 
+def _log_default(value: Any) -> str:
+    """Render a non-JSON value for the diagnostic dump.
+
+    A model reply that only parses through ``ast.literal_eval`` can carry
+    ``...`` (Python's Ellipsis), tuples or other non-JSON objects. The
+    business validator downstream rejects them, but the request dump is
+    written first and must never take the run down; ``repr`` keeps the
+    value visible without pretending it is valid JSON.
+    """
+    return repr(value)
+
+
 class _RequestLog:
     """Per-call dump helper: one JSON file per request/response, never the api key."""
 
@@ -456,7 +468,8 @@ class _RequestLog:
             while True:
                 record.update(seq=seq, prompt_name=prompt_name, role=handle.role,
                               model=handle.name)
-                tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2),
+                tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2,
+                                          default=_log_default),
                                encoding="utf-8")
                 path = directory / f"{seq:04d}_{prompt_name}.json"
                 # Atomic publish (AGENTS.md section 6): a half-written dump is

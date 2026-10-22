@@ -52,7 +52,7 @@ def test_text_call_roundtrip():
     assert call["model"] == "fake-model"
     assert call["system"] == DEFAULT_SYSTEM
     assert "What should you do when the build fails?" in call["user"]
-    assert call["temperature"] == 0.0
+    assert call["temperature"] == 1.0
     # Default changed from None (uncapped) to 5120: reasoning models need
     # several thousand output tokens, so the cap is uniform but explicit.
     assert call["max_tokens"] == 5120
@@ -597,6 +597,21 @@ def test_request_dump_covers_each_retry_attempt(tmp_path):
     assert second["status"] == "ok"
     assert second["parsed"] == {"verdict": "correct", "error_description": ""}
     assert REPAIR_INSTRUCTION in second["request_text"]
+
+
+def test_request_dump_survives_non_json_literal_values(tmp_path):
+    # 2026-10-20 SearchQA run: a SEGMENT reply that only parsed through
+    # ast.literal_eval carried Python's Ellipsis; json.dumps raised inside
+    # the request dump and killed the phase before validation could retry.
+    handle = make_fake_handle(
+        script="[{'start': 0, 'end': ..., 'label': 'x', "
+               "'description': 'd', 'success': True}]")
+    out = call_model(handle, "SEGMENT", SEGMENT_VARS, output_json=True,
+                     run_dir=tmp_path)
+    assert isinstance(out, list) and out[0]["end"] is Ellipsis
+    record = json.loads(
+        (tmp_path / "llm_requests" / "0001_SEGMENT.json").read_text())
+    assert record["parsed"][0]["end"] == "Ellipsis"
 
 
 def test_missing_variable_propagates_key_error():
