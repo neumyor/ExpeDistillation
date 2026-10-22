@@ -373,11 +373,15 @@ def skip_ids_for(stage1_shortfall: Iterable[str],
 # Injection audit row
 # ---------------------------------------------------------------------------
 
-def _audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
+def _audit_row(store: Store, task_id: str, round_: int,
+               block: Optional[str] = None) -> Dict[str, Any]:
     """The round-agnostic core of ``audit_row``: the row for one round
-    label, with no pinned-round check (that is the shell's)."""
+    label, with no pinned-round check (that is the shell's).  ``block``
+    is the exact rendered injection when the caller already has it (the
+    live driver passes the delivery's block, which is the catalog text
+    for a folder row); its absence keeps the group-block derivation."""
     members = _require_group(store, task_id)
-    block = format_skills_block(members)
+    block = format_skills_block(members) if block is None else block
     return {
         "schema": "injection-audit-v1",
         "task_id": task_id,
@@ -389,7 +393,8 @@ def _audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
     }
 
 
-def audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
+def audit_row(store: Store, task_id: str, round_: int,
+              block: Optional[str] = None) -> Dict[str, Any]:
     """Construct the group's injection-audit row for one round.
 
     The row is what the stage freezes into
@@ -399,16 +404,16 @@ def audit_row(store: Store, task_id: str, round_: int) -> Dict[str, Any]:
     checker, so they can never drift apart (decision ruling A10). The
     members are the pending candidates (the same derivation that yields
     the survivors after revisions), the sha256 covers the D9-rendered
-    block -- the exact bytes K1 injects -- and the token count is the
-    D10 estimate the overflow check reads. An empty group is a
-    CodeBugError: an empty injection is a bare run and is never
-    dispatched or audited.
+    block -- the exact bytes K1 injects, or the caller's folder catalog
+    block -- and the token count is the D10 estimate the overflow check
+    reads. An empty group is a CodeBugError: an empty injection is a
+    bare run and is never dispatched or audited.
 
     Thin shell over ``_audit_row`` (module docstring): checks the pinned
     round and is the execute-phase driver's entry point.
     """
     _check_round(round_)
-    return _audit_row(store, task_id, round_)
+    return _audit_row(store, task_id, round_, block)
 
 
 def _block_sha(block: str) -> str:

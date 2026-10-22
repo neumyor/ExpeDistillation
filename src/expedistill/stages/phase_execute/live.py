@@ -30,9 +30,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from expedistill.benchmarks.aux import aux_wiring
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.composites import decision, shortfall, verdicts
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import live_verdicts as lv
+from expedistill.composites import skill_usage
+from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.core import ids
 from expedistill.core.config import PHASE_ROLE_LIVE, ExecutePhaseSpec, PhaseInstance
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
@@ -91,6 +94,14 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     delivery, delivery_params = resolve._resolve_delivery(spec)
     rows = delivery.resolve(lm.pending_groups(store), task_ids,
                            delivery_params)
+    if any(engine._folder_manifest_of(row) is not None for row in rows):
+        if resolve_plugin(benchmark).skill_folder_prompt_name is None:
+            raise ConfigError(
+                f"benchmark {benchmark!r} does not support skill folders: "
+                "its plugin declares no skill_folder_prompt_name, and a "
+                "folder unit needs one")
+    folder_dirs = _materialize_task_folders(ctx, phase, rows, groups,
+                                            benchmark)
 
     tasks = engine._prefixed_task_map(
         ctx, sorted(ids.raw_task_id(task_id, benchmark)
@@ -98,7 +109,8 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
 
     plans = engine._plan_units(rows, tasks, phase_label=phase.label,
                                benchmark=benchmark, role="weak",
-                               n_attempts=n_attempts)
+                               n_attempts=n_attempts,
+                               skill_folder_dirs=folder_dirs or None)
 
     # Merge with earlier passes (live universe shrinks as groups are finalized)
     earlier_units = phase_disk._earlier_pass_units(ctx, phase)
@@ -167,7 +179,8 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
         if decision.live_injection_overflows(
                 max_injection_tokens=params.max_injection_tokens,
                 injection_tokens=estimate_tokens(plan.unit.skills_block)):
-            _freeze_audit_row(store, task_id, round_)
+            _freeze_audit_row(store, task_id, round_,
+                              plan.unit.skills_block)
             lv.judge_round(
                 store=store, task_id=task_id, round_=round_,
                 rule_name=rule_name, baseline_counts=baseline_counts,
@@ -183,7 +196,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             continue
 
         # No guard triggered: freeze audit row and add to dispatch
-        _freeze_audit_row(store, task_id, round_)
+        _freeze_audit_row(store, task_id, round_, plan.unit.skills_block)
         dispatch.append(plan)
 
     # ========================================================================
@@ -225,6 +238,11 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
                 dispatch_stagger=ctx.run_settings.k1_stagger,
                 skip_unit_ids=skip_unit_ids,
             )
+
+    # ========================================================================
+    # 5b. WRITE THE FOLDER USAGE LEDGER
+    # ========================================================================
+    usage_path = _write_skill_usage(ctx, round_, all_units)
 
     # ========================================================================
     # 6. JUDGE AND FINALIZE GROUPS
@@ -312,6 +330,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
         "infra_accepted": sorted(accepted),
         "complete": not infra_failed,
         "infra_shortfall_accepted": bool(accepted),
+        "skill_usage": usage_path,
     }
 
     write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
@@ -330,6 +349,61 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
 # ============================================================================
 # Supporting functions
 # ============================================================================
+
+def _write_skill_usage(ctx: StageContext, round_: int,
+                       units: List[Any]) -> Optional[str]:
+    """Write the round's read facts for every folder unit with stored runs.
+
+    Derived entirely from the stored trajectories and the frozen
+    manifest, so a resume rewrites the same bytes.  The unit list is the
+    phase's merged list (earlier passes included), so a finalized group's
+    rows are not lost when the pending universe shrinks on resume.  A
+    round with no folder rows writes nothing.
+    """
+    directory = lm.round_dir(ctx.store, round_)
+    if not directory.exists():
+        return None
+    rows: List[dict] = []
+    for unit in units:
+        folder = unit.aux.get("skill_folder")
+        if not folder:
+            continue
+        trajectories = lm._trajectories_from(directory, unit.task_ref,
+                                             round_)
+        rows.extend(skill_usage.build_usage_rows(
+            task_id=unit.task_ref, round_=round_, trajectories=trajectories,
+            folder=folder))
+    if not rows:
+        return None
+    path = directory / skill_usage.SKILL_USAGE_NAME
+    skill_usage.write_usage_rows(path, rows)
+    return str(path)
+
+
+def _materialize_task_folders(ctx: StageContext, phase: PhaseInstance,
+                              rows: List[Any], groups: Dict[str, List[Any]],
+                              benchmark: str) -> Dict[str, str]:
+    """Write each folder row's group into its own task directory.
+
+    Empty manifests (the delivery's null state) produce no directory,
+    matching the folder rule: no skills means no guidance file.
+    """
+    out: Dict[str, str] = {}
+    for row in rows:
+        manifest = engine._folder_manifest_of(row)
+        if manifest is None or not manifest.get("files"):
+            continue
+        members = groups.get(row.task_ref, [])
+        if not members:
+            raise CodeBugError(
+                f"folder row {row.unit_id!r} names task {row.task_ref!r} "
+                "with no pending group to materialize")
+        target = (phase_disk._phase_dir(ctx, phase) / "skill_folder"
+                  / ids.raw_task_id(row.task_ref, benchmark))
+        out[row.task_ref] = str(materialize_skill_folder(
+            manifest, members, target))
+    return out
+
 
 def _round_of(ctx: StageContext, phase: PhaseInstance) -> int:
     """The round THIS live phase measures (k-th live phase → round k-1)."""
@@ -390,9 +464,10 @@ def _frozen_audit_row(store: Store, round_: int,
     return None
 
 
-def _freeze_audit_row(store: Store, task_id: str, round_: int) -> None:
+def _freeze_audit_row(store: Store, task_id: str, round_: int,
+                      block: Optional[str] = None) -> None:
     """Freeze audit row before dispatch or verify it matches re-derivation."""
-    row = lm.audit_row(store, task_id, round_)
+    row = lm.audit_row(store, task_id, round_, block)
     frozen = _frozen_audit_row(store, round_, task_id)
 
     if frozen is not None:

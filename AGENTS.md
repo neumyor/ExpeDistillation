@@ -173,13 +173,17 @@ src/expedistill/
                           against: external_campaign 时对照臂由此取数，零执行
     skill_reads.py        folder 单元的事后读取统计（M4 纯函数）：从存储
                           轨迹解析实际 cat 过的技能文件，benchmark 无关
+    skill_usage.py        live folder 轮次的逐尝试使用事实：可用技能、首轮
+                          <available_skills> 是否与清单一致、读取/未读、
+                          结果；从存储轨迹重算，不拦截执行
     verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
                           统一报告行
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
                           （带 YAML 头）并写 catalog.md 兜底；test 相位派发前
-                          物化一次，全部单元共享
+                          物化一次全部单元共享，live 的 `folder_by_task` 按
+                          任务各物化一份
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
@@ -188,22 +192,26 @@ src/expedistill/
     execution/            execution 族参数契约：RealExecutionParams /
                           ExamExecutionParams / RealFolderExecutionParams
                           （无驱动，相位驱动直接消费）+ README.md（模块说明与参数表）
-    evidence/             evidence 族：SegmentationParams + 三个采集器
-                          add_path（加分路径）、live_group（G10 事实）、
-                          exam_sheet（考卷答卷材料）+ segmentation.py
+    evidence/             evidence 族：SegmentationParams / LiveGroupParams /
+                          UsageGroupParams + 采集器 add_path（加分路径）、
+                          live_group（G10 事实）、usage_group（读取与
+                          应用事实）、exam_sheet（考卷答卷材料）+ segmentation.py
                           （segment 方法驱动：add 行的 K2 切段接线，切强角色
                           轨迹，write_lessons 开着时连弱角色一起切）+ README.md
                           （模块说明与参数表）+ package.py
                           （证据包形状与只报事实守卫）
-    author/               author 族：AuthoringParams + write 驱动
-                          （写新 skill / 组修订 revise_group）+ README.md
+    author/               author 族：AuthoringParams / UsageReviseParams +
+                          write 驱动（写新 skill / 组修订 revise_group）+
+                          usage_revise 驱动（按使用事实 keep / retrigger /
+                          revise / delete / observe）+ README.md
                           （模块说明与参数表）
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
                           成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
     delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
-                          group_by_task.py、none.py、folder.py（技能文件夹交付：
-                          目录清单，M2）+ 各自的 Params + README.md（模块说明与参数表）
+                          group_by_task.py、none.py、folder.py（test 技能文件夹
+                          交付）、folder_by_task.py（live 逐任务技能文件夹）+
+                          各自的 Params + README.md（模块说明与参数表）
   stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
     stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
     phase_execute/        执行相位驱动包（R9/R8）：__init__ 分发入口 run()；
@@ -360,11 +368,11 @@ configs/
    为 `True`（判分器判对）/ `False`（判错）/ `None`（没拿到判分结果）；
    基础设施失败（沙箱超时、断网等）抛 `InfrastructureError`，由 K1 重试；
    Trajectory 的 ID、角色等簿记字段由 E1 组装）、`view_rules`（截断规则）、
-   `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹
-   （real_folder 执行）的插件再声明 `skill_folder_prompt_name`（指向
-   folder 模式执行 prompt 的注册名，digest 进 manifest；目前只有 tb 声明，
-   folder 相位落到不声明的插件由 test 相位驱动在派发前响亮拒绝，E1 的逐单元
-   守卫保留作第二道）；
+   `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹的插件
+   再声明 `skill_folder_prompt_name`（指向 folder 模式执行 prompt 的注册名，
+   digest 进 manifest；目前只有 tb 声明，folder / folder_by_task 相位落到
+   不声明的插件时，test / live 相位驱动在派发前响亮拒绝，E1 的逐单元守卫
+   保留作第二道）；
 2. 在 `benchmarks/registry.py` 登记名字；
 3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
    真实执行冒烟（标 `live`）；

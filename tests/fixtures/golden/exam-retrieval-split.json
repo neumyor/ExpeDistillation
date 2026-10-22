@@ -731,6 +731,12 @@
             "name": "segment",
             "retry_limit": 2
           },
+          "group_author": {
+            "name": "distill_diagnose"
+          },
+          "group_evidence": {
+            "name": "live_group"
+          },
           "kind": "learn",
           "role": "learn"
         },
@@ -764,7 +770,9 @@
         "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
         "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
         "LIVE_RUN_ATTRIBUTION": "2acee750d6b0848a038bdc5868e85a740b4540f3ac60e4bbd55f4256c2832037",
+        "LIVE_SKILL_RETRIGGER": "a78064c688c5b2c2fb0587e168592d44512b96010d46ad2f4211cf03c631c27e",
         "LIVE_SKILL_REVISION": "7feda4ec5d2f841a73098599deedc650ba8c7aa5e758b243389db8ff195b8e82",
+        "LIVE_USAGE_ATTRIBUTION": "ff85eeb2b1031f19fed100ebb3212a21a093a6d826535a6c04a6d8589d81c660",
         "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
         "REWRITE": "48fae498a6eb676a4d4931070a484485ee36ff8b8e75a05bc4084b4cbc7f18dc",
@@ -827,7 +835,9 @@
       "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
       "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
       "LIVE_RUN_ATTRIBUTION": "2acee750d6b0848a038bdc5868e85a740b4540f3ac60e4bbd55f4256c2832037",
+      "LIVE_SKILL_RETRIGGER": "a78064c688c5b2c2fb0587e168592d44512b96010d46ad2f4211cf03c631c27e",
       "LIVE_SKILL_REVISION": "7feda4ec5d2f841a73098599deedc650ba8c7aa5e758b243389db8ff195b8e82",
+      "LIVE_USAGE_ATTRIBUTION": "ff85eeb2b1031f19fed100ebb3212a21a093a6d826535a6c04a6d8589d81c660",
       "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
       "REWRITE": "48fae498a6eb676a4d4931070a484485ee36ff8b8e75a05bc4084b4cbc7f18dc",

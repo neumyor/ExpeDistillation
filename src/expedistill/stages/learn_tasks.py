@@ -38,12 +38,14 @@ skill runs inside the phase world with nothing seeded.
 
 **Evidence and author** (boundaries sections 2.5/2.6): a revise row
 collects fact-only evidence packages and hands them to the author
-driver. A group row (live) goes through
+driver. A group row (live) goes through the learn phase's configured
+``group_evidence`` / ``group_author`` methods; the defaults are
 ``methods.evidence.live_group.collect_group_evidence`` plus
-``methods.author.write.revise_group``; a skill row (exam) goes through
-``methods.evidence.exam_sheet.collect_exam_evidence`` (the exam, the
-judged attempt's weak answer and judge reason -- evidence gathering
-belongs to the evidence family).
+``methods.author.write.revise_group``, and ``usage_group`` /
+``usage_revise`` are the usage-aware alternatives. A skill row (exam)
+goes through ``methods.evidence.exam_sheet.collect_exam_evidence`` (the
+exam, the judged attempt's weak answer and judge reason -- evidence
+gathering belongs to the evidence family).
 
 **Resume** is the replay guard on a per-phase ledger: one
 ``revisions.jsonl`` row per skill BEFORE the author call records
@@ -101,8 +103,9 @@ from expedistill.infra.store import (
     write_jsonl,
 )
 from expedistill.methods import resolve_params
+from expedistill.methods import registry as method_registry
 from expedistill.methods.author import write as author
-from expedistill.methods.evidence import add_path, exam_sheet, live_group
+from expedistill.methods.evidence import add_path, exam_sheet
 from expedistill.methods.evidence import segmentation
 from expedistill.methods.evidence.package import EvidencePackage
 from expedistill.prompts import get as get_prompt
@@ -487,14 +490,20 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
         return
 
     if row.target_kind == "group":
-        packages = live_group.collect_group_evidence(
+        evidence_driver, evidence_params = method_registry.resolve(
+            "evidence", phase.spec.group_evidence)
+        author_task_instruction = _task_instruction(ctx, row.target_id)
+        packages = evidence_driver.collect_group_evidence(
             task_row=row, store=store, round_=current_round,
             n_attempts=_n_attempts(ctx, current_spec),
-            task_instruction=_task_instruction(ctx, row.target_id),
+            task_instruction=author_task_instruction,
             weak_profile=ctx.config.effective_weak_profile(),
             author_handle=ctx.handle("author"),
             view_rules=get_plugin(ctx.config.benchmark).view_rules,
-            usage=ctx.usage, run_dir=ctx.run_dir)
+            usage=ctx.usage, run_dir=ctx.run_dir,
+            params=evidence_params)
+        author_driver, author_params = method_registry.resolve(
+            "author", phase.spec.group_author)
         decide = None  # the author's own default per-skill policy
     else:
         report_row = _report_row_of(current_rows, row.basis_unit)
@@ -505,6 +514,8 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
         # per-skill discretion exists for GROUP revisions, and the
         # default policy would keep a package with no skill_problem
         # fact -- the answer-sheet package never carries one.
+        author_driver, author_params = author, None
+        author_task_instruction = ""
         decide = _always_revise
     todo_ids = {skill.skill_id for skill in todo}
     to_author = [package for package in packages
@@ -525,11 +536,12 @@ def _land_revise(ctx: Any, phase: PhaseInstance, row: TaskListRow,
             "skill_id": package.target,
             "from_version": package.old_skill.version,
         })
-    outcomes = author.revise_group(
+    outcomes = author_driver.revise_group(
         task_row=row, packages=to_author,
         rewriter_handle=ctx.handle("rewriter"),
         weak_profile=ctx.config.effective_weak_profile(), decide=decide,
-        usage=ctx.usage, run_dir=ctx.run_dir)
+        usage=ctx.usage, run_dir=ctx.run_dir, params=author_params,
+        task_instruction=author_task_instruction)
     by_target = {package.target: package for package in to_author}
     for outcome in outcomes:
         _land_revision(ctx, phase, row, by_target[outcome.skill_id],
@@ -552,6 +564,10 @@ def _land_revision(ctx: Any, phase: PhaseInstance, row: TaskListRow,
         _append_outcome(phase, row, skill_id, "kept",
                         package.old_skill.version, phase_dir)
         return
+    if outcome.outcome == "observed":
+        _append_outcome(phase, row, skill_id, "observed",
+                        package.old_skill.version, phase_dir)
+        return
     if outcome.outcome == "deleted":
         discard_skill(store, package.old_skill,
                       decision.LIVE_REVISION_DELETED)
@@ -567,11 +583,11 @@ def _land_revision(ctx: Any, phase: PhaseInstance, row: TaskListRow,
             raise InfrastructureError(
                 f"the revision of {skill_id!r} failed on infrastructure")
         return
-    if outcome.outcome != "revised":
+    if outcome.outcome not in ("revised", "retriggered"):
         raise CodeBugError(
             f"the author driver reported outcome {outcome.outcome!r} for "
-            f"{skill_id!r}; the closed set is kept / deleted / unchanged "
-            "/ infra_failed / revised")
+            f"{skill_id!r}; the closed set is kept / observed / deleted / "
+            "unchanged / infra_failed / revised / retriggered")
     stored = store.load("skills", skill_id, Skill)
     expected = package.old_skill.version + 1
     if stored.version == package.old_skill.version:
@@ -595,7 +611,8 @@ def _land_revision(ctx: Any, phase: PhaseInstance, row: TaskListRow,
             f"skill {skill_id!r} is at version {stored.version} with "
             "content the author did not produce; the store drifted from "
             "the revision ledger")
-    _append_outcome(phase, row, skill_id, "revised", expected, phase_dir)
+    _append_outcome(phase, row, skill_id, outcome.outcome, expected,
+                    phase_dir)
 
 
 def _report_row_of(current_rows: Optional[List[AcceptanceReportRow]],

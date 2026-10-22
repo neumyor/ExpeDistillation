@@ -39,6 +39,7 @@ anymore.
 """
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -808,11 +809,20 @@ def reuse_key(unit: ExecutionUnitRow) -> str:
     version, so the references differ while the measurement does not,
     and rule 1 counts that as "unchanged" (修改后内容和原来一字不差,
     也算没变). A bare unit and a retrieval-miss unit share the empty
-    block because they are the same measurement. This key is separate
-    from the resume/skip key (repair plan section 4.2, note 7); the
-    final test C never uses it -- it re-runs every time.
+    block because they are the same measurement. A folder unit's block
+    is its catalog (the exposed descriptions); its per-skill content
+    can change while the catalog stays identical, so the references
+    join the key for folder units -- the version bump then separates
+    the measurements. This key is separate from the resume/skip key
+    (repair plan section 4.2, note 7); the final test C never uses it --
+    it re-runs every time.
     """
-    digest = hashlib.sha256(unit.skills_block.encode("utf-8")).hexdigest()
+    payload = unit.skills_block
+    if unit.aux.get("skill_folder") is not None:
+        payload += "\0" + json.dumps(
+            unit.skills_injected, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"))
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     _, role = parse_unit_id(unit.unit_id)
     return f"{unit.task_ref}:{role}:{digest}"
 

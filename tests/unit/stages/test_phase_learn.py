@@ -41,7 +41,13 @@ from expedistill.infra.reliability import (
     InfrastructureError,
     ModelOutputError,
 )
-from expedistill.infra.store import Store, append_jsonl, read_jsonl
+from expedistill.infra.store import (
+    Store,
+    append_jsonl,
+    read_jsonl,
+    write_jsonl,
+)
+from expedistill.composites.skill_usage import SKILL_USAGE_NAME
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import RevisionOutcome
 from expedistill.methods.curation import none as curation_none
@@ -824,6 +830,80 @@ def test_a_live_miss_with_a_check_left_revises_the_group(
     assert outcomes == {skills[0].skill_id: "revised",
                         skills[1].skill_id: "kept"}
     assert result.summary["task_list"] == {"revise": 1, "superseded_rows": 0}
+
+
+def _usage_attribution_script(skills):
+    return json_script({
+        "diagnosis": "one skill was read and ignored; the other was never read",
+        "skills": [
+            {"skill_id": skills[0].skill_id, "relevance": "relevant",
+             "application": "not_applied", "evidence_steps": [1],
+             "problem": "the steps were ignored"},
+            {"skill_id": skills[1].skill_id, "relevance": "relevant",
+             "application": "unclear", "evidence_steps": [],
+             "problem": "the trigger did not select it"},
+        ],
+    })
+
+
+def _retrigger_script():
+    return json_script({
+        "summary": "a sharper one-liner",
+        "when_to_use": "Use this when the service rejects connections.",
+        "reason": "the old trigger was too vague",
+    })
+
+
+def test_usage_group_and_usage_revise_drive_the_group_outcome(
+        tmp_path, monkeypatch):
+    sequence, phases = _live_sequence()
+    phases["learn"] = LearnPhaseSpec(
+        evidence={"name": "segment", "K": 5, "write_lessons": False},
+        author={"name": "distill_diagnose"},
+        group_evidence={"name": "usage_group"},
+        group_author={"name": "usage_revise", "policy": "usage_v1"},
+        curate={"name": "none", "token_budget": BIG})
+    handles = {
+        "author": make_fake_handle(
+            "author", [_usage_attribution_script(
+                [_skill(segment=0), _skill(segment=1)])]),
+        "rewriter": make_fake_handle(
+            "rewriter", [_revision_script(), _retrigger_script()]),
+    }
+    ctx = _make_ctx(tmp_path, sequence, phases, handles)
+    _install_curation(monkeypatch)
+    _seed_finished_learn(ctx.store, ctx.run_dir)
+    skills = _seed_live_round(ctx.store, better=False)
+    round_dir = (ctx.run_dir / "stage4_acceptance" / "live_run"
+                 / "round00")
+    write_jsonl(round_dir / SKILL_USAGE_NAME, [
+        {"schema": "skill-usage-v1", "task_id": TASK_ID, "round": 0,
+         "attempt": attempt,
+         "trajectory_id": ids.make_trajectory_id(TASK_ID, "weak", attempt),
+         "delivery": "folder", "description_mode": "when_to_use",
+         "available_list_present": True, "available_names": [],
+         "available_skill_ids": [skill.skill_id for skill in skills],
+         "delivery_status": "ok",
+         "reads": [{"skill_id": skills[0].skill_id,
+                    "filename": "a/SKILL.md", "step_index": 1,
+                    "command": "cat a/SKILL.md"}],
+         "read_skill_ids": [skills[0].skill_id],
+         "unread_skill_ids": [skills[1].skill_id],
+         "first_agent_step": 1, "first_read_step": 1,
+         "outcome": "failure"}
+        for attempt in range(2)])
+
+    phase_learn.run(ctx, _phase(sequence, phases, 3))
+
+    first = ctx.store.load("skills", skills[0].skill_id, Skill)
+    second = ctx.store.load("skills", skills[1].skill_id, Skill)
+    assert first.version == 2 and first.content == MARKED_B
+    assert second.version == 2
+    assert "Use this when the service rejects connections." in second.content
+    outcomes = {row["skill_id"]: row["outcome"]
+                for row in _outcomes(ctx.run_dir, "p04:learn")}
+    assert outcomes == {skills[0].skill_id: "revised",
+                        skills[1].skill_id: "retriggered"}
 
 
 def test_a_partially_landed_group_revision_resumes_cleanly(

@@ -10,7 +10,17 @@ through this engine; the exam and live roles run their own protocols.
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks import tasks as tasks_block
@@ -112,7 +122,9 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                 tasks: Optional[Dict[str, Task]], *,
                 phase_label: str, benchmark: str, role: str,
                 n_attempts: int,
-                skill_folder_dir: Optional[str] = None) -> List[_Plan]:
+                skill_folder_dir: Optional[str] = None,
+                skill_folder_dirs: Optional[Mapping[str, str]] = None
+                ) -> List[_Plan]:
     """Rebuild each delivery row's full frozen unit id (verdicts' frozen
     rule; the row's task ref and sha8 already carry the pieces -- the
     P2 ruling's one rebuild site) and pair it with its Task object when
@@ -130,11 +142,15 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
     attached to its plan's Task meta together with ``skill_folder_dir``
     -- the materialized folder's local path, which the CALLER
     materialized before dispatch (the phase driver owns the bank the
-    manifest resolves against). The manifest with no files is the
-    delivery's null state (an empty accepted bank): no attachment, the
-    unit runs bare -- the D9 empty-injection lesson, never a guidance
-    claiming skills that do not exist. A manifest with files but no
-    directory is a wiring bug, not a configuration problem."""
+    manifest resolves against). ``skill_folder_dirs`` maps each task ref
+    to its own materialized directory (the live phase's per-task
+    folders); when it is absent, the single phase-level
+    ``skill_folder_dir`` applies (the test phase). The manifest with no
+    files is the delivery's null state (an empty accepted bank): no
+    attachment, the unit runs bare -- the D9 empty-injection lesson,
+    never a guidance claiming skills that do not exist. A manifest with
+    files but no directory is a wiring bug, not a configuration
+    problem."""
     plans: List[_Plan] = []
     for row in rows:
         ref = row.task_ref
@@ -150,7 +166,10 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
         task = tasks[ref] if tasks is not None else None
         manifest = _folder_manifest_of(row)
         if manifest is not None and manifest.get("files"):
-            if skill_folder_dir is None or task is None:
+            folder_dir = (skill_folder_dirs.get(ref)
+                          if skill_folder_dirs is not None
+                          else skill_folder_dir)
+            if folder_dir is None or task is None:
                 raise CodeBugError(
                     f"delivery resolved unit {row.unit_id!r} with a skill "
                     "folder but the phase passes no materialized "
@@ -158,7 +177,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     "(the manifest resolves against the phase bank)")
             task = replace(task, meta={**task.meta,
                                        "skill_folder": manifest,
-                                       "skill_folder_dir": skill_folder_dir})
+                                       "skill_folder_dir": folder_dir})
         plans.append(_Plan(
             unit=replace(
                 row,

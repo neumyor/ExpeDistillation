@@ -87,6 +87,11 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("delivery", "folder"):
         _Entry("expedistill.methods.delivery.folder",
                "expedistill.methods.delivery", "FolderParams"),
+    # The live phase's progressive-disclosure delivery: one folder per
+    # pending task group, reusing the folder params and materializer.
+    ("delivery", "folder_by_task"):
+        _Entry("expedistill.methods.delivery.folder_by_task",
+               "expedistill.methods.delivery", "FolderParams"),
     # R8's new family: what kind of run an execute phase makes. Driver-
     # less -- the phase driver consumes the params directly.
     ("execution", "real"):
@@ -104,8 +109,18 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("evidence", "segment"):
         _Entry(None, "expedistill.methods.evidence",
                "SegmentationParams"),
+    ("evidence", "live_group"):
+        _Entry("expedistill.methods.evidence.live_group",
+               "expedistill.methods.evidence", "LiveGroupParams"),
+    ("evidence", "usage_group"):
+        _Entry("expedistill.methods.evidence.usage_group",
+               "expedistill.methods.evidence", "UsageGroupParams"),
     ("author", "distill_diagnose"):
-        _Entry(None, "expedistill.methods.author", "AuthoringParams"),
+        _Entry("expedistill.methods.author.write",
+               "expedistill.methods.author", "AuthoringParams"),
+    ("author", "usage_revise"):
+        _Entry("expedistill.methods.author.usage_revise",
+               "expedistill.methods.author", "UsageReviseParams"),
     ("curation", "agentbrew"):
         _Entry("expedistill.methods.curation.agentbrew",
                "expedistill.methods.curation", "AgentBrewParams"),

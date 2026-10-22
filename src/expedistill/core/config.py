@@ -175,6 +175,14 @@ EXECUTION_NAMES = ("real", "exam")
 #: cross-layer literal pattern EXECUTION_NAMES already uses.
 FOLDER_DELIVERY_NAME = "folder"
 
+#: The live phase's per-task folder delivery: each pending task group is
+#: materialized as its own folder, so the live arm uses the same
+#: progressive disclosure as the test phase.  Live-only; it rides the
+#: plain ``real`` execution because the live depth and injection budget
+#: are that execution's parameters, while the folder shape comes from the
+#: delivery's manifest.
+FOLDER_BY_TASK_DELIVERY_NAME = "folder_by_task"
+
 #: The execution family's ``real_folder`` name: the skill-folder
 #: execution (skill-folder M3), ``real``'s folder twin. Legal on a
 #: test-role execute phase only, and paired one-to-one with the folder
@@ -311,16 +319,22 @@ class ExecutePhaseSpec:
 class LearnPhaseSpec:
     """One learn phase (decision -> evidence -> author -> curate).
 
-    Learn phases are not registry entries (plan R8); their three content
+    Learn phases are not registry entries (plan R8); their content
     families resolve through the registry like any other: ``evidence``
-    (the add path's cutting budget), ``author`` (the writing method) and
-    ``curate`` (agentbrew with merge_check, or none). Curation runs only
-    at the sequence's LAST learn phase -- the driver branches on the
-    sequence position, not on this spec.
+    (the add path's cutting budget), ``author`` (the add path's writing
+    method), ``group_evidence`` / ``group_author`` (the group-revision
+    path, defaulting to the pre-existing live_group / distill_diagnose
+    pair) and ``curate`` (agentbrew with merge_check, or none). Curation
+    runs only at the sequence's LAST learn phase -- the driver branches
+    on the sequence position, not on this spec.
     """
 
     evidence: Dict[str, Any] = field(default_factory=dict)
     author: Dict[str, Any] = field(default_factory=dict)
+    group_evidence: Dict[str, Any] = field(
+        default_factory=lambda: {"name": "live_group"})
+    group_author: Dict[str, Any] = field(
+        default_factory=lambda: {"name": "distill_diagnose"})
     curate: Dict[str, Any] = field(default_factory=dict)
     kind: str = "learn"
     role: str = PHASE_ROLE_LEARN
@@ -375,7 +389,8 @@ class PhaseResult:
 #: silent drop -- the same discipline as the unknown top-level key).
 _EXECUTE_FIELDS = frozenset({"kind", "role", "tasks", "delivery", "execution",
                              "compare", "acceptance"})
-_LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author", "curate"})
+_LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author",
+                           "group_evidence", "group_author", "curate"})
 
 #: The baseline phase's two arms: fixed by design (the strong arm feeds
 #: the add path, the weak arm is every later comparison's control).
@@ -437,6 +452,13 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             "skill-folder delivery is a final-test delivery, legal only "
             f"for role {PHASE_ROLE_TEST!r} (the test phase; the other "
             f"roles use the existing delivery methods)")
+    if delivery["name"] == FOLDER_BY_TASK_DELIVERY_NAME and \
+            role != PHASE_ROLE_LIVE:
+        raise ConfigError(
+            f"phases.{name} declares delivery name "
+            f"{FOLDER_BY_TASK_DELIVERY_NAME!r} with role {role!r}: the "
+            "per-task skill-folder delivery is a live-acceptance "
+            f"delivery, legal only for role {PHASE_ROLE_LIVE!r}")
     execution = _method_mapping(raw.get("execution"),
                                 f"phases.{name}.execution")
     exec_name = execution["name"]
@@ -450,14 +472,30 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
     # execution would inject the catalog as a skills block (silently the
     # wrong experiment), and a real_folder execution over another
     # delivery would expect a folder no delivery produced.
-    if (delivery["name"] == FOLDER_DELIVERY_NAME) != \
-            (exec_name == FOLDER_EXECUTION_NAME):
+    if delivery["name"] == FOLDER_DELIVERY_NAME and \
+            exec_name != FOLDER_EXECUTION_NAME:
         raise ConfigError(
             f"phases.{name} declares delivery name {delivery['name']!r} "
-            f"with execution name {exec_name!r}: the skill-folder play "
-            f"pairs delivery {FOLDER_DELIVERY_NAME!r} with execution "
-            f"{FOLDER_EXECUTION_NAME!r}, and nothing else (the other "
-            "deliveries run the plain real execution)")
+            f"with execution name {exec_name!r}: the test-phase "
+            f"skill-folder delivery pairs with execution "
+            f"{FOLDER_EXECUTION_NAME!r}, and nothing else")
+    if delivery["name"] == FOLDER_BY_TASK_DELIVERY_NAME and \
+            exec_name != EXECUTION_NAMES[0]:
+        raise ConfigError(
+            f"phases.{name} declares delivery name "
+            f"{FOLDER_BY_TASK_DELIVERY_NAME!r} with execution name "
+            f"{exec_name!r}: the live per-task folder rides the plain "
+            f"{EXECUTION_NAMES[0]!r} execution (its delivery manifest "
+            "drives the folder, and the live depth comes from that "
+            "execution's parameters)")
+    if delivery["name"] not in (FOLDER_DELIVERY_NAME,
+                                FOLDER_BY_TASK_DELIVERY_NAME) and \
+            exec_name == FOLDER_EXECUTION_NAME:
+        raise ConfigError(
+            f"phases.{name} declares delivery name {delivery['name']!r} "
+            f"with execution name {exec_name!r}: {FOLDER_EXECUTION_NAME!r} "
+            "expects a skill-folder delivery, and the other deliveries run "
+            "the plain real execution")
     # The exam execution is what the exam ROLE measures with; every
     # other role runs the benchmark for real, and a test role may run
     # the folder execution instead (checklist item 8 keeps the folder
@@ -589,6 +627,12 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
             f"a learn phase accepts {sorted(_LEARN_FIELDS)}")
     evidence = _method_mapping(raw.get("evidence"), f"phases.{name}.evidence")
     author = _method_mapping(raw.get("author"), f"phases.{name}.author")
+    group_evidence = _method_mapping(
+        raw.get("group_evidence", {"name": "live_group"}),
+        f"phases.{name}.group_evidence")
+    group_author = _method_mapping(
+        raw.get("group_author", {"name": "distill_diagnose"}),
+        f"phases.{name}.group_author")
     if "exams" in author:
         # The v3 authoring switch has no v4 image: upgrade_v3_config
         # refuses every combination but the one legal ablation pair, so
@@ -604,8 +648,10 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
         raise ConfigError(
             f"phases.{name}.role must be {PHASE_ROLE_LEARN!r} for a learn "
             f"phase, got {role!r}")
-    return LearnPhaseSpec(evidence=evidence, author=author, curate=curate,
-                         kind="learn", role=PHASE_ROLE_LEARN)
+    return LearnPhaseSpec(
+        evidence=evidence, author=author,
+        group_evidence=group_evidence, group_author=group_author,
+        curate=curate, kind="learn", role=PHASE_ROLE_LEARN)
 
 
 def parse_phases(raw_phases: Any, raw_sequence: Any, *,

@@ -25,11 +25,12 @@ def test_the_table_is_organised_by_the_five_families():
     assert set(by_family) == set(FAMILIES)
     assert sorted(by_family["delivery"]) == sorted([
         "whole_bank", "retrieval", "none", "per_skill", "group_by_task",
-        "folder"])
+        "folder", "folder_by_task"])
     assert sorted(by_family["execution"]) == [
         "exam", "real", "real_folder"]
-    assert by_family["evidence"] == ["segment"]
-    assert by_family["author"] == ["distill_diagnose"]
+    assert by_family["evidence"] == [
+        "segment", "live_group", "usage_group"]
+    assert by_family["author"] == ["distill_diagnose", "usage_revise"]
     assert sorted(by_family["curation"]) == ["agentbrew", "none"]
 
 
@@ -52,19 +53,34 @@ def test_the_retired_families_offer_nothing():
 
 
 def test_unknown_name_lists_the_known_ones():
-    with pytest.raises(ConfigError, match=r"known: \['segment'\]"):
+    with pytest.raises(
+            ConfigError,
+            match=r"known: \['segment', 'live_group', 'usage_group'\]"):
         resolve_params("evidence", {"name": "windows", "K": 5})
-    with pytest.raises(ConfigError, match=r"known: \['distill_diagnose'\]"):
+    with pytest.raises(
+            ConfigError,
+            match=r"known: \['distill_diagnose', 'usage_revise'\]"):
         resolve_params("author", {"name": "solo"})
     with pytest.raises(ConfigError, match="known:"):
         resolve_params("execution", {"name": "live_run"})
 
 
 def test_required_params_still_fail_loudly():
-    # The empty-mapping form validates too: an entry with required fields
-    # cannot be resolved without them.
+    # A named entry with required fields cannot be resolved without them.
     with pytest.raises(ConfigError, match="missing required parameter"):
-        resolve_params("evidence", {})
+        resolve_params("evidence", {"name": "segment"})
+
+
+def test_the_group_slots_resolve_their_drivers():
+    from expedistill.methods import resolve
+
+    evidence, evidence_params = resolve("evidence", {"name": "usage_group"})
+    assert evidence.__name__.endswith(".usage_group")
+    assert evidence_params.__class__.__name__ == "UsageGroupParams"
+    author, author_params = resolve("author", {
+        "name": "usage_revise", "policy": "usage_v1"})
+    assert author.__name__.endswith(".usage_revise")
+    assert author_params.policy == "usage_v1"
 
 
 def test_the_evidence_and_author_families_resolve_their_params():

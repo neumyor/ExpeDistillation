@@ -223,6 +223,8 @@ def revise_group(
     revision_attempts: int = _REVISION_ATTEMPTS,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
+    params: Any = None,
+    task_instruction: str = "",
 ) -> List[RevisionOutcome]:
     """Revise one authorized target from its evidence packages.
 
@@ -235,7 +237,9 @@ def revise_group(
     here. A revision's new version fields are the caller's to persist
     (version bump plus rewrite_history entry); a delete's discard
     reason is live_revision_deleted (R6 item 3: the revision-flow
-    delete is the author's own).
+    delete is the author's own). ``params`` is the registry's
+    ``AuthoringParams`` (empty); it is accepted so the phase driver can
+    call every group-author method through one signature.
     """
     if task_row.action != REVISE:
         raise ValueError(

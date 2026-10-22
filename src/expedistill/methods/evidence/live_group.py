@@ -77,6 +77,7 @@ def collect_group_evidence(
     view_rules: Any = None,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
+    params: Any = None,
 ) -> List[EvidencePackage]:
     """Collect one group's round evidence as fact-only packages.
 
@@ -90,7 +91,9 @@ def collect_group_evidence(
     a ``skill_problem`` fact; a skill without one gets no problem fact
     (the author's default policy keeps it). The round's trajectories
     are pinned as segments with their step ranges, so the author can
-    point at the exact runs the facts came from.
+    point at the exact runs the facts came from. ``params`` is the
+    registry's ``LiveGroupParams`` (empty); it is accepted so the phase
+    driver can call every group-evidence method through one signature.
     """
     if task_row.action != REVISE:
         raise ValueError(
