@@ -177,7 +177,8 @@ src/expedistill/
                           统一报告行
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
-                          从相位库读正文，把文件夹写进目标目录；test 相位派发前
+                          从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
+                          （带 YAML 头）并写 catalog.md 兜底；test 相位派发前
                           物化一次，全部单元共享
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）

@@ -1,18 +1,18 @@
 """Skill-folder M3, the TB sandbox leg: the folder rides the per-run
-skills directory into the sandbox, the default (inline_catalog=False)
-mode uploads the guidance as SKILL.md and leaves the catalog in
-catalog.md, and the recorded trajectory keeps the agent's cat commands
-for M4's parsing. The inline_catalog=True SKILL.md body is pinned in
-test_tb_plugin.py.
+skills directory into the sandbox. The task-level SKILL.md carries the
+guidance; each skill is its own ``<skill>/SKILL.md`` directory, and the
+catalog stays in catalog.md as a fallback. The recorded trajectory
+keeps the agent's cat commands for M4's parsing.
 
 Everything goes through the fake links of test_tb_plugin.py (no
-network, no ssh). The remote contract this pins: the plugin uploads
-SKILL.md + catalog.md + every manifest file into
+network, no ssh). The remote contract this pins: the plugin uploads the
+task-level SKILL.md + catalog.md + every manifest file into
 ``<TBENCH_SKILL_ROOT>/<run_id>/<task_name>/`` (and the dashed alias
 directory for dotted task names), which the vendored
 TencentTaskSkillE2BEnvironment mounts into the sandbox read-only at
-``/opt/openclaw-skills/<task_name>/`` -- the mechanism is the existing
-skills-mode one, unchanged; a folder unit only changes WHAT rides it.
+``/opt/openclaw-skills/<task_name>/``. Harbor's Terminus agent scans
+``<task>/<skill>/SKILL.md`` itself and renders the
+``<available_skills>`` list.
 """
 
 import json
@@ -86,8 +86,8 @@ _CAT_TRAJECTORY = {
                          "arguments": {"keystrokes":
                                        "cat /opt/openclaw-skills/"
                                        "train-fasttext/"
-                                       "traj_tb_t1_strong_00_seg00_skill.md"
-                                       "\n"}}],
+                                       "traj-tb-t1-strong-00-seg00-skill/"
+                                       "SKILL.md\n"}}],
          "observation": {"results": [{"content":
                                       _BANK[0].content}]}},
     ],
@@ -159,6 +159,7 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
         "local_dir": str(folder_dir),
         "bank_fingerprint": _MANIFEST["bank_fingerprint"],
         "catalog_filename": _MANIFEST["catalog_filename"],
+        "description_mode": _MANIFEST["description_mode"],
         "files": [entry["filename"] for entry in _MANIFEST["files"]],
     }
     # The trajectory keeps the agent's cat commands verbatim -- M4's
@@ -166,7 +167,7 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
     actions = "\n".join(step["action"] for step in outcome.steps)
     assert "cat /opt/openclaw-skills/train-fasttext/catalog.md" in actions
     assert ("cat /opt/openclaw-skills/train-fasttext/"
-            "traj_tb_t1_strong_00_seg00_skill.md") in actions
+            "traj-tb-t1-strong-00-seg00-skill/SKILL.md") in actions
 
 
 def test_folder_unit_uploads_the_dashed_alias_too(tmp_path):

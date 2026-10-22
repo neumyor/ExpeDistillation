@@ -492,7 +492,7 @@ E1 内部的 runner：
 | — | 决策 | 统一决策入口 `decide_task_list`、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py` |
 | — | 报告读取器 | 从磁盘现读三种验收报告（baseline / exam / live），只读 | `composites/reports.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
-| — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 markdown 文件 + catalog.md）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
+| — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
 | — | 空洞记录 | 已接受基础设施空洞（什么叫空洞见 5.9）的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
 | — | 考卷状态读取 | 从存量记录读出考题的已判作答与裸答 | `composites/acceptance_skill_status.py` |
@@ -574,8 +574,7 @@ E1 内部的 runner：
 | 合并 skill | G8 | curator（最末学习相位） |
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
-| 执行任务·技能文件夹——目录靠 cat（`TB_SKILL_FOLDER_GUIDANCE` 作为远端 `SKILL.md`，`inline_catalog=False`，默认） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
-| 执行任务·技能文件夹——目录内嵌 `SKILL.md`（`TB_TASK_PROMPT_FOLDER_INLINE` 作为远端 `SKILL.md` 正文，`inline_catalog=True`） | E1 的 TB runner（folder 单元，inline_catalog 变体） | executor_weak（test 相位 real_folder，FolderParams.inline_catalog=True） |
+| 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
 | LIVE_RUN_ATTRIBUTION | G10 | author（学习相位 revise，live 组证据） |
 | LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，live 组修订） |
 
@@ -738,8 +737,9 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  与 live 轮仓不在这里，见上）
     <臂>/accepted_infra_shortfall.json   本臂已接受的空洞
     skill_folder/                  test 相位（folder 交付）：物化出的技能
-                                   文件夹（每条已接受技能一个 md 文件 +
-                                   catalog.md，幂等物化，全部单元共享）
+                                   文件夹（每条已接受技能一个 <skill>/SKILL.md
+                                   目录 + catalog.md 兜底，幂等物化，
+                                   全部单元共享）
     generation_failures.jsonl    exam 相位：出题失败的终态记录（每道考题
                                  首行即定）
     phase_summary.json           执行相位摘要（也是返回给相位循环的值；
@@ -873,47 +873,49 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   只用**已接受**成员，`per_skill` 与 `group_by_task` 面向待定成员（沿用
   阶段世界的行为）；
 - **`folder` 交付（技能文件夹）**：其余交付把技能文本拼进提示词，folder
-  把技能放进执行环境里的一个文件夹，提示词只带一段固定指引。交付解析出
-  的每个单元在 `aux["skill_folder"]` 里带一份清单：目录文本、每条已接受
-  技能的文件名映射、库指纹——不带技能正文（正文的唯一来源是相位技能库，
-  渐进读取是这个玩法的核心）。`FolderParams.inline_catalog` 控制目录文本
-  出现的位置：`False`（默认）目录只在 `catalog.md` 文件里，`SKILL.md`
-  只带固定指引，agent 自己 cat 目录；`True` 目录文本被写进远端
-  `SKILL.md`（模型被要求先读的那个文件），agent 读 `SKILL.md` 就能看到
-  目录，正文仍在文件夹里按需 cat（两个模式都把目录文本写进
-  `aux["skill_folder"]` 的 `catalog_text`，物化和读取统计不受影响）。
-  第一轮任务提示词不因 `inline_catalog` 改变，仍是 Harbor/Terminus 自己
-  拼的任务说明；`TB_TASK_PROMPT_FOLDER_INLINE` 现在是 inline 模式的
-  `SKILL.md` 正文模板，不是第一轮提示词。目录文件 catalog.md 每行是
-  "技能编号 | 要 cat 的文件名 | 一句话摘要"，开头是使用规则（先看目录、
-  按需打开、别一次开太多）。派发前相位驱动把清单物化成真实目录（相位
-  目录下的 `skill_folder/`，`materialize_skill_folder` 幂等：内容不变
-  不重写；库指纹与相位库不符是代码 bug 停机）。支持技能文件夹的插件把
-  目录送进执行环境（TB：目录随既有 skills 上传链进沙箱
-  `/opt/openclaw-skills/`，零远端改动）。插件用能力位
+  把技能放进执行环境里的一个文件夹。每个已接受技能写成自己的目录
+  `<skill>/SKILL.md`，文件开头是 YAML 头（`name` 和 `description`），
+  后面是四段正文；任务级 `SKILL.md` 只放一段使用说明，`catalog.md` 是
+  兜底目录。交付解析出的每个单元在 `aux["skill_folder"]` 里带一份清单：
+  目录文本、每条已接受技能的相对路径映射、库指纹、描述拼法——不带技能
+  正文（正文的唯一来源是相位技能库，渐进读取是这个玩法的核心）。
+  `FolderParams.description_mode` 控制 YAML 头里 `description` 的拼法：
+  `summary` 只放摘要，`when_to_use` 只放触发条件，
+  `summary_then_when_to_use`（默认）两者都放。第一轮任务提示词由
+  Harbor/Terminus 自己拼；远端部署的 `Terminus2._build_skills_section`
+  会扫描 `skills_dir` 下深度 2 的 `SKILL.md`，解析 YAML 头，把技能名、
+  描述和完整路径生成 `<available_skills>` 放进首轮提示词。因此
+  `TencentSkillTerminus2` 在运行前把 `skills_dir` 设成当前任务目录
+  `/opt/openclaw-skills/<task>`，插件不再把 catalog 注入 `SKILL.md`，也不
+  再要求模型先读某一份固定文件。catalog.md 每行是
+  "技能编号 | 要 cat 的相对路径 | 一句话摘要"，只在 `<available_skills>`
+  缺失时作为兜底。派发前相位驱动把清单物化成真实目录（相位目录下的
+  `skill_folder/`，`materialize_skill_folder` 幂等：内容不变不重写；
+  库指纹与相位库不符是代码 bug 停机）。支持技能文件夹的插件把目录送进
+  执行环境（TB：目录随既有 skills 上传链进沙箱 `/opt/openclaw-skills/`；
+  上传缓存递归打包，缓存键是清单列出的每个文件的字节摘要）。插件用能力位
   `skill_folder_prompt_name` 声明支持（目前只有 tb 声明，默认指向
-  `TB_TASK_PROMPT_FOLDER`）；实际上传的 `SKILL.md` 在 false 时是
-  `TB_SKILL_FOLDER_GUIDANCE`，true 时由 `TB_TASK_PROMPT_FOLDER_INLINE`
-  模板填入目录文本，两个模板的 digest 都进 manifest 冻结面（stage0 在
-  `skill_folder_prompt_name` 后按 `_INLINE` 约定查配套名并加入冻结面）；
-  folder 相位落到不支持的插件，test 相位
-  驱动在派发前就报配置错误停机——与技能库空不空无关，逐单元的 E1 守卫
-  保留作第二道。空已接受集不物化、单元裸跑（空注入是空串：不渲染一个
-  只剩表头的空目录文件）。`real_folder` 执行没有自己的执行参数，test 相位
-  的采样深度沿用全局 `n_attempts_weak`，与旧 test 相位行为一致；执行过程
-  零拦截零预算，模型实际读了哪些技能文件，记录在
-  轨迹的 cat 命令里，事后由纯函数解析（`composites/skill_reads.py`：按
-  清单文件名做词边界匹配，首读序去重，只读轨迹零落盘）：每单元的读取集
-  写进 test 相位摘要的 `skill_files_read` 键（`{轨迹 ID: [技能编号]}`）。
-  键的口径要读全：它只盖带技能臂——对照臂不进键，且轨迹 ID 与对照臂
-  同形，审计拿 ID 对账必须配合臂目录使用。三态分辨：**键缺** = 旧执行
-  相位，或该单元没跑成 / 已接受为空洞（要与"跑了没读"区分，必须交叉
-  摘要的 `infra_missing` / `infra_accepted` 计数）；**空列表** = 跑了
-  但一个技能文件都没读；非空列表 = 实际读过的技能（首读序去重）。
-  已知局限：别的目录下同名文件的 cat 会误记、只有 cat 算（grep/head 不
-  算，catalog.md 永不进读取集）。test 相位不写验收报告，读取集不进任何
-  决策输入，供事后审计与技能使用分析；泄题审计对 test 相位沿用既有覆盖
-  （exam 相位考试管道的 D8 判定）；
+  `TB_TASK_PROMPT_FOLDER`）；实际上传的任务级 `SKILL.md` 是
+  `TB_SKILL_FOLDER_GUIDANCE`，它指向 `<available_skills>` 和挂载路径。
+  folder 相位落到不支持的插件，test 相位驱动在派发前就报配置错误停机——
+  与技能库空不空无关，逐单元的 E1 守卫保留作第二道。空已接受集不物化、
+  单元裸跑（空注入是空串：不渲染一个只剩表头的空目录文件）。
+  `real_folder` 执行没有自己的执行参数，test 相位的采样深度沿用全局
+  `n_attempts_weak`，与旧 test 相位行为一致；执行过程零拦截零预算，模型
+  实际读了哪些技能文件，记录在轨迹的 cat 命令里，事后由纯函数解析
+  （`composites/skill_reads.py`：匹配完整相对路径 `<skill>/SKILL.md`，
+  或同一行里同时出现唯一的技能目录名和 `SKILL.md`，首读序去重，只读轨迹
+  零落盘）：每单元的读取集写进 test 相位摘要的 `skill_files_read` 键
+  （`{轨迹 ID: [技能编号]}`）。键的口径要读全：它只盖带技能臂——对照臂
+  不进键，且轨迹 ID 与对照臂同形，审计拿 ID 对账必须配合臂目录使用。
+  三态分辨：**键缺** = 旧执行相位，或该单元没跑成 / 已接受为空洞（要与
+  "跑了没读"区分，必须交叉摘要的 `infra_missing` / `infra_accepted`
+  计数）；**空列表** = 跑了但一个技能文件都没读；非空列表 = 实际读过的
+  技能（首读序去重）。已知局限：别的目录下同名相对路径的 cat 会误记、
+  只有 cat 算（grep/head 不算，catalog.md 永不进读取集）、只有
+  `cat SKILL.md` 而没有技能目录名时无法判断是哪一个技能，不计入。
+  test 相位不写验收报告，读取集不进任何决策输入，供事后审计与技能使用
+  分析；泄题审计对 test 相位沿用既有覆盖（exam 相位考试管道的 D8 判定）；
 - 对照臂：full 模式复用 baseline 相位的弱臂裸跑（连同其已接受空洞）；split 模式
   在相位内现场跑一条裸臂（`fresh_bare`）；或 `external_campaign`——对照
   读外部 campaign 的冻结成绩文件（AgentBrew 裸跑归档），**零执行**：test 相位
