@@ -35,6 +35,7 @@ from expedistill.methods.delivery import folder as folder_driver
 from expedistill.methods.delivery.folder import (
     CATALOG_FILENAME,
     render_catalog,
+    skill_dirname,
     skill_filename,
     skill_folder_manifest,
 )
@@ -111,6 +112,20 @@ def test_the_file_name_is_a_skill_directory_with_skill_md():
     assert skill_filename("plain") == "plain/SKILL.md"
     with pytest.raises(ValueError, match="non-empty string skill_id"):
         skill_filename("")
+
+
+def test_a_long_skill_id_gets_a_bounded_directory_name():
+    name = skill_dirname("x" * 200)
+    assert len(name) == 64
+    assert name.startswith("x" * 55)
+    assert skill_dirname("x" * 200) == name  # deterministic
+
+
+def test_a_reserved_word_in_the_directory_name_is_refused():
+    with pytest.raises(ValueError, match="reserved word"):
+        skill_dirname("claude/helper")
+    with pytest.raises(ValueError, match="reserved word"):
+        skill_dirname("Anthropic/helper")
 
 
 def test_an_empty_summary_falls_back_to_the_when_to_use_section():
