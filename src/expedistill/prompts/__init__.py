@@ -1,8 +1,9 @@
 """B2 prompt registry (layer 1): every method prompt as a named constant.
 
 Importing this package imports every prompt module, which registers its
-prompts at import time -- including the two live prompts, whose v2-era
-lazy registration died with the v3 schema switch (the manifest now freezes
+prompts at import time -- including the live attribution/revision prompts
+and the usage-aware attribution/retrigger prompts, whose v2-era lazy
+registration died with the v3 schema switch (the manifest now freezes
 the digests of ALL registered method prompts plus the run's task prompt;
 the pre-registered static test pins that every prompts/*.py module is in
 this import list, so a prompt cannot exist outside the frozen surface).

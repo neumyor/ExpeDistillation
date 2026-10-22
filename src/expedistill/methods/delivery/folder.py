@@ -1,8 +1,10 @@
 """The folder delivery driver: one Agent Skill directory per skill.
 
-The agent is handed ONE read-only folder of skills. Each accepted skill
+The agent is handed ONE read-only folder of skills. Each delivered skill
 is a directory containing ``SKILL.md`` with YAML frontmatter (``name``
-and ``description``) and the skill's four-section body. Harbor's
+and ``description``) and the skill's four-section body. The test phase
+delivers the accepted set; the live phase's ``folder_by_task`` passes
+``accepted_only=False`` so its pending group is the delivered set. Harbor's
 Terminus agent discovers those files itself, renders an
 ``<available_skills>`` list with each exact location, and appends it to
 the initial prompt; the agent cats the skill it needs. The catalog file
@@ -194,8 +196,8 @@ def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],
 
 
 def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
-                          description_mode: str = DEFAULT_DESCRIPTION_MODE
-                          ) -> Dict[str, Any]:
+                          description_mode: str = DEFAULT_DESCRIPTION_MODE,
+                          accepted_only: bool = True) -> Dict[str, Any]:
     """The folder manifest a folder unit carries (M3's materialization
     input)::
 
@@ -205,24 +207,27 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
          "catalog_text": "<the catalog file's exact bytes>",
          "description_mode": "summary_then_when_to_use",
          "files": [{"skill_id", "version", "filename"},
-                   ...]}                      # accepted set, bank order
+                   ...]}                      # member set, bank order
 
-    The file list is the bank's ACCEPTED members only (whole_bank's
-    bookkeeping). It is a NAME MAPPING, not the skills: no content
-    travels with the manifest (the rev-1 ruling -- progressive
-    disclosure must survive every stage; the composite materialization
-    reads each skill's body from the phase bank, checking it against
-    the fingerprint below). The fingerprint is
-    ``bank_reference`` over the FULL bank -- the same digest the
-    phase's bank_summary.json writes -- which names which version of
-    the bank this folder is without inventing a new version number.
-    A collision (two skill ids mapping to one directory) is refused
-    loudly: a silent shadow would be a wrong folder, and an empty
-    accepted set renders NO catalog at all (the D9 null-state lesson:
-    an empty injection is the empty string, never a header claiming
-    experience exists)."""
+    The file list is the bank's ACCEPTED members by default
+    (whole_bank's bookkeeping). ``accepted_only=False`` keeps every
+    member instead: the live phase's pending group is the set under
+    test, so its folder must contain the pending candidates. It is a
+    NAME MAPPING, not the skills: no content travels with the manifest
+    (the rev-1 ruling -- progressive disclosure must survive every
+    stage; the composite materialization reads each skill's body from
+    the phase bank, checking it against the fingerprint below). The
+    fingerprint is ``bank_reference`` over the FULL bank -- the same
+    digest the phase's bank_summary.json writes -- which names which
+    version of the bank this folder is without inventing a new version
+    number. A collision (two skill ids mapping to one directory) is
+    refused loudly: a silent shadow would be a wrong folder, and an
+    empty member set renders NO catalog at all (the D9 null-state
+    lesson: an empty injection is the empty string, never a header
+    claiming experience exists)."""
     validate_description_mode(description_mode)
-    accepted = units.accepted_bank(bank)
+    accepted = (units.accepted_bank(bank) if accepted_only
+                else list(bank))
     files: List[Dict[str, Any]] = []
     owner_of: Dict[str, str] = {}
     for record in accepted:

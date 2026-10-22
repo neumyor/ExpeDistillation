@@ -19,9 +19,27 @@ image -- exam generation is implied by every sequence's exam phases).
 
 from dataclasses import dataclass
 
-__all__ = ["AuthoringParams"]
+from expedistill.core.config import ConfigError
+
+__all__ = ["AuthoringParams", "UsageReviseParams"]
+
+#: The usage-aware revision policies the author driver understands.
+USAGE_REVISE_POLICIES = ("usage_v1",)
 
 
 @dataclass(frozen=True)
 class AuthoringParams:
     """The ``distill_diagnose`` authoring method's (empty) parameters."""
+
+
+@dataclass(frozen=True)
+class UsageReviseParams:
+    """The ``usage_revise`` group author's parameters."""
+
+    policy: str = "usage_v1"
+
+    def __post_init__(self) -> None:
+        if self.policy not in USAGE_REVISE_POLICIES:
+            raise ConfigError(
+                "methods.author.usage_revise policy must be one of "
+                f"{USAGE_REVISE_POLICIES}, got {self.policy!r}")

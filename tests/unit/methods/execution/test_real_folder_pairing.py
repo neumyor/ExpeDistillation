@@ -22,6 +22,7 @@ the real_folder execution are ONE play, pinned to the test phase):
 import pytest
 
 from expedistill.core.config import (
+    FOLDER_BY_TASK_DELIVERY_NAME,
     FOLDER_DELIVERY_NAME,
     FOLDER_EXECUTION_NAME,
     ConfigError,
@@ -88,7 +89,9 @@ def _raw_sequence(*, delivery, execution, role="test", tasks="test"):
                                          "executor_weak"]}},
             "test": {"kind": "execute", "role": role, "tasks": tasks,
                   "delivery": {"name": delivery},
-                  "execution": dict(execution, name=execution["name"])},
+                  "execution": dict(execution, name=execution["name"]),
+                  **({"compare": {"against": "baseline"}}
+                     if role == "live" else {})},
         },
     }
 
@@ -115,8 +118,28 @@ def test_whole_bank_with_plain_real_still_parses():
 
 
 def test_folder_under_the_plain_real_execution_is_refused():
-    with pytest.raises(ConfigError, match="pairs delivery 'folder'"):
+    with pytest.raises(ConfigError, match="test-phase skill-folder"):
         _parse_pair(FOLDER_DELIVERY_NAME, {"name": "real"})
+
+
+def test_folder_by_task_pairs_with_the_plain_real_execution_on_live():
+    specs = _parse_pair(FOLDER_BY_TASK_DELIVERY_NAME, {"name": "real"},
+                        role="live", tasks="train")
+    assert specs["test"].delivery["name"] == FOLDER_BY_TASK_DELIVERY_NAME
+    assert specs["test"].execution["name"] == "real"
+
+
+def test_folder_by_task_is_live_only():
+    with pytest.raises(ConfigError, match="live-acceptance"):
+        _parse_pair(FOLDER_BY_TASK_DELIVERY_NAME, {"name": "real"},
+                    role="test", tasks="test")
+
+
+def test_folder_by_task_under_real_folder_is_refused():
+    with pytest.raises(ConfigError, match="plain 'real' execution"):
+        _parse_pair(FOLDER_BY_TASK_DELIVERY_NAME,
+                    {"name": FOLDER_EXECUTION_NAME},
+                    role="live", tasks="train")
 
 
 def test_real_folder_over_whole_bank_is_refused():

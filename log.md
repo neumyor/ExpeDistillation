@@ -1251,8 +1251,20 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件：run `runs/tb21_split_folder_tb21prompt_20261022_1637_v2/`（P02 完成，`phases/p02_learn/learn_summary.json`、`skill_bank.jsonl` 171 行、`bank_summary.json`，库指纹 `bank:19cf033ebe30`）、`src/expedistill/prompts/author.py`、`src/expedistill/prompts/attribution.py`、旧 run `runs/tb21_split_folder_tb21prompt_20261022_1552/`（P02 完成、P03 停止）
 
+## 2026-10-22 17:53 — 新增 live 渐进式披露与 usage 感知修订槽位
+
+一段话摘要：用户要求不破坏现有模块边界，用方法槽位实现“同一任务的技能渐进式披露，并让学习相位按实际使用情况决定重写触发条件、修改正文或删除”。新增 `folder_by_task` 交付：live 的待定组按任务物化成 `<task>/<skill>/SKILL.md`，使用 plain `real` 执行（folder 形态由交付 manifest 驱动，live 深度来自 `real` 参数）；执行后按轮写 `skill_usage.jsonl`，记录每次尝试的可用技能、读取/未读集合、首轮 `<available_skills>` 与清单是否一致、以及本次结果。学习相位新增 `group_evidence` / `group_author` 两个可选字段，默认仍是 `live_group` / `distill_diagnose`；新方法 `usage_group` 读取 usage 账本并让归因模型标注相关/应用事实，`usage_revise` 按 `usage_v1` 策略输出 kept / retriggered / revised / deleted / observed，其中 retrigger 只改 summary 和 `[When to use]`，正文逐字保留。投递失败或整组零读取只记 observed，不据此重写或删除；成功组不进入逐技能修订。新增提示词 `LIVE_USAGE_ATTRIBUTION`、`LIVE_SKILL_RETRIGGER`，并进入冻结的 prompt digest 集合。逐环节静态审查后修了两处：live folder 原计划配 `real_folder`，但该参数类没有 `n_attempts`/`max_injection_tokens`，改为配 plain `real`；投递能力检查提前到 live 派发前。新增单元测试覆盖 folder_by_task、skill_usage、usage_group、usage_revise、live folder 物化和 usage 学习接线；重新生成 4 组 golden 快照。ruff 通过；全量测试 2261 passed、4 deselected。未提交，未推送。
+
+工件：`src/expedistill/methods/delivery/folder_by_task.py`、`src/expedistill/composites/skill_usage.py`、`src/expedistill/methods/evidence/usage_group.py`、`src/expedistill/methods/author/usage_revise.py`、`src/expedistill/blocks/attribution.py`、`src/expedistill/prompts/attribution.py`、`src/expedistill/stages/phase_execute/live.py`、`src/expedistill/stages/learn_tasks.py`、`src/expedistill/core/config.py`、`src/expedistill/methods/registry.py`、`docs/decisions/usage_aware_live_folder_20261022.md`、`README.md`、`AGENTS.md`、`tests/unit/methods/delivery/test_folder_by_task.py`、`tests/unit/composites/test_skill_usage.py`、`tests/unit/methods/evidence/test_usage_group.py`、`tests/unit/methods/author/test_usage_revise.py`、`tests/fixtures/golden/`
+
 ## 2026-10-22 18:12 — 清理旧 P03 job，v2 启动 P03–P07
 
 一段话摘要：用户要求先清掉旧远端 job，再从 v2 的 P02 继续跑 P03–P07。node29 上剩余 8 个旧 `run_tencent_job.py`（7 个 1:37 左右的 v1 P03 job，加一个 50 分钟的 job），按 2 个一批的显式 PID SIGTERM 清理，前 3 批 6 个成功，第 4 批被 auto-mode classifier 拦下；随后单独清掉了旧的 `gpt2-codegolf` job。最后只剩 `ed_fix-git_a2843bc658_a00`（pid 2360449，18:04 启动，早于 v2 P03 启动，可能是别的会话或远端自动重试），没有动它。v2 run 从 P02 之后恢复：driver pid 12111，`--until-phase` 不再限制，32 workers、stagger 120、timeout 1500、retries 5/10；p03 已创建 30 个单元，K1 派发 weak 90 个 pending，约 2 分钟后 node29 上有 33 个 `run_tencent_job.py`（32 个 v2 P03 + 1 个 fix-git），本地 `failed_units` 仍为空。P03 live 使用 group_by_task 交付，P07 test 才会走 folder 交付并读取修好的 `skill_read_suffix`；P02 的 171 条库指纹 `bank:19cf033ebe30` 已作为 p03 输入。
 
 工件：v2 run `runs/tb21_split_folder_tb21prompt_20261022_1637_v2/`（p03_live 进行中，30 个单元）、`phases/p03_live/units.jsonl`、node29 旧 job 清理（6 个 v1 P03 + 1 个 gpt2；保留 fix-git 2360449）、`tmp/launch_tb21_p02_p07.py`（`--until-phase` 可选，一次性启动器）
+
+## 2026-10-22 18:18 — 真实单题冒烟验证 live folder 与 usage 修订
+
+一段话摘要：用户要求做一次真实带模型调用的小规模测试。先用真实端点调用 `qwen3.6-flash-distill`（返回 `OK`）确认连通；随后在 `tmp/usage_smoke_run` 构造单题 `fix-git`、单次尝试、两条 pending 技能的真实 TB live folder 运行。远端 trial 约 7 分钟完成并通过判分，模型读取第一条技能、未读第二条；`skill_usage.jsonl` 记录 `delivery_status=ok`、read/unread 集合和成功结果。真实轨迹暴露一个解析问题：TB 本地还原的轨迹首步是模型命令，不含初始 `<available_skills>`，原逻辑会误记 `list_missing`。已改为“看不到列表但有读取即视为投递可用；既看不到列表也没有读取记 `unverified`”。随后用真实 `deepseek-v4-flash-0731--ali` 做 usage 归因、真实 `qwen3.6-flash-distill` 做写作，两条技能分别得到 `revised` 和 `retriggered`，retrigger 只改摘要与 `[When to use]`，正文逐字保留。该冒烟为单题、低并发，只用于链路验证，不作为效果结论。ruff 通过；全量测试 2262 passed、4 deselected。
+
+工件：`tmp/real_usage_smoke.py`（一次性脚本，未进 git）、`tmp/real_usage_smoke.log`、`tmp/usage_smoke_run/`（保存真实轨迹、usage 账本与远端结果）、`src/expedistill/composites/skill_usage.py`、`tests/unit/composites/test_skill_usage.py`、`tests/unit/methods/evidence/test_usage_group.py`、`tests/unit/methods/author/test_usage_revise.py`

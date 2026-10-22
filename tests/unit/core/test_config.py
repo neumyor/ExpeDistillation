@@ -974,6 +974,8 @@ GOLDEN_PHASES = {
           "compare": None, "acceptance": None, "kind": "execute"},
     "learn": {"evidence": {"name": "segment", "K": 5},
           "author": {"name": "distill_diagnose"},
+          "group_evidence": {"name": "live_group"},
+          "group_author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096},
           "kind": "learn", "role": "learn"},
     "test": {"role": "test", "tasks": "test",
@@ -1048,6 +1050,8 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
         # another's phase).
         "learn": {"evidence": {"name": "segment", "K": 6},
               "author": {"name": "distill_diagnose"},
+              "group_evidence": {"name": "live_group"},
+              "group_author": {"name": "distill_diagnose"},
               "curate": {"name": "none", "token_budget": 4096},
               "kind": "learn", "role": "learn"},
     },

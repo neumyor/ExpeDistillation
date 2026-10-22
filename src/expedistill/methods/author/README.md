@@ -3,7 +3,8 @@
 按决策给的任务清单和找证据给的证据包，写出新技能或修改已有技能。它只依据证据包落笔，
 不判断技能好不好用，也不做任何测量。
 
-每个学习阶段都会执行。配置写在学习阶段的 `author` 里，`name` 选方法。
+每个学习阶段都会执行。新增路径的写作方法写在 `author` 里，组修订路径的写作方法
+写在 `group_author` 里，各自用 `name` 选方法。
 
 ## `distill_diagnose`：提炼 / 诊断写作
 
@@ -32,4 +33,26 @@ author:
   `weak_profile` 的正文。画像文本本身仍留在配置里，作为来源记录和 opt-in 素材。
 - 改写失败（重试用完，或改出来和原文一字不差）不会删技能，算"没变化"：版本不动，下一个学习阶段再试。
 
-设计取舍见 `docs/decisions/unified_skill_structure_20261019.md`。
+## `usage_revise`：按使用事实修订组
+
+```yaml
+group_author:
+  name: usage_revise
+  policy: usage_v1
+```
+
+只服务 live 组的修订。它按证据包里的读取、相关、应用事实，对每条技能选一个结果：
+
+| 结果 | 什么时候 | 做什么 |
+|---|---|---|
+| `kept` | 相关且已读、应用正常；或与本题无关 | 不动 |
+| `retriggered` | 相关但一次都没读，且此前没有重写过触发条件 | 只改 `summary` 和 `[When to use]`，正文逐字保留，版本号加一 |
+| `revised` | 读取了但没照做，或照做了仍无效 | 重写正文，保留四段，版本号加一 |
+| `deleted` | 触发条件已重写过仍未读；或动作与技能相反；或投递正常但明确有害 | 丢弃 |
+| `observed` | 投递失败、整组一次都没读、证据不足 | 不动，下一轮再看 |
+
+`policy` 目前只有 `usage_v1`。投递失败和整组零读取不会触发逐条重写触发条件：前者
+先修投递，后者先查提示和选择入口。
+
+设计取舍见 `docs/decisions/unified_skill_structure_20261019.md` 和
+`docs/decisions/usage_aware_live_folder_20261022.md`。

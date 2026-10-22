@@ -11,12 +11,13 @@
 |---|---|---|---|
 | `none` | 不注入（裸跑） | baseline（摸底） | 无 |
 | `per_skill` | 这道考题对应的那一条技能 | exam（纸面验收） | 无 |
-| `group_by_task` | 这道题名下还待验收的整包技能 | live（实战验收） | 无 |
+| `group_by_task` | 这道题名下还待验收的整包技能（整块注入） | live（实战验收） | 无 |
+| `folder_by_task` | 这道题名下还待验收的整包技能（逐技能目录，模型按需读取） | live（实战验收） | 见下 |
 | `whole_bank` | 技能库里所有已接受的技能 | test（最终测试） | 无 |
 | `retrieval` | 按题目文字检索出的几条技能 | test（最终测试） | 见下 |
 | `folder` | 只注入技能目录，技能正文放成文件夹里的文件，模型按需自己去读 | test（最终测试） | 见下 |
 
-只有 `folder` 在读配置时检查阶段，其余方法配错阶段不会在读配置时报错，请按上表配。
+`folder` 和 `folder_by_task` 在读配置时检查阶段，其余方法配错阶段不会在读配置时报错，请按上表配。
 
 ## `retrieval`：检索交付
 
@@ -35,6 +36,33 @@ delivery:
 | `top_k` | 每道题最多注入几条 | 正整数 | 必填 |
 | `max_categories` | 每道题最多路由到几个类别 | 正整数 | 必填 |
 | `min_score` | 最相似那条的分数低于它时，这道题不注入任何技能 | `[0, 1)` 的数 | 必填 |
+
+## `folder_by_task`：live 的逐任务文件夹交付
+
+```yaml
+delivery:
+  name: folder_by_task
+  description_mode: when_to_use
+```
+
+必须用在 live 相位，和执行方法 `real` 配对（live 的采样深度来自 `real` 的参数）。
+每个待验收的任务组物化成自己的目录：
+
+```text
+phases/p03_live/skill_folder/<task>/
+  SKILL.md                 # 任务级使用说明
+  catalog.md               # 列表缺失时的兜底
+  <skill-a>/SKILL.md       # YAML 头 + 四段正文
+  <skill-b>/SKILL.md
+```
+
+和 test 的 `folder` 一样，Harbor 只把每条技能的 `name` 和 `description` 放进
+`<available_skills>`；区别是这里的池子是 live 的 pending 组，且交付后会把
+逐技能读取事实写进该轮的 `skill_usage.jsonl`。参数与 `folder` 相同：
+
+| 参数 | 含义 | 可选项 | 默认 |
+|---|---|---|---|
+| `description_mode` | YAML 头里的 `description` 怎么拼 | `summary` / `when_to_use` / `summary_then_when_to_use` | `summary_then_when_to_use` |
 
 ## `folder`：文件夹交付
 
@@ -72,4 +100,6 @@ agent 自己扫描 `<task>/<skill>/SKILL.md`，解析 YAML 头，把技能名、
 
 模块边界见 `docs/decisions/execute_learn_module_boundaries_20261016.md`，
 检索的设计见 `docs/decisions/retrieval_delivery_tb_split_20261013.md`，
-本布局的决策见 `docs/decisions/folder_agent_skills_layout_20261022.md`。
+本布局的决策见 `docs/decisions/folder_agent_skills_layout_20261022.md`，
+live 渐进式披露与 usage 修订见
+`docs/decisions/usage_aware_live_folder_20261022.md`。

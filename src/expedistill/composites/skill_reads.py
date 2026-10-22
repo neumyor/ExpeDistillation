@@ -40,7 +40,7 @@ from typing import Any, List, Mapping
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError
 
-__all__ = ["skill_files_read"]
+__all__ = ["skill_files_read", "skill_read_events"]
 
 #: A cat command's word: "cat" at a word boundary -- ``concat`` or a
 #: text fragment like "indicates" never matches.
@@ -93,27 +93,14 @@ def _path_matches(line: str, filename: str) -> bool:
     return False
 
 
-def skill_files_read(trajectory: Trajectory,
-                     folder: Mapping[str, Any]) -> List[str]:
-    """The skill ids whose files ``trajectory``'s actions actually cat,
-    in first-read order, each skill once.
+def _manifest_files(folder: Mapping[str, Any]) -> List[str]:
+    """The manifest's file names in order, validating the name mapping.
 
-    ``folder`` is the unit's folder manifest (the delivery's frozen
-    shape, ``aux["skill_folder"]``); only ``files[].{skill_id,
-    filename}`` is consumed. A manifest with no files (the empty
-    accepted bank's null state) has nothing to read: the read set is
-    empty. The same file cat more than once counts once; within one
-    action line several files match in manifest order. A manifest entry
-    without string ``skill_id`` / ``filename``, or two entries naming
-    one file, is a CodeBugError -- the delivery refuses both, so a row
-    that carries one is a wiring bug, never a statistic.
-
-    Pure and trajectory-readonly: nothing is written, nothing is
-    mutated, and the same inputs always yield the same list -- a
-    resumed run recomputes the same read sets from the same stored
-    trajectories.
+    A manifest entry without string ``skill_id`` / ``filename``, or two
+    entries naming one file, is a CodeBugError -- the delivery refuses
+    both, so a row that carries one is a wiring bug, never a statistic.
     """
-    owner_of = {}
+    seen = set()
     order: List[str] = []
     for entry in folder.get("files") or []:
         if not isinstance(entry, Mapping):
@@ -127,26 +114,65 @@ def skill_files_read(trajectory: Trajectory,
             raise CodeBugError(
                 f"a folder manifest file entry needs string 'skill_id' "
                 f"and 'filename', got {entry!r}")
-        if filename in owner_of:
+        if filename in seen:
             raise CodeBugError(
-                f"the folder manifest lists file name {filename!r} "
-                f"twice (skills {owner_of[filename]!r} and "
-                f"{skill_id!r}): one cat could not be told apart -- a "
-                "human must look at this manifest")
-        owner_of[filename] = skill_id
+                f"the folder manifest lists file name {filename!r} twice "
+                f"(skills {skill_id!r} and another): one cat could not "
+                "be told apart -- a human must look at this manifest")
+        seen.add(filename)
         order.append(filename)
+    return order
+
+
+def skill_read_events(trajectory: Trajectory,
+                      folder: Mapping[str, Any]) -> List[dict]:
+    """The first cat of each manifest skill in ``trajectory``.
+
+    Each event is ``{"skill_id", "filename", "step_index", "command"}``
+    in first-read order. The same file cat more than once counts once;
+    within one action line several files match in manifest order. A
+    manifest with no files has nothing to read: the event list is empty.
+
+    Pure and trajectory-readonly: nothing is written, nothing is
+    mutated, and the same inputs always yield the same list -- a
+    resumed run recomputes the same usage rows from the same stored
+    trajectories.
+    """
+    order = _manifest_files(folder)
     if not order:
         return []
-
-    read: List[str] = []
+    owner_of = {entry["filename"]: entry["skill_id"]
+                for entry in folder["files"]}
+    events: List[dict] = []
     seen = set()
-    for step in trajectory.steps:
+    for step_index, step in enumerate(trajectory.steps):
         for line in step.action.split("\n"):
             if not _CAT_RE.search(line):
                 continue
             for filename in order:
-                if filename not in seen \
-                        and _path_matches(line, filename):
-                    seen.add(filename)
-                    read.append(owner_of[filename])
-    return read
+                if filename in seen \
+                        or not _path_matches(line, filename):
+                    continue
+                seen.add(filename)
+                events.append({
+                    "skill_id": owner_of[filename],
+                    "filename": filename,
+                    "step_index": step_index,
+                    "command": line.strip(),
+                })
+    return events
+
+
+def skill_files_read(trajectory: Trajectory,
+                     folder: Mapping[str, Any]) -> List[str]:
+    """The skill ids whose files ``trajectory``'s actions actually cat,
+    in first-read order, each skill once.
+
+    ``folder`` is the unit's folder manifest (the delivery's frozen
+    shape, ``aux["skill_folder"]``); only ``files[].{skill_id,
+    filename}`` is consumed. The richer per-step record is
+    :func:`skill_read_events`; this remains the id-only view the test
+    phase's summary uses.
+    """
+    return [event["skill_id"]
+            for event in skill_read_events(trajectory, folder)]

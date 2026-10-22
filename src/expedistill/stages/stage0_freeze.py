@@ -326,6 +326,8 @@ def _resolve_phase_methods(config: Any) -> None:
         elif isinstance(spec, LearnPhaseSpec):
             resolve_params("evidence", spec.evidence)
             resolve_params("author", spec.author)
+            resolve_params("evidence", spec.group_evidence)
+            resolve_params("author", spec.group_author)
             resolve_params("curation", spec.curate)
 
 

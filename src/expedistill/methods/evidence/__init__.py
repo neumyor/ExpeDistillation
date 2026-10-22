@@ -42,7 +42,17 @@ from dataclasses import dataclass
 
 from expedistill.core.config import ConfigError
 
-__all__ = ["SegmentationParams"]
+__all__ = ["LiveGroupParams", "SegmentationParams", "UsageGroupParams"]
+
+
+@dataclass(frozen=True)
+class LiveGroupParams:
+    """The ``live_group`` evidence method's empty parameter set."""
+
+
+@dataclass(frozen=True)
+class UsageGroupParams:
+    """The ``usage_group`` evidence method's empty parameter set."""
 
 
 @dataclass(frozen=True)

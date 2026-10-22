@@ -108,6 +108,15 @@ class PhasePlugin(BenchmarkPlugin):
         return "FAKE_TASK"
 
 
+class FolderPhasePlugin(PhasePlugin):
+    """The live-folder test's plugin: it declares the folder capability
+    so the execution boundary accepts a folder unit."""
+
+    @property
+    def skill_folder_prompt_name(self):
+        return "FAKE_TASK"
+
+
 def _outcome(task_id, correctness):
     return RunOutcome(
         steps=[{"action": f"exec {task_id}", "observation": "ok"}],
@@ -583,6 +592,31 @@ def test_live_control_perfect_skips_the_group(monkeypatch, tmp_path):
     row = report_rows(ctx, phase)[0]
     assert row.status == verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
     assert row.cause == verdicts.CAUSE_WEAK_ALREADY_KNOWS
+
+
+def test_live_folder_materializes_each_group_and_writes_usage(
+        monkeypatch, tmp_path):
+    _install_plugin(monkeypatch,
+                    FolderPhasePlugin(lambda record: _outcome(
+                        record["task_id"],
+                        record["handle"].role == "strong")))
+    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
+    ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
+
+    phase = phase_of(2, "live", live_spec(
+        delivery={"name": "folder_by_task",
+                  "description_mode": "when_to_use"},
+        execution={"name": "real", "n_attempts": 1}))
+    summary = phase_execute.run(ctx, phase).summary
+
+    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
+    folder = directory / "skill_folder" / "t1"
+    skill_files = list(folder.glob("*/SKILL.md"))
+    assert len(skill_files) == 1
+    assert "name:" in skill_files[0].read_text(encoding="utf-8")
+    assert summary["skill_usage"] is not None
+    assert (directory / "skill_folder").is_dir()
 
 
 def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
