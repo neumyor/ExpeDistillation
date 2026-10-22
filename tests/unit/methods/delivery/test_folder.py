@@ -35,6 +35,7 @@ from expedistill.methods.delivery import folder as folder_driver
 from expedistill.methods.delivery.folder import (
     CATALOG_FILENAME,
     render_catalog,
+    skill_dirname,
     skill_filename,
     skill_folder_manifest,
 )
@@ -79,20 +80,22 @@ def _tasks(*raws):
 def test_the_catalog_opens_with_the_usage_rules():
     catalog = render_catalog([_skill("t1", summary="Restart safely.")])
     lines = catalog.splitlines()
-    assert lines[0] == "## Skill folder catalog"
+    assert lines[0] == "## Skill folder catalog (fallback)"
     rules = [line for line in lines if line.startswith("- ")]
-    # The three usage rules of the ruling: read the catalog first, cat
-    # on demand, do not open many files at once.
-    assert len(rules) == 3
-    assert "Read this catalog before acting" in rules[0]
-    assert "cat only the skill file" in rules[1]
-    assert "Do not open many skill files at once" in rules[2]
+    # The catalog is a fallback: two usage rules remain (cat on demand,
+    # do not open many files at once). The prompt's <available_skills>
+    # list is the primary directory.
+    assert len(rules) == 2
+    assert "cat only the skill file" in rules[0]
+    assert "Do not open many skill files at once" in rules[1]
+    assert "available_skills" in "\n".join(lines)
     assert catalog.endswith("\n")
 
 
 def test_one_line_per_skill_in_bank_order():
     (accepted_a, accepted_b) = _bank()[1]
-    catalog = render_catalog([accepted_a, accepted_b])
+    catalog = render_catalog([accepted_a, accepted_b],
+                             description_mode="summary")
     entries = catalog.splitlines()[-2:]
     assert entries == [
         f"{accepted_a.skill_id} | {skill_filename(accepted_a.skill_id)} "
@@ -102,18 +105,32 @@ def test_one_line_per_skill_in_bank_order():
     ]
 
 
-def test_the_file_name_is_the_skill_id_over_the_safe_alphabet():
+def test_the_file_name_is_a_skill_directory_with_skill_md():
     assert skill_filename("tb:t1/a00/seg00/skill") == \
-        "tb_t1_a00_seg00_skill.md"
-    assert skill_filename("bank/merge/0001") == "bank_merge_0001.md"
-    assert skill_filename("plain") == "plain.md"
+        "tb-t1-a00-seg00-skill/SKILL.md"
+    assert skill_filename("bank/merge/0001") == "bank-merge-0001/SKILL.md"
+    assert skill_filename("plain") == "plain/SKILL.md"
     with pytest.raises(ValueError, match="non-empty string skill_id"):
         skill_filename("")
 
 
+def test_a_long_skill_id_gets_a_bounded_directory_name():
+    name = skill_dirname("x" * 200)
+    assert len(name) == 64
+    assert name.startswith("x" * 55)
+    assert skill_dirname("x" * 200) == name  # deterministic
+
+
+def test_a_reserved_word_in_the_directory_name_is_refused():
+    with pytest.raises(ValueError, match="reserved word"):
+        skill_dirname("claude/helper")
+    with pytest.raises(ValueError, match="reserved word"):
+        skill_dirname("Anthropic/helper")
+
+
 def test_an_empty_summary_falls_back_to_the_when_to_use_section():
     skill = _skill("t1", summary="")  # the v2-migration shape
-    catalog = render_catalog([skill])
+    catalog = render_catalog([skill], description_mode="summary")
     entry = catalog.splitlines()[-1]
     # The section body (marker-line remainder plus continuation lines)
     # collapsed to one line; [Steps] never leaks into the description.
@@ -132,26 +149,44 @@ def test_a_retired_failure_reference_gets_the_explicit_placeholder():
         "[Do not use when] The status command already reports running.",
     ])
     skill = _skill("t1", summary="", content=content)
-    entry = render_catalog([skill]).splitlines()[-1]
+    entry = render_catalog([skill], description_mode="summary").splitlines()[-1]
     assert entry.endswith("| (no summary)")
 
 
 def test_a_markerless_skill_gets_the_explicit_placeholder():
     skill = _skill("t1", content="Just some prose with no sections.")
-    catalog = render_catalog([skill])
+    catalog = render_catalog([skill], description_mode="summary")
     assert catalog.splitlines()[-1].endswith("| (no summary)")
 
 
 def test_a_k5_length_summary_is_clipped_and_marked():
     long = _skill("t1", summary="a" * 250)
-    entry = render_catalog([long]).splitlines()[-1]
+    entry = render_catalog([long], description_mode="summary").splitlines()[-1]
     # The clip is explicit, never silent: 200 chars plus the mark.
     assert entry.endswith("a" * 200 + " [truncated]")
     exact = _skill("t1", summary="a" * 200)
-    assert render_catalog([exact]).splitlines()[-1].endswith("| " + "a" * 200)
+    assert render_catalog(
+        [exact], description_mode="summary").splitlines()[-1].endswith(
+            "| " + "a" * 200)
     short = _skill("t1", summary="a" * 201)
-    assert render_catalog([short]).splitlines()[-1].endswith(
-        "a" * 200 + " [truncated]")
+    assert render_catalog(
+        [short], description_mode="summary").splitlines()[-1].endswith(
+            "a" * 200 + " [truncated]")
+
+
+def test_the_three_description_modes():
+    skill = _skill("t1", summary="Restart safely.")
+    trigger = "The service rejects connections. Check the log file "\
+              "before restarting anything."
+    summary_entry = render_catalog(
+        [skill], description_mode="summary").splitlines()[-1]
+    assert summary_entry.endswith("| Restart safely.")
+    trigger_entry = render_catalog(
+        [skill], description_mode="when_to_use").splitlines()[-1]
+    assert trigger_entry.endswith("| " + trigger)
+    combined = render_catalog(
+        [skill], description_mode="summary_then_when_to_use").splitlines()[-1]
+    assert combined.endswith("| Restart safely. Use when: " + trigger)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +198,7 @@ def test_the_manifest_carries_the_accepted_files_and_the_bank_fingerprint():
     manifest = skill_folder_manifest(bank)
     assert manifest["catalog_filename"] == CATALOG_FILENAME
     assert manifest["catalog_text"] == render_catalog(accepted)
+    assert manifest["description_mode"] == "summary_then_when_to_use"
     # The fingerprint is the phase artifact's bank-summary digest: over
     # the FULL bank (pending included), never a new version number.
     assert manifest["bank_fingerprint"] == bank_reference(bank)
@@ -210,9 +246,9 @@ def test_an_empty_accepted_bank_renders_no_catalog():
     assert rows[0].aux["skill_folder"]["catalog_text"] == ""
 
 
-def test_colliding_file_names_are_refused_loudly():
+def test_colliding_directory_names_are_refused_loudly():
     # The safe-alphabet mapping is not injective: two distinct ids can
-    # map to one file name, and one file must not silently shadow the
+    # map to one directory, and one file must not silently shadow the
     # other.
     left = _skill("t1", summary="Left.")
     left.skill_id = "a:b"
@@ -220,10 +256,15 @@ def test_colliding_file_names_are_refused_loudly():
     right.skill_id = "a/b"
     with pytest.raises(ValueError, match="silently"):
         skill_folder_manifest([left, right])
-    catalog_clash = _skill("t1", summary="Clash.")
-    catalog_clash.skill_id = "catalog"
-    with pytest.raises(ValueError, match="catalog's own file name"):
-        skill_folder_manifest([catalog_clash])
+
+
+def test_a_skill_named_catalog_gets_its_own_directory():
+    # The catalog file is catalog.md at the root; a skill id "catalog"
+    # maps to catalog/SKILL.md and does not collide with it.
+    skill = _skill("t1", summary="Clash.")
+    skill.skill_id = "catalog"
+    manifest = skill_folder_manifest([skill])
+    assert manifest["files"][0]["filename"] == "catalog/SKILL.md"
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +365,17 @@ def test_the_registry_resolves_the_folder_entry():
     assert params == FolderParams()
     assert resolve_params("delivery", {"name": FOLDER_DELIVERY_NAME}) == \
         FolderParams()
+
+
+def test_description_mode_is_validated():
+    with pytest.raises(ConfigError, match="description_mode"):
+        FolderParams(description_mode="unknown")
+
+
+def test_inline_catalog_is_no_longer_accepted():
+    with pytest.raises(ConfigError, match="unknown parameter"):
+        resolve_params("delivery", {"name": FOLDER_DELIVERY_NAME,
+                                    "inline_catalog": True})
 
 
 def test_an_unknown_delivery_name_lists_the_folder():

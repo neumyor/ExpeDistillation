@@ -16,15 +16,17 @@ runner script there is the real remote entry point):
    task prompt, so the remote agent sees the skills block as part of its
    task prompt. Bare runs (empty block) use ``TBENCH_EVAL_MODE=bare``.
    **Skill-folder units (the real_folder execution, M3)** ride the same
-   mechanism: the SKILL.md carries the folder GUIDANCE
-   (``TB_SKILL_FOLDER_GUIDANCE``); with ``inline_catalog=True`` the same
-   file also carries the full catalog text (built from
-   ``TB_TASK_PROMPT_FOLDER_INLINE``), while the manifest's catalog.md and
-   skill files are uploaded beside it into the same per-run directory,
-   which the environment mounts into the sandbox read-only at
-   ``/opt/openclaw-skills/<task>/``; the agent cats what it needs, every
-   command stays in the recorded terminal session, and the plugin neither
-   intercepts nor budgets the reads (M4 parses them).
+   mechanism: the task-level SKILL.md carries the folder GUIDANCE
+   (``TB_SKILL_FOLDER_GUIDANCE``), while each accepted skill is uploaded
+   as its own ``<skill>/SKILL.md`` directory beside it into the same
+   per-run directory, which the environment mounts into the sandbox
+   read-only at ``/opt/openclaw-skills/<task>/``. Harbor's Terminus agent
+   discovers the per-skill files itself, parses their YAML frontmatter,
+   and appends an ``<available_skills>`` list with each exact location to
+   the initial prompt. The agent cats what it needs, every command stays
+   in the recorded terminal session, and the plugin neither intercepts
+   nor budgets the reads (M4 parses them). The catalog file remains a
+   fallback, not the prompt's directory.
 2. **Launch**: one ssh round trip runs ``nohup setsid env <VARS> bash
    <runner> > <root>/logs/<run_id>.log 2>&1 < /dev/null & echo $!``. The
    runner is detached from the ssh session, so a dropped connection cannot
@@ -86,17 +88,26 @@ acceptance judges -- boundaries doc sections 2.2 and 2.3):
   something) carries the benchmark scorer's verdict and it passes through
   verbatim as ``correctness`` (reward > 0 -> True, reward == 0 -> False),
   whatever the verifier log looks like beyond that;
-- a trial with no reward, or a reward claimed without verifier evidence
-  (the campaign's "pseudo zero" -- the verifier log missing or pytest
-  never collected anything, in EITHER reward direction), carries no
-  scorer verdict: the run is stored with ``correctness=None`` and the
-  trial's exception_type / exception_message / ``verifier_ran`` as raw
-  facts. Execution does not mechanically retry it and does not reclassify
-  the model-vs-infra exceptions (AgentTimeoutError et al.); judging
-  those runs is acceptance's named-rule decision;
-- infrastructure failures (transport, deadline, dead runner, an
-  untrusted pre-existing run id) raise ``InfrastructureError`` -- K1's
-  mechanical retry, never a stored record.
+- a trial with no reward whose exception is infrastructure (anything
+  outside the model-exception set below: sandbox/setup timeouts, quota,
+  transport, or no exception at all) raises ``InfrastructureError``:
+  K1 retries the unit under a fresh attempt token, exactly like the
+  transport/deadline failures; an exhausted retry budget leaves the
+  unit missing (K1's failure ledger), never a stored pseudo-verdict;
+- a reward claimed without verifier evidence (the campaign's "pseudo
+  zero", in either reward direction) is an infrastructure failure too:
+  the reward cannot be trusted without the evidence, so it raises and
+  K1 retries the unit;
+- a model-side no-verdict trial (AgentTimeoutError,
+  ContextLengthExceededError, OutputLengthExceededError, or a broken
+  tmux RuntimeError) carries no scorer verdict: the run is stored with
+  ``correctness=None`` and the trial's exception_type /
+  exception_message / ``verifier_ran`` as raw facts. Execution does not
+  mechanically retry those; judging them is acceptance's named-rule
+  decision;
+- infrastructure failures before a trial result exists (transport,
+  deadline, dead runner, an untrusted pre-existing run id) raise
+  ``InfrastructureError`` -- K1's mechanical retry, never a stored record.
 
 ``classify_result`` below keeps the pre-R2 classification ONLY as the
 archive validator's historical lens (scripts/analysis/
@@ -125,7 +136,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NoReturn, Optional, Sequence, Tuple
 
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
@@ -140,17 +151,16 @@ from expedistill.infra.reliability import (
     InfrastructureError,
 )
 from expedistill.infra.store import write_json
-from expedistill.prompts.registry import PromptSpec, get as get_prompt, register
+from expedistill.prompts.registry import PromptSpec, register
 
 __all__ = [
     "TBPlugin",
     "TB_SKILL_FOLDER_GUIDANCE",
     "TB_TASK_PROMPT",
     "TB_TASK_PROMPT_FOLDER",
-    "TB_TASK_PROMPT_FOLDER_INLINE",
-    "TB_TASK_PROMPT_FOLDER_INLINE_NAME",
     "classify_result",
     "result_facts",
+    "retryable_unscored",
     "runner_env",
 ]
 
@@ -204,28 +214,30 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 #
 # A folder unit's remote trial rides the SAME skills-mode mechanism a
 # skills-block trial does: the plugin uploads a per-run directory under
-# ``<TBENCH_SKILL_ROOT>/<run_id>/<task_name>/`` whose SKILL.md the remote
-# skill agent injects into the agent's task prompt, and the
-# TencentTaskSkillE2BEnvironment (outer scripts/tb21, vendored
-# tencent_tb2_skill_env.py) uploads that WHOLE directory -- SKILL.md and
-# every other file in it -- into the sandbox read-only at
-# ``/opt/openclaw-skills/<task_name>/``. The folder play uses exactly
-# that: SKILL.md carries the GUIDANCE below; with inline_catalog=True it
-# also carries the catalog text (the SKILL.md body is built from
-# TB_TASK_PROMPT_FOLDER_INLINE), while catalog.md plus the skill files
-# ride the same directory into the sandbox, where the agent cats them.
-# So the guidance's path wording is a remote contract: it must name
-# /opt/openclaw-skills, the mount the vendored environment hardcodes.
+# ``<TBENCH_SKILL_ROOT>/<run_id>/<task_name>/`` whose task-level SKILL.md
+# is the guidance below, and the TencentTaskSkillE2BEnvironment (outer
+# scripts/tb21, vendored tencent_tb2_skill_env.py) uploads that WHOLE
+# directory -- SKILL.md and every other file in it -- into the sandbox
+# read-only at ``/opt/openclaw-skills/<task_name>/``. Each accepted skill
+# is its own ``<skill>/SKILL.md`` directory under that task directory.
+# Harbor's Terminus agent discovers those files itself and appends an
+# ``<available_skills>`` list to the initial prompt, so this guidance
+# points at that list instead of carrying a catalog. The path wording is
+# a remote contract: it must name /opt/openclaw-skills, the mount the
+# vendored environment hardcodes.
 # --------------------------------------------------------------------------
-TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox.
-Run `ls /opt/openclaw-skills/` to find this task's directory name, then read
-the catalog: `cat /opt/openclaw-skills/<directory>/catalog.md`. Every catalog
-line lists one skill as "<skill id> | <file to cat> | <one-line description>".
-cat only the skill file the current step needs, one at a time; do not open
-many skill files at once; come back to the catalog when a later step needs
-another one. These skills are lessons distilled from earlier runs: use
-them as references when they apply to the current task, and ignore them
-when they do not."""
+TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox at
+/opt/openclaw-skills/<task>/.
+The available skills are listed in the <available_skills> section of this
+prompt, each with the exact location of its SKILL.md. Before starting the
+task itself, read the location of at least one skill that could plausibly
+help with the task. You MUST do this at least once before running any
+command for the task itself, even if the task looks simple. After that,
+read only the skill the current step needs, one at a time; do not open many
+skill files at once; come back to the available-skills list when a later
+step needs another one. These skills are lessons distilled from earlier
+runs: use them as references when they apply to the current task, and
+ignore them when they do not."""
 
 TB_TASK_PROMPT_FOLDER = register(
     PromptSpec(
@@ -258,54 +270,13 @@ TB_TASK_PROMPT_FOLDER = register(
             "the task description.\n"
         ),
         description=(
-            "E1 TB runner, skill-folder mode (the real_folder execution, "
-            "inline_catalog=False): the folder unit's task prompt -- the "
-            "SKILLS slot is replaced by the folder guidance section "
-            "(TB_SKILL_FOLDER_GUIDANCE verbatim, which is also what the "
-            "remote skill agent injects as the trial's SKILL.md); the "
-            "catalog text is not part of this task prompt. No "
-            "{skills_block} slot: nothing variable is injected. See "
-            "TB_TASK_PROMPT_FOLDER_INLINE for the inline-catalog SKILL.md "
-            "body."
-        ),
-    )
-)
-
-#: The registered name of the inline-catalog folder prompt, used to switch
-#: on the FolderParams.inline_catalog flag without a magic string in run().
-TB_TASK_PROMPT_FOLDER_INLINE_NAME = "TB_TASK_PROMPT_FOLDER_INLINE"
-
-TB_TASK_PROMPT_FOLDER_INLINE = register(
-    PromptSpec(
-        name=TB_TASK_PROMPT_FOLDER_INLINE_NAME,
-        template=(
-            "Your task's skill folder is mounted read-only inside this "
-            "sandbox.\n"
-            "The skill files sit beside this SKILL.md in the same mounted "
-            "folder.\n"
-            "The catalog of available skills is included below. Each line "
-            "lists one skill as\n"
-            "\"<skill id> | <file to cat> | <one-line description>\".\n"
-            "cat only the skill file the current step needs, one at a time; "
-            "do not open many\n"
-            "skill files at once; come back to this catalog when a later step "
-            "needs another one.\n"
-            "These skills are lessons distilled from earlier runs: use them "
-            "as references when\n"
-            "they apply to the current task, and ignore them when they do "
-            "not.\n"
-            "\n"
-            "{catalog}\n"
-        ),
-        description=(
-            "E1 TB runner, skill-folder mode (the real_folder execution, "
-            "inline_catalog=True): the body uploaded as the folder unit's "
-            "SKILL.md -- the folder guidance plus the full catalog text "
-            "({catalog}). The remote task prompt tells the agent to read "
-            "this SKILL.md, so the catalog is visible without finding and "
-            "catting catalog.md. The skill bodies still live in the mounted "
-            "folder for on-demand cat. This is NOT the first-turn task "
-            "prompt; Harbor's Terminus prompt remains that."
+            "E1 TB runner, skill-folder mode (the real_folder execution): "
+            "the folder unit's task prompt -- the SKILLS slot is replaced "
+            "by the folder guidance section (TB_SKILL_FOLDER_GUIDANCE "
+            "verbatim, which is also what the remote skill agent injects "
+            "as the trial's task-level SKILL.md). Harbor's Terminus agent "
+            "adds the <available_skills> list; no catalog text is part of "
+            "this prompt and there is no {skills_block} slot."
         ),
     )
 )
@@ -420,6 +391,35 @@ def result_facts(result: Dict[str, Any],
     }
 
 
+def retryable_unscored(facts: Dict[str, Any]) -> bool:
+    """True when a no-verdict trial failed on infrastructure, not the model.
+
+    The live counterpart of ``classify_result``'s infra branch: a trial
+    that came back without usable verifier evidence is an infrastructure
+    failure even though Harbor returned a result.json. That covers a
+    missing reward and a pseudo zero (a reward claimed while pytest never
+    collected -- the reward is meaningless without the evidence). Raising
+    ``InfrastructureError`` lets K1 retry the unit under a fresh token;
+    the retry runs the whole trial again. A model-side no-verdict trial
+    stays a stored ``correctness=None`` fact for acceptance.
+
+    Keep the model predicates in sync with ``classify_result`` below:
+    that function is frozen for the archive validator and must reproduce
+    the historical campaign, so it cannot call this live policy.
+    """
+    if (facts.get("reward") is not None
+            and facts.get("verifier_ran") is True):
+        return False  # scored: reward plus verifier evidence
+    exception_type = str(facts.get("exception_type") or "")
+    message = str(facts.get("exception_message") or "")
+    if exception_type in _MODEL_EXCEPTIONS:
+        return False
+    if (exception_type == _TMUX_ERROR_TYPE
+            and _TMUX_ERROR_RE.search(message)):
+        return False
+    return True
+
+
 def classify_result(result: Dict[str, Any],
                     verifier_log: Optional[str]) -> Tuple[str, Optional[float], Dict[str, Any]]:
     """The pre-R2 verdict classification, kept ONLY as the archive
@@ -427,8 +427,9 @@ def classify_result(result: Dict[str, Any],
     re-derives the status an archived trial was produced under and checks
     it against the campaign audit. ``run`` no longer calls this -- the
     execution path passes the scorer's verdict through and reports raw
-    facts (:func:`result_facts`); validity judgments (pseudo zero,
-    model-vs-infra exceptions) live with acceptance's named rules now.
+    facts (:func:`result_facts`); the live infrastructure-retry predicate
+    is :func:`retryable_unscored` above, and pseudo-zero / model-side
+    validity judgments live with acceptance's named rules now.
     Returns (status, reward, info). Pure.
     """
     # The reward/exception parsing below is a FROZEN copy of
@@ -533,30 +534,49 @@ def _env_float(name: str, default: float, override: Optional[float]) -> float:
 #: lock already serialises whole drivers).
 _FOLDER_CACHE_LOCK = threading.Lock()
 
-#: Rolling upload admission (user ruling 2026-10-18): at most this many
-#: units may be between "started building connections" and "the submit
-#: returned" at once, and the next unit is admitted only when an earlier
-#: one's upload COMPLETES -- never by a timer alone. A transport-shape
-#: guard (the 2026-10-18 storm was 84 units x 141 per-file scp
-#: connections and node29's sshd MaxStartups dropped them): it changes
-#: when units start, never what they measure. Resumed units skip it
-#: (they only poll); polls run outside it (one ssh per poll period).
+#: Rolling connection admission (user ruling 2026-10-18): at most this
+#: many units may be between "started building connections" and "the
+#: submit returned" at once, and the next unit is admitted only when an
+#: earlier one's upload COMPLETES -- never by a timer alone. A
+#: transport-shape guard (the 2026-10-18 storm was 84 units x 141
+#: per-file scp connections and node29's sshd MaxStartups dropped them):
+#: it changes when units start, never what they measure. The fresh-unit
+#: probe, upload and submit all sit inside it; resumed units' result
+#: probes do too. Polls run outside it (one ssh per poll period).
 _UPLOAD_GATE_WIDTH = _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8)
 _UPLOAD_GATE = threading.BoundedSemaphore(_UPLOAD_GATE_WIDTH)
 
 
-def _folder_dir_digest(folder_dir: Path) -> str:
-    """The CONTENT digest of a materialized skill folder: sha256 over the
-    sorted (name, bytes) of every file it holds. The cache key -- the
-    same folder re-uses the remote cache, a changed folder (a re-curated
-    bank) gets a new one, and two folders with equal digests are
-    byte-identical by construction."""
+def _folder_file_names(folder: Mapping[str, Any]) -> List[str]:
+    """The folder-relative files the manifest ships: every per-skill
+    ``<skill>/SKILL.md`` plus the catalog when its text is non-empty.
+    The task-level SKILL.md is uploaded separately by the plugin and is
+    not part of this list."""
+    names = [entry["filename"] for entry in folder.get("files", [])]
+    catalog_name = folder.get("catalog_filename")
+    if folder.get("catalog_text") and catalog_name:
+        names.append(catalog_name)
+    return names
+
+
+def _folder_dir_digest(folder_dir: Path, names: Sequence[str]) -> str:
+    """The CONTENT digest of the exact files the manifest ships: sha256
+    over the sorted (relative path, bytes). The cache key -- the same
+    folder re-uses the remote cache, a changed folder (a re-curated bank
+    or a changed frontmatter) gets a new one, and two folders with equal
+    digests are byte-identical by construction."""
     digest = hashlib.sha256()
-    for path in sorted(entry for entry in folder_dir.iterdir()
-                       if entry.is_file()):
-        digest.update(path.name.encode("utf-8"))
+    for name in sorted(names):
+        path = folder_dir / name
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise CodeBugError(
+                f"the materialized folder {str(folder_dir)!r} is missing "
+                f"{name!r}, which the manifest names: {exc}") from exc
+        digest.update(name.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
+        digest.update(hashlib.sha256(payload).digest())
     return digest.hexdigest()
 
 
@@ -747,22 +767,11 @@ class TBPlugin(BenchmarkPlugin):
         link = self._link if self._link is not None else RemoteLink()
         run_id = self._make_run_id(task_name, task)
         # A folder unit rides the skills-mode mechanism with the folder
-        # guidance as its SKILL.md. inline_catalog=True also appends the
-        # catalog text to that same SKILL.md, so the agent sees the catalog
-        # when it reads the SKILL.md the remote task prompt tells it to
-        # read; the catalog lives in catalog.md too, as a fallback.
-        # inline_catalog=False (default): the SKILL.md carries guidance
-        # only; the agent must cat catalog.md from the mounted folder.
+        # guidance as its task-level SKILL.md. Harbor's Terminus agent
+        # discovers the per-skill <skill>/SKILL.md files and appends the
+        # <available_skills> list; the catalog file is only a fallback.
         folder = _folder_of(task)
-        inline_catalog = (
-            bool(task.meta.get("inline_catalog", False))
-            if isinstance(task.meta, dict) else False
-        ) if folder is not None else False
-        if folder is not None and inline_catalog:
-            skill_md = get_prompt(TB_TASK_PROMPT_FOLDER_INLINE_NAME).format(
-                catalog=skills_block)
-            folder_prompt_name = TB_TASK_PROMPT_FOLDER_INLINE_NAME
-        elif folder is not None:
+        if folder is not None:
             skill_md = TB_SKILL_FOLDER_GUIDANCE
             folder_prompt_name = self.skill_folder_prompt_name
         else:
@@ -796,8 +805,14 @@ class TBPlugin(BenchmarkPlugin):
             conditions = self._conditions(run_id, eval_mode, skill_md, folder)
             record = self._read_record(record_file, run_id)
             recorded_pid = record.get("pid") if record else None
-            state, found, remote_meta = self._probe(
-                link, root, run_id, task_name, recorded_pid)
+            # The pre-submit probe is a connection too: gate it with the
+            # upload/submit burst so 32 workers cannot open 32 ssh
+            # connections at once (the 2026-10-22 32+32 storm: the probe
+            # sat outside this gate and 37 units timed out before any job
+            # directory existed).
+            with _UPLOAD_GATE:
+                state, found, remote_meta = self._probe(
+                    link, root, run_id, task_name, recorded_pid)
             if state != "absent":
                 problem = self._untrusted(state, record, remote_meta,
                                           conditions, recorded_pid)
@@ -961,11 +976,11 @@ class TBPlugin(BenchmarkPlugin):
         uploading anything.
 
         A folder unit (``folder`` is its (manifest, local directory)) rides
-        the skills mode: its SKILL.md is the folder guidance (with the
-        catalog appended when inline_catalog is on; the caller passes the
-        finished body as ``skill_md``), and the manifest's catalog and skill
-        files reach the sandbox beside it through the same per-run
-        directory.
+        the skills mode: its task-level SKILL.md is the folder guidance
+        (the caller passes the finished body as ``skill_md``), and each
+        accepted skill's ``<skill>/SKILL.md`` reaches the sandbox beside
+        it through the same per-run directory. Harbor's Terminus agent
+        discovers those files and renders <available_skills>.
         The trajectory keeps every terminal command, so what the agent
         actually cat'd stays in the record for M4's parsing -- execution
         here neither intercepts nor budgets the reads."""
@@ -996,6 +1011,7 @@ class TBPlugin(BenchmarkPlugin):
                 "local_dir": str(folder_dir),
                 "bank_fingerprint": manifest.get("bank_fingerprint"),
                 "catalog_filename": manifest.get("catalog_filename"),
+                "description_mode": manifest.get("description_mode"),
                 "files": [entry.get("filename")
                           for entry in manifest.get("files", [])],
             }
@@ -1008,12 +1024,12 @@ class TBPlugin(BenchmarkPlugin):
                              folder: Optional[Tuple[Dict[str, Any], Path]]
                              ) -> None:
         """Fresh launches only: upload the run's SKILL.md (the D9 block
-        verbatim, or the folder guidance for a folder unit -- guidance plus
-        the catalog when inline_catalog is on; the remote skill agent wraps
-        it into the agent's task prompt), a folder unit's catalog and skill
-        files beside it (the whole per-run directory reaches the sandbox --
-        module docstring), then the remote submit meta -- last, so a meta on
-        the remote side means everything else is already there."""
+        verbatim, or the folder guidance for a folder unit; the remote
+        skill agent wraps it into the agent's task prompt), a folder
+        unit's per-skill ``<skill>/SKILL.md`` files and catalog beside it
+        (the whole per-run directory reaches the sandbox -- module
+        docstring), then the remote submit meta -- last, so a meta on the
+        remote side means everything else is already there."""
         dirs = [f"{root}/jobs"]
         if skill_meta["eval_mode"] == "skills":
             dirs.append(f"{skill_meta['remote_skill_root']}/{task_name}")
@@ -1075,10 +1091,7 @@ class TBPlugin(BenchmarkPlugin):
                 f"TB run {run_id}: the folder unit's materialized "
                 f"directory {str(folder_dir)!r} does not exist; the phase "
                 "driver must materialize the folder before dispatch")
-        names = [entry["filename"] for entry in manifest.get("files", [])]
-        catalog_name = manifest.get("catalog_filename")
-        if manifest.get("catalog_text"):
-            names.append(catalog_name)
+        names = _folder_file_names(manifest)
         missing = [name for name in names
                    if not (folder_dir / name).is_file()]
         if missing:
@@ -1086,18 +1099,17 @@ class TBPlugin(BenchmarkPlugin):
                 f"TB run {run_id}: the materialized folder "
                 f"{str(folder_dir)!r} is missing {missing}, which the "
                 "manifest names -- the folder cannot ship incomplete")
-        # The cache key is the CONTENT digest (the sorted file names and
-        # bytes of the materialized directory, which the bank fingerprint
-        # pins through the manifest): same folder -> same cache, a
-        # re-curated bank -> a new cache, never a mixed one.
-        digest = _folder_dir_digest(folder_dir)
+        # The cache key is the CONTENT digest of exactly the files the
+        # manifest names (a changed frontmatter or a re-curated bank gets
+        # a new cache, never a mixed one).
+        digest = _folder_dir_digest(folder_dir, names)
         cache = f"{root}/skills_cache/{digest}"
         with _FOLDER_CACHE_LOCK:
             _, _, rc = link.run(f"test -d {_q(cache)}",
                                 timeout=SUBMIT_TIMEOUT_SECONDS)
             if rc != 0:
                 self._ship_folder_cache(link, root, cache, folder_dir,
-                                        digest)
+                                        names, digest)
         targets = [f"{skill_meta['remote_skill_root']}/{task_name}"]
         alias_file = skill_meta.get("remote_skill_alias_file")
         if alias_file:
@@ -1113,21 +1125,24 @@ class TBPlugin(BenchmarkPlugin):
                 f"(rc={rc}): {_short(err)}")
 
     def _ship_folder_cache(self, link: RemoteLink, root: str, cache: str,
-                           folder_dir: Path, digest: str) -> None:
+                           folder_dir: Path, names: Sequence[str],
+                           digest: str) -> None:
         """The once-per-folder shipping: one tar, one scp, one atomic
         extract. Called under the cache lock; a crash mid-ship leaves at
         most a staging directory and a temporary tar, both of which the
         next attempt removes before retrying -- the cache directory
-        itself only ever appears whole (the mv)."""
-        files = sorted(path for path in folder_dir.iterdir()
-                       if path.is_file())
+        itself only ever appears whole (the mv). Only the manifest's
+        files ride the tar, so a stale file left in the local directory
+        can never leak into the sandbox."""
+        files = sorted(folder_dir / name for name in names)
         handle, tar_path = tempfile.mkstemp(suffix=".tar",
                                             prefix="skill_folder_")
         os.close(handle)
         try:
             with tarfile.open(tar_path, "w") as tar:
                 for path in files:
-                    tar.add(path, arcname=path.name)
+                    tar.add(path,
+                            arcname=path.relative_to(folder_dir).as_posix())
             cache_root = f"{root}/skills_cache"
             _, err, rc = link.run(f"mkdir -p {_q(cache_root)}",
                                   timeout=SUBMIT_TIMEOUT_SECONDS)
@@ -1163,10 +1178,11 @@ class TBPlugin(BenchmarkPlugin):
         the forwarded runner knobs and the uploaded content's bytes.
 
         Skills mode digests the SKILL.md; a folder unit additionally
-        folds in the manifest's bank fingerprint and catalog text -- the
-        SKILL.md bytes alone are not enough, and a run id whose folder
-        changed (a re-curated bank) must not be reused as if it were the
-        same trial."""
+        folds in the manifest's bank fingerprint, catalog text and the
+        exact bytes of every file the manifest ships -- the SKILL.md
+        bytes alone are not enough, and a run id whose folder changed (a
+        re-curated bank or different frontmatter) must not be reused as
+        if it were the same trial."""
         knobs = {knob: os.environ.get(knob) or "" for knob in _FORWARDED_KNOBS}
         env_digest = hashlib.sha256(json.dumps(
             knobs, sort_keys=True, separators=(",", ":")).encode("utf-8"))
@@ -1174,11 +1190,14 @@ class TBPlugin(BenchmarkPlugin):
         if eval_mode == "skills":
             digest_payload = skill_md
             if folder is not None:
-                manifest = folder[0]
+                manifest, folder_dir = folder
+                names = _folder_file_names(manifest)
                 digest_payload = "\n".join([
                     skill_md,
                     str(manifest.get("bank_fingerprint")),
                     str(manifest.get("catalog_text")),
+                    str(manifest.get("description_mode")),
+                    _folder_dir_digest(folder_dir, names),
                 ])
             skill_digest = hashlib.sha256(
                 digest_payload.encode("utf-8")).hexdigest()
@@ -1469,6 +1488,20 @@ class TBPlugin(BenchmarkPlugin):
         meta.update(facts)
         reward = facts["reward"]
 
+        if retryable_unscored(facts):
+            # A no-verdict trial whose failure is infrastructure is not a
+            # measurement fact: raise so K1 retries the unit under a fresh
+            # token (the retry runs the whole trial again). Model-side
+            # no-verdict trials fall through to the stored
+            # correctness=None fact below.
+            raise InfrastructureError(
+                f"TB trial {run_id} ({task_name}): no scorer verdict from "
+                f"an infrastructure failure (exception_type="
+                f"{facts['exception_type']!r}, exception_message="
+                f"{facts['exception_message']!r}, verifier_ran="
+                f"{facts['verifier_ran']!r}); retrying the unit under a "
+                "fresh attempt token")
+
         steps, usage_pair = self._fetch_steps(link, workdir, meta)
 
         if meta.get("resumed") in ("result", "alive"):
@@ -1491,11 +1524,9 @@ class TBPlugin(BenchmarkPlugin):
 
         # The scorer verdict, or its absence, as a fact (R2b, module
         # docstring): a reward whose verifier actually ran passes through
-        # verbatim; anything else (no reward, or a reward claimed without
-        # verifier evidence -- the pseudo zero, in either reward direction)
-        # carries NO verdict, so correctness stays None with the facts
-        # riding in meta. No mechanical retry either way: the run is
-        # stored and acceptance's named rule decides what it counts as.
+        # verbatim; the remaining no-verdict cases are model-side
+        # exceptions, stored as correctness=None with their raw facts in
+        # meta. Acceptance's named rule decides what they count as.
         if reward is not None and facts["verifier_ran"] is True:
             correctness: Optional[bool] = reward > 0.0
             usage_status = "ok"

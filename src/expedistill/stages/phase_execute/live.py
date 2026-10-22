@@ -232,6 +232,8 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
     # Handle new shortfalls first
     if ctx.run_settings.allow_infra_shortfall:
         open_holes = set()
+        round_store = Store(lm.round_dir(store, round_))
+        stored = set(round_store.ids("trajectories"))
         for plan in dispatch:
             if _round_has_row(store, plan.unit.task_ref, round_):
                 continue
@@ -239,8 +241,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             open_holes.update(
                 unit for unit in _expected_live_ids(plan.unit.task_ref,
                                                    n_attempts)
-                if unit not in skip
-                and not _round_stores(store, plan.unit.task_ref, round_))
+                if unit not in skip and unit not in stored)
 
         if open_holes:
             shortfall.write_unit_ids(
@@ -377,17 +378,6 @@ def _round_terminal(store: Store, task_id: str,
     row = lm.first_row_from(
         lm.ledger_path(store, lm.VERDICTS_LEDGER), task_id, round_)
     return row.get("verdict") if row is not None else None
-
-
-def _round_stores(store: Store, task_id: str, round_: int) -> bool:
-    """Whether the round store holds ANY trajectory of this task."""
-    directory = lm.round_dir(store, round_)
-    if not directory.exists():
-        return False
-
-    round_store = Store(directory)
-    return any(ids.parse_trajectory_id(unit)[0] == task_id
-              for unit in round_store.ids("trajectories"))
 
 
 def _frozen_audit_row(store: Store, round_: int,

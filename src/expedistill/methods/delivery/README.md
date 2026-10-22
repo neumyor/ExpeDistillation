@@ -41,14 +41,35 @@ delivery:
 ```yaml
 delivery:
   name: folder
-  inline_catalog: false
+  description_mode: summary_then_when_to_use
 ```
 
 必须和执行方法 `real_folder` 配对，只能用在 test 相位，读配置时会检查。
 
+每个已接受的技能写成自己的目录，目录里放 `SKILL.md`：
+
+```text
+<task>/
+  SKILL.md                 # benchmark 写的使用说明，不是技能
+  catalog.md               # 兜底目录，模型通常不需要读
+  bank-merge-0001/
+    SKILL.md               # YAML 头 + 四段正文
+  traj-tb-xxx/
+    SKILL.md
+```
+
+`SKILL.md` 开头的 YAML 头有 `name` 和 `description` 两个字段。Harbor 的 Terminus
+agent 自己扫描 `<task>/<skill>/SKILL.md`，解析 YAML 头，把技能名、描述和完整路径
+拼成 `<available_skills>` 放进首轮提示；模型按路径 `cat` 需要的那一个。`catalog.md`
+只在 `<available_skills>` 缺失时作为兜底。
+
 | 参数 | 含义 | 可选项 | 默认 |
 |---|---|---|---|
-| `inline_catalog` | 技能目录放在哪 | `false` 目录是文件夹里的 `catalog.md`，模型要自己打开；`true` 目录写进远端 `SKILL.md`（模型被要求先读的那个文件），正文仍在文件夹里按需读 | `false` |
+| `description_mode` | YAML 头里的 `description` 怎么拼 | `summary` 只放一句话摘要；`when_to_use` 只放 `[When to use]` 触发条件；`summary_then_when_to_use` 先放摘要，再放触发条件 | `summary_then_when_to_use` |
+
+两个字段都为空时，`SKILL.md` 里写一句 `Skill <id>.`，保证描述非空；`catalog.md`
+里保留原来的 `(no summary)` 占位符。
 
 模块边界见 `docs/decisions/execute_learn_module_boundaries_20261016.md`，
-检索的设计见 `docs/decisions/retrieval_delivery_tb_split_20261013.md`。
+检索的设计见 `docs/decisions/retrieval_delivery_tb_split_20261013.md`，
+本布局的决策见 `docs/decisions/folder_agent_skills_layout_20261022.md`。

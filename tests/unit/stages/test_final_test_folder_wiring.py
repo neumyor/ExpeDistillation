@@ -230,17 +230,18 @@ def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
     for call in control:
         assert call["task"].meta.get("skill_folder") is None
         assert call["task"].meta.get("skill_folder_dir") is None
-    # The folder on disk: the catalog plus one file per accepted skill,
-    # byte-identical to the manifest (which itself carries no bodies).
-    assert sorted(path.name for path in folder_dir.iterdir()) == sorted(
-        [manifest["catalog_filename"]]
-        + [entry["filename"] for entry in manifest["files"]])
+    # The folder on disk: the catalog plus one <skill>/SKILL.md per
+    # accepted skill (frontmatter plus the skill body).
+    assert sorted(path.relative_to(folder_dir).as_posix()
+                  for path in folder_dir.rglob("*") if path.is_file()) == \
+        sorted([manifest["catalog_filename"]]
+               + [entry["filename"] for entry in manifest["files"]])
     assert (folder_dir / manifest["catalog_filename"]).read_text(
         encoding="utf-8") == manifest["catalog_text"]
     for skill in skills:
         filename = manifest["files"][skills.index(skill)]["filename"]
-        assert (folder_dir / filename).read_text(
-            encoding="utf-8") == skill.content
+        text = (folder_dir / filename).read_text(encoding="utf-8")
+        assert text.split("\n---\n", 1)[1].lstrip("\n") == skill.content
     # The skills block handed to the plugin is the catalog (the delivery's
     # frozen row shape); the capable plugin is the one that must not
     # inject it -- the prompt test holds that side.
@@ -255,13 +256,15 @@ def test_a_resumed_c_phase_materializes_idempotently(monkeypatch, tmp_path):
     phase = _c_phase()
     phase_execute.run(ctx, phase)
     folder_dir = Path(ctx.run_dir) / "phases" / "p03_test" / "skill_folder"
-    before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns)
-              for path in folder_dir.iterdir()}
+    before = {path.relative_to(folder_dir).as_posix():
+              (path.read_bytes(), path.stat().st_mtime_ns)
+              for path in folder_dir.rglob("*") if path.is_file()}
 
     phase_execute.run(ctx, phase)
 
-    after = {path.name: (path.read_bytes(), path.stat().st_mtime_ns)
-             for path in folder_dir.iterdir()}
+    after = {path.relative_to(folder_dir).as_posix():
+             (path.read_bytes(), path.stat().st_mtime_ns)
+             for path in folder_dir.rglob("*") if path.is_file()}
     # Same bytes AND untouched files: unchanged content is not rewritten
     # (M2's idempotency contract, held through the phase driver).
     assert before == after

@@ -41,9 +41,10 @@ from tests.helpers.plugins import ensure_plugin
 _FOLDER_MANIFEST = {
     "bank_fingerprint": "bank:000000000000",
     "catalog_filename": "catalog.md",
-    "catalog_text": "## Skill folder catalog\n",
+    "catalog_text": "## Skill folder catalog (fallback)\n",
+    "description_mode": "summary_then_when_to_use",
     "files": [{"skill_id": "s1", "version": 1,
-               "filename": "s1.md"}],
+               "filename": "s1/SKILL.md"}],
 }
 
 

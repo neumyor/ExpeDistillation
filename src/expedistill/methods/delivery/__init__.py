@@ -7,6 +7,10 @@ stage 0 can validate them before anything freezes.
 from dataclasses import dataclass
 
 from expedistill.core.config import ConfigError
+from expedistill.inject.skill_text import (
+    DEFAULT_DESCRIPTION_MODE,
+    DESCRIPTION_MODES,
+)
 
 __all__ = ["FolderParams", "GroupByTaskParams", "NoneParams",
            "PerSkillParams", "RetrievalParams", "WholeBankParams"]
@@ -21,21 +25,26 @@ class WholeBankParams:
 class FolderParams:
     """The folder delivery's parameters.
 
-    ``inline_catalog`` controls where the catalog text reaches the
-    agent. ``False`` (the default, the M2 design) keeps the catalog in
-    ``catalog.md`` inside the mounted folder; the agent must ``cat`` it.
-    ``True`` puts the catalog text into the unit row's ``skills_block``
-    so the benchmark can include it in the remote skill file the agent is
-    told to read (the TB plugin writes it into ``SKILL.md``); the skill
-    bodies still live in the folder for on-demand ``cat`` -- the catalog
-    is no longer hidden behind a file the agent has to find and open,
-    which the 2026-10-19 folder-run audit found the weak model rarely did
-    (26/84 attempts hit a wrong path and saw no catalog lines). The
-    manifest's ``catalog_text`` is populated either way, so the
-    materialization and the M4 read-stats are unchanged.
+    ``description_mode`` chooses what the per-skill ``SKILL.md`` YAML
+    ``description`` (and the catalog's one-line column) is built from:
+
+    - ``summary``: the skill's WHAT sentence;
+    - ``when_to_use``: the ``[When to use]`` trigger;
+    - ``summary_then_when_to_use``: both, joined by ``Use when:``.
+
+    The folder layout is fixed: one ``SKILL.md`` per skill directory.
+    Harbor's Terminus discovers those files itself and renders the
+    ``<available_skills>`` list, so the catalog file is a fallback, not
+    the agent's primary directory.
     """
 
-    inline_catalog: bool = False
+    description_mode: str = DEFAULT_DESCRIPTION_MODE
+
+    def __post_init__(self) -> None:
+        if self.description_mode not in DESCRIPTION_MODES:
+            raise ConfigError(
+                "methods.delivery.folder description_mode must be one of "
+                f"{DESCRIPTION_MODES}, got {self.description_mode!r}")
 
 
 @dataclass(frozen=True)

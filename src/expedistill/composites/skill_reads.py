@@ -34,6 +34,7 @@ coverage keeps standing for folder units.
 
 import re
 import string
+from pathlib import PurePosixPath
 from typing import Any, List, Mapping
 
 from expedistill.core.models import Trajectory
@@ -70,6 +71,26 @@ def _name_token_in(line: str, filename: str) -> bool:
                      or line[end] not in _NAME_ALPHABET):
             return True
         start = found + 1
+
+
+def _path_matches(line: str, filename: str) -> bool:
+    """Whether a cat line reads ``filename``.
+
+    A manifest path is ``<skill-directory>/SKILL.md``. The full relative
+    path matches an absolute mount path as a substring (the characters
+    around it are ``/``, outside the name alphabet). The fallback
+    accepts the common ``cd <skill-directory> && cat SKILL.md`` form
+    when both the unique directory name and ``SKILL.md`` appear on the
+    same line; a bare ``cat SKILL.md`` stays ambiguous and is not
+    counted.
+    """
+    if _name_token_in(line, filename):
+        return True
+    path = PurePosixPath(filename)
+    if len(path.parts) == 2 and path.name == "SKILL.md":
+        return (_name_token_in(line, path.parts[0])
+                and _name_token_in(line, path.name))
+    return False
 
 
 def skill_files_read(trajectory: Trajectory,
@@ -125,7 +146,7 @@ def skill_files_read(trajectory: Trajectory,
                 continue
             for filename in order:
                 if filename not in seen \
-                        and _name_token_in(line, filename):
+                        and _path_matches(line, filename):
                     seen.add(filename)
                     read.append(owner_of[filename])
     return read

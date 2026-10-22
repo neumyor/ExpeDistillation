@@ -158,9 +158,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     "(the manifest resolves against the phase bank)")
             task = replace(task, meta={**task.meta,
                                        "skill_folder": manifest,
-                                       "skill_folder_dir": skill_folder_dir,
-                                       "inline_catalog": bool(
-                                           row.aux.get("inline_catalog", False))})
+                                       "skill_folder_dir": skill_folder_dir})
         plans.append(_Plan(
             unit=replace(
                 row,

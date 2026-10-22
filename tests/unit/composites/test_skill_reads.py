@@ -17,9 +17,9 @@ from expedistill.composites.skill_reads import skill_files_read
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError
 
-_FILE_A = "traj_tb_t1_strong_00_seg00_skill.md"
+_FILE_A = "traj-tb-t1-strong-00-seg00-skill/SKILL.md"
 _SKILL_A = "traj/tb:t1/strong/00/seg00/skill"
-_FILE_B = "bank_merge_0001.md"
+_FILE_B = "bank-merge-0001/SKILL.md"
 _SKILL_B = "bank/merge/0001"
 
 #: The delivery's frozen manifest shape (M2 rev-1: a name mapping, no
@@ -84,6 +84,22 @@ def test_only_the_cat_line_of_a_step_counts():
         f"bash_command({{\"keystrokes\": \"rm /tmp/{_FILE_B}\\n\"}})",
     ]))
     assert skill_files_read(_trajectory(step), _MANIFEST) == [_SKILL_A]
+
+
+def test_a_cd_then_cat_skill_md_line_counts_for_that_directory():
+    # The common shell form: the directory and SKILL.md both appear on
+    # the same action line, so the read is attributable.
+    line = ('bash_command({"keystrokes": "cd '
+            '/opt/openclaw-skills/train-fasttext/traj-tb-t1-strong-00-'
+            'seg00-skill && cat SKILL.md\\n"}})')
+    assert skill_files_read(_trajectory(line), _MANIFEST) == [_SKILL_A]
+
+
+def test_a_bare_cat_skill_md_without_a_directory_is_ambiguous():
+    # All skills share the file name SKILL.md; without the unique
+    # directory the read cannot be attributed and is not counted.
+    assert skill_files_read(
+        _trajectory(_cat("SKILL.md")), _MANIFEST) == []
 
 
 def test_a_bare_trajectory_reads_nothing():

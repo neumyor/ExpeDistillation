@@ -1143,6 +1143,12 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件：`src/expedistill/llm/client.py`（内容检查分支 + extra_headers）、`src/expedistill/llm/call.py`（ModelHandle.extra_headers）、`src/expedistill/llm/fake_provider.py`（签名接受 extra_headers）、`src/expedistill/cli.py`（model_options 到 header 的转换）、`src/expedistill/core/config.py`（data_inspection 校验）、`scripts/run/build_local_live_config.py`（qwen 增加 data_inspection: disable）、`configs/experiments/searchqa_split_live_run_20261020_v3.yaml`（新建）、`configs/experiments/alfworld_split_live_run_20261020.yaml`（重新生成）、`tests/unit/llm/test_client.py`、`tests/unit/core/test_config.py`、`tests/unit/test_cli.py`、`tests/unit/scripts/test_build_local_live_config.py`、run `runs/searchqa_split_live_run_20261020_v2/`（作废，含 `INVALID.md`）、run `runs/searchqa_split_live_run_20261020_v3/`（运行中）
 
+## 2026-10-20 15:41 — p03 中途切换新重试逻辑，补跑 write-compressor 无判定单元
+
+一段话摘要：用户要求当前实验使用新的无判定重试逻辑，并补跑 `tb:write-compressor` 的 weak/02。核查后确认 p03 尚未写 summary、也没有 verdict 行；已正常评分的 85 条轨迹在新旧代码下结果相同，只有“无判定 + 基础设施原因/伪零”的处理变化。15:41 停掉旧 driver 56188，把 `stage4_acceptance/live_run/round00/stage1_baseline/trajectories/traj%2Ftb%3Awrite-compressor%2Fweak%2F02.json` 移到 `runs/.../quarantine/p03_write_compressor_weak02/`，并保留旧 `result.json`/`trajectory.json`；用新代码和新 `.env` 重启为 PID 80578（`driver.pid`、日志 `driver_restart_20261020_1541.log`）。新 driver 接管 stale lock，p03 以 2 个 pending 单元续跑；write-compressor/02 先复用远端 a02 结果触发新的 `retryable_unscored` 分支，游标推进到 `next_retry=1`，已提交 `a02r1` 新 trial。p03 其余已存轨迹跳过；p03 完成后 p04+ 继续用新代码。
+
+工件：`src/expedistill/benchmarks/tb/plugin.py`、`tests/unit/benchmarks/test_tb_plugin.py`、`tests/unit/composites/test_execution_facts.py`、run `runs/tb21_split_folder_rerun2_20261020_1320/quarantine/p03_write_compressor_weak02/`、`driver.pid`、`driver_restart_20261020_1541.log`
+
 ## 2026-10-20 15:51 — 停止 SearchQA 实验，回退全部 400 内容检查处理代码
 
 一段话摘要：本条更正前面两条（15:01 与 15:24）里关于 400 异常处理的部分。用户要求停止正在运行的 SearchQA 实验，并回退所有针对 400 内容检查异常的处理代码。已用 SIGTERM 停止 v3 的 driver（PID 76368，exit -15），并删除定时检查任务。回退内容：`llm/client.py` 的裸 `APIError` 兜底分类、`APIStatusError` 分支的内容检查识别、`extra_headers` 参数与 SDK 传递；`llm/call.py` 的 `ModelHandle.extra_headers`；`llm/fake_provider.py` 的对应签名；`cli.py` 的 `_split_model_options` 与 header 常量；`core/config.py` 的 `data_inspection` 校验；配置生成脚本里的 qwen `data_inspection: disable`；以及前两轮新增的全部相关测试（裸 APIError 三条、内容检查 400 一条、extra_headers 两条、CLI 两条、config 两条、生成器一条断言）。保留的内容：本地 benchmark 的配置生成脚本、启动脚本、v5 配置、运行手册、ALFWorld 冻结测试、SearchQA 正式实验本身的支持工作。v3 run 目录已写 `INVALID.md`，停在 p01 baseline 的 1195 个已落盘单元，4 条失败记录全部是 deepseek 的内容检查拒绝，结果不进入任何结果表。`configs/experiments/searchqa_split_live_run_20261020_v3.yaml` 作为停机记录保留原样（含已被回退的 data_inspection 选项），不再用于续跑。全量测试 2220 passed + 4 deselected，ruff 与分层检查通过。400 异常的后续处理方式待用户决定。
@@ -1161,14 +1167,56 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 
 工件：`src/expedistill/llm/call.py`（`ModelHandle.temperature` 默认 1.0）、`src/expedistill/llm/client.py`（客户端默认 1.0）、`tests/unit/llm/test_call.py`（默认值断言）、`README.md`（B1 采样温度说明）、`log.md`（本条）、run `runs/searchqa_split_live_run_20261020_v4/`（运行中，已热重启）
 
+## 2026-10-20 21:20 — 修复 p05 部分组空洞未接受，补记 accepted 后续跑
+
+一段话摘要：p05 在 20:47 写完 summary 后 driver 退出（exit 3，可续跑），summary 的 `infra_missing` 有 4 个组：extract-moves-from-video、feal-linear-cryptanalysis、polyglot-rust-c、reshard-c4-data。根因是 `live.py` 的 `open_holes` 用 `_round_stores` 做组级过滤，只接受“整组零轨迹”的空洞；有部分轨迹、缺另一次尝试的组不会被写入 accepted，导致 `_round_complete` 为 false、`infra_failed` 触发退出。修复为逐单元检查 round store 的轨迹 id；新增回归测试 `test_live_shortfall_accepts_the_missing_attempt_of_a_partial_group`。p05 旧 summary/unit_verdicts 备份到 `quarantine/p05_before_shortfall_fix/`。把 6 个缺失单元（extract 00/02、feal 00、polyglot-rust 01/02、reshard 02）补进 round01 的 accepted 文件（21→27），按 `--allow-infra-shortfall` 语义接受；21:20 以新代码重启 PID 72292。p05 重入后 4 个部分组按短缺口判定，summary 变为 `complete=true`、`infra_missing=[]`；p06 learn 已启动（task_list/outcomes 已写）。全套测试 2213 passed + 4 deselected，ruff 通过。未提交。
+
+工件：`src/expedistill/stages/phase_execute/live.py`、`tests/unit/stages/test_phase_execute.py`、`runs/.../quarantine/p05_before_shortfall_fix/`、`runs/.../stage4_acceptance/live_run/round01/accepted_infra_shortfall.json`、`driver.pid`、`driver_restart_20261020_2120.log`
+
 ## 2026-10-20 21:52 — 修复请求日志遇到 Ellipsis 崩溃，续跑 v4
 
 一段话摘要：v4 在 p02 learn 写到 266 个切段、176 个技能时退出（exit 1），回溯落在 `llm/call.py` 的 `_RequestLog.write`：一次 SEGMENT 回复只能通过 `ast.literal_eval` 解析，返回值里含 Python 的 `Ellipsis`（模型在字段里写了 `...`），`json.dumps` 抛 `TypeError: Object of type ellipsis is not JSON serializable`，请求日志写入失败后整个相位被杀。业务校验本来会把 `...` 当作非法字段并触发格式重试，崩溃发生在校验之前的诊断写入。修法是给请求日志的 `json.dumps` 加 `default=_log_default`，非 JSON 值用 `repr` 落盘，诊断日志永远不会因为模型输出形态而中断 run；业务校验行为不变。新增一条回归测试：SEGMENT 回复含 `...` 时 `call_model` 正常返回解析结果，请求日志写出 `"Ellipsis"`。修复后在同一 run 目录续跑（诊断路径的修复不改变测量口径，已完成的 2400 个 baseline 单元与 266 个切段/176 个技能继续有效），新 driver PID 93873，32 并发；`status=400` 与 `DataInspectionFailed` 计数仍为 0。全量测试 2221 passed + 4 deselected，ruff 与分层检查通过。实验仍在运行，结果未审计。
 
 工件：`src/expedistill/llm/call.py`（`_log_default` + 请求日志序列化）、`tests/unit/llm/test_call.py`（回归测试）、run `runs/searchqa_split_live_run_20261020_v4/`（续跑中）、`log.md`（本条）
 
+## 2026-10-20 21:53 — p07 因远端 TB 主机不可达全部失败，隔离自动接受记录
+
+一段话摘要：p06 于 21:37 完成并写出 `bank:b7e871173bc2`；p07 test 启动后 84 个 with_bank 单元在约 9 分钟内全部失败，错误统一为 `InfrastructureError: ssh to xinhaidong@10.31.112.40 timed out after 60s`。`phases/p07_test/with_bank/store/failed_units.jsonl` 有 84 行，with_bank store 轨迹数为 0；p07 summary 的 28 个任务全部 infra，delta 不是有效结果。本机复核 `nc 10.31.112.40 22` 超时、`node29` 无法解析，判断为远端主机/网络整体不可达，与代码无关。p07 在全部失败后自动写入了 84 个单元的 accepted 记录；已移到 `quarantine/p07_premature_accept_all_20261020_2150/`，避免主机恢复后续跑把这些空洞当成最终测结果；summary 和失败台账也备份在该目录。driver 已退出、run.lock 已释放。待远端主机恢复并 ssh/TCP 探测通过后，再续跑同一条命令，p07 会重新派发 84 个单元。
+
+工件：run `runs/tb21_split_folder_rerun2_20261020_1320/quarantine/p07_premature_accept_all_20261020_2150/`、`phases/p07_test/phase_summary.json`、`phases/p07_test/with_bank/store/failed_units.jsonl`、`driver_restart_20261020_2120.log`
+
+## 2026-10-21 10:23 — 新建 P04 分叉 run，重跑 P05-P07 以补 node29 断联空洞
+
+一段话摘要：node29 于 10:20 左右恢复（TCP 22 可达、ssh 返回 OK）。用户确认放弃直接续跑旧 run，改用 P04 分叉方案：旧 run 的 P05 27 个空洞已被接受、18 个 group 已有 round1 判定且技能状态已提交，普通续跑无法回填。新建 `runs/tb21_split_folder_rerun3_20261021_1015`，用一次性脚本 `tmp/fork_p04_run.py` 复用 p01 246 条基线轨迹、p02 282 条子任务、p03 round00 87 条轨迹与 29 条判定行、p04 技能库 182 条（115 pending / 67 accepted）、p05 已测的 27 条有效轨迹和 18 条注入审计行；不复制 p05 空洞记录、p06 库、p07 产物。校验：P05 已存 27 条加接受空洞 27 条恰好等于 54 个期望单元，P04 库重算 18 条 audit 行零差异，提示词 digest 无漂移。先以 `--until-phase 3` 干跑，p01-p04 全部零模型调用（usage 与原 run 逐字节相同）；10:22 以 PID 79706 启动完整序列，64 workers、k1-stagger 20、不加 `--allow-infra-shortfall`。P05 正在补 27 个缺失单元（11 个 group），round01 已有 27 条轨迹、无 shortfall 文件。旧 run 保持不动，p06/p07 的数字作废。
+
+工件：run `runs/tb21_split_folder_rerun3_20261021_1015/`（含 `FORKED_FROM.md`）、`tmp/fork_p04_run.py`（一次性分叉脚本，未进 git）、`driver.pid`、`console.log`
+
 ## 2026-10-21 14:15 — SearchQA 正式实验完成并通过审计
 
 一段话摘要：SearchQA 正式实验在 `runs/searchqa_split_live_run_20261020_v4` 跑完 7 个相位并正常退出（exit 0）。强模型换成 `deepseek-v4-flash-0731-tencent` 后，之前触发 400 内容检查的题目没有再出现，整个 run 的 `status=400` 与 `DataInspectionFailed` 计数为 0。过程中修了两处代码并各提交一次：`1b5eab4` 把 learn 相位的行级落地接进 B5 并行池（`execute_rows` 使用 `--workers`，每 target 仍只由一个线程处理），`ca811d0` 在 SIMILARITY 校验里保留 `/skill` 后缀恢复、丢弃模型编造的其他未知 ID 并在 stderr 记录，避免大库下一次幻觉 ID 卡死整个整理。最终测试：control 臂 1400 题 × 3 次，avg@n 0.7326、pass@n 0.8307、sub_em 0.8362；with_bank 臂 1400 题 × 3 次，avg@n 0.7802、pass@n 0.8579、sub_em 0.8793；delta 分别为 +0.0476、+0.0271、+0.0431，两臂均无基础设施缺口。最终库指纹 `bank:a9ce76a9fb07`，p06 整理后的库为 `bank:cda6b8b3d5da`、143 条技能、46,331 tokens，整理第 1 轮合并尝试 19、保留 14、跳过 5。完整性审计结果 0 error / 0 warn / 9 info：8 条是 p04 归因失败留下的待定组，1 条是 learn 相位 14 个模型输出失败单元的记录（重试会重新处理），测试相位本身没有缺口。需要披露两点：温度在实验中途从 0 热更新到 1.0，baseline 和 p02 的一部分产物来自 0、其余来自 1.0，最终两臂都在 1.0 下执行，delta 是同一解码协议内的对照；另有 16 条模型输出格式失败记录，集中在 author 诊断与 LIVE_RUN_ATTRIBUTION，未进入测试缺口。实验完成，审计通过，数字可引用，但引用时需要带上温度混合与上述失败记录的说明。
 
 工件：提交 `1b5eab4`（learn 行级并行）、`ca811d0`（SIMILARITY 未知 ID 丢弃）、`src/expedistill/stages/learn_tasks.py`、`tests/unit/stages/test_phase_learn.py`、`src/expedistill/blocks/curate.py`、`tests/unit/blocks/test_curate.py`、`tests/composites/test_curation.py`、run `runs/searchqa_split_live_run_20261020_v4/`（完成，审计 0 error / 0 warn / 9 info）、`runs/searchqa_split_live_run_20261020_v4/phases/p07_test/phase_summary.json`
+
+## 2026-10-21 19:27 — 停止 rerun3，提交恢复代码，给 P07 加技能读取强制要求
+
+一段话摘要：用户要求先停止本次实验并提交当前代码版本。rerun3 的 P07 在 79/84 条轨迹时被停止；这批 P07 作废，新的 P07 会在独立 run 中重跑。提交 `2f7d004`（TB 无判定重试、live 部分组空洞接受、rerun2 配置与日志）。用户观察到 P07 中弱模型很少真正读取技能，要求强制 agent 先读 SKILL.md、至少选择一个 skill 并 cat 其内容。已修改 `TB_TASK_PROMPT_FOLDER_INLINE` 和 `TB_SKILL_FOLDER_GUIDANCE`，把读取 SKILL.md、从 catalog 选至少一个 skill 并 cat 其全文写成 MANDATORY FIRST STEP；全量测试 2213 passed，ruff 通过。下一步从 P06 bank `bank:1d5b0f718266` 分叉新 run，只重跑 P07，使用 16 workers / stagger 40，并用 `skill_files_read` 统计确认读取率。
+
+工件：`src/expedistill/benchmarks/tb/plugin.py`、commit `2f7d004`、run `runs/tb21_split_folder_rerun3_20261021_1015/`（P07 停止在 79/84，作废）
+
+## 2026-10-22 02:39 — 新 prompt 的 P07 完成，技能读取率约 42%，全样本 delta 接近零
+
+一段话摘要：从 rerun3 的 P06 分叉新建 `runs/tb21_split_folder_rerun4_20261021_1927`，复用 p01-p06 产物和 `bank:1d5b0f718266`（60 个 accepted skill），p01-p06 回放零模型调用。P07 用新 prompt（MANDATORY FIRST STEP：先读 SKILL.md，至少选一个 skill 并 cat 全文）以 16 workers / stagger 40 重跑 84 个单元，最后剩 `pytorch-model-cli/00` 一个无 scorer verdict 单元，低并发补跑后 84/84 完成，`complete=true`、`infra_missing=0`。最终全样本：with_bank avg@N=0.4643、pass@N=0.7143；control avg@N=0.4762、pass@N=0.6429；delta avg@N=-0.0119、pass@N=+0.0714。技能读取：35/84 条轨迹至少读 1 个技能正文（42%），分布 0 个=49、1 个=26、2 个=7、3 个=1、4 个=1；19/28 个 task 至少有一次读取，9 个 task 三次都没读。按 task 事后切分：有读取的 19 个 task，with_bank avg=0.4123、control avg=0.4912、delta=-0.0789，pass 双方都是 0.6316；零读取的 9 个 task，with_bank avg=0.5741、control avg=0.4444、delta=+0.1296，pass 0.8889 vs 0.6667。这个子样本切分是事后选择，读取与否和 task 难度相关，“读取组更差”不能解释为因果。完整性审计：0 error / 0 warn / 1 info（run 根 failed_units 有一条 learn 阶段历史失败记录，属于信息项）。结论：prompt 把“几乎不读”提升到约 42%，但没有做到每条必读；全样本结果接近零（avg 略负、pass 略正）。若要做“必须读”的干净因果对比，仍需 A（试后重派）或 B（远端 shell 拦截）硬门禁并新开 run。
+
+工件：run `runs/tb21_split_folder_rerun4_20261021_1927/`（含 `FORKED_FROM.md`）、`phases/p07_test/phase_summary.json`、`tmp/audit_rerun4_20261022.json`、`tmp/fork_p06_run.py`（一次性分叉脚本，未进 git）、commit `61314ac`
+
+## 2026-10-22 11:51 — folder 交付改成 Agent Skills 目录布局，描述拼法做成开关
+
+一段话摘要：用户发现 folder 模式写出的技能文件没有 Claude 技能要求的 YAML 头，要求把格式集成在写文件时，并提供一个开关决定 `description` 只放 `[When to use]`、只放 summary，还是两者都放；同时废弃 TB 插件的 `inline_catalog`。核对远端 Harbor/Terminus 后确认：`Terminus2._build_skills_section` 会在 `skills_dir` 下按 `find -mindepth 2 -maxdepth 2 -name SKILL.md` 扫描技能，解析 YAML 头里的 `name` 和 `description`，生成 `<available_skills>` 拼进首轮提示。原来的平铺布局深度不对，扫描不到任何技能，插件只能自己把 catalog 注入 `SKILL.md`。现在每个已接受技能写成 `<skill>/SKILL.md`，带 YAML 头，目录名和 `name` 一致；任务级 `SKILL.md` 只放指向 `<available_skills>` 的短说明，`catalog.md` 降为兜底；`TencentSkillTerminus2` 在运行前把 `skills_dir` 设成当前任务目录。新增 `FolderParams.description_mode`（`summary` / `when_to_use` / `summary_then_when_to_use`，默认第三种）；`inline_catalog` 和 `TB_TASK_PROMPT_FOLDER_INLINE` 删除。上传缓存改为递归，只打包清单列出的文件，缓存键和续跑摘要都纳入每个文件的字节；读取统计改为匹配 `<skill>/SKILL.md` 或同一行的技能目录名。按 delivery → materialize → 上传 → Terminus 扫描逐环节静态审查，修了五处：catalog 的空描述占位符、frontmatter 正文前导换行、测试辅助重复执行模块、缺失文件的摘要异常、catalog 文件名路径校验。ruff 通过；全量测试 2229 passed、4 deselected；用真实 P06 bank 离线物化 60 个技能，Harbor 的 find 规则命中 60 条，60 个 YAML 头全部可解析且 name 唯一。新增配置 `configs/experiments/tb21_split_folder_native_20261022.yaml`；旧配置里的 `inline_catalog` 现在会被参数校验拒绝，需要新配置。远端 node29 的适配器还未部署，实验也还没启动。
+
+工件：`src/expedistill/inject/skill_text.py`、`src/expedistill/methods/delivery/folder.py`、`src/expedistill/composites/skill_folder.py`、`src/expedistill/composites/skill_reads.py`、`src/expedistill/benchmarks/tb/plugin.py`、`configs/experiments/tb21_split_folder_native_20261022.yaml`、`docs/decisions/folder_agent_skills_layout_20261022.md`、commit `da03b84`（本仓库）、commit `473981d`（外层 `scripts/tb21` 适配器）
+
+## 2026-10-22 14:35 — 把提交前的 _probe 纳入上传闸门，准备 32+32 复测
+
+一段话摘要：32+32 并发实验触发 37 个 ssh 60 秒超时（第一组 19、第二组 18），失败单元都没有远端 job 目录和 runner 日志，定位为提交前 `_probe` 在 `_UPLOAD_GATE` 外面：32 workers 会让每个 driver 同时发起 32 条探测连接，两个 driver 共 64 条，打满 node29 的 sshd。按要求只改这一处：把 `_probe` 包进现有 `_UPLOAD_GATE`，每进程 6 条，并更新 folder sandbox 测试把“先 probe、再 upload/submit”的准入顺序固化。全量测试 2231 passed、4 deselected，ruff 通过。两组实验已从 16+16 停掉，按 32 runner、stagger 120、上传闸门 6 重启（第一组 pid 13880，第二组 pid 15825）；重启后 5 分钟没有新增 ssh 超时，`failed_units.jsonl` 仍是之前的 19/18 条历史记录。完整判断要等 32 并发跑满原来的失败窗口（约 25 分钟）后再确认。
+
+工件：`src/expedistill/benchmarks/tb/plugin.py`、`tests/unit/benchmarks/test_tb_folder_sandbox.py`、`configs/experiments/tb21_split_folder_native_when_20261022.yaml`、commit `3b73186`、run `runs/tb21_split_folder_native_20261022_1200/`、run `runs/tb21_split_folder_native_when_20261022_1255/`

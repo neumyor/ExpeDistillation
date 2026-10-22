@@ -14,9 +14,8 @@ refusals for a manifest that would shadow a file, escape the
 directory, or disagree with the bank.
 """
 
-import string
-
 import pytest
+import yaml
 
 from expedistill.composites import skill_reads
 from expedistill.composites.skill_folder import materialize_skill_folder
@@ -66,34 +65,85 @@ def _inode(path):
     return path.stat().st_ino
 
 
-def test_the_folder_writes_every_file_and_the_catalog(tmp_path):
+def _split_frontmatter(text):
+    """(parsed YAML mapping, body) from one rendered SKILL.md."""
+    assert text.startswith("---\n")
+    head, body = text[4:].split("\n---\n", 1)
+    return yaml.safe_load(head), body.lstrip("\n")
+
+
+def _files(folder):
+    return sorted(path for path in folder.rglob("*") if path.is_file())
+
+
+def test_the_folder_writes_each_skill_directory_and_the_catalog(tmp_path):
     manifest, bank, folder = _manifest(tmp_path)
     assert sorted(entry.name for entry in folder.iterdir()) == \
         ["catalog.md",
-         "traj_tb_t1_strong_00_seg00_skill.md",
-         "traj_tb_t2_strong_00_seg00_skill.md"]
-    # The catalog file is the manifest's catalog text verbatim, and
-    # every skill file's body is the skill's four-section content
-    # READ FROM THE BANK (the manifest carries names, not bodies).
+         "traj-tb-t1-strong-00-seg00-skill",
+         "traj-tb-t2-strong-00-seg00-skill"]
+    # The catalog file is the manifest's catalog text verbatim.
     assert (folder / "catalog.md").read_text(encoding="utf-8") == \
         manifest["catalog_text"]
     bodies = {skill.skill_id: skill.content for skill in bank}
     for entry in manifest["files"]:
-        assert (folder / entry["filename"]).read_text(
-            encoding="utf-8") == bodies[entry["skill_id"]]
+        text = (folder / entry["filename"]).read_text(encoding="utf-8")
+        front, body = _split_frontmatter(text)
+        assert front["name"] == entry["filename"].split("/", 1)[0]
+        assert front["description"]
+        assert body == bodies[entry["skill_id"]]
         # The rev-1 shape: no content travels with the manifest.
         assert "content" not in entry
 
 
+def test_the_frontmatter_is_a_valid_agent_skill_header(tmp_path):
+    manifest, bank, folder = _manifest(tmp_path)
+    for entry in manifest["files"]:
+        text = (folder / entry["filename"]).read_text(encoding="utf-8")
+        front, _body = _split_frontmatter(text)
+        name = front["name"]
+        assert name == entry["filename"].split("/", 1)[0]
+        assert 1 <= len(name) <= 64
+        assert name == name.lower()
+        assert all(ch.isalnum() or ch == "-" for ch in name)
+        assert front["description"].strip()
+        assert len(front["description"]) <= 1024
+        assert "anthropic" not in name and "claude" not in name
+
+
+def test_the_three_description_modes_reach_the_frontmatter(tmp_path):
+    bank = [_skill("t1", summary="Restart a stuck service safely.")]
+    expected = {
+        "summary": "Restart a stuck service safely.",
+        "when_to_use": "The service rejects connections.",
+        "summary_then_when_to_use": (
+            "Restart a stuck service safely. Use when: "
+            "The service rejects connections."),
+    }
+    for mode, description in expected.items():
+        rows = folder_driver.resolve(
+            bank, ["task-a"], FolderParams(description_mode=mode))
+        manifest = rows[0].aux["skill_folder"]
+        folder = materialize_skill_folder(
+            manifest, bank, tmp_path / mode)
+        entry = manifest["files"][0]
+        text = (folder / entry["filename"]).read_text(encoding="utf-8")
+        front, body = _split_frontmatter(text)
+        assert front["description"] == description
+        assert body == bank[0].content
+
+
 def test_replaying_the_same_manifest_changes_nothing(tmp_path):
     manifest, bank, folder = _manifest(tmp_path)
-    before = {entry.name: _inode(entry) for entry in folder.iterdir()}
+    before = {path.relative_to(folder).as_posix(): _inode(path)
+              for path in _files(folder)}
     again = materialize_skill_folder(manifest, bank, folder)
     assert again == folder
     # Idempotency, chosen form: unchanged content is NOT rewritten --
     # same inode on every file (a rewrite would be a new temp file's
     # inode under the same name).
-    after = {entry.name: _inode(entry) for entry in folder.iterdir()}
+    after = {path.relative_to(folder).as_posix(): _inode(path)
+             for path in _files(folder)}
     assert after == before
     assert (folder / "catalog.md").read_text(encoding="utf-8") == \
         manifest["catalog_text"]
@@ -101,8 +151,7 @@ def test_replaying_the_same_manifest_changes_nothing(tmp_path):
 
 def test_a_changed_bank_rewrites_only_the_changed_files(tmp_path):
     manifest, bank, folder = _manifest(tmp_path)
-    skill_files = sorted(entry.name for entry in folder.iterdir()
-                         if entry.name != "catalog.md")
+    skill_files = sorted(entry["filename"] for entry in manifest["files"])
     stable_name, changed_name = skill_files
     stable_before = _inode(folder / stable_name)
     changed_before = _inode(folder / changed_name)
@@ -167,8 +216,8 @@ def test_a_manifest_skill_missing_from_the_bank_is_refused(tmp_path):
 
 def test_an_unsafe_file_name_is_refused(tmp_path):
     manifest, bank, _folder = _manifest(tmp_path)
-    manifest["files"][0]["filename"] = "../escape.md"
-    with pytest.raises(CodeBugError, match="not a safe name"):
+    manifest["files"][0]["filename"] = "../escape/SKILL.md"
+    with pytest.raises(CodeBugError, match="exactly one normalized"):
         materialize_skill_folder(manifest, bank, tmp_path / "x")
 
 
@@ -179,10 +228,10 @@ def test_a_duplicate_file_name_is_refused(tmp_path):
         materialize_skill_folder(manifest, bank, tmp_path / "x")
 
 
-def test_a_file_named_like_the_catalog_is_refused(tmp_path):
+def test_a_root_level_file_name_is_refused(tmp_path):
     manifest, bank, _folder = _manifest(tmp_path)
-    manifest["files"][0]["filename"] = manifest["catalog_filename"]
-    with pytest.raises(CodeBugError, match="collides with the catalog"):
+    manifest["files"][0]["filename"] = "SKILL.md"
+    with pytest.raises(CodeBugError, match="exactly one normalized"):
         materialize_skill_folder(manifest, bank, tmp_path / "x")
 
 
@@ -201,41 +250,29 @@ def test_a_manifest_without_a_catalog_name_is_refused(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The safe alphabet's three spellings stay one contract
+# The delivery's name rule and the materializer's restatement stay one
+# contract
 # ---------------------------------------------------------------------------
 
-def test_the_safe_alphabet_is_one_contract_across_its_three_spellings(
-        tmp_path):
-    # The delivery DERIVES the file names over the alphabet; the
-    # composite materializer and the read parser each RESTATE it (the
-    # layer rule forbids the import, and each restatement says so).
-    # This mirror test binds the three spellings (the FAILURE_CATEGORIES
-    # precedent): relaxing any one of them fails here, at test time,
-    # instead of as a mid-run CodeBugError.
-    from expedistill.composites.skill_folder import _FILENAME_RE
-    alphabet = string.ascii_letters + string.digits + "._-"
-    boundary = alphabet + ":/ \t中"
-    for ch in boundary:
-        inside = ch in alphabet
-        # The delivery's derivation keeps exactly the alphabet...
-        assert (folder_driver.skill_filename("s" + ch + "t")
-                == "s" + ch + "t.md") is inside
-        # ...the materializer's restated regex accepts exactly it...
-        assert bool(_FILENAME_RE.fullmatch("s" + ch + "t.md")) is inside
-        # ...and the read parser's delimited match treats the same
-        # characters as name characters.
-        assert (ch in skill_reads._NAME_ALPHABET) is inside
-    # The same contract end to end, through one odd skill id (colon,
-    # slash, dot and a non-ASCII character in one id): the delivery
-    # derives the name, the materializer accepts it, and the read
-    # parser counts a cat of exactly that name -- never a longer name
-    # that merely contains it.
+def test_the_skill_directory_rule_is_one_contract(tmp_path):
+    # The delivery DERIVES the directory names; the composite materializer
+    # RESTATES the rule (the layer rule forbids the import). This mirror
+    # test binds the two spellings: relaxing either one fails here, at
+    # test time, instead of as a mid-run CodeBugError.
+    from expedistill.composites.skill_folder import _SKILL_DIR_RE
+    for skill_id in ("bank/merge/0001", "tb:t1/a00/seg00/skill",
+                     "Mixed Case/ID", "plain"):
+        directory = folder_driver.skill_filename(skill_id).split("/", 1)[0]
+        assert _SKILL_DIR_RE.fullmatch(directory)
+    # One odd id end to end: the delivery derives the name, the
+    # materializer accepts it, and the read parser counts a cat of the
+    # exact relative path.
     odd = Skill(skill_id="tb:odd/id.name 中", content=MARKED,
                 subtask_id="s0", source_subtasks=["s0"],
                 summary="Odd id.", status="accepted")
     manifest = folder_driver.skill_folder_manifest([odd])
     filename = manifest["files"][0]["filename"]
-    assert filename == "tb_odd_id.name__.md"
+    assert filename == "tb-odd-id-name/SKILL.md"
     materialize_skill_folder(manifest, [odd], tmp_path / "folder")
     trajectory = Trajectory(
         trajectory_id="tb:odd:weak:0", task_id="tb:odd", benchmark="tb",

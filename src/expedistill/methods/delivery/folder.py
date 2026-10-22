@@ -1,14 +1,18 @@
-"""The folder delivery driver: a catalog listing, not the skills (M2).
+"""The folder delivery driver: one Agent Skill directory per skill.
 
-The third delivery play (the 2026-10-17 skill-folder alignment
-ruling): the agent is handed ONE folder of skills -- one
-markdown file per accepted skill plus a catalog file listing them -- and
-the prompt carries only the catalog; the agent cats the files it needs.
-This module is the delivery side of that play and stays a PURE FUNCTION
-(zero disk): ``resolve`` renders the catalog text and the folder's
-manifest, and materializing them into a real directory is the composite
-layer's job (:mod:`expedistill.composites.skill_folder`, called by the
-M3 execution path).
+The agent is handed ONE read-only folder of skills. Each accepted skill
+is a directory containing ``SKILL.md`` with YAML frontmatter (``name``
+and ``description``) and the skill's four-section body. Harbor's
+Terminus agent discovers those files itself, renders an
+``<available_skills>`` list with each exact location, and appends it to
+the initial prompt; the agent cats the skill it needs. The catalog file
+is a fallback, not the primary directory.
+
+This module is the delivery side and stays a PURE FUNCTION (zero disk):
+``resolve`` renders the catalog text and the folder's manifest, and
+materializing them into a real directory is the composite layer's job
+(:mod:`expedistill.composites.skill_folder`, called by the M3 execution
+path).
 
 The manifest rides the unit rows' ``aux["skill_folder"]`` and stays
 LIGHTWEIGHT -- the skill contents never travel with it (the M2 rev-1
@@ -24,54 +28,62 @@ the unit row stays as light as the old top-k one.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the curated skill bank, ``tasks`` the phase's tasks, ``params`` the
-empty FolderParams. One row per test task, every row the same fixed
+FolderParams. One row per test task, every row the same fixed
 (bank digest, catalog) pair -- the accepted-set bookkeeping mirrors
 whole_bank exactly: ``skills_injected`` is the ACCEPTED bank's digest
 (:func:`units.accepted_bank`, the pre-phase-artifact meaning of "the
 bank"), so the unit ids join the reuse/decision plumbing unchanged.
 """
 
+import hashlib
 import re
 from collections.abc import Mapping
 from typing import Any, Dict, List, Sequence, Union
 
 from expedistill.core.contracts import ExecutionUnitList
-from expedistill.core.models import (
-    SKILL_MARKERS,
-    Skill,
-)
+from expedistill.core.models import Skill
 from expedistill.inject import bank_reference
+from expedistill.inject.skill_text import (
+    DEFAULT_DESCRIPTION_MODE,
+    description_text,
+    one_line,
+    validate_description_mode,
+    when_to_use_line,
+)
 from expedistill.methods.delivery import FolderParams
 from expedistill.methods.delivery import units
 
 __all__ = ["CATALOG_FILENAME", "render_catalog", "resolve",
-           "skill_filename", "skill_folder_manifest"]
+           "skill_dirname", "skill_filename", "skill_folder_manifest",
+           "when_to_use_line"]
 
 #: The catalog file's name inside the folder (one fixed name: every
-#: consumer -- the prompt, the M3 materialization, the M4 cat-audit --
-#: keys on it, so it is a constant, not a parameter).
+#: consumer -- the materialization and the M4 cat-audit -- keys on it,
+#: so it is a constant, not a parameter).
 CATALOG_FILENAME = "catalog.md"
 
-#: The per-skill file name's safe alphabet, the same set phase labels
-#: are held to (composites.phase_bank): everything else in a skill id
-#: (its benchmark prefix carries ':' and its chain carries '/') maps to
-#: '_'. The mapping is deterministic but not injective, so the manifest
-#: builder refuses two skills whose names collide rather than letting
-#: one file silently shadow another.
-_SAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]")
+#: The per-skill directory's safe alphabet: lowercase letters, digits
+#: and hyphens, the Agent Skills format's name rule. Everything else in
+#: a skill id (its benchmark prefix carries ':' and its chain carries
+#: '/') maps to '-'; runs of '-' collapse. The mapping is deterministic
+#: but not injective, so the manifest builder refuses two skills whose
+#: names collide rather than letting one file silently shadow another.
+_SAFE_CHARS = re.compile(r"[^a-z0-9]+")
 
-#: The directory line's description budget. G2 / G6 / G11 summaries
-#: are held to SKILL_SUMMARY_MAX_CHARS (500) at write time, but the K5
-#: merge product composes its summary from the sources' summaries and
-#: is deliberately NOT held to that cap (no model wrote it) -- so the
-#: catalog line, whose whole point is to stay one readable line, clips
-#: the description here and says so, never silently.
+#: The Agent Skills name ceiling. Names longer than this get a short
+#: digest suffix; the directory and the frontmatter use the same value.
+_SKILL_NAME_MAX_CHARS = 64
+
+#: Words the Agent Skills name rule reserves.
+_RESERVED_NAME_WORDS = ("anthropic", "claude")
+
+#: The per-skill file name under its directory.
+_SKILL_FILE_NAME = "SKILL.md"
+
+#: The directory line's description budget. The full description lives
+#: in SKILL.md; the catalog line stays one readable line.
 _LINE_MAX_CHARS = 200
 _TRUNCATION_MARK = " [truncated]"
-
-#: The section the empty-summary fallback reads ([When to use]); it runs
-#: to the next section marker (SKILL_MARKERS) or the end of the content.
-_WHEN_TO_USE = SKILL_MARKERS[0]
 
 #: The description of a skill with neither a summary nor a [When to
 #: use] section (a markerless body): an explicit placeholder, never a
@@ -83,12 +95,12 @@ _NO_DESCRIPTION = "(no summary)"
 #: open many files at once), then one line per skill in the fixed
 #: "<skill id> | <file to cat> | <one-line description>" shape.
 _HEADER = "\n".join([
-    "## Skill folder catalog",
+    "## Skill folder catalog (fallback)",
     "",
-    "Usage rules:",
-    '- Read this catalog before acting: every line below lists one '
-    'skill of this folder as "<skill id> | <file to cat> | '
-    '<one-line description>".',
+    "The task prompt normally lists the available skills in an",
+    "<available_skills> section, with each exact SKILL.md location. Use",
+    "this file only when that list is missing. Every line below lists one skill as",
+    '"<skill id> | <file to cat> | <one-line description>".',
     "- cat only the skill file the current step needs, one at a time.",
     "- Do not open many skill files at once; come back to this catalog "
     "when a later step needs another one.",
@@ -105,85 +117,84 @@ def _field(record: Union[Skill, Mapping[str, Any]], name: str,
     return getattr(record, name, default)
 
 
-def _one_line(text: str) -> str:
-    """Collapse every whitespace run (newlines included) to one space."""
-    return re.sub(r"\s+", " ", text).strip()
+def skill_dirname(skill_id: str) -> str:
+    """One skill's directory name under the Agent Skills rule.
+
+    Lowercase letters, digits and hyphens only, 1-64 characters, no
+    reserved word. A long id is truncated and given a short digest
+    suffix; a collision between two ids is refused by the manifest
+    builder, never silently shadowed.
+    """
+    if not isinstance(skill_id, str) or not skill_id:
+        raise ValueError(
+            f"a skill directory needs a non-empty string skill_id, got "
+            f"{skill_id!r}")
+    name = _SAFE_CHARS.sub("-", skill_id.lower()).strip("-")
+    if not name:
+        name = "skill-" + hashlib.sha256(
+            skill_id.encode("utf-8")).hexdigest()[:8]
+    if len(name) > _SKILL_NAME_MAX_CHARS:
+        digest = hashlib.sha256(skill_id.encode("utf-8")).hexdigest()[:8]
+        name = name[:_SKILL_NAME_MAX_CHARS - len(digest) - 1].rstrip("-")
+        name = f"{name}-{digest}"
+    for word in _RESERVED_NAME_WORDS:
+        if word in name:
+            raise ValueError(
+                f"skill id {skill_id!r} maps to directory name {name!r}, "
+                f"which contains the reserved word {word!r}; rename the "
+                "skill before delivering it as an Agent Skill")
+    return name
 
 
 def skill_filename(skill_id: str) -> str:
-    """The folder file name of one skill: the skill id over the safe
-    alphabet (everything else mapped to '_') plus ``.md``.
+    """The folder-relative path of one skill: ``<name>/SKILL.md``.
 
     Deterministic in the skill id alone -- the manifest, the folder on
-    disk and the M4 cat-audit all derive the same name from the same
-    id, so nothing but the id needs to travel between them."""
-    if not isinstance(skill_id, str) or not skill_id:
-        raise ValueError(
-            f"a skill file name needs a non-empty string skill_id, got "
-            f"{skill_id!r}")
-    return _SAFE_CHARS.sub("_", skill_id) + ".md"
+    disk and the M4 cat-audit all derive the same path from the same
+    id, so nothing but the id needs to travel between them.
+    """
+    return f"{skill_dirname(skill_id)}/{_SKILL_FILE_NAME}"
 
 
-def when_to_use_line(content: str) -> str:
-    """The [When to use] section body as one line, '' when absent.
+def _description(record: Union[Skill, Mapping[str, Any]],
+                 description_mode: str) -> str:
+    """One skill's catalog description under the configured mode, then
+    the explicit catalog clip.
 
-    The empty-summary fallback the M2 ruling froze (a v2-migrated
-    skill has no summary, so its directory line falls back to the
-    section that says WHEN the skill applies). Since the 2026-10-19
-    ruling every skill carries this section; a body without it (a
-    pre-ruling failure reference, a markerless body) falls back to the
-    explicit placeholder instead. The section body runs
-    from the marker line's remainder (the renderer puts the first
-    sentence on the marker line) to the next section marker or the end
-    of the content, collapsed to one line the same way the D9 block
-    collapses its bullets."""
-    body: List[str] = []
-    in_section = False
-    for line in content.splitlines():
-        if in_section and any(line.startswith(section_marker)
-                              for section_marker in SKILL_MARKERS):
-            break
-        if not in_section:
-            if line.startswith(_WHEN_TO_USE):
-                in_section = True
-                body.append(line[len(_WHEN_TO_USE):])
-            continue
-        body.append(line)
-    if not in_section:
-        return ""
-    return _one_line(" ".join(body))
-
-
-def _description(record: Union[Skill, Mapping[str, Any]]) -> str:
-    """One skill's catalog description: the summary, else the [When to
-    use] section, else the
-    explicit placeholder -- then one line, then the explicit clip."""
-    description = _one_line(_field(record, "summary", "") or "")
-    if not description:
-        description = when_to_use_line(_field(record, "content", ""))
-    if not description:
+    A skill with neither a summary nor a [When to use] section keeps the
+    catalog's explicit placeholder; the SKILL.md frontmatter renderer
+    uses a non-empty generic fallback instead, because the Agent Skills
+    format rejects an empty description.
+    """
+    summary = one_line(_field(record, "summary", "") or "")
+    trigger = when_to_use_line(_field(record, "content", "") or "")
+    if not summary and not trigger:
         return _NO_DESCRIPTION
+    description = description_text(record, description_mode)
     if len(description) > _LINE_MAX_CHARS:
         return (description[:_LINE_MAX_CHARS].rstrip()
                 + _TRUNCATION_MARK)
     return description
 
 
-def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]]
-                   ) -> str:
+def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],
+                   description_mode: str = DEFAULT_DESCRIPTION_MODE) -> str:
     """The catalog file's exact bytes: the fixed usage header, then one
     line per skill, ``<skill id> | <file to cat> | <one-line
     description>``, in the given (bank artifact) order, one trailing
     newline."""
+    validate_description_mode(description_mode)
     lines = [_HEADER]
     for record in skills:
         skill_id = _field(record, "skill_id")
         lines.append("{} | {} | {}".format(
-            skill_id, skill_filename(skill_id), _description(record)))
+            skill_id, skill_filename(skill_id),
+            _description(record, description_mode)))
     return "\n".join(lines) + "\n"
 
 
-def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]]
+def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
+                          description_mode: str = DEFAULT_DESCRIPTION_MODE
                           ) -> Dict[str, Any]:
     """The folder manifest a folder unit carries (M3's materialization
     input)::
@@ -192,6 +203,7 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]]
                                                 # bank-summary digest
          "catalog_filename": "catalog.md",
          "catalog_text": "<the catalog file's exact bytes>",
+         "description_mode": "summary_then_when_to_use",
          "files": [{"skill_id", "version", "filename"},
                    ...]}                      # accepted set, bank order
 
@@ -204,21 +216,18 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]]
     ``bank_reference`` over the FULL bank -- the same digest the
     phase's bank_summary.json writes -- which names which version of
     the bank this folder is without inventing a new version number.
-    A collision (two skill ids mapping to one file name, or one mapping
-    to the catalog's own name) is refused loudly: a silent shadow would
-    be a wrong folder, and an empty accepted set renders NO catalog at
-    all (the D9 null-state lesson: an empty injection is the empty
-    string, never a header claiming experience exists)."""
+    A collision (two skill ids mapping to one directory) is refused
+    loudly: a silent shadow would be a wrong folder, and an empty
+    accepted set renders NO catalog at all (the D9 null-state lesson:
+    an empty injection is the empty string, never a header claiming
+    experience exists)."""
+    validate_description_mode(description_mode)
     accepted = units.accepted_bank(bank)
     files: List[Dict[str, Any]] = []
     owner_of: Dict[str, str] = {}
     for record in accepted:
         skill_id = _field(record, "skill_id")
         filename = skill_filename(skill_id)
-        if filename == CATALOG_FILENAME:
-            raise ValueError(
-                f"skill {skill_id!r} maps to the catalog's own file name "
-                f"{filename!r}: the folder cannot hold both")
         if filename in owner_of:
             raise ValueError(
                 f"skills {owner_of[filename]!r} and {skill_id!r} both map "
@@ -233,7 +242,9 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]]
     return {
         "bank_fingerprint": bank_reference(bank),
         "catalog_filename": CATALOG_FILENAME,
-        "catalog_text": render_catalog(accepted) if files else "",
+        "catalog_text": (render_catalog(accepted, description_mode)
+                         if files else ""),
+        "description_mode": description_mode,
         "files": files,
     }
 
@@ -247,36 +258,17 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
     phase's rows -- it is phase-level data; a per-unit consumer must
     copy before mutating).
 
-    In both modes ``skills_block`` receives the catalog text and the
-    manifest's ``catalog_text`` is populated, so the materialization
-    path (``composites.skill_folder``) and the M4 read-stats
-    (``composites.skill_reads``) are unaffected by the flag.
-
-    ``params.inline_catalog`` is a signal to the benchmark prompt layer:
-
-    ``False`` (default) -- the catalog text lives in the unit row but
-    the benchmark leaves the block slot out of the remote prompt/file;
-    the agent must ``cat`` the catalog file from the mounted folder to
-    see it (the original M2 design).
-
-    ``True`` -- the caller includes the catalog text in the remote skill
-    file the agent is told to read (the TB plugin writes it into
-    ``SKILL.md``), so the agent sees the catalog without having to find
-    and cat the catalog file first, which the 2026-10-19 folder-run audit
-    found the weak model rarely did (26/84 attempts hit a wrong path and
-    saw no catalog lines).  The first-turn task prompt is unchanged; the
-    skill bodies still live in the folder for on-demand ``cat``."""
+    ``skills_block`` receives the catalog text as a fallback. Harbor's
+    Terminus agent discovers each ``<skill>/SKILL.md`` itself and
+    renders the ``<available_skills>`` list; the catalog file is not
+    the primary directory and no benchmark prompt needs to inline it.
+    ``params.description_mode`` is carried in the manifest so the
+    materializer and the catalog use the same composition rule.
+    """
     accepted = units.accepted_bank(bank)
-    manifest = skill_folder_manifest(bank)
+    manifest = skill_folder_manifest(bank, params.description_mode)
     injected = bank_reference(accepted)
-    # inline_catalog=True: the benchmark includes this catalog text in the
-    # remote skill file the agent is told to read (TB: SKILL.md);
-    # inline_catalog=False (default): the block is still the catalog text, but
-    # the benchmark leaves it out -- the agent is expected to cat the catalog
-    # file from the mounted folder instead.  Either way the manifest carries
-    # catalog_text for materialization and read-stats.
     block = manifest["catalog_text"]
     return [units.make_row(units.task_ref(task), injected, block,
-                           {"skill_folder": manifest,
-                            "inline_catalog": params.inline_catalog})
+                           {"skill_folder": manifest})
             for task in tasks]

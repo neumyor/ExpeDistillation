@@ -19,9 +19,9 @@ from expedistill.benchmarks.registry import _reset_registry, get_plugin
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.benchmarks.tb.plugin import (
     TB_SKILL_FOLDER_GUIDANCE,
-    TB_TASK_PROMPT_FOLDER_INLINE_NAME,
     classify_result,
     result_facts,
+    retryable_unscored,
 )
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
 from expedistill.infra.reliability import ConfigError, InfrastructureError
@@ -246,6 +246,39 @@ def test_result_facts_report_exception_verbatim():
     assert facts["verifier_ran"] is None
 
 
+def test_retryable_unscored_includes_pseudo_zero():
+    # No usable verifier evidence (missing reward or a pseudo zero) plus
+    # no model-side exception: K1 gets a fresh attempt. Model-side
+    # exceptions and tmux breakage stay stored facts.
+    assert retryable_unscored(_facts("result_infra.json", None)) is True
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "TimeoutException",
+                          "exception_message": "context deadline exceeded"}},
+                     None)) is True
+    assert retryable_unscored(
+        result_facts({"verifier_result": None, "exception_info": None},
+                     None)) is True
+    assert retryable_unscored(
+        _facts("result_failure.json", "verifier_not_collected.txt")) is True
+    assert retryable_unscored(
+        _facts("result_success.json", "verifier_not_collected.txt")) is True
+    assert retryable_unscored(_facts("result_model_fail.json", None)) is False
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "ContextLengthExceededError",
+                          "exception_message": "too long"}},
+                     None)) is False
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "RuntimeError",
+                          "exception_message": "tmux: send keys failed"}},
+                     None)) is False
+
+
 # ---------------------------------------------------------------------------
 # classify_result (pure): the archive validator's historical lens
 # ---------------------------------------------------------------------------
@@ -462,29 +495,33 @@ def test_run_deadline_raises(tmp_path):
         plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
 
-def test_run_infra_exception_result_is_unscored_not_retried(tmp_path):
-    # R2b: a trial that came back without a scorer verdict is a STORED
-    # correctness=None run with the exception as a raw fact -- no
-    # mechanical retry; acceptance's named rule judges it.
+def test_run_infra_exception_result_raises_for_k1_retry(tmp_path):
+    # A no-reward infrastructure exception is not a stored unscored fact:
+    # it raises so K1 retries the unit under a fresh attempt token. The
+    # failed attempt's usage row carries null totals (the retry path does
+    # not account the discarded trial's tokens).
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
             f"{TRIAL}/result.json": _fixture_text("result_infra.json"),
-            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
         })
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.correctness is None
-    assert outcome.meta["exception_type"] == "AgentSetupTimeoutError"
-    # The stepwise view is still rebuilt and kept.
-    assert len(outcome.steps) == 2
+    recorder = UsageRecorder(tmp_path / "usage.jsonl")
+    plugin = _make_plugin(link, recorder)
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        plugin.run(TASK, HANDLE, "", tmp_path / "work")
+
+    lines = (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["status"] == "infra"
+    assert row["in_tokens"] is None
+    assert row["out_tokens"] is None
 
 
 def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
-    # R2/R2b: the model-vs-infra exception reclassification is gone from the
-    # execution path and so is the mechanical retry. A timed-out agent
-    # produced no scorer verdict, so the run is stored with
-    # correctness=None and the exception as a raw fact (acceptance's named
-    # rules judge it from there).
+    # A model-side no-verdict trial stays a stored fact: AgentTimeoutError
+    # is in the model exception set, so the retry predicate does not fire
+    # and acceptance's named rules judge the stored run.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
@@ -497,48 +534,43 @@ def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
     assert outcome.meta["reward"] is None
 
 
-def test_run_pseudo_zero_carries_no_scorer_verdict(tmp_path):
-    # R2b: a reward claimed without pytest ever collecting anything (the
-    # campaign's "fake zero") carries no scorer verdict, in either reward
-    # direction -- the plugin stores correctness=None with the raw facts
-    # (reward, verifier_ran) beside it; whether the run counts is
-    # acceptance's named-rule decision, and it is never mechanically
-    # retried.
+def test_run_pseudo_zero_raises_for_k1_retry(tmp_path):
+    # A reward claimed without pytest ever collecting anything (the
+    # campaign's "fake zero") is not usable verifier evidence: the plugin
+    # raises so K1 retries the unit under a fresh token.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files(result="result_failure.json",
                                             verifier_log="verifier_not_collected.txt"))
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.correctness is None
-    assert outcome.meta["reward"] == 0.0
-    assert outcome.meta["verifier_ran"] is False
-    assert "verdict_reason" not in outcome.meta
+    recorder = UsageRecorder(tmp_path / "usage.jsonl")
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        _make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
+    rows = [json.loads(line) for line in
+            (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["status"] for row in rows] == ["infra"]
+    assert rows[0]["in_tokens"] is None
 
 
-def test_run_pseudo_zero_positive_direction_carries_no_scorer_verdict(
-        tmp_path):
+def test_run_pseudo_zero_positive_direction_raises_for_k1_retry(tmp_path):
     # The historically dangerous direction (2026-10-16 review D2): a
     # POSITIVE reward claimed without pytest ever collecting anything
-    # must not score as a success either -- the guard is symmetric in
-    # the reward value.
+    # must not score as a success either -- the retry guard is symmetric
+    # in the reward value.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files(result="result_success.json",
                                             verifier_log="verifier_not_collected.txt"))
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-    assert outcome.correctness is None
-    assert outcome.meta["reward"] == 1.0
-    assert outcome.meta["verifier_ran"] is False
-    assert "verdict_reason" not in outcome.meta
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
 
 
 def test_run_verifier_log_fetch_failure_is_infra_and_retried(tmp_path):
     # 2026-10-16 ruling 4 (C-path offset 1): the verifier log is the
     # scorer's evidence, so a transport failure fetching it is an
     # infrastructure failure -- K1 retries the unit, and a scored
-    # rollout is not silently voided as unscored. Only a log that
-    # arrives and shows pytest never collected may leave correctness
-    # None (the pseudo zero above).
+    # rollout is not silently voided as unscored. A log that arrives and
+    # shows pytest never collected is the pseudo zero above, retried the
+    # same way.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
@@ -942,13 +974,15 @@ def test_task_prompt_registered_with_exactly_three_variables():
     assert "## Skill rules" in with_skills
 
 
-def _folder_task(tmp_path, *, inline_catalog):
-    """One folder unit: a materialized folder plus the sale manifest."""
+def _folder_task(tmp_path):
+    """One folder unit: a materialized Agent Skills folder plus manifest."""
     folder_dir = tmp_path / "folder"
-    folder_dir.mkdir()
-    catalog = "## Skill folder catalog\n\nbank/x | x.md | example\n"
+    skill_dir = folder_dir / "x"
+    skill_dir.mkdir(parents=True)
+    catalog = "## Skill folder catalog (fallback)\n\nbank/x | x/SKILL.md | example\n"
     (folder_dir / "catalog.md").write_text(catalog, encoding="utf-8")
-    (folder_dir / "x.md").write_text(
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: x\ndescription: example\n---\n\n"
         "[When to use] example\n[Steps]\n1. do it\n[Verify] done\n"
         "[Do not use when] never\n",
         encoding="utf-8")
@@ -956,20 +990,20 @@ def _folder_task(tmp_path, *, inline_catalog):
         "bank_fingerprint": "bank:test",
         "catalog_filename": "catalog.md",
         "catalog_text": catalog,
-        "files": [{"skill_id": "bank/x", "version": 1, "filename": "x.md"}],
+        "description_mode": "summary_then_when_to_use",
+        "files": [{"skill_id": "bank/x", "version": 1,
+                   "filename": "x/SKILL.md"}],
     }
     task = Task(task_id="train-fasttext", instruction="train-fasttext",
                 meta={"task_name": "train-fasttext",
                       "attempt_token": "tok",
                       "skill_folder": manifest,
-                      "skill_folder_dir": str(folder_dir),
-                      "inline_catalog": inline_catalog})
+                      "skill_folder_dir": str(folder_dir)})
     return task, catalog
 
 
-def _run_folder(tmp_path, *, inline_catalog):
-    task, catalog = _folder_task(
-        tmp_path, inline_catalog=inline_catalog)
+def _run_folder(tmp_path):
+    task, catalog = _folder_task(tmp_path)
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=_completed_trial_files())
@@ -981,37 +1015,34 @@ def _run_folder(tmp_path, *, inline_catalog):
     return uploads[0][1].decode("utf-8"), catalog, outcome
 
 
-def test_folder_inline_skill_md_includes_the_catalog(tmp_path):
-    # inline_catalog=True: the catalog rides the SKILL.md the remote task
-    # prompt tells the agent to read. The first-turn prompt is unchanged;
-    # the skill bodies remain files in the mounted folder.
-    text, catalog, outcome = _run_folder(tmp_path, inline_catalog=True)
-    assert "The catalog of available skills is included below" in text
-    assert "## Skill folder catalog" in text
-    assert "bank/x | x.md | example" in text
-    # It no longer tells the agent to find and cat catalog.md first.
-    assert "cat /opt/openclaw-skills/<directory>/catalog.md" not in text
-    assert outcome.meta["prompt_name"] == TB_TASK_PROMPT_FOLDER_INLINE_NAME
-
-
-def test_folder_non_inline_skill_md_is_guidance_only(tmp_path):
-    # inline_catalog=False keeps the original behavior: guidance only;
-    # the catalog lives in catalog.md and the agent must cat it.
-    text, catalog, outcome = _run_folder(tmp_path, inline_catalog=False)
+def test_folder_skill_md_is_guidance_only(tmp_path):
+    # The task-level SKILL.md is guidance only. Harbor's Terminus agent
+    # supplies the <available_skills> list; the catalog is not injected.
+    text, catalog, outcome = _run_folder(tmp_path)
     assert text == TB_SKILL_FOLDER_GUIDANCE
+    assert "<available_skills>" in text
     assert "## Skill folder catalog" not in text
-    assert "bank/x | x.md | example" not in text
+    assert "bank/x | x/SKILL.md | example" not in text
     assert outcome.meta["prompt_name"] == "TB_TASK_PROMPT_FOLDER"
 
 
-def test_folder_inline_skill_template_has_only_catalog_variable():
-    template = get_prompt(TB_TASK_PROMPT_FOLDER_INLINE_NAME)
-    fields = {fname for _, fname, _, _ in string.Formatter().parse(template)
-              if fname}
-    assert fields == {"catalog"}
-    rendered = template.format(catalog="## Skill folder catalog\n")
-    assert "The catalog of available skills is included below" in rendered
-    assert "## Skill folder catalog" in rendered
+def test_folder_upload_keeps_the_skill_subdirectory(tmp_path):
+    task, catalog = _folder_task(tmp_path)
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files=_completed_trial_files())
+    _make_plugin(link).run(task, HANDLE, catalog, tmp_path / "work")
+    tar_puts = [(local, remote) for local, remote in link.puts
+                if remote.startswith(f"{ROOT}/skills_cache/")
+                and remote.endswith(".tar")]
+    assert len(tar_puts) == 1
+    import io
+    import tarfile as _tarfile
+    shipped = dict(link.uploads)[tar_puts[0][1]]
+    with _tarfile.open(fileobj=io.BytesIO(shipped)) as tar:
+        names = sorted(member.name for member in tar.getmembers()
+                       if member.isfile())
+    assert names == ["catalog.md", "x/SKILL.md"]
 
 
 def test_import_registers_plugin_and_prompt():
@@ -1022,7 +1053,7 @@ def test_import_registers_plugin_and_prompt():
     assert get_plugin("tb").name == "tb"
     assert "TB_TASK_PROMPT" in PROMPTS
     assert "TB_TASK_PROMPT_FOLDER" in PROMPTS
-    assert "TB_TASK_PROMPT_FOLDER_INLINE" in PROMPTS
+    assert "TB_TASK_PROMPT_FOLDER_INLINE" not in PROMPTS
     # The registered instance resolves the standard interface names and
     # its skill-folder capability prompt (M3).
     plugin = get_plugin("tb")
