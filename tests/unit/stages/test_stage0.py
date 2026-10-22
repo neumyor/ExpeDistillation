@@ -633,6 +633,29 @@ def test_real_searchqa_plugin_freezes_its_task_prompt_digest(
     assert manifest["aux_metric"] == "sub_em"
 
 
+def test_real_alfworld_plugin_freezes_its_task_prompt_digest(
+        monkeypatch, tmp_path):
+    importlib.import_module("expedistill.benchmarks.alfworld")
+    from expedistill.benchmarks.alfworld import ALFWorldPlugin
+
+    plugin = ALFWorldPlugin()
+    monkeypatch.setattr(plugin, "load_tasks", lambda spec: [
+        Task(task_id=i, instruction=f"task {i}") for i in spec])
+    _reset_registry()
+    register_plugin(plugin)
+    config = make_config(benchmark="alfworld", mode="full", split=None,
+                         tasks=["g1", "g2"])
+    ctx = make_ctx(tmp_path, config)
+    stage0_freeze.run(ctx)
+    manifest = load_manifest(ctx.run_dir)
+    frozen = manifest["prompt_digests"]
+    assert frozen["ALFWORLD_TASK_PROMPT"] == prompts.digest(
+        "ALFWORLD_TASK_PROMPT")
+    assert set(frozen) == (set(prompts.METHOD_PROMPT_NAMES)
+                           | {"ALFWORLD_TASK_PROMPT"})
+    assert manifest["aux_metric"] is None
+
+
 def test_declared_aux_metric_name_is_frozen_and_changing_it_refuses(
         monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, StagePlugin())
