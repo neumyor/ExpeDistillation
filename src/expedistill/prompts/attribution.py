@@ -103,7 +103,10 @@ LIVE_SKILL_REVISION = register(
     PromptSpec(
         name="LIVE_SKILL_REVISION",
         template="""A skill written for a weak model was injected into the weak model's real
-execution of a task, and the execution failed. Rewrite the skill.
+execution of a task, and the execution failed. Rewrite it only if the
+failure reveals a general defect. This is a Terminal Bench V2.1 skill; the
+card will be used on other tasks, so task-specific details must not enter
+it.
 
 SKILL (current version):
 {skill_text}
@@ -116,7 +119,7 @@ WHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):
 
 {profile_section}
 
-Work in two steps:
+Work in three steps:
 
 1. Classify why the weak model did not succeed WITH this skill. Choose
    exactly one category:
@@ -128,29 +131,53 @@ Work in two steps:
      unclear, so the weak model applied it wrongly or at the wrong moment;
    - "other": none of the above.
 
-2. Rewrite the skill to fix the classified problem and the attribution
-   report. Change the wording, granularity, or trigger conditions of the
-   skill -- not its underlying idea. The rewritten skill must keep the
-   four bracket sections of the original skill ([When to use]/[Steps]/
-   [Verify]/[Do not use when]): rewrite each section's content, never collapse them into prose.
-   Reproduce the bracketed section headers exactly as written, each on its
-   own line. Then write a fresh one-line summary of the REWRITTEN skill
-   (what it is and does, one sentence): the content changed, so the
-   skill's directory line must describe what it now says, not what it
-   used to say. Keep the summary on one line.
+2. Decide whether the failure is a general defect in the skill or a
+   task-specific issue.
+   - General defect: a missing intermediate step, a trigger the reader
+     cannot observe, a step the reader cannot execute, or a misleading
+     order. Rewrite the skill.
+   - Task-specific issue: a fact about this task's files, values, tools or
+     trajectory. Do not encode it. Return the skill unchanged and say in
+     revision_reason that the failure is task-specific.
+
+3. If you rewrite, keep the four bracket sections of the original skill
+   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each
+   section's content, never collapse them into prose. Reproduce
+   the bracketed section headers exactly as written, each on its own line.
+   Change the wording, granularity, or trigger conditions of the skill --
+   not its underlying idea.
+   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress
+   instead of appending. Every node must remain a general decision rule;
+   task-specific values become <placeholders>. A script may appear only as
+   its input, output, and invocation; never include its implementation, and
+   never use a code block longer than three lines.
+   Then write a fresh capability-level summary of the REWRITTEN skill: the
+   reusable capability it teaches (verb + object) and its observable
+   trigger, with no task or subtask names. Keep it on one line.
 
 Hard constraint: do NOT copy the specific values, file names, entity names,
 or other concrete details of THIS task's trajectory into the skill. The
 rewritten skill must stay transferable: general patterns and command forms
-with generic placeholders (for example <config-file>, <port>). Library
-skills are retrieved and injected into OTHER tasks, where this task's
-specifics are wrong.
+with generic placeholders. Library skills are retrieved and injected into
+OTHER tasks, where this task's specifics are wrong.
+
+Transfer audit before output:
+1. Would the rewritten nodes still make sense if this task's language,
+   tools, file names and constants changed?
+2. Is every trigger observable from the task, not from its name?
+3. Is every task-specific token a <placeholder>?
+4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?
+5. Does the verify part name the exact pass signal and forbid submission
+   before it passes?
+If any check fails, rewrite again.
 
 Output ONLY JSON with exactly these fields:
 {{"failure_category": "<misread|missing_step|wrong_trigger|other>",
   "skill_text": "<the rewritten skill, plain text>",
-  "revision_reason": "<one or two sentences: what you changed and why>",
-  "summary": "<one line: what the rewritten skill is and does>"}}
+  "revision_reason": "<one or two sentences: what you changed and why, or why
+  the failure is task-specific and the skill is unchanged>",
+  "summary": "<one line: the reusable capability the rewritten skill teaches
+  (verb + object) and its observable trigger; no task or subtask names>"}}
 """,
         description=(
             "G11 live-run skill revision: classify the live failure "
