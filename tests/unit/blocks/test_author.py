@@ -34,6 +34,7 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts.profile import NO_WEAK_PROFILE_SECTION, profile_section
 from expedistill.prompts.registry import get as get_prompt
 from expedistill.blocks.author import (
+    NO_SEGMENT_POSITION,
     gen_exam,
     has_skill_sections,
     render_skill_content,
@@ -193,6 +194,7 @@ def test_write_skill_distill_wiring_and_fields():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
+        segment_position=NO_SEGMENT_POSITION,
         profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
@@ -225,6 +227,7 @@ def test_write_skill_without_profile_sends_the_neutral_section():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
+        segment_position=NO_SEGMENT_POSITION,
         profile_section=NO_WEAK_PROFILE_SECTION,
     )
     assert user == expected
@@ -275,6 +278,7 @@ def test_write_skill_diagnose_wiring_and_fields():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
+        segment_position=NO_SEGMENT_POSITION,
         context_summary=subtask.context_summary,
         profile_section=_profile_section(),
     )
@@ -309,6 +313,19 @@ def test_write_skill_distill_guard_rejects_failed_subtask():
         write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
 
     assert handle.client.calls == []
+
+
+def test_write_skill_passes_the_segment_position_to_the_prompt():
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
+    position = "segment 5 of 5 in its trajectory; it covers original steps 30 to 41"
+
+    write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle,
+                segment_position=f"  {position}  ")
+
+    user = handle.client.calls[0]["user"]
+    assert f"SEGMENT POSITION: {position}\n" in user
+    assert NO_SEGMENT_POSITION not in user
 
 
 def test_write_skill_diagnose_guard_rejects_succeeded_subtask():

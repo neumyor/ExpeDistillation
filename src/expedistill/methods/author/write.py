@@ -309,6 +309,7 @@ def write_new(
     for experience in package.source_experiences:
         skills.append(write_skill(
             experience["subtask"], experience["steps_view"], weak_profile,
-            experience["mode"], author_handle, usage=usage,
-            run_dir=run_dir))
+            experience["mode"], author_handle,
+            segment_position=experience.get("segment_position", ""),
+            usage=usage, run_dir=run_dir))
     return skills

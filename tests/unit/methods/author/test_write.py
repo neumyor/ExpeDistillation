@@ -375,6 +375,18 @@ def test_write_new_distills_one_skill_per_experience():
     assert WEAK_PROFILE in prompt
 
 
+def test_write_new_forwards_the_segment_position():
+    package = add_package(make_subtask(0))
+    package.source_experiences[0]["segment_position"] = "segment 1 of 3"
+    author = make_fake_handle("author", [distill_script()])
+
+    write_new(task_row=add_row(), package=package, author_handle=author,
+              weak_profile=WEAK_PROFILE)
+
+    assert "SEGMENT POSITION: segment 1 of 3\n" in \
+        author.client.calls[0]["user"]
+
+
 def test_write_new_propagates_a_model_output_error():
     author = make_fake_handle(
         "author", [ModelOutputError("SKILL_DISTILL: bad json")])

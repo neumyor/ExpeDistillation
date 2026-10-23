@@ -17,10 +17,15 @@ from expedistill.prompts import PROMPTS, get
 # name -> (owning block, documented variables)
 EXPECTED = {
     "SEGMENT": ("G1", {"trajectory_view", "K"}),
-    "SKILL_DISTILL": ("G2", {"label", "description", "steps_view", "profile_section"}),
+    "SKILL_DISTILL": (
+        "G2",
+        {"label", "description", "steps_view", "segment_position",
+         "profile_section"},
+    ),
     "SKILL_DIAGNOSE": (
         "G2",
-        {"label", "description", "steps_view", "context_summary", "profile_section"},
+        {"label", "description", "steps_view", "segment_position",
+         "context_summary", "profile_section"},
     ),
     "REWRITE": (
         "G6",
@@ -146,6 +151,31 @@ def test_g2_json_contract_fields_match_validate_skill_sections():
     for name in ("SKILL_DISTILL", "SKILL_DIAGNOSE"):
         assert _json_contract_keys(get(name)) == set(
             SKILL_SECTION_FIELDS) | {SKILL_SUMMARY_FIELD}, name
+
+
+#: The five trigger-timing phrases (docs/decisions/
+#: p02_trigger_timing_and_length_20261023.md): each G2 card's when_to_use
+#: opens with exactly one of them, so the prompts must spell all five.
+TIMING_PHRASES = (
+    '"At task start,"',
+    '"After the first environment check,"',
+    '"When a command fails, hangs, or repeats,"',
+    '"Before submitting,"',
+    '"At any step,"',
+)
+
+
+def test_g2_templates_name_the_five_timing_phrases_and_the_length_rule():
+    for name in ("SKILL_DISTILL", "SKILL_DIAGNOSE"):
+        text = _normalized(get(name))
+        for phrase in TIMING_PHRASES:
+            assert phrase in text, (name, phrase)
+        assert ("Use this only when none of the four moments above fits."
+                in text), name
+        assert ("summary and when_to_use together should stay under about "
+                "400 characters and must never go over 1,000.") in text, name
+        assert "never cut a sentence off" in text, name
+        assert "Do not put the trigger in the summary." in text, name
 
 
 def test_rewrite_template_output_contract_carries_the_summary():

@@ -19,7 +19,7 @@
       ],
       "prompt_name": "SEGMENT",
       "request_id": "<request_id>",
-      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive).\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Drop pure\n  environment setup, one-off commands, and data wrangling that only makes\n  sense for this task.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive). Every step must\n  belong to exactly one segment.\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Environment\n  setup, one-off commands, and task-specific data wrangling should be folded\n  into the nearest capability segment, not given their own segment; their\n  steps still belong to a segment (so coverage stays complete), but the\n  segment's label and description name the capability, not the setup.\n- If the natural capability boundaries number more than 1, merge the most\n  closely related segments first; prefer folding setup or discovery steps\n  into a real capability segment over merging two distinct capabilities.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
       "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": false}]\n```",
       "role": "segmenter",
       "status": "ok",
@@ -44,7 +44,7 @@
       ],
       "prompt_name": "SEGMENT",
       "request_id": "<request_id>",
-      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive).\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Drop pure\n  environment setup, one-off commands, and data wrangling that only makes\n  sense for this task.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive). Every step must\n  belong to exactly one segment.\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Environment\n  setup, one-off commands, and task-specific data wrangling should be folded\n  into the nearest capability segment, not given their own segment; their\n  steps still belong to a segment (so coverage stays complete), but the\n  segment's label and description name the capability, not the setup.\n- If the natural capability boundaries number more than 1, merge the most\n  closely related segments first; prefer folding setup or discovery steps\n  into a real capability segment over merging two distinct capabilities.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
       "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": false}]\n```",
       "role": "segmenter",
       "status": "ok",
@@ -69,7 +69,7 @@
       ],
       "prompt_name": "SEGMENT",
       "request_id": "<request_id>",
-      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: success)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive).\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Drop pure\n  environment setup, one-off commands, and data wrangling that only makes\n  sense for this task.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t1 (final status: success)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive). Every step must\n  belong to exactly one segment.\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Environment\n  setup, one-off commands, and task-specific data wrangling should be folded\n  into the nearest capability segment, not given their own segment; their\n  steps still belong to a segment (so coverage stays complete), but the\n  segment's label and description name the capability, not the setup.\n- If the natural capability boundaries number more than 1, merge the most\n  closely related segments first; prefer folding setup or discovery steps\n  into a real capability segment over merging two distinct capabilities.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
       "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": true}]\n```",
       "role": "segmenter",
       "status": "ok",
@@ -94,7 +94,7 @@
       ],
       "prompt_name": "SEGMENT",
       "request_id": "<request_id>",
-      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t2 (final status: success)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive).\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Drop pure\n  environment setup, one-off commands, and data wrangling that only makes\n  sense for this task.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
+      "request_text": "You are given the view of one agent trajectory from Terminal Bench V2.1.\nSplit it into capability-coherent sub-procedures.\n\nTRAJECTORY:\ntask: fakebench:t2 (final status: success)\n\nstep 0\naction: run\nobservation: the environment state\n\nA segment is one reusable sub-procedure, not one task-specific step. A good\nsegment has:\n- an observable trigger: the situation where the sub-procedure starts;\n- a general goal: what it achieves, stated without this task's names or\n  concrete values;\n- a boundary: the point where the next sub-procedure begins.\n\nSplit the trajectory into at most 1 such subtasks.\n\nRules:\n- The segments must cover the whole trajectory in order, without gaps and\n  without overlaps: the first segment starts at step 0, the last one ends at\n  the final step, and consecutive segments touch (the end index of one is\n  the start index of the next; end indices are exclusive). Every step must\n  belong to exactly one segment.\n- Use at most 1 segments, and every segment must contain at least one step.\n- Merge adjacent steps that belong to the same capability. Environment\n  setup, one-off commands, and task-specific data wrangling should be folded\n  into the nearest capability segment, not given their own segment; their\n  steps still belong to a segment (so coverage stays complete), but the\n  segment's label and description name the capability, not the setup.\n- If the natural capability boundaries number more than 1, merge the most\n  closely related segments first; prefer folding setup or discovery steps\n  into a real capability segment over merging two distinct capabilities.\n- Do not restate the content of the steps. Describe each segment at the\n  level of its observable trigger and general goal, so the step content and\n  the segment description stay separate.\n- \"label\" is a short capability phrase, not a task-specific phrase (for\n  example \"build and verify a source project\", \"recover a key from known\n  pairs\").\n- \"description\" is one or two sentences that name the observable trigger and\n  the general goal.\n- \"success\" says whether that segment's own goal was achieved by the end of\n  the segment, independent of whether the overall trajectory succeeded.\n\nReturn ONLY a JSON array, one object per segment in order, with exactly\nthese fields:\n[\n  {\"start\": <first step index, integer>,\n    \"end\": <step index after the last step of this segment, exclusive, integer>,\n    \"label\": \"<short capability phrase>\",\n    \"description\": \"<one or two sentences: observable trigger and general goal>\",\n    \"success\": <true or false>}\n]\nReturn no text before or after the JSON array.\n",
       "response_text": "```json\n[{\"start\": 0, \"end\": 1, \"label\": \"whole\", \"description\": \"do the whole task\", \"success\": true}]\n```",
       "role": "segmenter",
       "status": "ok",
@@ -405,7 +405,7 @@
       },
       "prompt_name": "SKILL_DISTILL",
       "request_id": "<request_id>",
-      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task\nfrom the same capability family, not the task below. The subtask SUCCEEDED:\nthe card is the procedure the weak model should follow when it faces the\nsame kind of subtask. A card that only works on this task is a failure.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness, add an explicit guard;\nwhere it says the model cannot do something, never assume it can.\n\nWork in four passes.\n\nPass 1 - abstract the capability.\nTreat the steps as ONE instance of a reusable capability. Decide, for\nyourself:\n- capability: a short verb-and-object phrase (for example \"recover a key\n  from known plaintext-ciphertext pairs\", \"build a C project from source\n  and verify the binary\"). Do not use this task's name, file names or tools.\n- observable_trigger: the concrete signs a new TB21 task shows when this\n  capability applies: file types, input structure, error text, available\n  tools, required output.\n- invariants: the steps that remain correct when the task's language, file\n  names, tools and constants change.\n- variants: the choices that differ across tasks in this capability family.\n- failure_guard: the weak reader's most likely failure here, taken from the\n  profile (for example verifying too late, not reading the error before\n  retrying, or declaring success without running the verifier).\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 2 - write the decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, put the choice inside the node as\na short condition (\"if the task uses X, ...; otherwise ...\") instead of\npresenting one variant as universal.\nNever invent a step the steps view does not support. Every node must be\ngrounded in an observed action or observation; if the evidence is missing,\nomit the node rather than guess.\n\nPass 3 - make it executable for the weak model.\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- a script may appear only as its input, output, and invocation; never\n  include its implementation;\n- short sentences; no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters.\n\nEncode the TB21 discipline:\n- locate and read the task's verifier or test before solving; run it after\n  the change;\n- wait for the shell prompt after every action; send one command per action;\n  read the exit status and output before the next action;\n- if a command fails, read the error before retrying; do not blind-retry;\n- do not call mark_task_complete until the verifier passes; confirm the\n  submission prompt at most once;\n- if a required file or tool is missing, report it and stop instead of\n  inventing a replacement.\n\nPass 4 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<capability name, observable trigger, preconditions, and\none counterexample in at most two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one short line: the reusable capability this card teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task\nfrom the same capability family, not the task below. The subtask SUCCEEDED:\nthe card is the procedure the weak model should follow when it faces the\nsame kind of subtask. A card that only works on this task is a failure.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness, add an explicit guard;\nwhere it says the model cannot do something, never assume it can.\n\nWork in five passes.\n\nPass 1 - abstract the capability.\nTreat the steps as ONE instance of a reusable capability. Decide, for\nyourself:\n- capability: a short verb-and-object phrase that names the general skill\n  (for example \"recover a key from known plaintext-ciphertext pairs\"). Do\n  not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the concrete signs a new TB21 task shows when this\n  capability applies: file types, input structure, error text, available\n  tools, required output. Tool names are allowed here.\n- invariants: the steps that remain correct when the task's file names,\n  constants, and tools change.\n- variants: the choices that differ across tasks in this capability family.\n  Name a variant type you recognize from the family even if only one variant\n  appears in the steps view; but do not invent action steps for variants\n  you did not observe.\n- failure_guard: the weak reader's most likely failure here, taken from the\n  profile.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 2 - write the decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). Every action step must be\ngrounded in an observed action or observation from the steps view; omit a\nstep rather than invent it. Do not add separate TB21 discipline nodes;\ninstead weave the discipline into the verify and fallback parts of nodes:\ncheck before acting, read the error before retrying, run the verifier before\ncalling mark_task_complete.\n\nPass 3 - make it executable for the weak model.\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: an early segment often belongs\n\"At task start,\" or \"After the first environment check,\"; the last\nsegment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches. Do not put the trigger in the summary. No task or\n  subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the preconditions. One or two sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n6. Does when_to_use start with exactly one of the five timing phrases?\n7. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\npreconditions, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: the reusable capability this card teaches\n  (verb + object); no trigger, no task or subtask names>\"}\n",
       "response_text": "```json\n{\"when_to_use\": \"when a service reports an unexpected state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the service reports the expected state\", \"not_applicable_when\": \"no state was reported\", \"summary\": \"inspect the reported service state before acting on it\"}\n```",
       "role": "author",
       "status": "ok",
@@ -431,7 +431,7 @@
       },
       "prompt_name": "SKILL_DISTILL",
       "request_id": "<request_id>",
-      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task\nfrom the same capability family, not the task below. The subtask SUCCEEDED:\nthe card is the procedure the weak model should follow when it faces the\nsame kind of subtask. A card that only works on this task is a failure.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness, add an explicit guard;\nwhere it says the model cannot do something, never assume it can.\n\nWork in four passes.\n\nPass 1 - abstract the capability.\nTreat the steps as ONE instance of a reusable capability. Decide, for\nyourself:\n- capability: a short verb-and-object phrase (for example \"recover a key\n  from known plaintext-ciphertext pairs\", \"build a C project from source\n  and verify the binary\"). Do not use this task's name, file names or tools.\n- observable_trigger: the concrete signs a new TB21 task shows when this\n  capability applies: file types, input structure, error text, available\n  tools, required output.\n- invariants: the steps that remain correct when the task's language, file\n  names, tools and constants change.\n- variants: the choices that differ across tasks in this capability family.\n- failure_guard: the weak reader's most likely failure here, taken from the\n  profile (for example verifying too late, not reading the error before\n  retrying, or declaring success without running the verifier).\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 2 - write the decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, put the choice inside the node as\na short condition (\"if the task uses X, ...; otherwise ...\") instead of\npresenting one variant as universal.\nNever invent a step the steps view does not support. Every node must be\ngrounded in an observed action or observation; if the evidence is missing,\nomit the node rather than guess.\n\nPass 3 - make it executable for the weak model.\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- a script may appear only as its input, output, and invocation; never\n  include its implementation;\n- short sentences; no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters.\n\nEncode the TB21 discipline:\n- locate and read the task's verifier or test before solving; run it after\n  the change;\n- wait for the shell prompt after every action; send one command per action;\n  read the exit status and output before the next action;\n- if a command fails, read the error before retrying; do not blind-retry;\n- do not call mark_task_complete until the verifier passes; confirm the\n  submission prompt at most once;\n- if a required file or tool is missing, report it and stop instead of\n  inventing a replacement.\n\nPass 4 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<capability name, observable trigger, preconditions, and\none counterexample in at most two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one short line: the reusable capability this card teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task\nfrom the same capability family, not the task below. The subtask SUCCEEDED:\nthe card is the procedure the weak model should follow when it faces the\nsame kind of subtask. A card that only works on this task is a failure.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness, add an explicit guard;\nwhere it says the model cannot do something, never assume it can.\n\nWork in five passes.\n\nPass 1 - abstract the capability.\nTreat the steps as ONE instance of a reusable capability. Decide, for\nyourself:\n- capability: a short verb-and-object phrase that names the general skill\n  (for example \"recover a key from known plaintext-ciphertext pairs\"). Do\n  not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the concrete signs a new TB21 task shows when this\n  capability applies: file types, input structure, error text, available\n  tools, required output. Tool names are allowed here.\n- invariants: the steps that remain correct when the task's file names,\n  constants, and tools change.\n- variants: the choices that differ across tasks in this capability family.\n  Name a variant type you recognize from the family even if only one variant\n  appears in the steps view; but do not invent action steps for variants\n  you did not observe.\n- failure_guard: the weak reader's most likely failure here, taken from the\n  profile.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 2 - write the decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). Every action step must be\ngrounded in an observed action or observation from the steps view; omit a\nstep rather than invent it. Do not add separate TB21 discipline nodes;\ninstead weave the discipline into the verify and fallback parts of nodes:\ncheck before acting, read the error before retrying, run the verifier before\ncalling mark_task_complete.\n\nPass 3 - make it executable for the weak model.\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: an early segment often belongs\n\"At task start,\" or \"After the first environment check,\"; the last\nsegment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches. Do not put the trigger in the summary. No task or\n  subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the preconditions. One or two sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n6. Does when_to_use start with exactly one of the five timing phrases?\n7. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\npreconditions, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: the reusable capability this card teaches\n  (verb + object); no trigger, no task or subtask names>\"}\n",
       "response_text": "```json\n{\"when_to_use\": \"when a service reports an unexpected state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the service reports the expected state\", \"not_applicable_when\": \"no state was reported\", \"summary\": \"inspect the reported service state before acting on it\"}\n```",
       "role": "author",
       "status": "ok",
@@ -457,7 +457,7 @@
       },
       "prompt_name": "SKILL_DIAGNOSE",
       "request_id": "<request_id>",
-      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1, from a subtask where it went wrong. The card will be\ninjected into a DIFFERENT TB21 task from the same capability family. Teach\nthe reader to recognize a general failure pattern and follow a different\nprocedure; do not write a fix for this task.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING:\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness that caused or worsened\nthis failure, the guard must address it.\n\nWork in four passes.\n\nPass 1 - diagnose the general failure pattern.\nFind the step or decision where the weak model went wrong. Name the pattern\nat the reader's level: skipped verification, misread observation, wrong\ntool, unread error before retry, wrong order, early success claim, or an\nunrecognized precondition. Do not write \"logical error\" or this task's name.\nUse the context summary only to understand what the reader was trying to do.\n\nPass 2 - abstract the capability.\nDecide, for yourself:\n- capability: a short verb-and-object phrase;\n- observable_trigger: the signs a new TB21 task shows when this pattern can\n  occur (file types, input structure, error text, tool state, required\n  output);\n- invariants: the corrective steps that hold across tasks;\n- variants: the choices that differ across tasks;\n- failure_guard: the guard that prevents this pattern from recurring.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 3 - write the corrective decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, put the choice inside the node as\na short condition (\"if the task uses X, ...; otherwise ...\") instead of\npresenting one variant as universal.\nThe procedure must teach the reader to recognize the failing behavior from\nobservable signs, not from this task's names. Never invent a step the steps\nview does not support; every node must be grounded in an observed action or\nobservation.\n\nMake it executable for the weak model:\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- a script may appear only as its input, output, and invocation; never\n  include its implementation;\n- short sentences; no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters.\n\nEncode the TB21 discipline:\n- locate and read the task's verifier or test before solving; run it after\n  the change;\n- wait for the shell prompt after every action; send one command per action;\n  read the exit status and output before the next action;\n- if a command fails, read the error before retrying; do not blind-retry;\n- do not call mark_task_complete until the verifier passes; confirm the\n  submission prompt at most once;\n- if a required file or tool is missing, report it and stop instead of\n  inventing a replacement.\n\nPass 4 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<capability name, observable trigger, and the failing\nbehavior to recognize, in at most two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one short line: the failure pattern this card prevents and\nthe reusable capability it teaches instead; no task or subtask names>\"}\n",
+      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1, from a subtask where it went wrong. The card will be\ninjected into a DIFFERENT TB21 task from the same capability family. Teach\nthe reader to recognize a general failure pattern and follow a corrective\nprocedure; do not write a fix for this task.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING:\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness that caused or worsened\nthis failure, the guard must address it.\n\nWork in five passes.\n\nPass 1 - diagnose the general failure pattern.\nFind the step or decision where the weak model went wrong. Name the pattern\nat the reader's level: skipped verification, misread observation, wrong\ntool, unread error before retry, wrong order, early success claim, or an\nunrecognized precondition. Do not write \"logical error\" or this task's name.\nUse the context summary only to understand what the reader was trying to do.\n\nPass 2 - abstract the capability.\nDecide, for yourself:\n- capability: a short verb-and-object phrase that names the general skill.\n  Do not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the signs a new TB21 task shows when this pattern can\n  occur (file types, input structure, error text, tool state, required\n  output). Tool names are allowed here.\n- invariants: the corrective steps that hold across tasks.\n- variants: the choices that differ across tasks. Name a variant type you\n  recognize from the family even if only one variant appears in the steps\n  view; but do not invent action steps for variants you did not observe.\n- failure_guard: the guard that prevents this pattern from recurring.\n- corrective_steps: the correct actions that the trajectory shows working,\n  OR—where the trajectory only shows the mistake—the minimal corrective\n  action the profile tells you the reader can execute (for example: read the\n  error message before retrying). Do not invent multi-step procedures that\n  are not grounded in the steps view or the failure pattern.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 3 - write the corrective decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). The procedure must teach\nthe reader to recognize the failing behavior from observable signs, not from\nthis task's names.\nFor nodes where the trajectory only shows what went wrong and not what is\ncorrect: write one node that detects the failure sign and one node that\nnames the corrective action from the profile or the failure pattern—do not\ninvent a multi-step procedure beyond what the evidence supports.\nDo not add separate TB21 discipline nodes; instead weave the discipline into\nthe verify and fallback parts of nodes: check before acting, read the error\nbefore retrying, run the verifier before calling mark_task_complete.\n\nMake it executable for the weak model:\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: a failed segment often belongs\n\"When a command fails, hangs, or repeats,\"; an early segment often\nbelongs \"At task start,\" or \"After the first environment check,\"; the\nlast segment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches and the failure pattern it prevents. Do not put the trigger in\n  the summary. No task or subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the failing behavior to recognize. One or two\n  sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n6. Does when_to_use start with exactly one of the five timing phrases?\n7. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\nfailing behavior to recognize, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: what the card teaches instead (verb + object)\nand the failure pattern it prevents; no trigger, no task or subtask names>\"}\n",
       "response_text": "```json\n{\"when_to_use\": \"about to act on a report without inspecting it first: the action would not match the actual state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the command's result matches the inspected state\", \"not_applicable_when\": \"the state was already inspected\", \"summary\": \"never act on a report before inspecting it\"}\n```",
       "role": "author",
       "status": "ok",
@@ -483,7 +483,7 @@
       },
       "prompt_name": "SKILL_DIAGNOSE",
       "request_id": "<request_id>",
-      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1, from a subtask where it went wrong. The card will be\ninjected into a DIFFERENT TB21 task from the same capability family. Teach\nthe reader to recognize a general failure pattern and follow a different\nprocedure; do not write a fix for this task.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING:\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness that caused or worsened\nthis failure, the guard must address it.\n\nWork in four passes.\n\nPass 1 - diagnose the general failure pattern.\nFind the step or decision where the weak model went wrong. Name the pattern\nat the reader's level: skipped verification, misread observation, wrong\ntool, unread error before retry, wrong order, early success claim, or an\nunrecognized precondition. Do not write \"logical error\" or this task's name.\nUse the context summary only to understand what the reader was trying to do.\n\nPass 2 - abstract the capability.\nDecide, for yourself:\n- capability: a short verb-and-object phrase;\n- observable_trigger: the signs a new TB21 task shows when this pattern can\n  occur (file types, input structure, error text, tool state, required\n  output);\n- invariants: the corrective steps that hold across tasks;\n- variants: the choices that differ across tasks;\n- failure_guard: the guard that prevents this pattern from recurring.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 3 - write the corrective decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, put the choice inside the node as\na short condition (\"if the task uses X, ...; otherwise ...\") instead of\npresenting one variant as universal.\nThe procedure must teach the reader to recognize the failing behavior from\nobservable signs, not from this task's names. Never invent a step the steps\nview does not support; every node must be grounded in an observed action or\nobservation.\n\nMake it executable for the weak model:\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- a script may appear only as its input, output, and invocation; never\n  include its implementation;\n- short sentences; no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters.\n\nEncode the TB21 discipline:\n- locate and read the task's verifier or test before solving; run it after\n  the change;\n- wait for the shell prompt after every action; send one command per action;\n  read the exit status and output before the next action;\n- if a command fails, read the error before retrying; do not blind-retry;\n- do not call mark_task_complete until the verifier passes; confirm the\n  submission prompt at most once;\n- if a required file or tool is missing, report it and stop instead of\n  inventing a replacement.\n\nPass 4 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<capability name, observable trigger, and the failing\nbehavior to recognize, in at most two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one short line: the failure pattern this card prevents and\nthe reusable capability it teaches instead; no task or subtask names>\"}\n",
+      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1, from a subtask where it went wrong. The card will be\ninjected into a DIFFERENT TB21 task from the same capability family. Teach\nthe reader to recognize a general failure pattern and follow a corrective\nprocedure; do not write a fix for this task.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING:\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness that caused or worsened\nthis failure, the guard must address it.\n\nWork in five passes.\n\nPass 1 - diagnose the general failure pattern.\nFind the step or decision where the weak model went wrong. Name the pattern\nat the reader's level: skipped verification, misread observation, wrong\ntool, unread error before retry, wrong order, early success claim, or an\nunrecognized precondition. Do not write \"logical error\" or this task's name.\nUse the context summary only to understand what the reader was trying to do.\n\nPass 2 - abstract the capability.\nDecide, for yourself:\n- capability: a short verb-and-object phrase that names the general skill.\n  Do not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the signs a new TB21 task shows when this pattern can\n  occur (file types, input structure, error text, tool state, required\n  output). Tool names are allowed here.\n- invariants: the corrective steps that hold across tasks.\n- variants: the choices that differ across tasks. Name a variant type you\n  recognize from the family even if only one variant appears in the steps\n  view; but do not invent action steps for variants you did not observe.\n- failure_guard: the guard that prevents this pattern from recurring.\n- corrective_steps: the correct actions that the trajectory shows working,\n  OR—where the trajectory only shows the mistake—the minimal corrective\n  action the profile tells you the reader can execute (for example: read the\n  error message before retrying). Do not invent multi-step procedures that\n  are not grounded in the steps view or the failure pattern.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 3 - write the corrective decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). The procedure must teach\nthe reader to recognize the failing behavior from observable signs, not from\nthis task's names.\nFor nodes where the trajectory only shows what went wrong and not what is\ncorrect: write one node that detects the failure sign and one node that\nnames the corrective action from the profile or the failure pattern—do not\ninvent a multi-step procedure beyond what the evidence supports.\nDo not add separate TB21 discipline nodes; instead weave the discipline into\nthe verify and fallback parts of nodes: check before acting, read the error\nbefore retrying, run the verifier before calling mark_task_complete.\n\nMake it executable for the weak model:\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: a failed segment often belongs\n\"When a command fails, hangs, or repeats,\"; an early segment often\nbelongs \"At task start,\" or \"After the first environment check,\"; the\nlast segment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches and the failure pattern it prevents. Do not put the trigger in\n  the summary. No task or subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the failing behavior to recognize. One or two\n  sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n6. Does when_to_use start with exactly one of the five timing phrases?\n7. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\nfailing behavior to recognize, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: what the card teaches instead (verb + object)\nand the failure pattern it prevents; no trigger, no task or subtask names>\"}\n",
       "response_text": "```json\n{\"when_to_use\": \"about to act on a report without inspecting it first: the action would not match the actual state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the command's result matches the inspected state\", \"not_applicable_when\": \"the state was already inspected\", \"summary\": \"never act on a report before inspecting it\"}\n```",
       "role": "author",
       "status": "ok",
@@ -710,7 +710,67 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1341,
+        "estimated_in": 138,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 138,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 138,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 138,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 1952,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -726,7 +786,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1341,
+        "estimated_in": 1952,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -736,98 +796,6 @@
       "prompt": "SKILL_DISTILL",
       "request_id": "<request_id>",
       "role": "author",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 1345,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_DIAGNOSE",
-      "request_id": "<request_id>",
-      "role": "author",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 1345,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_DIAGNOSE",
-      "request_id": "<request_id>",
-      "role": "author",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 138,
-        "finish_reason": null,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "ANSWER",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 138,
-        "finish_reason": null,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "ANSWER",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 138,
-        "finish_reason": null,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "ANSWER",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 138,
-        "finish_reason": null,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "ANSWER",
-      "request_id": "<request_id>",
-      "role": "answerer",
       "status": "ok",
       "time": "<time>"
     },
@@ -888,6 +856,38 @@
       "prompt": "ANSWER",
       "request_id": "<request_id>",
       "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 2203,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_DIAGNOSE",
+      "request_id": "<request_id>",
+      "role": "author",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 2203,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_DIAGNOSE",
+      "request_id": "<request_id>",
+      "role": "author",
       "status": "ok",
       "time": "<time>"
     },
@@ -1166,70 +1166,6 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 550,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 550,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 550,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 550,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SEGMENT",
-      "request_id": "<request_id>",
-      "role": "segmenter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
         "estimated_in": 628,
         "finish_reason": null,
         "format_retries": 0,
@@ -1240,6 +1176,70 @@
       "prompt": "SIMILARITY",
       "request_id": "<request_id>",
       "role": "curator",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 667,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 667,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 667,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 667,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SEGMENT",
+      "request_id": "<request_id>",
+      "role": "segmenter",
       "status": "ok",
       "time": "<time>"
     }
@@ -1357,10 +1357,10 @@
         "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
         "REWRITE": "0d9924ef91a4781a0035ce021e3efffc731394583294ea02a91033213648c91e",
-        "SEGMENT": "0fb54304bd447bd0a02fe5221ed364a91490a966c0f480e03bef5b0730435160",
+        "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
         "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
-        "SKILL_DIAGNOSE": "6a21df561fafe4a3eae2b79ba9f96744d9ef282fe633b9331fa46a371e8a06b1",
-        "SKILL_DISTILL": "ed1582d62af0f93dcbdcdbaa1f52bc938ed0624907812428fc32979e9831d2f5"
+        "SKILL_DIAGNOSE": "8f31a6206bc43f79bead93c1f7731834eb0e8968d5d15398e5d3fc711f8d2691",
+        "SKILL_DISTILL": "c5ee93f6cbcd197de8a77f6724840f3c7acc3d669fb820c96cb6429b1200d055"
       },
       "rules": {
         "segment_select": "strong_success_weak_failed",
@@ -1415,10 +1415,10 @@
       "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
       "REWRITE": "0d9924ef91a4781a0035ce021e3efffc731394583294ea02a91033213648c91e",
-      "SEGMENT": "0fb54304bd447bd0a02fe5221ed364a91490a966c0f480e03bef5b0730435160",
+      "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
       "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
-      "SKILL_DIAGNOSE": "6a21df561fafe4a3eae2b79ba9f96744d9ef282fe633b9331fa46a371e8a06b1",
-      "SKILL_DISTILL": "ed1582d62af0f93dcbdcdbaa1f52bc938ed0624907812428fc32979e9831d2f5"
+      "SKILL_DIAGNOSE": "8f31a6206bc43f79bead93c1f7731834eb0e8968d5d15398e5d3fc711f8d2691",
+      "SKILL_DISTILL": "c5ee93f6cbcd197de8a77f6724840f3c7acc3d669fb820c96cb6429b1200d055"
     },
     "rules": {
       "segment_select": "strong_success_weak_failed",

@@ -502,7 +502,7 @@ E1 内部的 runner：
 | 编号 | 名称 | 输入 → 输出 |
 |---|---|---|
 | G1 | 切段 | （轨迹视图, K, 模型）→ 段列表（未校验）。模型只给每段的起止步号和 label / description / success |
-| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 模型）→ Skill v1。两种写法产出同一种四节结构 `[When to use]`/`[Steps]`/`[Verify]`/`[Do not use when]`（2026-10-19 起统一，技能是做法还是教训看来源段的 `Subtask.source`）；前提守卫：提炼要求段成功、诊断要求段失败 |
+| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 段位置, 模型）→ Skill v1。两种写法产出同一种四节结构 `[When to use]`/`[Steps]`/`[Verify]`/`[Do not use when]`（2026-10-19 起统一，技能是做法还是教训看来源段的 `Subtask.source`）；前提守卫：提炼要求段成功、诊断要求段失败。2026-10-23 起：`[When to use]` 以 5 种触发时机之一的固定短语开头（`At task start,` / `After the first environment check,` / `When a command fails, hangs, or repeats,` / `Before submitting,` / `At any step,`），summary 只写“教什么”、`[When to use]` 只写“什么时候打开”，两者合计最好 ≤400、最长 ≤1,000 字符；段位置（第 i/n 段、原轨迹步号范围）由 add 路径证据采集器算出，作为选时机的提示（`docs/decisions/p02_trigger_timing_and_length_20261023.md`） |
 | G3 | 出考题 | （Subtask, 模型）→ Exam。不接收 skill |
 | G4 | 作答 | （模型, Exam, skill 列表（可选））→ 作答文本 |
 | G5 | 判卷 | （Exam, 作答, 模型）→ 对 / 错 + 错误描述（只说哪里不对，不复述正确答案，也不暗示该怎么改） |
@@ -941,8 +941,8 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   `TencentSkillTerminus2` 在运行前把 `skills_dir` 设成当前任务目录
   `/opt/openclaw-skills/<task>`，插件不再把 catalog 注入 `SKILL.md`，也不
   再要求模型先读某一份固定文件。catalog.md 每行是
-  "技能编号 | 要 cat 的相对路径 | 一句话摘要"，只在 `<available_skills>`
-  缺失时作为兜底。派发前相位驱动把清单物化成真实目录（相位目录下的
+  "技能编号 | 要 cat 的相对路径 | 一句话摘要"（2026-10-23 起描述完整保留、
+  不截断），只在 `<available_skills>` 缺失时作为兜底。派发前相位驱动把清单物化成真实目录（相位目录下的
   `skill_folder/`，`materialize_skill_folder` 幂等：内容不变不重写；
   库指纹与相位库不符是代码 bug 停机）。支持技能文件夹的插件把目录送进
   执行环境（TB：目录随既有 skills 上传链进沙箱 `/opt/openclaw-skills/`；

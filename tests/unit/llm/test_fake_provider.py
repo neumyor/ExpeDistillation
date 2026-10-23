@@ -117,7 +117,8 @@ def test_segment_reads_a_failure_view(client):
 
 def test_distill_returns_the_protocol_v2_contract(client):
     user = get_prompt("SKILL_DISTILL").format(
-        label="l", description="d", steps_view="s", profile_section="w")
+        label="l", description="d", steps_view="s", segment_position="p",
+        profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed) == {"when_to_use", "steps", "verify",
                            "not_applicable_when", "summary"}
@@ -127,7 +128,7 @@ def test_distill_returns_the_protocol_v2_contract(client):
 def test_diagnose_returns_the_protocol_v2_contract(client):
     user = get_prompt("SKILL_DIAGNOSE").format(
         label="l", description="d", context_summary="c", steps_view="s",
-        profile_section="w")
+        segment_position="p", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed) == {"when_to_use", "steps", "verify",
                            "not_applicable_when", "summary"}

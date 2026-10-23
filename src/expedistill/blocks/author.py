@@ -70,6 +70,7 @@ from expedistill.llm.call import ModelHandle, call_model
 
 __all__ = [
     "FAILURE_CATEGORIES",
+    "NO_SEGMENT_POSITION",
     "SKILL_SECTION_FIELDS",
     "SKILL_SUMMARY_FIELD",
     "gen_exam",
@@ -110,6 +111,11 @@ _MODE_PROMPTS: Dict[str, str] = {
 #: blocks/attribution.py mirrors it for LIVE_SKILL_REVISION (blocks may
 #: not import each other, a unit test pins the mirror).
 SKILL_SUMMARY_FIELD = "summary"
+
+#: What the G2 prompts show when the caller knows nothing about where
+#: the segment sits in its trajectory (the timing hint then rests on the
+#: steps alone).
+NO_SEGMENT_POSITION = "Unknown: no position information is available."
 
 #: A checklist item's own "1. " / "12) " prefix. The G2 prompts forbid
 #: self-numbering, but a stray one is stripped rather than double-numbered.
@@ -310,6 +316,7 @@ def write_skill(
     mode: str,
     handle: ModelHandle,
     *,
+    segment_position: str = "",
     prompt_name: Optional[str] = None,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
@@ -339,30 +346,27 @@ def write_skill(
     raise ModelOutputError and are terminal for the unit (gen_exam
     precedent): call_model's format retries only cover JSON parsing,
     never field content.
+
+    ``segment_position`` is plain text saying where the segment sits in
+    its trajectory (the steps view restarts at step 0, so the prompt
+    cannot see it otherwise); it is the hint for the card's trigger
+    timing. Empty means unknown and renders NO_SEGMENT_POSITION.
     """
     if mode not in _MODE_PROMPTS:
         raise ValueError(
             f'mode must be "distill" or "diagnose", got {mode!r}')
     name = prompt_name or _MODE_PROMPTS[mode]
-    if mode == "distill":
-        variables = {
-            "label": subtask.label,
-            "description": subtask.description,
-            "steps_view": steps_view,
-            "profile_section": profile_section(
-                "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-                weak_profile),
-        }
-    else:
-        variables = {
-            "label": subtask.label,
-            "description": subtask.description,
-            "steps_view": steps_view,
-            "context_summary": subtask.context_summary,
-            "profile_section": profile_section(
-                "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-                weak_profile),
-        }
+    variables = {
+        "label": subtask.label,
+        "description": subtask.description,
+        "steps_view": steps_view,
+        "segment_position": segment_position.strip() or NO_SEGMENT_POSITION,
+        "profile_section": profile_section(
+            "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+            weak_profile),
+    }
+    if mode == "diagnose":
+        variables["context_summary"] = subtask.context_summary
 
     if mode == "distill" and subtask.success is not True:
         raise ValueError(

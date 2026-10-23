@@ -159,19 +159,13 @@ def test_a_markerless_skill_gets_the_explicit_placeholder():
     assert catalog.splitlines()[-1].endswith("| (no summary)")
 
 
-def test_a_k5_length_summary_is_clipped_and_marked():
-    long = _skill("t1", summary="a" * 250)
+def test_a_long_description_is_kept_whole_in_the_catalog():
+    # A clipped trigger reads as a different rule: the catalog line keeps
+    # the whole description (the length budget lives in the G2 prompts).
+    long = _skill("t1", summary="a" * 450)
     entry = render_catalog([long], description_mode="summary").splitlines()[-1]
-    # The clip is explicit, never silent: 200 chars plus the mark.
-    assert entry.endswith("a" * 200 + " [truncated]")
-    exact = _skill("t1", summary="a" * 200)
-    assert render_catalog(
-        [exact], description_mode="summary").splitlines()[-1].endswith(
-            "| " + "a" * 200)
-    short = _skill("t1", summary="a" * 201)
-    assert render_catalog(
-        [short], description_mode="summary").splitlines()[-1].endswith(
-            "a" * 200 + " [truncated]")
+    assert entry.endswith("| " + "a" * 450)
+    assert "[truncated]" not in entry
 
 
 def test_the_three_description_modes():
