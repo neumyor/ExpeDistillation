@@ -19,6 +19,7 @@ from pathlib import Path
 from expedistill.core import ids
 from expedistill.core.models import Skill
 from expedistill.infra.store import Store, read_json, write_json, write_jsonl
+from tests.helpers.skills import make_skill
 
 _SCRIPT = (Path(__file__).resolve().parents[3]
            / "scripts" / "audit" / "audit_live_run.py")
@@ -331,3 +332,50 @@ def test_a_scratch_terminal_group_without_verdicts_still_warns(tmp_path):
         assembled=False)
     severities = [(f["severity"], f["check"]) for f in audit.findings]
     assert severities == [("WARN", "terminals")]
+
+
+def test_folder_injection_blocks_reads_the_live_phase_units(tmp_path):
+    directory = tmp_path / "phases" / "p03_live"
+    directory.mkdir(parents=True)
+    write_jsonl(directory / "units.jsonl", [
+        {"task_ref": "tb:t1", "skills_block": "catalog",
+         "aux": {"skill_folder": {"files": []}}},
+        {"task_ref": "tb:t2", "skills_block": "plain", "aux": {}},
+    ])
+    specs = [(2, "live", {"kind": "execute", "role": "live"})]
+    blocks = audit_live_run._folder_injection_blocks(tmp_path, specs)
+    assert blocks == {("tb:t1", 0): "catalog"}
+
+
+def test_injection_audit_uses_the_folder_catalog_block(tmp_path):
+    """A folder_by_task row froze the catalog block, not the full skills
+    block; the audit must hash the catalog text the unit exposed."""
+    subtask_id = "traj/tb:t1/strong/00/seg00"
+    content = ("[When to use] The task edits a file.\n"
+               "[Steps]\n1. Read it.\n"
+               "[Verify] The file changed.\n"
+               "[Do not use when] The task is unrelated.")
+    skill = make_skill(subtask_id, content, summary="Edit a file.")
+    skill_id = skill.skill_id
+    catalog = ("## Skill folder catalog (fallback)\n\n"
+               f"{skill_id} | t1/SKILL.md | Edit a file.\n")
+    audit_rows = {("tb:t1", 0): {
+        "members": [{"skill_id": skill_id, "version": 1}],
+        "injection_block_sha256": hashlib.sha256(
+            catalog.encode("utf-8")).hexdigest(),
+        "injection_tokens": audit_live_run.estimate_tokens(catalog),
+    }}
+    store = Store(tmp_path)
+
+    audit = audit_live_run.Audit(tmp_path)
+    audit_live_run.check_injection_audit(
+        audit, store, {skill_id: skill}, audit_rows,
+        {("tb:t1", 0): catalog})
+    assert not audit.errors()
+
+    # Without the folder block the same row is judged against the full
+    # skills block, which is exactly the pre-fix false error.
+    legacy = audit_live_run.Audit(tmp_path)
+    audit_live_run.check_injection_audit(
+        legacy, store, {skill_id: skill}, audit_rows)
+    assert legacy.errors()

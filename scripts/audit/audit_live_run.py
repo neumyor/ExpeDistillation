@@ -649,7 +649,9 @@ def _normalize_refs(value: Any) -> Any:
 
 def check_injection_audit(
         audit: Audit, store: Store, skills: Dict[str, Skill],
-        audit_rows: Dict[Tuple[Any, ...], Dict[str, Any]]) -> None:
+        audit_rows: Dict[Tuple[Any, ...], Dict[str, Any]],
+        folder_blocks: Optional[Dict[Tuple[Any, ...], Optional[str]]] = None
+) -> None:
     for (task_id, round_), row in sorted(
             audit_rows.items(), key=lambda kv: (str(kv[0][0]), kv[0][1])):
         members = row.get("members", [])
@@ -688,7 +690,21 @@ def check_injection_audit(
                                   "content": content, "group": None})
         if len(reconstructed) != len(members):
             continue  # the member errors above name the specifics
-        block = format_skills_block(reconstructed)
+        folder = folder_blocks or {}
+        key = (task_id, round_)
+        if key in folder:
+            # A folder_by_task row froze the catalog text, not the full
+            # skills block. The phase's units.jsonl carries those exact
+            # bytes (row.skills_block, the block the unit exposed).
+            block = folder[key]
+            if not block:
+                audit.add(
+                    ERROR, "injection-audit",
+                    f"{task_id} round {round_}: folder delivery row has an "
+                    "empty catalog block")
+                continue
+        else:
+            block = format_skills_block(reconstructed)
         sha = hashlib.sha256(block.encode("utf-8")).hexdigest()
         if sha != row.get("injection_block_sha256"):
             audit.add(
@@ -1297,6 +1313,36 @@ def _live_depths(config: Dict[str, Any],
     return depths
 
 
+def _folder_injection_blocks(
+        run_dir: Path, specs: Sequence[Tuple[int, str, Dict[str, Any]]]
+) -> Dict[Tuple[Any, ...], Optional[str]]:
+    """(task_id, round) -> the frozen catalog block of a folder live row.
+
+    A ``folder_by_task`` unit's audit row hashes the catalog text, not
+    ``format_skills_block(members)``. The live phase's ``units.jsonl``
+    carries the exact block the unit exposed (``row.skills_block``); the
+    live phases are ordered, so their ordinals are the round numbers.
+    """
+    blocks: Dict[Tuple[Any, ...], Optional[str]] = {}
+    live_round = 0
+    for index, name, spec in specs:
+        if not isinstance(spec, dict) or spec.get("kind") != "execute" \
+                or spec.get("role") != PHASE_ROLE_LIVE:
+            continue
+        directory = _phase_dir_of(run_dir, index, name)
+        if directory is not None:
+            units = directory / "units.jsonl"
+            if units.exists():
+                for row in read_jsonl(units):
+                    aux = row.get("aux") or {}
+                    if "skill_folder" not in aux:
+                        continue
+                    blocks[(str(row.get("task_ref")), live_round)] = \
+                        row.get("skills_block")
+        live_round += 1
+    return blocks
+
+
 def _audit_v4(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
               n_attempts: Optional[int]) -> Audit:
     """The phase-world audit: the phase-directory checks always, the
@@ -1407,7 +1453,8 @@ def _audit_v4(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
     check_ledgers(audit, live_dir, ("verdicts",))
     check_shortfall(audit, run_dir, groups, rounds, depths.get,
                     learn_labels or ("stage4_live",))
-    check_injection_audit(audit, store, skills, audit_rows)
+    check_injection_audit(audit, store, skills, audit_rows,
+                          _folder_injection_blocks(run_dir, specs))
     return audit
 
 
