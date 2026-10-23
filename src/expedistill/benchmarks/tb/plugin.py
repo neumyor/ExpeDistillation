@@ -851,7 +851,7 @@ class TBPlugin(BenchmarkPlugin):
             if outcome[0] == "result":
                 return self._finish(link, workdir, meta, outcome[1],
                                     started, polls, handle, run_id, task_name)
-        except InfrastructureError:
+        except InfrastructureError as exc:
             # Transport failure (ssh timeout, scp error) anywhere above --
             # including the poll guard and the result fetch: nothing was
             # fetched, so no partial steps; a usage row only if a rollout
@@ -864,6 +864,10 @@ class TBPlugin(BenchmarkPlugin):
                 self._record_usage(handle, run_id, task_name, (None, None),
                                    "infra",
                                    prompt_name=meta.get("prompt_name"))
+            diagnostics = self._failure_diagnostics(link)
+            if diagnostics:
+                raise InfrastructureError(
+                    f"{exc} [{diagnostics}]") from exc
             raise
         # deadline / dead runner (outside the transport handler above: the
         # failure raised here must not be re-caught and usage-recorded
@@ -890,6 +894,27 @@ class TBPlugin(BenchmarkPlugin):
             f"remote runner for {run_id} (pid {pid}) exited without "
             "producing result.json "
             f"(runner log tail: {meta.get('runner_log_tail', '')})")
+
+    def _failure_diagnostics(self, link: RemoteLink) -> str:
+        """Best-effort node29 load snapshot for a failed unit.
+
+        One extra ssh on the failure path. A failed probe is reported as
+        such and never masks the original infrastructure error; the
+        caller appends this string to the error message, which K1 writes
+        to ``failed_units.jsonl``.
+        """
+        try:
+            out, err, rc = link.run(
+                "cat /proc/loadavg; who 2>/dev/null | wc -l", timeout=10)
+        except Exception as exc:  # the transport is already failing
+            return f"node29 probe failed: {type(exc).__name__}: {exc}"
+        if rc != 0:
+            detail = " ".join(err.split())[-200:] or "no stderr"
+            return f"node29 probe rc={rc}: {detail}"
+        lines = [line.strip() for line in out.splitlines() if line.strip()]
+        if len(lines) < 2:
+            return f"node29 probe output={out.strip()!r}"
+        return f"node29 loadavg={lines[0]}; users={lines[-1]}"
 
     # ------------------------------------------------------------------
     # Submission

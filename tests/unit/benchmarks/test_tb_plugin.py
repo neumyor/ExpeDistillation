@@ -623,6 +623,34 @@ def test_run_transport_failure_propagates(tmp_path):
         _make_plugin(BrokenLink()).run(TASK, HANDLE, "", tmp_path / "work")
 
 
+def test_run_transport_failure_carries_node29_load(tmp_path):
+    class BrokenThenProbe(FakeRemoteLink):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def run(self, cmd, timeout=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise InfrastructureError(
+                    "ssh to user@node29 timed out after 60s")
+            assert "loadavg" in cmd
+            return "272.10 255.00 240.00 3/5256 12345\n12\n", "", 0
+
+    with pytest.raises(InfrastructureError, match="node29 loadavg=272.10"):
+        _make_plugin(BrokenThenProbe()).run(
+            TASK, HANDLE, "", tmp_path / "work")
+
+
+def test_run_transport_failure_reports_a_failed_load_probe(tmp_path):
+    class AlwaysBroken(FakeRemoteLink):
+        def run(self, cmd, timeout=None):
+            raise InfrastructureError("ssh to user@node29 timed out")
+
+    with pytest.raises(InfrastructureError, match="node29 probe failed"):
+        _make_plugin(AlwaysBroken()).run(TASK, HANDLE, "", tmp_path / "work")
+
+
 def test_run_rejects_invalid_task_name(tmp_path):
     link = FakeRemoteLink()
     bad = Task(task_id="x; rm", instruction="x", meta={"task_name": "x; rm"})
