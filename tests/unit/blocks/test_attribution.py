@@ -31,6 +31,7 @@ from expedistill.prompts import METHOD_PROMPT_NAMES, PROMPTS
 from expedistill.blocks.attribution import (
     FAILURE_CATEGORIES,
     attribute_failure,
+    attribute_usage,
     revise_skill,
 )
 from expedistill.blocks.author import (
@@ -621,3 +622,49 @@ def test_revision_template_output_contract_carries_the_summary():
     keys = set(re.findall(r'"([a-z_]+)":', get_prompt("LIVE_SKILL_REVISION")))
     assert {"failure_category", "skill_text", "revision_reason",
             "summary"} <= keys
+
+
+def test_live_usage_attribution_prompt_requires_a_problem():
+    # The validator is strict on purpose: a not_applied / contradicted
+    # entry without a concrete problem is a terminal unit. The prompt is
+    # the only place that tells the model, so pin the sentence.
+    template = " ".join(get_prompt("LIVE_USAGE_ATTRIBUTION").split())
+    assert "Required and non-empty when" in template
+    assert '"application" is "not_applied" or "contradicted"' in template
+
+
+def _usage_script(problem: str) -> str:
+    skill = make_skill(1, SKILL_A_CONTENT)
+    return json_script({
+        "diagnosis": "the skill was read but its steps were not followed",
+        "skills": [{
+            "skill_id": skill.skill_id,
+            "relevance": "relevant",
+            "application": "not_applied",
+            "evidence_steps": [1],
+            "problem": problem,
+        }],
+    })
+
+
+def test_attribute_usage_accepts_a_non_applied_entry_with_a_problem():
+    skill = make_skill(1, SKILL_A_CONTENT)
+    plan = attribute_usage(
+        [skill], TASK_INSTRUCTION, BASELINE_SUMMARY, LIVE_VIEWS,
+        "attempt 0: outcome=failure read=[] unread=[all]",
+        WEAK_PROFILE,
+        make_fake_handle("author", _usage_script(
+            "the steps name the wrong config file")))
+    assert plan["skills"][0]["application"] == "not_applied"
+    assert plan["skills"][0]["problem"] == (
+        "the steps name the wrong config file")
+
+
+def test_attribute_usage_still_rejects_an_empty_problem():
+    skill = make_skill(1, SKILL_A_CONTENT)
+    with pytest.raises(ModelOutputError, match="needs a non-empty problem"):
+        attribute_usage(
+            [skill], TASK_INSTRUCTION, BASELINE_SUMMARY, LIVE_VIEWS,
+            "attempt 0: outcome=failure read=[] unread=[all]",
+            WEAK_PROFILE,
+            make_fake_handle("author", _usage_script("")))

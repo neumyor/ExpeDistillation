@@ -1,5 +1,5 @@
 {
-  "base_commit": "afbd118b3fd067b6be8c03884556689f6644fd53",
+  "base_commit": "fc7e66b9e67c472bd6652e23e00e00512c71edfd",
   "combos": {
     "exam-retrieval-split": {
       "crash_points": [
@@ -39,5 +39,5 @@
     0.6,
     0.95
   ],
-  "generated_on": "2026-10-22"
+  "generated_on": "2026-10-23"
 }

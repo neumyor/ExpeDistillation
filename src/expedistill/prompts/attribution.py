@@ -238,8 +238,9 @@ Work in two steps:
    - "evidence_steps": the step numbers that support the judgment (an empty
      list when there is no evidence);
    - "problem": a concrete statement of what is wrong with the skill AS
-     WRITTEN or with its selection, phrased transferably. Empty when there
-     is no problem.
+     WRITTEN or with its selection, phrased transferably. Required and
+     non-empty when "application" is "not_applied" or "contradicted";
+     empty otherwise when there is no problem.
 
 Do not propose actions. The learning phase decides what to do with these
 facts. Do not claim that a skill caused success or failure from the group
