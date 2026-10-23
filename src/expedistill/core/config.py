@@ -322,19 +322,16 @@ class LearnPhaseSpec:
     Learn phases are not registry entries (plan R8); their content
     families resolve through the registry like any other: ``evidence``
     (the add path's cutting budget), ``author`` (the add path's writing
-    method), ``group_evidence`` / ``group_author`` (the group-revision
-    path, defaulting to the pre-existing live_group / distill_diagnose
-    pair) and ``curate`` (agentbrew with merge_check, or none). Curation
-    runs only at the sequence's LAST learn phase -- the driver branches
-    on the sequence position, not on this spec.
+    method), ``decision`` (the P04/P06 task_level / skill_level strategy)
+    and ``curate`` (agentbrew with merge_check, or none). Curation runs
+    only at the sequence's LAST learn phase -- the driver branches on the
+    sequence position, not on this spec.
     """
 
     evidence: Dict[str, Any] = field(default_factory=dict)
     author: Dict[str, Any] = field(default_factory=dict)
-    group_evidence: Dict[str, Any] = field(
-        default_factory=lambda: {"name": "live_group"})
-    group_author: Dict[str, Any] = field(
-        default_factory=lambda: {"name": "distill_diagnose"})
+    decision: Dict[str, Any] = field(
+        default_factory=lambda: {"name": "task_level"})
     curate: Dict[str, Any] = field(default_factory=dict)
     kind: str = "learn"
     role: str = PHASE_ROLE_LEARN
@@ -390,7 +387,7 @@ class PhaseResult:
 _EXECUTE_FIELDS = frozenset({"kind", "role", "tasks", "delivery", "execution",
                              "compare", "acceptance"})
 _LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author",
-                           "group_evidence", "group_author", "curate"})
+                           "decision", "curate"})
 
 #: The baseline phase's two arms: fixed by design (the strong arm feeds
 #: the add path, the weak arm is every later comparison's control).
@@ -627,12 +624,9 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
             f"a learn phase accepts {sorted(_LEARN_FIELDS)}")
     evidence = _method_mapping(raw.get("evidence"), f"phases.{name}.evidence")
     author = _method_mapping(raw.get("author"), f"phases.{name}.author")
-    group_evidence = _method_mapping(
-        raw.get("group_evidence", {"name": "live_group"}),
-        f"phases.{name}.group_evidence")
-    group_author = _method_mapping(
-        raw.get("group_author", {"name": "distill_diagnose"}),
-        f"phases.{name}.group_author")
+    decision = _method_mapping(
+        raw.get("decision", {"name": "task_level"}),
+        f"phases.{name}.decision")
     if "exams" in author:
         # The v3 authoring switch has no v4 image: upgrade_v3_config
         # refuses every combination but the one legal ablation pair, so
@@ -650,8 +644,8 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
             f"phase, got {role!r}")
     return LearnPhaseSpec(
         evidence=evidence, author=author,
-        group_evidence=group_evidence, group_author=group_author,
-        curate=curate, kind="learn", role=PHASE_ROLE_LEARN)
+        decision=decision, curate=curate, kind="learn",
+        role=PHASE_ROLE_LEARN)
 
 
 def parse_phases(raw_phases: Any, raw_sequence: Any, *,

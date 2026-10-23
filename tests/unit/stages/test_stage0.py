@@ -713,7 +713,6 @@ FROZEN_PROMPT_NAMES = frozenset({
     "GROUP",
     "JUDGE",
     "LEAK_AUDIT_JUDGE",
-    "LIVE_RUN_ATTRIBUTION",
     "LIVE_SKILL_RETRIGGER",
     "LIVE_SKILL_REVISION",
     "LIVE_USAGE_ATTRIBUTION",
@@ -830,8 +829,6 @@ def test_the_full_prompt_freeze_covers_the_live_digests(
     manifest = load_manifest(ctx.run_dir)
     frozen = manifest["prompt_digests"]
     assert set(frozen) == set(prompts.METHOD_PROMPT_NAMES) | {"FAKE_TASK"}
-    assert frozen["LIVE_RUN_ATTRIBUTION"] == prompts.digest(
-        "LIVE_RUN_ATTRIBUTION")
     assert frozen["LIVE_SKILL_REVISION"] == prompts.digest(
         "LIVE_SKILL_REVISION")
     assert manifest["config"]["prompts_digests"] == frozen

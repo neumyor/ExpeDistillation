@@ -1,33 +1,24 @@
-"""The usage-aware group evidence driver.
+"""One task group's usage-aware attribution, as fact-only packages.
 
-The live folder phase records read facts in ``skill_usage.jsonl``.  This
-driver reads those facts, asks the attribution model for the per-skill
-relevance/application judgment that the trajectory alone cannot settle,
-and returns one fact-only package per group member.  The author driver
-decides what to do with each skill; no action is carried here.
-
-The group-level inputs (baseline attempts, live views, the group
-listing) are assembled the same way ``live_group`` assembles them.  The
-usage facts are the addition: which skills were exposed, which were
-read, and how the attempts that read them ended.
+This replaces the deprecated ``usage_group`` collector. The policy gate
+that lived there (when to attribute, what to keep/delete) is gone: the
+decision has already chosen the revise rows, and this driver only reads
+facts and asks the attribution model once for the whole group.
 """
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from expedistill.blocks.attribution import attribute_usage
-from expedistill.blocks.view import final_status_word, render_trajectory_view
-from expedistill.composites.decision import REVISE
+from expedistill.blocks.view import final_status_word
 from expedistill.composites.live_measurement import (
-    _LIVE_VIEWS_BUDGET_CHARS,
-    _clip_view,
-    _require_group,
-    _trajectories_from,
     load_baseline,
+    render_live_views,
     round_dir,
+    task_trajectories,
 )
 from expedistill.composites.skill_usage import SKILL_USAGE_NAME
-from expedistill.core.contracts import TaskListRow
+from expedistill.core.contracts import AcceptanceReportRow
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.inject.skill_text import (
@@ -35,10 +26,9 @@ from expedistill.inject.skill_text import (
     description_text,
 )
 from expedistill.llm.call import ModelHandle
+from expedistill.composites.evidence_package import EvidencePackage
 
-from expedistill.methods.evidence.package import EvidencePackage
-
-__all__ = ["collect_group_evidence"]
+__all__ = ["collect_group_attribution"]
 
 
 def _measurement_facts(kind: str, trajectories: List[Trajectory]) \
@@ -124,8 +114,7 @@ def _sibling_descriptions(skill: Skill, members: List[Skill],
 def _first_actions(trajectories: List[Trajectory]) -> str:
     if not trajectories:
         return ""
-    steps = trajectories[0].steps[:3]
-    return "\n".join(step.action for step in steps)[:4000]
+    return "\n".join(step.action for step in trajectories[0].steps[:3])[:4000]
 
 
 def _skill_usage_text(aggregate: Dict[str, Any]) -> str:
@@ -138,9 +127,11 @@ def _skill_usage_text(aggregate: Dict[str, Any]) -> str:
         f"outcomes_when_unread={aggregate['outcomes_when_unread']}")
 
 
-def collect_group_evidence(
+def collect_group_attribution(
     *,
-    task_row: TaskListRow,
+    task_id: str,
+    members: List[Skill],
+    report_row: AcceptanceReportRow,
     store: Store,
     round_: int,
     n_attempts: int,
@@ -150,28 +141,21 @@ def collect_group_evidence(
     view_rules: Any = None,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
-    params: Any = None,
 ) -> List[EvidencePackage]:
-    """Collect one failed group's usage-aware evidence packages."""
-    if task_row.action != REVISE:
-        raise ValueError(
-            "collect_group_evidence needs a task list row with action "
-            f"'revise', got {task_row.action!r} on target "
-            f"{task_row.target_id!r}")
-    task_id = task_row.target_id
-    members: List[Skill] = _require_group(store, task_id)
+    """Return one fact-only package per group member.
 
+    ``report_row`` is the live report row that measured the group; its
+    presence is the caller's proof that the group was actually measured.
+    """
+    if not members:
+        raise ValueError(
+            f"task {task_id!r} has no members to attribute")
     baseline_trajectories, _ = load_baseline(store, task_id, n_attempts)
     baseline_facts = _measurement_facts("baseline_run",
-                                       baseline_trajectories)
-    round_trajs = _trajectories_from(round_dir(store, round_), task_id,
-                                     round_)
+                                        baseline_trajectories)
+    round_trajs = task_trajectories(store, task_id, round_)
     live_facts = _measurement_facts("live_run", round_trajs)
-    per_view_budget = _LIVE_VIEWS_BUDGET_CHARS // max(1, len(round_trajs))
-    live_views = "\n\n".join(
-        _clip_view(render_trajectory_view(traj, view_rules),
-                   per_view_budget)
-        for traj in round_trajs)
+    live_views = render_live_views(round_trajs, view_rules)
 
     rows = _usage_rows(round_dir(store, round_), task_id, round_)
     usage_table, aggregates, delivery_status, selection = _usage_facts(
@@ -212,6 +196,7 @@ def collect_group_evidence(
                       "text": _sibling_descriptions(
                           skill, members, description_mode)})
         facts.append({"kind": "first_actions", "text": first_actions})
+        facts.append({"kind": "task_instruction", "text": task_instruction})
         entry = judged.get(skill.skill_id)
         if entry is not None:
             facts.append({"kind": "skill_relevance",

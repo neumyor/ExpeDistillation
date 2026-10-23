@@ -1,10 +1,10 @@
 """The exam path's evidence collector: a skill's answer-sheet package.
 
 The third evidence-family entry (beside ``add_path`` and
-``live_group``): a revise row of the EXAM kind collects the exam, the
+the live group attribution): a revise row of the EXAM kind collects the exam, the
 judged attempt's weak answer and the judge's reason as fact-only
 evidence for the author driver. This assembly used to live inline in
-``stages/learn_tasks.py`` as a disclosed deviation ("the evidence
+``stages/learn_add.py / learn_apply.py / learn_exam.py`` as a disclosed deviation ("the evidence
 family has no exam collector yet"); the Wave 2 integration moved it
 here -- evidence gathering belongs to the evidence family (boundary doc
 section 2.5).

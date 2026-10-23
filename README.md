@@ -81,10 +81,10 @@
    的读取事实，应用与相关判断仍属于找证据的工作。
 7. **决策不读轨迹，找证据不定动作，写作不做测量**。三者之间只通过任务清单
    和证据包交接。
-8. **实战验收的结论只到"包"**。live 相位一个任务的整包技能一起上场，组级结论
-   只能针对整包。逐技能的处理由找证据和使用事实查出，具体怎么改由写作决定；
-   `usage_revise` 的触发条件重写、正文修改和删除都只作用于单条技能，不改变
-   组级接受/丢弃。
+8. **实战验收的测量单位是"包"，决策单位是"技能"**。live 相位一个任务的整包
+   技能一起上场，组级结论只说明这包有没有提升；P04 的 `decision` 策略把组级
+   结论（或逐技能 usage 事实）展开成每条技能的 keep / revise / delete，归因
+   负责解释，写作只负责改内容。整包是否继续被测由这些逐技能动作共同决定。
 9. **测试结果不流进学习**。test 相位的报告只进入最终成绩；"带技能库比裸跑
    提升多少"由 test 相位自己的汇总计算，决策入口收到 test 相位的报告会直接报错。
 
@@ -185,8 +185,7 @@
 | `role` | 恒为 `learn` |
 | `evidence` | 找证据方法（新增路径）：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算；`write_lessons` 默认 `true`，add 路径同时从弱模型失败段学，`false` 只学强模型成功段）；说明见 `src/expedistill/methods/evidence/README.md` |
 | `author` | 写作方法（新增路径）：`distill_diagnose`（无参数）；说明见 `src/expedistill/methods/author/README.md` |
-| `group_evidence` | 组修订的证据方法：`live_group`（默认）/ `usage_group`（读取 live folder 的逐技能使用事实，并让归因模型标注相关与应用）；说明见 `src/expedistill/methods/evidence/README.md` |
-| `group_author` | 组修订的写作方法：`distill_diagnose`（默认）/ `usage_revise`（按读取/应用事实选择 keep / retrigger / revise / delete / observe）；说明见 `src/expedistill/methods/author/README.md` |
+| `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（读过 → revise，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
@@ -279,13 +278,11 @@ phases:
   learn: {kind: learn,
        evidence: {name: segment, K: 5, retry_limit: 2, write_lessons: true},
        author: {name: distill_diagnose},
-       group_evidence: {name: usage_group},
-       group_author: {name: usage_revise, policy: usage_v1},
+       decision: {name: task_level},
        curate: {name: agentbrew, ...}}
 ```
 
-`group_evidence` / `group_author` 不写时默认 `live_group` / `distill_diagnose`，
-与旧行为一致。
+`decision` 不写时默认 `task_level`；P02 的 add 路径不使用它。
 
 test 相位的技能文件夹形态（folder 交付 + real_folder 执行，完整可跑的配置见
 `configs/experiments/tb21_split_folder_v4.yaml`）：
@@ -510,9 +507,8 @@ E1 内部的 runner：
 | G7 | 找相似、冲突与低价值 | （skill 列表, 模型, 输入方式 全文/摘要）→ 候选合并组、冲突对、低价值技能列表 |
 | G8 | 合并 skill | （一组 skill 或一对冲突 skill, 模型）→ 合并后的 Skill 正文 + 一句话摘要（JSON；泛化优先，冲突先析因） |
 | G9 | 分组 | （skill 列表, 模型）→ 每条 skill 的能力分组标签 |
-| G10 | live 归因 | （任务 prompt 渲染产物, 基线状态行, 本轮全部尝试的轨迹视图, skill 组列表, 弱模型画像, author 模型）→ 组级诊断 + 逐 skill 的问题事实（相位世界里只报告事实，动作归决策与写作） |
 | G11 | live 修订 | （skill 现文本, 归因事实, 失败尝试视图摘录, 弱模型画像, rewriter 模型）→ 保节结构的新正文 + 错因归类 + 修订理由。修订纪律：不得写入本题的具体数值 / 文件名 / 实体名（检索交付会把技能注入其他任务，任务局部化的内容对别的任务有害） |
-| G12 | usage 归因 | （任务 prompt 渲染产物, 基线状态行, 本轮轨迹视图, 技能列表, 读取事实, 弱模型画像, author 模型）→ 组级诊断 + 每条技能的相关/应用事实，不带动作 |
+| G12 | usage 归因 | （任务 prompt 渲染产物, 基线状态行, 本轮轨迹视图, 技能列表, 读取事实, 弱模型画像, author 模型）→ 组级诊断 + 每条技能的相关/应用事实，不带动作；P04/P06 每 task 一次 |
 | G13 | 触发条件重写 | （skill 现文本, 旧摘要, 兄弟技能描述, 任务说明, 模型未读时的前几步, 读取事实, 弱模型画像, rewriter 模型）→ 新摘要 + 新 `[When to use]`，正文逐字保留 |
 
 "弱模型画像"是配置里的一段文字，换弱模型时只换这段配置。`use_weak_profile` 默认关闭：画像文本留在配置里，但写作、改写、live 归因和 live 修订的提示词收到的是中性段落；只有显式打开时才把画像正文送进提示词。
@@ -528,7 +524,7 @@ E1 内部的 runner：
 | K5 | 库整理 | G7 →（可选）丢弃低价值 → G8 →（可选）K3 回归考试 → G9 → D10，合并与丢弃日志先写后改、续跑按日志重放 | `composites/curation.py` |
 | K6 | live 判定账本 | 轮判定（judge_round，append-once、首判为准、续跑重算逐字节核对）、组终态提交（finalize_group）、基线与轮仓读取、注入审计行 | `composites/live_verdicts.py`、`live_measurement.py` |
 | — | 验收判定核 | 每次运行的判定（success / failure / invalid）与单元汇总行；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`——tb_scorer 消费 correctness 与 verifier_ran / exception_type 事实，例外死亡 / 伪零分判 invalid） | `composites/verdicts.py` |
-| — | 决策 | 统一决策入口 `decide_task_list`、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py` |
+| — | 决策 | `decide_task_list`（P02 baseline-gap / exam）、`decision_strategies`（P04/P06 的 `task_level` / `skill_level`）、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py`、`decision_strategies.py` |
 | — | 报告读取器 | 从磁盘现读三种验收报告（baseline / exam / live），只读 | `composites/reports.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
 | — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
@@ -582,7 +578,7 @@ E1 内部的 runner：
 | exam | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
 | live | 交付 `group_by_task` 或 `folder_by_task`、E1 × K1（整组或逐任务文件夹、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用；folder 交付另写 `skill_usage.jsonl` 读取事实 |
 | test | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
-| learn | `decision.decide_task_list`；add：K2（含 D5、G1、D7）+ D6 + G2 + G3；revise：找证据（exam 考卷 / live 组，live 组可用 `usage_group`）+ 写作（G11，或 `usage_revise` 的 G13 触发重写）+ 逐技能去留；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
+| learn | P02：`decision.decide_task_list` 的 baseline-gap add → `learn_add`（K2 + D6 + G2 + G3）；P04/P06：`decision_strategies`（`task_level` / `skill_level`）→ `learn_apply`（按 task 一次归因、逐 skill 写作/keep/delete）；exam：`learn_exam` 的多版本 merge + 考卷证据；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
 
 **复用最多的几块**：
 
@@ -614,10 +610,9 @@ E1 内部的 runner：
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
 | 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
-| LIVE_RUN_ATTRIBUTION | G10 | author（学习相位 revise，live 组证据） |
-| LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，live 组修订） |
-| LIVE_USAGE_ATTRIBUTION | usage 归因 | author（`group_evidence=usage_group`） |
-| LIVE_SKILL_RETRIGGER | 触发条件重写 | rewriter（`group_author=usage_revise` 的 retrigger） |
+| LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，整条重写） |
+| LIVE_USAGE_ATTRIBUTION | usage 归因 | author（`methods/attribution/group`，每 task 一次） |
+| LIVE_SKILL_RETRIGGER | 触发条件重写 | rewriter（`revise` 的内部 retrigger 子模式） |
 
 **全部方法 prompt 全量冻结**：`prompts/__init__.py` 的 import 清单登记
 每个方法 prompt，**每个 run 的 manifest 都冻结全部已注册方法 prompt 的
@@ -827,7 +822,9 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
 
 命令行循环（`cli.py`）按冻结序列逐相位派发：执行相位进
 `stages/phase_execute`（一个包，四种角色各一个模块），学习相位进
-`stages/phase_learn`（逐行动作在 `stages/learn_tasks.py`）。每完成一个相位
+`stages/phase_learn`（P02 add 在 `stages/learn_add.py`，P04/P06 per-skill apply 在
+`stages/learn_apply.py`，exam 在 `stages/learn_exam.py`，共享账本在
+`stages/learn_ledger.py`）。每完成一个相位
 打印一行摘要并写进度账本。**续跑 = 同一条命令重跑**：每个相位按磁盘上已有
 的产物跳过已完成的单元。
 
@@ -909,14 +906,11 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   units / dispatched / skipped_* 全部从并集与轮内磁盘事实（冻结审计行、
   终态、规则 1 复用表）推导，不读本 pass 的计划清单，重放落在一次跑完
   的同一些字节上；
-- **归因与修订不在这个相位**：没提升的组由下一个学习相位收证据（默认 G10
-  事实，视图在字符预算内裁剪）、做修订（G11，保节结构、版本加一）、按证据
-  定每条去留；选 `group_evidence=usage_group` / `group_author=usage_revise`
-  时，学习相位还会读取本轮 `skill_usage.jsonl`，把“相关但未读”“读取但未
-  应用”“应用但无效”分别映射到触发条件重写、正文修改和删除，并保留
-  `observe` 作为证据不足时的空操作；改写没产出新版本时，注入块逐字节不变，
-  下一个 live 相位按规则 1 直接沿用旧判定（这是 no-op 守卫的相位形态——
-  同一个注入不会被反复重采样直到运气好）。
+- **归因与修订不在这个相位**：没提升的组由下一个学习相位按
+  `decision.name` 先产出 per-skill 的 keep / revise / delete；`learn_apply`
+  再按 task 调一次 `methods/attribution/group`（`LIVE_USAGE_ATTRIBUTION`），
+  然后逐 skill 写 `LIVE_SKILL_REVISION`（或内部 retrigger）。改写没产出新版本
+  时，注入块逐字节不变，下一个 live 相位按规则 1 直接沿用旧判定。
 
 ### 5.5 终测相位（test）
 
@@ -1002,13 +996,16 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 就是对照）；技能库 = 上一个学习相位的工件（第一个学习相位没有上一工件，
 回退读 run 根的冻结库——装配 run 的预置库，从零跑此时尚无 run 根库、
 等价于空库开始；回退覆盖的任务不再重发 add，预置库因此保持冻结）；
-剩余检验次数由序列位置算出。全部交给 `decision.decide_task_list` 得任务
-清单。紧跟摸底相位的第一个学习相位走**摸底缺口路径**：本轮报告为空、
-baseline 相位报告当对照，对每个弱模型做不好且还没有技能的训练任务发一条 add 行。
+剩余检验次数由序列位置算出。紧跟摸底相位的第一个学习相位走
+**摸底缺口路径**（`decision.decide_task_list`）：本轮报告为空、baseline
+相位报告当对照，对每个弱模型做不好且还没有技能的训练任务发一条 add 行。
+后续 P04/P06 走 `decision_strategies` 的 `task_level` 或 `skill_level`，
+统一产出 per-skill 的 keep / revise / delete。
 
-**多版本行合并**：作答仓共享，一条技能可能带好几行报告行（不同版本各一
-行，结论可能互相冲突）。合并规则：**最高版本的那行算数**，低版本行作为
-被取代者写进清单账本。
+**多版本行合并（仅 exam 路径）**：作答仓共享，一条技能可能带好几行报告行
+（不同版本各一行，结论可能互相冲突）。合并规则：**最高版本的那行算数**，
+低版本行作为被取代者写进清单账本。P04/P06 的 live 决策已是 per-skill 一行，
+不做版本合并。
 
 **逐行动作**（动作是幂等的，续跑重放安全）：
 
@@ -1017,19 +1014,18 @@ baseline 相位报告当对照，对每个弱模型做不好且还没有技能�
 - **delete**：待定与已接受成员都按决策给的原因弃用（`discard_skill` 是
   唯一入口）；已终态的成员保持自己的既有事实（skipped_terminal）；
 - **revise**：先收证据再改写，成功则版本加一。exam 路径的证据是考卷
-  （考题、弱模型答案、判卷理由）；live 路径的证据是组内全部尝试的轨迹视图
-  与逐条问题事实，写作侧按证据对每条技能定去留（kept / deleted / revised）；
-  选 `usage_group` + `usage_revise` 时还会读 `skill_usage.jsonl`，相关但
-  未读的先 trigger-only 重写（`retriggered`），读取但未应用或应用无效的
-  重写正文（`revised`），投递失败或整组零读取只记 `observed`。
-  改写没产出新版本 = 没变化（版本不动，记 unchanged，下次学习再试）；
+  （考题、弱模型答案、判卷理由）；live 路径按 task 调一次 usage 归因，
+  再逐 skill 写正文；相关但从未读、应用 unclear 的技能走内部 retrigger
+  （只改 summary 和 `[When to use]`，记 `retriggered`），其余走整条重写
+  （记 `revised`）。改写没产出新版本 = 没变化（版本不动，记 unchanged，
+  下次学习再试）；
 - **add**：把该任务的强模型成功段提炼成新的待定技能；evidence 的
   `write_lessons` 开着（默认）时，弱模型失败段也用诊断写法写成技能，
   结构与提炼产物相同（一段一技能，`make_skill_id(subtask_id)` 编号）。
 
 **切段在相位世界里的位置**（关键设计，2026-10-16 Wave 3-S）：
 **切段发生在学习相位内部、add 行执行的时候**。流程世界没有独立的切段
-相位：`learn_tasks` 的 add 行先调 evidence 族的 segment 方法
+相位：`learn_add` 的 add 行先调 evidence 族的 segment 方法
 （`methods/evidence/segmentation.py`），它从 **run 级轨迹仓**（正是摸底
 相位两臂的裸跑轨迹）按 `trajectory_select` 具名规则逐任务挑轨迹、
 **切其中的强角色轨迹，`write_lessons` 开着时连弱角色轨迹一起切**
@@ -1059,7 +1055,7 @@ subtask 即算该单元完成"返回已存**前缀**——前缀即最终结果�
 - `learn_summary.json`：摘要最后写，**带 bank 键即该相位的完成信号**——
   已完成的学习相位重放时整个跳过（回执不翻倍、工件不按当前技能仓重写）。
 
-回执的**结局清单**（14 种）：
+回执的**结局清单**（11 种）：
 
 | 结局 | 含义 |
 |---|---|
@@ -1067,11 +1063,8 @@ subtask 即算该单元完成"返回已存**前缀**——前缀即最终结果�
 | `accepted` | keep 把待定成员收进库 |
 | `already_accepted` | keep 遇到已接受成员（复测又通过） |
 | `revised` | revise 产出新版本 |
-| `retriggered` | usage_revise 只重写摘要和 `[When to use]`，正文不变，版本加一 |
-| `observed` | usage_revise 证据不足（投递失败、整组零读取等），不动 |
+| `retriggered` | 内部 retrigger 只重写摘要和 `[When to use]`，正文不变，版本加一 |
 | `unchanged` | revise/retrigger 没产出新版本（没变化，下次再试） |
-| `kept` | live 组修订时写作侧决定保留这条技能 |
-| `deleted` | live 组修订时写作侧决定删除（按 LIVE_REVISION_DELETED 弃用） |
 | `discarded` | delete 按决策原因弃用 |
 | `skipped_no_material` | add 切不出可学材料（见上） |
 | `skipped_existing` | add 遇到技能已存在的经历（续跑的另一重保障） |

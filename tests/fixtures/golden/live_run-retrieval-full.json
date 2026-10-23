@@ -180,78 +180,6 @@
       "model": "strong-model",
       "out_tokens": null,
       "parsed": {
-        "diagnosis": "the skill's trigger is too vague to recognize",
-        "skill_actions": [
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
-          },
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
-          },
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t1/weak/01/seg00/skill"
-          }
-        ]
-      },
-      "prompt_name": "LIVE_RUN_ATTRIBUTION",
-      "request_id": "<request_id>",
-      "request_text": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the baseline), then with a group of\nskills injected into its execution prompt. The run with skills did NOT do\nbetter than the baseline. Diagnose why, and decide what happens to each\nskill.\n\nTASK (the execution prompt the weak model actually saw):\nSolve the task: inspect the reported state of the service for task one\n\n\n\nBASELINE (the weak model's bare attempts at the same task, one status line\nper attempt):\nattempt 0: failure\nattempt 1: failure\n\nRUN WITH SKILLS (every attempt of this round, successful and failed ones\nalike):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nSKILLS (the group that was injected; each skill's id, then its full text):\nskill_id: traj/fakebench:t1/strong/00/seg00/skill\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nskill_id: traj/fakebench:t1/weak/00/seg00/skill\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nskill_id: traj/fakebench:t1/weak/01/seg00/skill\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in two steps:\n\n1. Diagnose. Compare the baseline with the run-with-skills and say why the\n   real execution did not get better. 1 to 3 sentences, concrete: name the\n   skill that misfired or went unused, what the weak model did instead, and\n   where the injected text changed its behavior for the worse. Do not\n   restate the attempt counts; say what actually happened.\n\n2. Decide, per skill. Emit exactly one action for EVERY skill in the group,\n   each skill exactly once, identified by its skill_id exactly as listed:\n   - \"keep\": the skill is not part of the problem.\n   - \"revise\": the skill is part of the problem and fixable. The problem\n     must be concrete and about the skill AS WRITTEN: a trigger the weak\n     model cannot recognize during real execution, a step it cannot carry\n     out, an ordering that misleads it, a case the skill leaves uncovered.\n   - \"delete\": the skill is harmful or useless in this group. The problem\n     must say why, concretely.\n\n   Revision discipline, binding on every \"revise\" problem: the fix must be\n   phrased as a TRANSFERABLE skill -- general patterns and command forms\n   with generic placeholders (for example <config-file>, <port>), never\n   this task's file names, concrete values, or entity names. Every library\n   skill is retrieved and injected into OTHER tasks, where this task's\n   specifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"diagnosis\": \"<1 to 3 sentences: why the real execution did not get better>\",\n  \"skill_actions\": [\n    {\"skill_id\": \"<the skill's id, exactly as listed>\",\n      \"action\": \"<keep|revise|delete>\",\n      \"problem\": \"<empty string for keep; for revise/delete the concrete\n      problem, phrased transferably>\"}\n  ]}\n",
-      "response_text": "```json\n{\"diagnosis\": \"the skill's trigger is too vague to recognize\", \"skill_actions\": [{\"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}, {\"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}, {\"skill_id\": \"traj/fakebench:t1/weak/01/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}]}\n```",
-      "role": "author",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
-        "diagnosis": "the skill's trigger is too vague to recognize",
-        "skill_actions": [
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t2/strong/00/seg00/skill"
-          },
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t2/weak/00/seg00/skill"
-          },
-          {
-            "action": "revise",
-            "problem": "the trigger condition is too vague to recognize during real execution",
-            "skill_id": "traj/fakebench:t2/weak/01/seg00/skill"
-          }
-        ]
-      },
-      "prompt_name": "LIVE_RUN_ATTRIBUTION",
-      "request_id": "<request_id>",
-      "request_text": "You are the attribution step of a live acceptance round. A weak model\nexecuted the SAME task twice: first bare (the baseline), then with a group of\nskills injected into its execution prompt. The run with skills did NOT do\nbetter than the baseline. Diagnose why, and decide what happens to each\nskill.\n\nTASK (the execution prompt the weak model actually saw):\nSolve the task: inspect the reported state of the service for task two\n\n\n\nBASELINE (the weak model's bare attempts at the same task, one status line\nper attempt):\nattempt 0: failure\nattempt 1: failure\n\nRUN WITH SKILLS (every attempt of this round, successful and failed ones\nalike):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nSKILLS (the group that was injected; each skill's id, then its full text):\nskill_id: traj/fakebench:t2/strong/00/seg00/skill\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nskill_id: traj/fakebench:t2/weak/00/seg00/skill\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nskill_id: traj/fakebench:t2/weak/01/seg00/skill\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in two steps:\n\n1. Diagnose. Compare the baseline with the run-with-skills and say why the\n   real execution did not get better. 1 to 3 sentences, concrete: name the\n   skill that misfired or went unused, what the weak model did instead, and\n   where the injected text changed its behavior for the worse. Do not\n   restate the attempt counts; say what actually happened.\n\n2. Decide, per skill. Emit exactly one action for EVERY skill in the group,\n   each skill exactly once, identified by its skill_id exactly as listed:\n   - \"keep\": the skill is not part of the problem.\n   - \"revise\": the skill is part of the problem and fixable. The problem\n     must be concrete and about the skill AS WRITTEN: a trigger the weak\n     model cannot recognize during real execution, a step it cannot carry\n     out, an ordering that misleads it, a case the skill leaves uncovered.\n   - \"delete\": the skill is harmful or useless in this group. The problem\n     must say why, concretely.\n\n   Revision discipline, binding on every \"revise\" problem: the fix must be\n   phrased as a TRANSFERABLE skill -- general patterns and command forms\n   with generic placeholders (for example <config-file>, <port>), never\n   this task's file names, concrete values, or entity names. Every library\n   skill is retrieved and injected into OTHER tasks, where this task's\n   specifics are wrong.\n\nOutput ONLY JSON with exactly these fields:\n{\"diagnosis\": \"<1 to 3 sentences: why the real execution did not get better>\",\n  \"skill_actions\": [\n    {\"skill_id\": \"<the skill's id, exactly as listed>\",\n      \"action\": \"<keep|revise|delete>\",\n      \"problem\": \"<empty string for keep; for revise/delete the concrete\n      problem, phrased transferably>\"}\n  ]}\n",
-      "response_text": "```json\n{\"diagnosis\": \"the skill's trigger is too vague to recognize\", \"skill_actions\": [{\"skill_id\": \"traj/fakebench:t2/strong/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}, {\"skill_id\": \"traj/fakebench:t2/weak/00/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}, {\"skill_id\": \"traj/fakebench:t2/weak/01/seg00/skill\", \"action\": \"revise\", \"problem\": \"the trigger condition is too vague to recognize during real execution\"}]}\n```",
-      "role": "author",
-      "status": "ok",
-      "system": "You are a helpful assistant. Follow the instructions exactly."
-    },
-    {
-      "attempt": 0,
-      "duration_ms": "<duration_ms>",
-      "finish_reason": null,
-      "in_tokens": null,
-      "infra_attempt": 0,
-      "model": "strong-model",
-      "out_tokens": null,
-      "parsed": {
         "failure_category": "wrong_trigger",
         "revision_reason": "made the trigger condition concrete",
         "skill_text": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\nREVISED-BY-G11: name the concrete state before acting.",
@@ -259,7 +187,7 @@
       },
       "prompt_name": "LIVE_SKILL_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nRecorded usage: read 0/0; first_step=None; outcomes_when_read=[]; outcomes_when_unread=[]\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
       "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verify] the command's result matches the inspected state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -281,7 +209,7 @@
       },
       "prompt_name": "LIVE_SKILL_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nRecorded usage: read 0/0; first_step=None; outcomes_when_read=[]; outcomes_when_unread=[]\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
       "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verify] the command's result matches the inspected state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -303,7 +231,7 @@
       },
       "prompt_name": "LIVE_SKILL_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nRecorded usage: read 0/0; first_step=None; outcomes_when_read=[]; outcomes_when_unread=[]\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
       "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verify] the command's result matches the inspected state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -325,7 +253,7 @@
       },
       "prompt_name": "LIVE_SKILL_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nRecorded usage: read 0/0; first_step=None; outcomes_when_read=[]; outcomes_when_unread=[]\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
       "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verify] the command's result matches the inspected state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -347,7 +275,7 @@
       },
       "prompt_name": "LIVE_SKILL_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nRecorded usage: read 0/0; first_step=None; outcomes_when_read=[]; outcomes_when_unread=[]\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t1 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
       "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verify] the service reports the expected state\\n[Do not use when] no state was reported\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -369,7 +297,7 @@
       },
       "prompt_name": "LIVE_SKILL_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nthe skill's trigger is too vague to recognize\n\nThis skill's problem: the trigger condition is too vague to recognize during real execution\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
+      "request_text": "A skill written for a weak model was injected into the weak model's real\nexecution of a task, and the execution failed. Rewrite it only if the\nfailure reveals a general defect. This is a Terminal Bench V2.1 skill; the\ncard will be used on other tasks, so task-specific details must not enter\nit.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nATTRIBUTION REPORT (the group's diagnosis and this skill's problem):\nRecorded usage: read 0/0; first_step=None; outcomes_when_read=[]; outcomes_when_unread=[]\n\nWHAT THE FAILED EXECUTION ACTUALLY DID (excerpts from the failed attempts):\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\ntask: fakebench:t2 (final status: failure)\n\nstep 0\naction: run\nobservation: the environment state\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nWork in three steps:\n\n1. Classify why the weak model did not succeed WITH this skill. Choose\n   exactly one category:\n   - \"misread\": the weak model misunderstood the skill or the situation it\n     applies to;\n   - \"missing_step\": the skill skipped an intermediate step that real\n     execution needed spelled out;\n   - \"wrong_trigger\": the condition for when to apply the skill was\n     unclear, so the weak model applied it wrongly or at the wrong moment;\n   - \"other\": none of the above.\n\n2. Decide whether the failure is a general defect in the skill or a\n   task-specific issue.\n   - General defect: a missing intermediate step, a trigger the reader\n     cannot observe, a step the reader cannot execute, or a misleading\n     order. Rewrite the skill.\n   - Task-specific issue: a fact about this task's files, values, tools or\n     trajectory. Do not encode it. Return the skill unchanged and say in\n     revision_reason that the failure is task-specific.\n\n3. If you rewrite, keep the four bracket sections of the original skill\n   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each\n   section's content, never collapse them into prose. Reproduce\n   the bracketed section headers exactly as written, each on its own line.\n   Change the wording, granularity, or trigger conditions of the skill --\n   not its underlying idea.\n   Rewrite to 5 to 9 decision nodes and 1,500 to 2,500 characters. Compress\n   instead of appending. Every node must remain a general decision rule;\n   task-specific values become <placeholders>. A script may appear only as\n   its input, output, and invocation; never include its implementation, and\n   never use a code block longer than three lines.\n   Then write a fresh capability-level summary of the REWRITTEN skill: the\n   reusable capability it teaches (verb + object) and its observable\n   trigger, with no task or subtask names. Keep it on one line.\n\nHard constraint: do NOT copy the specific values, file names, entity names,\nor other concrete details of THIS task's trajectory into the skill. The\nrewritten skill must stay transferable: general patterns and command forms\nwith generic placeholders. Library skills are retrieved and injected into\nOTHER tasks, where this task's specifics are wrong.\n\nTransfer audit before output:\n1. Would the rewritten nodes still make sense if this task's language,\n   tools, file names and constants changed?\n2. Is every trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify part name the exact pass signal and forbid submission\n   before it passes?\nIf any check fails, rewrite again.\n\nOutput ONLY JSON with exactly these fields:\n{\"failure_category\": \"<misread|missing_step|wrong_trigger|other>\",\n  \"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what you changed and why, or why\n  the failure is task-specific and the skill is unchanged>\",\n  \"summary\": \"<one line: the reusable capability the rewritten skill teaches\n  (verb + object) and its observable trigger; no task or subtask names>\"}\n",
       "response_text": "```json\n{\"failure_category\": \"wrong_trigger\", \"skill_text\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Verify] the service reports the expected state\\n[Do not use when] no state was reported\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -562,7 +490,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1114,
+        "estimated_in": 1102,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -578,7 +506,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1114,
+        "estimated_in": 1102,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -594,7 +522,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1133,
+        "estimated_in": 1121,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -610,7 +538,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1133,
+        "estimated_in": 1121,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -626,7 +554,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1133,
+        "estimated_in": 1121,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -642,7 +570,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1133,
+        "estimated_in": 1121,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -878,38 +806,6 @@
       "role": "curator",
       "status": "ok",
       "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 970,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "LIVE_RUN_ATTRIBUTION",
-      "request_id": "<request_id>",
-      "role": "author",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 970,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "LIVE_RUN_ATTRIBUTION",
-      "request_id": "<request_id>",
-      "role": "author",
-      "status": "ok",
-      "time": "<time>"
     }
   ],
   "llm_requests/usage.jsonl.lock": {
@@ -965,16 +861,13 @@
             "rounds": 3,
             "token_budget": 4096
           },
+          "decision": {
+            "name": "task_level"
+          },
           "evidence": {
             "K": 1,
             "name": "segment",
             "retry_limit": 2
-          },
-          "group_author": {
-            "name": "distill_diagnose"
-          },
-          "group_evidence": {
-            "name": "live_group"
           },
           "kind": "learn",
           "role": "learn"
@@ -1027,7 +920,6 @@
         "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
         "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
         "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
-        "LIVE_RUN_ATTRIBUTION": "2acee750d6b0848a038bdc5868e85a740b4540f3ac60e4bbd55f4256c2832037",
         "LIVE_SKILL_RETRIGGER": "a78064c688c5b2c2fb0587e168592d44512b96010d46ad2f4211cf03c631c27e",
         "LIVE_SKILL_REVISION": "5ead76b92c45376b22c2e0a043817ffa6f60e5879ea7fd87b8db8d84ab692f78",
         "LIVE_USAGE_ATTRIBUTION": "da7262e955265cb9e4ef25be2616f91cccfc96eb989fa99f4d9d249a38e9f1c5",
@@ -1083,7 +975,6 @@
       "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
       "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
       "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
-      "LIVE_RUN_ATTRIBUTION": "2acee750d6b0848a038bdc5868e85a740b4540f3ac60e4bbd55f4256c2832037",
       "LIVE_SKILL_RETRIGGER": "a78064c688c5b2c2fb0587e168592d44512b96010d46ad2f4211cf03c631c27e",
       "LIVE_SKILL_REVISION": "5ead76b92c45376b22c2e0a043817ffa6f60e5879ea7fd87b8db8d84ab692f78",
       "LIVE_USAGE_ATTRIBUTION": "da7262e955265cb9e4ef25be2616f91cccfc96eb989fa99f4d9d249a38e9f1c5",
@@ -1515,7 +1406,7 @@
     },
     "role": "learn",
     "task_list": {
-      "revise": 2,
+      "revise": 6,
       "superseded_rows": 0
     }
   },
@@ -1526,8 +1417,8 @@
       "phase_label": "p04:learn",
       "schema": "learn-outcome-v1",
       "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-      "target_id": "fakebench:t1",
-      "target_kind": "group",
+      "target_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_kind": "skill",
       "version": 2
     },
     {
@@ -1536,8 +1427,8 @@
       "phase_label": "p04:learn",
       "schema": "learn-outcome-v1",
       "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-      "target_id": "fakebench:t1",
-      "target_kind": "group",
+      "target_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "target_kind": "skill",
       "version": 2
     },
     {
@@ -1546,8 +1437,8 @@
       "phase_label": "p04:learn",
       "schema": "learn-outcome-v1",
       "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-      "target_id": "fakebench:t1",
-      "target_kind": "group",
+      "target_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "target_kind": "skill",
       "version": 2
     },
     {
@@ -1556,8 +1447,8 @@
       "phase_label": "p04:learn",
       "schema": "learn-outcome-v1",
       "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-      "target_id": "fakebench:t2",
-      "target_kind": "group",
+      "target_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "target_kind": "skill",
       "version": 2
     },
     {
@@ -1566,8 +1457,8 @@
       "phase_label": "p04:learn",
       "schema": "learn-outcome-v1",
       "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-      "target_id": "fakebench:t2",
-      "target_kind": "group",
+      "target_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "target_kind": "skill",
       "version": 2
     },
     {
@@ -1576,8 +1467,8 @@
       "phase_label": "p04:learn",
       "schema": "learn-outcome-v1",
       "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
-      "target_id": "fakebench:t2",
-      "target_kind": "group",
+      "target_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "target_kind": "skill",
       "version": 2
     }
   ],
@@ -1590,48 +1481,48 @@
       "phase_label": "p04:learn",
       "schema": "learn-revision-v1",
       "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-      "target_id": "fakebench:t1",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "from_version": 1,
       "phase_label": "p04:learn",
       "schema": "learn-revision-v1",
       "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-      "target_id": "fakebench:t1",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "from_version": 1,
       "phase_label": "p04:learn",
       "schema": "learn-revision-v1",
       "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-      "target_id": "fakebench:t1",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "from_version": 1,
       "phase_label": "p04:learn",
       "schema": "learn-revision-v1",
       "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-      "target_id": "fakebench:t2",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "from_version": 1,
       "phase_label": "p04:learn",
       "schema": "learn-revision-v1",
       "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-      "target_id": "fakebench:t2",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "from_version": 1,
       "phase_label": "p04:learn",
       "schema": "learn-revision-v1",
       "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
-      "target_id": "fakebench:t2",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "target_kind": "skill"
     }
   ],
   "phases/p04_learn/revisions.jsonl.lock": {
@@ -1784,8 +1675,26 @@
       "phase_label": "p04:learn",
       "reason": "no_gain",
       "schema": "learn-task-list-v1",
-      "target_id": "fakebench:t1",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "revise",
+      "basis_unit": "p03:live:fakebench:fakebench:t1:weak:3ee7440b",
+      "phase_label": "p04:learn",
+      "reason": "no_gain",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "revise",
+      "basis_unit": "p03:live:fakebench:fakebench:t1:weak:3ee7440b",
+      "phase_label": "p04:learn",
+      "reason": "no_gain",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "action": "revise",
@@ -1793,8 +1702,26 @@
       "phase_label": "p04:learn",
       "reason": "no_gain",
       "schema": "learn-task-list-v1",
-      "target_id": "fakebench:t2",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "revise",
+      "basis_unit": "p03:live:fakebench:fakebench:t2:weak:312f573b",
+      "phase_label": "p04:learn",
+      "reason": "no_gain",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "revise",
+      "basis_unit": "p03:live:fakebench:fakebench:t2:weak:312f573b",
+      "phase_label": "p04:learn",
+      "reason": "no_gain",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "target_kind": "skill"
     }
   ],
   "phases/p05_live/phase.json": {
@@ -1942,34 +1869,74 @@
     "compare_rule": "strict_rate_gain",
     "current_phase": "live",
     "outcomes": {
-      "skipped_terminal": 2
+      "already_accepted": 6
     },
     "role": "learn",
     "task_list": {
-      "keep": 2,
+      "keep": 6,
       "superseded_rows": 0
     }
   },
   "phases/p06_learn/outcomes.jsonl": [
     {
       "action": "keep",
-      "outcome": "skipped_terminal",
+      "outcome": "already_accepted",
       "phase_label": "p06:learn",
       "schema": "learn-outcome-v1",
-      "skill_id": null,
-      "target_id": "fakebench:t1",
-      "target_kind": "group",
-      "version": null
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_kind": "skill",
+      "version": 2
     },
     {
       "action": "keep",
-      "outcome": "skipped_terminal",
+      "outcome": "already_accepted",
       "phase_label": "p06:learn",
       "schema": "learn-outcome-v1",
-      "skill_id": null,
-      "target_id": "fakebench:t2",
-      "target_kind": "group",
-      "version": null
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "target_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "target_kind": "skill",
+      "version": 2
+    },
+    {
+      "action": "keep",
+      "outcome": "already_accepted",
+      "phase_label": "p06:learn",
+      "schema": "learn-outcome-v1",
+      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "target_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "target_kind": "skill",
+      "version": 2
+    },
+    {
+      "action": "keep",
+      "outcome": "already_accepted",
+      "phase_label": "p06:learn",
+      "schema": "learn-outcome-v1",
+      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "target_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "target_kind": "skill",
+      "version": 2
+    },
+    {
+      "action": "keep",
+      "outcome": "already_accepted",
+      "phase_label": "p06:learn",
+      "schema": "learn-outcome-v1",
+      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "target_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "target_kind": "skill",
+      "version": 2
+    },
+    {
+      "action": "keep",
+      "outcome": "already_accepted",
+      "phase_label": "p06:learn",
+      "schema": "learn-outcome-v1",
+      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "target_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "target_kind": "skill",
+      "version": 2
     }
   ],
   "phases/p06_learn/outcomes.jsonl.lock": {
@@ -2125,8 +2092,26 @@
       "phase_label": "p06:learn",
       "reason": "improved",
       "schema": "learn-task-list-v1",
-      "target_id": "fakebench:t1",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "keep",
+      "basis_unit": "p05:live:fakebench:fakebench:t1:weak:67d449b6",
+      "phase_label": "p06:learn",
+      "reason": "improved",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "keep",
+      "basis_unit": "p05:live:fakebench:fakebench:t1:weak:67d449b6",
+      "phase_label": "p06:learn",
+      "reason": "improved",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "target_kind": "skill"
     },
     {
       "action": "keep",
@@ -2134,8 +2119,26 @@
       "phase_label": "p06:learn",
       "reason": "improved",
       "schema": "learn-task-list-v1",
-      "target_id": "fakebench:t2",
-      "target_kind": "group"
+      "target_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "keep",
+      "basis_unit": "p05:live:fakebench:fakebench:t2:weak:15a15897",
+      "phase_label": "p06:learn",
+      "reason": "improved",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "target_kind": "skill"
+    },
+    {
+      "action": "keep",
+      "basis_unit": "p05:live:fakebench:fakebench:t2:weak:15a15897",
+      "phase_label": "p06:learn",
+      "reason": "improved",
+      "schema": "learn-task-list-v1",
+      "target_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "target_kind": "skill"
     }
   ],
   "phases/p07_test/phase.json": {
@@ -2396,7 +2399,7 @@
         },
         "role": "learn",
         "task_list": {
-          "revise": 2,
+          "revise": 6,
           "superseded_rows": 0
         }
       }
@@ -2431,11 +2434,11 @@
         "compare_rule": "strict_rate_gain",
         "current_phase": "live",
         "outcomes": {
-          "skipped_terminal": 2
+          "already_accepted": 6
         },
         "role": "learn",
         "task_list": {
-          "keep": 2,
+          "keep": 6,
           "superseded_rows": 0
         }
       }

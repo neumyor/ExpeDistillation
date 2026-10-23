@@ -1865,16 +1865,12 @@ def test_bank_level_live_to_live_reuse_discloses_no_live_digest_drift(
     summary = assemble_reuse(source.run_dir, config_path, run_dir)
 
     assert summary["level"] == "bank"
-    assert "LIVE_RUN_ATTRIBUTION" not in summary["prompt_digest_drift"]
     assert "LIVE_SKILL_REVISION" not in summary["prompt_digest_drift"]
     assert summary["prompt_digest_drift"] == []
     # The no-drift assertion is not vacuous: the source manifest really
-    # froze the two live digests, so both sides of the comparison
-    # carried them.
+    # froze the live revision digest, so both sides carried it.
     source_manifest = read_json(source.run_dir / "manifest.json")
     from expedistill import prompts
-    assert source_manifest["prompt_digests"][
-        "LIVE_RUN_ATTRIBUTION"] == prompts.digest("LIVE_RUN_ATTRIBUTION")
     assert source_manifest["prompt_digests"][
         "LIVE_SKILL_REVISION"] == prompts.digest("LIVE_SKILL_REVISION")
 

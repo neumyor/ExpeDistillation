@@ -52,7 +52,7 @@ class NoAddMaterial(ValueError):
     never run, all segments cut away by the segment rule, or K2
     exhausted the trajectories (terminal within a run).
     With segmentation wired into the add path this is reachable on real
-    data; the landing records it (learn_tasks' ``skipped_no_material``
+    data; the landing records it (learn_add's ``skipped_no_material``
     receipt) where the old stage 3 answered with silence. A ValueError
     subclass because the contract violation shape (a caller handing in
     a task with material it knows exists) is still a bug and older

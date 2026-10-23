@@ -34,6 +34,7 @@ from typing import (
 )
 
 from expedistill.blocks.metrics import compute_task_metrics
+from expedistill.blocks.view import render_trajectory_view
 from expedistill.composites import shortfall
 from expedistill.core import ids
 from expedistill.core.models import Skill, Trajectory
@@ -58,6 +59,8 @@ __all__ = [
     "round_dir",
     "skip_ids_for",
     "survivors_and_block",
+    "task_trajectories",
+    "render_live_views",
 ]
 
 #: Live-run subtree inside the stage-4 directory (decision section 2.2):
@@ -206,6 +209,20 @@ def _trajectories_from(round_store_dir: Path, task_id: str,
 # ---------------------------------------------------------------------------
 # Group derivation
 # ---------------------------------------------------------------------------
+
+def task_trajectories(store: Store, task_id: str,
+                      round_: int) -> List[Trajectory]:
+    """The round's stored trajectories for one task (attempt order)."""
+    return _trajectories_from(round_dir(store, round_), task_id, round_)
+
+
+def render_live_views(trajectories: List[Trajectory], view_rules: Any) -> str:
+    """The attribution views, clipped under the shared envelope budget."""
+    per_view = _LIVE_VIEWS_BUDGET_CHARS // max(1, len(trajectories))
+    return "\n\n".join(
+        _clip_view(render_trajectory_view(traj, view_rules), per_view)
+        for traj in trajectories)
+
 
 def _task_of_skill(skill: Skill) -> Optional[str]:
     """The prefixed task id in a skill's ID chain, None for ids that do

@@ -134,22 +134,6 @@ def test_diagnose_returns_the_protocol_v2_contract(client):
                            "not_applicable_when", "summary"}
 
 
-def test_attribution_revises_every_listed_skill(client):
-    listing = "skill_id: s1\n[When to use] x\n\nskill_id: s2\n[When to use] y"
-    user = get_prompt("LIVE_RUN_ATTRIBUTION").format(
-        task_instruction="ti", baseline_summary="b", live_views="v",
-        skills_listing=listing, profile_section="w")
-    parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed["diagnosis"].strip()
-    assert parsed["skill_actions"] == [
-        {"skill_id": "s1", "action": "revise",
-         "problem": parsed["skill_actions"][0]["problem"]},
-        {"skill_id": "s2", "action": "revise",
-         "problem": parsed["skill_actions"][1]["problem"]}]
-    assert all(entry["problem"].strip()
-               for entry in parsed["skill_actions"])
-
-
 def test_revision_appends_the_marker_and_keeps_the_skill(client):
     original = ("[When to use] always\n[Steps] do it\n"
                 "[Verify] done\n[Do not use when] never")
@@ -277,14 +261,3 @@ def test_every_call_is_recorded(client):
     assert len(client.calls) == 1
     assert client.calls[0]["model"] == "fake-strong"
     assert client.calls[0]["reply"] == f"Finish[{ANSWER}]"
-
-
-def test_a_method_prompt_embedding_the_question_is_not_execution(client):
-    # The G10 attribution prompt embeds the rendered task instruction
-    # (question included); the anchor must win over the question match.
-    listing = "skill_id: s1\n[When to use] x"
-    user = get_prompt("LIVE_RUN_ATTRIBUTION").format(
-        task_instruction=_execution_user(), baseline_summary="b",
-        live_views="v", skills_listing=listing, profile_section="w")
-    parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed["skill_actions"][0]["skill_id"] == "s1"

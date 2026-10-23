@@ -1,13 +1,9 @@
 """The evidence family: segmenting experience into fact-only packages.
 
 R6 (docs/decisions/execute_learn_repair_plan_20261016.md) turned this
-family from a params-only package into a real driver family. Three
-entries stand next to the params class:
+family from a params-only package into a real driver family. Two
+collectors stand next to the params class:
 
-* ``methods.evidence.live_group.collect_group_evidence`` -- the live
-  method's G10, reporting FACTS ONLY (measurement numbers, the group
-  diagnosis, per-skill problems, failure views; the model prompt's
-  keep/revise/delete vocabulary is dropped at this boundary);
 * ``methods.evidence.add_path.collect_add_evidence`` -- the add path's
   evidence (a task's strong segments, plus its weak segments when
   ``write_lessons`` is on, as source experiences);
@@ -19,13 +15,16 @@ entries stand next to the params class:
   the add row's material is produced, not assumed;
 * ``methods.evidence.exam_sheet.collect_exam_evidence`` -- the exam
   path's answer-sheet package (the exam, the judged attempt's weak
-  answer and judge reason; moved there from learn_tasks' inline
+  answer and judge reason; moved there from learn_add's inline
   assembly at the Wave 2 integration).
+
+P04/P06's live group attribution lives in ``methods/attribution``, not
+in this family.
 
 ``methods.evidence.package`` defines the evidence-package shape
 (target, facts, segments, old_skill, source_experiences) and the
 fact-only guard. The phase driver (stages/phase_learn.py through
-learn_tasks) is the consumer of all three.
+learn_add / learn_apply) is the consumer of all three.
 
 ``SegmentationParams`` is the family's registered ``segment`` method
 (the add path's K, re-segmentation budget and ``write_lessons``); the
@@ -42,17 +41,7 @@ from dataclasses import dataclass
 
 from expedistill.core.config import ConfigError
 
-__all__ = ["LiveGroupParams", "SegmentationParams", "UsageGroupParams"]
-
-
-@dataclass(frozen=True)
-class LiveGroupParams:
-    """The ``live_group`` evidence method's empty parameter set."""
-
-
-@dataclass(frozen=True)
-class UsageGroupParams:
-    """The ``usage_group`` evidence method's empty parameter set."""
+__all__ = ["SegmentationParams"]
 
 
 @dataclass(frozen=True)

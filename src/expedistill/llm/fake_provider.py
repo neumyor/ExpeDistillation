@@ -196,8 +196,6 @@ class FakeProviderClient:
             return self._distill()
         if "WHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING" in user:
             return self._diagnose()
-        if user.startswith("You are the attribution step"):
-            return self._attribution(user)
         if user.startswith("A skill written for a weak model was injected"):
             return self._revision(user)
         if user.startswith("A skill written for a weak model failed"):
@@ -259,24 +257,6 @@ class FakeProviderClient:
         })
 
     # -- G10 / G11 / G6 ---------------------------------------------------
-
-    def _attribution(self, user: str) -> str:
-        ids = [line.split("skill_id: ", 1)[1]
-               for line in user.splitlines()
-               if line.startswith("skill_id: ")]
-        if not ids:
-            raise AssertionError(
-                "the LIVE_RUN_ATTRIBUTION prompt listed no skills")
-        return _fenced({
-            "diagnosis": "the injected skills did not change what the "
-                         "weak model submitted, so the run matched the "
-                         "bare baseline.",
-            "skill_actions": [
-                {"skill_id": skill_id, "action": "revise",
-                 "problem": "the trigger is too vague for the weak model "
-                            "to recognize while it is answering"}
-                for skill_id in ids],
-        })
 
     def _revision(self, user: str) -> str:
         original = user.split("SKILL (current version):\n", 1)[1].split(

@@ -48,10 +48,12 @@ from expedistill.methods.params import build_params
 
 __all__ = ["FAMILIES", "resolve", "resolve_fixed", "resolve_params"]
 
-#: The five content families (R8). The v4 phase fields name four of them
-#: verbatim (delivery, execution, evidence, author); the learn phase's
-#: ``curate`` field names the curation family.
-FAMILIES = ("delivery", "execution", "evidence", "author", "curation")
+#: The six content families (R8 plus the P04 decision split). The v4
+#: phase fields name five of them verbatim (delivery, execution,
+#: evidence, author, decision); the learn phase's ``curate`` field names
+#: the curation family.
+FAMILIES = ("delivery", "execution", "evidence", "author", "decision",
+            "curation")
 
 #: One table entry: the driver module (None while the phase driver
 #: consumes the params directly), the light module holding the params
@@ -109,18 +111,13 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("evidence", "segment"):
         _Entry(None, "expedistill.methods.evidence",
                "SegmentationParams"),
-    ("evidence", "live_group"):
-        _Entry("expedistill.methods.evidence.live_group",
-               "expedistill.methods.evidence", "LiveGroupParams"),
-    ("evidence", "usage_group"):
-        _Entry("expedistill.methods.evidence.usage_group",
-               "expedistill.methods.evidence", "UsageGroupParams"),
     ("author", "distill_diagnose"):
         _Entry("expedistill.methods.author.write",
                "expedistill.methods.author", "AuthoringParams"),
-    ("author", "usage_revise"):
-        _Entry("expedistill.methods.author.usage_revise",
-               "expedistill.methods.author", "UsageReviseParams"),
+    ("decision", "task_level"):
+        _Entry(None, "expedistill.methods.decision", "TaskLevelParams"),
+    ("decision", "skill_level"):
+        _Entry(None, "expedistill.methods.decision", "SkillLevelParams"),
     ("curation", "agentbrew"):
         _Entry("expedistill.methods.curation.agentbrew",
                "expedistill.methods.curation", "AgentBrewParams"),

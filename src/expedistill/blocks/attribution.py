@@ -1,15 +1,10 @@
-"""G10 group attribution and G11 skill revision (live-run blocks, layer 4).
+"""G11 skill revision and usage attribution (live-run blocks, layer 4).
 
-The live_run companion of blocks/author.py's exam-time G6: after a task
-group's injected run fails to beat its stage-1 baseline (a verdict this
-module never makes -- the named acceptance rule does, in the composite),
-``attribute_failure`` asks the author model for one group-level diagnosis
-plus a keep/revise/delete action per skill, and ``revise_skill`` asks the
-rewriter model to rewrite one skill from its attribution problem plus
-excerpts of the failed attempts.  ``attribute_usage`` adds the read
-facts to the same diagnosis (relevance/application, no actions), and
-``retrigger_skill`` rewrites only the summary and [When to use] section
-when a relevant skill was never read. Blocks stay pure (AGENTS.md block rules):
+``revise_skill`` asks the rewriter model to rewrite one skill from its
+attribution problem plus excerpts of the failed attempts.
+``attribute_usage`` asks for the per-skill relevance/application facts
+(no actions), and ``retrigger_skill`` rewrites only the summary and
+[When to use] section when a relevant skill was never read. Blocks stay pure (AGENTS.md block rules):
 the model is a parameter, nothing touches disk, and every call goes
 through ``llm.call.call_model`` with a named prompt.
 
@@ -28,7 +23,7 @@ appending.
 
 The FAILURE_CATEGORIES vocabulary below restates the tuple pinned by
 blocks/author.py (each set is pinned by its prompt's output contract, and
-the G10/G11 prompts share it with REWRITE by design, decision section 2.3).
+the G11 prompt shares it with REWRITE by design, decision section 2.3).
 It cannot be imported from there -- blocks may not import each other --
 so a unit test asserts equality with blocks.author.FAILURE_CATEGORIES: the
 two sets are one contract, and a future category change must consciously
@@ -57,7 +52,6 @@ from expedistill.prompts.profile import profile_section
 __all__ = [
     "FAILURE_CATEGORIES",
     "SKILL_SUMMARY_FIELD",
-    "attribute_failure",
     "attribute_usage",
     "retrigger_skill",
     "revise_skill",
@@ -106,152 +100,6 @@ def _validate_summary(value: Any) -> str:
             f"at most {SKILL_SUMMARY_MAX_CHARS} characters, got "
             f"{len(summary)}")
     return summary
-
-#: The closed action vocabulary of a G10 skill_actions entry.
-_ACTIONS = ("keep", "revise", "delete")
-
-
-def _skills_listing(skills: List[Skill]) -> str:
-    """Render the group as one deterministic listing block for the prompt.
-
-    Each entry is the skill's id on its own line followed by the full
-    four-section text; entries are separated by one blank line. The
-    attributor echoes skill_ids back from this listing, so the id line must
-    stay unambiguous (an id is a colon-suffixed header line, never embedded
-    in prose).
-    """
-    return "\n\n".join(
-        f"skill_id: {skill.skill_id}\n{skill.content}"
-        for skill in skills
-    )
-
-
-def attribute_failure(
-    skills: List[Skill],
-    task_instruction: str,
-    baseline_summary: str,
-    live_views: str,
-    weak_profile: str,
-    handle: ModelHandle,
-    *,
-    usage: Any = None,
-    run_dir: Optional[Union[str, Path]] = None,
-) -> Dict[str, Any]:
-    """Attribute one group's failed live round (G10); return the plan dict.
-
-    Called by K6 for a task group whose injected run did not beat its
-    stage-1 baseline. ``task_instruction`` is the rendered task prompt the
-    student model actually saw (decision section 2.3 -- under TB this is
-    the task name and the real instruction shows up only in the live views);
-    ``baseline_summary`` the per-attempt stage-1 status lines; ``live_views``
-    the D5 views of EVERY attempt this round, successes included, so the
-    attributor sees what the weak model did with the skills, not only that
-    it failed.
-
-    The returned dict is the validated plan: ``{"diagnosis": str,
-    "skill_actions": [{"skill_id", "action", "problem"}]}`` with every entry
-    normalized to exactly those three keys (a keep entry's missing or null
-    problem becomes ""). Everything else is a ModelOutputError: a
-    non-object response, an empty diagnosis, a non-list skill_actions, a
-    non-object entry, an action outside keep/revise/delete, a non-string
-    problem, a revise/delete without a non-empty problem, or coverage that
-    is not exactly one action per input skill (duplicates, missing, and
-    unknown ids are all rejected). Persisting the plan (attributions.jsonl,
-    the version field) belongs to K6; this block writes nothing.
-    """
-    if not skills:
-        # A group is non-empty by construction (K6 only attributes groups
-        # with pending candidates); an empty call is a caller bug, and
-        # spending a model call on it would be wasted budget.
-        raise ValueError(
-            "attribute_failure requires a non-empty skill group: there is "
-            "nothing to attribute")
-
-    variables = {
-        "task_instruction": task_instruction,
-        "baseline_summary": baseline_summary,
-        "live_views": live_views,
-        "skills_listing": _skills_listing(skills),
-        "profile_section": profile_section(
-            "THE MODEL THAT EXECUTED THE TASK (weak model profile):",
-            weak_profile),
-    }
-    parsed = call_model(
-        handle, "LIVE_RUN_ATTRIBUTION", variables,
-        output_json=True, usage=usage, run_dir=run_dir,
-    )
-    if not isinstance(parsed, dict):
-        raise ModelOutputError(
-            "LIVE_RUN_ATTRIBUTION: expected a JSON object, got "
-            f"{type(parsed).__name__}")
-
-    diagnosis = parsed.get("diagnosis")
-    if not isinstance(diagnosis, str) or not diagnosis.strip():
-        raise ModelOutputError(
-            "LIVE_RUN_ATTRIBUTION: field 'diagnosis' must be a non-empty "
-            f"string, got {diagnosis!r}")
-
-    raw_actions = parsed.get("skill_actions")
-    if not isinstance(raw_actions, list):
-        raise ModelOutputError(
-            "LIVE_RUN_ATTRIBUTION: field 'skill_actions' must be a list, "
-            f"got {type(raw_actions).__name__}")
-
-    actions: List[Dict[str, str]] = []
-    for index, entry in enumerate(raw_actions):
-        if not isinstance(entry, dict):
-            raise ModelOutputError(
-                f"LIVE_RUN_ATTRIBUTION: skill_actions[{index}] must be a "
-                f"JSON object, got {type(entry).__name__}")
-        skill_id = entry.get("skill_id")
-        if not isinstance(skill_id, str) or not skill_id:
-            raise ModelOutputError(
-                f"LIVE_RUN_ATTRIBUTION: skill_actions[{index}].skill_id "
-                f"must be a non-empty string, got {skill_id!r}")
-        action = entry.get("action")
-        if action not in _ACTIONS:
-            raise ModelOutputError(
-                f"LIVE_RUN_ATTRIBUTION: skill_actions[{index}].action must "
-                f"be one of {_ACTIONS}, got {action!r}")
-        problem = entry.get("problem", "")
-        if problem is None:
-            problem = ""
-        if not isinstance(problem, str):
-            raise ModelOutputError(
-                f"LIVE_RUN_ATTRIBUTION: skill_actions[{index}].problem must "
-                f"be a string, got {problem!r}")
-        if action in ("revise", "delete") and not problem.strip():
-            raise ModelOutputError(
-                f"LIVE_RUN_ATTRIBUTION: skill_actions[{index}] (action "
-                f"{action!r} on {skill_id}) must carry a non-empty "
-                "'problem': the revision or deletion needs a concrete, "
-                "transferably phrased problem statement")
-        actions.append(
-            {"skill_id": skill_id, "action": action, "problem": problem})
-
-    expected = [skill.skill_id for skill in skills]
-    emitted = [entry["skill_id"] for entry in actions]
-    counts: Dict[str, int] = {}
-    for skill_id in emitted:
-        counts[skill_id] = counts.get(skill_id, 0) + 1
-    duplicates = sorted(sid for sid, count in counts.items() if count > 1)
-    if duplicates:
-        raise ModelOutputError(
-            "LIVE_RUN_ATTRIBUTION: skill_actions must cover each skill "
-            f"exactly once; duplicated skill_ids: {duplicates}")
-    missing = sorted(set(expected) - set(emitted))
-    if missing:
-        raise ModelOutputError(
-            "LIVE_RUN_ATTRIBUTION: skill_actions must cover every skill in "
-            f"the group; missing skill_ids: {missing}")
-    unknown = sorted(set(emitted) - set(expected))
-    if unknown:
-        raise ModelOutputError(
-            "LIVE_RUN_ATTRIBUTION: skill_actions carries skill_ids that are "
-            f"not in the group: {unknown}")
-
-    return {"diagnosis": diagnosis, "skill_actions": actions}
-
 
 def revise_skill(
     skill_text: str,

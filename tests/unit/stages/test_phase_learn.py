@@ -52,7 +52,7 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import RevisionOutcome
 from expedistill.methods.curation import none as curation_none
 from expedistill.methods.curation import phase_bank as curation_phase_bank
-from expedistill.stages import learn_tasks, phase_learn
+from expedistill.stages import learn_add, learn_exam, learn_ledger, phase_learn
 from expedistill.stages.context import RunSettings, StageContext
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
@@ -333,12 +333,12 @@ def _distill_script():
 
 
 def _outcomes(run_dir, label):
-    path = phase_bank_dir(run_dir, label) / learn_tasks.OUTCOMES_NAME
+    path = phase_bank_dir(run_dir, label) / learn_ledger.OUTCOMES_NAME
     return list(read_jsonl(path)) if path.exists() else []
 
 
 def _task_list_rows(run_dir, label):
-    path = phase_bank_dir(run_dir, label) / learn_tasks.TASK_LIST_NAME
+    path = phase_bank_dir(run_dir, label) / learn_ledger.TASK_LIST_NAME
     return list(read_jsonl(path)) if path.exists() else []
 
 
@@ -362,7 +362,7 @@ def test_merge_keeps_the_highest_version_row():
     group = TaskListRow(target_kind="group", target_id=TASK_ID,
                         action="keep", reason="improved", basis_unit="u3")
 
-    effective, superseded = learn_tasks.merge_task_list(
+    effective, superseded = learn_exam.merge_task_list(
         [old, group, new], [_report_row("u1", 1), _report_row("u2", 2)])
 
     assert effective == [group, new]      # order preserved, v1 dropped
@@ -373,7 +373,7 @@ def test_merge_refuses_a_row_without_a_report_row():
     row = TaskListRow(target_kind="skill", target_id=SKILL_ID,
                       action="keep", reason="improved", basis_unit="u1")
     with pytest.raises(CodeBugError, match="does not carry"):
-        learn_tasks.merge_task_list([row], [])
+        learn_exam.merge_task_list([row], [])
 
 
 def test_merge_refuses_two_rows_of_one_version():
@@ -382,7 +382,7 @@ def test_merge_refuses_two_rows_of_one_version():
     second = TaskListRow(target_kind="skill", target_id=SKILL_ID,
                          action="revise", reason="no_gain", basis_unit="u1b")
     with pytest.raises(CodeBugError, match="share version"):
-        learn_tasks.merge_task_list(
+        learn_exam.merge_task_list(
             [first, second], [_report_row("u1", 2), _report_row("u1b", 2)])
 
 
@@ -428,7 +428,8 @@ def test_a_label_off_the_frozen_derivation_is_refused(tmp_path):
 # The first learn phase: the baseline gap -> add path
 # ---------------------------------------------------------------------------
 
-def test_execute_rows_parallelizes_independent_targets(tmp_path, monkeypatch):
+def test_execute_add_rows_parallelizes_independent_targets(
+        tmp_path, monkeypatch):
     sequence, phases = _exam_sequence()
     handles = {"author": make_fake_handle("author", []),
                "rewriter": make_fake_handle("rewriter", []),
@@ -443,16 +444,13 @@ def test_execute_rows_parallelizes_independent_targets(tmp_path, monkeypatch):
     seen = []
     lock = threading.Lock()
 
-    def fake_execute(ctx, phase, row, current_rows, current_spec,
-                     current_round, phase_dir):
+    def fake_land(ctx, phase, row, phase_dir):
         with lock:
             seen.append(row.target_id)
-        # Four rows and four workers: the pool must hold all four at once.
         barrier.wait(timeout=5)
 
-    monkeypatch.setattr(learn_tasks, "_execute_row", fake_execute)
-    failed = learn_tasks.execute_rows(
-        ctx, phase, rows, None, phases["learn"], 0, [])
+    monkeypatch.setattr(learn_add, "_land_add", fake_land)
+    failed = learn_add.execute_add_rows(ctx, phase, rows)
 
     assert failed == set()
     assert sorted(seen) == ["t0", "t1", "t2", "t3"]
@@ -709,8 +707,8 @@ def test_a_revision_without_a_new_version_is_no_change(tmp_path, monkeypatch):
     stored = ctx.store.load("skills", skill.skill_id, Skill)
     assert stored.version == 1 and stored.status == "pending"
     assert stored.content == MARKED_A
-    # revise_outcome: the row counts as keep, nothing discarded.
-    assert result.summary["task_list"] == {"keep": 1, "superseded_rows": 0}
+    assert result.summary["task_list"] == {"revise": 1,
+                                          "superseded_rows": 0}
     assert result.summary["outcomes"] == {"unchanged": 1}
     assert len(handles["rewriter"].client.calls) == 2
 
@@ -787,7 +785,7 @@ def test_a_crashed_revision_is_replayed_from_the_ledger(tmp_path, monkeypatch):
     skill.version = 2
     ctx.store.save(skill, "skills")
     append_jsonl(phase_bank_dir(ctx.run_dir, "p04:learn")
-                 / learn_tasks.REVISIONS_NAME, {
+                 / learn_ledger.REVISIONS_NAME, {
                      "schema": "learn-revision-v1",
                      "phase_label": "p04:learn", "target_kind": "skill",
                      "target_id": skill.skill_id,
@@ -806,14 +804,13 @@ def test_a_crashed_revision_is_replayed_from_the_ledger(tmp_path, monkeypatch):
 # The live learn phases: the group revision (the G10/G11 migration)
 # ---------------------------------------------------------------------------
 
-def test_a_live_miss_with_a_check_left_revises_the_group(
+def test_a_live_miss_with_a_check_left_revises_every_member(
         tmp_path, monkeypatch):
     sequence, phases = _live_sequence()
     handles = {
-        "author": make_fake_handle(
-            "author", [_group_plan(("revise", "trigger too vague"),
-                                   ("keep", ""))]),
-        "rewriter": make_fake_handle("rewriter", [_revision_script()])}
+        "author": make_fake_handle("author", []),
+        "rewriter": make_fake_handle("rewriter", [
+            _revision_script(), _revision_script()])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
     _install_curation(monkeypatch)
     _seed_finished_learn(ctx.store, ctx.run_dir)
@@ -824,12 +821,13 @@ def test_a_live_miss_with_a_check_left_revises_the_group(
     first = ctx.store.load("skills", skills[0].skill_id, Skill)
     second = ctx.store.load("skills", skills[1].skill_id, Skill)
     assert first.version == 2 and first.content == MARKED_B
-    assert second.version == 1 and second.status == "pending"
+    assert second.version == 2 and second.content == MARKED_B
     outcomes = {row["skill_id"]: row["outcome"]
                 for row in _outcomes(ctx.run_dir, "p04:learn")}
     assert outcomes == {skills[0].skill_id: "revised",
-                        skills[1].skill_id: "kept"}
-    assert result.summary["task_list"] == {"revise": 1, "superseded_rows": 0}
+                        skills[1].skill_id: "revised"}
+    assert result.summary["task_list"] == {"revise": 2,
+                                          "superseded_rows": 0}
 
 
 def _usage_attribution_script(skills):
@@ -840,7 +838,7 @@ def _usage_attribution_script(skills):
              "application": "not_applied", "evidence_steps": [1],
              "problem": "the steps were ignored"},
             {"skill_id": skills[1].skill_id, "relevance": "relevant",
-             "application": "unclear", "evidence_steps": [],
+             "application": "not_applied", "evidence_steps": [],
              "problem": "the trigger did not select it"},
         ],
     })
@@ -854,21 +852,19 @@ def _retrigger_script():
     })
 
 
-def test_usage_group_and_usage_revise_drive_the_group_outcome(
+def test_skill_level_deletes_unread_and_revises_read(
         tmp_path, monkeypatch):
     sequence, phases = _live_sequence()
     phases["learn"] = LearnPhaseSpec(
         evidence={"name": "segment", "K": 5, "write_lessons": False},
         author={"name": "distill_diagnose"},
-        group_evidence={"name": "usage_group"},
-        group_author={"name": "usage_revise", "policy": "usage_v1"},
+        decision={"name": "skill_level"},
         curate={"name": "none", "token_budget": BIG})
     handles = {
         "author": make_fake_handle(
             "author", [_usage_attribution_script(
                 [_skill(segment=0), _skill(segment=1)])]),
-        "rewriter": make_fake_handle(
-            "rewriter", [_revision_script(), _retrigger_script()]),
+        "rewriter": make_fake_handle("rewriter", [_revision_script()]),
     }
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
     _install_curation(monkeypatch)
@@ -893,17 +889,15 @@ def test_usage_group_and_usage_revise_drive_the_group_outcome(
          "outcome": "failure"}
         for attempt in range(2)])
 
-    phase_learn.run(ctx, _phase(sequence, phases, 3))
+    result = phase_learn.run(ctx, _phase(sequence, phases, 3))
 
     first = ctx.store.load("skills", skills[0].skill_id, Skill)
     second = ctx.store.load("skills", skills[1].skill_id, Skill)
-    assert first.version == 2 and first.content == MARKED_B
-    assert second.version == 2
-    assert "Use this when the service rejects connections." in second.content
-    outcomes = {row["skill_id"]: row["outcome"]
-                for row in _outcomes(ctx.run_dir, "p04:learn")}
-    assert outcomes == {skills[0].skill_id: "revised",
-                        skills[1].skill_id: "retriggered"}
+    assert first.version == 2
+    assert second.status == "discarded"
+    assert second.discard_reason == "skill_never_read"
+    assert result.summary["task_list"] == {"delete": 1, "revise": 1,
+                                          "superseded_rows": 0}
 
 
 def test_a_partially_landed_group_revision_resumes_cleanly(
@@ -914,27 +908,46 @@ def test_a_partially_landed_group_revision_resumes_cleanly(
     sequence, phases = _live_sequence()
     handles = {
         "author": make_fake_handle(
-            "author", [_group_plan(("revise", "trigger too vague"),
-                                   ("revise", "steps too terse"))]),
+            "author", [_usage_attribution_script(
+                [_skill(segment=0), _skill(segment=1)])]),
         "rewriter": make_fake_handle("rewriter", [_revision_script()])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
     _install_curation(monkeypatch)
     _seed_finished_learn(ctx.store, ctx.run_dir)
     skills = _seed_live_round(ctx.store, better=False)
+    round_dir = (ctx.run_dir / "stage4_acceptance" / "live_run"
+                 / "round00")
+    write_jsonl(round_dir / SKILL_USAGE_NAME, [
+        {"schema": "skill-usage-v1", "task_id": TASK_ID, "round": 0,
+         "attempt": attempt,
+         "trajectory_id": ids.make_trajectory_id(TASK_ID, "weak", attempt),
+         "delivery": "folder", "description_mode": "when_to_use",
+         "available_list_present": True, "available_names": [],
+         "available_skill_ids": [skill.skill_id for skill in skills],
+         "delivery_status": "ok",
+         "reads": [{"skill_id": skills[0].skill_id,
+                    "filename": "a/SKILL.md", "step_index": 1,
+                    "command": "cat a/SKILL.md"}],
+         "read_skill_ids": [skills[0].skill_id],
+         "unread_skill_ids": [skills[1].skill_id],
+         "first_agent_step": 1, "first_read_step": 1,
+         "outcome": "failure"}
+        for attempt in range(2)])
     landed = skills[0]
     landed.content = MARKED_B
     landed.version = 2
     ctx.store.save(landed, "skills")
     phase_dir = phase_bank_dir(ctx.run_dir, "p04:learn")
     phase_dir.mkdir(parents=True)
-    append_jsonl(phase_dir / learn_tasks.REVISIONS_NAME, {
+    append_jsonl(phase_dir / learn_ledger.REVISIONS_NAME, {
         "schema": "learn-revision-v1", "phase_label": "p04:learn",
-        "target_kind": "group", "target_id": TASK_ID,
+        "target_kind": "skill", "target_id": landed.skill_id,
         "skill_id": landed.skill_id, "from_version": 1})
-    append_jsonl(phase_dir / learn_tasks.OUTCOMES_NAME, {
+    append_jsonl(phase_dir / learn_ledger.OUTCOMES_NAME, {
         "schema": "learn-outcome-v1", "phase_label": "p04:learn",
-        "target_kind": "group", "target_id": TASK_ID, "action": "revise",
-        "skill_id": landed.skill_id, "outcome": "revised", "version": 2})
+        "target_kind": "skill", "target_id": landed.skill_id,
+        "action": "revise", "skill_id": landed.skill_id,
+        "outcome": "revised", "version": 2})
 
     result = phase_learn.run(ctx, _phase(sequence, phases, 3))
 
@@ -942,29 +955,6 @@ def test_a_partially_landed_group_revision_resumes_cleanly(
     assert len(handles["rewriter"].client.calls) == 1  # only member 1
     assert ctx.store.load("skills", skills[1].skill_id, Skill).version == 2
     assert result.summary["outcomes"] == {"revised": 2}   # cumulative
-
-
-def test_the_author_delete_lands_live_revision_deleted(tmp_path, monkeypatch):
-    sequence, phases = _live_sequence()
-    handles = {"author": make_fake_handle("author", [
-        _group_plan(("revise", "p0"), ("revise", "p1"))]),
-        "rewriter": make_fake_handle("rewriter", [])}
-    ctx = _make_ctx(tmp_path, sequence, phases, handles)
-    _install_curation(monkeypatch)
-    _seed_finished_learn(ctx.store, ctx.run_dir)
-    skills = _seed_live_round(ctx.store, better=False)
-    deleted = RevisionOutcome(
-        skill_id=skills[1].skill_id, decision="delete", outcome="deleted",
-        discard_reason="live_revision_deleted")
-    monkeypatch.setattr(learn_tasks.author, "revise_group",
-                        lambda **kwargs: [deleted])
-
-    result = phase_learn.run(ctx, _phase(sequence, phases, 3))
-
-    stored = ctx.store.load("skills", skills[1].skill_id, Skill)
-    assert stored.status == "discarded"
-    assert stored.discard_reason == "live_revision_deleted"
-    assert result.summary["outcomes"] == {"deleted": 1}
 
 
 def test_an_infra_failed_revision_raises_after_the_summary(
@@ -977,11 +967,12 @@ def test_an_infra_failed_revision_raises_after_the_summary(
     calls = _install_curation(monkeypatch)
     _seed_finished_learn(ctx.store, ctx.run_dir)
     skills = _seed_live_round(ctx.store, better=False)
+    from expedistill.stages import learn_apply
     monkeypatch.setattr(
-        learn_tasks.author, "revise_group",
-        lambda **kwargs: [
-            RevisionOutcome(skill_id=skills[0].skill_id, decision="revise",
-                            outcome="infra_failed")])
+        learn_apply, "revise_one",
+        lambda *args, **kwargs: RevisionOutcome(
+            skill_id=skills[0].skill_id, decision="revise",
+            outcome="infra_failed"))
 
     with pytest.raises(InfrastructureError,
                        match="pending on infrastructure errors"):

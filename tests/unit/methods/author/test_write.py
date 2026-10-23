@@ -27,7 +27,6 @@ from expedistill.infra.reliability import (
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import (
     RevisionOutcome,
-    default_decide,
     revise_group,
     write_new,
 )
@@ -130,27 +129,6 @@ def run_revise(packages, script, *, decide=None, revision_attempts=2):
 # ---------------------------------------------------------------------------
 # decide / keep
 # ---------------------------------------------------------------------------
-
-def test_default_policy_revises_on_problem_keeps_without_one():
-    with_problem = live_package(make_skill(), problem="trigger vague")
-    assert default_decide(with_problem) == "revise"
-    no_problem = live_package(make_skill(), problem="")
-    no_problem.facts = [f for f in no_problem.facts
-                        if f["kind"] != "skill_problem"]
-    assert default_decide(no_problem) == "keep"
-
-
-def test_keep_needs_no_model_call():
-    skill = make_skill()
-    package = live_package(skill, problem="")
-    package.facts = [f for f in package.facts
-                     if f["kind"] != "skill_problem"]
-    handle, outcomes, _ = run_revise([package], [])
-
-    assert outcomes == [RevisionOutcome(skill_id=skill.skill_id,
-                                        decision="keep", outcome="kept")]
-    assert handle.client.calls == []
-
 
 # ---------------------------------------------------------------------------
 # revise: dispatch by the evidence package

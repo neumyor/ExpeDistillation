@@ -9,7 +9,7 @@ round stores' trajectories. Model verdicts and plans are FakeClient
 scripts on the author / rewriter handles (AGENTS.md section 8: no
 network, deterministic, assertable). The retired G10/G11 composite
 (attribution + revision application) went with the K6 shell; its
-phase-world heirs are methods/evidence/live_group (facts) and
+phase-world heirs are methods/attribution/group (facts) and
 methods/author/write (decisions), tested under tests/unit.
 """
 

@@ -9,7 +9,7 @@ mandatory for anything that lands units):
   rule over the task's both-roles set, the strong-only cut, the
   0-step exclusion with its once-only audit records, mid-batch crash ->
   resume without re-segmentation, and terminal exhaustion;
-* the LEARN PHASE (``stages.phase_learn`` through ``learn_tasks``)
+* the LEARN PHASE (``stages.phase_learn`` through ``learn_add` / `learn_apply` / `learn_exam``)
   with NOTHING seeded but the baseline phase's on-disk trajectories: an add
   row produces its own subtasks, an add row with no strong material is
   recorded instead of raised, and a learn phase with no add row never
@@ -32,7 +32,7 @@ from expedistill.core.models import Skill, Step, Subtask, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import json_script, make_fake_handle
 from expedistill.methods.evidence.segmentation import segment_add_material
-from expedistill.stages import learn_tasks, phase_learn
+from expedistill.stages import learn_ledger, phase_learn
 from expedistill.stages.context import StageContext
 from tests.helpers.plugins import ensure_plugin
 
@@ -178,7 +178,7 @@ def _seed_d_phase(store, *, strong=True, weak_attempts=2):
 
 
 def _outcomes(run_dir, label):
-    path = phase_bank_dir(run_dir, label) / learn_tasks.OUTCOMES_NAME
+    path = phase_bank_dir(run_dir, label) / learn_ledger.OUTCOMES_NAME
     return list(read_jsonl(path)) if path.exists() else []
 
 
