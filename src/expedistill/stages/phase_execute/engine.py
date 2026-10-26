@@ -121,7 +121,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                 skill_folder_dir: Optional[str] = None,
                 skill_folder_dirs: Optional[Mapping[str, str]] = None
                 ) -> List[_Plan]:
-    """Rebuild each delivery row's full frozen unit id (verdicts' frozen
+    """Rebuild each delivery row's full frozen unit id (unit_ids' frozen
     rule; the row's task ref and sha8 already carry the pieces -- the
     P2 ruling's one rebuild site) and pair it with its Task object when
     the phase dispatches K1 (the exam role pairs none).
@@ -287,9 +287,9 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     re-offered to K1 while the budget lasts.  The bookkeeping is durable, so
     a resumed phase continues the same budget.
 
-    This function deliberately builds no report rows: it returns the stored
-    trajectories and the unaccepted hole ids.  Coverage and unit summaries
-    are derived later by the pure functions.
+    This function deliberately builds no unit summaries: it returns the
+    stored trajectories and the unaccepted hole ids.  Coverage and unit
+    summaries are derived later by the pure functions.
     """
     state_path = _phase_dir(ctx, phase, arm) / REDISPATCH_NAME
     state = _redispatch_state(state_path)

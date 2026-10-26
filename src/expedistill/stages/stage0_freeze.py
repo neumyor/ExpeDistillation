@@ -292,7 +292,8 @@ def _resolve_phase_methods(config: Any) -> None:
 
     Per-phase: the v4 config carries its method mappings inside the
     phase definitions (an execute phase resolves delivery + execution,
-    a learn phase evidence + author + curate), and the named-rule
+    a learn phase evidence + author + attribution + decision + curate),
+    and the named-rule
     selections the phases carry -- an execute phase's verdict rule
     (``acceptance``) and comparison rule (``compare.rule``) -- validate
     against their registries here (core cannot: layer 0 must not import
@@ -326,6 +327,7 @@ def _resolve_phase_methods(config: Any) -> None:
         elif isinstance(spec, LearnPhaseSpec):
             resolve_params("evidence", spec.evidence)
             resolve_params("author", spec.author)
+            resolve_params("attribution", spec.attribution)
             resolve_params("decision", spec.decision)
             resolve_params("curation", spec.curate)
 

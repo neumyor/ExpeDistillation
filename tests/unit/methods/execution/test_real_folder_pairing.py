@@ -15,8 +15,9 @@ the real_folder execution are ONE play, pinned to the test phase):
   ``real_folder`` over another delivery, either name on a non-test
   role;
 * ``_execution_params`` (the stage's resolution seam) passes the folder
-  params through -- it has no ``arms`` to check, and the load-time
-  checklist already owns the role rules.
+  params through and re-checks the role/params pairing for a directly
+  constructed spec -- a mismatched pair is a ConfigError there too, not
+  an AttributeError or a silently different execution path.
 """
 
 import pytest
@@ -29,6 +30,7 @@ from expedistill.core.config import (
     parse_phases,
 )
 from expedistill.methods import resolve_params
+from expedistill.infra.reliability import ConfigError as RunConfigError
 from expedistill.methods.execution import (
     ExamExecutionParams,
     RealExecutionParams,
@@ -196,3 +198,25 @@ def test_execution_params_passes_folder_params_through():
     # The arms consistency is real's own rule; the empty folder params
     # carry nothing to check, so the seam returns them untouched.
     assert _execution_params(spec) == RealFolderExecutionParams()
+
+
+@pytest.mark.parametrize("role,tasks,execution_name", [
+    ("baseline", "train", "exam"),
+    ("baseline", "train", "real_folder"),
+    ("exam", "train", "real"),
+    ("exam", "train", "real_folder"),
+    ("live", "train", "exam"),
+    ("live", "train", "real_folder"),
+    ("test", "test", "exam"),
+])
+def test_execution_params_refuse_a_role_execution_mismatch(
+        role, tasks, execution_name):
+    """A directly constructed spec gets the same loud refusal the YAML
+    loader gives: a mismatched pair must not reach a driver as an
+    AttributeError or a silently different execution path."""
+    spec = ExecutePhaseSpec(
+        role=role, tasks=tasks, delivery={"name": "none"},
+        execution={"name": execution_name}, compare=None,
+        acceptance=None, kind="execute")
+    with pytest.raises(RunConfigError, match="does not accept execution"):
+        _execution_params(spec)

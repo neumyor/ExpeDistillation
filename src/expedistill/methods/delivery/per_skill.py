@@ -5,8 +5,8 @@ answers the exam with the ONE skill under test injected, exactly the
 way K4 renders acceptance-time blocks today. In exam mode delivery
 receives only the deterministic exam IDENTIFIER (R5: ``<subtask_id>/
 exam``): the exam itself is generated on the spot at execution time and
-the reference answer travels to acceptance through the run record --
-delivery resolves identifiers, it never writes exams.
+the reference answer stays on the stored Exam the answer sheet points
+at -- delivery resolves identifiers, it never writes exams.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the skills under test (the exam-phase universe is one exam per skill),

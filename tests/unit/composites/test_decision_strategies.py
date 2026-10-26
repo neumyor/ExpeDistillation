@@ -236,3 +236,94 @@ def test_p04_and_p06_use_the_same_skill_level_rule():
 
     assert [(row.target_id, row.action, row.reason) for row in p04] == [
         (row.target_id, row.action, row.reason) for row in p06]
+
+
+def _decide(*, report, checks_left=1, delivery="folder_by_task",
+            usage=None, group_better=None, statuses=PENDING):
+    return decision_strategies.decide(
+        name="skill_level", current_kind="live", current_report=[report],
+        control_kind="baseline", control_report=[_baseline_row()],
+        bank=SKILLS, checks_left=checks_left,
+        compare_rule="strict_rate_gain", n_attempts_weak=3,
+        task_select_rule="any_weak_failed", delivery=delivery,
+        usage_by_task=usage or {}, group_better_by_task=group_better or {},
+        skill_status_by_id=statuses)
+
+
+def test_skill_level_deletes_a_control_perfect_unit():
+    rows = _decide(report=_report_row(
+        valid=0, status="not_run_control_perfect",
+        cause="weak_already_knows"))
+
+    assert [(row.action, row.reason) for row in rows] == [
+        (decision.DELETE, "weak_already_knows")] * len(SKILL_IDS)
+
+
+def test_skill_level_deletes_a_not_testable_unit():
+    rows = _decide(report=_report_row(
+        valid=0, status="not_testable", cause="all_holes"))
+
+    assert [(row.action, row.reason) for row in rows] == [
+        (decision.DELETE, "all_holes")] * len(SKILL_IDS)
+
+
+def test_skill_level_revises_a_leak_only_while_a_check_remains():
+    report = _report_row(valid=0, status="not_testable", cause="leak")
+    remaining = _decide(report=report, checks_left=1)
+    last = _decide(report=report, checks_left=0)
+
+    assert [(row.action, row.reason) for row in remaining] == [
+        (decision.REVISE, "leak")] * len(SKILL_IDS)
+    assert [(row.action, row.reason) for row in last] == [
+        (decision.DELETE, "leak_audit")] * len(SKILL_IDS)
+
+
+def test_skill_level_skips_a_zero_execution_unit():
+    rows = _decide(report=_report_row(
+        valid=0, status="not_testable", cause="zero_execution"))
+
+    assert rows == []
+
+
+def test_skill_level_deletes_on_the_last_check():
+    rows = _decide(
+        report=_report_row(), checks_left=0,
+        usage={TASK: [_usage(read=[SKILL_IDS[0]])]},
+        group_better=GROUP_LOST)
+
+    by_id = {row.target_id: row for row in rows}
+    assert (by_id[SKILL_IDS[0]].action,
+            by_id[SKILL_IDS[0]].reason) == (
+        decision.DELETE, decision.LIVE_NO_IMPROVEMENT)
+
+
+def test_skill_level_falls_back_to_the_bank_for_a_digest_injection():
+    report = UnitSummary(
+        unit_id="p03:live:tb:tb:t1:weak:deadbeef", phase_label="p03:live",
+        task_ref=TASK, role="weak", arm=None, expected_attempts=3,
+        injected_skills="bank-digest", valid_count=3, success_count=0,
+        status="normal", cause="")
+    rows = _decide(report=report, delivery="whole_bank",
+                   group_better=GROUP_LOST)
+
+    assert [(row.target_id, row.action, row.reason) for row in rows] == [
+        (skill_id, decision.REVISE, "skill_not_won")
+        for skill_id in SKILL_IDS]
+
+
+def test_skill_level_infers_a_carried_units_group_result():
+    report = UnitSummary(
+        unit_id="p05:live:tb:tb:t1:weak:deadbeef", phase_label="p05:live",
+        task_ref=TASK, role="weak", arm=None, expected_attempts=3,
+        injected_skills=[{"skill_id": skill_id, "version": 1}
+                         for skill_id in SKILL_IDS],
+        valid_count=3, success_count=0, status="normal", cause="",
+        artifacts={"reused_from": "p03:live:tb:tb:t1:weak:cafebabe"})
+    rows = _decide(
+        report=report, usage={TASK: [_usage(read=[SKILL_IDS[0]])]},
+        group_better={}, statuses=PENDING)
+
+    by_id = {row.target_id: row for row in rows}
+    assert (by_id[SKILL_IDS[0]].action,
+            by_id[SKILL_IDS[0]].reason) == (
+        decision.REVISE, "skill_not_won")

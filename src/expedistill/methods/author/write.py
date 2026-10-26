@@ -6,14 +6,13 @@ packages), and produces skill CONTENT: a revision's new text, or a new
 skill distilled from source experiences. The P04/P06 per-skill decision
 lives in ``composites/decision_strategies.py``; this module's
 ``revise_group`` is the exam-compatible group writer and always revises
-each package. It dispatches by the EVIDENCE PACKAGE's shape, never by the
-report kind -- a package carrying an exam answer sheet goes to the exam
-rewrite block (G6's REWRITE prompt), one carrying failure views to the
-live revision block (G11's old prompt); the caller never says
-which. For the same reason this module does not import the evidence
-family (methods modules never import each other): it consumes the
-package's duck-typed shape -- ``target``, ``facts``, ``old_skill``,
-``source_experiences`` and the ``fact``/``has_fact`` readers.
+each package. It accepts only exam answer-sheet packages (an exam
+question, the weak answer and the judge reason); the P04/P06 path uses
+``methods/author/revise.py`` and never calls this driver. For the same
+reason this module does not import the evidence family (methods modules
+never import each other): it consumes the package's duck-typed shape --
+``target``, ``facts``, ``old_skill`` and the ``fact``/``has_fact``
+readers.
 
 The old per-skill keep/delete policy is gone: delete is a decision row,
 landed by ``stages.learn_ledger``. The shared P04/P06 writer is
@@ -105,12 +104,10 @@ def _revise_once(
     version came out of it (exhausted budget -- see the module
     docstring) and an InfrastructureError propagates.
 
-    Dispatch is by the package's evidence shape (module docstring): an
-    exam answer sheet (question, weak answer, judge reason) goes to
-    blocks.author.rewrite_skill; failure views go to
-    blocks.attribution.revise_skill with the composite-level marker
-    check (the K5 lesson: a structural failure rides the same
-    ModelOutputError budget as a format failure).
+    Only an exam answer-sheet package (question, weak answer, judge
+    reason) reaches this driver; it goes to blocks.author.rewrite_skill.
+    A package without ``exam_question`` is a caller bug -- the P04/P06
+    path uses ``methods/author/revise.py`` instead.
     """
     skill: Skill = package.old_skill
     exam_question = package.fact("exam_question")
@@ -236,6 +233,7 @@ def write_new(
     weak_profile: str,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
+    params: Any = None,
 ) -> List[Skill]:
     """Write new skills for one authorized add, from its evidence.
 
@@ -248,6 +246,10 @@ def write_new(
     survives the block's own format repairs propagates: the caller
     dispositions the unit (the stage-3 rule -- terminal within the
     run directory, never a partial save). Nothing is stored here.
+
+    ``params`` is the registry's ``AuthoringParams`` (empty); it is
+    accepted so the add driver is reached through the same family
+    signature as the other author methods.
     """
     if task_row.action != ADD:
         raise ValueError(

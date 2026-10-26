@@ -29,7 +29,7 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import Store
-from expedistill.methods.attribution import AttributionParams
+from expedistill.methods import resolve_params
 from expedistill.methods.attribution.skill_attempts import collect_skill_evidence
 from expedistill.methods.author.revise import revise_one
 from expedistill.prompts import get as get_prompt
@@ -48,6 +48,10 @@ def execute_decision_rows(
 ) -> Set[str]:
     """Land per-skill decisions; return infra-failed target ids."""
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
+    attribution_params = resolve_params(
+        "attribution",
+        getattr(phase.spec, "attribution", None)
+        or {"name": "skill_attempts"})
     recorder = UnitFailureRecorder(ctx.run_dir)
     ledger.write_task_list(phase_dir, phase.label, rows)
     _assert_unique(rows)
@@ -79,7 +83,7 @@ def execute_decision_rows(
             _execute_revise_group(
                 ctx, phase, task_id, task_rows, current_rows, current_spec,
                 current_round, phase_dir, recorder, usage_by_task,
-                current_sheets, delivery)
+                current_sheets, delivery, attribution_params)
             return task_id, None
         except InfrastructureError as exc:
             recorder.record(task_id, phase.label, exc, exc)
@@ -112,6 +116,7 @@ def _execute_revise_group(
     current_round: int, phase_dir, recorder: UnitFailureRecorder,
     usage_by_task: Dict[str, List[dict]],
     current_sheets: Sequence[AnswerSheet], delivery: str,
+    attribution_params: Any,
 ) -> None:
     """One task: one evidence collection, then one writer call per skill."""
     if not rows:
@@ -166,7 +171,7 @@ def _execute_revise_group(
         weak_profile=ctx.config.effective_weak_profile(),
         author_handle=ctx.handle("author"),
         view_rules=get_plugin(ctx.config.benchmark).view_rules,
-        params=AttributionParams(),
+        params=attribution_params,
         usage=ctx.usage,
         run_dir=ctx.run_dir)
     for row, skill in todo:

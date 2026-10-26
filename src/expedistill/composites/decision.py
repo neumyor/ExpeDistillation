@@ -14,8 +14,9 @@ re-exporting it, so there is one definition and no import cycle).
 
 R3 (repair plan, item R3; boundary doc sections 2.4, 3, 4): the phase
 world's ONE decision entry is :func:`decide_task_list` -- (this round's
-report, the control report, the current bank, how many checks are left)
--> task list -- with the comparison rules as named parameters (default
+unit summaries, the control summaries, the current bank, how many checks
+are left) -> task list -- with the comparison rules as named parameters
+(default
 ``strict_rate_gain``) and the section 4.2 action table as
 :func:`table_action`. The per-mode exam_*/live_* rules the old K4/K6
 shells called retired with those shells (Wave 2): the phase drivers
@@ -44,7 +45,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from expedistill.blocks.rules import get_task_select
+from expedistill.blocks.rules import (
+    ACCEPTANCE_IMPROVE,
+    get_acceptance_improve,
+    get_task_select,
+)
 from expedistill.core import ids, vocabulary
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import ExecutionUnitRow, TaskListRow
@@ -250,7 +255,7 @@ def live_all_holes(expected_ids: Sequence[str],
 #: The phase-kind vocabulary (boundary doc sections 1.1 and 1.3): one
 #: kind per semantic phase role. The config's phase sequence (R9) maps
 #: onto these names; decision never sees a phase label -- labels are
-#: bookkeeping (unit ids, report rows), kinds are semantics.
+#: bookkeeping (unit ids, unit summaries), kinds are semantics.
 PHASE_BASELINE = "baseline"  # D: the two-arm bare baseline
 PHASE_EXAM = "exam"          # A: paper acceptance, one skill per exam
 PHASE_LIVE = "live"          # B: live acceptance, a task's whole group
@@ -299,8 +304,8 @@ CAUSE_ZERO_EXECUTION = vocabulary.CAUSE_ZERO_EXECUTION
 NOT_TESTABLE_CAUSES = vocabulary.NOT_TESTABLE_CAUSES
 
 #: The four comparison conclusions (boundary doc section 4.1) plus the
-#: baseline gap (section 4.2's last row -- decided from the D report,
-#: not from a comparison).
+#: baseline gap (section 4.2's last row -- decided from the D-phase
+#: summaries, not from a comparison).
 CONCLUSION_IMPROVED = "improved"
 CONCLUSION_NO_GAIN = "no_gain"
 CONCLUSION_NO_HEADROOM = "no_headroom"
@@ -374,47 +379,31 @@ def remaining_checks(phase_kinds: Sequence[str], learn_index: int) -> int:
 def strict_rate_gain(current: Mapping[str, int],
                      control: Mapping[str, int]) -> bool:
     """Default compare rule: the unit's success RATE strictly exceeds the
-    control's.
-
-    Compared by integer cross-multiplication, never a float division
-    (exact in small integers; the arms may have different valid
-    denominators). No valid run on either side is "not better", never a
-    crash. The same math as the registered live rule of the same name in
-    blocks/rules.py -- deliberately restated here: the comparison is a
-    decision PARAMETER (boundary doc section 2.4), not a named-rule seam,
-    and the entry must stay independent of that registry.
-    """
-    if current["valid"] == 0 or control["valid"] == 0:
-        return False
-    return (current["success"] * control["valid"]
-            > control["success"] * current["valid"])
+    control's. Delegates to the registered live rule of the same name;
+    the decision entry and the live judge share ONE implementation."""
+    return get_acceptance_improve("strict_rate_gain")(
+        control, current, 0)
 
 
 def first_success_gain(current: Mapping[str, int],
                        control: Mapping[str, int]) -> bool:
-    """The pass@N-flavoured alternative: the control never succeeded and
-    the unit did at least once (weaker than strict_rate_gain on purpose --
-    running the two rules against each other measures exactly that)."""
-    return current["success"] >= 1 and control["success"] == 0
-
-
-#: Selection of a compare rule by parameter name: a fixed two-entry
-#: table, not a registry (repair plan section 5, note 19: no decision-
-#: rule registry). Adding a rule means adding a named function above and
-#: one line here.
-_COMPARE_RULES = {
-    "strict_rate_gain": strict_rate_gain,
-    "first_success_gain": first_success_gain,
-}
+    """The pass@N-flavoured alternative, delegated to the registered rule."""
+    return get_acceptance_improve("first_success_gain")(
+        control, current, 0)
 
 
 def _get_compare_rule(name: str):
+    """The registered compare rule under ``name``.
+
+    The same ``blocks/rules.py`` registry the config loader validates
+    against, so a new rule cannot pass load and fail here.
+    """
     try:
-        return _COMPARE_RULES[name]
-    except KeyError:
+        return get_acceptance_improve(name)
+    except ConfigError:
         raise ConfigError(
             f"unknown compare rule {name!r}; the decision entry knows "
-            f"{sorted(_COMPARE_RULES)}") from None
+            f"{ACCEPTANCE_IMPROVE.names()}") from None
 
 
 def _control_is_perfect(compare_rule: str, control_valid: int,
@@ -439,8 +428,9 @@ def control_perfect_skips_run(*, compare_rule: str, control_valid: int,
 
 def compare_conclusion(*, row: UnitSummary, control_valid: int,
                        control_success: int, control_cause: str,
-                       compare_rule: str) -> Tuple[str, str]:
-    """One unit's section 4.1 conclusion from its report row and its
+                       compare_rule: str,
+                       n_attempts: int = 0) -> Tuple[str, str]:
+    """One unit's section 4.1 conclusion from its unit summary and its
     control's counts; returns ``(conclusion, cause)``.
 
     Precedence:
@@ -497,8 +487,10 @@ def compare_conclusion(*, row: UnitSummary, control_valid: int,
         return CONCLUSION_NOT_TESTABLE, control_cause
     if _control_is_perfect(compare_rule, control_valid, control_success):
         return CONCLUSION_NO_HEADROOM, ""
-    better = rule({"valid": row.valid_count, "success": row.success_count},
-                  {"valid": control_valid, "success": control_success})
+    better = rule(
+        {"valid": control_valid, "success": control_success},
+        {"valid": row.valid_count, "success": row.success_count},
+        n_attempts)
     return (CONCLUSION_IMPROVED if better else CONCLUSION_NO_GAIN), ""
 
 
@@ -516,8 +508,8 @@ def table_action(*, conclusion: str, cause: str = "", checks_left: int,
       remains, else delete(leak_audit);
     * not testable, any other cause -> delete with the cause's reason
       (without a measurement there is nothing a rewrite could repair);
-    * the baseline gap (the D-report row: the weak model fails the task
-      and it has no skill yet) -> add, either way.
+    * the baseline gap (the D-phase unit summary: the weak model fails
+      the task and it has no skill yet) -> add, either way.
     """
     if checks_left < 0:
         raise CodeBugError(f"checks_left must be >= 0, got {checks_left}")
@@ -613,15 +605,15 @@ def _baseline_rows(*, control_kind: Optional[str],
                    bank: Sequence[Skill], n_attempts_weak: int,
                    task_select_rule: str) -> List[TaskListRow]:
     """The section 4.2 baseline row: the first learn phase follows the D
-    phase, no acceptance phase has run yet, so this round's report is
-    empty and the baseline-phase report acts as the input. Every train task the
-    weak model fails (the named task-select rule over its weak rows) and
-    that has no skill in the bank yet gets one add row."""
+    phase, no acceptance phase has run yet, so this round's summaries are
+    empty and the baseline-phase summaries act as the input. Every train
+    task the weak model fails (the named task-select rule over its weak
+    rows) and that has no skill in the bank yet gets one add row."""
     rows = list(control_report or ())
     if control_kind != PHASE_BASELINE or not rows:
         raise CodeBugError(
-            "the empty-current-report path (the first learn phase) needs "
-            "the baseline-phase report as the control: got control_kind="
+            "the empty-current-summaries path (the first learn phase) needs "
+            "the baseline-phase summaries as the control: got control_kind="
             f"{control_kind!r} with {len(rows)} row(s)")
     rule = get_task_select(task_select_rule)
     covered = {task for task in (_task_of_bank_skill(skill) for skill in bank)
@@ -659,31 +651,31 @@ def decide_task_list(
     task_select_rule: str = "any_weak_failed",
 ) -> List[TaskListRow]:
     """The unified decision entry (boundary doc section 2.4): this
-    round's acceptance report, the control report, the current bank and
+    round's unit summaries, the control summaries, the current bank and
     the number of checks left become one task list.
 
     Pure: no store, no ledger, no bank mutation (R4's decision side -- a
     skill's deletion is a task-list row, never a write here), and no
-    trajectory is read: the report rows are the only evidence (section 3
-    rule 7).
+    trajectory is read: the unit summaries are the only evidence
+    (section 3 rule 7).
 
     * ``current_kind`` / ``control_kind`` name the phases the two
-      reports belong to (the vocabulary above; the phase driver reads
-      them off the frozen config). ``PHASE_TEST`` on either side is
+      summary sets belong to (the vocabulary above; the phase driver
+      reads them off the frozen config). ``PHASE_TEST`` on either side is
       :class:`FinalTestReportRejected` (section 3 rule 9).
     * ``current_kind=None`` is the first learn phase's path: no
-      acceptance phase has run yet, so this round's report is empty and
-      the baseline-phase report (``control_kind="baseline"``) acts as the input
-      -- the table's baseline row, one add per failed, skill-less train
-      task. ``task_select_rule`` (a named blocks/rules.py rule) plus
-      ``n_attempts_weak`` decide "the weak model fails"; the bank decides
-      "no skill yet".
+      acceptance phase has run yet, so this round's summaries are empty
+      and the baseline-phase summaries (``control_kind="baseline"``) act
+      as the input -- the table's baseline row, one add per failed,
+      skill-less train task. ``task_select_rule`` (a named
+      blocks/rules.py rule) plus ``n_attempts_weak`` decide "the weak
+      model fails"; the bank decides "no skill yet".
     * Otherwise every row of ``current_report`` that injected skills is
       a decision target -- the skill its exam measures (exam kind:
       ``target_kind="skill"``) or the task's whole group (live kind:
       ``target_kind="group"``, the task names the group) -- and the
-      report's own no-injection rows plus ``control_report``'s weak rows
-      are the controls, matched by task. ``skills_injected=[]`` (a
+      summaries' own no-injection rows plus ``control_report``'s weak
+      rows are the controls, matched by task. ``skills_injected=[]`` (a
       retrieval that reached no threshold, R5's frozen legal value) is
       the same measurement as a bare run (:func:`reuse_key`'s existing
       semantics), so it joins the controls and never raises and never
@@ -704,8 +696,8 @@ def decide_task_list(
     if current_kind == PHASE_TEST or control_kind == PHASE_TEST:
         raise FinalTestReportRejected(
             "the decision entry does not take final-test (test-phase) "
-            "reports (boundary doc section 3 rule 9: test results do not "
-            "flow into learning); the final summary computes the "
+            "unit summaries (boundary doc section 3 rule 9: test results "
+            "do not flow into learning); the final summary computes the "
             "with-bank delta itself (decision.final_test_delta)")
     if current_kind not in (None, PHASE_EXAM, PHASE_LIVE):
         raise CodeBugError(f"unknown current phase kind {current_kind!r}; "
@@ -719,9 +711,9 @@ def decide_task_list(
     if current_kind is None:
         if rows:
             raise CodeBugError(
-                "a current report without a phase kind: pass the kind of "
-                "the phase the report belongs to (current_kind=None is "
-                "the first learn phase's empty-report path)")
+                "current summaries without a phase kind: pass the kind of "
+                "the phase the summaries belong to (current_kind=None is "
+                "the first learn phase's empty-summaries path)")
         return _baseline_rows(control_kind=control_kind,
                                control_report=control_report, bank=bank,
                                n_attempts_weak=n_attempts_weak,
@@ -762,7 +754,7 @@ def decide_task_list(
         conclusion, cause = compare_conclusion(
             row=row, control_valid=control_valid,
             control_success=control_success, control_cause=control_cause,
-            compare_rule=compare_rule)
+            compare_rule=compare_rule, n_attempts=n_attempts_weak)
         if (row.status == ROW_NOT_TESTABLE
                 and row.cause == CAUSE_ZERO_EXECUTION):
             # B1's one-meaning rule: zero_execution is a visibility
@@ -825,7 +817,7 @@ def reusable_units(new_units: Sequence[ExecutionUnitRow],
     re-execution): ``{new unit_id: previous unit_id}``.
 
     The phase driver skips execution for the new units in the mapping
-    and reads the previous report's row for the returned ids; every
+    and reads the previous unit summary for the returned ids; every
     other new unit re-executes. Two previous units sharing a key is a
     CodeBugError: within one phase a (task, role, block) triple names
     one unit, so a duplicate means the batches disagree.
@@ -927,8 +919,8 @@ def control_arm_source(*, reused_phase: Optional[str],
     control reuses, a fresh bare run, or the external campaign file the
     old stage-6 ruling froze (``external_campaign``, zero execution --
     the label keeps the old summary's exact vocabulary). Boundary doc
-    section 2.4: the control report's phase is a stage-config decision,
-    not an execution stage's. The label keeps the historical summary
+    section 2.4: the control summaries' phase is a stage-config
+    decision, not an execution stage's. The label keeps the historical summary
     vocabulary (E3 pins it): ``"<phase>_reuse"`` /
     ``"fresh_bare_run"`` / ``"external_campaign"``."""
     if external_campaign:

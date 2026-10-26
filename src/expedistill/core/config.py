@@ -322,14 +322,16 @@ class LearnPhaseSpec:
     Learn phases are not registry entries (plan R8); their content
     families resolve through the registry like any other: ``evidence``
     (the add path's cutting budget), ``author`` (the add path's writing
-    method), ``decision`` (the P04/P06 task_level / skill_level strategy)
-    and ``curate`` (agentbrew with merge_check, or none). Curation runs
-    only at the sequence's LAST learn phase -- the driver branches on the
-    sequence position, not on this spec.
+    method), ``attribution`` (the P04/P06 window sizes), ``decision``
+    (the task_level / skill_level strategy) and ``curate`` (agentbrew
+    with merge_check, or none). Curation runs only at the sequence's
+    LAST learn phase -- the driver branches on the sequence position, not
+    on this spec.
     """
 
     evidence: Dict[str, Any] = field(default_factory=dict)
     author: Dict[str, Any] = field(default_factory=dict)
+    attribution: Dict[str, Any] = field(default_factory=dict)
     decision: Dict[str, Any] = field(
         default_factory=lambda: {"name": "task_level"})
     curate: Dict[str, Any] = field(default_factory=dict)
@@ -387,7 +389,7 @@ class PhaseResult:
 _EXECUTE_FIELDS = frozenset({"kind", "role", "tasks", "delivery", "execution",
                              "compare", "acceptance"})
 _LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author",
-                           "decision", "curate"})
+                           "attribution", "decision", "curate"})
 
 #: The baseline phase's two arms: fixed by design (the strong arm feeds
 #: the add path, the weak arm is every later comparison's control).
@@ -624,6 +626,10 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
             f"a learn phase accepts {sorted(_LEARN_FIELDS)}")
     evidence = _method_mapping(raw.get("evidence"), f"phases.{name}.evidence")
     author = _method_mapping(raw.get("author"), f"phases.{name}.author")
+    attribution_raw = raw.get("attribution")
+    attribution = ({} if attribution_raw is None else
+                   _method_mapping(attribution_raw,
+                                   f"phases.{name}.attribution"))
     decision = _method_mapping(
         raw.get("decision", {"name": "task_level"}),
         f"phases.{name}.decision")
@@ -643,7 +649,7 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
             f"phases.{name}.role must be {PHASE_ROLE_LEARN!r} for a learn "
             f"phase, got {role!r}")
     return LearnPhaseSpec(
-        evidence=evidence, author=author,
+        evidence=evidence, author=author, attribution=attribution,
         decision=decision, curate=curate, kind="learn",
         role=PHASE_ROLE_LEARN)
 
@@ -675,7 +681,7 @@ def parse_phases(raw_phases: Any, raw_sequence: Any, *,
     6. the sequence starts with an execute phase (a learn phase first
        would have nothing to learn from);
     7. a live phase carries ``compare`` naming an earlier baseline phase
-       (its own report rows are all with-skill rows, so it has no
+       (its own unit summaries are all with-skill, so it has no
        in-report control);
     8. the ``folder`` delivery appears only on a test-role execute
        phase (the skill-folder delivery is a test-phase delivery; the A, B
@@ -762,9 +768,9 @@ def _check_compare_targets(raw_sequence: List[str],
                            specs: Dict[str, PhaseSpec]) -> None:
     """Checklist item 4, first half: ``against`` is an earlier sequence
     name, ``fresh_bare`` or ``external_campaign``, and a named control is
-    a BASELINE phase. A baseline's weak bare arm is the only report whose rows are
-    bare measurements; a live phase's report rows all carry the
-    injected group, and comparing against one would read a with-skill
+    a BASELINE phase. A baseline's weak bare arm is the only report whose
+    units are bare measurements; a live phase's unit summaries all carry
+    the injected group, and comparing against one would read a with-skill
     arm as the control."""
     for position, name in enumerate(raw_sequence):
         spec = specs[name]
@@ -794,9 +800,9 @@ def _check_compare_targets(raw_sequence: List[str],
 
 def _check_live_needs_a_control(raw_sequence: List[str],
                                 specs: Dict[str, PhaseSpec]) -> None:
-    """Checklist item 7: a live phase's report rows are all with-skill
-    rows, so its control must be a named earlier baseline phase. Without
-    ``compare`` (or with ``fresh_bare``) the decision would have no
+    """Checklist item 7: a live phase's unit summaries are all
+    with-skill, so its control must be a named earlier baseline phase.
+    Without ``compare`` (or with ``fresh_bare``) the decision would have no
     control row to compare against -- a failure the learn driver
     previously raised only after the live phase's executions were
     spent."""
@@ -809,7 +815,7 @@ def _check_live_needs_a_control(raw_sequence: List[str],
                                                             EXTERNAL_CAMPAIGN):
             raise ConfigError(
                 f"phases.{name} is a live phase without a control: its "
-                "report rows all carry the injected group, so "
+                "unit summaries all carry the injected group, so "
                 "compare.against must name an earlier baseline phase "
                 "(not fresh_bare, not external_campaign and not nothing)")
 
@@ -869,8 +875,13 @@ def _check_merge_check_needs_exams(raw_sequence: List[str],
 def phase_spec_to_raw(spec: PhaseSpec) -> Dict[str, Any]:
     """The freezable form of one parsed phase spec: the same shape
     ``parse_phases`` accepts, so ``to_dict`` -> ``from_dict`` round-trips
-    (the manifest comparison depends on that)."""
-    return dataclasses.asdict(spec)
+    (the manifest comparison depends on that). An absent attribution
+    block stays absent: old manifests have no such key and must keep
+    comparing equal until a config actually sets one."""
+    raw = dataclasses.asdict(spec)
+    if isinstance(spec, LearnPhaseSpec) and not spec.attribution:
+        raw.pop("attribution", None)
+    return raw
 
 
 def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:

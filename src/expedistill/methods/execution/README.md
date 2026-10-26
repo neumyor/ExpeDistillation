@@ -16,6 +16,10 @@
 
 阶段和方法的搭配在读配置时检查，配错直接报错。
 
+`real_folder` 只用于 test。live 的逐任务技能文件夹走 `real` + `folder_by_task`：
+live 的采样深度和注入预算属于 `real`，folder 只改变交付形态；test 没有这两项参数，
+所以用独立的 `real_folder` 名字把 folder 配对钉死。两条路径都能用，但不要互相替换。
+
 ## `real`：真做题
 
 ```yaml

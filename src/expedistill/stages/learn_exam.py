@@ -167,11 +167,10 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
                               package.old_skill.version, phase_dir)
         raise InfrastructureError(
             f"the revision of {skill_id!r} failed on infrastructure")
-    if outcome.outcome not in ("revised", "retriggered"):
+    if outcome.outcome != "revised":
         raise CodeBugError(
             f"the writer reported outcome {outcome.outcome!r} for "
-            f"{skill_id!r}; expected revised / retriggered / unchanged / "
-            "infra_failed")
+            f"{skill_id!r}; expected revised / unchanged / infra_failed")
     stored = store.load("skills", skill_id, Skill)
     expected = package.old_skill.version + 1
     if stored.version == package.old_skill.version:

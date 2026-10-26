@@ -192,7 +192,8 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | `role` | 恒为 `learn` |
 | `evidence` | 找证据方法（新增路径）：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算；`write_lessons` 默认 `true`，add 路径同时从弱模型失败段学，`false` 只学强模型成功段）；说明见 `src/expedistill/methods/evidence/README.md` |
 | `author` | 写作方法（新增路径）：`distill_diagnose`（无参数）；说明见 `src/expedistill/methods/author/README.md` |
-| `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（触发且组赢 → keep 不改写，触发且组没赢 → revise，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`；参数 `unread_in_won_group: delete|keep` 决定“未读但组赢”的 32 条）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` 与 `docs/decisions/p04_p06_revise_only_not_won_20261024.md` |
+| `attribution` | P04/P06 归因窗口：`skill_attempts`（默认；`before_steps` / `after_steps` 默认 10 / 10，必须是非负整数）；模式仍由上一执行相位的 `delivery.name` 决定，见 `src/expedistill/methods/attribution/README.md` |
+| `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（先按 unit 终态走共享动作表：control-perfect / not-testable 删除，leak 有余次改写到末次删除，zero_execution 不产行；正常单元触发且组赢 → keep 不改写，触发且组没赢 → 有余次 revise、末次 delete，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`；参数 `unread_in_won_group: delete|keep` 决定“未读但组赢”的 32 条）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` 与 `docs/decisions/p04_p06_revise_only_not_won_20261024.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
@@ -285,11 +286,13 @@ phases:
   learn: {kind: learn,
        evidence: {name: segment, K: 5, retry_limit: 2, write_lessons: true},
        author: {name: distill_diagnose},
+       attribution: {name: skill_attempts, before_steps: 10, after_steps: 10},
        decision: {name: task_level},
        curate: {name: agentbrew, ...}}
 ```
 
-`decision` 不写时默认 `task_level`；P02 的 add 路径不使用它。
+`decision` 不写时默认 `task_level`；`attribution` 不写时默认
+`skill_attempts` + 10/10。P02 的 add 路径不使用 `decision` / `attribution`。
 
 test 相位的技能文件夹形态（folder 交付 + real_folder 执行，完整可跑的配置见
 `configs/experiments/tb21_split_folder_v4.yaml`）：
@@ -779,6 +782,9 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  两臂都写在这里
     coverage.jsonl               执行相位：每个预期 trial 的 CoverageRecord
                                  （present / missing / terminal + cause）
+    carried_units.jsonl          执行相位：规则 1 复用单元的上一份 UnitSummary
+                                 （新 unit_id + 原计数 + reused_from）；只在
+                                 有复用单元时写，学习相位据此仍能决策该单元
     reuse_index.jsonl            执行相位：规则 1 的 execution-side 缓存
                                  （unit_id / status / cause）；不是验收报告，
                                  test 相位不写
@@ -1117,10 +1123,13 @@ none：原样入库，预算仍是硬阀），中间的学习相位写原样工�
 （`reuse_index.jsonl`：unit_id、status、cause）写进自己的相位目录；
 `decision.reusable_units` 把本次的单元与**更早的每个执行相位**按
 （任务, 角色, 注入块字节）连接、最新优先：命中即不重新执行，新相位的状态行
-沿用旧判定。学习相位不读这份缓存：它读 trial 级 `answer_sheets/` +
-`coverage.jsonl`，用 `unit_summary.py` 现算 UnitSummary（见 5.7）。
-`zero_execution` 可见性行（工作还没做的记录）永远不参与复用。在 live 相位
-上这就是 no-op 守卫；在 exam 相位上它让"改写没变 → 下轮免考"自动成立。
+沿用旧判定。复用单元不产生新的 trial sheet，因此执行相位把它上一份
+UnitSummary 写成 `carried_units.jsonl`（新 unit_id、原计数、`reused_from`）；
+学习相位读 `answer_sheets/` + `coverage.jsonl` + `carried_units.jsonl`，
+用 `unit_summary.py` 现算 UnitSummary（见 5.7）。这样规则 1 不会把“改写
+没产出新版本、下次还要再试”的单元从决策输入里隐藏掉。`zero_execution`
+可见性行（工作还没做的记录）永远不参与复用。在 live 相位上这就是 no-op
+守卫；在 exam 相位上它让"改写没变 → 下轮免考"自动成立。
 
 ### 5.9 基础设施空洞
 

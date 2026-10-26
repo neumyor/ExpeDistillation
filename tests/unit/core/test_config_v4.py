@@ -171,6 +171,20 @@ class TestParsedShapes:
         learn = _parse(raw)["learn"]
         assert learn.decision == {"name": "skill_level"}
 
+    def test_learn_phase_attribution_windows_parse(self, exam_v4):
+        raw = copy.deepcopy(exam_v4)
+        raw["phases"]["learn"]["attribution"] = {
+            "name": "skill_attempts", "before_steps": 3, "after_steps": 4}
+        learn = _parse(raw)["learn"]
+        assert learn.attribution == {
+            "name": "skill_attempts", "before_steps": 3, "after_steps": 4}
+        assert phase_spec_to_raw(learn)["attribution"] == learn.attribution
+
+    def test_an_absent_attribution_block_stays_absent(self, exam_v4):
+        learn = _parse(exam_v4)["learn"]
+        assert learn.attribution == {}
+        assert "attribution" not in phase_spec_to_raw(learn)
+
     def test_live_sequence_shape(self, live_v4):
         assert live_v4["sequence"] == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
         specs = _parse(live_v4)

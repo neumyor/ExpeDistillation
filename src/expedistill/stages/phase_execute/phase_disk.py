@@ -8,13 +8,14 @@ module: the roles (baseline / exam / live / final_test) and the engine
 consume them, none owns them.
 """
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites import phase_bank
+from expedistill.composites import phase_report
 from expedistill.core import vocabulary
 from expedistill.core.config import PhaseInstance
 from expedistill.core.contracts import ExecutionUnitRow
@@ -32,6 +33,7 @@ __all__ = [
     "UNITS_NAME",
     "_earlier_pass_unit_ids",
     "_earlier_pass_units",
+    "_write_carried_units",
     "_write_reuse_index",
 ]
 
@@ -127,7 +129,7 @@ def _write_reuse_index(ctx: StageContext, phase: PhaseInstance,
                        rows: Sequence[Tuple[str, str, str]]) -> None:
     """Persist the execution-side rule-1 reuse index.
 
-    This is deliberately NOT an acceptance report: it is a small
+    This is deliberately NOT a unit report card: it is a small
     ``{unit_id, status, cause}`` cache written by the execute driver so a
     later phase can answer "is this unchanged unit's result reusable?"
     without re-reading the trial sheets.  Acceptance itself only produces
@@ -136,6 +138,41 @@ def _write_reuse_index(ctx: StageContext, phase: PhaseInstance,
     write_jsonl(_phase_dir(ctx, phase) / REUSE_INDEX_NAME,
                 [{"unit_id": unit_id, "status": status, "cause": cause}
                  for unit_id, status, cause in rows])
+
+
+def _write_carried_units(ctx: StageContext, phase: PhaseInstance,
+                         reused: Dict[str, tuple]) -> None:
+    """Persist the reused units' previous summaries under the new ids.
+
+    Rule 1 deliberately does not re-measure the unit, but the next learn
+    phase still has to decide it (a failed revision must be retried).
+    The summary travels in ``carried_units.jsonl``; the trial sheets stay
+    exactly this phase's measurements.
+    """
+    carried = []
+    for new_id, (status, cause, summary) in sorted(reused.items()):
+        if (summary.status, summary.cause) != (status, cause):
+            raise CodeBugError(
+                f"reuse row {new_id!r} says {(status, cause)!r} but the "
+                f"source summary says "
+                f"{(summary.status, summary.cause)!r}: the reuse index "
+                "and the carried summary disagree")
+        artifacts = dict(summary.artifacts or {})
+        # Keep the ORIGINAL measured unit, not a chain of carries.
+        artifacts["reused_from"] = artifacts.get(
+            "reused_from", summary.unit_id)
+        carried.append(replace(
+            summary, unit_id=new_id, phase_label=phase.label,
+            sheet_ids=[], artifacts=artifacts))
+    phase_dir = _phase_dir(ctx, phase)
+    if carried:
+        phase_report.write_carried_units(carried, phase_dir)
+    else:
+        # No reused unit: leave no empty artifact behind. A resumed pass
+        # that now carries nothing must remove an earlier pass's file.
+        stale = phase_dir / phase_report.CARRIED_UNITS_NAME
+        if stale.exists():
+            stale.unlink()
 
 
 def _earlier_pass_unit_ids(ctx: StageContext, phase: PhaseInstance
@@ -179,13 +216,14 @@ def _earlier_pass_units(ctx: StageContext, phase: PhaseInstance
 def _reusable_units(ctx: StageContext, phase: PhaseInstance,
                     new_units: Sequence[ExecutionUnitRow]
                     ) -> Dict[str, tuple]:
-    """Rule 1's reuse map: new unit id -> the previous verdict.
+    """Rule 1's reuse map: new unit id -> (status, cause, summary).
 
     A new unit reuses an earlier execute unit's result when task, role
     and the rendered injection bytes match (:func:`decision.reusable_units`).
-    The returned verdict is ``(status, cause)`` from the earlier phase's
-    ``reuse_index.jsonl`` so the reusing phase can record the carried
-    verdict without re-deriving it. A ``zero_execution`` verdict is not
+    The status/cause come from the earlier phase's
+    ``reuse_index.jsonl``; the full summary (counts included) comes from
+    its measured report or its own carried units, so a later learn phase
+    can still decide the reused unit. A ``zero_execution`` verdict is not
     a measurement and is never reused. Most recent phase wins.
     """
     reused: Dict[str, tuple] = {}
@@ -208,6 +246,8 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
         stored = {row["unit_id"]: (row.get("status", ""),
                                    row.get("cause", ""))
                   for row in read_jsonl(index_path)}
+        summaries = {unit.unit_id: unit
+                     for unit in phase_report.read_phase_units(directory)}
         for new_id, previous_id in matches.items():
             if new_id in reused:
                 continue  # a more recent phase already answered this unit
@@ -222,7 +262,20 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
             if (status == vocabulary.STATUS_NOT_TESTABLE
                     and cause == vocabulary.CAUSE_ZERO_EXECUTION):
                 continue
-            reused[new_id] = verdict
+            summary = summaries.get(previous_id)
+            if summary is None:
+                raise CodeBugError(
+                    f"phase {record['label']!r} has a reuse row for "
+                    f"{previous_id!r} but no summary to carry: the "
+                    "reused unit would be invisible to the next learn "
+                    "phase")
+            if (summary.status, summary.cause) != (status, cause):
+                raise CodeBugError(
+                    f"phase {record['label']!r} reuse row {previous_id!r} "
+                    f"says {(status, cause)!r} but its summary says "
+                    f"{(summary.status, summary.cause)!r}: the phase "
+                    "directory disagrees with itself")
+            reused[new_id] = (status, cause, summary)
     return reused
 
 

@@ -46,8 +46,8 @@ def find_leak_verdict(store: Store, skill_id: str,
     The first matching row wins; only one row per (skill, version) is ever
     appended, but reading the first keeps the lookup honest even if a
     hand-edited ledger ever holds duplicates. Public since R1: the
-    acceptance report reader reads the leak state through this lookup
-    instead of a private cross-module name.
+    coverage layer reads the leak state through this lookup instead of a
+    private cross-module name.
     """
     for record in _skill_records(store, LEAK_VERDICTS_LEDGER, skill_id):
         if record.get("skill_version") == skill_version:

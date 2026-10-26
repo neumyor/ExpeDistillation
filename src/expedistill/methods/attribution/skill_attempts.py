@@ -207,15 +207,25 @@ def _collect_injected_attempt(
 
 def _start_end_windows(n_steps: int, start_size: int,
                        end_size: int) -> List[tuple]:
+    """The injected-delivery windows, with empty windows never emitted.
+
+    A zero size contributes nothing. When the end window reaches the
+    start of the trajectory it subsumes the start window, so the result
+    is one whole-trajectory window rather than a start prefix that drops
+    the tail.
+    """
     if n_steps <= 0:
         return []
-    first_end = min(start_size, n_steps)
-    last_start = max(0, n_steps - end_size)
-    windows = [("start", 0, first_end)]
-    if last_start > 0 and last_start >= first_end:
-        windows.append(("end", last_start, n_steps))
-    elif last_start > 0:
-        windows[-1] = ("start", 0, n_steps)
+    windows: List[tuple] = []
+    start_end = min(start_size, n_steps) if start_size > 0 else 0
+    if start_end > 0:
+        windows.append(("start", 0, start_end))
+    end_start = max(0, n_steps - end_size) if end_size > 0 else n_steps
+    if end_size > 0 and end_start < n_steps:
+        if not windows or end_start >= windows[-1][2]:
+            windows.append(("end", end_start, n_steps))
+        else:
+            windows[-1] = ("start", 0, n_steps)
     return windows
 
 
@@ -257,7 +267,8 @@ def _attribute_window(
     skill_aliases: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, WindowEvidence]:
     text = render_steps_view(
-        (execution.steps or [])[step_start:step_end], view_rules)
+        (execution.steps or [])[step_start:step_end], view_rules,
+        start_index=step_start)
     meta = execution.metrics if isinstance(execution.metrics, dict) else {}
     initial_prompt = meta.get("initial_prompt")
     instruction = _task_description(initial_prompt, task_instruction)

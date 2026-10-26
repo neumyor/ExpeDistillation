@@ -134,6 +134,15 @@ def test_a_longer_name_containing_the_file_name_does_not_count():
     assert skill_files_read(trajectory, _MANIFEST) == [_SKILL_A]
 
 
+def test_a_cat_line_does_not_cross_attribute_two_paths():
+    # B's SKILL.md and A's directory appear on the same line, but the
+    # SKILL.md belongs to B's path; A is not a read.
+    line = _cat(
+        f"/opt/openclaw-skills/train-fasttext/{_FILE_B} "
+        f"/tmp/{_FILE_A.split('/')[0]}")
+    assert skill_files_read(_trajectory(line), _MANIFEST) == [_SKILL_B]
+
+
 def test_an_empty_manifest_has_nothing_to_read():
     # The empty accepted bank's null state: the unit ran bare, the read
     # set is empty.

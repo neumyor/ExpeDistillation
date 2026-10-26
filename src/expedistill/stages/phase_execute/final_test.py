@@ -25,7 +25,7 @@ Three control arm options:
 
 Special rules:
     - Control completeness checked BEFORE with-bank spends anything
-    - No acceptance report written (numbers go to summary only)
+    - No learning report is written (numbers go to summary only)
     - No skip logic, no redispatch (every call re-runs everything)
     - Folder delivery: materialize skills as files + catalog
 """
@@ -70,7 +70,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     """Execute test phase: with-bank vs control over test set.
 
     Control arm is verified complete BEFORE with-bank spends anything.
-    No acceptance report is written (C numbers go to summary only).
+    No learning report is written (C numbers go to summary only).
     """
     # ========================================================================
     # 1. RESOLVE PARAMETERS AND VERIFY CAPABILITY

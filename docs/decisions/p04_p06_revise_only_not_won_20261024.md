@@ -3,6 +3,12 @@
 日期：2026-10-24
 一句话：把 P04/P06 的改写条件从“读过就改写”改成“触发过且组级没赢才改写”；已赢的 accepted 技能保留原正文，不再改写；从未触发的技能仍删除。
 对应 log.md：2026-10-24 的 P04/P06 规则变更与 P03 前缀重跑条目（装配/dry check 完成后补）。
+更新：2026-10-26 起 `skill_level` 先按 UnitSummary 的终态走共享动作表
+（control-perfect / not-testable 删除，leak 有余次改写到末次删除，
+zero_execution 不产行）；正常单元“触发 + pending + 组没赢”在还有后续
+检验时 revise、末次检验时 delete(`live_no_improvement`)。规则 1 复用的
+单元经 `carried_units.jsonl` 进入下一学习相位，不再因无新 trial sheet
+而隐身。
 
 ## 用户裁决（2026-10-24 10:52）
 

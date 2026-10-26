@@ -54,9 +54,9 @@ def _judge_failures(attempt: Attempt) -> int:
 def judge_budget_exhausted(attempt: Attempt) -> bool:
     """True when an unjudged attempt's persistent judge budget is spent
     (a judged attempt never is): the exam pipeline terminally failed to
-    produce this run's measurement. The report reader maps such a row to
-    ``not_testable``/``exam_generation_failed`` -- an unjudged attempt
-    whose budget merely survived a crash (fewer stored tries) is
+    produce this run's measurement. The coverage layer maps such an
+    attempt to ``not_testable``/``exam_generation_failed`` -- an unjudged
+    attempt whose budget merely survived a crash (fewer stored tries) is
     in-flight work, ``zero_execution``, not a terminal failure."""
     return _judge_failures(attempt) >= _BLOCK_REPAIR_ATTEMPTS
 

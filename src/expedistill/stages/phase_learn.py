@@ -7,17 +7,17 @@ execute_learn_module_boundaries_20261016.md sections 1.2, 2.4-2.7). One call
 is one learn phase of the frozen sequence; the per-target landing lives in
 ``stages/learn_add.py / learn_apply.py / learn_exam.py`` (the plan's 400-line split rule).
 
-1. **Decision** (section 2.4): the acceptance report of the nearest
-   preceding execute phase, the control report that phase's ``compare``
+1. **Decision** (section 2.4): the unit summaries of the nearest
+   preceding execute phase, the control summaries that phase's ``compare``
    names, the previous learn phase's bank artifact and the checks left
    after this phase go through ``decision.decide_task_list`` -- one task
    list. The first learn phase after a baseline runs the baseline-gap
-   path (current report empty, the D report as the control; the entry
-   implements it, this driver only routes).
+   path (current summaries empty, the D-phase summaries as the control;
+   the entry implements it, this driver only routes).
 2. **Evidence and author** (sections 2.5/2.6), **the multi-version
-   merge** (one skill can carry several report rows when the shared
+   merge** (one skill can carry several unit summaries when the shared
    answer store holds attempts of several versions; the highest
-   version's row decides) and the landing semantics are documented on
+   version's summary decides) and the landing semantics are documented on
    ``learn_add / learn_apply / learn_exam``; the answer-sheet evidence of an exam
    revise comes from the evidence family's collector
    (``methods.evidence.exam_sheet``).
@@ -68,6 +68,7 @@ from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
 )
+from expedistill.composites.unit_ids import phase_label_of_unit_id
 from expedistill.core.config import (
     FRESH_BARE,
     PHASE_ROLE_BASELINE,
@@ -330,7 +331,9 @@ def _read_report(ctx: Any, names: Sequence[str], specs: dict,
 
     Every execute phase writes ``unit_specs.jsonl`` + ``answer_sheets/``
     + ``coverage.jsonl``; a missing set is an interrupted/incompatible
-    run, not a legacy shape to guess around.
+    run, not a legacy shape to guess around. Reused units are not
+    measured in this phase, so their carried summaries are appended --
+    rule 1 must not hide a unit the learn phase still has to decide.
     """
     name = names[position]
     kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
@@ -340,15 +343,15 @@ def _read_report(ctx: Any, names: Sequence[str], specs: dict,
             f"a report was asked for phase {name!r} of role "
             f"{specs[name].role!r}; only baseline / exam / live phases "
             "have one")
+    phase_dir = phase_bank_dir(ctx.run_dir, phase_label(position, name))
     report = phase_report.read_phase_report(
-        phase_bank_dir(ctx.run_dir, phase_label(position, name)),
-        phase_kind=kind, learning_usable=True)
+        phase_dir, phase_kind=kind, learning_usable=True)
     if report is None:
         raise CodeBugError(
             f"phase {name!r} has no trial-level artifacts "
             "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl); "
             "this run predates the answer-sheet protocol")
-    return report.units
+    return list(report.units) + phase_report.read_carried_units(phase_dir)
 
 
 def _live_round(names: Sequence[str], specs: dict, position: int) -> int:
@@ -414,10 +417,13 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
              superseded: Sequence[str], phase_dir, *,
              current_phase: str, compare_rule: str,
              checks_left: int) -> Dict[str, Any]:
-    """The phase's JSON-safe summary: the effective actions (a revise
-    that produced no new version counts as keep -- ``revise_outcome``),
-    the landed outcomes read back from the ledger (cumulative across
-    resumes), and the decision's provenance."""
+    """The phase's JSON-safe summary: the decision's action counts (one
+    per task-list row, before the rewrite outcome is known), the landed
+    outcomes read back from the ledger (cumulative across resumes), and
+    the decision's provenance. A revise that produced no new version
+    stays counted as ``revise`` here and appears as ``unchanged`` in
+    ``outcomes``; :func:`decision.revise_outcome` is the helper for a
+    caller that needs the effective action instead."""
     records = _phase_outcomes(phase, phase_dir)
     outcomes: Dict[str, int] = {}
     for record in records:
@@ -438,17 +444,67 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
 
 def _read_sheets(ctx: Any, names: Sequence[str], specs: dict,
                  position: int) -> List[Any]:
-    """The execute phase's trial-level AnswerSheets, if it wrote them."""
+    """The execute phase's trial-level AnswerSheets.
+
+    A measured execute phase must have written them; a missing set is an
+    interrupted or incompatible run, the same rule ``_read_report``
+    applies, not an empty measurement.
+    """
     name = names[position]
     spec = specs[name]
     kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
             PHASE_ROLE_LIVE: "live"}.get(spec.role)
     if kind is None:
         return []
+    phase_dir = phase_bank_dir(ctx.run_dir, phase_label(position, name))
     report = phase_report.read_phase_report(
-        phase_bank_dir(ctx.run_dir, phase_label(position, name)),
-        phase_kind=kind, learning_usable=True)
-    return report.sheets if report is not None else []
+        phase_dir, phase_kind=kind, learning_usable=True)
+    if report is None:
+        raise CodeBugError(
+            f"phase {name!r} has no trial-level artifacts "
+            "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl); "
+            "this run predates the answer-sheet protocol")
+    return list(report.sheets) + _carried_source_sheets(ctx, phase_dir)
+
+
+def _carried_source_sheets(ctx: Any, phase_dir) -> List[Any]:
+    """The original sheets behind this phase's reused units.
+
+    A reused unit has no sheets in the current phase, but its usage
+    facts are still what a retry/keep/delete decision needs. The carried
+    summary names the ORIGINAL measured unit, so one lookup into that
+    phase's report recovers the sheets.
+    """
+    out: List[Any] = []
+    seen = set()
+    for unit in phase_report.read_carried_units(phase_dir):
+        source_id = (unit.artifacts or {}).get("reused_from")
+        if not source_id:
+            continue
+        try:
+            source_label = phase_label_of_unit_id(source_id)
+        except ValueError as exc:
+            raise CodeBugError(
+                f"carried unit {unit.unit_id!r} names malformed source "
+                f"unit {source_id!r}") from exc
+        source_dir = phase_bank_dir(ctx.run_dir, source_label)
+        source_report = phase_report.read_phase_report(
+            source_dir, phase_kind="carried", learning_usable=True)
+        if source_report is None:
+            raise CodeBugError(
+                f"carried unit {unit.unit_id!r} names source "
+                f"{source_id!r}, but its phase has no trial-level report")
+        matched = [sheet for sheet in source_report.sheets
+                   if sheet.coverage.unit_id == source_id]
+        if not matched:
+            raise CodeBugError(
+                f"carried unit {unit.unit_id!r} names source "
+                f"{source_id!r}, but that source unit has no sheets")
+        for sheet in matched:
+            if sheet.sheet_id not in seen:
+                seen.add(sheet.sheet_id)
+                out.append(sheet)
+    return out
 
 
 def _usage_by_task_from_sheets(sheets: Sequence[Any], round_: int

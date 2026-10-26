@@ -22,7 +22,21 @@ task instruction 只取 P03 初始 prompt 的 `Task Description:` 段，避免�
 Terminal agent 的 `analysis/plan/commands` 输出格式带进 attribution。
 `blocks/attribution.py` 对业务契约失败（如 `skills: null`）重试 2 次。
 
-参数：`AttributionParams(before_steps=10, after_steps=10)`。
+参数写在学相位的 `attribution` 块里：
+
+```yaml
+phases:
+  learn:
+    attribution:
+      name: skill_attempts
+      before_steps: 10
+      after_steps: 10
+```
+
+`before_steps` / `after_steps` 必须是非负整数，默认 10 / 10。folder 模式下
+它们是每个 `cat` 调用点前后各取多少步；group/whole-bank 模式下分别是开头
+窗口和结尾窗口的大小。不写 `attribution` 时使用默认的 `skill_attempts` +
+10 / 10。
 
 它不读决策结果，不做 keep/delete，不写技能。写作交给
 `methods/author/revise.py`；决策交给

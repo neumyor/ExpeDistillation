@@ -1,8 +1,8 @@
 """The evidence package: the evidence family's output shape (R6).
 
-The frozen interface shapes live in core/contracts.py, which pins the
-four cross-module hand-offs (execution unit list, run record, acceptance
-report row, task list row). The evidence package is the FIFTH hand-off
+The frozen interface shapes live in core/contracts.py (the delivery
+rows and the task list row) and core/answer_sheet.py (the trial-level
+ExecutionRecord). The evidence package is another cross-module hand-off
 -- the boundaries doc (execute_learn_module_boundaries_20261016.md
 section 2.5) freezes its FIELD SET in prose (target, facts, segments,
 old_skill, source_experiences), and this module is its definition site

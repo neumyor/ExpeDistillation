@@ -119,9 +119,9 @@ learn-phase half is phase_bank's):
         coverage.jsonl            one CoverageRecord per expected trial
                                   (present / missing / terminal + cause)
         reuse_index.jsonl         the execution-side rule-1 cache
-                                  (unit_id, status, cause); NOT an
-                                  acceptance report and NOT written by
-                                  the test phase
+                                  (unit_id, status, cause); NOT a unit
+                                  report card and NOT written by the test
+                                  phase
         redispatch.json           per-unit re-dispatch bookkeeping
         <arm>/accepted_infra_shortfall.json   the durable accepted holes
         generation_failures.jsonl (exam phases) terminal exam-generation

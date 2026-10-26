@@ -90,7 +90,8 @@ def decide(*, name: str,
             usage_by_task=usage_by_task or {})
     if name == SKILL_LEVEL:
         return skill_level(
-            current_report=current_report or (), delivery=delivery,
+            current_report=current_report or (), bank=bank,
+            checks_left=checks_left, delivery=delivery,
             usage_by_task=usage_by_task or {},
             group_better_by_task=group_better_by_task,
             skill_status_by_id=skill_status_by_id,
@@ -144,6 +145,8 @@ def task_level(*, current_kind: Optional[str],
 
 
 def skill_level(*, current_report: Sequence[UnitSummary],
+                bank: Sequence[Skill] = (),
+                checks_left: int = 0,
                 delivery: str,
                 usage_by_task: Dict[str, List[dict]],
                 group_better_by_task: Optional[
@@ -153,15 +156,21 @@ def skill_level(*, current_report: Sequence[UnitSummary],
                 ) -> List[TaskListRow]:
     """Read facts + group result decide the three terminal actions.
 
-    Never read -> delete. Read and already won (``accepted``) -> keep,
-    never rewrite a proven skill. Read, still ``pending``, and the live
-    group did not win -> revise. Missing/untrusted usage or a missing
-    group/status fact keeps the skill rather than guessing.
+    A unit-level terminal status is resolved FIRST with the shared action
+    table: control-perfect deletes ``weak_already_knows``; a not-testable
+    cause deletes (or revises a leak while a check remains); a
+    ``zero_execution`` row is a visibility fact and emits no row.
 
-    ``unread_in_won_group`` resolves the one genuinely ambiguous case:
-    a skill never read whose group won (P03 accepted the whole pending
-    group). ``delete`` follows "never triggered -> delete"; ``keep``
-    trusts the winning group's membership.
+    For a normal unit: never read -> delete. Read and already won
+    (``accepted``) -> keep, never rewrite a proven skill. Read, still
+    ``pending``, and the live group did not win -> revise while a check
+    remains, delete on the last check (the shared table's no-gain row).
+    Missing/untrusted usage or a missing group/status fact keeps the
+    skill rather than guessing.
+
+    A reused unit (rule 1) has no usage of its own in this phase; its
+    carried summary's ``reused_from`` marker lets the group result fall
+    back to the skill statuses (a group that won accepted its members).
     """
     if unread_in_won_group not in UNREAD_POLICIES:
         raise CodeBugError(
@@ -172,9 +181,30 @@ def skill_level(*, current_report: Sequence[UnitSummary],
     out: List[TaskListRow] = []
     for report_row in sorted(current_report, key=lambda row: row.unit_id):
         task_id, _ = decision.parse_unit_id(report_row.unit_id)
-        members = _members(report_row, task_id, ())
+        members = _members(report_row, task_id, bank)
         if not members:
             continue
+        if (report_row.status == decision.ROW_NOT_TESTABLE
+                and report_row.cause == decision.CAUSE_ZERO_EXECUTION):
+            # B1: a visibility row has no completed run to decide from.
+            continue
+        if report_row.status in (decision.ROW_NOT_RUN_CONTROL_PERFECT,
+                                 decision.ROW_NOT_TESTABLE):
+            action = _terminal_action(
+                report_row, checks_left=checks_left,
+                phase_kind=decision.PHASE_LIVE)
+            out.extend(_rows_for(members, action.kind,
+                                 action.reason or "",
+                                 report_row.unit_id))
+            continue
+        if report_row.status != decision.ROW_NORMAL:
+            raise CodeBugError(
+                f"unit {report_row.unit_id!r} reports unknown status "
+                f"{report_row.status!r}")
+        if report_row.valid_count == 0:
+            raise CodeBugError(
+                f"unit {report_row.unit_id!r} reports status normal with "
+                "no valid run; acceptance must report not_testable instead")
         rows = usage_by_task.get(task_id, [])
         if delivery in FOLDER_DELIVERIES:
             trusted = bool(rows) and all(
@@ -185,6 +215,8 @@ def skill_level(*, current_report: Sequence[UnitSummary],
                                      report_row.unit_id))
                 continue
         better = group_better.get(task_id)
+        if better is None:
+            better = _carried_better(report_row, members, statuses)
         for skill_id in members:
             used = _used(skill_id, task_id, delivery, usage_by_task,
                          members)
@@ -197,8 +229,12 @@ def skill_level(*, current_report: Sequence[UnitSummary],
                     action, reason = decision.KEEP, REASON_ALREADY_WON
                 elif status == "pending":
                     if better is False:
-                        action, reason = (decision.REVISE,
-                                          REASON_SKILL_NOT_WON)
+                        if checks_left > 0:
+                            action, reason = (decision.REVISE,
+                                              REASON_SKILL_NOT_WON)
+                        else:
+                            action, reason = (decision.DELETE,
+                                              decision.LIVE_NO_IMPROVEMENT)
                     elif better is True:
                         action, reason = decision.KEEP, REASON_GROUP_WON
                     else:
@@ -220,6 +256,41 @@ def skill_level(*, current_report: Sequence[UnitSummary],
                 basis_unit=report_row.unit_id))
     _assert_unique(out)
     return out
+
+
+def _terminal_action(report_row: UnitSummary, *, checks_left: int,
+                     phase_kind: str) -> decision.Action:
+    """The shared table's action for a unit-level terminal status."""
+    if report_row.status == decision.ROW_NOT_RUN_CONTROL_PERFECT:
+        return decision.table_action(
+            conclusion=decision.CONCLUSION_NO_HEADROOM,
+            checks_left=checks_left, phase_kind=phase_kind)
+    if report_row.cause not in decision.NOT_TESTABLE_CAUSES:
+        raise CodeBugError(
+            f"unit {report_row.unit_id!r} reports cause "
+            f"{report_row.cause!r}, which is not in the frozen "
+            "not-testable set")
+    return decision.table_action(
+        conclusion=decision.CONCLUSION_NOT_TESTABLE,
+        cause=report_row.cause, checks_left=checks_left,
+        phase_kind=phase_kind)
+
+
+def _carried_better(report_row: UnitSummary, members: Sequence[str],
+                    statuses: Dict[str, str]) -> Optional[bool]:
+    """A reused unit's group result, inferred from its members' status.
+
+    A won group accepts every pending member; a lost group leaves them
+    pending. Only used when the current phase has no verdict row for the
+    task (rule 1 reused it), never as a substitute for real usage facts.
+    """
+    if not (report_row.artifacts or {}).get("reused_from"):
+        return None
+    known = [statuses.get(skill_id) for skill_id in members
+             if statuses.get(skill_id) is not None]
+    if not known:
+        return None
+    return any(status == "accepted" for status in known)
 
 
 def _used(skill_id: str, task_id: str, delivery: str,

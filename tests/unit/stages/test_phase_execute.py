@@ -655,6 +655,16 @@ def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
                         / "verdicts.jsonl")
     assert [row["round"] for row in ledger] == [0]
 
+    # The reused unit's summary is carried under the new phase's unit id,
+    # so the next learn phase can still decide it (counts included).
+    carried = phase_report.read_carried_units(
+        phase_bank.phase_bank_dir(ctx.run_dir, second.label))
+    new_id = measured[0].unit_id.replace(first.label, second.label)
+    assert [unit.unit_id for unit in carried] == [new_id]
+    assert (carried[0].valid_count, carried[0].success_count) == (
+        measured[0].valid_count, measured[0].success_count)
+    assert carried[0].artifacts["reused_from"] == measured[0].unit_id
+
 
 def test_live_shortfall_accepts_the_missing_attempt_of_a_partial_group(
         monkeypatch, tmp_path):

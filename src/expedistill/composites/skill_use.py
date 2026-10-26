@@ -34,6 +34,8 @@ __all__ = [
 ]
 
 _CAT_RE = re.compile(r"\bcat\b")
+_SEGMENT_RE = re.compile(r"&&|\|\||[;|]")
+_SKILL_FILENAME = "SKILL.md"
 _NAME_ALPHABET = frozenset(string.ascii_letters + string.digits + "._-")
 
 FOLDER_DELIVERIES = ("folder", "folder_by_task")
@@ -80,13 +82,42 @@ def _name_token_in(line: str, filename: str) -> bool:
         start = found + 1
 
 
+def _cat_segments(line: str) -> List[tuple]:
+    """The shell segments containing a cat command, each with its prefix.
+
+    ``prefix`` is the line text before the segment. The ``cd DIR && cat
+    SKILL.md`` form keeps the directory in the prefix, so a bare
+    ``SKILL.md`` argument can still be attributed to it.
+    """
+    segments: List[tuple] = []
+    prefix = ""
+    for part in _SEGMENT_RE.split(line):
+        if _CAT_RE.search(part):
+            segments.append((part, prefix))
+        prefix += part + " "
+    return segments
+
+
+def _bare_token_position(line: str, token: str) -> Optional[int]:
+    """The first position of ``token`` that is not part of a path."""
+    pattern = re.compile(
+        rf"(?<![\w./-]){re.escape(token)}(?![\w.-])")
+    match = pattern.search(line)
+    return match.start() if match is not None else None
+
+
 def _path_matches(line: str, filename: str) -> bool:
-    if _name_token_in(line, filename):
-        return True
     path = PurePosixPath(filename)
-    if len(path.parts) == 2 and path.name == "SKILL.md":
-        return (_name_token_in(line, path.parts[0])
-                and _name_token_in(line, path.name))
+    for segment, prefix in _cat_segments(line):
+        if _name_token_in(segment, filename):
+            return True
+        if len(path.parts) == 2 and path.name == _SKILL_FILENAME:
+            position = _bare_token_position(segment, _SKILL_FILENAME)
+            if position is None:
+                continue
+            if _name_token_in(prefix, path.parts[0]) \
+                    or _name_token_in(segment[:position], path.parts[0]):
+                return True
     return False
 
 

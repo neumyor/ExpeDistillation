@@ -5,7 +5,7 @@ Orchestration:
     2. Select pending skills from bank
     3. Plan exam units (one per skill)
     4. Execute exams in parallel (three-stage workflow per exam)
-    5. Generate acceptance report from exam attempts
+    5. Build trial-level answer sheets from exam attempts
     6. Write summary and check for failures
 
 Components used:
@@ -139,6 +139,7 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     phase_disk._write_units(ctx, phase, [plan.unit for plan in plans])
     reused = phase_disk._reusable_units(ctx, phase,
                                         [plan.unit for plan in plans])
+    phase_disk._write_carried_units(ctx, phase, reused)
 
     # ========================================================================
     # 3. LOAD SUPPORTING DATA
@@ -268,7 +269,7 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
         bare_unit = bare_unit_by_exam[exam_id]
         cause = _CAUSE_BY_OUTCOME.get(kind)
         if kind == "reused":
-            status, reused_cause = reused[skill_unit]
+            status, reused_cause, _summary = reused[skill_unit]
             if status != vocabulary.STATUS_NORMAL:
                 cause = reused_cause
         if cause:

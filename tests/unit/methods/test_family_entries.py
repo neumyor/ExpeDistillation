@@ -1,11 +1,10 @@
-"""R8's registry re-key: the five content families, pinned as data.
+"""R8's registry re-key: the method families, pinned as data.
 
 The v3 slot keys (segmentation.llm, authoring.distill_diagnose,
 acceptance.exam, acceptance.live_run) are retired -- asking for one is a
-ConfigError naming the family, never a quiet fallback. The five families
-(delivery, execution, evidence, author, curation) each offer exactly the
-names their phase fields can name; the params classes behind the entries
-are exercised by tests/unit/methods/test_params.py.
+ConfigError naming the family, never a quiet fallback. Each family
+offers exactly the names its phase fields can name; the params classes
+behind the entries are exercised by tests/unit/methods/test_params.py.
 """
 
 import pytest
@@ -15,10 +14,10 @@ from expedistill.methods import resolve_params
 from expedistill.methods.registry import FAMILIES, _ENTRIES
 
 
-def test_the_table_is_organised_by_the_five_families():
-    # R8's acceptance: five families, no slots.
+def test_the_table_is_organised_by_the_method_families():
+    # R8's acceptance: named families, no slots.
     assert FAMILIES == ("delivery", "execution", "evidence", "author",
-                        "decision", "curation")
+                        "attribution", "decision", "curation")
     by_family = {}
     for (family, name) in _ENTRIES:
         by_family.setdefault(family, []).append(name)
@@ -30,6 +29,7 @@ def test_the_table_is_organised_by_the_five_families():
         "exam", "real", "real_folder"]
     assert by_family["evidence"] == ["segment"]
     assert by_family["author"] == ["distill_diagnose"]
+    assert by_family["attribution"] == ["skill_attempts"]
     assert by_family["decision"] == ["task_level", "skill_level"]
     assert sorted(by_family["curation"]) == ["agentbrew", "none"]
 
@@ -91,3 +91,15 @@ def test_the_evidence_and_author_families_resolve_their_params():
         SegmentationParams(K=5, retry_limit=2)
     assert resolve_params("author", {"name": "distill_diagnose"}) == \
         AuthoringParams()
+
+
+def test_the_attribution_family_resolves_its_window_params():
+    from expedistill.methods.attribution import AttributionParams
+
+    assert resolve_params("attribution", {}) == AttributionParams()
+    assert resolve_params(
+        "attribution", {"name": "skill_attempts", "before_steps": 3,
+                        "after_steps": 4}) == \
+        AttributionParams(before_steps=3, after_steps=4)
+    with pytest.raises(ConfigError, match="must be <class 'int'>"):
+        resolve_params("attribution", {"before_steps": "wide"})

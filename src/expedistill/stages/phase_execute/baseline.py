@@ -7,8 +7,8 @@ Orchestration:
     4. Build trial-level answer sheets + coverage, grade them
     5. Write the reuse index and summary; check for holes
 
-The execute driver no longer builds unit-level report rows: coverage and
-unit summaries are derived by pure functions from the trial sheets.
+The execute driver no longer builds unit-level report cards: coverage
+and unit summaries are derived by pure functions from the trial sheets.
 """
 
 from typing import Any, Dict, List, Set

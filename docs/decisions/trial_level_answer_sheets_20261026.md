@@ -157,3 +157,20 @@ AnswerSheet 落地后，`core.contracts.RunRecord` 和
 
 有意保留的旧读路径只有两类：审计脚本对 pre-v4 run 的 `_audit_legacy`，
 以及 `assemble_reuse` / `fork_run_stage04.py` 对 v2/v3 源 run 的装配支持。
+
+## 8. 后续修正：规则 1 复用与 skill_level 终态
+
+AnswerSheet 落地后发现两个语义缺口，已修正：
+
+- **复用单元对学习相位隐身**：执行相位只把 measured units 写进
+  `unit_specs.jsonl`，规则 1 复用的单元没有 sheet，`phase_report` 因此读不到，
+  下一次学习相位不会重试“改写没产出新版本”的技能。现在执行相位把复用单元的
+  上一份 `UnitSummary` 写成 `carried_units.jsonl`（新 unit_id、原计数、
+  `reused_from` 指向原测量单元）；学习相位把它并入决策输入，并按
+  `reused_from` 回读原相位的 `answer_sheets/` 作为 usage 证据。没有复用单元时
+  不写空文件。
+- **`skill_level` 不消费 unit 终态、也不看剩余检验次数**：现在先按
+  `UnitSummary.status/cause` 走共享 `table_action`（control-perfect、
+  not-testable、leak、zero_execution），正常单元在“触发 + pending + 组没赢”
+  时按 `checks_left` 决定 revise 还是末次 delete。比较规则也改为直接使用
+  `blocks/rules.py` 的 `ACCEPTANCE_IMPROVE` 注册表，不再维护第二张固定表。

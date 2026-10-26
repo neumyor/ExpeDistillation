@@ -12,9 +12,10 @@ graph: importing ``composites`` as a package has always pulled the live
 blocks in through ``composites/__init__`` -- the guarded invariant is
 the name set, not which modules happen to be loaded.)
 
-The config speaks the v4 phase families (schema v4, R8's five content
-families); resolving a family validates its params (the family's
-dataclass) before any driver is imported.
+The config speaks the v4 phase families (R8's method families plus the
+P04 decision split and attribution windows); resolving a family
+validates its params (the family's dataclass) before any driver is
+imported.
 """
 
 from expedistill.methods.registry import (

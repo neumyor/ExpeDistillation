@@ -181,7 +181,8 @@ src/expedistill/
     unit_summary.py       AnswerSheet + UnitSpec → UnitSummary 的纯聚合函数
                           （summarize_unit / summarize_phase / task_metrics）
     phase_report.py       相位报告 envelope：读取 unit_specs/answer_sheets/
-                          coverage，现算 UnitSummary；不落 report card
+                          coverage，现算 UnitSummary；carried_units 让规则 1
+                          复用的单元仍进入下一学习相位的决策；不落 report card
     evidence_package.py   P02/exam 的 fact-only 证据包形状
     skill_use.py          统一判断 skill 在 attempt 是否被使用、在哪些 step
                           被 cat；folder 读取解析与 group/whole-bank 的
@@ -207,9 +208,9 @@ src/expedistill/
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
-    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（R8 六族：
+    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（R8 七族：
                           delivery / execution / evidence / author /
-                          decision / curation）
+                          attribution / decision / curation）
     execution/            execution 族参数契约：RealExecutionParams /
                           ExamExecutionParams / RealFolderExecutionParams
                           （无驱动，相位驱动直接消费）+ README.md（模块说明与参数表）

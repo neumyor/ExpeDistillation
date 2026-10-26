@@ -7,7 +7,7 @@ Orchestration:
     4. Apply entry guards (five short-circuit conditions)
     5. Execute one K1 batch for non-skipped groups
     6. Judge and finalize each group through verdicts ledger
-    7. Generate acceptance report
+    7. Build trial-level answer sheets
     8. Write summary
 
 Components used:
@@ -133,6 +133,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
 
     plan_by_task = {plan.unit.task_ref: plan for plan in plans}
     reused = phase_disk._reusable_units(ctx, phase, all_units)
+    phase_disk._write_carried_units(ctx, phase, reused)
 
     accepted = shortfall.read_unit_ids(
         lm.round_dir(store, round_) / shortfall.SHORTFALL_NAME)
@@ -384,7 +385,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
                   for unit in report.units]
     reuse_rows.extend(
         (unit_id, status, cause)
-        for unit_id, (status, cause) in reused.items()
+        for unit_id, (status, cause, _summary) in reused.items()
         if unit_id not in {row[0] for row in reuse_rows})
     phase_disk._write_reuse_index(ctx, phase, reuse_rows)
 

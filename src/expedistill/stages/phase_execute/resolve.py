@@ -14,11 +14,18 @@ from expedistill.core.config import (
     BASELINE_ARMS,
     ConfigError as CoreConfigError,
     PHASE_ROLE_BASELINE,
+    PHASE_ROLE_EXAM,
+    PHASE_ROLE_LIVE,
+    PHASE_ROLE_TEST,
     ExecutePhaseSpec,
 )
 from expedistill.infra.reliability import ConfigError
 from expedistill.methods import registry as method_registry
-from expedistill.methods.execution import RealExecutionParams
+from expedistill.methods.execution import (
+    ExamExecutionParams,
+    RealExecutionParams,
+    RealFolderExecutionParams,
+)
 from expedistill.stages.context import StageContext
 
 __all__ = [
@@ -31,6 +38,18 @@ __all__ = [
 ]
 
 _ROLE_OF_ARM = {"executor_strong": "strong", "executor_weak": "weak"}
+
+#: The execution params class each execute role accepts. The config
+#: loader owns the same rule for YAML; this table is the driver-side
+#: twin for a directly constructed spec (a mismatched pair must be a
+#: ConfigError here, never an AttributeError or a silently different
+#: execution path inside the driver).
+_ALLOWED_EXECUTION_PARAMS = {
+    PHASE_ROLE_BASELINE: (RealExecutionParams,),
+    PHASE_ROLE_EXAM: (ExamExecutionParams,),
+    PHASE_ROLE_LIVE: (RealExecutionParams,),
+    PHASE_ROLE_TEST: (RealExecutionParams, RealFolderExecutionParams),
+}
 
 
 def _resolve_delivery(spec: ExecutePhaseSpec) -> Tuple[Any, Any]:
@@ -50,14 +69,26 @@ def _execution_params(spec: ExecutePhaseSpec) -> Any:
     vocabulary); this stage re-raises it as the infra ConfigError the
     run's failure handling and the tests expect.
 
-    The ARMS consistency is re-checked here although core's load-time
-    checklist owns it: a driver can receive a directly constructed spec
-    (parse_phases never saw it), and the same loud refusal must hold.
+    The role/params pairing and the ARMS consistency are re-checked here
+    although core's load-time checklist owns them: a driver can receive a
+    directly constructed spec (parse_phases never saw it), and the same
+    loud refusal must hold.  A mismatched pair is a ConfigError here, not
+    an AttributeError or a silently different execution path inside the
+    driver.
     """
     try:
         params = method_registry.resolve_params("execution", spec.execution)
     except CoreConfigError as exc:
         raise ConfigError(str(exc)) from exc
+    allowed = _ALLOWED_EXECUTION_PARAMS.get(spec.role)
+    if allowed is None:
+        raise ConfigError(
+            f"phase role {spec.role!r} is not an execute role")
+    if not isinstance(params, allowed):
+        expected = " or ".join(cls.__name__ for cls in allowed)
+        raise ConfigError(
+            f"phase role {spec.role!r} does not accept execution "
+            f"{spec.execution.get('name')!r}; expected {expected}")
     if not isinstance(params, RealExecutionParams):
         return params
     if spec.role == PHASE_ROLE_BASELINE:

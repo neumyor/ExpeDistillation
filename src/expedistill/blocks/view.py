@@ -68,14 +68,18 @@ def _step_fields(step: _StepLike, position: int) -> tuple:
 
 
 def render_steps_view(steps: Iterable[_StepLike],
-                      view_rules: Optional[ViewRules] = None) -> str:
+                      view_rules: Optional[ViewRules] = None,
+                      *, start_index: int = 0) -> str:
     """Render steps as the numbered text view models consume.
 
     Deterministic: the same steps and rules always render to the same string.
-    ``view_rules=None`` disables truncation entirely.
+    ``view_rules=None`` disables truncation entirely. ``start_index`` is
+    the original trajectory index of the first rendered step; a caller
+    rendering a slice passes the slice's offset so the model sees the
+    same step numbers the window metadata carries.
     """
     blocks: List[str] = []
-    for index, step in enumerate(steps):
+    for index, step in enumerate(steps, start=start_index):
         action, observation = _step_fields(step, index)
         if view_rules is not None:
             action = view_rules.truncate(action)

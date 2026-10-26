@@ -14,23 +14,32 @@ from expedistill.core.answer_sheet import (
     CoverageRecord,
     PhaseReport,
     UnitSpec,
+    UnitSummary,
 )
 from expedistill.infra.reliability import CodeBugError
 from expedistill.infra.store import read_json, read_jsonl, write_jsonl
 
 __all__ = [
     "ANSWER_SHEETS_DIR",
+    "CARRIED_UNITS_NAME",
     "COVERAGE_NAME",
     "SPECS_NAME",
     "build_phase_report",
+    "read_carried_units",
     "read_phase_report",
+    "read_phase_units",
     "require_learning_report",
+    "write_carried_units",
     "write_unit_specs",
 ]
 
 SPECS_NAME = "unit_specs.jsonl"
 COVERAGE_NAME = "coverage.jsonl"
 ANSWER_SHEETS_DIR = "answer_sheets"
+#: Reused units' previous UnitSummary rows, carried under the current
+#: phase's unit ids. Not a measurement of this phase: it keeps rule 1
+#: from hiding a unit the next learn phase still has to decide.
+CARRIED_UNITS_NAME = "carried_units.jsonl"
 
 
 def build_phase_report(
@@ -67,6 +76,47 @@ def write_unit_specs(specs: Sequence[UnitSpec], phase_dir: Path) -> None:
     """
     write_jsonl(Path(phase_dir) / SPECS_NAME,
                 [spec.to_dict() for spec in specs])
+
+
+def write_carried_units(units: Sequence[UnitSummary],
+                        phase_dir: Path) -> None:
+    """Persist rule-1 reused units' previous summaries under the new ids.
+
+    These are not this phase's measurements and never enter the trial
+    sheets; they exist so the next learn phase can still decide a reused
+    unit (rule 1 must not hide work that is still owed).
+    """
+    write_jsonl(Path(phase_dir) / CARRIED_UNITS_NAME,
+                [unit.to_dict() for unit in units])
+
+
+def read_carried_units(phase_dir: Path) -> List[UnitSummary]:
+    """The reused units an execute phase carried forward, if any."""
+    path = Path(phase_dir) / CARRIED_UNITS_NAME
+    if not path.exists():
+        return []
+    return [UnitSummary.from_dict(row) for row in read_jsonl(path)]
+
+
+def read_phase_units(phase_dir: Path) -> List[UnitSummary]:
+    """Every unit summary a phase can hand to decision.
+
+    The measured units come from the normal phase report; reused units
+    come from ``carried_units.jsonl`` (they have no sheets of their own
+    in this phase). A missing measured report with carried rows is an
+    inconsistent directory and raises.
+    """
+    phase_dir = Path(phase_dir)
+    carried = read_carried_units(phase_dir)
+    report = read_phase_report(
+        phase_dir, phase_kind="carried", learning_usable=True)
+    if report is None:
+        if carried:
+            raise CodeBugError(
+                f"phase directory {phase_dir} carries "
+                f"{CARRIED_UNITS_NAME} but no trial-level report")
+        return []
+    return carried + list(report.units)
 
 
 def read_phase_report(phase_dir: Path, *, phase_kind: str,

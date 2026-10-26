@@ -35,36 +35,37 @@ __all__ = ["collect_exam_evidence", "injected_version"]
 _VOID_NOTE = "The previous skill version was voided by the leak audit: "
 
 
-def injected_version(report_row: UnitSummary) -> int:
-    """The single skill version an exam row injected (its unit id's
+def injected_version(summary: UnitSummary) -> int:
+    """The single skill version an exam unit injected (its unit id's
     join back to the target)."""
-    injected = report_row.injected_skills
+    injected = summary.injected_skills
     if (not isinstance(injected, list) or len(injected) != 1
             or not isinstance(injected[0], dict)
             or not isinstance(injected[0].get("version"), int)):
         raise CodeBugError(
-            f"report row {report_row.unit_id!r} injects {injected!r}; an "
-            "exam-phase row injects exactly one {skill_id, version}")
+            f"unit summary {summary.unit_id!r} injects {injected!r}; an "
+            "exam-phase unit injects exactly one {skill_id, version}")
     return injected[0]["version"]
 
 
-def collect_exam_evidence(store: Store, report_row: UnitSummary,
+def collect_exam_evidence(store: Store, summary: UnitSummary,
                           skill: Skill) -> EvidencePackage:
     """One skill's answer-sheet package from the unit summary's refs.
 
-    ``report_row`` is the decision's basis unit (the row that authorized
+    ``summary`` is the decision's basis unit (the summary that authorized
     the revision); ``skill`` is the stored target. Raises CodeBugError
-    when the row names no exam, or no judged attempt exists to revise
-    from (the row authorized a revision without answer-sheet material).
+    when the summary names no exam, or no judged attempt exists to
+    revise from (the summary authorized a revision without answer-sheet
+    material).
     """
-    exam_id = report_row.task_ref
+    exam_id = summary.task_ref
     if not exam_id:
         raise CodeBugError(
-            f"report row {report_row.unit_id!r} carries no exam ref; an "
-            "exam-phase row always names its exam")
+            f"unit summary {summary.unit_id!r} carries no exam ref; an "
+            "exam-phase unit always names its exam")
     exam = store.load("exams", exam_id, Exam)
     judged = [store.load("attempts", sheet_id, Attempt)
-              for sheet_id in report_row.sheet_ids]
+              for sheet_id in summary.sheet_ids]
     if judged:
         source = judged[-1]
         error = source.judge_reason
@@ -83,14 +84,14 @@ def collect_exam_evidence(store: Store, report_row: UnitSummary,
             if not bare:
                 raise CodeBugError(
                     f"exam {exam_id!r} has no judged attempt to revise "
-                    f"skill {skill.skill_id!r} from: the report row "
+                    f"skill {skill.skill_id!r} from: the unit summary "
                     "authorized a revision without answer-sheet material")
             source = bare[-1]
         error = source.judge_reason
-        if report_row.status == decision.ROW_NOT_TESTABLE \
-                and report_row.cause == decision.CAUSE_LEAK:
+        if summary.status == decision.ROW_NOT_TESTABLE \
+                and summary.cause == decision.CAUSE_LEAK:
             leak = find_leak_verdict(store, skill.skill_id,
-                                     injected_version(report_row))
+                                     injected_version(summary))
             report = leak["reason"] if leak else ""
             reason = (source.judge_reason or "").strip()
             error = (f"{reason} {_VOID_NOTE}{report}" if reason

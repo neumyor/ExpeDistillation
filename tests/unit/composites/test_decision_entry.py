@@ -324,10 +324,10 @@ def test_baseline_path_uses_the_named_task_select_rule():
 
 
 def test_baseline_path_demands_the_d_report():
-    with pytest.raises(CodeBugError, match="baseline-phase report"):
+    with pytest.raises(CodeBugError, match="baseline-phase summaries"):
         decide_task_list(current_kind=None, control_kind=None,
                          control_report=None, bank=[], checks_left=1)
-    with pytest.raises(CodeBugError, match="baseline-phase report"):
+    with pytest.raises(CodeBugError, match="baseline-phase summaries"):
         decide_task_list(current_kind=None, control_kind=decision.PHASE_EXAM,
                          control_report=[], bank=[], checks_left=1)
     with pytest.raises(CodeBugError, match="without a phase kind"):

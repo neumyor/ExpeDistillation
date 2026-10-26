@@ -3,10 +3,9 @@
 The frozen v1 behaviour (README stage 6): every test task's weak run
 sees the entire curated bank, and the with-bank trajectories record the
 bank digest string as ``skills_injected`` (inject.bank_reference). The
-scalar K1 kwargs are kept on purpose in the legacy seam -- routing
-whole_bank through K1's per-task resolver would turn the recorded
-``skills_injected`` into a reference list and change the trajectory
-bookkeeping.
+per-task resolver returns that same digest and block for every task, so
+the trajectory bookkeeping stays the frozen whole-bank shape (a digest
+string, never a reference list).
 
 The injection is the bank's ACCEPTED members only
 (:func:`units.accepted_bank`): the phase artifacts carry pending

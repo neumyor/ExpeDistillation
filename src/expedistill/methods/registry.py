@@ -30,7 +30,7 @@ name asked for by the config that is not in the table is a ConfigError
 listing what the family offers -- same contract as the named-rule
 registries (blocks/rules.py).
 
-Driver-less entries (execution, evidence, author) are not a gap: the
+Driver-less entries (execution, evidence, attribution, decision) are not a gap: the
 phase driver consumes their params directly (there is no uniform driver
 surface to dispatch to, and inventing one ahead of the first consumer
 is the over-design the repair plan forbids). Cross-constraint checks
@@ -48,12 +48,12 @@ from expedistill.methods.params import build_params
 
 __all__ = ["FAMILIES", "resolve", "resolve_fixed", "resolve_params"]
 
-#: The six content families (R8 plus the P04 decision split). The v4
-#: phase fields name five of them verbatim (delivery, execution,
-#: evidence, author, decision); the learn phase's ``curate`` field names
-#: the curation family.
-FAMILIES = ("delivery", "execution", "evidence", "author", "decision",
-            "curation")
+#: The seven method families (R8, the P04 decision split, and the
+#: attribution window contract). Execute phases name delivery, execution
+#: and decision; learn phases name evidence, author, attribution and
+#: curation.
+FAMILIES = ("delivery", "execution", "evidence", "author", "attribution",
+            "decision", "curation")
 
 #: One table entry: the driver module (None while the phase driver
 #: consumes the params directly), the light module holding the params
@@ -114,6 +114,11 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("author", "distill_diagnose"):
         _Entry("expedistill.methods.author.write",
                "expedistill.methods.author", "AuthoringParams"),
+    # P04/P06 attribution windows: driver-less, the learn driver consumes
+    # the params directly.
+    ("attribution", "skill_attempts"):
+        _Entry(None, "expedistill.methods.attribution",
+               "AttributionParams"),
     ("decision", "task_level"):
         _Entry(None, "expedistill.methods.decision", "TaskLevelParams"),
     ("decision", "skill_level"):
@@ -197,8 +202,8 @@ def resolve_params(family: str, raw: Mapping[str, Any]) -> Any:
 def resolve(family: str, raw: Mapping[str, Any]) -> Tuple[Any, Any]:
     """(driver module, params) for the family; imports the driver now.
 
-    For a driver-less family (execution, evidence, author) this is a
-    construction bug in the caller: the phase driver owns those params
+    For a driver-less family (execution, evidence, attribution, decision)
+    this is a construction bug in the caller: the phase driver owns those params
     and must not ask for a driver that does not exist.
     """
     name, entry, params = _resolve_entry(family, raw)

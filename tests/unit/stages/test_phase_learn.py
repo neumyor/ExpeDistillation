@@ -19,6 +19,7 @@ import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_
 from expedistill.composites import answer_sheets as acceptance_sheets
 from expedistill.composites import coverage as coverage_io
 from expedistill.composites import live_measurement as lm
+from expedistill.composites import phase_report
 from expedistill.composites.acceptance_skill_status import exam_attempts
 from expedistill.composites.phase_bank import (
     load_phase_bank,
@@ -1095,3 +1096,35 @@ def test_an_infra_failed_revision_raises_after_the_summary(
     assert [row["outcome"] for row in outcomes] == ["infra_failed"]
     assert not (phase_bank_dir(ctx.run_dir, "p04:learn") / "skill_bank.jsonl") \
         .exists()
+
+
+def test_a_reused_live_unit_is_visible_to_the_next_learn_phase(tmp_path):
+    """Rule 1 must not hide a unit the next learn phase still decides."""
+    sequence, phases = _live_sequence()
+    ctx = _make_ctx(tmp_path, sequence, phases, handles={})
+    _seed_live_round(ctx.store, better=False)
+
+    source = phase_report.read_phase_report(
+        phase_bank_dir(ctx.run_dir, "p03:live"),
+        phase_kind="live", learning_usable=True)
+    source_unit = next(unit for unit in source.units
+                       if unit.injected_skills)
+    new_id = source_unit.unit_id.replace("p03:live", "p05:live")
+    carried = dataclasses.replace(
+        source_unit, unit_id=new_id, phase_label="p05:live",
+        sheet_ids=[],
+        artifacts={**source_unit.artifacts,
+                   "reused_from": source_unit.unit_id})
+    dest = phase_bank_dir(ctx.run_dir, "p05:live")
+    (dest / ANSWER_SHEETS_DIR).mkdir(parents=True)
+    write_unit_specs([], dest)
+    acceptance_sheets.write_coverage([], dest / COVERAGE_NAME)
+    phase_report.write_carried_units([carried], dest)
+
+    units = phase_learn._read_report(ctx, sequence, phases, 4)
+    assert [unit.unit_id for unit in units] == [new_id]
+
+    sheets = phase_learn._read_sheets(ctx, sequence, phases, 4)
+    assert sheets
+    usage = phase_learn._usage_by_task_from_sheets(sheets, round_=1)
+    assert TASK_ID in usage

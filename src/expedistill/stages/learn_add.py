@@ -19,8 +19,8 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import Store
+from expedistill.methods import registry as method_registry
 from expedistill.methods import resolve_params
-from expedistill.methods.author import write as author
 from expedistill.methods.evidence import add_path, segmentation
 from expedistill.methods.evidence.package import EvidencePackage
 
@@ -61,19 +61,32 @@ def execute_add_rows(ctx: Any, phase: Any,
             if failure is not None}
 
 
+def _has_outcome(phase: Any, row: TaskListRow, phase_dir) -> bool:
+    return bool(ledger.rows_of(phase_dir / ledger.OUTCOMES_NAME,
+                               phase.label, row.target_id))
+
+
 def _land_add(ctx: Any, phase: Any, row: TaskListRow, phase_dir) -> None:
-    """One task's add landing (idempotent; a receipt means done)."""
-    if ledger.rows_of(phase_dir / ledger.OUTCOMES_NAME, phase.label,
-                      row.target_id):
-        return
+    """One task's add landing; a per-skill receipt is the completion proof.
+
+    The task may name several source segments, so "one outcome row exists"
+    is NOT "the task is done": a crash between two ``store.save`` calls
+    leaves the first skill receipted and the rest unwritten. Re-entering
+    therefore recomputes the fresh set and writes the missing skills;
+    only a pass with nothing fresh (and an existing receipt) returns
+    silently, keeping the replay idempotent.
+    """
     store: Store = ctx.store
     evidence_params = resolve_params("evidence", phase.spec.evidence)
+    author_driver, author_params = method_registry.resolve(
+        "author", phase.spec.author)
+    view_rules = get_plugin(ctx.config.benchmark).view_rules
     segmentation.segment_add_material(
         store=store,
         task_id=row.target_id,
         params=evidence_params,
         trajectory_select=ctx.config.rules["trajectory_select"],
-        view_rules=get_plugin(ctx.config.benchmark).view_rules,
+        view_rules=view_rules,
         handle=ctx.handle("segmenter"),
         usage=ctx.usage,
         run_dir=ctx.run_dir)
@@ -81,18 +94,21 @@ def _land_add(ctx: Any, phase: Any, row: TaskListRow, phase_dir) -> None:
         package = add_path.collect_add_evidence(
             task_row=row, store=store,
             rule_name=ctx.config.rules["segment_select"],
-            write_lessons=evidence_params.write_lessons)
+            write_lessons=evidence_params.write_lessons,
+            view_rules=view_rules)
     except add_path.NoAddMaterial:
-        ledger.append_outcome(phase, row, None, "skipped_no_material",
-                              None, phase_dir)
+        if not _has_outcome(phase, row, phase_dir):
+            ledger.append_outcome(phase, row, None, "skipped_no_material",
+                                  None, phase_dir)
         return
     fresh = [experience for experience in package.source_experiences
              if not store.exists(
                  "skills",
                  ids.make_skill_id(experience["subtask"].subtask_id))]
     if not fresh:
-        ledger.append_outcome(phase, row, None, "skipped_existing", None,
-                              phase_dir)
+        if not _has_outcome(phase, row, phase_dir):
+            ledger.append_outcome(phase, row, None, "skipped_existing", None,
+                                  phase_dir)
         return
     fresh_ids = {experience["subtask"].subtask_id for experience in fresh}
     filtered = EvidencePackage(
@@ -100,11 +116,11 @@ def _land_add(ctx: Any, phase: Any, row: TaskListRow, phase_dir) -> None:
         segments=[segment for segment in package.segments
                   if segment["subtask_id"] in fresh_ids],
         source_experiences=fresh)
-    skills = author.write_new(
+    skills = author_driver.write_new(
         task_row=row, package=filtered,
         author_handle=ctx.handle("author"),
         weak_profile=ctx.config.effective_weak_profile(),
-        usage=ctx.usage, run_dir=ctx.run_dir)
+        usage=ctx.usage, run_dir=ctx.run_dir, params=author_params)
     for skill in skills:
         store.save(skill, "skills")
         ledger.append_outcome(phase, row, skill.skill_id, "added",

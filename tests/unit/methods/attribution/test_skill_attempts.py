@@ -201,3 +201,46 @@ def test_answer_sheet_does_not_read_the_trajectory_store(monkeypatch):
 
     assert [call["window_kind"] for call in calls] == ["start", "end"]
     assert len(evidence[SKILL_A.skill_id].windows) == 2
+
+
+def test_folder_window_text_keeps_the_original_step_numbers(monkeypatch):
+    actions = [f"step {i}" for i in range(30)]
+    actions[12] = "cat a/SKILL.md"
+    sheet = _sheet(_trajectory(actions))
+    usage = [{
+        "task_id": TASK, "attempt": 0, "delivery_status": "ok",
+        "read_skill_ids": [SKILL_A.skill_id],
+        "unread_skill_ids": [SKILL_B.skill_id],
+        "reads": [{"skill_id": SKILL_A.skill_id, "step_index": 12,
+                   "filename": "a/SKILL.md", "command": "cat a/SKILL.md"}],
+        "outcome": "failure",
+    }]
+    calls = []
+    monkeypatch.setattr(skill_attempts, "attribute_attempts",
+                        _fake_attribution(calls))
+
+    skill_attempts.collect_skill_evidence(
+        task_id=TASK, skills=[SKILL_A], sheets=[sheet], round_=0,
+        task_instruction="do it", delivery="folder", usage_rows=usage,
+        weak_profile="w", author_handle=object(),
+        params=AttributionParams(before_steps=2, after_steps=2))
+
+    assert calls[0]["step_start"] == 10
+    assert calls[0]["trajectory_window"].startswith(
+        "step 10\naction: step 10\nobservation: obs")
+    assert "step 0\naction:" not in calls[0]["trajectory_window"]
+
+
+def test_start_end_windows_never_emit_an_empty_window():
+    assert skill_attempts._start_end_windows(30, 0, 10) == [
+        ("end", 20, 30)]
+    assert skill_attempts._start_end_windows(30, 0, 0) == []
+    assert skill_attempts._start_end_windows(30, 10, 0) == [
+        ("start", 0, 10)]
+
+
+def test_start_end_windows_keeps_the_tail_when_the_end_covers_the_attempt():
+    # 8 steps, 5-step start, 10-step end: the end window starts at 0 and
+    # subsumes the start window; dropping the tail (5..7) would be wrong.
+    assert skill_attempts._start_end_windows(8, 5, 10) == [
+        ("start", 0, 8)]
