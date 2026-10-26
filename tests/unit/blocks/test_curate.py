@@ -241,13 +241,24 @@ def test_merge_skills_conflict_mode_string():
     ({"content": "", "summary": "one line"}, "content"),
     ({"content": "Merged.", "summary": " "}, "summary"),
     ({"content": "Merged.", "summary": "two\nlines"}, "ONE line"),
-    ({"content": "Merged.", "summary": "x" * 501}, "at most"),
     ({"content": "Merged.", "summary": 3}, "summary"),
 ])
 def test_merge_skills_format_errors(reply, field):
     handle = make_fake_handle(script=json_script(reply))
     with pytest.raises(ModelOutputError, match=field):
         merge_skills(SKILLS[:2], handle, mode="dedup")
+
+
+def test_merge_skills_accepts_a_long_summary():
+    # The merge summary has no length cap; only the one-line/non-empty
+    # rules stay.
+    long_summary = "y" * 5000
+    handle = make_fake_handle(script=json_script({
+        "content": "Merged.",
+        "summary": long_summary}))
+    merged, summary = merge_skills(SKILLS[:2], handle, mode="dedup")
+    assert merged == "Merged."
+    assert summary == long_summary
 
 
 def test_merge_skills_wrong_mode_raises_before_any_call():

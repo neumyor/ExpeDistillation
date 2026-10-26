@@ -6,18 +6,18 @@ conditions, no abstract commands the weak model cannot operationalize.
 
 Protocol v2 (docs/decisions/stage23_protocol_v2_20261013.md section 3.2):
 SKILL_DISTILL writes from SUCCEEDED subtasks, SKILL_DIAGNOSE from failed ones,
-and both return JSON whose field names map 1:1 onto the four stored sections
+and both return JSON whose field names map 1:1 onto the three stored sections
 -- blocks/author.py validates the fields and its renderer adds the bracket
 section markers, so the G2 templates carry no marker literals. Since the
 2026-10-19 ruling (docs/decisions/unified_skill_structure_20261019.md) both
-return the SAME four fields: a skill learned from a failure has the same
-structure as one learned from a success. REWRITE names the four markers:
+return the SAME three fields: a skill learned from a failure has the same
+structure as one learned from a success. REWRITE names the three markers:
 its rewritten skill_text must reproduce them.
 
 Schema v3 (skill-folder M1, 2026-10-17) adds ONE non-section field to all
 three output contracts: ``summary``, the one-line "what this skill is"
 sentence a future skill-directory listing shows next to the skill id. It
-is not a fifth section and never enters the stored content; when_to_use
+is not a section and never enters the stored content; when_to_use
 says WHEN to apply the skill, summary says WHAT it is. REWRITE must
 produce a fresh summary: the content changed, so the old line no longer
 describes the skill.
@@ -165,11 +165,8 @@ Before output, check every item; if any fails, rewrite the card:
 2. Is the trigger observable from the task, not from its name?
 3. Is every task-specific token a <placeholder>?
 4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?
-5. Does the verify field name the exact pass signal (the task's verifier,
-   exit status, required file or expected output) and forbid submission
-   before it passes?
-6. Does when_to_use start with exactly one of the five timing phrases?
-7. Is the summary free of the trigger, and are summary and when_to_use
+5. Does when_to_use start with exactly one of the five timing phrases?
+6. Is the summary free of the trigger, and are summary and when_to_use
    complete sentences, together under 1,000 characters (about 400 is
    best)?
 
@@ -177,7 +174,6 @@ Output ONLY JSON with exactly these fields:
 {{"when_to_use": "<timing phrase, then the observable trigger and the
 preconditions, in one or two sentences>",
   "steps": ["<one decision node: condition, action, verify, fallback>", ...],
-  "verify": "<the exact pass signal and what to do when it is absent>",
   "not_applicable_when": "<observable conditions under which this card is
 wrong>",
   "summary": "<one sentence: the reusable capability this card teaches
@@ -185,7 +181,7 @@ wrong>",
 """,
         description=(
             "G2 skill writing, distill mode: turn a succeeded strong-model "
-            "subtask into a four-section procedure skill, written for the "
+            "subtask into a three-section procedure skill, written for the "
             "weak model."
         ),
     )
@@ -344,11 +340,8 @@ Before output, check every item; if any fails, rewrite the card:
 2. Is the trigger observable from the task, not from its name?
 3. Is every task-specific token a <placeholder>?
 4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?
-5. Does the verify field name the exact pass signal (the task's verifier,
-   exit status, required file or expected output) and forbid submission
-   before it passes?
-6. Does when_to_use start with exactly one of the five timing phrases?
-7. Is the summary free of the trigger, and are summary and when_to_use
+5. Does when_to_use start with exactly one of the five timing phrases?
+6. Is the summary free of the trigger, and are summary and when_to_use
    complete sentences, together under 1,000 characters (about 400 is
    best)?
 
@@ -356,7 +349,6 @@ Output ONLY JSON with exactly these fields:
 {{"when_to_use": "<timing phrase, then the observable trigger and the
 failing behavior to recognize, in one or two sentences>",
   "steps": ["<one decision node: condition, action, verify, fallback>", ...],
-  "verify": "<the exact pass signal and what to do when it is absent>",
   "not_applicable_when": "<observable conditions under which this card is
 wrong>",
   "summary": "<one sentence: what the card teaches instead (verb + object)
@@ -413,8 +405,8 @@ Work in three steps:
      expected answer. Do not encode it. Return the skill unchanged and say
      in rewrite_reason that the failure is task-specific.
 
-3. If you rewrite, keep the four bracket sections of the original skill
-   ([When to use]/[Steps]/[Verify]/[Do not use when]): rewrite each
+3. If you rewrite, keep the three bracket sections of the original skill
+   ([When to use]/[Steps]/[Do not use when]): rewrite each
    section's content, never collapse them into prose. Reproduce
    the bracketed section headers exactly as written, each on its own line.
    Change the wording, granularity, or trigger conditions of the skill --
@@ -439,8 +431,6 @@ Transfer audit before output:
 2. Is every trigger observable from the task, not from its name?
 3. Is every task-specific token a <placeholder>?
 4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?
-5. Does the verify part name the exact pass signal and forbid submission
-   before it passes?
 If any check fails, rewrite again.
 
 Output ONLY JSON with exactly these fields:
@@ -453,7 +443,7 @@ Output ONLY JSON with exactly these fields:
 """,
         description=(
             "G6 skill rewrite: classify the weak model's failure category, "
-            "then rewrite the skill section by section, keeping its four "
+            "then rewrite the skill section by section, keeping its three "
             "bracket sections, without leaking the exam scenario."
         ),
     )

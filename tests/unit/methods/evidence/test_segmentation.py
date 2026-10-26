@@ -85,7 +85,6 @@ def _distill_script():
         "when_to_use": "When the service rejects connections.",
         "steps": ["Run the status command on the service.",
                   "Restart the service with its restart command."],
-        "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
         "summary": "restore a service that rejects connections",
     })
@@ -97,7 +96,6 @@ def _diagnose_script():
                        "a restart: restarting again does not help.",
         "steps": ["Read the service log.",
                   "Fix the error the log names, then restart."],
-        "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service has never been started.",
         "summary": "read the log instead of restarting blindly",
     })
@@ -418,7 +416,7 @@ def test_a_learn_phase_without_add_rows_never_segments(tmp_path):
     subtask_id = ids.make_subtask_id(
         ids.make_trajectory_id(TASK_ID, "strong", 0), 0)
     covered = Skill(skill_id=ids.make_skill_id(subtask_id),
-                    content="[When to use] x\n[Steps]\n1. y\n[Verify] z",
+                    content="[When to use] x\n[Steps]\n1. y\n",
                     subtask_id=subtask_id, source_subtasks=[subtask_id],
                     version=1, status="accepted")
     ctx.store.save(covered, "skills")
@@ -524,7 +522,7 @@ def test_an_add_row_with_write_lessons_lands_a_distill_and_a_diagnose_skill(
     assert "where it went wrong" in prompts[1]
     for subtask_id in (strong, weak):
         skill = ctx.store.load("skills", ids.make_skill_id(subtask_id), Skill)
-        # One structure for both: the four sections, no [Trigger].
+        # One structure for both: the three sections, no [Trigger].
         assert skill.content.startswith("[When to use]")
         assert "[Trigger]" not in skill.content
     assert {row["skill_id"] for row in _outcomes(ctx.run_dir, "p02:learn")} \

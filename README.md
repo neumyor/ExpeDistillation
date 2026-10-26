@@ -185,7 +185,7 @@
 | `role` | 恒为 `learn` |
 | `evidence` | 找证据方法（新增路径）：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算；`write_lessons` 默认 `true`，add 路径同时从弱模型失败段学，`false` 只学强模型成功段）；说明见 `src/expedistill/methods/evidence/README.md` |
 | `author` | 写作方法（新增路径）：`distill_diagnose`（无参数）；说明见 `src/expedistill/methods/author/README.md` |
-| `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（读过 → revise，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` |
+| `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（触发且组赢 → keep 不改写，触发且组没赢 → revise，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`；参数 `unread_in_won_group: delete|keep` 决定“未读但组赢”的 32 条）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` 与 `docs/decisions/p04_p06_revise_only_not_won_20261024.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
@@ -499,7 +499,7 @@ E1 内部的 runner：
 | 编号 | 名称 | 输入 → 输出 |
 |---|---|---|
 | G1 | 切段 | （轨迹视图, K, 模型）→ 段列表（未校验）。模型只给每段的起止步号和 label / description / success |
-| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 段位置, 模型）→ Skill v1。两种写法产出同一种四节结构 `[When to use]`/`[Steps]`/`[Verify]`/`[Do not use when]`（2026-10-19 起统一，技能是做法还是教训看来源段的 `Subtask.source`）；前提守卫：提炼要求段成功、诊断要求段失败。2026-10-23 起：`[When to use]` 以 5 种触发时机之一的固定短语开头（`At task start,` / `After the first environment check,` / `When a command fails, hangs, or repeats,` / `Before submitting,` / `At any step,`），summary 只写“教什么”、`[When to use]` 只写“什么时候打开”，两者合计最好 ≤400、最长 ≤1,000 字符；段位置（第 i/n 段、原轨迹步号范围）由 add 路径证据采集器算出，作为选时机的提示（`docs/decisions/p02_trigger_timing_and_length_20261023.md`） |
+| G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 段位置, 模型）→ Skill v1。两种写法产出同一种三节结构 `[When to use]`/`[Steps]`/`[Do not use when]`（2026-10-19 起统一，技能是做法还是教训看来源段的 `Subtask.source`）；前提守卫：提炼要求段成功、诊断要求段失败。2026-10-23 起：`[When to use]` 以 5 种触发时机之一的固定短语开头（`At task start,` / `After the first environment check,` / `When a command fails, hangs, or repeats,` / `Before submitting,` / `At any step,`），summary 只写“教什么”、`[When to use]` 只写“什么时候打开”，两者合计最好 ≤400、最长 ≤1,000 字符；段位置（第 i/n 段、原轨迹步号范围）由 add 路径证据采集器算出，作为选时机的提示（`docs/decisions/p02_trigger_timing_and_length_20261023.md`） |
 | G3 | 出考题 | （Subtask, 模型）→ Exam。不接收 skill |
 | G4 | 作答 | （模型, Exam, skill 列表（可选））→ 作答文本 |
 | G5 | 判卷 | （Exam, 作答, 模型）→ 对 / 错 + 错误描述（只说哪里不对，不复述正确答案，也不暗示该怎么改） |
@@ -507,9 +507,8 @@ E1 内部的 runner：
 | G7 | 找相似、冲突与低价值 | （skill 列表, 模型, 输入方式 全文/摘要）→ 候选合并组、冲突对、低价值技能列表 |
 | G8 | 合并 skill | （一组 skill 或一对冲突 skill, 模型）→ 合并后的 Skill 正文 + 一句话摘要（JSON；泛化优先，冲突先析因） |
 | G9 | 分组 | （skill 列表, 模型）→ 每条 skill 的能力分组标签 |
-| G11 | live 修订 | （skill 现文本, 归因事实, 失败尝试视图摘录, 弱模型画像, rewriter 模型）→ 保节结构的新正文 + 错因归类 + 修订理由。修订纪律：不得写入本题的具体数值 / 文件名 / 实体名（检索交付会把技能注入其他任务，任务局部化的内容对别的任务有害） |
-| G12 | usage 归因 | （任务 prompt 渲染产物, 基线状态行, 本轮轨迹视图, 技能列表, 读取事实, 弱模型画像, author 模型）→ 组级诊断 + 每条技能的相关/应用事实，不带动作；P04/P06 每 task 一次 |
-| G13 | 触发条件重写 | （skill 现文本, 旧摘要, 兄弟技能描述, 任务说明, 模型未读时的前几步, 读取事实, 弱模型画像, rewriter 模型）→ 新摘要 + 新 `[When to use]`，正文逐字保留 |
+| G11 | live 修订 | （skill 现文本, 本次 skill 的所有 attempt 窗口证据, 弱模型画像, rewriter 模型）→ 保节结构的新正文 + 修订理由 + 新摘要。多个窗口冲突时由写作模型自己综合 |
+| G12 | attempt 归因 | （任务 instruction, 本次 attempt 的 success/failure, 一段轨迹窗口, 窗口内所有目标 skill 的内容, 弱模型画像, author 模型）→ 每条 skill 的触发上下文 / 触发后行为 / 可改进点，不带动作；同一窗口的多条 skill 合并一次调用 |
 
 "弱模型画像"是配置里的一段文字，换弱模型时只换这段配置。`use_weak_profile` 默认关闭：画像文本留在配置里，但写作、改写、live 归因和 live 修订的提示词收到的是中性段落；只有显式打开时才把画像正文送进提示词。
 
@@ -610,9 +609,8 @@ E1 内部的 runner：
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
 | 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
-| LIVE_SKILL_REVISION | G11 | rewriter（学习相位 revise，整条重写） |
-| LIVE_USAGE_ATTRIBUTION | usage 归因 | author（`methods/attribution/group`，每 task 一次） |
-| LIVE_SKILL_RETRIGGER | 触发条件重写 | rewriter（`revise` 的内部 retrigger 子模式） |
+| SKILL_ATTEMPT_ATTRIBUTION | G12 | author（学习相位 revise，每窗口一次） |
+| SKILL_ATTEMPT_REVISION | G11 | rewriter（学习相位 revise，逐 skill 整条重写） |
 
 **全部方法 prompt 全量冻结**：`prompts/__init__.py` 的 import 清单登记
 每个方法 prompt，**每个 run 的 manifest 都冻结全部已注册方法 prompt 的
@@ -658,7 +656,7 @@ Skill（schema v3）
   skill_id, content(自然语言正文), subtask_id(→段),
   source_subtasks[ subtask_id ... ](素材来源段；合并产物 = 各来源的并集),
   summary(一句话摘要：这条技能是什么；目录行用，不进 content；
-    G2/G6/G11 产出，K5 合并产物的摘要由 G8 写；
+    G2/G6/G11 产出，K5 合并产物的摘要由 G8 写；非空、单行、无长度上限；
     v2 旧记录迁移时置空，M2 目录渲染对空摘要回退取 [When to use] 节),
   version(改写次数), status(pending/accepted/discarded/merged),
   discard_reason(自由字符串), group(能力分组，整理写入),
@@ -908,9 +906,11 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   的同一些字节上；
 - **归因与修订不在这个相位**：没提升的组由下一个学习相位按
   `decision.name` 先产出 per-skill 的 keep / revise / delete；`learn_apply`
-  再按 task 调一次 `methods/attribution/group`（`LIVE_USAGE_ATTRIBUTION`），
-  然后逐 skill 写 `LIVE_SKILL_REVISION`（或内部 retrigger）。改写没产出新版本
-  时，注入块逐字节不变，下一个 live 相位按规则 1 直接沿用旧判定。
+  按 `skill_use` 找到触发点：folder 按每个 cat 调用切前后窗口，group/whole
+  bank 每个 attempt 只取开头和结尾窗口；同一窗口内多条 skill 合并一次
+  `SKILL_ATTEMPT_ATTRIBUTION`，然后逐 skill 写 `SKILL_ATTEMPT_REVISION`。
+  改写没产出新版本时，注入块逐字节不变，下一个 live 相位按规则 1 直接沿用
+  旧判定。
 
 ### 5.5 终测相位（test）
 
@@ -922,7 +922,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 - **`folder` 交付（技能文件夹）**：其余交付把技能文本拼进提示词，folder
   把技能放进执行环境里的一个文件夹。每个已接受技能写成自己的目录
   `<skill>/SKILL.md`，文件开头是 YAML 头（`name` 和 `description`），
-  后面是四段正文；任务级 `SKILL.md` 只放一段使用说明，`catalog.md` 是
+  后面是三段正文；任务级 `SKILL.md` 只放一段使用说明，`catalog.md` 是
   兜底目录。交付解析出的每个单元在 `aux["skill_folder"]` 里带一份清单：
   目录文本、每条已接受技能的相对路径映射、库指纹、描述拼法——不带技能
   正文（正文的唯一来源是相位技能库，渐进读取是这个玩法的核心）。
@@ -950,7 +950,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   `real_folder` 执行没有自己的执行参数，test 相位的采样深度沿用全局
   `n_attempts_weak`，与旧 test 相位行为一致；执行过程零拦截零预算，模型
   实际读了哪些技能文件，记录在轨迹的 cat 命令里，事后由纯函数解析
-  （`composites/skill_reads.py`：匹配完整相对路径 `<skill>/SKILL.md`，
+  （`composites/skill_use.py`：匹配完整相对路径 `<skill>/SKILL.md`，
   或同一行里同时出现唯一的技能目录名和 `SKILL.md`，首读序去重，只读轨迹
   零落盘）：每单元的读取集写进 test 相位摘要的 `skill_files_read` 键
   （`{轨迹 ID: [技能编号]}`）。键的口径要读全：它只盖带技能臂——对照臂
@@ -1014,9 +1014,9 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 - **delete**：待定与已接受成员都按决策给的原因弃用（`discard_skill` 是
   唯一入口）；已终态的成员保持自己的既有事实（skipped_terminal）；
 - **revise**：先收证据再改写，成功则版本加一。exam 路径的证据是考卷
-  （考题、弱模型答案、判卷理由）；live 路径按 task 调一次 usage 归因，
-  再逐 skill 写正文；相关但从未读、应用 unclear 的技能走内部 retrigger
-  （只改 summary 和 `[When to use]`，记 `retriggered`），其余走整条重写
+  （考题、弱模型答案、判卷理由）；live 路径按 `skill_use` 找触发点，
+  folder 按 cat 调用切前后窗口，group/whole bank 每个 attempt 取开头和
+  结尾窗口，同一窗口内多条 skill 合并一次归因，再逐 skill 整条重写
   （记 `revised`）。改写没产出新版本 = 没变化（版本不动，记 unchanged，
   下次学习再试）；
 - **add**：把该任务的强模型成功段提炼成新的待定技能；evidence 的
@@ -1063,8 +1063,7 @@ subtask 即算该单元完成"返回已存**前缀**——前缀即最终结果�
 | `accepted` | keep 把待定成员收进库 |
 | `already_accepted` | keep 遇到已接受成员（复测又通过） |
 | `revised` | revise 产出新版本 |
-| `retriggered` | 内部 retrigger 只重写摘要和 `[When to use]`，正文不变，版本加一 |
-| `unchanged` | revise/retrigger 没产出新版本（没变化，下次再试） |
+| `unchanged` | revise 没产出新版本（没变化，下次再试） |
 | `discarded` | delete 按决策原因弃用 |
 | `skipped_no_material` | add 切不出可学材料（见上） |
 | `skipped_existing` | add 遇到技能已存在的经历（续跑的另一重保障） |

@@ -2,7 +2,7 @@
 
 The agent is handed ONE read-only folder of skills. Each delivered skill
 is a directory containing ``SKILL.md`` with YAML frontmatter (``name``
-and ``description``) and the skill's four-section body. The test phase
+and ``description``) and the skill's three-section body. The test phase
 delivers the accepted set; the live phase's ``folder_by_task`` passes
 ``accepted_only=False`` so its pending group is the delivered set. Harbor's
 Terminus agent discovers those files itself, renders an

@@ -41,7 +41,7 @@ def _build_v1_live_run(root: Path) -> Path:
     task_id = ids.make_task_id("tb", "t1")
     subtask_id = ids.make_subtask_id(
         ids.make_trajectory_id(task_id, "strong", 0), 0)
-    content = ("[When to use] x\n[Steps]\n1. do\n[Verify] y\n"
+    content = ("[When to use] x\n[Steps]\n1. do\n"
                "[Do not use when] z")
 
     def v1_skill_row(skill_id, merged_from):

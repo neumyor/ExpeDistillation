@@ -79,8 +79,8 @@ Rules:
 - Keep every distinct piece of advice from the sources, stated in general form.
 - You may generalize the sources' conditions and steps; do not add advice that
   none of the sources supports.
-- The merged skill carries the four bracketed sections every source skill
-  carries: [When to use], [Steps], [Verify], [Do not use when]. Reproduce
+- The merged skill carries the three bracketed sections every source skill
+  carries: [When to use], [Steps], [Do not use when]. Reproduce
   the bracketed section headers exactly as written, each on its own line.
 - Keep the weak-model-friendly style: short sentences, one instruction per
   sentence, explicit order, concrete trigger conditions.

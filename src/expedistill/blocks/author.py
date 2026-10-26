@@ -12,15 +12,15 @@ Protocol v2 (docs/decisions/stage23_protocol_v2_20261013.md section 3.3)
 also makes this module the home of the G2 output contract. The section
 markers themselves live in ``core.models`` (a second block consumer exists),
 and around them: ``has_skill_sections`` checks a stored content carries
-all four sections, ``validate_skill_sections`` checks a parsed G2 response against its
+all three sections, ``validate_skill_sections`` checks a parsed G2 response against its
 mode's JSON contract, and ``render_skill_content`` turns a validated response
 into the deterministic marker text stored in ``Skill.content`` (the single
 representation every later consumer -- injection, G7 similarity, G8 merge,
 D8 audit -- reads). ``write_skill`` refuses a subtask outcome that
 contradicts its mode before any model call, and ``rewrite_skill`` requires
-the rewrite to keep the four sections. Since the 2026-10-19 ruling
+the rewrite to keep the three sections. Since the 2026-10-19 ruling
 (docs/decisions/unified_skill_structure_20261019.md) the distill and
-diagnose modes share one four-section structure.
+diagnose modes share one three-section structure.
 
 2026-10-13 incident (run tb21_split_v2_20261013_2125, 67/315 stage-3 units
 killed): validate_skill_sections rejected ANY embedded newline in a field
@@ -47,9 +47,8 @@ rewrite).
 Schema v3 (skill-folder M1, 2026-10-17): every G2 / G6 output also carries
 ``summary`` -- ONE line saying what the skill IS (the directory line), not
 when to apply it. It is not a fifth section: it never enters the rendered
-content, and the summary contract (non-empty, no newline, at most
-SKILL_SUMMARY_MAX_CHARS) is enforced by ``_validate_summary`` in
-validate_skill_sections and rewrite_skill alike.
+content, and the summary contract (non-empty, no newline) is enforced by
+``_validate_summary`` in validate_skill_sections and rewrite_skill alike.
 """
 
 import re
@@ -60,7 +59,6 @@ from expedistill.core.ids import make_exam_id, make_skill_id
 from expedistill.prompts.profile import profile_section
 from expedistill.core.models import (
     SKILL_MARKERS,
-    SKILL_SUMMARY_MAX_CHARS,
     Exam,
     Skill,
     Subtask,
@@ -87,13 +85,13 @@ __all__ = [
 FAILURE_CATEGORIES = ("misread", "missing_step", "wrong_trigger", "other")
 
 #: The JSON contract both write_skill modes work against: the parsed
-#: response must carry exactly these keys, which map 1:1 onto the four
+#: response must carry exactly these keys, which map 1:1 onto the three
 #: stored sections (SKILL_MARKERS). Since the 2026-10-19 ruling the
 #: distill and diagnose modes share ONE structure; the mode only picks
 #: the prompt and the material (a succeeded vs a failed subtask).
 #: test_templates pins the G2 prompts' "Output ONLY JSON" examples to it.
 SKILL_SECTION_FIELDS: Tuple[str, ...] = (
-    "when_to_use", "steps", "verify", "not_applicable_when")
+    "when_to_use", "steps", "not_applicable_when")
 
 #: The checklist field: a non-empty list of strings in validation, a
 #: renderer-numbered list in rendering.
@@ -105,10 +103,10 @@ _MODE_PROMPTS: Dict[str, str] = {
     "diagnose": "SKILL_DIAGNOSE",
 }
 
-#: The non-section field every G2 / G6 output carries alongside the four
+#: The non-section field every G2 / G6 output carries alongside the three
 #: sections (schema v3): the skill's one-line directory entry. Pinned by
 #: the SKILL_DISTILL / SKILL_DIAGNOSE / REWRITE prompts' output contracts;
-#: blocks/attribution.py mirrors it for LIVE_SKILL_REVISION (blocks may
+#: blocks/attribution.py mirrors it for SKILL_ATTEMPT_REVISION (blocks may
 #: not import each other, a unit test pins the mirror).
 SKILL_SUMMARY_FIELD = "summary"
 
@@ -141,7 +139,7 @@ def _normalize_newlines(value: str) -> str:
 
 
 def has_skill_sections(content: str) -> bool:
-    """True when a stored skill content carries all four section markers.
+    """True when a stored skill content carries all three section markers.
 
     Line-start anchored, and ONLY ever applied to the stored multi-line
     content -- never to the single-line compressed injection block (the
@@ -164,7 +162,6 @@ def render_skill_content(sections: Dict[str, Any]) -> str:
         [Steps]
         1. {steps[0]}
         2. {steps[1]}
-        [Verify] {verify}
         [Do not use when] {not_applicable_when}
 
     The renderer numbers the checklist itself; same sections in,
@@ -178,15 +175,14 @@ def render_skill_content(sections: Dict[str, Any]) -> str:
     a multi-line scalar likewise continues at column 0. Scalars and items
     pass through the same ``_normalize_newlines`` as validation.
     """
-    (when_to_use, steps, verify, not_applicable) = SKILL_SECTION_FIELDS
-    (use_marker, steps_marker, verify_marker, close_marker) = SKILL_MARKERS
+    (when_to_use, steps, not_applicable) = SKILL_SECTION_FIELDS
+    (use_marker, steps_marker, close_marker) = SKILL_MARKERS
     items = [f"{index}. {_strip_self_numbering(_normalize_newlines(item))}"
              for index, item in enumerate(sections[steps], 1)]
     lines = [
         f"{use_marker} {_normalize_newlines(sections[when_to_use]).strip()}",
         steps_marker,
         *items,
-        f"{verify_marker} {_normalize_newlines(sections[verify]).strip()}",
         f"{close_marker} "
         f"{_normalize_newlines(sections[not_applicable]).strip()}",
     ]
@@ -200,7 +196,7 @@ def _reject_bad_text(mode: str, where: str, value: str) -> None:
     prompts ask for the exact command form, and heredoc-shaped steps carry
     real newlines; the old any-newline rejection killed 67/315 stage-3
     units). What stays forbidden is a line -- any line, not just the first
-    -- starting with one of the four section markers: the renderer writes
+    -- starting with one of the three section markers: the renderer writes
     a multi-line value's continuation lines at column 0 verbatim, and
     has_skill_sections is line-start anchored, so a forged line-start
     marker in a value would poison its reading of the rendered content.
@@ -220,9 +216,9 @@ def _validate_summary(where: str, value: Any) -> str:
     The schema v3 contract (skill-folder M1): a non-empty string, ONE
     line (the directory entry is a single line, so any embedded newline
     -- after the same ``_normalize_newlines`` pass the sections get, so a
-    stray \\r is caught too -- is a format error), and at most
-    SKILL_SUMMARY_MAX_CHARS. The returned value is the stripped,
-    newline-normalized line that lands in ``Skill.summary``.
+    stray \\r is caught too -- is a format error). There is no length
+    cap. The returned value is the stripped, newline-normalized line that
+    lands in ``Skill.summary``.
     """
     if not isinstance(value, str):
         raise ModelOutputError(
@@ -238,10 +234,6 @@ def _validate_summary(where: str, value: Any) -> str:
             f"{where}: field {SKILL_SUMMARY_FIELD!r} must be ONE line "
             "(the skill's directory entry); got a value with an embedded "
             f"newline: {value!r}")
-    if len(summary) > SKILL_SUMMARY_MAX_CHARS:
-        raise ModelOutputError(
-            f"{where}: field {SKILL_SUMMARY_FIELD!r} must be at most "
-            f"{SKILL_SUMMARY_MAX_CHARS} characters, got {len(summary)}")
     return summary
 
 
@@ -325,16 +317,17 @@ def write_skill(
 
     ``mode`` picks the prompt and the material: "distill" writes from a
     SUCCEEDED subtask (what to do), "diagnose" from a FAILED one (which
-    mistake to avoid and what to do instead). Both render the same four
-    sections (the 2026-10-19 ruling). Any other mode is a caller bug and raises ValueError
-    before any model call, and so does a subtask outcome that contradicts
-    the mode: the guards below turn an old v1 selection rule combined
+    mistake to avoid and what to do instead). Both render the same three
+    sections (the 2026-10-19 ruling). Any other mode is a caller bug and
+    raises ValueError before any model call, and so does a subtask outcome
+    that contradicts the mode: the guards below turn an old v1 selection
+    rule combined
     with the v2 prompts from silent distortion into a loud refusal
     (run_units treats the ValueError as a fatal config error).
 
     ``prompt_name`` overrides the mode's default prompt (SKILL_DISTILL /
     SKILL_DIAGNOSE): a prompt-strategy variant registers its own prompt
-    under a new name and passes it here, keeping the mode's four-section
+    under a new name and passes it here, keeping the mode's three-section
     output contract. None -- every current caller -- keeps the default,
     so the parameter is invisible to the frozen runs.
 
@@ -471,10 +464,10 @@ def rewrite_skill(
 
     Protocol v2 keeps the skill's structure: when the original content
     carries a section-marker set (every stored v2 skill does), the
-    rewritten text must carry all four sections too (has_skill_sections)
+    rewritten text must carry all three sections too (has_skill_sections)
     or the call fails with ModelOutputError -- a rewrite that drops a
     section would silently change what every marker-based consumer
-    reads. An original without the four sections (test fixtures, foreign
+    reads. An original without the three sections (test fixtures, foreign
     content, a pre-2026-10-19 failure reference) is passed through
     without the check.
     """
@@ -508,7 +501,7 @@ def rewrite_skill(
     new_text = skill_text.strip()
     if has_skill_sections(skill.content) and not has_skill_sections(new_text):
         raise ModelOutputError(
-            "REWRITE: the rewritten skill must keep the four bracket "
+            "REWRITE: the rewritten skill must keep the three bracket "
             f"sections ({' / '.join(SKILL_MARKERS)})")
     rewrite_reason = parsed.get("rewrite_reason")
     if not isinstance(rewrite_reason, str):

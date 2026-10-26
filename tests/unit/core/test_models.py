@@ -299,9 +299,9 @@ class TestSkillSectionMarkers:
     that drifts silently disarms every downstream marker check."""
 
     def test_skill_markers_pinned(self):
-        # The 2026-10-19 ruling: one four-section structure for every skill.
+        # The 2026-10-19 ruling: one three-section structure for every skill.
         assert SKILL_MARKERS == (
-            "[When to use]", "[Steps]", "[Verify]", "[Do not use when]")
+            "[When to use]", "[Steps]", "[Do not use when]")
 
 
 # ---------------------------------------------------------------------------

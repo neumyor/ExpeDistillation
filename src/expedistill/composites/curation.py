@@ -115,10 +115,10 @@ the reusing unit's own dispatch serial burns (the reused merge keeps its
 stored id), so later merges may sit at higher serials than the lost run
 would have produced -- the plan cannot survive the journal's loss.
 
-*K5 section check.* Every fresh merge's G8 output must carry the four
+*K5 section check.* Every fresh merge's G8 output must carry the three
 section markers (``has_skill_sections``) before its commit-step-1 save:
 a structure-losing merge is never stored. The check is skipped when no
-source carries the four sections (prose; test fixtures and foreign
+source carries the three sections (prose; test fixtures and foreign
 content): prose merges into prose. Since the 2026-10-19 ruling
 (docs/decisions/unified_skill_structure_20261019.md) every skill shares
 one structure, so groups are never split by skill kind. The raise sits
@@ -1247,7 +1247,7 @@ def curate_bank(
                             # is rejected before its commit-step-1 save,
                             # so nothing lands on disk.
                             raise ModelOutputError(
-                                "merged skill must carry the four bracket "
+                                "merged skill must carry the three bracket "
                                 f"sections ({' / '.join(SKILL_MARKERS)})")
                     except InfrastructureError as exc:
                         record_failure(f"{unit_id}/merge", exc)

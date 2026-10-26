@@ -227,7 +227,6 @@ _DISTILL_SECTIONS = {
     "when_to_use": "when a service reports an unexpected state",
     "steps": ["inspect the reported state",
               "run the command that matches the state"],
-    "verify": "the service reports the expected state",
     "not_applicable_when": "no state was reported",
     "summary": "inspect the reported service state before acting on it",
 }
@@ -236,7 +235,6 @@ _DIAGNOSE_SECTIONS = {
                    "the action would not match the actual state",
     "steps": ["inspect the reported state",
               "run the command that matches the state"],
-    "verify": "the command's result matches the inspected state",
     "not_applicable_when": "the state was already inspected",
     "summary": "never act on a report before inspecting it",
 }
@@ -251,24 +249,22 @@ def _script(system: str, user: str) -> str:
     injects different bytes -- the no-op guard must not skip it).
     """
     # -- live G10 / G11 come first: their anchors are live-only --------
-    if user.startswith("You are the attribution step"):
+    if user.startswith("You are attributing ONE window"):
         ids = [line.split("skill_id: ", 1)[1]
                for line in user.splitlines()
                if line.startswith("skill_id: ")]
-        assert ids, "the G10 prompt listed no skills"
-        return json_script({
-            "diagnosis": "the skill's trigger is too vague to recognize",
-            "skill_actions": [
-                {"skill_id": skill_id, "action": "revise",
-                 "problem": "the trigger condition is too vague to "
-                            "recognize during real execution"}
-                for skill_id in ids],
-        })
-    if user.startswith("A skill written for a weak model was injected"):
+        assert ids, "the SKILL_ATTEMPT_ATTRIBUTION prompt listed no skills"
+        return json_script({"skills": [
+            {"skill_id": skill_id,
+             "trigger_context": "the window shows the task context",
+             "behavior_after_trigger": "the model followed the observed "
+                                       "procedure",
+             "improvement": "name the concrete state before acting"}
+            for skill_id in ids]})
+    if user.startswith("A skill was active in real attempts"):
         original = user.split("SKILL (current version):\n", 1)[1].split(
-            "\n\nATTRIBUTION REPORT", 1)[0]
+            "\n\nATTEMPT EVIDENCE:", 1)[0]
         return json_script({
-            "failure_category": "wrong_trigger",
             "skill_text": original + "\n" + G11_REVISION_MARKER +
                           ": name the concrete state before acting.",
             "revision_reason": "made the trigger condition concrete",

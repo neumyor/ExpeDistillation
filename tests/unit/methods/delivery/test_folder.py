@@ -48,7 +48,6 @@ MARKED = "\n".join([
     "Check the log file before restarting anything.",
     "[Steps]",
     "1. Check the service status.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 

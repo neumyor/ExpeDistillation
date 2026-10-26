@@ -27,8 +27,8 @@ evidence:
 | `exam_sheet.collect_exam_evidence` | exam revise | 考题、弱模型答案、判卷理由 | 不调用 |
 
 P04/P06 的 live 归因不在这个 family：新路径见
-`src/expedistill/methods/attribution/group.py`，它每 task 调一次
-`LIVE_USAGE_ATTRIBUTION`，产出同样的 fact-only 证据包。
+`src/expedistill/methods/attribution/skill_attempts.py`，它按触发窗口
+产出 `SkillAttemptEvidence`。
 
 旧配置里的 `group_evidence` / `group_author` 已随 usage 策略一起移除；
 P04/P06 只读 `decision`。

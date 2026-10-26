@@ -50,7 +50,6 @@ MARKED = "\n".join([
     "[Steps]",
     "1. Check the service status.",
     "2. Restart the service.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 
@@ -59,7 +58,6 @@ REVISED = "\n".join([
     "[Steps]",
     "1. Run the status command to see the service state.",
     "2. Restart the service with its restart command.",
-    "[Verify] The second status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 
@@ -247,7 +245,6 @@ def _distill():
         "when_to_use": "When the service rejects connections.",
         "steps": ["Run the status command on the service.",
                   "Restart the service with its restart command."],
-        "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
         "summary": "restore a service that rejects connections",
     })

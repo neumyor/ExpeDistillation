@@ -171,12 +171,31 @@ def test_merge_product_summary_is_the_g8_summary(store):
     assert merged.summary == "read the log before acting on any error"
 
 
+def test_merge_product_summary_has_no_length_cap(store):
+    long_summary = "x" * 5000
+    for index in range(2):
+        _add_skill(store, index, f"skill {index}")
+        _add_exam(store, index)
+    handles = _handles(
+        curator_script=[
+            _similarity(groups=[[_skill_id(0), _skill_id(1)]]),
+            _merged("Merged.", summary=long_summary),
+            _grouping({"bank/merge/0000": "logs"})],
+        answer_script=["a", "a"],
+        judge_script=[_CORRECT(), _CORRECT()],
+    )
+
+    _curate(store, handles)
+
+    merged = store.load("skills", "bank/merge/0000", Skill)
+    assert merged.summary == long_summary
+
+
 @pytest.mark.parametrize("bad", [
     {"content": "Merged."},                                  # no summary
     {"summary": "one line"},                                 # no content
     {"content": "Merged.", "summary": ""},                   # empty summary
     {"content": "Merged.", "summary": "two\nlines"},          # not one line
-    {"content": "Merged.", "summary": "x" * 501},            # over the cap
     {"content": "  ", "summary": "one line"},                # empty content
 ])
 def test_a_malformed_g8_reply_skips_the_unit(store, bad):
@@ -1067,7 +1086,6 @@ PROCEDURE_CONTENT = "\n".join([
     "[Steps]",
     "1. Check the service status.",
     "2. Restart the service.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The service already reports running.",
 ])
 
@@ -1076,14 +1094,13 @@ LESSON_CONTENT = "\n".join([
     "[Steps]",
     "1. Re-check the config file for syntax errors.",
     "2. Restart the service.",
-    "[Verify] The service accepts connections again.",
     "[Do not use when] The service never accepted connections.",
 ])
 
 
 def test_a_strong_and_a_weak_skill_merge_into_one(store):
     # The 2026-10-19 ruling: a skill learned from a weak failure has the
-    # same four sections as one learned from a strong success, and K5
+    # same three sections as one learned from a strong success, and K5
     # merges them like any other group -- no kind gate.
     _add_skill(store, 0, PROCEDURE_CONTENT)
     weak_subtask = "traj/tb:t1/weak/00/seg00"
@@ -1106,8 +1123,8 @@ def test_a_strong_and_a_weak_skill_merge_into_one(store):
 
 
 def test_a_marked_skill_mixed_with_prose_still_needs_the_sections(store):
-    # A group with at least one four-section source holds the merge to the
-    # four sections; a prose G8 output is skipped, never stored.
+    # A group with at least one three-section source holds the merge to the
+    # three sections; a prose G8 output is skipped, never stored.
     _add_skill(store, 0, PROCEDURE_CONTENT)
     _add_skill(store, 1, "Check the log file first.")
     handles = _handles(
@@ -1124,7 +1141,7 @@ def test_a_marked_skill_mixed_with_prose_still_needs_the_sections(store):
     assert [row["skill_id"] for row in bank] == [_skill_id(0), _skill_id(1)]
     record = _log_of(store)["merge_records"][0]
     assert record["outcome"] == "skipped"
-    assert "four bracket sections" in record["reason"]
+    assert "three bracket sections" in record["reason"]
 
 
 def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
@@ -1132,13 +1149,13 @@ def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
     _add_skill(store, 1, PROCEDURE_CONTENT)
     for index in range(2):
         _add_exam(store, index)
-    # A G8 output that dropped [Verify]: has_skill_sections reads False.
+    # A G8 output that dropped [Do not use when]: has_skill_sections
+    # reads False.
     broken_output = "\n".join([
         "[When to use] You need to restart a stuck service.",
         "[Steps]",
         "1. Check the service status.",
         "2. Restart the service.",
-        "[Do not use when] The service already reports running.",
     ])
     handles = _handles(
         curator_script=[_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
@@ -1164,7 +1181,7 @@ def test_merge_output_missing_sections_is_skipped_and_never_stored(store):
     # G8 ran and produced an unusable output: the existing G8-failure
     # skip path and its reason prefix apply.
     assert "G8 merge failed" in record["reason"]
-    assert "four bracket sections" in record["reason"]
+    assert "three bracket sections" in record["reason"]
     assert len(_failures(store)) == 1
 
 

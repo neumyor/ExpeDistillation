@@ -33,7 +33,7 @@ registry's ``(evidence, segment)`` entry resolves it here.
 ``write_lessons`` (the 2026-10-19 ruling, docs/decisions/
 unified_skill_structure_20261019.md, default True): the add path also
 learns from the weak model's FAILED segments, written in diagnose mode
-into the same four-section structure as a strong success. False keeps
+into the same three-section structure as a strong success. False keeps
 the add path to strong segments only (and segments no weak trajectory).
 """
 

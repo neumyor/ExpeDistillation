@@ -188,7 +188,7 @@ def test_rewrite_template_output_contract_carries_the_summary():
 
 
 def test_rewrite_template_names_every_section_marker():
-    # The rewritten skill_text must keep the original's four bracket
+    # The rewritten skill_text must keep the original's three bracket
     # sections, so the REWRITE prompt has to name all four markers (each
     # contiguous so the model can copy it) and to demand line-start-
     # accurate reproduction: a bolded or preamble-shifted variant would
@@ -214,7 +214,7 @@ def test_no_prompt_names_a_retired_marker():
 
 
 def test_merge_template_preserves_section_structure():
-    # G8's merged skill must carry the four sections, and the section
+    # G8's merged skill must carry the three sections, and the section
     # headers must be reproduced exactly (line-start anchored markers).
     template = get("MERGE")
     for marker in ALL_MARKERS:

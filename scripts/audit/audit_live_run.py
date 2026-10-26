@@ -1789,7 +1789,7 @@ def _build_fake_v4_run(root: Path) -> Path:
             "skill_id": skill.skill_id, "from_version": 1})
         _bump_skill(store, skill.skill_id,
                     f"[When to use] x2\n[Steps]\n1. do\n"
-                    f"[Verify] y\n[Do not use when] z{skill.skill_id[-1]}")
+                    f"[Do not use when] z{skill.skill_id[-1]}")
         _append_jsonl_raw(mid_dir / OUTCOMES_NAME, {
             "schema": LEARN_OUTCOME_SCHEMA, "phase_label": "p04:learn_mid",
             "target_kind": "group", "target_id": task_id,
@@ -1979,7 +1979,7 @@ def _fake_group_skill(task_id: str, segment: int) -> Skill:
         ids.make_trajectory_id(task_id, "strong", 0), segment)
     return Skill(skill_id=ids.make_skill_id(subtask_id),
                  content="[When to use] x\n[Steps]\n1. do\n"
-                         "[Verify] y\n[Do not use when] z",
+                         "[Do not use when] z",
                  subtask_id=subtask_id, source_subtasks=[subtask_id],
                  version=1)
 
@@ -2082,7 +2082,7 @@ def _build_fake_run(root: Path) -> Path:
         "content": revised_stored.content, "error_category": "misread",
         "reason": "spelled out the trigger"})
     revised_stored.content = ("[When to use] x2\n[Steps]\n1. do\n"
-                              "[Verify] y\n[Do not use when] z")
+                              "[Do not use when] z")
     revised_stored.version = 2
     store.save(revised_stored, "skills")
 

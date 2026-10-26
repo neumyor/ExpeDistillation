@@ -80,7 +80,7 @@ def collect_add_evidence(
     failures). Each source experience carries the subtask, its rendered
     steps view and the write mode the author uses -- ``distill`` for a
     strong segment, ``diagnose`` for a weak one; both write the same
-    four-section skill. Each experience also carries its
+    three-section skill. Each experience also carries its
     ``segment_position`` text (the author's trigger-timing hint). The
     package's segments pin the subtask ids and step ranges so the
     author's output stays traceable to its evidence.

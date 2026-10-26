@@ -65,7 +65,7 @@
       },
       "prompt_name": "SIMILARITY",
       "request_id": "<request_id>",
-      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value skills in the listing\nbelow. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n- traj/fakebench:t1/weak/00/seg00/skill: [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the command's result matches the inspected state [Do not use when] the state was already inspected\n\n- similar_groups: groups of skills that teach the same procedure or the same\n  lesson. Two skills belong together when one merged skill could teach what\n  both teach. Differences in the task they came from, in task-specific error\n  messages, file names or concrete values do NOT make them different: judge\n  the behavior they teach, not their wording. Every group has at least two\n  skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n- low_value: skills that would not help on any other task: advice that only\n  makes sense for the one task the skill came from (its specific files,\n  values or one-off computation), or advice too vague to act on.\n\nDo not force anything: return empty lists when there is nothing to merge, no\nconflicts and no low-value skill.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...],\n  \"low_value\": [\"skill_id\", ...]}\n",
+      "request_text": "You are curating a bank of skills written for a weak model. Find\nnear-duplicate groups, conflicting pairs and low-value skills in the listing\nbelow. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] no state was reported\n- traj/fakebench:t1/weak/00/seg00/skill: [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected\n\n- similar_groups: groups of skills that teach the same procedure or the same\n  lesson. Two skills belong together when one merged skill could teach what\n  both teach. Differences in the task they came from, in task-specific error\n  messages, file names or concrete values do NOT make them different: judge\n  the behavior they teach, not their wording. Every group has at least two\n  skill ids.\n- conflicts: pairs of skills that give OPPOSITE advice for the same situation.\n  Each conflict is a two-element list [skill_id, skill_id].\n- low_value: skills that would not help on any other task: advice that only\n  makes sense for the one task the skill came from (its specific files,\n  values or one-off computation), or advice too vague to act on.\n\nDo not force anything: return empty lists when there is nothing to merge, no\nconflicts and no low-value skill.\n\nOutput ONLY JSON with exactly these fields:\n{\"similar_groups\": [[\"skill_id\", \"skill_id\"], ...],\n  \"conflicts\": [[\"skill_id\", \"skill_id\"], ...],\n  \"low_value\": [\"skill_id\", ...]}\n",
       "response_text": "```json\n{\"similar_groups\": [], \"conflicts\": [], \"low_value\": []}\n```",
       "role": "curator",
       "status": "ok",
@@ -167,7 +167,7 @@
       },
       "prompt_name": "GROUP",
       "request_id": "<request_id>",
-      "request_text": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n- traj/fakebench:t1/weak/00/seg00/skill: [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the command's result matches the inspected state [Do not use when] the state was already inspected\n\nGroup by WHAT KIND of ability the skill teaches, not by where it came from. Use\nshort, consistent group names (two to four words, for example \"file inspection\"\nor \"error recovery\"), and reuse the same name for skills of the same capability.\nEvery skill id in the listing must appear exactly once.\n\nOutput ONLY JSON with exactly these fields:\n{\"groups\": {\"skill_id\": \"<group_name>\", ...}}\n",
+      "request_text": "You are curating a bank of skills written for a weak model. Assign each\nskill to exactly one capability group. Each entry starts with the skill id.\n\nSKILLS:\n- traj/fakebench:t1/strong/00/seg00/skill: [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] no state was reported\n- traj/fakebench:t1/weak/00/seg00/skill: [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected\n\nGroup by WHAT KIND of ability the skill teaches, not by where it came from. Use\nshort, consistent group names (two to four words, for example \"file inspection\"\nor \"error recovery\"), and reuse the same name for skills of the same capability.\nEvery skill id in the listing must appear exactly once.\n\nOutput ONLY JSON with exactly these fields:\n{\"groups\": {\"skill_id\": \"<group_name>\", ...}}\n",
       "response_text": "```json\n{\"groups\": {\"traj/fakebench:t1/strong/00/seg00/skill\": \"state inspection\", \"traj/fakebench:t1/weak/00/seg00/skill\": \"state inspection\"}}\n```",
       "role": "curator",
       "status": "ok",
@@ -187,7 +187,7 @@
       },
       "prompt_name": "LEAK_AUDIT_JUDGE",
       "request_id": "<request_id>",
-      "request_text": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (protected material; the skill's reader never sees it):\nInspect the reported state first, then take the matching corrective action.\n\nSKILL:\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected\n\nThe skill LEAKS when it contains, trivially rephrases, or directly reveals the\nprotected answer material: the reference answer itself, or the exam's concrete\nanswer-specific entities -- names, values, file names -- that would let a reader\nanswer this exam by lookup instead of ability.\n\nThe skill does NOT leak when it only gives generic method advice that would\nhelp on ANY similar task, even when that advice also fits this exam.\nProtocol words, action names, and environment feedback strings are never\nleaks, even when the same words appear in the question or the reference\nanswer.\n\nJudge the skill text only; do not judge the exam or its answer.\n\nThe reason must NEVER restate, quote, or paraphrase the reference answer or its\nconcrete entities: the reason is reused as rewrite context whose reader must\nnot see the answer. Name the KIND of leaked material instead (for example \"a\nconcrete value from the exam situation\"), never the material itself.\n\nOutput ONLY JSON with exactly these fields:\n{\"leaked\": <true|false>,\n  \"reason\": \"<one to three sentences; never the protected material>\"}\n",
+      "request_text": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (protected material; the skill's reader never sees it):\nInspect the reported state first, then take the matching corrective action.\n\nSKILL:\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nThe skill LEAKS when it contains, trivially rephrases, or directly reveals the\nprotected answer material: the reference answer itself, or the exam's concrete\nanswer-specific entities -- names, values, file names -- that would let a reader\nanswer this exam by lookup instead of ability.\n\nThe skill does NOT leak when it only gives generic method advice that would\nhelp on ANY similar task, even when that advice also fits this exam.\nProtocol words, action names, and environment feedback strings are never\nleaks, even when the same words appear in the question or the reference\nanswer.\n\nJudge the skill text only; do not judge the exam or its answer.\n\nThe reason must NEVER restate, quote, or paraphrase the reference answer or its\nconcrete entities: the reason is reused as rewrite context whose reader must\nnot see the answer. Name the KIND of leaked material instead (for example \"a\nconcrete value from the exam situation\"), never the material itself.\n\nOutput ONLY JSON with exactly these fields:\n{\"leaked\": <true|false>,\n  \"reason\": \"<one to three sentences; never the protected material>\"}\n",
       "response_text": "```json\n{\"leaked\": false, \"reason\": \"generic advice\"}\n```",
       "role": "auditor",
       "status": "ok",
@@ -207,7 +207,7 @@
       },
       "prompt_name": "LEAK_AUDIT_JUDGE",
       "request_id": "<request_id>",
-      "request_text": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (protected material; the skill's reader never sees it):\nInspect the reported state first, then take the matching corrective action.\n\nSKILL:\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported\n\nThe skill LEAKS when it contains, trivially rephrases, or directly reveals the\nprotected answer material: the reference answer itself, or the exam's concrete\nanswer-specific entities -- names, values, file names -- that would let a reader\nanswer this exam by lookup instead of ability.\n\nThe skill does NOT leak when it only gives generic method advice that would\nhelp on ANY similar task, even when that advice also fits this exam.\nProtocol words, action names, and environment feedback strings are never\nleaks, even when the same words appear in the question or the reference\nanswer.\n\nJudge the skill text only; do not judge the exam or its answer.\n\nThe reason must NEVER restate, quote, or paraphrase the reference answer or its\nconcrete entities: the reason is reused as rewrite context whose reader must\nnot see the answer. Name the KIND of leaked material instead (for example \"a\nconcrete value from the exam situation\"), never the material itself.\n\nOutput ONLY JSON with exactly these fields:\n{\"leaked\": <true|false>,\n  \"reason\": \"<one to three sentences; never the protected material>\"}\n",
+      "request_text": "Judge whether the skill below leaks the answer to the exam question.\n\nEXAM QUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nREFERENCE ANSWER (protected material; the skill's reader never sees it):\nInspect the reported state first, then take the matching corrective action.\n\nSKILL:\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported\n\nThe skill LEAKS when it contains, trivially rephrases, or directly reveals the\nprotected answer material: the reference answer itself, or the exam's concrete\nanswer-specific entities -- names, values, file names -- that would let a reader\nanswer this exam by lookup instead of ability.\n\nThe skill does NOT leak when it only gives generic method advice that would\nhelp on ANY similar task, even when that advice also fits this exam.\nProtocol words, action names, and environment feedback strings are never\nleaks, even when the same words appear in the question or the reference\nanswer.\n\nJudge the skill text only; do not judge the exam or its answer.\n\nThe reason must NEVER restate, quote, or paraphrase the reference answer or its\nconcrete entities: the reason is reused as rewrite context whose reader must\nnot see the answer. Name the KIND of leaked material instead (for example \"a\nconcrete value from the exam situation\"), never the material itself.\n\nOutput ONLY JSON with exactly these fields:\n{\"leaked\": <true|false>,\n  \"reason\": \"<one to three sentences; never the protected material>\"}\n",
       "response_text": "```json\n{\"leaked\": false, \"reason\": \"generic advice\"}\n```",
       "role": "auditor",
       "status": "ok",
@@ -228,13 +228,12 @@
           "run the command that matches the state"
         ],
         "summary": "inspect the reported service state before acting on it",
-        "verify": "the service reports the expected state",
         "when_to_use": "when a service reports an unexpected state"
       },
       "prompt_name": "SKILL_DISTILL",
       "request_id": "<request_id>",
-      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task\nfrom the same capability family, not the task below. The subtask SUCCEEDED:\nthe card is the procedure the weak model should follow when it faces the\nsame kind of subtask. A card that only works on this task is a failure.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness, add an explicit guard;\nwhere it says the model cannot do something, never assume it can.\n\nWork in five passes.\n\nPass 1 - abstract the capability.\nTreat the steps as ONE instance of a reusable capability. Decide, for\nyourself:\n- capability: a short verb-and-object phrase that names the general skill\n  (for example \"recover a key from known plaintext-ciphertext pairs\"). Do\n  not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the concrete signs a new TB21 task shows when this\n  capability applies: file types, input structure, error text, available\n  tools, required output. Tool names are allowed here.\n- invariants: the steps that remain correct when the task's file names,\n  constants, and tools change.\n- variants: the choices that differ across tasks in this capability family.\n  Name a variant type you recognize from the family even if only one variant\n  appears in the steps view; but do not invent action steps for variants\n  you did not observe.\n- failure_guard: the weak reader's most likely failure here, taken from the\n  profile.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 2 - write the decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). Every action step must be\ngrounded in an observed action or observation from the steps view; omit a\nstep rather than invent it. Do not add separate TB21 discipline nodes;\ninstead weave the discipline into the verify and fallback parts of nodes:\ncheck before acting, read the error before retrying, run the verifier before\ncalling mark_task_complete.\n\nPass 3 - make it executable for the weak model.\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: an early segment often belongs\n\"At task start,\" or \"After the first environment check,\"; the last\nsegment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches. Do not put the trigger in the summary. No task or\n  subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the preconditions. One or two sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n6. Does when_to_use start with exactly one of the five timing phrases?\n7. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\npreconditions, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: the reusable capability this card teaches\n  (verb + object); no trigger, no task or subtask names>\"}\n",
-      "response_text": "```json\n{\"when_to_use\": \"when a service reports an unexpected state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the service reports the expected state\", \"not_applicable_when\": \"no state was reported\", \"summary\": \"inspect the reported service state before acting on it\"}\n```",
+      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task\nfrom the same capability family, not the task below. The subtask SUCCEEDED:\nthe card is the procedure the weak model should follow when it faces the\nsame kind of subtask. A card that only works on this task is a failure.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness, add an explicit guard;\nwhere it says the model cannot do something, never assume it can.\n\nWork in five passes.\n\nPass 1 - abstract the capability.\nTreat the steps as ONE instance of a reusable capability. Decide, for\nyourself:\n- capability: a short verb-and-object phrase that names the general skill\n  (for example \"recover a key from known plaintext-ciphertext pairs\"). Do\n  not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the concrete signs a new TB21 task shows when this\n  capability applies: file types, input structure, error text, available\n  tools, required output. Tool names are allowed here.\n- invariants: the steps that remain correct when the task's file names,\n  constants, and tools change.\n- variants: the choices that differ across tasks in this capability family.\n  Name a variant type you recognize from the family even if only one variant\n  appears in the steps view; but do not invent action steps for variants\n  you did not observe.\n- failure_guard: the weak reader's most likely failure here, taken from the\n  profile.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 2 - write the decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). Every action step must be\ngrounded in an observed action or observation from the steps view; omit a\nstep rather than invent it. Do not add separate TB21 discipline nodes;\ninstead weave the discipline into the verify and fallback parts of nodes:\ncheck before acting, read the error before retrying, run the verifier before\ncalling mark_task_complete.\n\nPass 3 - make it executable for the weak model.\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: an early segment often belongs\n\"At task start,\" or \"After the first environment check,\"; the last\nsegment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches. Do not put the trigger in the summary. No task or\n  subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the preconditions. One or two sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does when_to_use start with exactly one of the five timing phrases?\n6. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\npreconditions, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: the reusable capability this card teaches\n  (verb + object); no trigger, no task or subtask names>\"}\n",
+      "response_text": "```json\n{\"when_to_use\": \"when a service reports an unexpected state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"not_applicable_when\": \"no state was reported\", \"summary\": \"inspect the reported service state before acting on it\"}\n```",
       "role": "author",
       "status": "ok",
       "system": "You are a helpful assistant. Follow the instructions exactly."
@@ -254,13 +253,12 @@
           "run the command that matches the state"
         ],
         "summary": "never act on a report before inspecting it",
-        "verify": "the command's result matches the inspected state",
         "when_to_use": "about to act on a report without inspecting it first: the action would not match the actual state"
       },
       "prompt_name": "SKILL_DIAGNOSE",
       "request_id": "<request_id>",
-      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1, from a subtask where it went wrong. The card will be\ninjected into a DIFFERENT TB21 task from the same capability family. Teach\nthe reader to recognize a general failure pattern and follow a corrective\nprocedure; do not write a fix for this task.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING:\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness that caused or worsened\nthis failure, the guard must address it.\n\nWork in five passes.\n\nPass 1 - diagnose the general failure pattern.\nFind the step or decision where the weak model went wrong. Name the pattern\nat the reader's level: skipped verification, misread observation, wrong\ntool, unread error before retry, wrong order, early success claim, or an\nunrecognized precondition. Do not write \"logical error\" or this task's name.\nUse the context summary only to understand what the reader was trying to do.\n\nPass 2 - abstract the capability.\nDecide, for yourself:\n- capability: a short verb-and-object phrase that names the general skill.\n  Do not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the signs a new TB21 task shows when this pattern can\n  occur (file types, input structure, error text, tool state, required\n  output). Tool names are allowed here.\n- invariants: the corrective steps that hold across tasks.\n- variants: the choices that differ across tasks. Name a variant type you\n  recognize from the family even if only one variant appears in the steps\n  view; but do not invent action steps for variants you did not observe.\n- failure_guard: the guard that prevents this pattern from recurring.\n- corrective_steps: the correct actions that the trajectory shows working,\n  OR—where the trajectory only shows the mistake—the minimal corrective\n  action the profile tells you the reader can execute (for example: read the\n  error message before retrying). Do not invent multi-step procedures that\n  are not grounded in the steps view or the failure pattern.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 3 - write the corrective decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). The procedure must teach\nthe reader to recognize the failing behavior from observable signs, not from\nthis task's names.\nFor nodes where the trajectory only shows what went wrong and not what is\ncorrect: write one node that detects the failure sign and one node that\nnames the corrective action from the profile or the failure pattern—do not\ninvent a multi-step procedure beyond what the evidence supports.\nDo not add separate TB21 discipline nodes; instead weave the discipline into\nthe verify and fallback parts of nodes: check before acting, read the error\nbefore retrying, run the verifier before calling mark_task_complete.\n\nMake it executable for the weak model:\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: a failed segment often belongs\n\"When a command fails, hangs, or repeats,\"; an early segment often\nbelongs \"At task start,\" or \"After the first environment check,\"; the\nlast segment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches and the failure pattern it prevents. Do not put the trigger in\n  the summary. No task or subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the failing behavior to recognize. One or two\n  sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does the verify field name the exact pass signal (the task's verifier,\n   exit status, required file or expected output) and forbid submission\n   before it passes?\n6. Does when_to_use start with exactly one of the five timing phrases?\n7. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\nfailing behavior to recognize, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"verify\": \"<the exact pass signal and what to do when it is absent>\",\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: what the card teaches instead (verb + object)\nand the failure pattern it prevents; no trigger, no task or subtask names>\"}\n",
-      "response_text": "```json\n{\"when_to_use\": \"about to act on a report without inspecting it first: the action would not match the actual state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"verify\": \"the command's result matches the inspected state\", \"not_applicable_when\": \"the state was already inspected\", \"summary\": \"never act on a report before inspecting it\"}\n```",
+      "request_text": "You are writing ONE reusable capability card for a weaker terminal agent on\nTerminal Bench V2.1, from a subtask where it went wrong. The card will be\ninjected into a DIFFERENT TB21 task from the same capability family. Teach\nthe reader to recognize a general failure pattern and follow a corrective\nprocedure; do not write a fix for this task.\n\nSUBTASK LABEL: whole\nSUBTASK DESCRIPTION: do the whole task\nWHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING:\n\nSTEPS OF THE SUBTASK:\nstep 0\naction: run\nobservation: the environment state\nSEGMENT POSITION: segment 1 of 1 in its trajectory; it covers original steps 0 to 0 out of 1 steps (steps are numbered from 0)\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRead the weak model profile FIRST. It is the capability boundary of your\nreader: every node you write must be an action this exact model can carry\nout as written. Where the profile names a weakness that caused or worsened\nthis failure, the guard must address it.\n\nWork in five passes.\n\nPass 1 - diagnose the general failure pattern.\nFind the step or decision where the weak model went wrong. Name the pattern\nat the reader's level: skipped verification, misread observation, wrong\ntool, unread error before retry, wrong order, early success claim, or an\nunrecognized precondition. Do not write \"logical error\" or this task's name.\nUse the context summary only to understand what the reader was trying to do.\n\nPass 2 - abstract the capability.\nDecide, for yourself:\n- capability: a short verb-and-object phrase that names the general skill.\n  Do not use this task's name, file names, or specific tool names in this\n  phrase.\n- observable_trigger: the signs a new TB21 task shows when this pattern can\n  occur (file types, input structure, error text, tool state, required\n  output). Tool names are allowed here.\n- invariants: the corrective steps that hold across tasks.\n- variants: the choices that differ across tasks. Name a variant type you\n  recognize from the family even if only one variant appears in the steps\n  view; but do not invent action steps for variants you did not observe.\n- failure_guard: the guard that prevents this pattern from recurring.\n- corrective_steps: the correct actions that the trajectory shows working,\n  OR—where the trajectory only shows the mistake—the minimal corrective\n  action the profile tells you the reader can execute (for example: read the\n  error message before retrying). Do not invent multi-step procedures that\n  are not grounded in the steps view or the failure pattern.\n\nIf the segment fits none of the TB21 capability families below, use\n\"general terminal procedure\" and write only the meta-rules you can support.\n\nTB21 capability families:\n- source build, install and verification\n- runtime crash, hang and resource diagnosis\n- environment and dependency setup\n- numerical and scientific computation with result validation\n- cryptographic analysis and security forensics\n- sequence, primer and bioinformatics work\n- distributed PyTorch and parallel execution\n- data, text and large-file processing\n- terminal interaction and recovery\n- final verification and submission\n\nPass 3 - write the corrective decision procedure.\nWrite 5 to 9 decision nodes. A node is one decision, not a script:\nWhen <observable condition>, do <general action>; verify <pass signal>; if\nit fails, <fallback>.\nUse only the invariants. For each variant, add a short condition inside the\nnode (\"if the task uses X, ...; otherwise ...\"). The procedure must teach\nthe reader to recognize the failing behavior from observable signs, not from\nthis task's names.\nFor nodes where the trajectory only shows what went wrong and not what is\ncorrect: write one node that detects the failure sign and one node that\nnames the corrective action from the profile or the failure pattern—do not\ninvent a multi-step procedure beyond what the evidence supports.\nDo not add separate TB21 discipline nodes; instead weave the discipline into\nthe verify and fallback parts of nodes: check before acting, read the error\nbefore retrying, run the verifier before calling mark_task_complete.\n\nMake it executable for the weak model:\n- one action per node, imperative voice, no self-numbering;\n- every task-specific value is a <placeholder> in angle brackets: file\n  names, paths, commands, flags, API names, constants, error strings,\n  entities;\n- a command may appear only in a general form that works after substituting\n  the placeholders;\n- scripts used as tools: write only the invocation pattern, the inputs, and\n  the expected output—never include the script body, even if the trajectory\n  showed it in full;\n- code as the deliverable (when the task is to write a program or module):\n  describe the structure the code must satisfy and how to verify it with\n  the task's tests—do not include the implementation;\n- no code block longer than three lines;\n- keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full\n  nodes do not fit in 2,500 characters, prefer fewer well-written nodes\n  over many truncated ones.\n\nPass 4 - write the trigger and the summary.\nThe reader does not see this card at first. It sees a list with one line\nper card: the summary, then the when_to_use text. From that one line it\ndecides whether to open the card. So the line must say WHAT the card\nteaches and WHEN to open it.\n\nFirst choose the ONE moment in a new task when the reader should open\nthis card, and start when_to_use with its phrase, copied exactly:\n  \"At task start,\"\n      the reader has just received the task and is reading the task\n      description and the given files;\n  \"After the first environment check,\"\n      the reader has run its first ls, which, import or network probe and\n      now knows what is installed and what is reachable;\n  \"When a command fails, hangs, or repeats,\"\n      a command gave an error, got stuck, or the same action keeps\n      repeating without progress;\n  \"Before submitting,\"\n      the work looks done and the reader is about to run the final check\n      and submit;\n  \"At any step,\"\n      a basic rule that holds at every step. Use this only when none of\n      the four moments above fits.\nSEGMENT POSITION is a hint, not a rule: a failed segment often belongs\n\"When a command fails, hangs, or repeats,\"; an early segment often\nbelongs \"At task start,\" or \"After the first environment check,\"; the\nlast segment often belongs \"Before submitting,\".\n\nThen write:\n- summary: one sentence, a verb and an object, saying what the card\n  teaches and the failure pattern it prevents. Do not put the trigger in\n  the summary. No task or subtask names.\n- when_to_use: the timing phrase, then the signs the reader can see at\n  that moment (file types, input structure, error text, available tools,\n  required output), and the failing behavior to recognize. One or two\n  sentences.\n- not_applicable_when: the signs that this card is wrong for the task.\n  Keep these out of when_to_use.\n\nLength: summary and when_to_use together should stay under about 400\ncharacters and must never go over 1,000. Write only complete sentences.\nIf the text is too long, drop details; never cut a sentence off. Do not\nmake it vague to make it short: the reader must still be able to tell\nthis card apart from the other cards in the same list.\n\nPass 5 - transfer audit.\nBefore output, check every item; if any fails, rewrite the card:\n1. Replace the task's language, tools, file names and constants in your\n   mind. Do the nodes still make sense?\n2. Is the trigger observable from the task, not from its name?\n3. Is every task-specific token a <placeholder>?\n4. Are there 5 to 9 decision nodes and 1,500 to 2,500 characters?\n5. Does when_to_use start with exactly one of the five timing phrases?\n6. Is the summary free of the trigger, and are summary and when_to_use\n   complete sentences, together under 1,000 characters (about 400 is\n   best)?\n\nOutput ONLY JSON with exactly these fields:\n{\"when_to_use\": \"<timing phrase, then the observable trigger and the\nfailing behavior to recognize, in one or two sentences>\",\n  \"steps\": [\"<one decision node: condition, action, verify, fallback>\", ...],\n  \"not_applicable_when\": \"<observable conditions under which this card is\nwrong>\",\n  \"summary\": \"<one sentence: what the card teaches instead (verb + object)\nand the failure pattern it prevents; no trigger, no task or subtask names>\"}\n",
+      "response_text": "```json\n{\"when_to_use\": \"about to act on a report without inspecting it first: the action would not match the actual state\", \"steps\": [\"inspect the reported state\", \"run the command that matches the state\"], \"not_applicable_when\": \"the state was already inspected\", \"summary\": \"never act on a report before inspecting it\"}\n```",
       "role": "author",
       "status": "ok",
       "system": "You are a helpful assistant. Follow the instructions exactly."
@@ -316,7 +314,7 @@
       "parsed": null,
       "prompt_name": "ANSWER",
       "request_id": "<request_id>",
-      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n## Skill rules\n- [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the command's result matches the inspected state [Do not use when] the state was already inspected\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
+      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n## Skill rules\n- [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
       "response_text": "The skill applies. Inspect the state first, then act. Final answer: inspect the state first.",
       "role": "answerer",
       "status": "ok",
@@ -333,7 +331,7 @@
       "parsed": null,
       "prompt_name": "ANSWER",
       "request_id": "<request_id>",
-      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
+      "request_text": "Answer the question below.\n\nQUESTION:\nA service reports an unexpected state and stops. What should be done before anything else, and why?\n\nSKILLS:\n## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] no state was reported\n\nIf the skills block above is not empty, first check whether any skill applies to\nthe situation in the question. Follow the applicable skill exactly; if several\napply, follow the most relevant one. If no skill applies, or the block is empty,\nanswer from your own knowledge.\n\nGive your reasoning step by step, then state the final answer clearly.\n",
       "response_text": "The skill applies. Inspect the state first, then act. Final answer: inspect the state first.",
       "role": "answerer",
       "status": "ok",
@@ -408,7 +406,22 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 1952,
+        "estimated_in": 187,
+        "finish_reason": null,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "ANSWER",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 1892,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -424,7 +437,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 199,
+        "estimated_in": 203,
         "finish_reason": null,
         "requested_max_tokens": 65536
       },
@@ -439,22 +452,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 217,
-        "finish_reason": null,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "ANSWER",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 2203,
+        "estimated_in": 2143,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -470,7 +468,7 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 304,
+        "estimated_in": 277,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -582,7 +580,23 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 431,
+        "estimated_in": 419,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "LEAK_AUDIT_JUDGE",
+      "request_id": "<request_id>",
+      "role": "auditor",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 435,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -599,22 +613,6 @@
       "in_tokens": null,
       "meta": {
         "estimated_in": 449,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "LEAK_AUDIT_JUDGE",
-      "request_id": "<request_id>",
-      "role": "auditor",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 475,
         "finish_reason": null,
         "format_retries": 0,
         "requested_max_tokens": 65536
@@ -766,16 +764,15 @@
         "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
         "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
         "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
-        "LIVE_SKILL_RETRIGGER": "a78064c688c5b2c2fb0587e168592d44512b96010d46ad2f4211cf03c631c27e",
-        "LIVE_SKILL_REVISION": "5ead76b92c45376b22c2e0a043817ffa6f60e5879ea7fd87b8db8d84ab692f78",
-        "LIVE_USAGE_ATTRIBUTION": "da7262e955265cb9e4ef25be2616f91cccfc96eb989fa99f4d9d249a38e9f1c5",
-        "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
+        "MERGE": "89b91dfa9b3a33cce4b610571a3dac5e5e5aaf1bb1767f84375b1e311f935da7",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
-        "REWRITE": "0d9924ef91a4781a0035ce021e3efffc731394583294ea02a91033213648c91e",
+        "REWRITE": "ae1f94ec6efadd09d9c16a092ea44aacb6c08e58a8272645690e2754b8a48c34",
         "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
         "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
-        "SKILL_DIAGNOSE": "8f31a6206bc43f79bead93c1f7731834eb0e8968d5d15398e5d3fc711f8d2691",
-        "SKILL_DISTILL": "c5ee93f6cbcd197de8a77f6724840f3c7acc3d669fb820c96cb6429b1200d055"
+        "SKILL_ATTEMPT_ATTRIBUTION": "2c609a18018f623e54f755215889b91e6c37012095d59cdcd2f96f0e9170b5fc",
+        "SKILL_ATTEMPT_REVISION": "d8b2980cc5edeb8069edcd0b2adf2dd945af4a31a639089dcca98602e2707855",
+        "SKILL_DIAGNOSE": "f2ac62c356d86d76635cbb6fcf97eb701061ead8be6d20d988c51ebb3ab87a28",
+        "SKILL_DISTILL": "03cad5979ec7ee26cbb79700daf6ea69469f78c0d9edebf56da48e6ea56099c9"
       },
       "rules": {
         "segment_select": "strong_success_weak_failed",
@@ -830,16 +827,15 @@
       "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
       "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
       "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
-      "LIVE_SKILL_RETRIGGER": "a78064c688c5b2c2fb0587e168592d44512b96010d46ad2f4211cf03c631c27e",
-      "LIVE_SKILL_REVISION": "5ead76b92c45376b22c2e0a043817ffa6f60e5879ea7fd87b8db8d84ab692f78",
-      "LIVE_USAGE_ATTRIBUTION": "da7262e955265cb9e4ef25be2616f91cccfc96eb989fa99f4d9d249a38e9f1c5",
-      "MERGE": "9a4febe46a10c781f77cb4fe783c02cec8e9497e0ff963babf3cafc8ea019227",
+      "MERGE": "89b91dfa9b3a33cce4b610571a3dac5e5e5aaf1bb1767f84375b1e311f935da7",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
-      "REWRITE": "0d9924ef91a4781a0035ce021e3efffc731394583294ea02a91033213648c91e",
+      "REWRITE": "ae1f94ec6efadd09d9c16a092ea44aacb6c08e58a8272645690e2754b8a48c34",
       "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
       "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
-      "SKILL_DIAGNOSE": "8f31a6206bc43f79bead93c1f7731834eb0e8968d5d15398e5d3fc711f8d2691",
-      "SKILL_DISTILL": "c5ee93f6cbcd197de8a77f6724840f3c7acc3d669fb820c96cb6429b1200d055"
+      "SKILL_ATTEMPT_ATTRIBUTION": "2c609a18018f623e54f755215889b91e6c37012095d59cdcd2f96f0e9170b5fc",
+      "SKILL_ATTEMPT_REVISION": "d8b2980cc5edeb8069edcd0b2adf2dd945af4a31a639089dcca98602e2707855",
+      "SKILL_DIAGNOSE": "f2ac62c356d86d76635cbb6fcf97eb701061ead8be6d20d988c51ebb3ab87a28",
+      "SKILL_DISTILL": "03cad5979ec7ee26cbb79700daf6ea69469f78c0d9edebf56da48e6ea56099c9"
     },
     "rules": {
       "segment_select": "strong_success_weak_failed",
@@ -909,7 +905,7 @@
     }
   },
   "phases/p02_learn/bank_summary.json": {
-    "bank_reference": "bank:1c3464eb0a9e",
+    "bank_reference": "bank:1ccd3f5cc86a",
     "members": [
       "traj/fakebench:t1/strong/00/seg00/skill",
       "traj/fakebench:t1/weak/00/seg00/skill"
@@ -918,7 +914,7 @@
   },
   "phases/p02_learn/learn_summary.json": {
     "bank": {
-      "bank_reference": "bank:1c3464eb0a9e",
+      "bank_reference": "bank:1ccd3f5cc86a",
       "members": [
         "traj/fakebench:t1/strong/00/seg00/skill",
         "traj/fakebench:t1/weak/00/seg00/skill"
@@ -964,7 +960,7 @@
   },
   "phases/p02_learn/skill_bank.jsonl": [
     {
-      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
       "discard_reason": null,
       "group": null,
       "merged_from": [],
@@ -980,7 +976,7 @@
       "version": 1
     },
     {
-      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected",
+      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
       "discard_reason": null,
       "group": null,
       "merged_from": [],
@@ -1035,7 +1031,7 @@
   "phases/p03_exam/units.jsonl": [
     {
       "aux": {},
-      "skills_block": "## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported",
+      "skills_block": "## Skill rules\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] no state was reported",
       "skills_injected": [
         {
           "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
@@ -1047,7 +1043,7 @@
     },
     {
       "aux": {},
-      "skills_block": "## Skill rules\n- [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the command's result matches the inspected state [Do not use when] the state was already inspected",
+      "skills_block": "## Skill rules\n- [When to use] about to act on a report without inspecting it first: the action would not match the actual state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] the state was already inspected",
       "skills_injected": [
         {
           "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
@@ -1059,7 +1055,7 @@
     }
   ],
   "phases/p04_learn/bank_summary.json": {
-    "bank_reference": "bank:1c3464eb0a9e",
+    "bank_reference": "bank:1ccd3f5cc86a",
     "members": [
       "traj/fakebench:t1/strong/00/seg00/skill",
       "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1068,7 +1064,7 @@
   },
   "phases/p04_learn/learn_summary.json": {
     "bank": {
-      "bank_reference": "bank:1c3464eb0a9e",
+      "bank_reference": "bank:1ccd3f5cc86a",
       "members": [
         "traj/fakebench:t1/strong/00/seg00/skill",
         "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1114,7 +1110,7 @@
   },
   "phases/p04_learn/skill_bank.jsonl": [
     {
-      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
       "discard_reason": null,
       "group": null,
       "merged_from": [],
@@ -1130,7 +1126,7 @@
       "version": 1
     },
     {
-      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected",
+      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
       "discard_reason": null,
       "group": null,
       "merged_from": [],
@@ -1182,7 +1178,7 @@
   "phases/p05_exam/unit_verdicts.jsonl": [],
   "phases/p05_exam/units.jsonl": [],
   "phases/p06_learn/bank_summary.json": {
-    "bank_reference": "bank:1c3464eb0a9e",
+    "bank_reference": "bank:1ccd3f5cc86a",
     "members": [
       "traj/fakebench:t1/strong/00/seg00/skill",
       "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1191,7 +1187,7 @@
   },
   "phases/p06_learn/learn_summary.json": {
     "bank": {
-      "bank_reference": "bank:1c3464eb0a9e",
+      "bank_reference": "bank:1ccd3f5cc86a",
       "members": [
         "traj/fakebench:t1/strong/00/seg00/skill",
         "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1237,7 +1233,7 @@
   },
   "phases/p06_learn/skill_bank.jsonl": [
     {
-      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
       "discard_reason": null,
       "group": null,
       "merged_from": [],
@@ -1253,7 +1249,7 @@
       "version": 1
     },
     {
-      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected",
+      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
       "discard_reason": null,
       "group": null,
       "merged_from": [],
@@ -1305,7 +1301,7 @@
   "phases/p07_exam/unit_verdicts.jsonl": [],
   "phases/p07_exam/units.jsonl": [],
   "phases/p08_learn/bank_summary.json": {
-    "bank_reference": "bank:1c3464eb0a9e",
+    "bank_reference": "bank:1ccd3f5cc86a",
     "members": [
       "traj/fakebench:t1/strong/00/seg00/skill",
       "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1313,7 +1309,7 @@
     "size": 2
   },
   "phases/p08_learn/curation_log.json": {
-    "bank_tokens": 141,
+    "bank_tokens": 114,
     "final_member_ids": [
       "traj/fakebench:t1/strong/00/seg00/skill",
       "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1350,7 +1346,7 @@
   },
   "phases/p08_learn/learn_summary.json": {
     "bank": {
-      "bank_reference": "bank:1c3464eb0a9e",
+      "bank_reference": "bank:1ccd3f5cc86a",
       "members": [
         "traj/fakebench:t1/strong/00/seg00/skill",
         "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1396,7 +1392,7 @@
   },
   "phases/p08_learn/skill_bank.jsonl": [
     {
-      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+      "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
       "discard_reason": null,
       "group": "state inspection",
       "merged_from": [],
@@ -1412,7 +1408,7 @@
       "version": 1
     },
     {
-      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected",
+      "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
       "discard_reason": null,
       "group": "state inspection",
       "merged_from": [],
@@ -1478,7 +1474,7 @@
     "role": "test"
   },
   "phases/p09_test/phase_summary.json": {
-    "bank_reference": "bank:1c3464eb0a9e",
+    "bank_reference": "bank:1ccd3f5cc86a",
     "complete": true,
     "control": {
       "aux": null,
@@ -1518,7 +1514,7 @@
   "phases/p09_test/units.jsonl": [
     {
       "aux": {},
-      "skills_block": "## Skill rules\n### state inspection\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Verify] the service reports the expected state [Do not use when] no state was reported",
+      "skills_block": "## Skill rules\n### state inspection\n- [When to use] when a service reports an unexpected state [Steps] 1. inspect the reported state 2. run the command that matches the state [Do not use when] no state was reported",
       "skills_injected": [
         {
           "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
@@ -1582,7 +1578,7 @@
       "stage": "p02:learn",
       "summary": {
         "bank": {
-          "bank_reference": "bank:1c3464eb0a9e",
+          "bank_reference": "bank:1ccd3f5cc86a",
           "members": [
             "traj/fakebench:t1/strong/00/seg00/skill",
             "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1616,7 +1612,7 @@
       "stage": "p04:learn",
       "summary": {
         "bank": {
-          "bank_reference": "bank:1c3464eb0a9e",
+          "bank_reference": "bank:1ccd3f5cc86a",
           "members": [
             "traj/fakebench:t1/strong/00/seg00/skill",
             "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1650,7 +1646,7 @@
       "stage": "p06:learn",
       "summary": {
         "bank": {
-          "bank_reference": "bank:1c3464eb0a9e",
+          "bank_reference": "bank:1ccd3f5cc86a",
           "members": [
             "traj/fakebench:t1/strong/00/seg00/skill",
             "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1684,7 +1680,7 @@
       "stage": "p08:learn",
       "summary": {
         "bank": {
-          "bank_reference": "bank:1c3464eb0a9e",
+          "bank_reference": "bank:1ccd3f5cc86a",
           "members": [
             "traj/fakebench:t1/strong/00/seg00/skill",
             "traj/fakebench:t1/weak/00/seg00/skill"
@@ -1707,7 +1703,7 @@
     {
       "stage": "p09:test",
       "summary": {
-        "bank_reference": "bank:1c3464eb0a9e",
+        "bank_reference": "bank:1ccd3f5cc86a",
         "complete": true,
         "control": {
           "aux": null,
@@ -1850,7 +1846,7 @@
     "subtask_id": "traj/fakebench:t1/weak/00/seg00"
   },
   "stage3_generation/skills/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fskill.json": {
-    "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the service reports the expected state\n[Do not use when] no state was reported",
+    "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
     "discard_reason": null,
     "group": "state inspection",
     "merged_from": [],
@@ -1866,7 +1862,7 @@
     "version": 1
   },
   "stage3_generation/skills/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fskill.json": {
-    "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Verify] the command's result matches the inspected state\n[Do not use when] the state was already inspected",
+    "content": "[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected",
     "discard_reason": null,
     "group": "state inspection",
     "merged_from": [],
@@ -1956,11 +1952,11 @@
       ],
       "scores": [
         {
-          "score": 0.6118154158903719,
+          "score": 0.5324593838111004,
           "skill_id": "traj/fakebench:t1/strong/00/seg00/skill"
         },
         {
-          "score": 0.49905847777424917,
+          "score": 0.4597345426213775,
           "skill_id": "traj/fakebench:t1/weak/00/seg00/skill"
         }
       ],

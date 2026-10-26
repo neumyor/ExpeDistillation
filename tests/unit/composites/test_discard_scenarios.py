@@ -51,7 +51,6 @@ MARKED_A = "\n".join([
     "[When to use] The service rejects connections and needs a restart.",
     "[Steps]",
     "1. Restart the service with the restart command.",
-    "[Verify] The status command reports the service as running.",
 ])
 
 
