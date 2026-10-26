@@ -16,6 +16,40 @@ author:
 |---|---|---|
 | 新增 | 每个片段写一条新技能；强模型成功段用提炼，弱模型失败段用诊断；两种都产出三段结构 `[When to use]` / `[Steps]` / `[Do not use when]` | `author` |
 
+## `cluster_by_trigger`：跨 task 的 trigger 族聚类写作
+
+```yaml
+author:
+  name: cluster_by_trigger
+  max_cards_per_prompt: 40
+  max_chars_per_card: 1200
+  min_cluster_size: 1
+  classify_retry_limit: 2
+  cluster_retry_limit: 2
+  skill_retry_limit: 2
+```
+
+只用在 P02 的 `add` 路径，仍然只处理 `add` 行授权的 task 和
+`segment_select` 保留的段；决策、归因、整理三条链路不变。
+
+流程：
+
+1. 对每个 subtask 调强模型分成五个固定 trigger 族：
+   `at_task_start` / `after_first_environment_check` /
+   `when_command_fails` / `before_submitting` / `at_any_step`；
+2. 每个族内把所有 subtask 卡片拼给强模型，按“遇到的问题相似”聚类；
+   聚类输出 JSON，必须覆盖族内每个 subtask 恰好一次；
+3. 每个 cluster 调强模型写一条三段式 skill；锚点取 cluster 中最小
+   `subtask_id`，`source_subtasks` 记录全部成员；
+4. 中间结果落在学习相位的 `trigger_families.jsonl`、`clusters.jsonl`、
+   `cluster_skills.jsonl`、`cluster_outcomes.jsonl`、
+   `cluster_summary.json`；已完成的 subtask/family/cluster 续跑只读盘。
+
+单条 skill 仍是 `pending`、`version=1`，由后续 live/exam 路径正常验收。
+`source_subtasks` 只是来源记录；live 的分组仍按锚点 subtask 所在的 task
+进行，因此一个跨 task cluster 在 live 上只在锚点 task 组里被测量，
+P07 的全局 folder 仍会交付它。
+
 ## P04/P06 的 revise 写作
 
 新的共享写作入口是 `revise.py` 的 `revise_one`：

@@ -707,6 +707,9 @@ def test_duplicate_ids_in_task_file_rejected_before_split(
 #: a deliberate text change is a new experiment).
 FROZEN_PROMPT_NAMES = frozenset({
     "ANSWER",
+    "CLUSTER_SKILL",
+    "CLUSTER_SUBTASKS",
+    "CLUSTER_TRIGGER_FAMILY",
     "DEFAULT_SYSTEM",
     "EXAM_GEN",
     "FAKE_TASK",

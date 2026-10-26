@@ -41,6 +41,16 @@ def execute_add_rows(ctx: Any, phase: Any,
             "the add task list carries duplicate task ids; each task must "
             "have exactly one row")
 
+    if phase.spec.author.get("name") == "cluster_by_trigger":
+        # New cross-task writing path: same decision rows and same
+        # evidence collectors, a different writing landing. The existing
+        # distill_diagnose path below is untouched.
+        from expedistill.stages import learn_add_cluster
+        _driver, author_params = method_registry.resolve(
+            "author", phase.spec.author)
+        return learn_add_cluster.execute_add_rows(
+            ctx, phase, rows, phase_dir, author_params=author_params)
+
     def land(row: TaskListRow) -> Tuple[str, Optional[BaseException]]:
         try:
             _land_add(ctx, phase, row, phase_dir)

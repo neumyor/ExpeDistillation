@@ -112,6 +112,8 @@ src/expedistill/
     llm.py                 B1 自己的协议 prompt（默认 system 消息等）
     segment.py            G1 切段
     author.py             G2 提炼 / 诊断、G6 改写
+    cluster_author.py     P02 cluster_by_trigger：trigger 分族、族内聚类、
+                          按类写 skill 的三个 prompt
     exam.py               G3 出考题、G4 作答、G5 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
     attribution.py        G11 attempt 修订、G12 attempt 归因（v3 起进
@@ -223,6 +225,8 @@ src/expedistill/
                           （证据包形状的兼容 re-export；定义在
                           composites/evidence_package.py）
     author/               author 族：AuthoringParams + write 驱动（P02 写新 skill）
+                          + cluster_by_trigger.py（P02 跨 task 的 trigger 族
+                          聚类写作，ClusterAuthoringParams）
                           + revise.py（P04/P06 每 skill 一次写作，读
                           SkillAttemptEvidence；不做 keep/delete 策略）+
                           README.md
@@ -247,7 +251,11 @@ src/expedistill/
                           baseline / exam / live / final_test 四种 role 各一
                           个模块（baseline 摸底 / exam 纸面验收 / live 实战验收 / test 终测）
     phase_learn.py        learn 相位驱动（R9）：按 P02/P04/P06/exam 分流
-    learn_add.py          P02 add 路径：切段、证据、写新 skill、回执
+    learn_add.py          P02 add 路径：切段、证据、写新 skill、回执；
+                          author.name=cluster_by_trigger 时转交
+                          learn_add_cluster
+    learn_add_cluster.py  P02 跨 task 的 trigger 族聚类写作落地：分族、
+                          聚类、按类写 skill、五个中间工件、逐类续跑
     learn_apply.py        P04/P06 per-skill apply：keep/delete 逐 skill，
                           revise 按 task 一次归因后逐 skill 写作
     learn_exam.py         exam 路径：多版本 merge、考卷证据、keep/delete/revise

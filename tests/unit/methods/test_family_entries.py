@@ -28,7 +28,7 @@ def test_the_table_is_organised_by_the_method_families():
     assert sorted(by_family["execution"]) == [
         "exam", "real", "real_folder"]
     assert by_family["evidence"] == ["segment"]
-    assert by_family["author"] == ["distill_diagnose"]
+    assert by_family["author"] == ["distill_diagnose", "cluster_by_trigger"]
     assert by_family["attribution"] == ["skill_attempts"]
     assert by_family["decision"] == ["task_level", "skill_level"]
     assert sorted(by_family["curation"]) == ["agentbrew", "none"]
@@ -59,7 +59,7 @@ def test_unknown_name_lists_the_known_ones():
         resolve_params("evidence", {"name": "windows", "K": 5})
     with pytest.raises(
             ConfigError,
-            match=r"known: \['distill_diagnose'\]"):
+            match=r"known: \['distill_diagnose', 'cluster_by_trigger'\]"):
         resolve_params("author", {"name": "solo"})
     with pytest.raises(ConfigError, match="known:"):
         resolve_params("execution", {"name": "live_run"})
@@ -91,6 +91,29 @@ def test_the_evidence_and_author_families_resolve_their_params():
         SegmentationParams(K=5, retry_limit=2)
     assert resolve_params("author", {"name": "distill_diagnose"}) == \
         AuthoringParams()
+
+
+def test_the_cluster_authoring_family_resolves_its_params():
+    from expedistill.methods.author import ClusterAuthoringParams
+
+    assert resolve_params(
+        "author", {"name": "cluster_by_trigger"}) == \
+        ClusterAuthoringParams()
+    assert resolve_params(
+        "author", {"name": "cluster_by_trigger",
+                   "max_cards_per_prompt": 12,
+                   "max_chars_per_card": 700,
+                   "min_cluster_size": 2,
+                   "classify_retry_limit": 1,
+                   "cluster_retry_limit": 3,
+                   "skill_retry_limit": 4}) == ClusterAuthoringParams(
+        max_cards_per_prompt=12, max_chars_per_card=700,
+        min_cluster_size=2, classify_retry_limit=1,
+        cluster_retry_limit=3, skill_retry_limit=4)
+    with pytest.raises(ConfigError, match="must be <class 'int'>"):
+        resolve_params(
+            "author", {"name": "cluster_by_trigger",
+                       "max_cards_per_prompt": "many"})
 
 
 def test_the_attribution_family_resolves_its_window_params():

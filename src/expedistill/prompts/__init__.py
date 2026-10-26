@@ -27,6 +27,7 @@ from expedistill.prompts import (  # noqa: F401
     audit,
     attribution,
     author,
+    cluster_author,
     curate,
     exam,
     llm,

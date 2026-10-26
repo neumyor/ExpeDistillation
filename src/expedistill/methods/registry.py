@@ -114,6 +114,12 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("author", "distill_diagnose"):
         _Entry("expedistill.methods.author.write",
                "expedistill.methods.author", "AuthoringParams"),
+    # P02's cross-task cluster writer: trigger-family classification,
+    # per-family problem clustering, then one skill per cluster. The
+    # phase-level orchestration lives in stages/learn_add_cluster.
+    ("author", "cluster_by_trigger"):
+        _Entry("expedistill.methods.author.cluster_by_trigger",
+               "expedistill.methods.author", "ClusterAuthoringParams"),
     # P04/P06 attribution windows: driver-less, the learn driver consumes
     # the params directly.
     ("attribution", "skill_attempts"):

@@ -191,7 +191,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 |---|---|
 | `role` | 恒为 `learn` |
 | `evidence` | 找证据方法（新增路径）：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算；`write_lessons` 默认 `true`，add 路径同时从弱模型失败段学，`false` 只学强模型成功段）；说明见 `src/expedistill/methods/evidence/README.md` |
-| `author` | 写作方法（新增路径）：`distill_diagnose`（无参数）；说明见 `src/expedistill/methods/author/README.md` |
+| `author` | 写作方法（新增路径）：`distill_diagnose`（默认，无参数，逐 task 逐段写）或 `cluster_by_trigger`（跨 add-authorized task 的 subtask：先分五个 trigger 族，再族内聚类，最后每类写一条 skill；参数 `max_cards_per_prompt` / `max_chars_per_card` / `min_cluster_size` / `classify_retry_limit` / `cluster_retry_limit` / `skill_retry_limit`）；说明见 `src/expedistill/methods/author/README.md` |
 | `attribution` | P04/P06 归因窗口：`skill_attempts`（默认；`before_steps` / `after_steps` 默认 10 / 10，必须是非负整数）；模式仍由上一执行相位的 `delivery.name` 决定，见 `src/expedistill/methods/attribution/README.md` |
 | `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（先按 unit 终态走共享动作表：control-perfect / not-testable 删除，leak 有余次改写到末次删除，zero_execution 不产行；正常单元触发且组赢 → keep 不改写，触发且组没赢 → 有余次 revise、末次 delete，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`；参数 `unread_in_won_group: delete|keep` 决定“未读但组赢”的 32 条）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` 与 `docs/decisions/p04_p06_revise_only_not_won_20261024.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
@@ -293,6 +293,25 @@ phases:
 
 `decision` 不写时默认 `task_level`；`attribution` 不写时默认
 `skill_attempts` + 10/10。P02 的 add 路径不使用 `decision` / `attribution`。
+
+P02 也可以换成跨 task 的 trigger-族聚类写作（只影响 `add` 的写作落地，
+P04/P06 仍走 `revise.py`）：
+
+```yaml
+author:
+  name: cluster_by_trigger
+  max_cards_per_prompt: 40
+  max_chars_per_card: 1200
+  min_cluster_size: 1
+  classify_retry_limit: 2
+  cluster_retry_limit: 2
+  skill_retry_limit: 2
+```
+
+它仍只处理 `add` 行授权的 task，以及 `segment_select` 保留的段；新增
+`phases/pNN_learn/trigger_families.jsonl`、`clusters.jsonl`、
+`cluster_skills.jsonl`、`cluster_outcomes.jsonl`、`cluster_summary.json`
+五个工件。聚类结果以 JSON 为源，`clusters/<family>.md` 只是人读视图。
 
 test 相位的技能文件夹形态（folder 交付 + real_folder 执行，完整可跑的配置见
 `configs/experiments/tb21_split_folder_v4.yaml`）：
@@ -817,6 +836,17 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     curation_log.json             整理日志（agentbrew 方法，最末学习相位）
     learn_summary.json           学习相位摘要（最后写；带 bank 键即该相位
                                  的完成信号）
+    trigger_families.jsonl       cluster_by_trigger：每个 subtask 的五个
+                                 trigger 族之一及理由
+    clusters.jsonl               cluster_by_trigger：族内聚类结果（theme、
+                                 subtask_ids、reason、确定性 cluster_id）
+    cluster_skills.jsonl         cluster_by_trigger：每类写出的 skill
+                                 （cluster_id、skill_id、source_subtasks）
+    cluster_outcomes.jsonl       cluster_by_trigger：逐 cluster 回执
+                                 （added / skipped_existing / failed /
+                                 infra_failed）
+    cluster_summary.json         cluster_by_trigger：跨 task 写作摘要（族、
+                                 类、skill、回执计数）
 
   —— 其他 ——
   skill_bank.jsonl               run 根整库（装配产出的 run 由装配器写入；

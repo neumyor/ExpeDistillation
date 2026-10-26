@@ -38,6 +38,20 @@ EXPECTED = {
     "SIMILARITY": ("G7", {"skills_listing"}),
     "MERGE": ("G8", {"mode", "skills_block"}),
     "GROUP": ("G9", {"skills_listing"}),
+    "CLUSTER_TRIGGER_FAMILY": (
+        "Cluster authoring",
+        {"label", "description", "source", "success", "segment_position",
+         "steps_view"},
+    ),
+    "CLUSTER_SUBTASKS": (
+        "Cluster authoring",
+        {"family", "family_definition", "cards"},
+    ),
+    "CLUSTER_SKILL": (
+        "Cluster authoring",
+        {"family", "family_trigger", "theme", "reason", "cards",
+         "profile_section"},
+    ),
 }
 
 ALL_MARKERS = set(SKILL_MARKERS)
