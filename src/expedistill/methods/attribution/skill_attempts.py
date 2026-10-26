@@ -22,8 +22,6 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from expedistill.blocks.attribution import attribute_attempts
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites import skill_usage
-from expedistill.composites.answer_sheets import execution_from_trajectory
-from expedistill.composites.live_measurement import task_trajectories
 from expedistill.composites.skill_attempt_evidence import (
     SkillAttemptEvidence,
     WindowEvidence,
@@ -35,7 +33,6 @@ from expedistill.composites.skill_use import (
 )
 from expedistill.core.answer_sheet import AnswerSheet, ExecutionRecord
 from expedistill.core.models import Skill
-from expedistill.infra.store import Store
 from expedistill.methods.attribution import AttributionParams
 
 __all__ = ["collect_skill_evidence"]
@@ -45,14 +42,10 @@ def collect_skill_evidence(
     *,
     task_id: str,
     skills: Sequence[Skill],
-    sheets: Optional[Sequence[AnswerSheet]] = None,
-    store: Optional[Store] = None,
-    round_: Optional[int] = None,
-    phase_label: str = "",
-    n_attempts: int = 0,
+    sheets: Sequence[AnswerSheet],
+    round_: int,
     task_instruction: str,
     delivery: str,
-    folder: Optional[Dict[str, Any]] = None,
     usage_rows: Optional[Sequence[Dict[str, Any]]] = None,
     weak_profile: str,
     author_handle: Any,
@@ -63,32 +56,20 @@ def collect_skill_evidence(
 ) -> Dict[str, SkillAttemptEvidence]:
     """Collect every window for every target skill of one task.
 
-    The primary input is the trial-level AnswerSheet set: each present
-    execution supplies its steps, attempt index, raw correctness and the
-    folder manifest (in ``artifacts["skill_folder"]``).  The legacy
-    ``store``/``round_`` pair is accepted only when no sheets are handed
-    in, so old runs/tests keep working while new runs use the answer-sheet
-    path exclusively.
+    Input is the trial-level AnswerSheet set: each present execution
+    supplies its steps, attempt index, raw correctness and the folder
+    manifest (``artifacts["skill_folder"]``).  Nothing is read from the
+    trajectory store.
     """
     if not skills:
         return {}
     params = params or AttributionParams()
     executions = _executions_for_task(task_id, sheets)
-    if not executions and store is not None and round_ is not None:
-        executions = [
-            execution_from_trajectory(
-                trajectory,
-                unit_id=f"legacy:{trajectory.trajectory_id}",
-                phase_label=phase_label,
-                folder=folder)
-            for trajectory in task_trajectories(store, task_id, round_)]
     records = {execution.sample_index: execution
                for execution in executions}
     if usage_rows is None:
-        usage_rows = (
-            skill_usage.build_usage_rows_from_sheets(
-                list(sheets or []), round_=round_ or 0)
-            if sheets else [])
+        usage_rows = skill_usage.build_usage_rows_from_sheets(
+            list(sheets), round_=round_)
     usage_by_attempt = {
         row.get("attempt"): row for row in usage_rows}
     evidence = {
@@ -98,8 +79,7 @@ def collect_skill_evidence(
 
     for attempt in sorted(records):
         execution = records[attempt]
-        execution_folder = (
-            execution.artifacts.get("skill_folder") or folder)
+        execution_folder = execution.artifacts.get("skill_folder")
         usage_row = usage_by_attempt.get(attempt)
         if delivery in FOLDER_DELIVERIES:
             _collect_folder_attempt(
@@ -121,16 +101,13 @@ def collect_skill_evidence(
 
 
 def _executions_for_task(task_id: str,
-                         sheets: Optional[Sequence[AnswerSheet]]
+                         sheets: Sequence[AnswerSheet]
                          ) -> List[ExecutionRecord]:
-    out: List[ExecutionRecord] = []
-    for sheet in sheets or ():
-        execution = sheet.execution
-        if execution is None or execution.kind != "trajectory":
-            continue
-        if execution.task_ref == task_id:
-            out.append(execution)
-    return out
+    return [
+        sheet.execution for sheet in sheets
+        if sheet.execution is not None
+        and sheet.execution.kind == "trajectory"
+        and sheet.execution.task_ref == task_id]
 
 
 def _folder_aliases(folder: Optional[Mapping[str, Any]]

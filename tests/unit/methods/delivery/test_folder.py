@@ -14,7 +14,7 @@ import pytest
 
 from expedistill.benchmarks.base import Task
 from expedistill.composites.decision import reuse_key, reusable_units
-from expedistill.composites.verdicts import make_unit_id
+from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core.config import (
     ConfigError,
     FOLDER_DELIVERY_NAME,

@@ -1,4 +1,4 @@
-"""core/contracts.py: the four frozen interface shapes (R0).
+"""core/contracts.py: the frozen interface shapes (R0).
 
 These tests freeze the FIELD SETS -- the join key, the value slots the
 module boundaries doc names, and the one Optional field -- so any change
@@ -9,7 +9,6 @@ contract: changes are deliberate and reviewed).
 from dataclasses import fields
 
 from expedistill.core.contracts import (
-    AcceptanceReportRow,
     ExecutionUnitList,
     ExecutionUnitRow,
     RunRecord,
@@ -26,13 +25,6 @@ def test_run_record_fields():
         "unit_id", "task_ref", "skills_injected", "skills_block",
         "model_role", "model_name", "sample_index", "dispatch_index",
         "correctness", "metrics", "aux", "artifacts",
-    ]
-
-
-def test_acceptance_report_row_fields():
-    assert _field_names(AcceptanceReportRow) == [
-        "unit_id", "phase_label", "role", "injected_skills", "runs",
-        "valid_count", "success_count", "status", "cause", "artifacts",
     ]
 
 
@@ -54,19 +46,13 @@ def test_shapes_construct_with_plain_values():
         skills_injected=None, skills_block="", model_role="weak",
         model_name="m", sample_index=0, dispatch_index=0,
         correctness=None, metrics={}, aux={}, artifacts={})
-    row = AcceptanceReportRow(
-        unit_id=run.unit_id, phase_label="p00", role="weak",
-        injected_skills=None, runs=[{"verdict": "invalid"}],
-        valid_count=0, success_count=0, status="not_testable",
-        cause="leak", artifacts={})
     unit = ExecutionUnitRow(
         unit_id=run.unit_id, task_ref="tb:task1", skills_injected=["s1"],
         skills_block="[s1]", aux={})
     task = TaskListRow(
         target_kind="skill", target_id="s1", action="keep",
         reason="improved", basis_unit=run.unit_id)
-    assert (run.unit_id, row.unit_id, unit.unit_id, task.basis_unit) == (
-        run.unit_id,) * 4
+    assert (run.unit_id, unit.unit_id, task.basis_unit) == (run.unit_id,) * 3
 
 
 def test_execution_unit_list_is_a_plain_list_alias():

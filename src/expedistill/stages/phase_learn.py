@@ -57,21 +57,17 @@ scripts and Wave 4's golden regeneration align to that shape), and
 ``learn_summary.json`` mirroring the returned PhaseResult.
 """
 
-import dataclasses
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites import decision_strategies
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import phase_report
 from expedistill.composites import skill_usage
-from expedistill.composites.live_measurement import round_dir
 from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
 )
-from expedistill.composites.reports import acceptance_report
-from expedistill.composites.skill_usage import SKILL_USAGE_NAME
 from expedistill.core.config import (
     FRESH_BARE,
     PHASE_ROLE_BASELINE,
@@ -85,14 +81,11 @@ from expedistill.core.config import (
     phase_label,
 )
 from expedistill.core.answer_sheet import UnitSummary
-from expedistill.core.contracts import AcceptanceReportRow
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import read_json, read_jsonl, write_json
 from expedistill.methods.curation import phase_bank as curation_phase_bank
 from expedistill.stages import learn_add, learn_apply, learn_exam, learn_ledger
-
-ReportRow = Union[UnitSummary, AcceptanceReportRow]
 
 __all__ = ["run"]
 
@@ -163,9 +156,6 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         current_sheets = _read_sheets(ctx, names, specs, current_pos)
         usage_by_task = _usage_by_task_from_sheets(
             current_sheets, current_round)
-        if not usage_by_task:
-            # Legacy run: no answer sheets, fall back to the old ledger.
-            usage_by_task = _usage_by_task(ctx.store, current_round)
         task_rows = decision_strategies.decide(
             name=phase.spec.decision.get("name", "task_level"),
             current_kind=current_kind, current_report=current_rows,
@@ -286,9 +276,9 @@ def _current_execute_position(names: Sequence[str], specs: dict,
 
 def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
                    index: int) -> Tuple[Optional[str],
-                                        List[ReportRow],
+                                        List[UnitSummary],
                                         Optional[str],
-                                        Optional[List[ReportRow]],
+                                        Optional[List[UnitSummary]],
                                         str]:
     """The decision entry's two reports and its compare rule.
 
@@ -335,79 +325,30 @@ def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
 
 
 def _read_report(ctx: Any, names: Sequence[str], specs: dict,
-                 position: int) -> List[ReportRow]:
+                 position: int) -> List[UnitSummary]:
     """One execute phase's unit summaries, read off the run's disk.
 
-    New runs carry ``unit_specs.jsonl`` + ``answer_sheets/`` +
-    ``coverage.jsonl``; the pure summarizer turns them into UnitSummary
-    rows.  A legacy run without those artifacts falls back to the old
-    report reader during the migration.
+    Every execute phase writes ``unit_specs.jsonl`` + ``answer_sheets/``
+    + ``coverage.jsonl``; a missing set is an interrupted/incompatible
+    run, not a legacy shape to guess around.
     """
     name = names[position]
-    spec = specs[name]
-    label = phase_label(position, name)
     kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
-            PHASE_ROLE_LIVE: "live"}.get(spec.role)
-    if kind is not None:
-        report = phase_report.read_phase_report(
-            phase_bank_dir(ctx.run_dir, label),
-            phase_kind=kind, learning_usable=True)
-        if report is not None:
-            return report.units
-
-    # Legacy run fallback (old artifacts, no answer sheets).
-    if spec.role == PHASE_ROLE_BASELINE:
-        return acceptance_report(
-            ctx.store, kind="baseline", benchmark=ctx.config.benchmark,
-            phase_label=label,
-            n_attempts_strong=ctx.config.n_attempts_strong,
-            n_attempts_weak=ctx.config.n_attempts_weak)
-    if spec.role == PHASE_ROLE_EXAM:
-        rows = acceptance_report(
-            ctx.store, kind="exam", benchmark=ctx.config.benchmark,
-            phase_label=label)
-        return _with_phase_verdicts(ctx, label, rows)
-    if spec.role == PHASE_ROLE_LIVE:
-        return acceptance_report(
-            ctx.store, kind="live", benchmark=ctx.config.benchmark,
-            phase_label=label, round_=_live_round(names, specs, position))
-    raise CodeBugError(
-        f"a report was asked for phase {name!r} of role {spec.role!r}; "
-        "only baseline / exam / live phases have one")
-
-
-def _with_phase_verdicts(ctx: Any, label: str,
-                         rows: Sequence[ReportRow]
-                         ) -> List[ReportRow]:
-    """Override the recomputed exam rows with the phase's own verdicts.
-
-    The exam phase records facts the stores cannot carry: a unit whose
-    with-skill answer was SKIPPED because the bare control was perfect
-    has no attempt anywhere, so the recomputed report calls it
-    ``zero_execution`` (work still owed). The phase's minimal verdict
-    file knows better (``not_run_control_perfect`` /
-    ``weak_already_knows``), and the decision table needs that fact to
-    reach "no headroom" and drop the skill.
-
-    Only the status and cause are overridden; every count and artifact
-    stays the recomputation's. A missing file (an interrupted phase, or
-    a verdict written by an older build) leaves the rows unchanged.
-    """
-    path = (phase_bank_dir(ctx.run_dir, label)
-            / "unit_verdicts.jsonl")
-    if not path.exists():
-        return list(rows)
-    stored = {row["unit_id"]: row for row in read_jsonl(path)}
-    out: List[ReportRow] = []
-    for row in rows:
-        verdict = stored.get(row.unit_id)
-        if verdict is None:
-            out.append(row)
-            continue
-        out.append(dataclasses.replace(
-            row, status=verdict.get("status", row.status),
-            cause=verdict.get("cause", row.cause)))
-    return out
+            PHASE_ROLE_LIVE: "live"}.get(specs[name].role)
+    if kind is None:
+        raise CodeBugError(
+            f"a report was asked for phase {name!r} of role "
+            f"{specs[name].role!r}; only baseline / exam / live phases "
+            "have one")
+    report = phase_report.read_phase_report(
+        phase_bank_dir(ctx.run_dir, phase_label(position, name)),
+        phase_kind=kind, learning_usable=True)
+    if report is None:
+        raise CodeBugError(
+            f"phase {name!r} has no trial-level artifacts "
+            "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl); "
+            "this run predates the answer-sheet protocol")
+    return report.units
 
 
 def _live_round(names: Sequence[str], specs: dict, position: int) -> int:
@@ -522,16 +463,6 @@ def _usage_by_task_from_sheets(sheets: Sequence[Any], round_: int
     return out
 
 
-def _usage_by_task(store, round_: int) -> Dict[str, List[dict]]:
-    """Legacy: the round's skill-usage rows, grouped by task id."""
-    out: Dict[str, List[dict]] = {}
-    for row in read_jsonl(round_dir(store, round_) / SKILL_USAGE_NAME):
-        task_id = row.get("task_id")
-        if task_id:
-            out.setdefault(task_id, []).append(row)
-    return out
-
-
 def _group_better_by_task(ctx: Any, round_: int
                           ) -> Dict[str, Optional[bool]]:
     """The live phase's group result for this round: task -> better.
@@ -555,7 +486,7 @@ def _group_better_by_task(ctx: Any, round_: int
 
 
 def _skill_statuses(ctx: Any, current_rows: Optional[
-        Sequence[ReportRow]]) -> Dict[str, str]:
+        Sequence[UnitSummary]]) -> Dict[str, str]:
     """The current store status of every measured skill.
 
     P03/P05's live ``finalize_group`` is the writer of accepted/pending;

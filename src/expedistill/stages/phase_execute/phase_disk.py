@@ -28,7 +28,6 @@ __all__ = [
     "PHASE_RECORD_NAME",
     "REDISPATCH_NAME",
     "REUSE_INDEX_NAME",
-    "VERDICTS_NAME",
     "SUMMARY_NAME",
     "UNITS_NAME",
     "_earlier_pass_unit_ids",
@@ -41,7 +40,6 @@ __all__ = [
 #: phase_bank's.
 PHASE_RECORD_NAME = "phase.json"
 UNITS_NAME = "units.jsonl"
-VERDICTS_NAME = "unit_verdicts.jsonl"   # legacy read fallback only
 REUSE_INDEX_NAME = "reuse_index.jsonl"
 REDISPATCH_NAME = "redispatch.json"
 SUMMARY_NAME = "phase_summary.json"
@@ -186,7 +184,7 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
     A new unit reuses an earlier execute unit's result when task, role
     and the rendered injection bytes match (:func:`decision.reusable_units`).
     The returned verdict is ``(status, cause)`` from the earlier phase's
-    ``unit_verdicts.jsonl`` so the reusing phase can record the carried
+    ``reuse_index.jsonl`` so the reusing phase can record the carried
     verdict without re-deriving it. A ``zero_execution`` verdict is not
     a measurement and is never reused. Most recent phase wins.
     """
@@ -200,10 +198,6 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
                                               record["label"])
         units_path = directory / UNITS_NAME
         index_path = directory / REUSE_INDEX_NAME
-        if not index_path.exists():
-            # Legacy runs only: the old per-unit verdict ledger.  New runs
-            # write the reuse index above.
-            index_path = directory / VERDICTS_NAME
         if not units_path.exists() or not index_path.exists():
             continue
         matches = decision.reusable_units(

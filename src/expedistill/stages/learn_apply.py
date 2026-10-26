@@ -159,10 +159,7 @@ def _execute_revise_group(
         task_id=task_id,
         skills=[skill for _, skill in todo],
         sheets=task_sheets,
-        store=store,
         round_=current_round,
-        phase_label=phase.label,
-        n_attempts=_n_attempts(ctx, current_spec),
         task_instruction=task_instruction,
         delivery=delivery,
         usage_rows=usage_by_task.get(task_id, []),
@@ -261,10 +258,6 @@ def _task_instruction(ctx: Any, task_id: str) -> str:
             "set than the groups")
     return get_prompt(plugin.task_prompt_name).format(
         instruction=match[0].instruction, skills_block="", history="")
-
-
-def _n_attempts(ctx: Any, spec: Any) -> int:
-    return spec.execution.get("n_attempts") or ctx.config.n_attempts_weak
 
 
 def _assert_unique(rows: Sequence[TaskListRow]) -> None:

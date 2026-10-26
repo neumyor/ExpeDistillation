@@ -24,17 +24,11 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 from expedistill.composites.skill_use import skill_read_events
 from expedistill.core.answer_sheet import AnswerSheet, ExecutionRecord
 from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
-from expedistill.infra.store import write_jsonl
 
 __all__ = [
-    "SKILL_USAGE_NAME",
     "build_usage_rows",
     "build_usage_rows_from_sheets",
-    "write_usage_rows",
 ]
-
-#: The round-level usage ledger's file name.
-SKILL_USAGE_NAME = "skill_usage.jsonl"
 
 _AVAILABLE_RE = re.compile(
     r"<available_skills>(.*?)</available_skills>", re.DOTALL)
@@ -121,17 +115,10 @@ def _outcome(record: Any) -> str:
 
 
 def build_usage_rows(*, task_id: str, round_: int,
-                     executions: Optional[Iterable[Any]] = None,
-                     trajectories: Optional[Iterable[Any]] = None,
+                     executions: Iterable[ExecutionRecord],
                      folder: Mapping[str, Any]) -> List[dict]:
-    """One usage row per stored attempt of one task.
-
-    ``executions`` accepts the new trial-level ExecutionRecord (or an
-    AnswerSheet's execution); ``trajectories`` is the legacy spelling and
-    remains for old callers/tests.  The read extraction only needs the
-    record's steps, attempt index, id and raw correctness.
-    """
-    records = executions if executions is not None else (trajectories or [])
+    """One usage row per trial execution of one task."""
+    records = executions
     rows: List[dict] = []
     expected_ids = [entry["skill_id"] for entry in folder.get("files") or []]
     for record in records:
@@ -200,9 +187,3 @@ def build_usage_rows_from_sheets(
             task_id=task_id, round_=round_, executions=executions,
             folder=folder))
     return rows
-
-
-def write_usage_rows(path: Any, rows: List[dict]) -> None:
-    """Write the round's rows in deterministic order (atomic write)."""
-    write_jsonl(path, sorted(rows, key=lambda row: (row["task_id"],
-                                                    row["attempt"])))

@@ -27,7 +27,7 @@ Entry guards (short-circuit conditions):
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Set
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import resolve_plugin
@@ -41,7 +41,6 @@ from expedistill.composites import (
 )
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import live_verdicts as lv
-from expedistill.composites import skill_usage
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.composites.unit_ids import unit_id_for_trajectory
 from expedistill.core import ids, vocabulary
@@ -360,7 +359,6 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
         executions, coverage_records, phase_label=phase.label)
     answer_sheets.grade_answer_sheets(
         sheets, verdicts.default_verdict_rule(ctx.config.benchmark))
-    usage_path = _write_skill_usage_from_sheets(ctx, round_, sheets)
 
     # ========================================================================
     # 8. WRITE SUMMARY
@@ -371,7 +369,6 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
         "infra_accepted": sorted(accepted),
         "complete": not infra_failed,
         "infra_shortfall_accepted": bool(accepted),
-        "skill_usage": usage_path,
     }
     report = phase_report.build_phase_report(
         sheets, specs, phase_kind=PHASE_ROLE_LIVE,
@@ -417,23 +414,6 @@ def _coverage_cause_for_terminal(terminal: Optional[str]) -> str:
 # Supporting functions
 # ============================================================================
 
-def _write_skill_usage_from_sheets(ctx: StageContext, round_: int,
-                                   sheets: Sequence[Any]) -> Optional[str]:
-    """Write the round's read facts from the trial-level AnswerSheets.
-
-    This is a derived cache for audit/legacy readers; the learn phase
-    computes usage from the same AnswerSheets directly.  A round with no
-    folder execution writes nothing.
-    """
-    directory = lm.round_dir(ctx.store, round_)
-    if not directory.exists():
-        return None
-    rows = skill_usage.build_usage_rows_from_sheets(sheets, round_=round_)
-    if not rows:
-        return None
-    path = directory / skill_usage.SKILL_USAGE_NAME
-    skill_usage.write_usage_rows(path, rows)
-    return str(path)
 
 
 def _materialize_task_folders(ctx: StageContext, phase: PhaseInstance,

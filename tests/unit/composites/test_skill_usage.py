@@ -1,6 +1,5 @@
 """The live folder usage ledger: read facts and delivery status."""
 
-from expedistill.composites.answer_sheets import execution_from_trajectory
 from expedistill.composites.skill_usage import (
     build_usage_rows,
     build_usage_rows_from_sheets,
@@ -12,6 +11,7 @@ from expedistill.core.ids import (
     make_task_id,
     make_trajectory_id,
 )
+from expedistill.composites.answer_sheets import execution_from_trajectory
 from expedistill.core.models import Skill, Step, Trajectory
 from expedistill.methods.delivery.folder import skill_folder_manifest
 
@@ -51,6 +51,11 @@ def _trajectory(prompt, actions, correctness=False):
     )
 
 
+def _execution(trajectory):
+    return execution_from_trajectory(
+        trajectory, unit_id="unit-1", phase_label="p03:live")
+
+
 def _prompt(names):
     skills = "".join(
         f"<skill><name>{name}</name></skill>" for name in names)
@@ -67,7 +72,7 @@ def test_a_cat_of_the_absolute_path_counts_as_a_read():
          "echo done\n"])
 
     rows = build_usage_rows(task_id=TASK_ID, round_=0,
-                            trajectories=[trajectory], folder=manifest)
+                            executions=[_execution(trajectory)], folder=manifest)
 
     assert len(rows) == 1
     row = rows[0]
@@ -85,7 +90,7 @@ def test_a_missing_list_with_no_read_is_unverified():
     manifest = _manifest()
     trajectory = _trajectory("TASK without a list", ["echo hi\n"])
     row = build_usage_rows(task_id=TASK_ID, round_=0,
-                           trajectories=[trajectory], folder=manifest)[0]
+                           executions=[_execution(trajectory)], folder=manifest)[0]
     assert row["delivery_status"] == "unverified"
     assert row["read_skill_ids"] == []
 
@@ -97,7 +102,7 @@ def test_a_missing_prompt_with_a_read_counts_as_delivered():
         "TASK without a stored prompt",
         [f"cat /opt/openclaw-skills/t1/{first['filename']}\n"])
     row = build_usage_rows(task_id=TASK_ID, round_=0,
-                           trajectories=[trajectory], folder=manifest)[0]
+                           executions=[_execution(trajectory)], folder=manifest)[0]
     assert row["delivery_status"] == "ok"
     assert row["read_skill_ids"] == [first["skill_id"]]
 
@@ -106,7 +111,7 @@ def test_a_list_with_the_wrong_names_is_a_manifest_mismatch():
     manifest = _manifest()
     trajectory = _trajectory(_prompt(["wrong-name"]), ["echo hi\n"])
     row = build_usage_rows(task_id=TASK_ID, round_=0,
-                           trajectories=[trajectory], folder=manifest)[0]
+                           executions=[_execution(trajectory)], folder=manifest)[0]
     assert row["delivery_status"] == "manifest_mismatch"
 
 

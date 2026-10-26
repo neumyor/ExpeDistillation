@@ -7,7 +7,6 @@ P04/P06 的共享归因 driver。它只解释“为什么”，不决定 keep/re
 输入：task、目标 skill 列表、trial 级 `AnswerSheet` 集合（每个 present
 `ExecutionRecord` 提供 steps、attempt、raw correctness 和
 `artifacts.skill_folder`）、可选 usage rows、task instruction、delivery 类型。
-旧 run 才用 `store` + `round_` + `skill_usage.jsonl` 的 fallback。
 
 - folder / folder_by_task：`skill_use` 找出每个 skill 的 `cat` 调用；
   每个调用切前后窗口（默认前后 10 步）；

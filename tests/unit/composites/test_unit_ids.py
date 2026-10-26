@@ -3,14 +3,13 @@
 The unit id is the join key between a UnitSpec, a coverage record and a
 UnitSummary.  These tests pin the four raw injection shapes, the canonical
 JSON form (dict key order is not identity), the deterministic id format,
-and the two convenience ids -- plus the agreement with the acceptance
-module's own definition of the same rule.
+and the two convenience ids.
 """
 
 import hashlib
 import json
 
-from expedistill.composites import unit_ids, verdicts
+from expedistill.composites import unit_ids
 from expedistill.core.models import Step, Trajectory
 
 
@@ -119,17 +118,13 @@ def test_unit_id_for_trajectory_reads_task_role_and_injection():
             skills_injected=[{"skill_id": "s1", "version": 2}])
 
 
-def test_unit_ids_agree_with_the_acceptance_modules_definition():
-    """The rule is defined once; this module's copy must keep producing the
-    acceptance side's ids for every raw injection shape."""
+def test_unit_ids_keeps_every_raw_shape_a_distinct_identity():
+    ids_ = set()
     for skills in (None, [], "digest-abc",
                    [{"skill_id": "s1", "version": 1}],
                    [{"skill_id": "s2", "version": 3},
                     {"skill_id": "s1", "version": 1}]):
-        assert unit_ids.canonical_skills(skills) == \
-            verdicts.canonical_skills(skills)
-        kwargs = dict(phase_label="p03:live", benchmark="tb",
-                      task_ref="tb:task-1", role="weak",
-                      skills_injected=skills)
-        assert unit_ids.make_unit_id(**kwargs) == \
-            verdicts.make_unit_id(**kwargs)
+        ids_.add(unit_ids.make_unit_id(
+            phase_label="p03:live", benchmark="tb",
+            task_ref="tb:task-1", role="weak", skills_injected=skills))
+    assert len(ids_) == 5

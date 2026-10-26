@@ -30,8 +30,8 @@ from expedistill.benchmarks.registry import ConfigError, _reset_registry, regist
 from expedistill.composites import (
     phase_bank,
     phase_report,
-    reports,
     shortfall,
+    unit_ids,
     verdicts,
 )
 from expedistill.core.config import (
@@ -300,39 +300,19 @@ def write_bank_artifact(ctx, label, skills):
 
 
 def report_rows(ctx, phase):
-    """The phase's acceptance report, RECOMPUTED from the store.
-
-    The execute phases no longer persist this report (they write only
-    the minimal per-unit verdicts); this is the same reconstruction the
-    learning phase performs, and the authoritative view for assertions.
-    """
-    spec = phase.spec
-    if spec.role == PHASE_ROLE_BASELINE:
-        return reports.acceptance_report(
-            ctx.store, kind="baseline", benchmark=ctx.config.benchmark,
-            phase_label=phase.label,
-            n_attempts_strong=ctx.config.n_attempts_strong,
-            n_attempts_weak=ctx.config.n_attempts_weak)
-    if spec.role == PHASE_ROLE_EXAM:
-        return reports.acceptance_report(
-            ctx.store, kind="exam", benchmark=ctx.config.benchmark,
-            phase_label=phase.label)
-    if spec.role == PHASE_ROLE_LIVE:
-        earlier = 0
-        phases_dir = Path(ctx.run_dir) / phase_bank.PHASES_DIR
-        for entry in phases_dir.iterdir():
-            record_path = entry / "phase.json"
-            if not record_path.exists():
-                continue
-            record = read_json(record_path)
-            if (isinstance(record.get("index"), int)
-                    and record["index"] < phase.index
-                    and record.get("role") == PHASE_ROLE_LIVE):
-                earlier += 1
-        return reports.acceptance_report(
-            ctx.store, kind="live", benchmark=ctx.config.benchmark,
-            phase_label=phase.label, round_=earlier)
-    raise AssertionError(f"no report kind for role {spec.role!r}")
+    """The phase's trial-level unit summaries, read from its artifacts."""
+    kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
+            PHASE_ROLE_LIVE: "live"}.get(phase.spec.role)
+    if kind is None:
+        raise AssertionError(
+            f"no report kind for role {phase.spec.role!r}")
+    report = phase_report.read_phase_report(
+        phase_bank.phase_bank_dir(ctx.run_dir, phase.label),
+        phase_kind=kind, learning_usable=True)
+    if report is None:
+        raise AssertionError(
+            f"phase {phase.label!r} wrote no trial-level artifacts")
+    return report.units
 
 
 def unit_verdicts(ctx, phase):
@@ -566,7 +546,7 @@ def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
                     if "t1" in row.unit_id and row.role == "weak")
     assert weak_row.status == verdicts.STATUS_NOT_TESTABLE
     assert weak_row.cause == verdicts.CAUSE_ALL_HOLES
-    assert len(weak_row.runs) == 1
+    assert len(weak_row.artifacts["sheet_ids"]) == 1
     assert weak_row.valid_count == 0
     assert summary["complete"] is True  # nothing is missing
 
@@ -629,7 +609,8 @@ def test_live_folder_materializes_each_group_and_writes_usage(
     skill_files = list(folder.glob("*/SKILL.md"))
     assert len(skill_files) == 1
     assert "name:" in skill_files[0].read_text(encoding="utf-8")
-    assert summary["skill_usage"] is not None
+    assert "skill_usage" not in summary
+    assert (directory / "answer_sheets").is_dir()
     assert (directory / "skill_folder").is_dir()
 
 
@@ -1117,10 +1098,10 @@ def test_unit_id_rebuild_matches_the_delivery_sha8():
     row = delivery_units.make_row(_prefixed("t1"),
                                   [{"skill_id": "s1", "version": 2}],
                                   "block bytes")
-    full = verdicts.make_unit_id(phase_label="p03:live", benchmark=_FAKE,
+    full = unit_ids.make_unit_id(phase_label="p03:live", benchmark=_FAKE,
                                  task_ref=row.task_ref, role="weak",
                                  skills_injected=row.skills_injected)
-    sha8 = hashlib.sha256(verdicts.canonical_skills(
+    sha8 = hashlib.sha256(unit_ids.canonical_skills(
         row.skills_injected).encode("utf-8")).hexdigest()[:8]
     assert full == f"p03:live:{_FAKE}:{_prefixed('t1')}:weak:{sha8}"
     # The delivery-side id is exactly the join the rebuild consumes.

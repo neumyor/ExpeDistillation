@@ -14,7 +14,6 @@ to end.
 """
 
 import importlib
-import json
 import importlib.abc
 import importlib.machinery
 import sys
@@ -29,7 +28,7 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
-from expedistill.composites import phase_bank, verdicts
+from expedistill.composites import phase_bank, phase_report, verdicts
 from expedistill.composites.phase_bank import load_phase_bank
 from expedistill.core import ids
 from expedistill.core.config import ExperimentConfig
@@ -409,36 +408,14 @@ def test_a_perfect_bare_control_reaches_the_decision_as_no_headroom(
 
 
 def _report_rows(ctx, label):
-    """The phase's acceptance report, RECOMPUTED from the store (the
-    execute phases persist only minimal per-unit verdicts now)."""
-    from expedistill.composites.reports import acceptance_report
-    name = label.split(":", 1)[1]
-    benchmark = ctx.config.benchmark
-    if name == "baseline":
-        return acceptance_report(
-            ctx.store, kind="baseline", benchmark=benchmark,
-            phase_label=label,
-            n_attempts_strong=ctx.config.n_attempts_strong,
-            n_attempts_weak=ctx.config.n_attempts_weak)
-    if name == "exam":
-        return acceptance_report(ctx.store, kind="exam",
-                                 benchmark=benchmark, phase_label=label)
-    if name == "live":
-        index = int(label[1:3])
-        earlier = 0
-        for entry in (ctx.run_dir / "phases").iterdir():
-            record_path = entry / "phase.json"
-            if not record_path.exists():
-                continue
-            record = json.loads(record_path.read_text(encoding="utf-8"))
-            if (isinstance(record.get("index"), int)
-                    and record["index"] < index
-                    and record.get("role") == "live"):
-                earlier += 1
-        return acceptance_report(ctx.store, kind="live",
-                                 benchmark=benchmark, phase_label=label,
-                                 round_=earlier)
-    raise AssertionError(f"no report kind for {label!r}")
+    """The phase's trial-level unit summaries, read from its artifacts."""
+    kind = label.split(":", 1)[1]
+    report = phase_report.read_phase_report(
+        phase_bank.phase_bank_dir(ctx.run_dir, label),
+        phase_kind=kind, learning_usable=True)
+    if report is None:
+        raise AssertionError(f"phase {label!r} wrote no report artifacts")
+    return report.units
 
 
 # ---------------------------------------------------------------------------

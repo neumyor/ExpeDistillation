@@ -10,7 +10,8 @@ acceptance attempt ON this version, the judged with-skill attempt of one
 round, the most recent judged with-skill attempt before a round, the
 next round's number, and the latest judged attempt of one full key --
 the exam phase driver's replay guard). Read-only; the consumers are the
-acceptance report reader (composites/reports.py), the exam phase driver
+trial-level coverage/report path (composites/coverage.py,
+composites/phase_report.py), the exam phase driver
 (stages/phase_execute.py) and the exam evidence collector
 (methods/evidence/exam_sheet.py), and the leak verdicts are
 composites/acceptance_leak.py.

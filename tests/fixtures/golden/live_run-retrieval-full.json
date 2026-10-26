@@ -2206,8 +2206,7 @@
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "role": "live",
-    "skill_usage": null
+    "role": "live"
   },
   "phases/p03_live/reuse_index.jsonl": [
     {
@@ -2963,8 +2962,7 @@
     "infra_accepted": [],
     "infra_missing": [],
     "infra_shortfall_accepted": false,
-    "role": "live",
-    "skill_usage": null
+    "role": "live"
   },
   "phases/p05_live/reuse_index.jsonl": [
     {
@@ -4194,8 +4192,7 @@
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "role": "live",
-        "skill_usage": null
+        "role": "live"
       }
     },
     {
@@ -4233,8 +4230,7 @@
         "infra_accepted": [],
         "infra_missing": [],
         "infra_shortfall_accepted": false,
-        "role": "live",
-        "skill_usage": null
+        "role": "live"
       }
     },
     {

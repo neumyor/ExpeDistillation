@@ -17,6 +17,7 @@ import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
 from expedistill.composites import answer_sheets as acceptance_sheets
+from expedistill.composites import coverage as coverage_io
 from expedistill.composites import live_measurement as lm
 from expedistill.composites.acceptance_skill_status import exam_attempts
 from expedistill.composites.phase_bank import (
@@ -29,6 +30,7 @@ from expedistill.composites.phase_report import (
     write_unit_specs,
 )
 from expedistill.composites.unit_ids import make_unit_id
+from expedistill.methods.delivery.folder import skill_folder_manifest
 from expedistill.core import ids
 from expedistill.core.config import (
     CompareSpec,
@@ -55,9 +57,7 @@ from expedistill.infra.store import (
     Store,
     append_jsonl,
     read_jsonl,
-    write_jsonl,
 )
-from expedistill.composites.skill_usage import SKILL_USAGE_NAME
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import RevisionOutcome
 from expedistill.methods.curation import none as curation_none
@@ -218,19 +218,57 @@ def _skill(content=MARKED_A, version=1, status="pending", segment=0):
 
 def _seed_baseline(store, weak_correctness=False, attempts=2):
     """The baseline phase's on-disk state: both arms of one task."""
-    store.save(Trajectory(
+    strong = Trajectory(
         trajectory_id=ids.make_trajectory_id(TASK_ID, "strong", 0),
         task_id=TASK_ID, benchmark=BENCHMARK, model_role="strong",
         model_name="s", attempt_index=0,
         steps=[Step(action="do s", observation="ok")],
-        correctness=True), "trajectories")
+        correctness=True)
+    store.save(strong, "trajectories")
+    weak = []
     for attempt in range(attempts):
-        store.save(Trajectory(
+        trajectory = Trajectory(
             trajectory_id=ids.make_trajectory_id(TASK_ID, "weak", attempt),
             task_id=TASK_ID, benchmark=BENCHMARK, model_role="weak",
             model_name="w", attempt_index=attempt,
             steps=[Step(action="do w", observation="no")],
-            correctness=weak_correctness), "trajectories")
+            correctness=weak_correctness)
+        store.save(trajectory, "trajectories")
+        weak.append(trajectory)
+    specs = [
+        UnitSpec(
+            unit_id=make_unit_id(
+                phase_label="p01:baseline", benchmark=BENCHMARK,
+                task_ref=TASK_ID, role="strong", skills_injected=None),
+            phase_label="p01:baseline", task_ref=TASK_ID, role="strong",
+            arm="strong", expected_attempts=1, injected_skills=None,
+            no_valid_cause="all_holes"),
+        UnitSpec(
+            unit_id=make_unit_id(
+                phase_label="p01:baseline", benchmark=BENCHMARK,
+                task_ref=TASK_ID, role="weak", skills_injected=None),
+            phase_label="p01:baseline", task_ref=TASK_ID, role="weak",
+            arm="weak", expected_attempts=attempts, injected_skills=None,
+            no_valid_cause="all_holes"),
+    ]
+    cov = coverage_io.baseline_coverage(store, specs, [])
+    executions = [
+        acceptance_sheets.execution_from_trajectory(
+            strong, unit_id=specs[0].unit_id,
+            phase_label="p01:baseline", arm="strong")]
+    executions.extend(
+        acceptance_sheets.execution_from_trajectory(
+            trajectory, unit_id=specs[1].unit_id,
+            phase_label="p01:baseline", arm="weak")
+        for trajectory in weak)
+    sheets = acceptance_sheets.assemble_answer_sheets(
+        executions, cov, phase_label="p01:baseline")
+    acceptance_sheets.grade_answer_sheets(sheets, "tb_scorer")
+    dest = phase_bank_dir(store.run_dir, "p01:baseline")
+    acceptance_sheets.write_answer_sheets(
+        sheets, dest / ANSWER_SHEETS_DIR)
+    acceptance_sheets.write_coverage(cov, dest / COVERAGE_NAME)
+    write_unit_specs(specs, dest)
 
 
 def _seed_segment(store, success=True):
@@ -336,19 +374,48 @@ def _seed_live_round(store, *, better=False):
     _seed_baseline(store, weak_correctness=False)
     round_dir = store.run_dir / "stage4_acceptance" / "live_run" / "round00"
     round_store = Store(round_dir)
-    for attempt in range(2):
-        round_store.save(Trajectory(
-            trajectory_id=ids.make_trajectory_id(TASK_ID, "weak", attempt),
-            task_id=TASK_ID, benchmark=BENCHMARK, model_role="weak",
-            model_name="w", attempt_index=attempt,
-            steps=[Step(action=f"do x {attempt}",
-                        observation=f"obs {attempt}")],
-            correctness=better), "trajectories")
     skills = [_skill(segment=segment) for segment in range(2)]
     for skill in skills:
         store.save(skill, "skills")
     members = [{"skill_id": skill.skill_id, "version": skill.version}
                for skill in skills]
+    manifest = skill_folder_manifest(skills, "when_to_use",
+                                     accepted_only=False)
+    cat = f"cat {manifest['files'][0]['filename']}\n"
+    for attempt in range(2):
+        round_store.save(Trajectory(
+            trajectory_id=ids.make_trajectory_id(TASK_ID, "weak", attempt),
+            task_id=TASK_ID, benchmark=BENCHMARK, model_role="weak",
+            model_name="w", attempt_index=attempt,
+            skills_injected=members,
+            steps=[Step(action=cat, observation=""),
+                   Step(action=f"do x {attempt}",
+                        observation=f"obs {attempt}")],
+            correctness=better), "trajectories")
+    spec = UnitSpec(
+        unit_id=make_unit_id(
+            phase_label="p03:live", benchmark=BENCHMARK,
+            task_ref=TASK_ID, role="weak", skills_injected=members),
+        phase_label="p03:live", task_ref=TASK_ID, role="weak", arm=None,
+        expected_attempts=2, injected_skills=members)
+    cov = coverage_io.live_coverage(
+        store, [spec], round_=0, terminal_overrides={})
+    executions = [
+        acceptance_sheets.execution_from_trajectory(
+            round_store.load("trajectories",
+                             ids.make_trajectory_id(TASK_ID, "weak", attempt),
+                             Trajectory),
+            unit_id=spec.unit_id, phase_label="p03:live", arm=None,
+            folder=manifest)
+        for attempt in range(2)]
+    sheets = acceptance_sheets.assemble_answer_sheets(
+        executions, cov, phase_label="p03:live")
+    acceptance_sheets.grade_answer_sheets(sheets, "tb_scorer")
+    live_dir = phase_bank_dir(store.run_dir, "p03:live")
+    acceptance_sheets.write_answer_sheets(
+        sheets, live_dir / ANSWER_SHEETS_DIR)
+    acceptance_sheets.write_coverage(cov, live_dir / COVERAGE_NAME)
+    write_unit_specs([spec], live_dir)
     _, block = lm.survivors_and_block(store, TASK_ID)
     append_jsonl(round_dir / lm.INJECTION_AUDIT_NAME, {
         "schema": "injection-audit-v1", "task_id": TASK_ID, "round": 0,
@@ -950,24 +1017,6 @@ def test_skill_level_deletes_unread_and_revises_read(
     _install_curation(monkeypatch)
     _seed_finished_learn(ctx.store, ctx.run_dir)
     skills = _seed_live_round(ctx.store, better=False)
-    round_dir = (ctx.run_dir / "stage4_acceptance" / "live_run"
-                 / "round00")
-    write_jsonl(round_dir / SKILL_USAGE_NAME, [
-        {"schema": "skill-usage-v1", "task_id": TASK_ID, "round": 0,
-         "attempt": attempt,
-         "trajectory_id": ids.make_trajectory_id(TASK_ID, "weak", attempt),
-         "delivery": "folder", "description_mode": "when_to_use",
-         "available_list_present": True, "available_names": [],
-         "available_skill_ids": [skill.skill_id for skill in skills],
-         "delivery_status": "ok",
-         "reads": [{"skill_id": skills[0].skill_id,
-                    "filename": "a/SKILL.md", "step_index": 0,
-                    "command": "cat a/SKILL.md"}],
-         "read_skill_ids": [skills[0].skill_id],
-         "unread_skill_ids": [skills[1].skill_id],
-         "first_agent_step": 1, "first_read_step": 0,
-         "outcome": "failure"}
-        for attempt in range(2)])
 
     result = phase_learn.run(ctx, _phase(sequence, phases, 3))
 
@@ -995,24 +1044,6 @@ def test_a_partially_landed_group_revision_resumes_cleanly(
     _install_curation(monkeypatch)
     _seed_finished_learn(ctx.store, ctx.run_dir)
     skills = _seed_live_round(ctx.store, better=False)
-    round_dir = (ctx.run_dir / "stage4_acceptance" / "live_run"
-                 / "round00")
-    write_jsonl(round_dir / SKILL_USAGE_NAME, [
-        {"schema": "skill-usage-v1", "task_id": TASK_ID, "round": 0,
-         "attempt": attempt,
-         "trajectory_id": ids.make_trajectory_id(TASK_ID, "weak", attempt),
-         "delivery": "folder", "description_mode": "when_to_use",
-         "available_list_present": True, "available_names": [],
-         "available_skill_ids": [skill.skill_id for skill in skills],
-         "delivery_status": "ok",
-         "reads": [{"skill_id": skills[0].skill_id,
-                    "filename": "a/SKILL.md", "step_index": 1,
-                    "command": "cat a/SKILL.md"}],
-         "read_skill_ids": [skills[0].skill_id],
-         "unread_skill_ids": [skills[1].skill_id],
-         "first_agent_step": 1, "first_read_step": 1,
-         "outcome": "failure"}
-        for attempt in range(2)])
     landed = skills[0]
     landed.content = MARKED_B
     landed.version = 2

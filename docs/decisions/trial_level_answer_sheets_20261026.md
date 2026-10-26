@@ -88,9 +88,10 @@ Markdown 不作为源。
 
 反向 / 风险：
 
-- 旧 run 没有新工件；`reports.py` / `verdicts.summarize_unit` 保留为兼容
-  fallback，新路径不再使用；
-- `unit_verdicts.jsonl` 不再由新 run 写入；规则 1 改读 `reuse_index.jsonl`；
+- 旧 run 没有新工件；实现上已删除 `reports.py`、
+  `AcceptanceReportRow`、`verdicts.summarize_unit` 和
+  `unit_verdicts.jsonl` 双轨，不提供旧 run 读取兼容；
+- 规则 1 改读 `reuse_index.jsonl`；
 - coverage 必须显式处理 expected/missing/leak/overflow/generation/control
   perfect；漏一个就会把“没测”当 0 分；
 - `UnitSummary` 只能由共享函数产生，禁止下游各自计数；
@@ -121,15 +122,18 @@ Markdown 不作为源。
   attempt 的轨迹和可见技能清单是什么”；
 - `composites/skill_usage.build_usage_rows_from_sheets` 从 AnswerSheet 的
   `ExecutionRecord.steps` + `artifacts.skill_folder` 提取读取/未读事实；
-  `skill_usage.jsonl` 只保留为相位写出的派生审计缓存；
+  `skill_usage.jsonl` 的写盘和旧 trajectory 入口已删除；
 - `phase_learn` 从上一执行相位的 `answer_sheets/` 现算
-  `usage_by_task`，不再把 `skill_usage.jsonl` 当作决策/归因的输入；
-- `methods/attribution/skill_attempts.collect_skill_evidence` 的主输入改为
+  `usage_by_task`；
+- `methods/attribution/skill_attempts.collect_skill_evidence` 的唯一输入是
   `sheets: Sequence[AnswerSheet]`，从 `ExecutionRecord` 取 steps、
-  attempt、raw correctness 和 folder；`store`/`round_` 仅作为旧 run
-  fallback；
+  attempt、raw correctness 和 folder；`store`/`round_` fallback 已删除；
 - `learn_apply` 把当前 phase 的 sheets 传给归因，不再传
   `folder_manifests`。
+
+最终清理提交还删除了 `composites/reports.py`、`AcceptanceReportRow`、
+`verdicts.summarize_unit` / `status_cause_for_terminal`、phase-world
+`unit_verdicts.jsonl` 读取和审计 fallback；新代码只认 AnswerSheet 协议。
 
 决策仍消费 UnitSummary（unit 级视图），不直接读 trial 轨迹；这是有意的
 分层。归因/写作消费 trial 级 execution/evidence。

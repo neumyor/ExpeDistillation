@@ -59,8 +59,7 @@ phases/p03_live/skill_folder/<task>/
 和 test 的 `folder` 一样，Harbor 只把每条技能的 `name` 和 `description` 放进
 `<available_skills>`；区别是这里的池子是 live 的 pending 组。逐技能读取事实
 从该轮的 trial 级 AnswerSheet（`ExecutionRecord.steps` +
-`artifacts.skill_folder`）按需提取；`skill_usage.jsonl` 只是派生的审计缓存。
-参数与 `folder` 相同：
+`artifacts.skill_folder`）按需提取。参数与 `folder` 相同：
 
 | 参数 | 含义 | 可选项 | 默认 |
 |---|---|---|---|

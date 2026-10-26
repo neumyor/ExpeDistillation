@@ -155,8 +155,7 @@ def test_an_unplanned_coverage_record_is_an_error(tmp_path):
 
 def test_a_final_test_report_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
-    write_jsonl(run_dir / "phases" / "p07_test"
-               / audit_live_run.VERDICTS_NAME, [])
+    write_jsonl(run_dir / "phases" / "p07_test" / "unit_verdicts.jsonl", [])
     assert any("final-test phase wrote per-unit verdicts" in message
                for message in _errors(run_dir))
 
@@ -203,6 +202,26 @@ def test_a_final_test_reuse_index_is_an_error(tmp_path):
                / audit_live_run.REUSE_INDEX_NAME,
                [{"unit_id": "x", "status": "normal", "cause": ""}])
     assert any("final-test phase wrote reuse_index.jsonl" in message
+               for message in _errors(run_dir))
+
+
+def test_a_complete_non_test_phase_without_a_reuse_index_is_an_error(
+        tmp_path):
+    """New runs are audited only through the trial-level artifacts; the
+    reuse index is the non-test phase's unit-status record, so a complete
+    phase without one is an ERROR (there is no legacy verdict fallback)."""
+    run_dir = _clean_v4_run(tmp_path)
+    (run_dir / "phases" / "p03_live_1"
+     / audit_live_run.REUSE_INDEX_NAME).unlink()
+    assert any("no reuse_index.jsonl" in message
+               for message in _errors(run_dir))
+
+
+def test_a_missing_trial_artifact_on_a_complete_phase_is_an_error(tmp_path):
+    run_dir = _clean_v4_run(tmp_path)
+    (run_dir / "phases" / "p03_live_1"
+     / audit_live_run.COVERAGE_NAME).unlink()
+    assert any("carries no coverage.jsonl" in message
                for message in _errors(run_dir))
 
 

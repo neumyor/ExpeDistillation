@@ -67,10 +67,12 @@ five classes' phase-world counterparts, "对象一致 / 重复执行 / 统计
      present trial has exactly one executed answer sheet with a verdict
      from the closed vocabulary, a non-present trial has no execution
      sheet and a non-empty cause, and ``reuse_index.jsonl`` matches the
-     unit summaries derived from the sheets; a pre-refactor phase falls
-     back to its legacy ``unit_verdicts.jsonl`` (one INFO names the
-     fallback); a final-test phase wrote neither index; the redispatch
-     bookkeeping only names planned units with sane pass counts;
+     unit summaries derived from the sheets; every phase carries the
+     trial-level artifacts -- a missing one is an ERROR on a complete
+     phase, a WARN while it is still in flight -- and a non-test phase
+     must carry its reuse index (the next phase's rule-1 reuse reads it);
+     a final-test phase wrote neither index; the redispatch bookkeeping
+     only names planned units with sane pass counts;
   8. learn-ledgers: the learn phases' three ledgers reconcile with the
      skill store (receipts land as real statuses, the revision chain
      from_version -> version is intact, one receipt per (target,
@@ -148,7 +150,6 @@ from expedistill.composites.phase_report import (  # noqa: E402
     SPECS_NAME,
     read_phase_report,
 )
-from expedistill.composites.verdicts import UNIT_STATUSES  # noqa: E402
 from expedistill.core.vocabulary import RUN_VERDICTS  # noqa: E402
 from expedistill.infra.reliability import CodeBugError, ConfigError  # noqa: E402
 from expedistill.infra.store import (  # noqa: E402
@@ -178,11 +179,6 @@ ZERO_EXECUTION_VERDICTS = ("weak_already_knows", "live_injection_overflow",
 # not reach into stages/ private names (AGENTS section 5).
 PHASE_RECORD_NAME = "phase.json"
 UNITS_NAME = "units.jsonl"
-#: The legacy per-unit result ledger. New runs write ``reuse_index.jsonl``
-#: (same three fields, execution-side meaning) and trial-level answer
-#: sheets instead; this name is read only for runs frozen before the
-#: trial-level refactor.
-VERDICTS_NAME = "unit_verdicts.jsonl"
 #: The execution-side reuse cache of a new run (unit_id / status / cause).
 #: Restated here rather than imported from the stage layer (AGENTS 5).
 REUSE_INDEX_NAME = "reuse_index.jsonl"
@@ -803,7 +799,7 @@ def _live_phases_all_complete(run_dir: Path,
         if summary.get("complete") is not True:
             return False
         # A live phase that measured anything leaves a result record: the
-        # trial-level artifacts of a new run, or the legacy verdict rows.
+        # trial-level artifacts (specs, coverage, answer sheets).
         if _has_trial_artifacts(directory):
             try:
                 if (read_jsonl(directory / SPECS_NAME)
@@ -813,9 +809,6 @@ def _live_phases_all_complete(run_dir: Path,
                 return False
             if any((directory / ANSWER_SHEETS_DIR).glob("*.json")):
                 return False
-        verdicts_path = directory / VERDICTS_NAME
-        if verdicts_path.exists() and read_jsonl(verdicts_path):
-            return False
     return True
 
 
@@ -908,16 +901,14 @@ def _read_sheets(audit: Audit, label: str, directory: Path, *,
 
 
 def _check_reuse_index(audit: Audit, label: str, directory: Path,
-                       report: Any,
-                       legacy_rows: Sequence[Dict[str, Any]]) -> None:
+                       report: Any) -> None:
     """Check 7 (new): the reuse index matches the derived unit summaries.
 
     The index may carry rows a previous phase handed forward (rule 1's
     reused units); those have no sheet in this phase, so only the units
-    the summaries cover are compared. Without the trial artifacts the
-    caller passes the legacy verdict rows instead (the same three-field
-    shape) -- a pre-refactor run's index (when one exists) is checked
-    against the records it was derived from, never skipped silently.
+    the summaries cover are compared. A missing index is reported by the
+    caller; a derivation failure was already an ERROR, so there is
+    nothing further to compare here.
     """
     index_path = directory / REUSE_INDEX_NAME
     if not index_path.is_file():
@@ -931,21 +922,10 @@ def _check_reuse_index(audit: Audit, label: str, directory: Path,
                 f"phase {label}: duplicate {REUSE_INDEX_NAME} row for unit "
                 f"{unit_id!r} (one reuse answer per unit)")
         index[unit_id] = (row.get("status"), row.get("cause", ""))
-    if report is not None:
-        derived = {unit.unit_id: (unit.status, unit.cause)
-                   for unit in report.units}
-    elif legacy_rows:
-        derived = {row.get("unit_id"): (row.get("status"),
-                                        row.get("cause", ""))
-                   for row in legacy_rows}
-    else:
-        if index:
-            audit.add(
-                ERROR, "units-report",
-                f"phase {label}: {REUSE_INDEX_NAME} exists but there are no "
-                "answer sheets and no legacy verdicts to derive its rows "
-                "from")
+    if report is None:
         return
+    derived = {unit.unit_id: (unit.status, unit.cause)
+               for unit in report.units}
     for unit_id, expected in sorted(derived.items(), key=lambda kv: str(kv[0])):
         actual = index.get(unit_id)
         if actual is None:
@@ -1076,40 +1056,7 @@ def _check_trial_artifacts(audit: Audit, label: str, directory: Path,
             ERROR, "units-report",
             f"phase {label}: cannot derive unit summaries from the trial "
             f"artifacts: {exc}")
-    _check_reuse_index(audit, label, directory, report, ())
-
-
-def _check_legacy_verdicts(audit: Audit, label: str, directory: Path,
-                           unit_set: Set[Any]) -> List[Dict[str, Any]]:
-    """Check 7 (legacy): the pre-refactor per-unit verdict ledger."""
-    verdicts_path = directory / VERDICTS_NAME
-    if not verdicts_path.is_file():
-        return []
-    rows = read_jsonl(verdicts_path)
-    reported: Set[str] = set()
-    for row in rows:
-        unit_id = row.get("unit_id")
-        if unit_id not in unit_set:
-            audit.add(
-                ERROR, "units-report",
-                f"phase {label}: verdict row names unit {unit_id!r} "
-                "the phase never resolved (an invented row)")
-        if row.get("status") not in UNIT_STATUSES:
-            audit.add(
-                ERROR, "units-report",
-                f"phase {label}: verdict row {unit_id!r} carries "
-                f"status {row.get('status')!r} outside the closed "
-                f"vocabulary {list(UNIT_STATUSES)}")
-        reported.add(unit_id)
-    if _summary_is_complete(directory):
-        missing = [uid for uid in unit_set if uid not in reported]
-        if missing:
-            audit.add(
-                ERROR, "units-report",
-                f"phase {label}: the summary says complete but "
-                f"{len(missing)} resolved unit(s) have no report "
-                f"row ({missing})")
-    return rows
+    _check_reuse_index(audit, label, directory, report)
 
 
 def check_units_report(audit: Audit, run_dir: Path,
@@ -1118,14 +1065,15 @@ def check_units_report(audit: Audit, run_dir: Path,
     no duplicate execution, no invented row, closed status vocabulary,
     a complete summary leaves no unit unreported.
 
-    A phase that carries the trial-level artifacts (``unit_specs.jsonl``
-    / ``coverage.jsonl`` / ``answer_sheets/``) is audited on those; a
-    phase frozen before the refactor falls back to its legacy
-    ``unit_verdicts.jsonl`` (one run-level INFO names the fallback). The
-    final test is allowed to have neither index: its numbers never flow
-    into learning, and writing one is an ERROR.
+    Every execute phase is audited through its trial-level artifacts
+    (``unit_specs.jsonl`` / ``coverage.jsonl`` / ``answer_sheets/``):
+    a missing artifact is an ERROR once the phase's summary says
+    complete, a WARN while it is still in flight -- there is no legacy
+    per-unit ledger to fall back to. A non-test phase must also carry
+    ``reuse_index.jsonl`` (the next phase's rule-1 reuse reads it); the
+    final test must carry neither index, since its numbers never flow
+    into learning.
     """
-    legacy_fallback: List[str] = []
     for index, name, spec in specs:
         if not isinstance(spec, dict) or spec.get("kind") != "execute":
             continue
@@ -1134,12 +1082,13 @@ def check_units_report(audit: Audit, run_dir: Path,
         if directory is None or not directory.exists():
             continue
         is_test = spec.get("role") == PHASE_ROLE_TEST
+        complete = _summary_is_complete(directory)
 
         unit_ids: List[str] = []
         units_path = directory / UNITS_NAME
         if not units_path.is_file():
             audit.add(
-                ERROR if _summary_is_complete(directory) else WARN,
+                ERROR if complete else WARN,
                 "units-report",
                 f"phase {label}: the phase directory carries no "
                 f"{UNITS_NAME} (the resolved unit list is the phase's "
@@ -1157,7 +1106,7 @@ def check_units_report(audit: Audit, run_dir: Path,
         unit_set = set(unit_ids)
 
         if is_test:
-            if (directory / VERDICTS_NAME).exists():
+            if (directory / "unit_verdicts.jsonl").exists():
                 audit.add(
                     ERROR, "units-report",
                     f"phase {label}: a final-test phase wrote per-unit "
@@ -1169,38 +1118,33 @@ def check_units_report(audit: Audit, run_dir: Path,
                     f"phase {label}: a final-test phase wrote "
                     f"{REUSE_INDEX_NAME} (test results never seed a later "
                     "phase's rule-1 reuse)")
-        if _has_trial_artifacts(directory):
-            if not is_test and (directory / VERDICTS_NAME).exists():
-                audit.add(
-                    WARN, "units-report",
-                    f"phase {label}: legacy {VERDICTS_NAME} sits beside the "
-                    "trial-level artifacts (a transitional directory; the "
-                    "answer sheets are the record)")
+
+        missing_artifacts = [
+            name for name, present in (
+                (SPECS_NAME, (directory / SPECS_NAME).is_file()),
+                (COVERAGE_NAME, (directory / COVERAGE_NAME).is_file()),
+                (f"{ANSWER_SHEETS_DIR}/",
+                 (directory / ANSWER_SHEETS_DIR).is_dir()),
+            ) if not present]
+        if missing_artifacts:
+            audit.add(
+                ERROR if complete else WARN,
+                "units-report",
+                f"phase {label}: the phase directory carries no "
+                f"{', '.join(missing_artifacts)} (every execute phase is "
+                "audited through its trial-level artifacts)")
+        else:
             _check_trial_artifacts(
                 audit, label, directory, str(spec.get("role")),
                 is_test=is_test)
-        elif not is_test and (directory / VERDICTS_NAME).is_file():
-            legacy_fallback.append(label)
-            legacy_rows = _check_legacy_verdicts(
-                audit, label, directory, unit_set)
-            _check_reuse_index(audit, label, directory, None, legacy_rows)
-        elif units_path.is_file() and not is_test:
-            audit.add(
-                INFO, "units-report",
-                f"phase {label}: units resolved but no result record yet "
-                "(the phase is in flight or was interrupted)")
 
-        if not is_test:
-            has_index = ((directory / REUSE_INDEX_NAME).is_file()
-                         or (directory / VERDICTS_NAME).is_file())
-            if not has_index and (_has_trial_artifacts(directory)
-                                  or _summary_is_complete(directory)):
-                audit.add(
-                    ERROR if _summary_is_complete(directory) else INFO,
-                    "units-report",
-                    f"phase {label}: no {REUSE_INDEX_NAME} and no legacy "
-                    f"{VERDICTS_NAME} (a non-test phase must record its "
-                    "unit statuses for the next phase's rule-1 reuse)")
+        if not is_test and not (directory / REUSE_INDEX_NAME).is_file():
+            audit.add(
+                ERROR if complete else WARN,
+                "units-report",
+                f"phase {label}: no {REUSE_INDEX_NAME} (a non-test phase "
+                "must record its unit statuses for the next phase's "
+                "rule-1 reuse)")
 
         redispatch_path = directory / REDISPATCH_NAME
         if redispatch_path.exists():
@@ -1225,13 +1169,6 @@ def check_units_report(audit: Audit, run_dir: Path,
                         f"phase {label}: the redispatch bookkeeping of unit "
                         f"{unit_id!r} carries a non-natural pass count "
                         f"({passes!r})")
-
-    if legacy_fallback:
-        audit.add(
-            INFO, "units-report",
-            f"phase(s) {legacy_fallback} predate the trial-level artifacts "
-            f"({SPECS_NAME} / {COVERAGE_NAME} / {ANSWER_SHEETS_DIR}/); "
-            f"audited through the legacy {VERDICTS_NAME} read path")
 
 
 def check_learn_ledgers(audit: Audit, run_dir: Path,
@@ -1398,8 +1335,9 @@ def _check_final_test_sheets(audit: Audit, label: str, directory: Path, *,
     """The final test's answer sheets cover both arms.
 
     The test phase writes trial-level artifacts like any other execute
-    phase, but no reuse index / legacy verdicts (check_units_report
-    rejects those). A complete summary must show at least one executed
+    phase, but neither a reuse index nor the legacy per-unit verdicts
+    (check_units_report rejects both). A complete summary must show at
+    least one executed
     sheet per arm; an external-campaign trial must be marked
     ``kind="external"`` so its provenance cannot pass for a local run.
     """

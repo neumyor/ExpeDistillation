@@ -19,10 +19,9 @@ Who produces what:
 * ``ExecutionUnitRow`` -- delivery, one row per unit (one task plus the
   skills injected into it, possibly none).
 * ``RunRecord`` -- execution, one per execution of a unit.
-* ``AcceptanceReportRow`` -- acceptance, one row per unit.
 * ``TaskListRow`` -- decision, one row per decided operation.
 
-``unit_id`` is the join key of the first three shapes:
+``unit_id`` is the join key of the two rows that carry one:
 
     f"{phase_label}:{benchmark}:{task_or_exam_id}:{role}"
     f":{sha256(canonical(skills_injected)).hexdigest()[:8]}"
@@ -43,7 +42,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 __all__ = [
-    "AcceptanceReportRow",
     "ExecutionUnitList",
     "ExecutionUnitRow",
     "RunRecord",
@@ -106,52 +104,6 @@ class RunRecord:
     aux: Dict[str, Any]
 
     #: Where the trajectory and the other artifacts live.
-    artifacts: Dict[str, Any]
-
-
-@dataclass
-class AcceptanceReportRow:
-    """Legacy unit-level report row (old-run fallback only).
-
-    New runs use the trial-level AnswerSheet + UnitSummary shapes in
-    ``core/answer_sheet.py``; this dataclass is kept so pre-refactor run
-    directories remain readable.
-    """
-
-    #: The unit this row judges (the join key shared with the execution
-    #: unit list).
-    unit_id: str
-
-    #: The phase this row belongs to.
-    phase_label: str
-
-    #: The execution role this row judges.
-    role: str
-
-    #: The skills injected into this unit (same raw value as the unit's
-    #: ``skills_injected``).
-    injected_skills: Any
-
-    #: Per-run results: the run key, the verdict (success / failure /
-    #: invalid) and its basis (the named rule plus explanation text).
-    runs: List[Dict[str, Any]]
-
-    #: How many runs were valid.
-    valid_count: int
-
-    #: How many of the valid runs succeeded.
-    success_count: int
-
-    #: One of ``"normal"``, ``"not_testable"``, ``"not_run_control_perfect"``.
-    #: A normal unit's score is its counts alone.
-    status: str
-
-    #: Why ``status`` is ``"not_testable"`` or ``"not_run_control_perfect"``;
-    #: a value from the fixed set R0 places in composites.decision (the
-    #: empty string on a normal row).
-    cause: str
-
-    #: Where the trajectories and the other artifacts live.
     artifacts: Dict[str, Any]
 
 

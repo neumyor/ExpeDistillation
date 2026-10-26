@@ -186,8 +186,6 @@ src/expedistill/
                           被 cat；folder 读取解析与 group/whole-bank 的
                           injected 规则都在这里
     skill_attempt_evidence.py  P04/P06 的 SkillAttemptEvidence / 窗口证据
-    reports.py            旧 run 的 unit-level 报告读取 fallback（新 run 不写；
-                          新路径用 phase_report + answer_sheets）
     shortfall.py          接受空洞的落盘记录（摸底相位的记录在 run 根的
                           stage1_baseline/ 下，live 基线加载与 test 相位的
                           复用对照都读它）
@@ -197,10 +195,8 @@ src/expedistill/
                           against: external_campaign 时对照臂由此取数，零执行
     skill_usage.py        live folder 轮次的逐尝试使用事实：从 trial 级
                           AnswerSheet 的 ExecutionRecord.steps +
-                          artifacts.skill_folder 提取可用技能、读取/未读、
-                          结果；旧 trajectory 入口仅作兼容
-    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet；
-                          旧 unit report 行保留为 legacy fallback
+                          artifacts.skill_folder 提取可用技能、读取/未读、结果
+    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`

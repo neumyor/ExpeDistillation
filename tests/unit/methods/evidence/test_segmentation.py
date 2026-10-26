@@ -20,7 +20,14 @@ mandatory for anything that lands units):
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
+from expedistill.composites import answer_sheets, coverage
 from expedistill.composites.phase_bank import load_phase_bank, phase_bank_dir
+from expedistill.composites.phase_report import (
+    ANSWER_SHEETS_DIR,
+    COVERAGE_NAME,
+    write_unit_specs,
+)
+from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core import ids
 from expedistill.core.config import (
     CompareSpec,
@@ -28,6 +35,7 @@ from expedistill.core.config import (
     LearnPhaseSpec,
     PhaseInstance,
 )
+from expedistill.core.answer_sheet import UnitSpec
 from expedistill.core.models import Skill, Step, Subtask, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import json_script, make_fake_handle
@@ -168,11 +176,40 @@ def _phase(sequence, phases, index):
 def _seed_d_phase(store, *, strong=True, weak_attempts=2):
     """The baseline phase's on-disk state: the strong arm all-success, the weak
     arm failing every attempt (the baseline gap that authorizes add)."""
+    trajectories = []
     if strong:
-        store.save(_trajectory("strong", 0), "trajectories")
+        trajectory = _trajectory("strong", 0)
+        store.save(trajectory, "trajectories")
+        trajectories.append(trajectory)
     for attempt in range(weak_attempts):
-        store.save(_trajectory("weak", attempt, correctness=False),
-                   "trajectories")
+        trajectory = _trajectory("weak", attempt, correctness=False)
+        store.save(trajectory, "trajectories")
+        trajectories.append(trajectory)
+    specs = [
+        UnitSpec(
+            unit_id=make_unit_id(
+                phase_label="p01:baseline", benchmark=BENCHMARK,
+                task_ref=TASK_ID, role=role, skills_injected=None),
+            phase_label="p01:baseline", task_ref=TASK_ID, role=role,
+            arm=role, expected_attempts=(1 if role == "strong"
+                                         else weak_attempts),
+            injected_skills=None, no_valid_cause="all_holes")
+        for role in ("strong", "weak")]
+    cov = coverage.baseline_coverage(store, specs, [])
+    by_role = {"strong": specs[0].unit_id, "weak": specs[1].unit_id}
+    executions = [
+        answer_sheets.execution_from_trajectory(
+            trajectory, unit_id=by_role[trajectory.model_role],
+            phase_label="p01:baseline", arm=trajectory.model_role)
+        for trajectory in trajectories]
+    sheets = answer_sheets.assemble_answer_sheets(
+        executions, cov, phase_label="p01:baseline")
+    answer_sheets.grade_answer_sheets(sheets, "tb_scorer")
+    dest = phase_bank_dir(store.run_dir, "p01:baseline")
+    answer_sheets.write_answer_sheets(
+        sheets, dest / ANSWER_SHEETS_DIR)
+    answer_sheets.write_coverage(cov, dest / COVERAGE_NAME)
+    write_unit_specs(specs, dest)
 
 
 def _outcomes(run_dir, label):

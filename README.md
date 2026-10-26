@@ -56,8 +56,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 没有）、grading（success / failure / invalid + basis + rule name）。
 `UnitSummary`（有效次数、成功次数、status、cause）不是验收产物，而是
 `unit_summary.py` 从 AnswerSheet + UnitSpec 现算的 unit 级视图；决策、
-审计、test 都调同一组纯函数。旧 run 的 `unit_verdicts.jsonl` 只保留为
-兼容读取 fallback。
+审计、test 都调同一组纯函数。
 
 | 执行阶段 | 题 | 注入的技能 | 谁做、做几次 |
 |---|---|---|---|
@@ -86,8 +85,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
    "对不对"留空、参考答案作为附带信息传下去，判卷和泄题检查归验收。
 6. **报告只记录"注入了哪些技能"**。模型实际按哪条技能做的，要读轨迹才知道；
    live folder 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 是读取
-   事实的源，`skill_usage.jsonl` 只是从 AnswerSheet 派生的审计缓存；应用与
-   相关判断仍属于找证据的工作。
+   事实的源；应用与相关判断仍属于找证据的工作。
 7. **决策不读轨迹，找证据不定动作，写作不做测量**。三者之间只通过任务清单
    和证据包交接。
 8. **实战验收的测量单位是"包"，决策单位是"技能"**。live 相位一个任务的整包
@@ -538,7 +536,6 @@ E1 内部的 runner：
 | — | 相位报告 envelope | 读取 `unit_specs.jsonl` + `answer_sheets/` + `coverage.jsonl`，现算 UnitSummary；不是持久 report card | `composites/phase_report.py` |
 | — | unit/sheet 身份 | `make_unit_id` / `canonical_skills` / gap sheet id | `composites/unit_ids.py` |
 | — | 决策 | `decide_task_list`（P02 baseline-gap / exam）、`decision_strategies`（P04/P06 的 `task_level` / `skill_level`）、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py`、`decision_strategies.py` |
-| — | 兼容读取器 | 旧 run 的 unit-level 报告读取（新 run 不写）：baseline / exam / live 只读 fallback | `composites/reports.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
 | — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
@@ -766,8 +763,7 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  同轨迹仓布局；injection_audit.jsonl 派发
                                  前首写冻结；accepted_infra_shortfall.json
                                  按轮记录；folder_by_task 的读取/未读事实
-                                 由相位 AnswerSheet 的 execution steps 提取，
-                                 skill_usage.jsonl 仅作派生审计缓存）
+                                 由相位 AnswerSheet 的 execution steps 提取）
 
   —— 相位目录（每个相位一份）——
   phases/pNN_<局部名>/
@@ -786,7 +782,6 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     reuse_index.jsonl            执行相位：规则 1 的 execution-side 缓存
                                  （unit_id / status / cause）；不是验收报告，
                                  test 相位不写
-    unit_verdicts.jsonl          仅旧 run：历史最小判决账本（兼容读取 fallback）
     redispatch.json              执行相位：按单元持久记录的无效重派计数
     <臂>/store/                  执行相位自己的轨迹仓（test 相位的两臂、
                                  split 模式 test 相位的现场裸臂；摸底相位
@@ -906,9 +901,8 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   （`folder_by_task`）：后者把每个技能写成 `<task>/<skill>/SKILL.md`，模型只
   先看到名字和描述，按需读取全文；派发前按任务物化到相位目录的
   `skill_folder/<task>/`，执行后由该轮 AnswerSheet 的
-  `ExecutionRecord.steps` + `artifacts.skill_folder` 提取读取/未读事实
-  （`skill_usage.jsonl` 只是派生审计缓存）。首轮提示词仍可见时比较
-  `<available_skills>` 与清单；
+  `ExecutionRecord.steps` + `artifacts.skill_folder` 提取读取/未读事实。
+  首轮提示词仍可见时比较 `<available_skills>` 与清单；
   TB 的本地还原从第一条模型命令开始，列表通常不可见，此时有读取即视为投递
   可用，没有读取则记 `unverified`，不误判为投递失败；
 - 轮次规则：序列里第 k 个 live 相位测量第 k-1 轮，轮号只有 {0, 1}

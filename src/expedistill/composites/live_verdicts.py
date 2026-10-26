@@ -34,13 +34,12 @@ stays on purpose -- the tests drive the round-agnostic cores directly
 with explicit paths, and the shells keep the frozen call shape the
 driver uses.
 
-Since R1 the acceptance verdict core is ``composites/verdicts.py`` (the
-status/cause vocabulary, the named run-verdict rules, the one report
-row). This module is K6's frozen verdicts-ledger protocol -- the ledger
-rows are pinned, so the judgment here is deliberately unchanged; the
-zero-execution terminals it writes are exactly the keys of verdicts'
-terminal table, and the report reader (composites/reports.py, kind
-"live") maps them onto the one acceptance report shape.
+The per-trial grading core is ``composites/verdicts.py``; the live
+phase's trial-level view is built by ``composites/coverage.py`` and
+``composites/phase_report.py``. This module is K6's frozen
+verdicts-ledger protocol -- the ledger rows are pinned, so the judgment
+here is deliberately unchanged; the zero-execution terminals it writes
+are mapped onto CoverageRecord causes by the live phase driver.
 """
 
 from pathlib import Path
