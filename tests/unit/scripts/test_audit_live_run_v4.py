@@ -140,16 +140,16 @@ def test_a_phase_record_drifted_from_the_sequence_is_an_error(tmp_path):
                for message in _errors(run_dir))
 
 
-def test_an_unplanned_report_row_is_an_error(tmp_path):
+def test_an_unplanned_coverage_record_is_an_error(tmp_path):
     run_dir = _clean_v4_run(tmp_path)
-    report_path = (run_dir / "phases" / "p03_live_1"
-                   / audit_live_run.VERDICTS_NAME)
+    coverage_path = (run_dir / "phases" / "p03_live_1"
+                     / audit_live_run.COVERAGE_NAME)
     rows = [json.loads(line) for line in
-            report_path.read_text(encoding="utf-8").splitlines() if line]
-    rows.append(audit_live_run._verdict_row(
-        "p03:live_1:tb:tb:t1:weak:deadbeef"))
-    write_jsonl(report_path, rows)
-    assert any("never resolved" in message
+            coverage_path.read_text(encoding="utf-8").splitlines() if line]
+    rows.append(audit_live_run._present_coverage(
+        "p03:live_1:tb:tb:t1:weak:deadbeef", 0))
+    write_jsonl(coverage_path, rows)
+    assert any("never specified" in message
                for message in _errors(run_dir))
 
 
@@ -158,6 +158,51 @@ def test_a_final_test_report_is_an_error(tmp_path):
     write_jsonl(run_dir / "phases" / "p07_test"
                / audit_live_run.VERDICTS_NAME, [])
     assert any("final-test phase wrote per-unit verdicts" in message
+               for message in _errors(run_dir))
+
+
+def test_a_present_sheet_without_grading_is_an_error(tmp_path):
+    run_dir = _clean_v4_run(tmp_path)
+    sheets = sorted((run_dir / "phases" / "p03_live_1"
+                     / audit_live_run.ANSWER_SHEETS_DIR).glob("*.json"))
+    sheet = read_json(sheets[0])
+    sheet["grading"] = None
+    write_json(sheets[0], sheet, indent=2)
+    assert any("has no grading verdict" in message
+               for message in _errors(run_dir))
+
+
+def test_a_gap_record_with_an_execution_sheet_is_an_error(tmp_path):
+    run_dir = _clean_v4_run(tmp_path)
+    coverage_path = (run_dir / "phases" / "p03_live_1"
+                     / audit_live_run.COVERAGE_NAME)
+    rows = [json.loads(line) for line in
+            coverage_path.read_text(encoding="utf-8").splitlines() if line]
+    rows[0] = audit_live_run._gap_coverage(
+        rows[0]["unit_id"], rows[0]["attempt_index"], "missing")
+    write_jsonl(coverage_path, rows)
+    assert any("carries an execution sheet" in message
+               for message in _errors(run_dir))
+
+
+def test_a_reuse_index_that_disagrees_with_the_sheets_is_an_error(tmp_path):
+    run_dir = _clean_v4_run(tmp_path)
+    index_path = (run_dir / "phases" / "p03_live_1"
+                  / audit_live_run.REUSE_INDEX_NAME)
+    rows = [json.loads(line) for line in
+            index_path.read_text(encoding="utf-8").splitlines() if line]
+    rows[0]["status"] = "not_testable"
+    write_jsonl(index_path, rows)
+    assert any("reuse_index.jsonl says unit" in message
+               for message in _errors(run_dir))
+
+
+def test_a_final_test_reuse_index_is_an_error(tmp_path):
+    run_dir = _clean_v4_run(tmp_path)
+    write_jsonl(run_dir / "phases" / "p07_test"
+               / audit_live_run.REUSE_INDEX_NAME,
+               [{"unit_id": "x", "status": "normal", "cause": ""}])
+    assert any("final-test phase wrote reuse_index.jsonl" in message
                for message in _errors(run_dir))
 
 

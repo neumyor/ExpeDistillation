@@ -61,11 +61,16 @@ five classes' phase-world counterparts, "对象一致 / 重复执行 / 统计
      frozen sequence (label, index, name, role) -- the run directory
      cannot drift from its frozen identity;
   7. units-report: the resolved unit list has no duplicate unit (one
-     resolution per phase), every report row names a planned unit and
-     carries a status from the closed vocabulary, a summary that says
-     "complete" leaves no unit without a report row, a final-test phase
-     never wrote a report, and the redispatch bookkeeping only names
-     planned units with sane pass counts;
+     resolution per phase); a new phase's trial artifacts agree --
+     ``unit_specs.jsonl`` has one spec per unit, every coverage record
+     names a spec unit and every spec covers each expected attempt, a
+     present trial has exactly one executed answer sheet with a verdict
+     from the closed vocabulary, a non-present trial has no execution
+     sheet and a non-empty cause, and ``reuse_index.jsonl`` matches the
+     unit summaries derived from the sheets; a pre-refactor phase falls
+     back to its legacy ``unit_verdicts.jsonl`` (one INFO names the
+     fallback); a final-test phase wrote neither index; the redispatch
+     bookkeeping only names planned units with sane pass counts;
   8. learn-ledgers: the learn phases' three ledgers reconcile with the
      skill store (receipts land as real statuses, the revision chain
      from_version -> version is intact, one receipt per (target,
@@ -96,9 +101,11 @@ Self-test: --self-test builds fake run directories in a temporary folder
          clean, then tampers with them (a verdict-contradicting status,
          a dropped round-0 trajectory, an invented shortfall unit on the
          legacy shape; a phase.json role flip, a duplicated unit, an
-         invented report row, a receipt the store contradicts, a dropped
-         final-test trajectory, a verdict-contradicting status on the v4
-         shape) and asserts each tamper is caught. No network, no model.
+         invented coverage record, a receipt the store contradicts, a
+         dropped final-test trajectory, a verdict-contradicting status,
+         a present sheet without grading, a coverage gap that still
+         carries an execution sheet on the v4 shape) and asserts each
+         tamper is caught. No network, no model.
 
 Example:
     .venv/bin/python scripts/audit/audit_live_run.py --run-dir runs/<name>
@@ -135,10 +142,18 @@ from expedistill.core.models import (  # noqa: E402
 )
 from expedistill.composites.decision import LIVE_REVISION_DELETED  # noqa: E402
 from expedistill.composites.phase_bank import phase_bank_dir  # noqa: E402
+from expedistill.composites.phase_report import (  # noqa: E402
+    ANSWER_SHEETS_DIR,
+    COVERAGE_NAME,
+    SPECS_NAME,
+    read_phase_report,
+)
 from expedistill.composites.verdicts import UNIT_STATUSES  # noqa: E402
-from expedistill.infra.reliability import ConfigError  # noqa: E402
+from expedistill.core.vocabulary import RUN_VERDICTS  # noqa: E402
+from expedistill.infra.reliability import CodeBugError, ConfigError  # noqa: E402
 from expedistill.infra.store import (  # noqa: E402
     Store,
+    object_filename,
     read_json,
     read_jsonl,
     write_json,
@@ -163,7 +178,14 @@ ZERO_EXECUTION_VERDICTS = ("weak_already_knows", "live_injection_overflow",
 # not reach into stages/ private names (AGENTS section 5).
 PHASE_RECORD_NAME = "phase.json"
 UNITS_NAME = "units.jsonl"
+#: The legacy per-unit result ledger. New runs write ``reuse_index.jsonl``
+#: (same three fields, execution-side meaning) and trial-level answer
+#: sheets instead; this name is read only for runs frozen before the
+#: trial-level refactor.
 VERDICTS_NAME = "unit_verdicts.jsonl"
+#: The execution-side reuse cache of a new run (unit_id / status / cause).
+#: Restated here rather than imported from the stage layer (AGENTS 5).
+REUSE_INDEX_NAME = "reuse_index.jsonl"
 REDISPATCH_NAME = "redispatch.json"
 EXEC_SUMMARY_NAME = "phase_summary.json"
 TASK_LIST_NAME = "task_list.jsonl"
@@ -780,6 +802,17 @@ def _live_phases_all_complete(run_dir: Path,
         summary = read_json(summary_path)
         if summary.get("complete") is not True:
             return False
+        # A live phase that measured anything leaves a result record: the
+        # trial-level artifacts of a new run, or the legacy verdict rows.
+        if _has_trial_artifacts(directory):
+            try:
+                if (read_jsonl(directory / SPECS_NAME)
+                        or read_jsonl(directory / COVERAGE_NAME)):
+                    return False
+            except ValueError:
+                return False
+            if any((directory / ANSWER_SHEETS_DIR).glob("*.json")):
+                return False
         verdicts_path = directory / VERDICTS_NAME
         if verdicts_path.exists() and read_jsonl(verdicts_path):
             return False
@@ -826,11 +859,273 @@ def check_phase_dirs(audit: Audit, run_dir: Path, specs: Sequence[Tuple]) \
                     "frozen identity")
 
 
+def _has_trial_artifacts(directory: Path) -> bool:
+    """Whether a phase directory carries the trial-level artifacts."""
+    return ((directory / SPECS_NAME).is_file()
+            and (directory / COVERAGE_NAME).is_file()
+            and (directory / ANSWER_SHEETS_DIR).is_dir())
+
+
+def _summary_is_complete(directory: Path) -> bool:
+    path = directory / EXEC_SUMMARY_NAME
+    if not path.is_file():
+        return False
+    try:
+        return read_json(path).get("complete") is True
+    except (OSError, ValueError):
+        return False
+
+
+def _read_sheets(audit: Audit, label: str, directory: Path, *,
+                 report_errors: bool = True) -> List[Dict[str, Any]]:
+    """Every answer-sheet JSON in the phase's ``answer_sheets/`` dir.
+
+    ``report_errors=False`` skips the malformed-file findings: the
+    units-report check has already named them, and the later final-test
+    read would otherwise report every defect twice.
+    """
+    sheets: List[Dict[str, Any]] = []
+    for path in sorted((directory / ANSWER_SHEETS_DIR).glob("*.json")):
+        try:
+            data = read_json(path)
+        except (OSError, ValueError) as exc:
+            if report_errors:
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: unreadable answer sheet "
+                    f"{path.name}: {exc}")
+            continue
+        if not isinstance(data, dict) or not isinstance(
+                data.get("coverage"), dict):
+            if report_errors:
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: answer sheet {path.name} is not an "
+                    "answer-sheet object (missing its coverage record)")
+            continue
+        sheets.append(data)
+    return sheets
+
+
+def _check_reuse_index(audit: Audit, label: str, directory: Path,
+                       report: Any,
+                       legacy_rows: Sequence[Dict[str, Any]]) -> None:
+    """Check 7 (new): the reuse index matches the derived unit summaries.
+
+    The index may carry rows a previous phase handed forward (rule 1's
+    reused units); those have no sheet in this phase, so only the units
+    the summaries cover are compared. Without the trial artifacts the
+    caller passes the legacy verdict rows instead (the same three-field
+    shape) -- a pre-refactor run's index (when one exists) is checked
+    against the records it was derived from, never skipped silently.
+    """
+    index_path = directory / REUSE_INDEX_NAME
+    if not index_path.is_file():
+        return
+    index: Dict[str, Tuple[Any, Any]] = {}
+    for row in read_jsonl(index_path):
+        unit_id = row.get("unit_id")
+        if unit_id in index:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: duplicate {REUSE_INDEX_NAME} row for unit "
+                f"{unit_id!r} (one reuse answer per unit)")
+        index[unit_id] = (row.get("status"), row.get("cause", ""))
+    if report is not None:
+        derived = {unit.unit_id: (unit.status, unit.cause)
+                   for unit in report.units}
+    elif legacy_rows:
+        derived = {row.get("unit_id"): (row.get("status"),
+                                        row.get("cause", ""))
+                   for row in legacy_rows}
+    else:
+        if index:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: {REUSE_INDEX_NAME} exists but there are no "
+                "answer sheets and no legacy verdicts to derive its rows "
+                "from")
+        return
+    for unit_id, expected in sorted(derived.items(), key=lambda kv: str(kv[0])):
+        actual = index.get(unit_id)
+        if actual is None:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: unit {unit_id!r} has a summary "
+                f"{expected} but no {REUSE_INDEX_NAME} row")
+        elif actual != expected:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: {REUSE_INDEX_NAME} says unit {unit_id!r} "
+                f"is {actual} but the derived summary says {expected}")
+
+
+def _check_trial_artifacts(audit: Audit, label: str, directory: Path,
+                           phase_kind: str, *,
+                           is_test: bool) -> None:
+    """Check 7 (new): specs / coverage / sheets are one consistent record.
+
+    Every spec unit has a coverage record for each expected attempt;
+    a present record has exactly one executed sheet with a verdict from
+    the closed vocabulary; a non-present record has no execution sheet
+    and a non-empty cause. The unit summaries re-derived from the sheets
+    must match the phase's reuse index.
+    """
+    try:
+        spec_rows = read_jsonl(directory / SPECS_NAME)
+        coverage_rows = read_jsonl(directory / COVERAGE_NAME)
+    except ValueError as exc:
+        audit.add(
+            ERROR, "units-report",
+            f"phase {label}: the trial artifacts are corrupt: {exc}")
+        return
+    sheets = _read_sheets(audit, label, directory)
+
+    spec_by_id: Dict[str, Dict[str, Any]] = {}
+    for row in spec_rows:
+        unit_id = row.get("unit_id")
+        if unit_id in spec_by_id:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: duplicate {SPECS_NAME} row for unit "
+                f"{unit_id!r} (the expected-unit universe has one spec per "
+                "unit)")
+            continue
+        spec_by_id[unit_id] = row
+
+    coverage_by_key: Dict[Tuple[Any, Any], Dict[str, Any]] = {}
+    for row in coverage_rows:
+        unit_id = row.get("unit_id")
+        key = (unit_id, row.get("attempt_index"))
+        if unit_id not in spec_by_id:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: {COVERAGE_NAME} record names unit "
+                f"{unit_id!r} the phase never specified")
+        if key in coverage_by_key:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: duplicate {COVERAGE_NAME} record for "
+                f"{key} (one coverage fact per expected trial)")
+            continue
+        coverage_by_key[key] = row
+
+    for unit_id, spec in sorted(spec_by_id.items(), key=lambda kv: str(kv[0])):
+        expected = spec.get("expected_attempts")
+        if not isinstance(expected, int) or isinstance(expected, bool) \
+                or expected < 0:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: {SPECS_NAME} row {unit_id!r} carries a "
+                f"non-natural expected_attempts ({expected!r})")
+            continue
+        missing = [attempt for attempt in range(expected)
+                   if (unit_id, attempt) not in coverage_by_key]
+        if missing:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: unit {unit_id!r} has no {COVERAGE_NAME} "
+                f"record for expected attempt(s) {missing}")
+
+    sheets_by_key: Dict[Tuple[Any, Any], List[Dict[str, Any]]] = {}
+    for sheet in sheets:
+        coverage = sheet["coverage"]
+        key = (coverage.get("unit_id"), coverage.get("attempt_index"))
+        sheets_by_key.setdefault(key, []).append(sheet)
+
+    for key, coverage in sorted(coverage_by_key.items(),
+                                key=lambda kv: str(kv[0])):
+        matching = sheets_by_key.get(key, [])
+        executed = [sheet for sheet in matching
+                    if sheet.get("execution") is not None]
+        if coverage.get("present") is True:
+            if len(executed) != 1:
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: present trial {key} has "
+                    f"{len(executed)} answer sheet(s) with an execution "
+                    "(exactly one is required)")
+            for sheet in executed:
+                grading = sheet.get("grading")
+                verdict = (grading.get("verdict")
+                           if isinstance(grading, dict) else None)
+                if verdict not in RUN_VERDICTS:
+                    audit.add(
+                        ERROR, "units-report",
+                        f"phase {label}: present trial {key} has no grading "
+                        f"verdict ({verdict!r}); a present sheet must carry "
+                        f"one of {list(RUN_VERDICTS)}")
+        else:
+            if executed:
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: non-present trial {key} carries an "
+                    "execution sheet (a gap record must not have one)")
+            if not coverage.get("cause"):
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: non-present trial {key} carries no "
+                    "cause (a gap must say why it is missing)")
+
+    report = None
+    try:
+        report = read_phase_report(
+            directory, phase_kind=phase_kind, learning_usable=not is_test)
+    except (OSError, ValueError, KeyError, TypeError, CodeBugError) as exc:
+        audit.add(
+            ERROR, "units-report",
+            f"phase {label}: cannot derive unit summaries from the trial "
+            f"artifacts: {exc}")
+    _check_reuse_index(audit, label, directory, report, ())
+
+
+def _check_legacy_verdicts(audit: Audit, label: str, directory: Path,
+                           unit_set: Set[Any]) -> List[Dict[str, Any]]:
+    """Check 7 (legacy): the pre-refactor per-unit verdict ledger."""
+    verdicts_path = directory / VERDICTS_NAME
+    if not verdicts_path.is_file():
+        return []
+    rows = read_jsonl(verdicts_path)
+    reported: Set[str] = set()
+    for row in rows:
+        unit_id = row.get("unit_id")
+        if unit_id not in unit_set:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: verdict row names unit {unit_id!r} "
+                "the phase never resolved (an invented row)")
+        if row.get("status") not in UNIT_STATUSES:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: verdict row {unit_id!r} carries "
+                f"status {row.get('status')!r} outside the closed "
+                f"vocabulary {list(UNIT_STATUSES)}")
+        reported.add(unit_id)
+    if _summary_is_complete(directory):
+        missing = [uid for uid in unit_set if uid not in reported]
+        if missing:
+            audit.add(
+                ERROR, "units-report",
+                f"phase {label}: the summary says complete but "
+                f"{len(missing)} resolved unit(s) have no report "
+                f"row ({missing})")
+    return rows
+
+
 def check_units_report(audit: Audit, run_dir: Path,
                        specs: Sequence[Tuple]) -> None:
-    """Check 7: the per-phase unit list and acceptance report agree --
-    no duplicate execution, no invented report row, closed status
-    vocabulary, a complete summary leaves no unit unreported."""
+    """Check 7: the per-phase unit list and acceptance record agree --
+    no duplicate execution, no invented row, closed status vocabulary,
+    a complete summary leaves no unit unreported.
+
+    A phase that carries the trial-level artifacts (``unit_specs.jsonl``
+    / ``coverage.jsonl`` / ``answer_sheets/``) is audited on those; a
+    phase frozen before the refactor falls back to its legacy
+    ``unit_verdicts.jsonl`` (one run-level INFO names the fallback). The
+    final test is allowed to have neither index: its numbers never flow
+    into learning, and writing one is an ERROR.
+    """
+    legacy_fallback: List[str] = []
     for index, name, spec in specs:
         if not isinstance(spec, dict) or spec.get("kind") != "execute":
             continue
@@ -838,9 +1133,18 @@ def check_units_report(audit: Audit, run_dir: Path,
         directory = _phase_dir_of(run_dir, index, name)
         if directory is None or not directory.exists():
             continue
+        is_test = spec.get("role") == PHASE_ROLE_TEST
+
         unit_ids: List[str] = []
         units_path = directory / UNITS_NAME
-        if units_path.exists():
+        if not units_path.is_file():
+            audit.add(
+                ERROR if _summary_is_complete(directory) else WARN,
+                "units-report",
+                f"phase {label}: the phase directory carries no "
+                f"{UNITS_NAME} (the resolved unit list is the phase's "
+                "first record; no complete run can lack it)")
+        else:
             for row in read_jsonl(units_path):
                 unit_id = row.get("unit_id")
                 if unit_id in unit_ids:
@@ -852,46 +1156,51 @@ def check_units_report(audit: Audit, run_dir: Path,
                 unit_ids.append(unit_id)
         unit_set = set(unit_ids)
 
-        verdicts_path = directory / VERDICTS_NAME
-        is_test = spec.get("role") == PHASE_ROLE_TEST
-        if is_test and verdicts_path.exists():
-            audit.add(
-                ERROR, "units-report",
-                f"phase {label}: a final-test phase wrote per-unit verdicts "
-                "(its numbers go to the summary alone; test results never "
-                "flow into learning)")
-        if not is_test and verdicts_path.exists():
-            reported: Set[str] = set()
-            for row in read_jsonl(verdicts_path):
-                unit_id = row.get("unit_id")
-                if unit_id not in unit_set:
-                    audit.add(
-                        ERROR, "units-report",
-                        f"phase {label}: verdict row names unit {unit_id!r} "
-                        "the phase never resolved (an invented row)")
-                if row.get("status") not in UNIT_STATUSES:
-                    audit.add(
-                        ERROR, "units-report",
-                        f"phase {label}: verdict row {unit_id!r} carries "
-                        f"status {row.get('status')!r} outside the closed "
-                        f"vocabulary {list(UNIT_STATUSES)}")
-                reported.add(unit_id)
-            summary_path = directory / EXEC_SUMMARY_NAME
-            if summary_path.exists():
-                summary = read_json(summary_path)
-                if summary.get("complete") is True:
-                    missing = [uid for uid in unit_set if uid not in reported]
-                    if missing:
-                        audit.add(
-                            ERROR, "units-report",
-                            f"phase {label}: the summary says complete but "
-                            f"{len(missing)} resolved unit(s) have no report "
-                            f"row ({missing})")
-        elif units_path.exists() and not is_test:
+        if is_test:
+            if (directory / VERDICTS_NAME).exists():
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: a final-test phase wrote per-unit "
+                    "verdicts (its numbers go to the summary alone; test "
+                    "results never flow into learning)")
+            if (directory / REUSE_INDEX_NAME).exists():
+                audit.add(
+                    ERROR, "units-report",
+                    f"phase {label}: a final-test phase wrote "
+                    f"{REUSE_INDEX_NAME} (test results never seed a later "
+                    "phase's rule-1 reuse)")
+        if _has_trial_artifacts(directory):
+            if not is_test and (directory / VERDICTS_NAME).exists():
+                audit.add(
+                    WARN, "units-report",
+                    f"phase {label}: legacy {VERDICTS_NAME} sits beside the "
+                    "trial-level artifacts (a transitional directory; the "
+                    "answer sheets are the record)")
+            _check_trial_artifacts(
+                audit, label, directory, str(spec.get("role")),
+                is_test=is_test)
+        elif not is_test and (directory / VERDICTS_NAME).is_file():
+            legacy_fallback.append(label)
+            legacy_rows = _check_legacy_verdicts(
+                audit, label, directory, unit_set)
+            _check_reuse_index(audit, label, directory, None, legacy_rows)
+        elif units_path.is_file() and not is_test:
             audit.add(
                 INFO, "units-report",
-                f"phase {label}: units resolved but no verdicts yet "
+                f"phase {label}: units resolved but no result record yet "
                 "(the phase is in flight or was interrupted)")
+
+        if not is_test:
+            has_index = ((directory / REUSE_INDEX_NAME).is_file()
+                         or (directory / VERDICTS_NAME).is_file())
+            if not has_index and (_has_trial_artifacts(directory)
+                                  or _summary_is_complete(directory)):
+                audit.add(
+                    ERROR if _summary_is_complete(directory) else INFO,
+                    "units-report",
+                    f"phase {label}: no {REUSE_INDEX_NAME} and no legacy "
+                    f"{VERDICTS_NAME} (a non-test phase must record its "
+                    "unit statuses for the next phase's rule-1 reuse)")
 
         redispatch_path = directory / REDISPATCH_NAME
         if redispatch_path.exists():
@@ -916,6 +1225,13 @@ def check_units_report(audit: Audit, run_dir: Path,
                         f"phase {label}: the redispatch bookkeeping of unit "
                         f"{unit_id!r} carries a non-natural pass count "
                         f"({passes!r})")
+
+    if legacy_fallback:
+        audit.add(
+            INFO, "units-report",
+            f"phase(s) {legacy_fallback} predate the trial-level artifacts "
+            f"({SPECS_NAME} / {COVERAGE_NAME} / {ANSWER_SHEETS_DIR}/); "
+            f"audited through the legacy {VERDICTS_NAME} read path")
 
 
 def check_learn_ledgers(audit: Audit, run_dir: Path,
@@ -1077,6 +1393,55 @@ def check_learn_ledgers(audit: Audit, run_dir: Path,
                 "artifact; in flight or interrupted)")
 
 
+def _check_final_test_sheets(audit: Audit, label: str, directory: Path, *,
+                             complete: bool) -> None:
+    """The final test's answer sheets cover both arms.
+
+    The test phase writes trial-level artifacts like any other execute
+    phase, but no reuse index / legacy verdicts (check_units_report
+    rejects those). A complete summary must show at least one executed
+    sheet per arm; an external-campaign trial must be marked
+    ``kind="external"`` so its provenance cannot pass for a local run.
+    """
+    if not _has_trial_artifacts(directory):
+        return
+    try:
+        spec_rows = read_jsonl(directory / SPECS_NAME)
+    except ValueError:
+        return  # the units-report check names the corrupt artifact
+    spec_arms = {row.get("arm") for row in spec_rows}
+    missing = [arm for arm in ARM_NAMES if arm not in spec_arms]
+    if missing:
+        audit.add(
+            ERROR, "final-test",
+            f"phase {label}: the unit specs cover only the arm(s) "
+            f"{sorted(str(arm) for arm in spec_arms)}; both "
+            f"{list(ARM_NAMES)} are required")
+    sheets = _read_sheets(audit, label, directory, report_errors=False)
+    for sheet in sheets:
+        execution = sheet.get("execution")
+        if not isinstance(execution, dict):
+            continue
+        if execution.get("source") == "external" \
+                and execution.get("kind") != "external":
+            audit.add(
+                ERROR, "final-test",
+                f"phase {label}: external trial "
+                f"{sheet.get('sheet_id')!r} carries source='external' but "
+                f"kind={execution.get('kind')!r} (an external reward must "
+                "not pass for a local run)")
+    if not complete:
+        return
+    executed_arms = {sheet["execution"].get("arm") for sheet in sheets
+                     if isinstance(sheet.get("execution"), dict)}
+    missing = [arm for arm in ARM_NAMES if arm not in executed_arms]
+    if missing:
+        audit.add(
+            ERROR, "final-test",
+            f"phase {label}: the summary says complete but arm(s) "
+            f"{missing} have no executed answer sheet")
+
+
 def check_final_test(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
                      specs: Sequence[Tuple]) -> None:
     """Check 9: a complete final-test summary's arms hold every expected
@@ -1098,12 +1463,15 @@ def check_final_test(audit: Audit, run_dir: Path, manifest: Dict[str, Any],
         if directory is None or not directory.exists():
             continue
         summary_path = directory / EXEC_SUMMARY_NAME
+        complete = (read_json(summary_path).get("complete") is True
+                    if summary_path.exists() else False)
+        _check_final_test_sheets(audit, label, directory, complete=complete)
         if not summary_path.exists():
             audit.add(INFO, "final-test",
                       f"phase {label}: no summary yet (in flight or "
                       "interrupted)")
             continue
-        if read_json(summary_path).get("complete") is not True:
+        if not complete:
             audit.add(INFO, "final-test",
                       f"phase {label}: incomplete (infra holes; the "
                       "summary lists them under infra_missing)")
@@ -1606,17 +1974,78 @@ def _make_unit_id(phase: str, task_ref: str, role: str,
                         skills_injected=skills_injected)
 
 
-def _verdict_row(unit_id: str, status: str = "normal",
-                 cause: str = "") -> Dict[str, Any]:
-    """One minimal per-unit verdict row (``unit_verdicts.jsonl``)."""
-    return {"unit_id": unit_id, "status": status, "cause": cause}
-
-
 def _unit_row(unit_id: str, task_ref: str, injected: Any,
               block: str = "") -> Dict[str, Any]:
     """One units.jsonl row in the frozen ExecutionUnitRow shape."""
     return {"unit_id": unit_id, "task_ref": task_ref,
             "skills_injected": injected, "skills_block": block, "aux": {}}
+
+
+def _spec_row(unit_id: str, label: str, task_ref: str, role: str,
+              arm: Optional[str], expected: int,
+              injected: Any) -> Dict[str, Any]:
+    """One unit_specs.jsonl row (the expected-unit universe)."""
+    return {"unit_id": unit_id, "phase_label": label, "task_ref": task_ref,
+            "role": role, "arm": arm, "expected_attempts": expected,
+            "injected_skills": injected}
+
+
+def _present_coverage(unit_id: str, attempt: int) -> Dict[str, Any]:
+    return {"unit_id": unit_id, "attempt_index": attempt, "present": True,
+            "status": "present", "cause": "", "artifacts": {}}
+
+
+def _gap_coverage(unit_id: str, attempt: int,
+                  cause: str) -> Dict[str, Any]:
+    return {"unit_id": unit_id, "attempt_index": attempt, "present": False,
+            "status": "missing", "cause": cause, "artifacts": {}}
+
+
+def _execution_row(*, sheet_id: str, unit_id: str, label: str,
+                   task_ref: str, role: str, arm: Optional[str],
+                   attempt: int, injected: Any,
+                   correctness: Optional[bool] = False,
+                   source: str = "local", kind: str = "trajectory"
+                   ) -> Dict[str, Any]:
+    """One ExecutionRecord payload (the answer sheet's trial facts)."""
+    return {"sheet_id": sheet_id, "unit_id": unit_id,
+            "phase_label": label, "task_ref": task_ref, "role": role,
+            "arm": arm, "model_role": role, "model_name": "weak-model",
+            "sample_index": attempt, "skills_injected": injected,
+            "steps": [], "raw_correctness": correctness,
+            "metrics": {}, "aux": {}, "artifacts": {},
+            "source": source, "kind": kind}
+
+
+def _sheet_row(sheet_id: str, label: str, coverage: Dict[str, Any],
+               execution: Optional[Dict[str, Any]],
+               verdict: Optional[str] = None) -> Dict[str, Any]:
+    """One AnswerSheet payload: execution + coverage + grading."""
+    return {
+        "sheet_id": sheet_id, "phase_label": label, "coverage": coverage,
+        "execution": execution,
+        "grading": (None if verdict is None
+                    else {"verdict": verdict, "basis": "self-test",
+                          "rule_name": "self-test"}),
+    }
+
+
+def _write_trial_artifacts(directory: Path, *,
+                           specs: Sequence[Dict[str, Any]],
+                           coverage: Sequence[Dict[str, Any]],
+                           sheets: Sequence[Dict[str, Any]],
+                           reuse_rows: Optional[Sequence[Dict[str, Any]]]
+                           ) -> None:
+    """Write the trial-level artifacts the way the phase drivers do."""
+    write_jsonl(directory / SPECS_NAME, list(specs))
+    write_jsonl(directory / COVERAGE_NAME, list(coverage))
+    sheet_dir = directory / ANSWER_SHEETS_DIR
+    sheet_dir.mkdir(parents=True, exist_ok=True)
+    for sheet in sheets:
+        stem = object_filename(sheet["sheet_id"])[:-len(".json")]
+        write_json(sheet_dir / f"{stem}.json", sheet, indent=2)
+    if reuse_rows is not None:
+        write_jsonl(directory / REUSE_INDEX_NAME, list(reuse_rows))
 
 
 def _write_phase_record(run_dir: Path, label: str, index: int, name: str,
@@ -1706,9 +2135,31 @@ def _build_fake_v4_run(root: Path) -> Path:
     write_jsonl(d_dir / UNITS_NAME, [
         _unit_row(d_weak, task_id, None),
         _unit_row(d_strong, task_id, None)])
-    write_jsonl(d_dir / VERDICTS_NAME, [
-        _verdict_row(d_weak),
-        _verdict_row(d_strong)])
+    b_specs = [
+        _spec_row(d_strong, "p01:baseline", task_id, "strong", "strong", 1,
+                  None),
+        _spec_row(d_weak, "p01:baseline", task_id, "weak", "weak",
+                  n_attempts, None),
+    ]
+    b_coverage: List[Dict[str, Any]] = []
+    b_sheets = []
+    for role, unit_id, depth in (("strong", d_strong, 1),
+                                 ("weak", d_weak, n_attempts)):
+        for attempt in range(depth):
+            trajectory_id = ids.make_trajectory_id(task_id, role, attempt)
+            b_coverage.append(_present_coverage(unit_id, attempt))
+            b_sheets.append(_sheet_row(
+                trajectory_id, "p01:baseline",
+                _present_coverage(unit_id, attempt),
+                _execution_row(
+                    sheet_id=trajectory_id, unit_id=unit_id,
+                    label="p01:baseline", task_ref=task_id, role=role,
+                    arm=role, attempt=attempt, injected=None),
+                verdict="failure"))
+    _write_trial_artifacts(
+        d_dir, specs=b_specs, coverage=b_coverage, sheets=b_sheets,
+        reuse_rows=[{"unit_id": d_strong, "status": "normal", "cause": ""},
+                    {"unit_id": d_weak, "status": "normal", "cause": ""}])
     write_json(d_dir / EXEC_SUMMARY_NAME,
                {"role": "baseline", "complete": True,
                 "infra_missing": [], "infra_accepted": []}, indent=2)
@@ -1762,8 +2213,26 @@ def _build_fake_v4_run(root: Path) -> Path:
                                         b_name, "live")
         write_jsonl(directory / UNITS_NAME,
                    [_unit_row(unit_id, task_id, refs)])
-        write_jsonl(directory / VERDICTS_NAME, [
-            _verdict_row(unit_id)])
+        live_coverage = [_present_coverage(unit_id, attempt)
+                         for attempt in range(n_attempts)]
+        live_sheets = [
+            _sheet_row(
+                ids.make_trajectory_id(task_id, "weak", attempt), b_label,
+                _present_coverage(unit_id, attempt),
+                _execution_row(
+                    sheet_id=ids.make_trajectory_id(
+                        task_id, "weak", attempt),
+                    unit_id=unit_id, label=b_label, task_ref=task_id,
+                    role="weak", arm=None, attempt=attempt, injected=refs),
+                verdict="failure")
+            for attempt in range(n_attempts)]
+        _write_trial_artifacts(
+            directory,
+            specs=[_spec_row(unit_id, b_label, task_id, "weak", None,
+                             n_attempts, refs)],
+            coverage=live_coverage, sheets=live_sheets,
+            reuse_rows=[{"unit_id": unit_id, "status": "normal",
+                         "cause": ""}])
         write_json(directory / EXEC_SUMMARY_NAME,
                    {"role": "live", "complete": True,
                     "infra_missing": [], "infra_accepted": []}, indent=2)
@@ -1838,16 +2307,43 @@ def _build_fake_v4_run(root: Path) -> Path:
     # -- p07 C: both arms hold every expected test unit ------------------
     c_dir = _write_phase_record(run_dir, "p07:test", 6, "test", "test")
     c_unit = _make_unit_id("p07:test", test_id, "weak", "bank-digest")
+    control_unit = _make_unit_id("p07:test", test_id, "weak", None)
     write_jsonl(c_dir / UNITS_NAME,
                [_unit_row(c_unit, test_id, "bank-digest")])
     write_json(c_dir / REDISPATCH_NAME, {}, indent=2)
-    for arm, injected in (("with_bank", [{"bank": "digest"}]),
-                          ("control", None)):
+    test_specs = [
+        _spec_row(c_unit, "p07:test", test_id, "weak", "with_bank",
+                  n_attempts, "bank-digest"),
+        _spec_row(control_unit, "p07:test", test_id, "weak", "control",
+                  n_attempts, None),
+    ]
+    test_coverage: List[Dict[str, Any]] = []
+    test_sheets: List[Dict[str, Any]] = []
+    for arm, unit_id, injected in (("with_bank", c_unit, "bank-digest"),
+                                   ("control", control_unit, None)):
         arm_store = Store(c_dir / arm / "store")
         for attempt in range(n_attempts):
+            trajectory_id = ids.make_trajectory_id(
+                test_id, "weak", attempt)
             arm_store.save(_fake_trajectory(
-                ids.make_trajectory_id(test_id, "weak", attempt), False,
-                injected), "trajectories")
+                trajectory_id, False, injected), "trajectories")
+            test_coverage.append(_present_coverage(unit_id, attempt))
+            # The two arms store the same trajectory ids; a sheet needs an
+            # arm-qualified id so one arm's record cannot overwrite the
+            # other's file.
+            sheet_id = f"{arm}:{trajectory_id}"
+            test_sheets.append(_sheet_row(
+                sheet_id, "p07:test",
+                _present_coverage(unit_id, attempt),
+                _execution_row(
+                    sheet_id=sheet_id, unit_id=unit_id,
+                    label="p07:test", task_ref=test_id, role="weak",
+                    arm=arm, attempt=attempt, injected=injected),
+                verdict="failure"))
+    # The final test writes answer sheets but no reuse index / verdicts.
+    _write_trial_artifacts(
+        c_dir, specs=test_specs, coverage=test_coverage,
+        sheets=test_sheets, reuse_rows=None)
     write_json(c_dir / EXEC_SUMMARY_NAME,
                {"role": "test", "mode": "split", "complete": True,
                 "with_bank": {"avg": 0.0}, "control": {"avg": 0.0},
@@ -1902,17 +2398,19 @@ def _self_test_v4(root: Path) -> int:
         return 1
     print("self-test: duplicated unit row caught")
 
-    # Tamper 7: an invented report row -> a verdict for a unit the phase
-    # never resolved.
-    report = read_jsonl(b1_dir / VERDICTS_NAME)
-    report.append(_verdict_row("p03:live_1:tb:tb:t1:weak:deadbeef"))
-    write_jsonl(b1_dir / VERDICTS_NAME, report)
+    # Tamper 7: an invented coverage record -> a trial for a unit the
+    # phase never specified.
+    coverage_rows = read_jsonl(b1_dir / COVERAGE_NAME)
+    coverage_rows.append(_present_coverage(
+        "p03:live_1:tb:tb:t1:weak:deadbeef", 0))
+    write_jsonl(b1_dir / COVERAGE_NAME, coverage_rows)
     audit = audit_run(run_dir)
-    if not any("never resolved" in f["message"]
+    if not any("never specified" in f["message"]
                for f in audit.errors()):
-        print("SELF-TEST FAIL: tamper 7 (invented report row) not caught")
+        print("SELF-TEST FAIL: tamper 7 (invented coverage record) "
+              "not caught")
         return 1
-    print("self-test: invented report row caught")
+    print("self-test: invented coverage record caught")
 
     # Tamper 8: a receipt the store contradicts -> the landing never
     # landed (the member is discarded, the receipt says accepted).
@@ -1962,6 +2460,38 @@ def _self_test_v4(root: Path) -> int:
               "the v4 run) not caught")
         return 1
     print("self-test: verdict-contradicting status caught")
+
+    # Tamper 11: strip a present trial's grading -> an executed sheet with
+    # no verdict.
+    p05_dir = phase_bank_dir(run_dir, "p05:live_2")
+    sheet_paths = sorted((p05_dir / ANSWER_SHEETS_DIR).glob("*.json"))
+    if not sheet_paths:  # pragma: no cover - fixture contract
+        print("SELF-TEST FAIL: the live phase wrote no answer sheets")
+        return 1
+    sheet = read_json(sheet_paths[0])
+    sheet["grading"] = None
+    write_json(sheet_paths[0], sheet, indent=2)
+    audit = audit_run(run_dir)
+    if not any("has no grading verdict" in f["message"]
+               for f in audit.errors()):
+        print("SELF-TEST FAIL: tamper 11 (present sheet with no grading) "
+              "not caught")
+        return 1
+    print("self-test: present sheet with no grading caught")
+
+    # Tamper 12: mark a present trial non-present while keeping its
+    # execution sheet -> a gap record that claims a run happened.
+    coverage = read_jsonl(p05_dir / COVERAGE_NAME)
+    coverage[0] = _gap_coverage(coverage[0]["unit_id"],
+                                coverage[0]["attempt_index"], "missing")
+    write_jsonl(p05_dir / COVERAGE_NAME, coverage)
+    audit = audit_run(run_dir)
+    if not any("carries an execution sheet" in f["message"]
+               for f in audit.errors()):
+        print("SELF-TEST FAIL: tamper 12 (coverage gap with an execution "
+              "sheet) not caught")
+        return 1
+    print("self-test: coverage gap with an execution sheet caught")
     return 0
 
 def _fake_trajectory(unit_id: str, correctness: Optional[bool],
