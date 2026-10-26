@@ -1,23 +1,28 @@
-"""The acceptance module's verdict core (layer 5, pure functions).
+"""The acceptance module's per-run grading core (layer 5, pure functions).
 
 R1 (docs/decisions/execute_learn_repair_plan_20261016.md): one module
-answers "did this run make it" for the whole loop. G1's five scattered
-judgment sites converge HERE, and the acceptance report has exactly one
-shape -- ``core.contracts.AcceptanceReportRow`` -- assembled in memory
-(the D3 ruling: no new persisted object, nothing written to disk).
+answers "did this run make it" for the whole loop.  The new answer-sheet
+path grades ONE trial at a time (``grade_sheet``) and leaves coverage and
+unit aggregation to ``composites/coverage.py`` and
+``composites/unit_summary.py``.
+
+The legacy ``summarize_unit`` / ``AcceptanceReportRow`` code below is kept
+ONLY for reading pre-answer-sheet runs; new runs write
+``unit_specs.jsonl`` + ``answer_sheets/`` + ``coverage.jsonl`` and never
+call it.
 
 The acceptance module system (boundaries doc §2.3 / §3.4 -- everything
 that needs a model to judge belongs to acceptance):
 
-* this file: the status/cause vocabulary, the named per-run verdict
-  rules, the unit summary (``summarize_unit``) and the unit-id rule
-  frozen with acceptance per core/contracts.py;
+* this file: the named per-run verdict rules and ``grade_sheet``; the
+  legacy unit summary for old-run fallback;
 * ``composites/exam_grading.py``: the G5 judge under its crash-persistent
   repair budget (entered through :func:`grade_attempt` below);
 * ``composites/acceptance_leak.py``: the D8 leak judge and its
   first-verdict ledger;
-* ``composites/reports.py``: the one report reader that maps a run
-  directory's on-disk state onto rows of the one shape.
+* ``composites/answer_sheets.py`` / ``coverage.py`` / ``unit_summary.py``:
+  the new trial-level envelope, coverage and pure unit aggregation;
+* ``composites/reports.py``: the legacy report reader (old-run fallback).
 
 Where G1's five sites stand after this module (the ones outside this
 wave's file ownership converge onto it when their owners land):
@@ -49,6 +54,8 @@ import hashlib
 import json
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+from expedistill.core import vocabulary
+from expedistill.core.answer_sheet import ExecutionRecord, GradingRecord
 from expedistill.core.contracts import AcceptanceReportRow, RunRecord
 from expedistill.core.registry import make_registry
 from expedistill.infra.reliability import CodeBugError, ConfigError
@@ -80,6 +87,7 @@ __all__ = [
     "default_verdict_rule",
     "get_verdict_rule",
     "grade_attempt",
+    "grade_sheet",
     "make_unit_id",
     "register_verdict_rule",
     "status_cause_for_terminal",
@@ -95,10 +103,10 @@ __all__ = [
 #: One run's verdict. ``invalid`` means the run did not complete normally
 #: and is none of the model's business (sandbox, network, leak, ...);
 #: invalid runs are excluded from every denominator.
-RUN_SUCCESS = "success"
-RUN_FAILURE = "failure"
-RUN_INVALID = "invalid"
-RUN_VERDICTS = (RUN_SUCCESS, RUN_FAILURE, RUN_INVALID)
+RUN_SUCCESS = vocabulary.RUN_SUCCESS
+RUN_FAILURE = vocabulary.RUN_FAILURE
+RUN_INVALID = vocabulary.RUN_INVALID
+RUN_VERDICTS = vocabulary.RUN_VERDICTS
 
 #: A unit's status (AcceptanceReportRow.status). A normal unit's score is
 #: its counts alone; ``not_testable`` means no valid run exists and the
@@ -108,30 +116,29 @@ RUN_VERDICTS = (RUN_SUCCESS, RUN_FAILURE, RUN_INVALID)
 #: module as the status/cause definition site, next to the discard
 #: vocabulary) and re-exported under the acceptance-side names, so the
 #: two modules cannot drift (D1; the re-exports are pinned by test).
-STATUS_NORMAL = decision.ROW_NORMAL
-STATUS_NOT_TESTABLE = decision.ROW_NOT_TESTABLE
-STATUS_NOT_RUN_CONTROL_PERFECT = decision.ROW_NOT_RUN_CONTROL_PERFECT
-UNIT_STATUSES = (STATUS_NORMAL, STATUS_NOT_TESTABLE,
-                 STATUS_NOT_RUN_CONTROL_PERFECT)
+STATUS_NORMAL = vocabulary.STATUS_NORMAL
+STATUS_NOT_TESTABLE = vocabulary.STATUS_NOT_TESTABLE
+STATUS_NOT_RUN_CONTROL_PERFECT = vocabulary.STATUS_NOT_RUN_CONTROL_PERFECT
+UNIT_STATUSES = vocabulary.UNIT_STATUSES
 
 #: Why a unit is ``not_testable`` (the fixed cause set, R0): the same
 #: single definition as above, re-exported. These values are the ONLY
 #: legal causes on a not_testable row.
-CAUSE_LEAK = decision.CAUSE_LEAK
-CAUSE_INJECTION_OVERFLOW = decision.CAUSE_INJECTION_OVERFLOW
-CAUSE_EXAM_GENERATION_FAILED = decision.CAUSE_EXAM_GENERATION_FAILED
+CAUSE_LEAK = vocabulary.CAUSE_LEAK
+CAUSE_INJECTION_OVERFLOW = vocabulary.CAUSE_INJECTION_OVERFLOW
+CAUSE_EXAM_GENERATION_FAILED = vocabulary.CAUSE_EXAM_GENERATION_FAILED
 CAUSE_INVALID_REDISPATCH_EXHAUSTED = \
-    decision.CAUSE_INVALID_REDISPATCH_EXHAUSTED
-CAUSE_ALL_HOLES = decision.CAUSE_ALL_HOLES
-CAUSE_ZERO_EXECUTION = decision.CAUSE_ZERO_EXECUTION
-NOT_TESTABLE_CAUSES = decision.NOT_TESTABLE_CAUSES
+    vocabulary.CAUSE_INVALID_REDISPATCH_EXHAUSTED
+CAUSE_ALL_HOLES = vocabulary.CAUSE_ALL_HOLES
+CAUSE_ZERO_EXECUTION = vocabulary.CAUSE_ZERO_EXECUTION
+NOT_TESTABLE_CAUSES = vocabulary.NOT_TESTABLE_CAUSES
 
 #: The cause on a ``not_run_control_perfect`` row: the baseline was
 #: all-success under a strict-family rule, so the with-skill run was
 #: skipped with zero executions. The same string (and fact) as decision's
 #: ``weak_already_knows`` discard reason -- one definition, two
 #: vocabularies (boundaries doc §4.1's "no headroom" conclusion).
-CAUSE_WEAK_ALREADY_KNOWS = decision.WEAK_ALREADY_KNOWS
+CAUSE_WEAK_ALREADY_KNOWS = vocabulary.CAUSE_WEAK_ALREADY_KNOWS
 
 #: Today's zero-execution terminals and discard reasons (decision's
 #: vocabulary) mapped onto the status/cause vocabulary. Every key is a
@@ -251,6 +258,23 @@ def _scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
     return RUN_FAILURE, "scorer: the benchmark's own scorer"
 
 
+@VERDICT_RULES.register("external_reward")
+def _external_reward_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
+    """One externally supplied campaign reward (0/1) as a trial verdict.
+
+    There is no local run or verifier evidence; the rule exists so the
+    grading basis names the external provenance instead of pretending the
+    benchmark scorer produced it.
+    """
+    metrics = facts.get("metrics") or {}
+    reward = metrics.get("reward")
+    if reward is None:
+        return RUN_INVALID, "external_reward: no campaign reward"
+    if reward > 0.0:
+        return RUN_SUCCESS, "external_reward: campaign reward"
+    return RUN_FAILURE, "external_reward: campaign reward"
+
+
 @VERDICT_RULES.register("exam_judge")
 def _exam_judge_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
     """The G5 model judge decided (the exam benchmark: the question is
@@ -346,6 +370,24 @@ def verdict_from_run(record: RunRecord, *,
                  "aux": record.aux})
 
 
+def grade_sheet(execution: ExecutionRecord,
+                rule_name: str) -> GradingRecord:
+    """Grade ONE trial-level execution record under a named rule.
+
+    This is the only acceptance entry in the answer-sheet world: it reads
+    the execution facts (raw correctness, run metrics, aux) and returns a
+    trial-level ``GradingRecord``.  It does not read coverage, unit specs,
+    controls or the skill bank.
+    """
+    rule = get_verdict_rule(rule_name)
+    verdict, basis = rule({
+        "correctness": execution.raw_correctness,
+        "metrics": execution.metrics,
+        "aux": execution.aux,
+    })
+    return GradingRecord(verdict=verdict, basis=basis, rule_name=rule_name)
+
+
 # ---------------------------------------------------------------------------
 # The unit summary: one AcceptanceReportRow per unit
 # ---------------------------------------------------------------------------
@@ -356,8 +398,10 @@ def summarize_unit(*, unit_id: str, phase_label: str, role: str,
                    status: str = STATUS_NORMAL, cause: str = "",
                    artifacts: Optional[Dict[str, Any]] = None
                    ) -> AcceptanceReportRow:
-    """Assemble one unit's report row in memory (the one acceptance
-    report shape; nothing is written anywhere).
+    """LEGACY: assemble one unit's report row (old-run fallback only).
+
+    New runs use ``composites.unit_summary.summarize_unit`` over
+    AnswerSheets; do not add new callers here.
 
     ``runs`` is one entry per execution of the unit, each
     ``{"run": <key>, "verdict": <one of RUN_VERDICTS>, "basis": <the

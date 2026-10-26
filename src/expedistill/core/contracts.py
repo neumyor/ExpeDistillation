@@ -111,8 +111,12 @@ class RunRecord:
 
 @dataclass
 class AcceptanceReportRow:
-    """One unit's row of the acceptance report (the acceptance module's
-    output; one report, one row per unit -- baseline phases split by role)."""
+    """Legacy unit-level report row (old-run fallback only).
+
+    New runs use the trial-level AnswerSheet + UnitSummary shapes in
+    ``core/answer_sheet.py``; this dataclass is kept so pre-refactor run
+    directories remain readable.
+    """
 
     #: The unit this row judges (the join key shared with the execution
     #: unit list).
