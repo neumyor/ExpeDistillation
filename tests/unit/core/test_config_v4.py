@@ -161,20 +161,15 @@ class TestParsedShapes:
         assert learn.evidence == {"name": "segment", "K": 5,
                                   "retry_limit": 2}
         assert learn.author == {"name": "distill_diagnose"}
-        assert learn.group_evidence == {"name": "live_group"}
-        assert learn.group_author == {"name": "distill_diagnose"}
+        assert learn.decision == {"name": "task_level"}
         assert learn.curate["name"] == "agentbrew"
         assert learn.curate["merge_check"] == "exam"
 
-    def test_learn_phase_group_methods_parse(self, exam_v4):
+    def test_learn_phase_decision_strategy_parses(self, exam_v4):
         raw = copy.deepcopy(exam_v4)
-        raw["phases"]["learn"]["group_evidence"] = {"name": "usage_group"}
-        raw["phases"]["learn"]["group_author"] = {
-            "name": "usage_revise", "policy": "usage_v1"}
+        raw["phases"]["learn"]["decision"] = {"name": "skill_level"}
         learn = _parse(raw)["learn"]
-        assert learn.group_evidence == {"name": "usage_group"}
-        assert learn.group_author == {
-            "name": "usage_revise", "policy": "usage_v1"}
+        assert learn.decision == {"name": "skill_level"}
 
     def test_live_sequence_shape(self, live_v4):
         assert live_v4["sequence"] == ["baseline", "learn", "live", "learn", "live", "learn", "test"]

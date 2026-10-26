@@ -196,10 +196,10 @@ class FakeProviderClient:
             return self._distill()
         if "WHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING" in user:
             return self._diagnose()
-        if user.startswith("You are the attribution step"):
-            return self._attribution(user)
-        if user.startswith("A skill written for a weak model was injected"):
-            return self._revision(user)
+        if user.startswith("You are attributing ONE window"):
+            return self._attempt_attribution(user)
+        if user.startswith("A skill was active in real attempts"):
+            return self._attempt_revision(user)
         if user.startswith("A skill written for a weak model failed"):
             return self._rewrite(user)
         if user.startswith("You are curating a bank of skills written "
@@ -241,7 +241,6 @@ class FakeProviderClient:
             "when_to_use": "when a question needs an exact short answer",
             "steps": ["search the question's key terms",
                       "reply with Finish[<the short answer>]"],
-            "verify": "the environment reports the answer is correct",
             "not_applicable_when": "the answer is already known",
             "summary": "search before submitting the final answer",
         })
@@ -253,40 +252,35 @@ class FakeProviderClient:
                            "first: the guess misses the gold phrasing",
             "steps": ["search the question's key terms",
                       "reply with Finish[<the short answer>]"],
-            "verify": "the environment reports the answer is correct",
             "not_applicable_when": "a search was already done",
             "summary": "never submit an answer before searching for it",
         })
 
     # -- G10 / G11 / G6 ---------------------------------------------------
 
-    def _attribution(self, user: str) -> str:
-        ids = [line.split("skill_id: ", 1)[1]
+    def _attempt_attribution(self, user: str) -> str:
+        ids = [line.split("skill_id: ", 1)[1].strip()
                for line in user.splitlines()
                if line.startswith("skill_id: ")]
         if not ids:
             raise AssertionError(
-                "the LIVE_RUN_ATTRIBUTION prompt listed no skills")
-        return _fenced({
-            "diagnosis": "the injected skills did not change what the "
-                         "weak model submitted, so the run matched the "
-                         "bare baseline.",
-            "skill_actions": [
-                {"skill_id": skill_id, "action": "revise",
-                 "problem": "the trigger is too vague for the weak model "
-                            "to recognize while it is answering"}
-                for skill_id in ids],
-        })
+                "the SKILL_ATTEMPT_ATTRIBUTION prompt listed no skills")
+        return _fenced({"skills": [
+            {"skill_id": skill_id,
+             "trigger_context": "the window shows the task context",
+             "behavior_after_trigger": "the model followed the observed "
+                                       "procedure",
+             "improvement": "name the concrete state before acting"}
+            for skill_id in ids]})
 
-    def _revision(self, user: str) -> str:
+    def _attempt_revision(self, user: str) -> str:
         original = user.split("SKILL (current version):\n", 1)[1].split(
-            "\n\nATTRIBUTION REPORT", 1)[0]
+            "\n\nATTEMPT EVIDENCE:", 1)[0]
         return _fenced({
-            "failure_category": "wrong_trigger",
             "skill_text": (original + "\n" + self.revision_marker +
                            ": name the concrete state before acting."),
             "revision_reason": "made the trigger condition concrete",
-            "summary": "search before submitting the final answer",
+            "summary": "a sharper capability line",
         })
 
     def _rewrite(self, user: str) -> str:

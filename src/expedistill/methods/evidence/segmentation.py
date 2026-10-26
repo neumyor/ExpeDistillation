@@ -7,7 +7,7 @@ path's evidence (boundaries doc section 2.5 -- the baseline-phase strong-model
 segments; repair plan R6 -- "the evidence module reads the baseline phase's
 strong trajectories and their segmentation results") would find an
 empty store. This driver closes that gap, and
-``stages/learn_tasks._land_add`` calls it lazily, right before the
+``stages/learn_add._land_add`` calls it lazily, right before the
 evidence collector reads the store: only an add row pays for the cut,
 so an exam-only or live-only sequence never segments, and the
 collector itself stays a pure reader (no model calls, no store writes).

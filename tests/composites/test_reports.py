@@ -47,7 +47,6 @@ MARKED_A = "\n".join([
     "[Steps]",
     "1. Check the service status with the status command.",
     "2. Restart the service with the restart command.",
-    "[Verify] The status command reports the service as running.",
     "[Do not use when] The status command already reports running.",
 ])
 

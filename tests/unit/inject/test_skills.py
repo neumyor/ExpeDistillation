@@ -111,7 +111,6 @@ def test_section_markers_survive_single_line_compression():
         "[Steps]",
         "1. inspect the reported state",
         "2. run the command that matches the state",
-        "[Verify] the service reports the expected state",
         "[Do not use when] no state was reported",
     ])
     block = format_skills_block([make_skill("s1", content)])
@@ -133,7 +132,6 @@ def test_multiline_heredoc_content_compresses_markers_survive():
         "python3 - <<'PY'",
         "print('ok')",
         "PY",
-        "[Verify] the service reports the expected state",
         "[Do not use when] no state was reported",
     ])
     block = format_skills_block([make_skill("s1", content)])

@@ -1011,7 +1011,7 @@ def _folder_task(tmp_path):
     (folder_dir / "catalog.md").write_text(catalog, encoding="utf-8")
     (skill_dir / "SKILL.md").write_text(
         "---\nname: x\ndescription: example\n---\n\n"
-        "[When to use] example\n[Steps]\n1. do it\n[Verify] done\n"
+        "[When to use] example\n[Steps]\n1. do it\n"
         "[Do not use when] never\n",
         encoding="utf-8")
     manifest = {

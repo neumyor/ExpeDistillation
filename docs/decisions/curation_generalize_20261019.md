@@ -67,7 +67,7 @@ folder 版 C 终测（`runs/tb21_split_folder_20261017_1339`）复用了源 run
 代码层只做下列检查，不满足即为 ModelOutputError，走现有的格式修复与重试路径：
 
 - G8 输出是合法 JSON，`content` 与 `summary` 两个字段都在；
-- `summary` 非空、单行、不超过 `SKILL_SUMMARY_MAX_CHARS`（500）；
+- `summary` 非空、单行；2026-10-26 起取消 500 字符上限（见 `docs/decisions/skill_summary_no_length_cap_20261026.md`）；
 - 合并技能的段落标记与来源一致（现有后置检查，不变）；
 - G7 的 `low_value` 中每个 id 都在本轮输入的技能里。
 

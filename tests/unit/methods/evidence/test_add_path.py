@@ -17,7 +17,10 @@ from expedistill.core.models import Step, Subtask, Trajectory
 from expedistill.infra.store import Store
 from expedistill.methods.evidence.package import ensure_fact_only
 
-from expedistill.methods.evidence.add_path import collect_add_evidence
+from expedistill.methods.evidence.add_path import (
+    collect_add_evidence,
+    segment_position,
+)
 
 BENCHMARK = "tb"
 TASK_ID = make_task_id(BENCHMARK, "t1")
@@ -80,6 +83,31 @@ def test_collects_the_kept_strong_segments_as_source_experiences(tmp_path):
                                  "trajectory_id": kept.trajectory_id,
                                  "step_range": [1, 3]}]
     assert package.old_skill is None
+
+
+def test_each_experience_carries_its_place_in_the_trajectory(tmp_path):
+    # The position counts the trajectory's whole cut (two segments here),
+    # not only the segments the rule kept, and uses original step numbers.
+    store, kept, _ = seeded_store(tmp_path)
+
+    package = collect_add_evidence(task_row=add_row(), store=store,
+                                   rule_name="strong_success_weak_failed")
+
+    assert package.source_experiences[0]["segment_position"] == (
+        "segment 1 of 2 in its trajectory; it covers original steps 1 to "
+        "2 out of 4 steps (steps are numbered from 0)")
+
+
+def test_segment_position_names_the_last_segment():
+    trajectory_id = make_trajectory_id(TASK_ID, "strong", 0)
+    last = Subtask(
+        subtask_id=make_subtask_id(trajectory_id, 4), task_id=TASK_ID,
+        trajectory_id=trajectory_id, source="strong",
+        trajectory_success=True, segment_index=4, step_range=(30, 42),
+        label="l", description="d", success=True)
+    assert segment_position(last, 5, 42) == (
+        "segment 5 of 5 in its trajectory; it covers original steps 30 to "
+        "41 out of 42 steps (steps are numbered from 0)")
 
 
 def test_refuses_when_nothing_is_left_to_learn_from(tmp_path):

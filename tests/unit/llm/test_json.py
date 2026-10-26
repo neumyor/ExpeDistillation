@@ -120,7 +120,6 @@ def test_unfenced_object_with_embedded_code_fence_fragments():
     text = json.dumps({
         "when_to_use": "probe an unknown file",
         "steps": ["Run `ls` and note <file>.", steps_item],
-        "verify": "the block prints a request id",
         "not_applicable_when": "the file is missing",
     }, ensure_ascii=False)
 

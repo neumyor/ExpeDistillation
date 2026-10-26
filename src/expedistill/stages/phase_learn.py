@@ -5,7 +5,7 @@ this module replaces stage4_acceptance.py and stage5_curation.py with ONE
 driver for the learn half of the loop (boundaries doc
 execute_learn_module_boundaries_20261016.md sections 1.2, 2.4-2.7). One call
 is one learn phase of the frozen sequence; the per-target landing lives in
-``stages/learn_tasks.py`` (the plan's 400-line split rule).
+``stages/learn_add.py / learn_apply.py / learn_exam.py`` (the plan's 400-line split rule).
 
 1. **Decision** (section 2.4): the acceptance report of the nearest
    preceding execute phase, the control report that phase's ``compare``
@@ -18,7 +18,7 @@ is one learn phase of the frozen sequence; the per-target landing lives in
    merge** (one skill can carry several report rows when the shared
    answer store holds attempts of several versions; the highest
    version's row decides) and the landing semantics are documented on
-   ``learn_tasks.execute_rows``; the answer-sheet evidence of an exam
+   ``learn_add / learn_apply / learn_exam``; the answer-sheet evidence of an exam
    revise comes from the evidence family's collector
    (``methods.evidence.exam_sheet``).
 3. **Curation** (section 2.7): every learn phase ends with its own bank
@@ -51,7 +51,7 @@ re-enters and finishes it.
 The phase's files all live in ``phases/<label>/``
 (composites.phase_bank's layout): the bank artifact and summary from
 the curation side, ``task_list.jsonl`` / ``revisions.jsonl`` /
-``outcomes.jsonl`` from learn_tasks (the outcomes ledger is the
+``outcomes.jsonl`` from the path modules (the outcomes ledger is the
 G10/G11 migration's successor to attributions.jsonl -- Wave 3's audit
 scripts and Wave 4's golden regeneration align to that shape), and
 ``learn_summary.json`` mirroring the returned PhaseResult.
@@ -61,11 +61,15 @@ import dataclasses
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
+from expedistill.composites import decision_strategies
+from expedistill.composites import live_measurement as lm
+from expedistill.composites.live_measurement import round_dir
 from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
 )
 from expedistill.composites.reports import acceptance_report
+from expedistill.composites.skill_usage import SKILL_USAGE_NAME
 from expedistill.core.config import (
     FRESH_BARE,
     PHASE_ROLE_BASELINE,
@@ -83,7 +87,7 @@ from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import read_json, read_jsonl, write_json
 from expedistill.methods.curation import phase_bank as curation_phase_bank
-from expedistill.stages import learn_tasks
+from expedistill.stages import learn_add, learn_apply, learn_exam, learn_ledger
 
 __all__ = ["run"]
 
@@ -125,17 +129,55 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     bank = _previous_bank(ctx, names, specs, phase.index)
     checks_left = decision.remaining_checks(
         [specs[name].role for name in names], phase.index)
-    task_rows = decision.decide_task_list(
-        current_kind=current_kind, current_report=current_rows,
-        control_kind=control_kind, control_report=control_rows,
-        bank=bank, checks_left=checks_left, compare_rule=compare_rule,
-        n_attempts_weak=config.n_attempts_weak,
-        task_select_rule=config.rules["task_select"])
-    effective, superseded = learn_tasks.merge_task_list(
-        task_rows, list(current_rows or ()))
-    infra_failed = learn_tasks.execute_rows(
-        ctx, phase, effective, current_rows, current_spec,
-        _live_round(names, specs, current_pos), superseded)
+    current_round = _live_round(names, specs, current_pos)
+    if current_kind is None:
+        # P02: the baseline-gap add path stays exactly as it was.
+        task_rows = decision.decide_task_list(
+            current_kind=current_kind, current_report=current_rows,
+            control_kind=control_kind, control_report=control_rows,
+            bank=bank, checks_left=checks_left, compare_rule=compare_rule,
+            n_attempts_weak=config.n_attempts_weak,
+            task_select_rule=config.rules["task_select"])
+        effective, superseded = task_rows, []
+        infra_failed = learn_add.execute_add_rows(ctx, phase, effective)
+    elif current_kind == PHASE_ROLE_EXAM:
+        # Legacy exam path: multi-version rows still need the merge.
+        task_rows = decision.decide_task_list(
+            current_kind=current_kind, current_report=current_rows,
+            control_kind=control_kind, control_report=control_rows,
+            bank=bank, checks_left=checks_left, compare_rule=compare_rule,
+            n_attempts_weak=config.n_attempts_weak,
+            task_select_rule=config.rules["task_select"])
+        effective, superseded = learn_exam.merge_task_list(
+            task_rows, list(current_rows or ()))
+        infra_failed = learn_exam.execute_exam_rows(
+            ctx, phase, effective, current_rows, current_spec,
+            current_round, superseded)
+    else:
+        # P04/P06: one per-skill decision row per measured skill.
+        usage_by_task = _usage_by_task(ctx.store, current_round)
+        task_rows = decision_strategies.decide(
+            name=phase.spec.decision.get("name", "task_level"),
+            current_kind=current_kind, current_report=current_rows,
+            control_kind=control_kind, control_report=control_rows,
+            bank=bank, checks_left=checks_left, compare_rule=compare_rule,
+            n_attempts_weak=config.n_attempts_weak,
+            task_select_rule=config.rules["task_select"],
+            delivery=current_spec.delivery.get("name", ""),
+            usage_by_task=usage_by_task,
+            group_better_by_task=_group_better_by_task(
+                ctx, current_round),
+            skill_status_by_id=_skill_statuses(ctx, current_rows),
+            unread_in_won_group=phase.spec.decision.get(
+                "unread_in_won_group", "delete"))
+        effective, superseded = task_rows, []
+        infra_failed = learn_apply.execute_decision_rows(
+            ctx, phase, effective, current_rows, current_spec,
+            current_round,
+            usage_by_task=usage_by_task,
+            folder_manifests=_folder_manifests(
+                ctx, names, specs, current_pos),
+            delivery=current_spec.delivery.get("name", ""))
 
     summary = _summary(phase, effective, superseded, phase_dir,
                        current_phase=names[current_pos],
@@ -415,16 +457,9 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     for record in records:
         outcome = record["outcome"]
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
-    revised_targets = {record["target_id"] for record in records
-                       if record["outcome"] == "revised"}
     actions: Dict[str, int] = {}
     for row in rows:
-        if row.action == decision.REVISE:
-            effective = decision.revise_outcome(
-                row, produced_new_version=row.target_id in revised_targets)
-        else:
-            effective = row
-        actions[effective.action] = actions.get(effective.action, 0) + 1
+        actions[row.action] = actions.get(row.action, 0) + 1
     return {
         "role": phase.spec.role,
         "current_phase": current_phase,
@@ -435,10 +470,92 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     }
 
 
+def _folder_manifests(ctx: Any, names: Sequence[str], specs: dict,
+                      position: int) -> Dict[str, Dict[str, Any]]:
+    """The preceding live phase's per-task folder manifests.
+
+    Only folder deliveries carry them; the attribution driver uses the
+    manifests to locate actual cat events. A non-folder live phase
+    returns an empty mapping.
+    """
+    spec = specs[names[position]]
+    if spec.delivery.get("name") not in ("folder", "folder_by_task"):
+        return {}
+    directory = phase_bank_dir(
+        ctx.run_dir, phase_label(position, names[position]))
+    units = directory / "units.jsonl"
+    if not units.exists():
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in read_jsonl(units):
+        aux = row.get("aux") or {}
+        folder = aux.get("skill_folder")
+        if folder:
+            out[str(row.get("task_ref"))] = folder
+    return out
+
+
+def _usage_by_task(store, round_: int) -> Dict[str, List[dict]]:
+    """The round's skill-usage rows, grouped by task id."""
+    out: Dict[str, List[dict]] = {}
+    for row in read_jsonl(round_dir(store, round_) / SKILL_USAGE_NAME):
+        task_id = row.get("task_id")
+        if task_id:
+            out.setdefault(task_id, []).append(row)
+    return out
+
+
+def _group_better_by_task(ctx: Any, round_: int
+                          ) -> Dict[str, Optional[bool]]:
+    """The live phase's group result for this round: task -> better.
+
+    ``verdicts.jsonl`` is the live phase's own commit ledger; ``better``
+    is True for a winning group, False for a miss, and None for a
+    zero-execution terminal. A missing ledger/round returns an empty
+    map, which the decision keeps as unverified instead of guessing.
+    """
+    path = lm.ledger_path(ctx.store, lm.VERDICTS_LEDGER)
+    if not path.exists():
+        return {}
+    out: Dict[str, Optional[bool]] = {}
+    for row in read_jsonl(path):
+        if row.get("round") != round_:
+            continue
+        task_id = row.get("task_id")
+        if isinstance(task_id, str) and task_id not in out:
+            out[task_id] = row.get("better")
+    return out
+
+
+def _skill_statuses(ctx: Any, current_rows: Optional[
+        Sequence[AcceptanceReportRow]]) -> Dict[str, str]:
+    """The current store status of every measured skill.
+
+    P03/P05's live ``finalize_group`` is the writer of accepted/pending;
+    this map is the decision's view of that terminal fact. A missing
+    store object is a store/decision disagreement and raises from the
+    load rather than becoming a silent default.
+    """
+    out: Dict[str, str] = {}
+    for row in current_rows or ():
+        refs = row.injected_skills
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            skill_id = ref.get("skill_id")
+            if not isinstance(skill_id, str) or skill_id in out:
+                continue
+            out[skill_id] = ctx.store.load(
+                "skills", skill_id, Skill).status
+    return out
+
+
 def _phase_outcomes(phase: PhaseInstance, phase_dir) -> List[dict]:
     """This phase's receipt rows (the outcomes ledger is cumulative:
     a resumed phase's summary covers both halves)."""
-    path = phase_dir / learn_tasks.OUTCOMES_NAME
+    path = phase_dir / learn_ledger.OUTCOMES_NAME
     if not path.exists():
         return []
     return [record for record in read_jsonl(path)

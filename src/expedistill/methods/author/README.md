@@ -1,58 +1,44 @@
 # 写作模块（author）
 
-按决策给的任务清单和找证据给的证据包，写出新技能或修改已有技能。它只依据证据包落笔，
-不判断技能好不好用，也不做任何测量。
+按决策结果和证据包写内容。它不判断技能好不好用，不做 keep/delete 决策，
+也不做测量。
 
-每个学习阶段都会执行。新增路径的写作方法写在 `author` 里，组修订路径的写作方法
-写在 `group_author` 里，各自用 `name` 选方法。
-
-## `distill_diagnose`：提炼 / 诊断写作
+## `distill_diagnose`：P02 的提炼 / 诊断写作
 
 ```yaml
 author:
   name: distill_diagnose
 ```
 
-这个方法没有参数。
+没有参数。P02 的 add 行用它：
 
-它做两件事：
-
-| 任务清单动作 | 做什么 | 用哪个模型 |
+| 任务清单动作 | 做什么 | 模型 |
 |---|---|---|
-| 新增 | 证据包里每个片段写一条新技能。强模型成功的片段用**提炼**写法（这类事怎么做），弱模型失败的片段用**诊断**写法（在什么情况下会犯这个错、应该怎么做）。两种写法产出同一种四段结构：`[When to use]` / `[Steps]` / `[Verify]` / `[Do not use when]` | `author` |
-| 修改 | 证据是考卷（纸面验收）时，按考题、弱模型答案和判卷说明重写；证据是失败轨迹（实战验收）时，按归因报告重写。改写后版本号加一，必须保留四段 | `rewriter` |
+| 新增 | 每个片段写一条新技能；强模型成功段用提炼，弱模型失败段用诊断；两种都产出三段结构 `[When to use]` / `[Steps]` / `[Do not use when]` | `author` |
 
-一条技能是做法还是教训，不单独记录，看它来源片段的 `Subtask.source`（`strong` / `weak`）。
+## P04/P06 的 revise 写作
 
-注意：
+新的共享写作入口是 `revise.py` 的 `revise_one`：
 
-- 要不要从弱模型失败片段学，**不在这里设**。开关是找证据参数 `evidence.write_lessons`（默认 `true`），
-  关掉后证据包里只有强模型片段，写作也就只写提炼类技能。
-- 要不要把弱模型画像送进写作/改写提示，**也不在这里设**。开关是实验级配置 `use_weak_profile`（默认
-  `false`）：关闭时提示词收到的是“没有画像，按一般能力终端 agent 写”的中性段落；只有显式打开才用
-  `weak_profile` 的正文。画像文本本身仍留在配置里，作为来源记录和 opt-in 素材。
-- 改写失败（重试用完，或改出来和原文一字不差）不会删技能，算"没变化"：版本不动，下一个学习阶段再试。
+- 决策已经给出 per-skill 的 `revise`，这里只写内容；
+- 输入是 `SkillAttemptEvidence`（逐 attempt、逐窗口的证据），不再读
+  group diagnosis / failure_view / retrigger 判断；
+- 多个窗口的 X 可能冲突，由写作模型自己综合；
+- 整条重写，保留三段结构；
+- 改写失败或输出与原文相同 = `unchanged`，版本不动。
 
-## `usage_revise`：按使用事实修订组
+## `revise_group`：exam 兼容路径
 
-```yaml
-group_author:
-  name: usage_revise
-  policy: usage_v1
-```
+`write.py` 的 `revise_group` 仍保留给 exam 的考卷证据路径：它对每个包调用
+`rewrite_skill`，不再有 `default_decide` 的 per-skill 策略。
 
-只服务 live 组的修订。它按证据包里的读取、相关、应用事实，对每条技能选一个结果：
+## 参数
 
-| 结果 | 什么时候 | 做什么 |
+| 参数 | 含义 | 默认 |
 |---|---|---|
-| `kept` | 相关且已读、应用正常；或与本题无关 | 不动 |
-| `retriggered` | 相关但一次都没读，且此前没有重写过触发条件 | 只改 `summary` 和 `[When to use]`，正文逐字保留，版本号加一 |
-| `revised` | 读取了但没照做，或照做了仍无效 | 重写正文，保留四段，版本号加一 |
-| `deleted` | 触发条件已重写过仍未读；或动作与技能相反；或投递正常但明确有害 | 丢弃 |
-| `observed` | 投递失败、整组一次都没读、证据不足 | 不动，下一轮再看 |
+| `use_weak_profile` | 是否把弱模型画像送进写作/改写提示（实验级配置，不在 author family） | `false` |
+| `evidence.write_lessons` | P02 是否从弱模型失败段学 | `true` |
 
-`policy` 目前只有 `usage_v1`。投递失败和整组零读取不会触发逐条重写触发条件：前者
-先修投递，后者先查提示和选择入口。
-
-设计取舍见 `docs/decisions/unified_skill_structure_20261019.md` 和
-`docs/decisions/usage_aware_live_folder_20261022.md`。
+设计取舍见 `docs/decisions/p04_decision_strategy_split_20261023.md`、
+`docs/decisions/skill_structure_three_sections_20261026.md`、
+`docs/decisions/unified_skill_structure_20261019.md`（后者已过时，仅作历史记录）。

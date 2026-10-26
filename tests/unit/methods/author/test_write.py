@@ -21,13 +21,11 @@ from expedistill.core.ids import (
 from expedistill.core.models import Skill, Subtask
 from expedistill.infra.reliability import (
     CodeBugError,
-    InfrastructureError,
     ModelOutputError,
 )
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import (
     RevisionOutcome,
-    default_decide,
     revise_group,
     write_new,
 )
@@ -41,7 +39,6 @@ MARKED_A = "\n".join([
     "[Steps]",
     "1. Check the service status with the status command.",
     "2. Restart the service with the restart command.",
-    "[Verify] The status command reports the service as running.",
     "[Do not use when] The status command already reports running.",
 ])
 MARKED_A_DROPPED = "\n".join([
@@ -57,7 +54,6 @@ MARKED_A_REVISED = "\n".join([
     "1. Run the status command to see the service state.",
     "2. Restart the service with its restart command.",
     "3. Re-run the status command to confirm.",
-    "[Verify] The second status command reports the service as running.",
     "[Do not use when] The status command already reports running.",
 ])
 
@@ -131,49 +127,9 @@ def run_revise(packages, script, *, decide=None, revision_attempts=2):
 # decide / keep
 # ---------------------------------------------------------------------------
 
-def test_default_policy_revises_on_problem_keeps_without_one():
-    with_problem = live_package(make_skill(), problem="trigger vague")
-    assert default_decide(with_problem) == "revise"
-    no_problem = live_package(make_skill(), problem="")
-    no_problem.facts = [f for f in no_problem.facts
-                        if f["kind"] != "skill_problem"]
-    assert default_decide(no_problem) == "keep"
-
-
-def test_keep_needs_no_model_call():
-    skill = make_skill()
-    package = live_package(skill, problem="")
-    package.facts = [f for f in package.facts
-                     if f["kind"] != "skill_problem"]
-    handle, outcomes, _ = run_revise([package], [])
-
-    assert outcomes == [RevisionOutcome(skill_id=skill.skill_id,
-                                        decision="keep", outcome="kept")]
-    assert handle.client.calls == []
-
-
 # ---------------------------------------------------------------------------
 # revise: dispatch by the evidence package
 # ---------------------------------------------------------------------------
-
-def test_live_shaped_package_goes_to_the_live_revision_block():
-    skill = make_skill()
-    handle, outcomes, _ = run_revise(
-        [live_package(skill)], [revision_script(MARKED_A_REVISED)])
-
-    assert outcomes[0].outcome == "revised"
-    assert outcomes[0].content == MARKED_A_REVISED
-    assert outcomes[0].failure_category == "missing_step"
-    assert outcomes[0].revision_reason == \
-        "spelled out the verification step"
-    prompt = handle.client.calls[0]["user"]
-    # The same composed inputs the legacy K6 path renders.
-    assert DIAGNOSIS in prompt
-    assert "This skill's problem: the verify step is missing" in prompt
-    assert "do x 0" in prompt
-    assert MARKED_A in prompt
-    assert WEAK_PROFILE in prompt
-
 
 def test_exam_shaped_package_goes_to_the_exam_rewrite_block():
     """The same driver, the other package shape: an exam answer sheet
@@ -189,20 +145,6 @@ def test_exam_shaped_package_goes_to_the_exam_rewrite_block():
     assert "I would restart it." in prompt
     assert "the answer omits the verification step" in prompt
     assert MARKED_A in prompt
-
-
-def test_a_revision_without_failure_material_is_a_caller_bug():
-    skill = make_skill()
-    package = EvidencePackage(
-        target=skill.skill_id,
-        facts=[{"kind": "skill_problem", "text": "trigger vague"},
-               {"kind": "group_diagnosis", "text": DIAGNOSIS}],
-        old_skill=skill)
-    with pytest.raises(CodeBugError, match="no failure material"):
-        revise_group(task_row=revise_row(), packages=[package],
-                     rewriter_handle=make_fake_handle("rewriter", []),
-                     weak_profile=WEAK_PROFILE,
-                     decide=lambda p: "revise")
 
 
 def test_a_package_without_an_old_skill_is_a_caller_bug():
@@ -234,71 +176,6 @@ def test_refuses_a_nonpositive_revision_budget():
 
 # ---------------------------------------------------------------------------
 # revise: the C8 budget disposition -- no change, never a discard
-# ---------------------------------------------------------------------------
-
-def test_budget_exhaustion_is_no_change_not_a_discard():
-    """R6's acceptance scenario: the rewrite budget runs out and the
-    skill is NOT discarded -- no new version came out, so the skill is
-    unchanged (boundaries 4.3 rule 2; the C8 ruling overrides the old
-    failure-disposition row), retried next learning round."""
-    skill = make_skill()
-    handle, outcomes, _ = run_revise([live_package(skill)], [
-        ModelOutputError("LIVE_SKILL_REVISION: bad json"),
-        ModelOutputError("LIVE_SKILL_REVISION: worse"),
-    ])
-
-    assert outcomes[0].outcome == "unchanged"
-    assert outcomes[0].content is None
-    assert outcomes[0].discard_reason is None
-    assert len(handle.client.calls) == 2
-
-
-def test_a_marker_failure_rides_the_budget_then_revises():
-    skill = make_skill()
-    handle, outcomes, _ = run_revise([live_package(skill)], [
-        revision_script(MARKED_A_DROPPED),      # drops [Verify]
-        revision_script(MARKED_A_REVISED),
-    ])
-
-    assert outcomes[0].outcome == "revised"
-    assert outcomes[0].content == MARKED_A_REVISED
-    assert len(handle.client.calls) == 2
-
-
-def test_a_marker_failure_exhausting_the_budget_is_no_change():
-    skill = make_skill()
-    handle, outcomes, _ = run_revise([live_package(skill)], [
-        revision_script(MARKED_A_DROPPED),
-        revision_script(MARKED_A_DROPPED),
-    ])
-
-    assert outcomes[0].outcome == "unchanged"
-    assert len(handle.client.calls) == 2
-
-
-def test_identical_output_is_no_change_not_a_new_version():
-    """Boundaries 4.3 rule 1: a revision that lands byte-identical to
-    the original counts as no change -- no new version."""
-    skill = make_skill()
-    handle, outcomes, _ = run_revise(
-        [live_package(skill)], [revision_script(MARKED_A)])
-
-    assert outcomes[0].outcome == "unchanged"
-    assert outcomes[0].content is None
-    assert len(handle.client.calls) == 1
-
-
-def test_infra_failure_is_not_a_budget_item():
-    skill = make_skill()
-    handle, outcomes, _ = run_revise(
-        [live_package(skill)], [InfrastructureError("sandbox died")])
-
-    assert outcomes[0].outcome == "infra_failed"
-    assert len(handle.client.calls) == 1
-
-
-# ---------------------------------------------------------------------------
-# the revision-flow delete (R6 item 3: owned by the author)
 # ---------------------------------------------------------------------------
 
 def test_delete_decision_carries_live_revision_deleted():
@@ -352,7 +229,6 @@ def distill_script():
         "when_to_use": "When the service rejects connections.",
         "steps": ["Run the status command on the service.",
                   "Restart the service with its restart command."],
-        "verify": "The status command reports the service as running.",
         "not_applicable_when": "The service already reports running.",
         "summary": "restore a service that rejects connections",
     })
@@ -373,6 +249,18 @@ def test_write_new_distills_one_skill_per_experience():
     assert "restart the service" in prompt   # the subtask description
     assert "do s0 0" in prompt               # the rendered steps view
     assert WEAK_PROFILE in prompt
+
+
+def test_write_new_forwards_the_segment_position():
+    package = add_package(make_subtask(0))
+    package.source_experiences[0]["segment_position"] = "segment 1 of 3"
+    author = make_fake_handle("author", [distill_script()])
+
+    write_new(task_row=add_row(), package=package, author_handle=author,
+              weak_profile=WEAK_PROFILE)
+
+    assert "SEGMENT POSITION: segment 1 of 3\n" in \
+        author.client.calls[0]["user"]
 
 
 def test_write_new_propagates_a_model_output_error():

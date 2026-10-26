@@ -39,7 +39,7 @@ folder 交付改成 Agent Skills 目录布局：
   SKILL.md                 # benchmark 写的使用说明，深度 1，不会被扫描
   catalog.md               # 兜底目录，不是主入口
   bank-merge-0001/
-    SKILL.md               # YAML 头 + 四段正文
+    SKILL.md               # YAML 头 + 三段正文
   traj-tb-xxx/
     SKILL.md
 ```

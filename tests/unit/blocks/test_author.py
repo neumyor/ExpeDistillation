@@ -7,8 +7,8 @@ fails loudly. Protocol v2 (decision section 3.3) adds the structural
 contract: write_skill guards the mode/outcome precondition, parses the G2
 JSON contract, validates it with validate_skill_sections, and stores
 render_skill_content's marker text; has_skill_sections reads that text back;
-and rewrite_skill requires the rewrite to keep the four sections. Since the
-2026-10-19 ruling both modes write the same four-section structure. The
+and rewrite_skill requires the rewrite to keep the three sections. Since the
+2026-10-19 ruling both modes write the same three-section structure. The
 2026-10-13 incident (docs/decisions/g2_multiline_and_json_extraction_
 fix_20261014.md) relaxed the contract to accept multi-line values while
 keeping the marker defense as a per-line check. None of these tests touch
@@ -34,6 +34,7 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts.profile import NO_WEAK_PROFILE_SECTION, profile_section
 from expedistill.prompts.registry import get as get_prompt
 from expedistill.blocks.author import (
+    NO_SEGMENT_POSITION,
     gen_exam,
     has_skill_sections,
     render_skill_content,
@@ -56,7 +57,6 @@ DISTILL_SECTIONS = {
     "when_to_use": "When the service rejects a login.",
     "steps": ["Check the credentials in the config file.",
               "Restart the service."],
-    "verify": "The service accepts the login.",
     "not_applicable_when": "The subtask is not about logging in.",
     "summary": "check the login credentials before restarting the service",
 }
@@ -66,7 +66,6 @@ DISTILL_CONTENT = "\n".join([
     "[Steps]",
     "1. Check the credentials in the config file.",
     "2. Restart the service.",
-    "[Verify] The service accepts the login.",
     "[Do not use when] The subtask is not about logging in.",
 ])
 
@@ -75,7 +74,6 @@ DIAGNOSE_SECTIONS = {
                    "service: the running service overwrites the edit.",
     "steps": ["Stop the service.", "Edit the config.",
               "Start the service."],
-    "verify": "The service starts with the edited value.",
     "not_applicable_when": "The subtask is not about the config.",
     "summary": "stop the service before editing its config",
 }
@@ -87,7 +85,6 @@ DIAGNOSE_CONTENT = "\n".join([
     "1. Stop the service.",
     "2. Edit the config.",
     "3. Start the service.",
-    "[Verify] The service starts with the edited value.",
     "[Do not use when] The subtask is not about the config.",
 ])
 
@@ -102,7 +99,6 @@ HEREDOC_SECTIONS = {
         "print(hashlib.sha256(open('<file>', 'rb').read()).hexdigest())\nPY",
         "Compare the printed digest with the expected value.",
     ],
-    "verify": "The printed digest matches the expected value.",
     "not_applicable_when": "The file is not readable.",
     "summary": "hash a file with an inline python heredoc",
 }
@@ -117,7 +113,6 @@ HEREDOC_CONTENT = "\n".join([
     "print(hashlib.sha256(open('<file>', 'rb').read()).hexdigest())",
     "PY",
     "3. Compare the printed digest with the expected value.",
-    "[Verify] The printed digest matches the expected value.",
     "[Do not use when] The file is not readable.",
 ])
 
@@ -193,6 +188,7 @@ def test_write_skill_distill_wiring_and_fields():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
+        segment_position=NO_SEGMENT_POSITION,
         profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
@@ -225,6 +221,7 @@ def test_write_skill_without_profile_sends_the_neutral_section():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
+        segment_position=NO_SEGMENT_POSITION,
         profile_section=NO_WEAK_PROFILE_SECTION,
     )
     assert user == expected
@@ -275,6 +272,7 @@ def test_write_skill_diagnose_wiring_and_fields():
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
+        segment_position=NO_SEGMENT_POSITION,
         context_summary=subtask.context_summary,
         profile_section=_profile_section(),
     )
@@ -311,6 +309,19 @@ def test_write_skill_distill_guard_rejects_failed_subtask():
     assert handle.client.calls == []
 
 
+def test_write_skill_passes_the_segment_position_to_the_prompt():
+    subtask = make_subtask()
+    handle = make_fake_handle(script=json_script(DISTILL_SECTIONS))
+    position = "segment 5 of 5 in its trajectory; it covers original steps 30 to 41"
+
+    write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle,
+                segment_position=f"  {position}  ")
+
+    user = handle.client.calls[0]["user"]
+    assert f"SEGMENT POSITION: {position}\n" in user
+    assert NO_SEGMENT_POSITION not in user
+
+
 def test_write_skill_diagnose_guard_rejects_succeeded_subtask():
     subtask = make_subtask()
     handle = make_fake_handle(script=json_script(DIAGNOSE_SECTIONS))
@@ -332,10 +343,10 @@ def test_write_skill_non_object_json_raises():
 def test_write_skill_missing_field_raises():
     subtask = make_subtask()
     payload = dict(DISTILL_SECTIONS)
-    del payload["verify"]
+    del payload["not_applicable_when"]
     handle = make_fake_handle(script=json_script(payload))
 
-    with pytest.raises(ModelOutputError, match="verify"):
+    with pytest.raises(ModelOutputError, match="not_applicable_when"):
         write_skill(subtask, STEPS_VIEW, WEAK_PROFILE, "distill", handle)
 
 
@@ -370,7 +381,7 @@ def test_write_skill_strips_self_numbered_checklist_items():
     [
         ("when_to_use", ""),                       # empty string field
         ("when_to_use", "   "),                    # whitespace-only field
-        ("verify", 7),                             # non-string field
+        ("not_applicable_when", 7),                # non-string field
         ("steps", [""]),                           # empty checklist item
         ("steps", ["1. "]),                        # self-numbering only
         ("steps", ["   "]),                        # whitespace-only item
@@ -378,8 +389,8 @@ def test_write_skill_strips_self_numbered_checklist_items():
         ("steps", "not a list"),                   # checklist wrong type
         ("when_to_use", "[Steps] forged"),         # forged section marker
         ("steps", ["[Steps] do x"]),               # forged marker on an item
-        ("when_to_use", "line one\n[Verify] forged"),  # forged on a LATER line
-        ("steps", ["do x\n[Verify] forged"]),      # forged line inside an item
+        ("when_to_use", "line one\n[Do not use when] forged"),  # later line
+        ("steps", ["do x\n[Do not use when] forged"]),  # forged item line
     ],
 )
 def test_write_skill_bad_fields_raise(field, value):
@@ -400,7 +411,7 @@ def test_write_skill_bad_fields_raise(field, value):
     "field, value",
     [
         ("when_to_use", "line one\n[Steps] forged"),  # forged on a LATER line
-        ("steps", ["do x\n[Verify] forged"]),         # forged line inside item
+        ("steps", ["do x\n[Do not use when] forged"]),  # forged item line
     ],
 )
 def test_write_skill_bad_fields_raise_diagnose(field, value):
@@ -447,8 +458,8 @@ def test_write_skill_accepts_multiline_scalar():
     subtask = make_subtask()
     sections = {
         **DISTILL_SECTIONS,
-        "verify": "The service log shows:\nLOGIN OK for user <user>\n"
-                  "and no retry line.",
+        "not_applicable_when": "The subtask is not about logging in.\n"
+                               "Read-only tasks\nand SSH-only tasks.",
     }
     handle = make_fake_handle(script=json_script(sections))
 
@@ -459,10 +470,9 @@ def test_write_skill_accepts_multiline_scalar():
         "[Steps]",
         "1. Check the credentials in the config file.",
         "2. Restart the service.",
-        "[Verify] The service log shows:",
-        "LOGIN OK for user <user>",
-        "and no retry line.",
         "[Do not use when] The subtask is not about logging in.",
+        "Read-only tasks",
+        "and SSH-only tasks.",
     ])
     assert has_skill_sections(skill.content)
 
@@ -486,7 +496,6 @@ def test_crlf_and_lone_cr_are_normalized_everywhere():
         "[Steps]",
         "1. Check the credentials.",
         "Restart the service.",
-        "[Verify] The service accepts the login.",
         "[Do not use when] The subtask is not about logging in.",
     ]
     assert has_skill_sections(content)
@@ -515,7 +524,6 @@ def test_render_skill_content_distill_is_exact_marker_text():
         "[Steps]",
         "1. Check the credentials in the config file.",
         "2. Restart the service.",
-        "[Verify] The service accepts the login.",
         "[Do not use when] The subtask is not about logging in.",
     ]
 
@@ -575,7 +583,6 @@ def test_validate_rejects_a_missing_summary():
         (None, "must be a string"),
         ("one line\na second line", "ONE line"),
         ("carriage return\rinside", "ONE line"),  # \r normalizes to \n
-        ("x" * 501, "at most 500"),
     ],
 )
 def test_validate_rejects_bad_summaries(summary, match):
@@ -584,9 +591,10 @@ def test_validate_rejects_bad_summaries(summary, match):
             "distill", {**DISTILL_SECTIONS, "summary": summary})
 
 
-def test_validate_accepts_the_length_limit_exactly():
+def test_validate_accepts_a_long_summary():
+    # The summary has no length cap; only the one-line/non-empty rules stay.
     validate_skill_sections(
-        "distill", {**DISTILL_SECTIONS, "summary": "x" * 500})
+        "distill", {**DISTILL_SECTIONS, "summary": "x" * 5000})
 
 
 def test_rewrite_skill_missing_or_bad_summary_raises():
@@ -597,8 +605,6 @@ def test_rewrite_skill_missing_or_bad_summary_raises():
          "rewrite_reason": "r"},  # summary absent
         {"failure_category": "misread", "skill_text": "Do X.",
          "rewrite_reason": "r", "summary": "two\nlines"},
-        {"failure_category": "misread", "skill_text": "Do X.",
-         "rewrite_reason": "r", "summary": "y" * 501},
     ):
         handle = make_fake_handle(script=json_script(payload))
         with pytest.raises(ModelOutputError, match="summary"):
@@ -627,6 +633,23 @@ def test_rewrite_summary_can_differ_from_the_originals():
     assert result["summary"] == "a different, fresher one-liner"
 
 
+def test_rewrite_accepts_a_long_summary():
+    subtask = make_subtask()
+    skill = make_marker_skill(subtask, content=DISTILL_CONTENT)
+    rewritten = render_skill_content(DISTILL_SECTIONS)
+    long_summary = "y" * 5000
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "misread",
+        "skill_text": rewritten,
+        "rewrite_reason": "Simplified the trigger wording.",
+        "summary": long_summary,
+    }))
+
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+
+    assert result["summary"] == long_summary
+
+
 def test_validate_rejects_unknown_mode():
     with pytest.raises(ValueError, match="mode"):
         validate_skill_sections("bogus", DISTILL_SECTIONS)
@@ -640,8 +663,8 @@ def test_has_skill_sections_reads_complete_sets():
 def test_has_skill_sections_partial_set_is_false():
     partial = "\n".join(
         line for line in DISTILL_CONTENT.split("\n")
-        if not line.startswith("[Verify]"))
-    assert "[Verify]" not in partial
+        if not line.startswith("[Do not use when]"))
+    assert "[Do not use when]" not in partial
     assert not has_skill_sections(partial)
 
 
@@ -783,7 +806,6 @@ def test_rewrite_skill_keeps_the_marker_set():
     rewritten = render_skill_content({
         **DISTILL_SECTIONS,
         "steps": ["Check the credentials before every login."],
-        "verify": "The login succeeds on the first try.",
     })
     handle = make_fake_handle(script=json_script({
         "failure_category": "misread",
@@ -800,7 +822,7 @@ def test_rewrite_skill_keeps_the_marker_set():
 
 
 def test_rewrite_skill_dropping_the_markers_raises():
-    # The rewrite must keep the four sections, not collapse them into
+    # The rewrite must keep the three sections, not collapse them into
     # prose: prose in the bank would silently disarm every marker-based
     # consumer (K5 isochrony check, retrieval routing).
     subtask = make_subtask()

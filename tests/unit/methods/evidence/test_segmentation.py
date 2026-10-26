@@ -9,7 +9,7 @@ mandatory for anything that lands units):
   rule over the task's both-roles set, the strong-only cut, the
   0-step exclusion with its once-only audit records, mid-batch crash ->
   resume without re-segmentation, and terminal exhaustion;
-* the LEARN PHASE (``stages.phase_learn`` through ``learn_tasks``)
+* the LEARN PHASE (``stages.phase_learn`` through ``learn_add` / `learn_apply` / `learn_exam``)
   with NOTHING seeded but the baseline phase's on-disk trajectories: an add
   row produces its own subtasks, an add row with no strong material is
   recorded instead of raised, and a learn phase with no add row never
@@ -32,7 +32,7 @@ from expedistill.core.models import Skill, Step, Subtask, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import json_script, make_fake_handle
 from expedistill.methods.evidence.segmentation import segment_add_material
-from expedistill.stages import learn_tasks, phase_learn
+from expedistill.stages import learn_ledger, phase_learn
 from expedistill.stages.context import StageContext
 from tests.helpers.plugins import ensure_plugin
 
@@ -85,7 +85,6 @@ def _distill_script():
         "when_to_use": "When the service rejects connections.",
         "steps": ["Run the status command on the service.",
                   "Restart the service with its restart command."],
-        "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
         "summary": "restore a service that rejects connections",
     })
@@ -97,7 +96,6 @@ def _diagnose_script():
                        "a restart: restarting again does not help.",
         "steps": ["Read the service log.",
                   "Fix the error the log names, then restart."],
-        "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service has never been started.",
         "summary": "read the log instead of restarting blindly",
     })
@@ -178,7 +176,7 @@ def _seed_d_phase(store, *, strong=True, weak_attempts=2):
 
 
 def _outcomes(run_dir, label):
-    path = phase_bank_dir(run_dir, label) / learn_tasks.OUTCOMES_NAME
+    path = phase_bank_dir(run_dir, label) / learn_ledger.OUTCOMES_NAME
     return list(read_jsonl(path)) if path.exists() else []
 
 
@@ -418,7 +416,7 @@ def test_a_learn_phase_without_add_rows_never_segments(tmp_path):
     subtask_id = ids.make_subtask_id(
         ids.make_trajectory_id(TASK_ID, "strong", 0), 0)
     covered = Skill(skill_id=ids.make_skill_id(subtask_id),
-                    content="[When to use] x\n[Steps]\n1. y\n[Verify] z",
+                    content="[When to use] x\n[Steps]\n1. y\n",
                     subtask_id=subtask_id, source_subtasks=[subtask_id],
                     version=1, status="accepted")
     ctx.store.save(covered, "skills")
@@ -524,7 +522,7 @@ def test_an_add_row_with_write_lessons_lands_a_distill_and_a_diagnose_skill(
     assert "where it went wrong" in prompts[1]
     for subtask_id in (strong, weak):
         skill = ctx.store.load("skills", ids.make_skill_id(subtask_id), Skill)
-        # One structure for both: the four sections, no [Trigger].
+        # One structure for both: the three sections, no [Trigger].
         assert skill.content.startswith("[When to use]")
         assert "[Trigger]" not in skill.content
     assert {row["skill_id"] for row in _outcomes(ctx.run_dir, "p02:learn")} \

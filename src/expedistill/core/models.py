@@ -74,25 +74,14 @@ ATTEMPT_PURPOSES = ("bare", "acceptance", "regression")
 # is the only legal home both can import. The REWRITE/MERGE/SIMILARITY
 # prompts embed these markers literally (their outputs must reproduce
 # them); the G2 prompts carry the JSON field names that map 1:1 onto the
-# four sections (blocks/author.py's renderer adds the markers);
+# three sections (blocks/author.py's renderer adds the markers);
 # blocks/retrieve.py weights the [When to use] section for retrieval.
 
-#: The four sections of every stored skill's content. A skill written
+#: The three sections of every stored skill's content. A skill written
 #: from a strong success (distill) and one written from a weak failure
-#: (diagnose) carry the same four sections (the 2026-10-19 ruling,
-#: docs/decisions/unified_skill_structure_20261019.md); which kind a
-#: skill is, its source subtasks' ``Subtask.source`` says.
-SKILL_MARKERS = ("[When to use]", "[Steps]", "[Verify]", "[Do not use when]")
-
-#: The write-side length cap of ``Skill.summary`` (schema v3): the
-#: summary is one line of a future skill-directory listing, so the G2 /
-#: G6 / G11 output contracts reject anything longer. A deliberately
-#: generous ceiling -- the prompt asks for one or two sentences, this
-#: only catches runaway output. Lives in core (like the markers) because
-#: TWO blocks enforce it (blocks/author.py, blocks/attribution.py) and
-#: blocks may not import each other; the K5 merge product's composed
-#: summary is NOT held to it (no model wrote that one).
-SKILL_SUMMARY_MAX_CHARS = 500
+#: (diagnose) carry the same three sections; which kind a skill is, its
+#: source subtasks' ``Subtask.source`` says.
+SKILL_MARKERS = ("[When to use]", "[Steps]", "[Do not use when]")
 
 
 def _check_vocab(value: str, allowed: Tuple[str, ...], owner: str,
@@ -264,7 +253,7 @@ class Skill(_Record):
     subtask_id: str
     #: Which subtasks this skill distills; see the class docstring.
     source_subtasks: List[str]
-    #: One line, <= SKILL_SUMMARY_MAX_CHARS, no newline (schema v3).
+    #: One line, no newline (schema v3).
     summary: str = ""
     version: int = 1
     status: str = "pending"

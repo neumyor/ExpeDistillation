@@ -17,7 +17,6 @@ MARKED = "\n".join([
     "[When to use] The service rejects connections.",
     "[Steps]",
     "1. Check the service status.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 

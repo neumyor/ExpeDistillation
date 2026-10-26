@@ -2,7 +2,7 @@
 
 The agent is handed ONE read-only folder of skills. Each delivered skill
 is a directory containing ``SKILL.md`` with YAML frontmatter (``name``
-and ``description``) and the skill's four-section body. The test phase
+and ``description``) and the skill's three-section body. The test phase
 delivers the accepted set; the live phase's ``folder_by_task`` passes
 ``accepted_only=False`` so its pending group is the delivered set. Harbor's
 Terminus agent discovers those files itself, renders an
@@ -82,11 +82,6 @@ _RESERVED_NAME_WORDS = ("anthropic", "claude")
 #: The per-skill file name under its directory.
 _SKILL_FILE_NAME = "SKILL.md"
 
-#: The directory line's description budget. The full description lives
-#: in SKILL.md; the catalog line stays one readable line.
-_LINE_MAX_CHARS = 200
-_TRUNCATION_MARK = " [truncated]"
-
 #: The description of a skill with neither a summary nor a [When to
 #: use] section (a markerless body): an explicit placeholder, never a
 #: silently blank column.
@@ -160,8 +155,9 @@ def skill_filename(skill_id: str) -> str:
 
 def _description(record: Union[Skill, Mapping[str, Any]],
                  description_mode: str) -> str:
-    """One skill's catalog description under the configured mode, then
-    the explicit catalog clip.
+    """One skill's catalog description under the configured mode, kept
+    whole: a clipped trigger reads as a different rule, so the length
+    budget lives in the G2 prompts, not in a clip here.
 
     A skill with neither a summary nor a [When to use] section keeps the
     catalog's explicit placeholder; the SKILL.md frontmatter renderer
@@ -172,11 +168,7 @@ def _description(record: Union[Skill, Mapping[str, Any]],
     trigger = when_to_use_line(_field(record, "content", "") or "")
     if not summary and not trigger:
         return _NO_DESCRIPTION
-    description = description_text(record, description_mode)
-    if len(description) > _LINE_MAX_CHARS:
-        return (description[:_LINE_MAX_CHARS].rstrip()
-                + _TRUNCATION_MARK)
-    return description
+    return description_text(record, description_mode)
 
 
 def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],

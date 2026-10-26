@@ -9,8 +9,8 @@ round stores' trajectories. Model verdicts and plans are FakeClient
 scripts on the author / rewriter handles (AGENTS.md section 8: no
 network, deterministic, assertable). The retired G10/G11 composite
 (attribution + revision application) went with the K6 shell; its
-phase-world heirs are methods/evidence/live_group (facts) and
-methods/author/write (decisions), tested under tests/unit.
+phase-world heirs are methods/attribution/skill_attempts (facts) and
+methods/author/revise (writing), tested under tests/unit.
 """
 
 import hashlib
@@ -57,24 +57,22 @@ OTHER_TASK_ID = make_task_id(BENCHMARK, "t2")
 N_ATTEMPTS = 3
 RULE = "strict_rate_gain"
 
-# Protocol-v2 contents: four bracket sections at line starts, so
+# Protocol-v2 contents: three bracket sections at line starts, so
 # blocks.author.skill_markers reads the procedure set off them.
 MARKED_A = "\n".join([
     "[When to use] The service rejects connections and needs a restart.",
     "[Steps]",
     "1. Check the service status with the status command.",
     "2. Restart the service with the restart command.",
-    "[Verify] The status command reports the service as running.",
     "[Do not use when] The status command already reports running.",
 ])
-#: Same four sections, reworded: passes the keep-structure check.
+#: Same three sections, reworded: passes the keep-structure check.
 MARKED_A_REVISED = "\n".join([
     "[When to use] The service rejects connections and a restart is due.",
     "[Steps]",
     "1. Run the status command to see the service state.",
     "2. Restart the service with its restart command.",
     "3. Re-run the status command to confirm.",
-    "[Verify] The second status command reports the service as running.",
     "[Do not use when] The status command already reports running.",
 ])
 PROSE = "Restart the service after editing its configuration."

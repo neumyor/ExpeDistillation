@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from expedistill.core.models import SKILL_SUMMARY_MAX_CHARS, Skill
+from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError, ModelOutputError
 from expedistill.llm.call import ModelHandle, call_model
 
@@ -209,9 +209,9 @@ def find_similar(
 
 def _validate_merge_summary(value: Any) -> str:
     """The G8 mirror of blocks/author.py's summary rule (the same-layer
-    rule forbids the import): a non-empty string, ONE line, at most
-    SKILL_SUMMARY_MAX_CHARS; returns the stripped, newline-normalized
-    line the composite stores in ``Skill.summary``."""
+    rule forbids the import): a non-empty string on ONE line, with no
+    length cap; returns the stripped, newline-normalized line the
+    composite stores in ``Skill.summary``."""
     if not isinstance(value, str):
         raise ModelOutputError(
             f"MERGE: field 'summary' must be a string, got {value!r}")
@@ -225,10 +225,6 @@ def _validate_merge_summary(value: Any) -> str:
             "MERGE: field 'summary' must be ONE line (the skill's "
             f"directory entry); got a value with an embedded newline: "
             f"{value!r}")
-    if len(summary) > SKILL_SUMMARY_MAX_CHARS:
-        raise ModelOutputError(
-            f"MERGE: field 'summary' must be at most "
-            f"{SKILL_SUMMARY_MAX_CHARS} characters, got {len(summary)}")
     return summary
 
 

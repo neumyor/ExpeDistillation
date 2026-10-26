@@ -15,6 +15,7 @@ which the landing calls right before this collector reads the store);
 this driver only gathers what it produced.
 """
 
+from collections import Counter
 from typing import Any, List
 
 from expedistill.blocks.select import select_subtasks
@@ -26,7 +27,22 @@ from expedistill.infra.store import Store
 
 from expedistill.methods.evidence.package import EvidencePackage
 
-__all__ = ["NoAddMaterial", "collect_add_evidence"]
+__all__ = ["NoAddMaterial", "collect_add_evidence", "segment_position"]
+
+
+def segment_position(subtask: Subtask, n_segments: int,
+                     n_steps: int) -> str:
+    """Where one segment sits in its trajectory, as plain text for G2.
+
+    The steps view restarts its numbering at 0, so without this the
+    author cannot tell an opening segment from a closing one -- the
+    main hint for the card's trigger timing. Step numbers are the
+    original trajectory's, 0-based, end inclusive.
+    """
+    start, end = subtask.step_range
+    return (f"segment {subtask.segment_index + 1} of {n_segments} in its "
+            f"trajectory; it covers original steps {start} to {end - 1} "
+            f"out of {n_steps} steps (steps are numbered from 0)")
 
 
 class NoAddMaterial(ValueError):
@@ -36,7 +52,7 @@ class NoAddMaterial(ValueError):
     never run, all segments cut away by the segment rule, or K2
     exhausted the trajectories (terminal within a run).
     With segmentation wired into the add path this is reachable on real
-    data; the landing records it (learn_tasks' ``skipped_no_material``
+    data; the landing records it (learn_add's ``skipped_no_material``
     receipt) where the old stage 3 answered with silence. A ValueError
     subclass because the contract violation shape (a caller handing in
     a task with material it knows exists) is still a bug and older
@@ -64,8 +80,10 @@ def collect_add_evidence(
     failures). Each source experience carries the subtask, its rendered
     steps view and the write mode the author uses -- ``distill`` for a
     strong segment, ``diagnose`` for a weak one; both write the same
-    four-section skill. The package's segments pin the subtask ids and
-    step ranges so the author's output stays traceable to its evidence.
+    three-section skill. Each experience also carries its
+    ``segment_position`` text (the author's trigger-timing hint). The
+    package's segments pin the subtask ids and step ranges so the
+    author's output stays traceable to its evidence.
     """
     if task_row.action != ADD:
         raise ValueError(
@@ -78,6 +96,9 @@ def collect_add_evidence(
     roles = ("strong", "weak") if write_lessons else ("strong",)
     subtasks = [sub for sub in subtasks if sub.task_id == task_id
                 and sub.source in roles]
+    # Counted before the segment rule drops any: the position is about
+    # the trajectory's own cut, not about which segments are material.
+    per_trajectory = Counter(sub.trajectory_id for sub in subtasks)
     subtasks = select_subtasks(subtasks, rule_name)
 
     source_experiences: List[dict] = []
@@ -92,6 +113,9 @@ def collect_add_evidence(
             "subtask": sub,
             "steps_view": steps_view,
             "mode": "distill" if sub.source == "strong" else "diagnose",
+            "segment_position": segment_position(
+                sub, per_trajectory[sub.trajectory_id],
+                len(trajectory.steps)),
         })
         segments.append({"subtask_id": sub.subtask_id,
                          "trajectory_id": sub.trajectory_id,

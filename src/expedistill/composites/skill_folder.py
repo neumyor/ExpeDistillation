@@ -5,7 +5,7 @@ it resolves the catalog text and the per-skill file LIST into the unit
 row's ``aux["skill_folder"]``, and touching the file system belongs
 here (layer 5 owns disk IO). This module writes that folder out: one
 directory per skill containing ``SKILL.md`` (YAML frontmatter plus the
-skill's four-section content) plus the catalog file (the manifest's
+skill's three-section content) plus the catalog file (the manifest's
 catalog text, verbatim). The frontmatter is what Harbor's Terminus
 agent parses to build its ``<available_skills>`` list; a file without
 it is silently skipped, so every rendered skill file carries it.
@@ -156,7 +156,7 @@ def _validate_filename(filename: Any) -> str:
 def _render_skill_file(record: Union[Skill, Mapping[str, Any]],
                        filename: str, description_mode: str) -> str:
     """The exact bytes of one skill's SKILL.md: YAML frontmatter then
-    the skill's four-section content.
+    the skill's three-section content.
 
     ``name`` is the manifest directory (the delivery derived it from
     the skill id); ``description`` is the configured composition. The

@@ -3,22 +3,21 @@
 The author module takes what the decision module authorized (a
 TaskListRow) and what the evidence module gathered (evidence
 packages), and produces skill CONTENT: a revision's new text, or a new
-skill distilled from source experiences. It decides the per-skill
-handling of a package-revision WITHIN the authorization (boundaries
-section 2.6: which skill to rewrite, which to drop, is the author's
-call), and it dispatches by the EVIDENCE PACKAGE's shape, never by the
+skill distilled from source experiences. The P04/P06 per-skill decision
+lives in ``composites/decision_strategies.py``; this module's
+``revise_group`` is the exam-compatible group writer and always revises
+each package. It dispatches by the EVIDENCE PACKAGE's shape, never by the
 report kind -- a package carrying an exam answer sheet goes to the exam
 rewrite block (G6's REWRITE prompt), one carrying failure views to the
-live revision block (G11's LIVE_SKILL_REVISION); the caller never says
+live revision block (G11's old prompt); the caller never says
 which. For the same reason this module does not import the evidence
 family (methods modules never import each other): it consumes the
 package's duck-typed shape -- ``target``, ``facts``, ``old_skill``,
 ``source_experiences`` and the ``fact``/``has_fact`` readers.
 
-The revision-flow DELETE is owned here (R6 item 3): a delete decision
-comes back with discard reason ``live_revision_deleted`` for the task
-list applier to land. The attribution-budget-exhaustion group abandon
-is NOT here -- that is the decision module's call.
+The old per-skill keep/delete policy is gone: delete is a decision row,
+landed by ``stages.learn_ledger``. The shared P04/P06 writer is
+``methods/author/revise.py``.
 
 Budget exhaustion deliberately does NOT discard anything: the C8
 ruling (repair plan section 3) settles the old failure-disposition
@@ -35,15 +34,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Union
 
-from expedistill.blocks.attribution import revise_skill
-from expedistill.blocks.author import (
-    has_skill_sections,
-    rewrite_skill,
-    write_skill,
-)
+from expedistill.blocks.author import rewrite_skill, write_skill
 from expedistill.composites.decision import ADD, LIVE_REVISION_DELETED, REVISE
 from expedistill.core.contracts import TaskListRow
-from expedistill.core.models import SKILL_MARKERS, Skill
+from expedistill.core.models import Skill
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -53,7 +47,6 @@ from expedistill.llm.call import ModelHandle
 
 __all__ = [
     "RevisionOutcome",
-    "default_decide",
     "revise_group",
     "write_new",
 ]
@@ -95,30 +88,9 @@ class RevisionOutcome:
     summary: Optional[str] = None
 
 
-def default_decide(package: Any) -> str:
-    """The Wave-1 decision policy: a skill the evidence reports a
-    problem for is revised; a skill with no problem fact is kept.
-
-    A model-decided policy needs its own prompt, which is a new
-    experiment; until then the conservative default never deletes (a
-    wrong keep is corrected by the next learning round's decision, a
-    wrong delete is unrecoverable). A caller with a better policy
-    passes its own ``decide`` to ``revise_group``.
-    """
-    return "revise" if package.has_fact("skill_problem") else "keep"
-
-
-def _attribution_report(package: Any) -> str:
-    """The revision prompt's attribution report, composed the same way
-    the legacy K6 path composes it (group diagnosis plus this skill's
-    problem), so the two paths render the same request bytes."""
-    diagnosis = package.fact("group_diagnosis") or ""
-    problem = package.fact("skill_problem") or ""
-    report = diagnosis
-    if problem:
-        report = f"{report}\n\nThis skill's problem: {problem}" if report \
-            else f"This skill's problem: {problem}"
-    return report
+def _always_revise(package: Any) -> str:
+    """The legacy group writer has no policy: revise every package."""
+    return "revise"
 
 
 def _revise_once(
@@ -152,26 +124,10 @@ def _revise_once(
                 "failure_category": result["failure_category"],
                 "revision_reason": result["rewrite_reason"],
                 "summary": result["summary"]}
-    failure_view = package.fact("failure_view")
-    if failure_view is None:
-        raise CodeBugError(
-            f"the evidence package of {package.target!r} authorizes a "
-            "revision but carries no failure material: expected an exam "
-            "answer sheet (exam_question) or failure views (failure_view)")
-    result = revise_skill(
-        skill.content, _attribution_report(package), failure_view,
-        weak_profile, handle, usage=usage, run_dir=run_dir)
-    new_text = result["skill_text"]
-    if has_skill_sections(skill.content) and not has_skill_sections(new_text):
-        # Same budget as a format failure; a structural raise outside
-        # the budget's scope kills whole units (the K5 lesson).
-        raise ModelOutputError(
-            "the revision must keep the four bracket sections "
-            f"({' / '.join(SKILL_MARKERS)})")
-    return {"content": new_text,
-            "failure_category": result["failure_category"],
-            "revision_reason": result["revision_reason"],
-            "summary": result["summary"]}
+    raise CodeBugError(
+        f"the evidence package of {package.target!r} is not an exam "
+        "answer sheet; the P04/P06 revision path uses "
+        "methods.author.revise")
 
 
 def _revise_with_budget(
@@ -230,14 +186,11 @@ def revise_group(
 
     ``task_row`` is the decision module's authorization and must carry
     action ``revise``; ``packages`` are the evidence module's per-skill
-    packages (each with its ``old_skill``). For every package the
-    author decides keep / revise / delete (``decide``, the default
-    policy in ``default_decide``), and the outcomes come back in
-    package order for the task list applier: nothing is written to disk
-    here. A revision's new version fields are the caller's to persist
-    (version bump plus rewrite_history entry); a delete's discard
-    reason is live_revision_deleted (R6 item 3: the revision-flow
-    delete is the author's own). ``params`` is the registry's
+    packages (each with its ``old_skill``). Every package is revised
+    (``decide`` defaults to always-revise; the exam path passes its own);
+    outcomes come back in package order for the task-list applier:
+    nothing is written to disk here. A revision's new version fields are
+    the caller's to persist (version bump plus rewrite_history entry). ``params`` is the registry's
     ``AuthoringParams`` (empty); it is accepted so the phase driver can
     call every group-author method through one signature.
     """
@@ -248,7 +201,7 @@ def revise_group(
     if revision_attempts < 1:
         raise ValueError(
             f"revision_attempts must be >= 1, got {revision_attempts}")
-    decide = decide or default_decide
+    decide = decide or _always_revise
     outcomes: List[RevisionOutcome] = []
     for package in packages:
         if package.old_skill is None:
@@ -309,6 +262,7 @@ def write_new(
     for experience in package.source_experiences:
         skills.append(write_skill(
             experience["subtask"], experience["steps_view"], weak_profile,
-            experience["mode"], author_handle, usage=usage,
-            run_dir=run_dir))
+            experience["mode"], author_handle,
+            segment_position=experience.get("segment_position", ""),
+            usage=usage, run_dir=run_dir))
     return skills

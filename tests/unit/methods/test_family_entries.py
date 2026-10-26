@@ -18,7 +18,7 @@ from expedistill.methods.registry import FAMILIES, _ENTRIES
 def test_the_table_is_organised_by_the_five_families():
     # R8's acceptance: five families, no slots.
     assert FAMILIES == ("delivery", "execution", "evidence", "author",
-                        "curation")
+                        "decision", "curation")
     by_family = {}
     for (family, name) in _ENTRIES:
         by_family.setdefault(family, []).append(name)
@@ -28,9 +28,9 @@ def test_the_table_is_organised_by_the_five_families():
         "folder", "folder_by_task"])
     assert sorted(by_family["execution"]) == [
         "exam", "real", "real_folder"]
-    assert by_family["evidence"] == [
-        "segment", "live_group", "usage_group"]
-    assert by_family["author"] == ["distill_diagnose", "usage_revise"]
+    assert by_family["evidence"] == ["segment"]
+    assert by_family["author"] == ["distill_diagnose"]
+    assert by_family["decision"] == ["task_level", "skill_level"]
     assert sorted(by_family["curation"]) == ["agentbrew", "none"]
 
 
@@ -55,11 +55,11 @@ def test_the_retired_families_offer_nothing():
 def test_unknown_name_lists_the_known_ones():
     with pytest.raises(
             ConfigError,
-            match=r"known: \['segment', 'live_group', 'usage_group'\]"):
+            match=r"known: \['segment'\]"):
         resolve_params("evidence", {"name": "windows", "K": 5})
     with pytest.raises(
             ConfigError,
-            match=r"known: \['distill_diagnose', 'usage_revise'\]"):
+            match=r"known: \['distill_diagnose'\]"):
         resolve_params("author", {"name": "solo"})
     with pytest.raises(ConfigError, match="known:"):
         resolve_params("execution", {"name": "live_run"})
@@ -72,15 +72,14 @@ def test_required_params_still_fail_loudly():
 
 
 def test_the_group_slots_resolve_their_drivers():
-    from expedistill.methods import resolve
+    from expedistill.methods import resolve_params
 
-    evidence, evidence_params = resolve("evidence", {"name": "usage_group"})
-    assert evidence.__name__.endswith(".usage_group")
-    assert evidence_params.__class__.__name__ == "UsageGroupParams"
-    author, author_params = resolve("author", {
-        "name": "usage_revise", "policy": "usage_v1"})
-    assert author.__name__.endswith(".usage_revise")
-    assert author_params.policy == "usage_v1"
+    assert resolve_params(
+        "decision", {"name": "task_level"}).__class__.__name__ == \
+        "TaskLevelParams"
+    assert resolve_params(
+        "decision", {"name": "skill_level"}).__class__.__name__ == \
+        "SkillLevelParams"
 
 
 def test_the_evidence_and_author_families_resolve_their_params():

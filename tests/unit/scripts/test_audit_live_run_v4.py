@@ -353,7 +353,6 @@ def test_injection_audit_uses_the_folder_catalog_block(tmp_path):
     subtask_id = "traj/tb:t1/strong/00/seg00"
     content = ("[When to use] The task edits a file.\n"
                "[Steps]\n1. Read it.\n"
-               "[Verify] The file changed.\n"
                "[Do not use when] The task is unrelated.")
     skill = make_skill(subtask_id, content, summary="Edit a file.")
     skill_id = skill.skill_id

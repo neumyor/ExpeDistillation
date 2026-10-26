@@ -26,11 +26,17 @@ Rules:
 - The segments must cover the whole trajectory in order, without gaps and
   without overlaps: the first segment starts at step 0, the last one ends at
   the final step, and consecutive segments touch (the end index of one is
-  the start index of the next; end indices are exclusive).
+  the start index of the next; end indices are exclusive). Every step must
+  belong to exactly one segment.
 - Use at most {K} segments, and every segment must contain at least one step.
-- Merge adjacent steps that belong to the same capability. Drop pure
-  environment setup, one-off commands, and data wrangling that only makes
-  sense for this task.
+- Merge adjacent steps that belong to the same capability. Environment
+  setup, one-off commands, and task-specific data wrangling should be folded
+  into the nearest capability segment, not given their own segment; their
+  steps still belong to a segment (so coverage stays complete), but the
+  segment's label and description name the capability, not the setup.
+- If the natural capability boundaries number more than {K}, merge the most
+  closely related segments first; prefer folding setup or discovery steps
+  into a real capability segment over merging two distinct capabilities.
 - Do not restate the content of the steps. Describe each segment at the
   level of its observable trigger and general goal, so the step content and
   the segment description stay separate.

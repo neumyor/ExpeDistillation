@@ -8,7 +8,7 @@ skeleton (D L A L A L A L C) as one smoke.
 Every phase here is the production driver -- no seeded report files, no
 seeded artifacts, no hand-written acceptance rows, and since Wave 3-S no
 seeded SUBTASK either: the add path segments the baseline phase's strong
-trajectory itself (methods.evidence.segmentation through learn_tasks),
+trajectory itself (methods.evidence.segmentation through learn_add / learn_apply),
 so the chain from the baseline-phase trajectories to the new skill is real end
 to end.
 """
@@ -37,7 +37,7 @@ from expedistill.core.models import Skill
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import json_script, make_fake_handle
-from expedistill.stages import learn_tasks, phase_execute, phase_learn
+from expedistill.stages import learn_ledger, phase_execute, phase_learn
 from expedistill.stages.context import RunSettings, StageContext
 
 _FAKE = "fakebench"
@@ -50,7 +50,6 @@ MARKED = "\n".join([
     "[Steps]",
     "1. Check the service status.",
     "2. Restart the service.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 
@@ -59,7 +58,6 @@ REVISED = "\n".join([
     "[Steps]",
     "1. Run the status command to see the service state.",
     "2. Restart the service with its restart command.",
-    "[Verify] The second status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 
@@ -247,7 +245,6 @@ def _distill():
         "when_to_use": "When the service rejects connections.",
         "steps": ["Run the status command on the service.",
                   "Restart the service with its restart command."],
-        "verify": "The status command reports the service is running.",
         "not_applicable_when": "The service already reports running.",
         "summary": "restore a service that rejects connections",
     })
@@ -521,6 +518,6 @@ def test_the_two_round_exam_skeleton_runs_end_to_end(tmp_path, monkeypatch):
     for index in (1, 3, 5, 7):
         path = (phase_bank.phase_bank_dir(ctx.run_dir,
                                           f"p{index + 1:02d}:learn")
-                 / learn_tasks.OUTCOMES_NAME)
+                 / learn_ledger.OUTCOMES_NAME)
         outcomes.extend(row["outcome"] for row in read_jsonl(path))
     assert outcomes == ["added", "revised", "accepted", "already_accepted"]

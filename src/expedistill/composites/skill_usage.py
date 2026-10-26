@@ -19,7 +19,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any, Iterable, List, Mapping, Optional
 
-from expedistill.composites.skill_reads import skill_read_events
+from expedistill.composites.skill_use import skill_read_events
 from expedistill.core.models import Trajectory
 from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
 from expedistill.infra.store import write_jsonl

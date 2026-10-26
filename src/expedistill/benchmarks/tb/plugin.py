@@ -1580,6 +1580,11 @@ class TBPlugin(BenchmarkPlugin):
             return [], (None, None)
         steps = reconstruct_steps(traj)
         meta.update(reconstruct_skip_counts(traj))
+        raw_steps = traj.get("steps") if isinstance(traj, dict) else None
+        if isinstance(raw_steps, list) and raw_steps:
+            first = raw_steps[0]
+            if isinstance(first, dict) and isinstance(first.get("message"), str):
+                meta["initial_prompt"] = first["message"]
         return steps, total_usage(traj)
 
     def _augment_partial(self, link: RemoteLink, meta: Dict[str, Any],

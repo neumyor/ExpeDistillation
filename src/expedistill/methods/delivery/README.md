@@ -52,7 +52,7 @@ delivery:
 phases/p03_live/skill_folder/<task>/
   SKILL.md                 # 任务级使用说明
   catalog.md               # 列表缺失时的兜底
-  <skill-a>/SKILL.md       # YAML 头 + 四段正文
+  <skill-a>/SKILL.md       # YAML 头 + 三段正文
   <skill-b>/SKILL.md
 ```
 
@@ -81,7 +81,7 @@ delivery:
   SKILL.md                 # benchmark 写的使用说明，不是技能
   catalog.md               # 兜底目录，模型通常不需要读
   bank-merge-0001/
-    SKILL.md               # YAML 头 + 四段正文
+    SKILL.md               # YAML 头 + 三段正文
   traj-tb-xxx/
     SKILL.md
 ```

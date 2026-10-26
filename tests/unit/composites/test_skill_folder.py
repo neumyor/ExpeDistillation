@@ -17,7 +17,7 @@ directory, or disagree with the bank.
 import pytest
 import yaml
 
-from expedistill.composites import skill_reads
+from expedistill.composites import skill_use
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.core.ids import (
     make_subtask_id,
@@ -36,7 +36,6 @@ MARKED = "\n".join([
     "[When to use] The service rejects connections.",
     "[Steps]",
     "1. Check the service status.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The status command already reports running.",
 ])
 
@@ -279,5 +278,5 @@ def test_the_skill_directory_rule_is_one_contract(tmp_path):
         model_role="weak", model_name="weak-7b", attempt_index=0,
         steps=[{"action": f"cat /opt/openclaw-skills/train/{filename}",
                 "observation": "ok"}], correctness=True)
-    assert skill_reads.skill_files_read(trajectory, manifest) == \
+    assert skill_use.skill_files_read(trajectory, manifest) == \
         [odd.skill_id]
