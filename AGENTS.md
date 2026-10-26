@@ -93,6 +93,11 @@ src/expedistill/
     config_upgrade.py     v2→v3→v4→v5 升级纯函数（config.py 重新导出）
     contracts.py          执行—学习循环的四个交接数据类（执行单元行 / 运行记录 /
                           验收报告行 / 任务清单行，R0 冻结的接口形状）
+    answer_sheet.py       trial 级 AnswerSheet / ExecutionRecord / CoverageRecord /
+                          GradingRecord，以及 unit 级 UnitSpec / UnitSummary /
+                          PhaseReport 的接口形状
+    vocabulary.py         success/failure/invalid、normal/not_testable/
+                          not_run_control_perfect 与 cause 词的唯一定义处
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
   infra/                  第 1 层：与业务无关的运行支撑
     store.py              B3 对象存储（原子写、按 ID 读、判断单元是否完成）
@@ -166,12 +171,23 @@ src/expedistill/
     decision_strategies.py P04/P06 的 per-skill 决策：task_level（组动作展开）
                           与 skill_level（读取事实 → revise/delete；delivery
                           失败或无证据时 keep）
+    unit_ids.py           unit id / canonical injected skills / gap sheet id
+                          的纯身份规则
+    answer_sheets.py      trial 级 ExecutionRecord 构建、coverage 与 execution
+                          装配、逐 trial 判分、answer_sheets/JSON+Markdown 导出
+    coverage.py           expected trial vs stored trial 的 coverage 记录
+                          （present / missing / terminal + cause）；不判分、不聚合
+    unit_summary.py       AnswerSheet + UnitSpec → UnitSummary 的纯聚合函数
+                          （summarize_unit / summarize_phase / task_metrics）
+    phase_report.py       相位报告 envelope：读取 unit_specs/answer_sheets/
+                          coverage，现算 UnitSummary；不落 report card
     evidence_package.py   P02/exam 的 fact-only 证据包形状
     skill_use.py          统一判断 skill 在 attempt 是否被使用、在哪些 step
                           被 cat；folder 读取解析与 group/whole-bank 的
                           injected 规则都在这里
     skill_attempt_evidence.py  P04/P06 的 SkillAttemptEvidence / 窗口证据
-    reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件
+    reports.py            旧 run 的 unit-level 报告读取 fallback（新 run 不写；
+                          新路径用 phase_report + answer_sheets）
     shortfall.py          接受空洞的落盘记录（摸底相位的记录在 run 根的
                           stage1_baseline/ 下，live 基线加载与 test 相位的
                           复用对照都读它）

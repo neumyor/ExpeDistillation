@@ -41,15 +41,23 @@
 |---|---|---|
 | 交付 | 决定每道题注入哪些技能 | 技能库 + 本阶段的题 → 执行单元清单（每行 = 一道题 + 注入的技能，技能可以为空） |
 | 执行 | 适配各 benchmark，把运行结果统一成同一种输出格式 | 执行单元清单 → 运行记录（每次运行一条） |
-| 验收 | 对每次运行给出最终判定 | 运行记录（及其指向的轨迹）→ 验收报告 |
-| 决策 | 决定本轮技能库要做哪些操作 | 本轮验收报告 + 对照验收报告 + 当前技能库 + 剩余检验次数 → 任务清单 |
-| 找证据 | 收集写作需要的信息，整理成统一格式 | 任务清单 + 验收报告指向的轨迹 → 证据包 |
+| 验收 | 对每次运行给出最终判定 | 运行记录（及其指向的轨迹）→ trial 级 AnswerSheet（execution + coverage + grading）；unit/task 级汇总只是共享纯函数的按需结果 |
+| 决策 | 决定本轮技能库要做哪些操作 | 本轮验收汇总（UnitSummary）+ 对照汇总 + 当前技能库 + 剩余检验次数 → 任务清单 |
+| 找证据 | 收集写作需要的信息，整理成统一格式 | 任务清单 + AnswerSheet/轨迹 → 证据包 |
 | 写作 | 按写作规范新建或修改技能 | 任务清单 + 证据包 → 新技能（或修改后的技能，版本号加一） |
 | 整理 | 把技能整理成最终形态的技能库 | 本轮全部技能 → 新技能库 |
 
 执行单元 = 一道题 + 给它注入的技能。单元每被执行一次就留下一条运行记录。
 阶段之间只传三样东西：**技能库、运行记录、验收报告**；执行单元清单、任务清单、
 证据包这些中间产物只在阶段内部流转。
+
+验收的落盘输出是 **trial 级 AnswerSheet**：execution（轨迹/答卷/外部
+reward + raw correctness）、coverage（这张 trial 该不该有、有没有、为什么
+没有）、grading（success / failure / invalid + basis + rule name）。
+`UnitSummary`（有效次数、成功次数、status、cause）不是验收产物，而是
+`unit_summary.py` 从 AnswerSheet + UnitSpec 现算的 unit 级视图；决策、
+审计、test 都调同一组纯函数。旧 run 的 `unit_verdicts.jsonl` 只保留为
+兼容读取 fallback。
 
 | 执行阶段 | 题 | 注入的技能 | 谁做、做几次 |
 |---|---|---|---|
@@ -522,9 +530,14 @@ E1 内部的 runner：
 | K4 | 泄题判定 | D8 的判定与 leak_verdicts 账本：每个 (skill, 版本) 恰一行、首判为准，续跑不重问 | `composites/acceptance_leak.py` |
 | K5 | 库整理 | G7 →（可选）丢弃低价值 → G8 →（可选）K3 回归考试 → G9 → D10，合并与丢弃日志先写后改、续跑按日志重放 | `composites/curation.py` |
 | K6 | live 判定账本 | 轮判定（judge_round，append-once、首判为准、续跑重算逐字节核对）、组终态提交（finalize_group）、基线与轮仓读取、注入审计行 | `composites/live_verdicts.py`、`live_measurement.py` |
-| — | 验收判定核 | 每次运行的判定（success / failure / invalid）与单元汇总行；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`——tb_scorer 消费 correctness 与 verifier_ran / exception_type 事实，例外死亡 / 伪零分判 invalid） | `composites/verdicts.py` |
+| — | trial 级 AnswerSheet | `ExecutionRecord`（轨迹/答卷/外部 reward + raw facts）、`CoverageRecord`（present/missing/terminal + cause）、`GradingRecord`（verdict/basis/rule）组成的 trial 级 envelope；JSON 是源，Markdown 是派生视图 | `core/answer_sheet.py`、`composites/answer_sheets.py`、`blocks/view.py::render_answer_sheet` |
+| — | 验收判定核 | 只对一张 AnswerSheet 判 success / failure / invalid；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`、`external_reward`） | `composites/verdicts.py` |
+| — | coverage | expected trial vs stored trial：present / missing / terminal + cause（accepted hole、leak、injection overflow、exam generation failed、control perfect、zero execution）；不判分、不聚合 | `composites/coverage.py` |
+| — | unit 汇总 | `summarize_unit` / `summarize_phase` / `task_metrics`：由 AnswerSheet + UnitSpec 纯函数算出 UnitSummary；决策/审计/test 共用 | `composites/unit_summary.py` |
+| — | 相位报告 envelope | 读取 `unit_specs.jsonl` + `answer_sheets/` + `coverage.jsonl`，现算 UnitSummary；不是持久 report card | `composites/phase_report.py` |
+| — | unit/sheet 身份 | `make_unit_id` / `canonical_skills` / gap sheet id | `composites/unit_ids.py` |
 | — | 决策 | `decide_task_list`（P02 baseline-gap / exam）、`decision_strategies`（P04/P06 的 `task_level` / `skill_level`）、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py`、`decision_strategies.py` |
-| — | 报告读取器 | 从磁盘现读三种验收报告（baseline / exam / live），只读 | `composites/reports.py` |
+| — | 兼容读取器 | 旧 run 的 unit-level 报告读取（新 run 不写）：baseline / exam / live 只读 fallback | `composites/reports.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
 | — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
@@ -762,11 +775,17 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     units.jsonl                  执行相位：交付解析出的执行单元清单（带
                                  完整冻结 unit_id；每次相位启动整文件重写，
                                  exam 相位读覆写前的内容当同相位重放标记）
-    unit_verdicts.jsonl          执行相位：每单元一行最小判决
-                                 （unit_id / status / cause）。规则 1 复用的
-                                 输入与审计的覆盖检查都用它；它不是学习相位
-                                 读的验收报告（那份由存储重算）。test 相位
-                                 不写：测试结果不流进学习
+    unit_specs.jsonl             执行相位：每个预期 trial/unit 的 UnitSpec
+                                 （unit_id / task / role / arm / expected）
+    answer_sheets/               执行相位：trial 级 AnswerSheet 的 JSON + Markdown
+                                 （execution + coverage + grading）；test 相位
+                                 两臂都写在这里
+    coverage.jsonl               执行相位：每个预期 trial 的 CoverageRecord
+                                 （present / missing / terminal + cause）
+    reuse_index.jsonl            执行相位：规则 1 的 execution-side 缓存
+                                 （unit_id / status / cause）；不是验收报告，
+                                 test 相位不写
+    unit_verdicts.jsonl          仅旧 run：历史最小判决账本（兼容读取 fallback）
     redispatch.json              执行相位：按单元持久记录的无效重派计数
     <臂>/store/                  执行相位自己的轨迹仓（test 相位的两臂、
                                  split 模式 test 相位的现场裸臂；摸底相位
@@ -1097,12 +1116,12 @@ none：原样入库，预算仍是硬阀），中间的学习相位写原样工�
 
 ### 5.8 没变的单元不重测（规则 1）
 
-执行相位把解析出的单元清单（`units.jsonl`）与每单元最小判决
-（`unit_verdicts.jsonl`：unit_id、status、cause）写进自己的相位目录；
+执行相位把解析出的单元清单（`units.jsonl`）与 execution-side 的复用缓存
+（`reuse_index.jsonl`：unit_id、status、cause）写进自己的相位目录；
 `decision.reusable_units` 把本次的单元与**更早的每个执行相位**按
-（任务, 角色, 注入块字节）连接、最新优先：命中即不重新执行，新相位的判决行
-沿用旧判定。学习相位不读这份文件：它按需从轨迹 / 作答 / 判定账本重算完整
-验收报告（见 5.7）。
+（任务, 角色, 注入块字节）连接、最新优先：命中即不重新执行，新相位的状态行
+沿用旧判定。学习相位不读这份缓存：它读 trial 级 `answer_sheets/` +
+`coverage.jsonl`，用 `unit_summary.py` 现算 UnitSummary（见 5.7）。
 `zero_execution` 可见性行（工作还没做的记录）永远不参与复用。在 live 相位
 上这就是 no-op 守卫；在 exam 相位上它让"改写没变 → 下轮免考"自动成立。
 
