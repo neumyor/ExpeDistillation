@@ -18,7 +18,8 @@ from expedistill.blocks import tasks as tasks_block
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.core import ids
-from expedistill.core.contracts import AcceptanceReportRow, TaskListRow
+from expedistill.core.answer_sheet import UnitSummary
+from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
@@ -40,7 +41,7 @@ __all__ = ["execute_decision_rows"]
 
 def execute_decision_rows(
     ctx: Any, phase: Any, rows: Sequence[TaskListRow],
-    current_rows: Optional[List[AcceptanceReportRow]], current_spec: Any,
+    current_rows: Optional[List[UnitSummary]], current_spec: Any,
     current_round: int, *, usage_by_task: Dict[str, List[dict]],
     folder_manifests: Dict[str, Dict[str, Any]],
     delivery: str,
@@ -107,7 +108,7 @@ def execute_decision_rows(
 
 def _execute_revise_group(
     ctx: Any, phase: Any, task_id: str, rows: List[TaskListRow],
-    current_rows: Optional[List[AcceptanceReportRow]], current_spec: Any,
+    current_rows: Optional[List[UnitSummary]], current_spec: Any,
     current_round: int, phase_dir, recorder: UnitFailureRecorder,
     usage_by_task: Dict[str, List[dict]],
     folder_manifests: Dict[str, Dict[str, Any]], delivery: str,
@@ -227,8 +228,8 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
                           phase_dir)
 
 
-def _report_row_of(current_rows: Optional[List[AcceptanceReportRow]],
-                   basis_unit: str) -> AcceptanceReportRow:
+def _report_row_of(current_rows: Optional[List[UnitSummary]],
+                   basis_unit: str) -> UnitSummary:
     if not current_rows:
         raise CodeBugError(
             f"task-list row names basis unit {basis_unit!r} but the "

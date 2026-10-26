@@ -28,15 +28,27 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.blocks.author import gen_exam
 from expedistill.blocks.view import render_steps_view
-from expedistill.composites import decision, verdicts
+from expedistill.composites import (
+    answer_sheets,
+    coverage,
+    decision,
+    phase_report,
+    verdicts,
+)
 from expedistill.composites.acceptance_leak import (
+    find_leak_verdict,
     leak_verdict_for,
 )
 from expedistill.composites.acceptance_skill_status import (
+    exam_attempts,
+    find_bare,
     find_judged_attempt,
 )
 from expedistill.composites.exam_once import exam_once
-from expedistill.core import ids
+from expedistill.composites.skill_status import stage3_candidates
+from expedistill.composites.unit_ids import make_unit_id
+from expedistill.core import ids, vocabulary
+from expedistill.core.answer_sheet import UnitSpec
 from expedistill.core.config import PHASE_ROLE_EXAM, ExecutePhaseSpec, PhaseInstance
 from expedistill.core.models import Exam, Skill, Subtask, Trajectory
 from expedistill.infra.parallel import run_units
@@ -52,18 +64,14 @@ from expedistill.stages.phase_execute import engine, phase_disk, resolve
 
 __all__ = ["_run_exam"]
 
-#: One exam unit's outcome -> the minimal verdict row it writes. The
-#: four outcomes are the unit's own disposition from ``exam_unit``;
-#: a reused unit carries the previous phase's verdict instead.
-_STATUS_BY_OUTCOME = {
-    "measured": (verdicts.STATUS_NORMAL, ""),
-    "control_perfect": (verdicts.STATUS_NOT_RUN_CONTROL_PERFECT,
-                        verdicts.CAUSE_WEAK_ALREADY_KNOWS),
-    "leaked": (verdicts.STATUS_NOT_TESTABLE, verdicts.CAUSE_LEAK),
-    "generation_failed": (verdicts.STATUS_NOT_TESTABLE,
-                          verdicts.CAUSE_EXAM_GENERATION_FAILED),
-    "infra_failed": (verdicts.STATUS_NOT_TESTABLE,
-                     verdicts.CAUSE_ZERO_EXECUTION),
+#: One exam unit's terminal outcome -> its coverage cause.  ``measured``
+#: and a normal ``reused`` unit have no override: their sheets are read
+#: from the attempts store.
+_CAUSE_BY_OUTCOME = {
+    "control_perfect": vocabulary.CAUSE_WEAK_ALREADY_KNOWS,
+    "leaked": vocabulary.CAUSE_LEAK,
+    "generation_failed": vocabulary.CAUSE_EXAM_GENERATION_FAILED,
+    "infra_failed": vocabulary.CAUSE_ZERO_EXECUTION,
 }
 
 
@@ -107,6 +115,18 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
 
     skill_by_exam = {ids.make_exam_id(skill.subtask_id): skill
                      for skill in pending}
+    # The exam REPORT universe is every stage-3 candidate, not only the
+    # pending ones: an already accepted skill can still have a judged v2
+    # attempt from an earlier exam phase, and the learn phase must see it
+    # (that is the old reader's universe).  Only the pending skills are
+    # dispatched below.
+    all_skill_by_exam = {
+        ids.make_exam_id(skill.subtask_id): skill
+        for skill in stage3_candidates(ctx.store)}
+    # A pending bank artifact can carry a skill that is not (yet) in the
+    # store in a seeded/refreshed fixture; it is still a plan target, so
+    # the report universe is the union.
+    all_skill_by_exam.update(skill_by_exam)
 
     rows = delivery.resolve(bank, sorted(skill_by_exam), delivery_params)
     plans = engine._plan_units(rows, None, phase_label=phase.label,
@@ -210,19 +230,98 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     outcomes = run_units(exam_unit, plans, ctx.run_settings.workers)
 
     # ========================================================================
-    # 5. WRITE THE PER-UNIT VERDICTS
+    # 5. TRIAL SHEETS + COVERAGE + GRADING
     # ========================================================================
     kind_by_exam = {exam_id: kind for kind, exam_id in outcomes}
-    unit_verdicts: List[Tuple[str, str, str]] = []
+    pending_unit_by_exam = {plan.unit.task_ref: plan.unit.unit_id
+                            for plan in plans}
+    specs: List[UnitSpec] = []
+    bare_unit_by_exam: Dict[str, str] = {}
+    skill_unit_by_key: Dict[Tuple[str, int], str] = {}
+    for exam_id in sorted(all_skill_by_exam):
+        skill = all_skill_by_exam[exam_id]
+        bare_unit = make_unit_id(
+            phase_label=phase.label, benchmark=ctx.config.benchmark,
+            task_ref=exam_id, role="weak", skills_injected=None)
+        bare_unit_by_exam[exam_id] = bare_unit
+        specs.append(UnitSpec(
+            unit_id=bare_unit, phase_label=phase.label, task_ref=exam_id,
+            role="weak", arm=None, expected_attempts=1,
+            injected_skills=None))
+        injected = [{"skill_id": skill.skill_id,
+                     "version": skill.version}]
+        skill_unit = pending_unit_by_exam.get(exam_id) or make_unit_id(
+            phase_label=phase.label, benchmark=ctx.config.benchmark,
+            task_ref=exam_id, role="weak", skills_injected=injected)
+        specs.append(UnitSpec(
+            unit_id=skill_unit, phase_label=phase.label, task_ref=exam_id,
+            role="weak", arm=None, expected_attempts=1,
+            injected_skills=injected))
+        skill_unit_by_key[(skill.skill_id, skill.version)] = skill_unit
+
+    terminal_overrides: Dict[str, str] = {}
+    leak_versions: set = set()
     for plan in plans:
-        unit_id = plan.unit.unit_id
-        if unit_id in reused:
-            status, cause = reused[unit_id]
-        else:
-            status, cause = _STATUS_BY_OUTCOME[
-                kind_by_exam[plan.unit.task_ref]]
-        unit_verdicts.append((unit_id, status, cause))
-    phase_disk._write_verdicts(ctx, phase, unit_verdicts)
+        exam_id = plan.unit.task_ref
+        kind = kind_by_exam[exam_id]
+        skill_unit = plan.unit.unit_id
+        bare_unit = bare_unit_by_exam[exam_id]
+        cause = _CAUSE_BY_OUTCOME.get(kind)
+        if kind == "reused":
+            status, reused_cause = reused[skill_unit]
+            if status != vocabulary.STATUS_NORMAL:
+                cause = reused_cause
+        if cause:
+            terminal_overrides[skill_unit] = cause
+            if kind in ("generation_failed", "infra_failed"):
+                terminal_overrides[bare_unit] = cause
+    # A leak is a fact about (skill, version), including a candidate that
+    # was accepted before this phase; read it back rather than relying only
+    # on this pass's outcomes.
+    for skill in all_skill_by_exam.values():
+        leak = find_leak_verdict(ctx.store, skill.skill_id, skill.version)
+        if leak is not None and leak.get("leaked"):
+            leak_versions.add((skill.skill_id, skill.version))
+
+    generation_failed_units: set = set()
+    for exam_id in terminal_generation:
+        if exam_id in all_skill_by_exam:
+            generation_failed_units.add(bare_unit_by_exam[exam_id])
+            skill = all_skill_by_exam[exam_id]
+            unit_id = skill_unit_by_key.get((skill.skill_id, skill.version))
+            if unit_id is not None:
+                generation_failed_units.add(unit_id)
+
+    coverage_records = coverage.exam_coverage(
+        ctx.store, specs,
+        control_perfect_units=set(),
+        leak_versions=leak_versions,
+        generation_failed_units=generation_failed_units,
+        terminal_overrides=terminal_overrides)
+
+    executions = []
+    for exam_id in sorted(all_skill_by_exam):
+        attempts = exam_attempts(ctx.store, exam_id)
+        bare = find_bare(attempts)
+        if bare is not None and bare.judge_verdict is not None:
+            executions.append(answer_sheets.execution_from_attempt(
+                bare, unit_id=bare_unit_by_exam[exam_id],
+                phase_label=phase.label))
+        for attempt in attempts:
+            if attempt.purpose != "acceptance":
+                continue
+            if attempt.judge_verdict is None:
+                continue
+            unit_id = skill_unit_by_key.get(
+                (attempt.skill_id, attempt.skill_version))
+            if unit_id is None:
+                continue
+            executions.append(answer_sheets.execution_from_attempt(
+                attempt, unit_id=unit_id, phase_label=phase.label))
+
+    sheets = answer_sheets.assemble_answer_sheets(
+        executions, coverage_records, phase_label=phase.label)
+    answer_sheets.grade_answer_sheets(sheets, rule_name)
 
     # ========================================================================
     # 6. WRITE SUMMARY AND CHECK FAILURES
@@ -236,9 +335,22 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
         "complete": not infra_failed_list,
         "infra_shortfall_accepted": False,
     }
+    report = phase_report.build_phase_report(
+        sheets, specs, phase_kind=PHASE_ROLE_EXAM,
+        learning_usable=True, summary=summary)
 
-    write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
-               summary, indent=2)
+    phase_dir = phase_disk._phase_dir(ctx, phase)
+    answer_sheets.write_answer_sheets(
+        report.sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
+    answer_sheets.write_coverage(
+        coverage_records, phase_dir / phase_report.COVERAGE_NAME)
+    phase_report.write_unit_specs(specs, phase_dir)
+    phase_disk._write_reuse_index(
+        ctx, phase,
+        [(unit.unit_id, unit.status, unit.cause)
+         for unit in report.units])
+
+    write_json(phase_dir / phase_disk.SUMMARY_NAME, summary, indent=2)
 
     if summary["infra_missing"]:
         raise InfrastructureError(

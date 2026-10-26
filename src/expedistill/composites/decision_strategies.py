@@ -22,7 +22,8 @@ from typing import Dict, List, Optional, Sequence
 
 from expedistill.composites import decision
 from expedistill.core import ids
-from expedistill.core.contracts import AcceptanceReportRow, TaskListRow
+from expedistill.core.answer_sheet import UnitSummary
+from expedistill.core.contracts import TaskListRow
 from expedistill.composites.skill_use import (
     FOLDER_DELIVERIES,
     skill_used_in_attempt,
@@ -64,9 +65,9 @@ UNREAD_POLICIES = ("delete", "keep")
 
 def decide(*, name: str,
            current_kind: Optional[str],
-           current_report: Optional[Sequence[AcceptanceReportRow]],
+           current_report: Optional[Sequence[UnitSummary]],
            control_kind: Optional[str],
-           control_report: Optional[Sequence[AcceptanceReportRow]],
+           control_report: Optional[Sequence[UnitSummary]],
            bank: Sequence[Skill],
            checks_left: int,
            compare_rule: str,
@@ -100,9 +101,9 @@ def decide(*, name: str,
 
 
 def task_level(*, current_kind: Optional[str],
-               current_report: Optional[Sequence[AcceptanceReportRow]],
+               current_report: Optional[Sequence[UnitSummary]],
                control_kind: Optional[str],
-               control_report: Optional[Sequence[AcceptanceReportRow]],
+               control_report: Optional[Sequence[UnitSummary]],
                bank: Sequence[Skill], checks_left: int,
                compare_rule: str, n_attempts_weak: int,
                task_select_rule: str, delivery: str = "",
@@ -142,7 +143,7 @@ def task_level(*, current_kind: Optional[str],
     return out
 
 
-def skill_level(*, current_report: Sequence[AcceptanceReportRow],
+def skill_level(*, current_report: Sequence[UnitSummary],
                 delivery: str,
                 usage_by_task: Dict[str, List[dict]],
                 group_better_by_task: Optional[
@@ -246,7 +247,7 @@ def _used(skill_id: str, task_id: str, delivery: str,
     return False
 
 
-def _members(report_row: AcceptanceReportRow, task_id: str,
+def _members(report_row: UnitSummary, task_id: str,
              bank: Sequence[Skill]) -> List[str]:
     """The measured members: the report's own refs, else the task's bank."""
     refs = report_row.injected_skills

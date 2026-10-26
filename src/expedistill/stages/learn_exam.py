@@ -10,7 +10,8 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.core.contracts import AcceptanceReportRow, TaskListRow
+from expedistill.core.answer_sheet import UnitSummary
+from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
@@ -29,7 +30,7 @@ __all__ = ["execute_exam_rows", "merge_task_list"]
 
 
 def merge_task_list(rows: Sequence[TaskListRow],
-                    report_rows: Sequence[AcceptanceReportRow]
+                    report_rows: Sequence[UnitSummary]
                     ) -> Tuple[List[TaskListRow], List[str]]:
     """Collapse the exam report's multi-version rows to one per skill."""
     by_unit = {row.unit_id: row for row in report_rows}
@@ -64,7 +65,7 @@ def merge_task_list(rows: Sequence[TaskListRow],
 
 
 def execute_exam_rows(ctx: Any, phase: Any, rows: Sequence[TaskListRow],
-                      current_rows: Optional[List[AcceptanceReportRow]],
+                      current_rows: Optional[List[UnitSummary]],
                       current_spec: Any, current_round: int,
                       superseded: Sequence[str]) -> Set[str]:
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
@@ -93,7 +94,7 @@ def execute_exam_rows(ctx: Any, phase: Any, rows: Sequence[TaskListRow],
 
 
 def _execute_row(ctx: Any, phase: Any, row: TaskListRow,
-                 current_rows: Optional[List[AcceptanceReportRow]],
+                 current_rows: Optional[List[UnitSummary]],
                  phase_dir) -> None:
     if row.target_kind != "skill":
         raise CodeBugError(
@@ -112,7 +113,7 @@ def _execute_row(ctx: Any, phase: Any, row: TaskListRow,
 
 
 def _land_revise(ctx: Any, phase: Any, row: TaskListRow,
-                 current_rows: Optional[List[AcceptanceReportRow]],
+                 current_rows: Optional[List[UnitSummary]],
                  phase_dir) -> None:
     store: Store = ctx.store
     skill = store.load("skills", row.target_id, Skill)
@@ -195,8 +196,8 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
                           phase_dir)
 
 
-def _report_row_of(current_rows: Optional[List[AcceptanceReportRow]],
-                   basis_unit: str) -> AcceptanceReportRow:
+def _report_row_of(current_rows: Optional[List[UnitSummary]],
+                   basis_unit: str) -> UnitSummary:
     if not current_rows:
         raise CodeBugError(
             f"task-list row names basis unit {basis_unit!r} but the "

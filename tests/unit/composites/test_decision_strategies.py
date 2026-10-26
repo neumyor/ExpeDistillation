@@ -2,7 +2,7 @@
 
 from expedistill.composites import decision, decision_strategies
 from expedistill.core import ids
-from expedistill.core.contracts import AcceptanceReportRow
+from expedistill.core.answer_sheet import UnitSummary
 from tests.helpers.skills import make_skill
 
 TASK = ids.make_task_id("tb", "t1")
@@ -15,20 +15,21 @@ SKILL_IDS = [skill.skill_id for skill in SKILLS]
 
 def _report_row(*, unit_id="p03:live:tb:tb:t1:weak:deadbeef",
                 valid=3, success=0, status="normal", cause=""):
-    return AcceptanceReportRow(
-        unit_id=unit_id, phase_label="p03:live", role="weak",
+    return UnitSummary(
+        unit_id=unit_id, phase_label="p03:live", task_ref=TASK,
+        role="weak", arm=None, expected_attempts=valid,
         injected_skills=[{"skill_id": skill_id, "version": 1}
                          for skill_id in SKILL_IDS],
-        runs=[], valid_count=valid, success_count=success,
-        status=status, cause=cause, artifacts={})
+        valid_count=valid, success_count=success, status=status,
+        cause=cause)
 
 
 def _baseline_row(*, valid=3, success=0):
-    return AcceptanceReportRow(
+    return UnitSummary(
         unit_id="p01:baseline:tb:tb:t1:weak:deadbeef",
-        phase_label="p01:baseline", role="weak", injected_skills=[],
-        runs=[], valid_count=valid, success_count=success,
-        status="normal", cause="", artifacts={})
+        phase_label="p01:baseline", task_ref=TASK, role="weak", arm=None,
+        expected_attempts=valid, injected_skills=[], valid_count=valid,
+        success_count=success, status="normal", cause="")
 
 
 def _usage(*, delivery="ok", available=None, read=None, round_=0):

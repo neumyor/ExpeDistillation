@@ -9,7 +9,7 @@ side) and the loud failures on wiring bugs. The table itself is pinned
 cell by cell in tests/unit/composites/test_decision_table.py.
 
 Unit ids follow core/contracts.py's frozen construction rule -- the
-report row carries no task_ref field, so its task lives inside the id:
+decision entry joins on the id, so its task lives inside it:
 ``pNN:<local>:<benchmark>:<task_or_exam_id>:<role>:<sha8>``.
 """
 
@@ -17,10 +17,10 @@ import pytest
 
 from expedistill.composites import decision
 from expedistill.composites.decision import (
-    AcceptanceReportRow,
     FinalTestReportRejected,
     decide_task_list,
 )
+from expedistill.core.answer_sheet import UnitSummary
 from expedistill.infra.reliability import CodeBugError, ConfigError
 from tests.helpers.skills import make_skill
 
@@ -36,10 +36,11 @@ def _skill(skill_id=_SKILL):
 
 def _row(*, unit_id, role="weak", injected=None, valid=1, success=1,
          status="normal", cause="", phase_label="p01:exam"):
-    return AcceptanceReportRow(
-        unit_id=unit_id, phase_label=phase_label, role=role,
-        injected_skills=injected, runs=[], valid_count=valid,
-        success_count=success, status=status, cause=cause, artifacts={})
+    return UnitSummary(
+        unit_id=unit_id, phase_label=phase_label, task_ref="", role=role,
+        arm=None, expected_attempts=valid, injected_skills=injected,
+        valid_count=valid, success_count=success, status=status,
+        cause=cause)
 
 
 def _bank():

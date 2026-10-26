@@ -45,12 +45,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from expedistill.blocks.rules import get_task_select
-from expedistill.core import ids
-from expedistill.core.contracts import (
-    AcceptanceReportRow,
-    ExecutionUnitRow,
-    TaskListRow,
-)
+from expedistill.core import ids, vocabulary
+from expedistill.core.answer_sheet import UnitSummary
+from expedistill.core.contracts import ExecutionUnitRow, TaskListRow
 from expedistill.core.models import MODEL_ROLES, Skill
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
@@ -130,7 +127,7 @@ ADD = "add"
 #: last-round miss) and the verdicts row's round tells them apart.
 #: Defined here since M3 so K4, K6 and this module share one
 #: definition (composites.live_verdicts re-exports them unchanged).
-WEAK_ALREADY_KNOWS = "weak_already_knows"
+WEAK_ALREADY_KNOWS = vocabulary.CAUSE_WEAK_ALREADY_KNOWS
 LIVE_INJECTION_OVERFLOW = "live_injection_overflow"
 LIVE_UNDETERMINED = "live_undetermined"
 LIVE_NO_IMPROVEMENT = "live_no_improvement"
@@ -268,12 +265,11 @@ PHASE_KINDS = frozenset({PHASE_BASELINE, PHASE_EXAM, PHASE_LIVE,
 #: (section 3 rule 9), and neither do further learn phases.
 CHECK_PHASE_KINDS = frozenset({PHASE_EXAM, PHASE_LIVE})
 
-#: Acceptance-report row statuses: the values core/contracts.py freezes
-#: in AcceptanceReportRow.status's comment, named for the entry's
-#: consumption side.
-ROW_NORMAL = "normal"
-ROW_NOT_TESTABLE = "not_testable"
-ROW_NOT_RUN_CONTROL_PERFECT = "not_run_control_perfect"
+#: Unit-summary statuses: the frozen values core.vocabulary defines,
+#: named for the entry's consumption side.
+ROW_NORMAL = vocabulary.STATUS_NORMAL
+ROW_NOT_TESTABLE = vocabulary.STATUS_NOT_TESTABLE
+ROW_NOT_RUN_CONTROL_PERFECT = vocabulary.STATUS_NOT_RUN_CONTROL_PERFECT
 
 #: The fixed ``cause`` set R0 places in this module (core/contracts.py
 #: names composites.decision as its definition site): why a row is
@@ -292,21 +288,15 @@ ROW_NOT_RUN_CONTROL_PERFECT = "not_run_control_perfect"
 #: but unscored" out of ``invalid_redispatch_exhausted`` (whose fact is
 #: missing units whose dispatch budget died) and out of
 #: ``zero_execution`` (whose fact is work still owed).
-CAUSE_LEAK = "leak"
-CAUSE_INJECTION_OVERFLOW = "injection_overflow"
-CAUSE_EXAM_GENERATION_FAILED = "exam_generation_failed"
-CAUSE_INVALID_REDISPATCH_EXHAUSTED = "invalid_redispatch_exhausted"
-CAUSE_ALL_HOLES = "all_holes"
-CAUSE_ZERO_EXECUTION = "zero_execution"
+CAUSE_LEAK = vocabulary.CAUSE_LEAK
+CAUSE_INJECTION_OVERFLOW = vocabulary.CAUSE_INJECTION_OVERFLOW
+CAUSE_EXAM_GENERATION_FAILED = vocabulary.CAUSE_EXAM_GENERATION_FAILED
+CAUSE_INVALID_REDISPATCH_EXHAUSTED = \
+    vocabulary.CAUSE_INVALID_REDISPATCH_EXHAUSTED
+CAUSE_ALL_HOLES = vocabulary.CAUSE_ALL_HOLES
+CAUSE_ZERO_EXECUTION = vocabulary.CAUSE_ZERO_EXECUTION
 
-NOT_TESTABLE_CAUSES = frozenset({
-    CAUSE_LEAK,
-    CAUSE_INJECTION_OVERFLOW,
-    CAUSE_EXAM_GENERATION_FAILED,
-    CAUSE_INVALID_REDISPATCH_EXHAUSTED,
-    CAUSE_ALL_HOLES,
-    CAUSE_ZERO_EXECUTION,
-})
+NOT_TESTABLE_CAUSES = vocabulary.NOT_TESTABLE_CAUSES
 
 #: The four comparison conclusions (boundary doc section 4.1) plus the
 #: baseline gap (section 4.2's last row -- decided from the D report,
@@ -447,7 +437,7 @@ def control_perfect_skips_run(*, compare_rule: str, control_valid: int,
     return _control_is_perfect(compare_rule, control_valid, control_success)
 
 
-def compare_conclusion(*, row: AcceptanceReportRow, control_valid: int,
+def compare_conclusion(*, row: UnitSummary, control_valid: int,
                        control_success: int, control_cause: str,
                        compare_rule: str) -> Tuple[str, str]:
     """One unit's section 4.1 conclusion from its report row and its
@@ -589,8 +579,8 @@ def parse_unit_id(unit_id: str) -> Tuple[str, str]:
     it is a wiring bug, never data to guess with.
 
     ExecutionUnitRow carries ``task_ref`` as a field and needs no
-    parsing; the report row does not (its shape is frozen), so this
-    parser is the report-side join.
+    parsing; the unit summary is still joined by its id (the basis unit
+    names it), so this parser is the report-side join.
     """
     try:
         head, role, sha = unit_id.rsplit(":", 2)
@@ -606,7 +596,7 @@ def parse_unit_id(unit_id: str) -> Tuple[str, str]:
     return prefix[3], role
 
 
-def _exam_target(row: AcceptanceReportRow) -> Tuple[str, str]:
+def _exam_target(row: UnitSummary) -> Tuple[str, str]:
     """The skill an exam-phase unit measures: the exam's own subtask's
     stage-3 skill, from the ID chain (the report's injected refs are
     evidence, not targeting -- the exam id is the address)."""
@@ -619,7 +609,7 @@ def _exam_target(row: AcceptanceReportRow) -> Tuple[str, str]:
 
 
 def _baseline_rows(*, control_kind: Optional[str],
-                   control_report: Optional[Sequence[AcceptanceReportRow]],
+                   control_report: Optional[Sequence[UnitSummary]],
                    bank: Sequence[Skill], n_attempts_weak: int,
                    task_select_rule: str) -> List[TaskListRow]:
     """The section 4.2 baseline row: the first learn phase follows the D
@@ -659,9 +649,9 @@ def _baseline_rows(*, control_kind: Optional[str],
 def decide_task_list(
     *,
     current_kind: Optional[str],
-    current_report: Optional[Sequence[AcceptanceReportRow]] = None,
+    current_report: Optional[Sequence[UnitSummary]] = None,
     control_kind: Optional[str] = None,
-    control_report: Optional[Sequence[AcceptanceReportRow]] = None,
+    control_report: Optional[Sequence[UnitSummary]] = None,
     bank: Sequence[Skill],
     checks_left: int,
     compare_rule: str = DEFAULT_COMPARE_RULE,
@@ -745,7 +735,7 @@ def decide_task_list(
     # (a retrieval that reached no threshold) is the same measurement as
     # a bare run, so it sits with the controls (P1).
     targets = [row for row in rows if row.injected_skills]
-    controls: Dict[str, List[AcceptanceReportRow]] = {}
+    controls: Dict[str, List[UnitSummary]] = {}
     for row in list(control_report or ()) + [
             row for row in rows if not row.injected_skills]:
         if row.role != "weak":

@@ -21,7 +21,8 @@ from expedistill.composites import decision
 from expedistill.core import ids
 from expedistill.core.config import CompareSpec, ExecutePhaseSpec, PhaseInstance
 from expedistill.stages import phase_execute
-from expedistill.stages.phase_execute.phase_disk import VERDICTS_NAME
+from expedistill.composites import phase_report
+from expedistill.stages.phase_execute.phase_disk import REUSE_INDEX_NAME
 from tests.unit.stages.test_final_test_folder_wiring import (
     FolderPlugin,
     TASK_IDS,
@@ -181,11 +182,14 @@ def test_the_read_set_stays_out_of_the_decision_inputs(
     phase_execute.run(ctx, phase)
 
     # The frozen C rule, pinned from the read set's side: the phase
-    # writes NO per-unit verdicts, so no row (with or without a read
-    # set) exists for decision to read.
-    verdicts_path = (Path(ctx.run_dir) / "phases" / "p03_test"
-                     / VERDICTS_NAME)
-    assert not verdicts_path.exists()
+    # writes NO reuse index (and so no decision-readable row, with or
+    # without a read set); its trial artifacts carry both arms instead.
+    directory = Path(ctx.run_dir) / "phases" / "p03_test"
+    assert not (directory / REUSE_INDEX_NAME).exists()
+    report = phase_report.read_phase_report(
+        directory, phase_kind="test", learning_usable=False)
+    assert report is not None
+    assert {unit.arm for unit in report.units} == {"with_bank", "control"}
     # And the decision module refuses a test-phase report outright
     # (section 3 rule 9) -- the read set's only carrier, the C
     # summary, is structurally outside decide_task_list's inputs.

@@ -38,14 +38,16 @@ has) and nothing is ever reused ACROSS test phases.
 The frozen companions, wired here:
 
 * rule 1 (unchanged units reuse the last acceptance): the resolved
-  units and the acceptance report are persisted per phase
-  (``units.jsonl`` / ``unit_verdicts.jsonl`` inside the phase
-  directory) and :func:`decision.reusable_units` joins the new units
-  against every earlier execute phase, most recent first -- a reused
-  unit is not re-executed and its new row is the previous row's
-  verdicts under the new unit id. A ``zero_execution`` row is a
-  visibility fact (work still owed), never an acceptance result, so it
-  is never reused. On the live role this is also the no-op guard's
+  units and a small execution-side reuse cache are persisted per phase
+  (``units.jsonl`` / ``reuse_index.jsonl`` inside the phase directory)
+  and :func:`decision.reusable_units` joins the new units against every
+  earlier execute phase, most recent first -- a reused unit is not
+  re-executed and its new row is the previous row's status under the new
+  unit id. The acceptance itself is the trial-level
+  ``answer_sheets/`` + ``coverage.jsonl`` view, never a persisted unit
+  report. A ``zero_execution`` row is a visibility fact (work still
+  owed), never an acceptance result, so it is never reused. On the live
+  role this is also the no-op guard's
   phase-world shape: a revision that produced no new version leaves the
   block byte-identical, so the next live phase reuses the last verdict
   instead of re-measuring the same injection.
@@ -109,15 +111,17 @@ learn-phase half is phase_bank's):
                                   the exam role reads its pre-overwrite
                                   content as the same-phase replay
                                   marker)
-        unit_verdicts.jsonl       one (unit_id, status, cause) row per
-                                  planned unit -- the rule-1 reuse input
-                                  and the audit's coverage check. NOT the
-                                  acceptance report the learning phase
-                                  reads (that one is recomputed from the
-                                  store); the C phase writes none.
-                                  phase: its numbers go to the summary
-                                  alone, the boundaries doc's rule that
-                                  test results never flow into learning)
+        unit_specs.jsonl          one UnitSpec per expected unit (the
+                                  pure summarizer's universe)
+        answer_sheets/            trial-level AnswerSheet JSON + Markdown
+                                  (execution + coverage + grading); the
+                                  test phase writes both arms here
+        coverage.jsonl            one CoverageRecord per expected trial
+                                  (present / missing / terminal + cause)
+        reuse_index.jsonl         the execution-side rule-1 cache
+                                  (unit_id, status, cause); NOT an
+                                  acceptance report and NOT written by
+                                  the test phase
         redispatch.json           per-unit re-dispatch bookkeeping
         <arm>/accepted_infra_shortfall.json   the durable accepted holes
         generation_failures.jsonl (exam phases) terminal exam-generation

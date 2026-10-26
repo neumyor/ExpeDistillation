@@ -27,7 +27,13 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import ConfigError, _reset_registry, register_plugin
-from expedistill.composites import phase_bank, reports, shortfall, verdicts
+from expedistill.composites import (
+    phase_bank,
+    phase_report,
+    reports,
+    shortfall,
+    verdicts,
+)
 from expedistill.core.config import (
     PHASE_ROLE_BASELINE,
     PHASE_ROLE_EXAM,
@@ -330,10 +336,19 @@ def report_rows(ctx, phase):
 
 
 def unit_verdicts(ctx, phase):
-    """The minimal per-unit verdict rows the phase persisted."""
+    """The phase's execution-side reuse index, keyed by unit id."""
     path = (phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-            / phase_execute.VERDICTS_NAME)
+            / phase_execute.phase_disk.REUSE_INDEX_NAME)
     return {row["unit_id"]: row for row in read_jsonl(path)}
+
+
+def phase_units(ctx, phase):
+    """The phase's derived unit summaries, read off the trial artifacts."""
+    report = phase_report.read_phase_report(
+        phase_bank.phase_bank_dir(ctx.run_dir, phase.label),
+        phase_kind=phase.spec.role, learning_usable=True)
+    assert report is not None
+    return report.units
 
 
 def snapshot_bank(ctx):
@@ -821,8 +836,8 @@ def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
                                         judge=judge, auditor=auditor))
     first = phase_of(2, "exam", exam_spec())
     phase_execute.run(ctx, first)
-    assert [row["status"] for row in unit_verdicts(ctx, first).values()] == [
-        verdicts.STATUS_NORMAL]
+    assert [unit.status for unit in phase_units(ctx, first)
+            if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]
     first_rows = {row.unit_id: row for row in report_rows(ctx, first)}
     calls_after_first = sum(
         len(handle.client.calls) for handle in ctx.handles.values())
@@ -835,8 +850,8 @@ def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
     second = phase_of(4, "exam", exam_spec())
     phase_execute.run(ctx, second)
 
-    assert [row["status"] for row in unit_verdicts(ctx, second).values()] == [
-        verdicts.STATUS_NORMAL]
+    assert [unit.status for unit in phase_units(ctx, second)
+            if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]
     # Zero model calls: the exam, the answers and the audits all stand.
     assert sum(len(handle.client.calls)
                for handle in ctx.handles.values()) == calls_after_first
@@ -872,9 +887,10 @@ def test_exam_bare_correct_skips_the_with_skill_answer(monkeypatch,
     assert len(examiner.client.calls) == 1
     assert len(answerer.client.calls) == 1
     assert len(judge.client.calls) == 1
-    stored = next(iter(unit_verdicts(ctx, phase).values()))
-    assert stored["status"] == verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
-    assert stored["cause"] == verdicts.CAUSE_WEAK_ALREADY_KNOWS
+    stored = next(unit for unit in phase_units(ctx, phase)
+                  if unit.injected_skills is not None)
+    assert stored.status == verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
+    assert stored.cause == verdicts.CAUSE_WEAK_ALREADY_KNOWS
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     bare_row = next(row for row in rows.values()
                     if row.injected_skills is None)
@@ -898,8 +914,8 @@ def test_exam_measures_the_with_skill_answer(monkeypatch, tmp_path):
     # Bare wrong -> leak audit (clean) -> with-skill answer -> judged.
     assert len(answerer.client.calls) == 2
     assert len(auditor.client.calls) == 1
-    assert [row["status"] for row in unit_verdicts(ctx, phase).values()] == [
-        verdicts.STATUS_NORMAL]
+    assert [unit.status for unit in phase_units(ctx, phase)
+            if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     skill_row = next(row for row in rows.values()
                      if row.injected_skills is not None)
@@ -921,9 +937,10 @@ def test_exam_leaked_version_voids_the_measurement(monkeypatch, tmp_path):
     phase = phase_of(2, "exam", exam_spec())
     phase_execute.run(ctx, phase)
 
-    stored = next(iter(unit_verdicts(ctx, phase).values()))
-    assert stored["status"] == verdicts.STATUS_NOT_TESTABLE
-    assert stored["cause"] == verdicts.CAUSE_LEAK
+    stored = next(unit for unit in phase_units(ctx, phase)
+                  if unit.injected_skills is not None)
+    assert stored.status == verdicts.STATUS_NOT_TESTABLE
+    assert stored.cause == verdicts.CAUSE_LEAK
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     skill_row = next(row for row in rows.values()
                      if row.injected_skills is not None)
@@ -960,9 +977,14 @@ def test_c_phase_reuses_the_d_control_and_computes_the_delta(
     assert result["control_source"] == "baseline_reuse"
     assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
     assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
-    # C writes no acceptance report (section 3 rule 9).
+    # C writes no acceptance report / reuse index (section 3 rule 9):
+    # only trial-level answer sheets, both arms included.
     directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-    assert not (directory / phase_execute.VERDICTS_NAME).exists()
+    assert not (directory / phase_execute.phase_disk.REUSE_INDEX_NAME).exists()
+    test_report = phase_report.read_phase_report(
+        directory, phase_kind="test", learning_usable=False)
+    assert test_report is not None
+    assert {unit.arm for unit in test_report.units} == {"with_bank", "control"}
 
 
 def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):

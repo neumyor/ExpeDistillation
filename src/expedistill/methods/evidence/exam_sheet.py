@@ -11,7 +11,7 @@ section 2.5).
 
 The rewrite material is P7b's source selection, mirrored from the
 retired ``acceptance_submit``: the latest judged attempt of THIS version
-(the row's runs), else the latest judged with-skill attempt of the
+(the row's graded sheet ids), else the latest judged with-skill attempt of the
 exam, else the bare attempt -- and a leaked version's rewrite carries
 the audit report as its failure description (the voided rewrite; the
 leak verdict is read back, never re-asked).
@@ -20,7 +20,7 @@ leak verdict is read back, never re-asked).
 from expedistill.composites import decision
 from expedistill.composites.acceptance_leak import find_leak_verdict
 from expedistill.composites.acceptance_skill_status import exam_attempts
-from expedistill.core.contracts import AcceptanceReportRow
+from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import CodeBugError
 from expedistill.infra.store import Store
@@ -35,7 +35,7 @@ __all__ = ["collect_exam_evidence", "injected_version"]
 _VOID_NOTE = "The previous skill version was voided by the leak audit: "
 
 
-def injected_version(report_row: AcceptanceReportRow) -> int:
+def injected_version(report_row: UnitSummary) -> int:
     """The single skill version an exam row injected (its unit id's
     join back to the target)."""
     injected = report_row.injected_skills
@@ -48,23 +48,23 @@ def injected_version(report_row: AcceptanceReportRow) -> int:
     return injected[0]["version"]
 
 
-def collect_exam_evidence(store: Store, report_row: AcceptanceReportRow,
+def collect_exam_evidence(store: Store, report_row: UnitSummary,
                           skill: Skill) -> EvidencePackage:
-    """One skill's answer-sheet package from the report row's artifacts.
+    """One skill's answer-sheet package from the unit summary's refs.
 
     ``report_row`` is the decision's basis unit (the row that authorized
     the revision); ``skill`` is the stored target. Raises CodeBugError
     when the row names no exam, or no judged attempt exists to revise
     from (the row authorized a revision without answer-sheet material).
     """
-    exam_id = report_row.artifacts.get("exam_id")
+    exam_id = report_row.task_ref
     if not exam_id:
         raise CodeBugError(
-            f"report row {report_row.unit_id!r} carries no exam_id; an "
+            f"report row {report_row.unit_id!r} carries no exam ref; an "
             "exam-phase row always names its exam")
     exam = store.load("exams", exam_id, Exam)
-    judged = [store.load("attempts", run["run"], Attempt)
-              for run in report_row.runs]
+    judged = [store.load("attempts", sheet_id, Attempt)
+              for sheet_id in report_row.sheet_ids]
     if judged:
         source = judged[-1]
         error = source.judge_reason

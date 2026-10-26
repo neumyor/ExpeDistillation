@@ -1206,6 +1206,362 @@
     },
     "tasks_digest": "acc365b23957040e3bcf2982fdd1e0ee48767f5f65259e071af281aca036fec3"
   },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At1%3Astrong%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fstrong%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "strong",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/strong/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/strong/traj%2Ffakebench%3At1%2Fstrong%2F00"
+      },
+      "model_name": "strong-model",
+      "model_role": "strong",
+      "phase_label": "p01:baseline",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "strong",
+      "sample_index": 0,
+      "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p01:baseline",
+    "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At1%3Astrong%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fstrong%2F00.md": {
+    "__sha256__": "2b9dabbe145da85efc9e8e222f4ce911f9b4c1c55c65699c39a4ea898a95ed54"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "weak",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At1%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p01:baseline",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p01:baseline",
+    "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.md": {
+    "__sha256__": "b288a713d6d305a69fd32fbfe836e0c735df7193b2858a3991ec8cee7fd699ec"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "weak",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At1%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p01:baseline",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/01",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p01:baseline",
+    "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/01"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.md": {
+    "__sha256__": "5f7f73ac4263df0757cce7c08ce176cfb736a6bf554db64fb7d29a9d038b9112"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At2%3Astrong%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fstrong%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "strong",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/strong/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/strong/traj%2Ffakebench%3At2%2Fstrong%2F00"
+      },
+      "model_name": "strong-model",
+      "model_role": "strong",
+      "phase_label": "p01:baseline",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "strong",
+      "sample_index": 0,
+      "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p01:baseline",
+    "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At2%3Astrong%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fstrong%2F00.md": {
+    "__sha256__": "ba2b0cf8650a08a30f6269d40857365b012a00c5296b065cec76e2985262ddd9"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "weak",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At2%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p01:baseline",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p01:baseline",
+    "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.md": {
+    "__sha256__": "61d7a6c74b208dc1e62cf57b47febfe52b94358570442ce4794ddae8114d46cf"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "weak",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At2%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p01:baseline",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/01",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p01:baseline",
+    "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/01"
+  },
+  "phases/p01_baseline/answer_sheets/p01%3Abaseline%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.md": {
+    "__sha256__": "4b6b985c08aa916c97d5d5c1a55f5d5821fb7ea1a37f806aad8039dabc40e9c7"
+  },
+  "phases/p01_baseline/coverage.jsonl": [
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    }
+  ],
   "phases/p01_baseline/phase.json": {
     "index": 0,
     "label": "p01:baseline",
@@ -1219,15 +1575,7 @@
     "infra_shortfall_accepted": false,
     "role": "baseline"
   },
-  "phases/p01_baseline/strong/redispatch.json": {
-    "p01:baseline:fakebench:fakebench:t1:strong:140bedbf": {
-      "passes": 0
-    },
-    "p01:baseline:fakebench:fakebench:t2:strong:140bedbf": {
-      "passes": 0
-    }
-  },
-  "phases/p01_baseline/unit_verdicts.jsonl": [
+  "phases/p01_baseline/reuse_index.jsonl": [
     {
       "cause": "",
       "status": "normal",
@@ -1246,6 +1594,56 @@
     {
       "cause": "",
       "status": "normal",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+    }
+  ],
+  "phases/p01_baseline/strong/redispatch.json": {
+    "p01:baseline:fakebench:fakebench:t1:strong:140bedbf": {
+      "passes": 0
+    },
+    "p01:baseline:fakebench:fakebench:t2:strong:140bedbf": {
+      "passes": 0
+    }
+  },
+  "phases/p01_baseline/unit_specs.jsonl": [
+    {
+      "arm": "strong",
+      "expected_attempts": 1,
+      "injected_skills": null,
+      "no_valid_cause": "all_holes",
+      "phase_label": "p01:baseline",
+      "role": "strong",
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+    },
+    {
+      "arm": "strong",
+      "expected_attempts": 1,
+      "injected_skills": null,
+      "no_valid_cause": "all_holes",
+      "phase_label": "p01:baseline",
+      "role": "strong",
+      "task_ref": "fakebench:t2",
+      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
+    },
+    {
+      "arm": "weak",
+      "expected_attempts": 2,
+      "injected_skills": null,
+      "no_valid_cause": "all_holes",
+      "phase_label": "p01:baseline",
+      "role": "weak",
+      "task_ref": "fakebench:t1",
+      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "arm": "weak",
+      "expected_attempts": 2,
+      "injected_skills": null,
+      "no_valid_cause": "all_holes",
+      "phase_label": "p01:baseline",
+      "role": "weak",
+      "task_ref": "fakebench:t2",
       "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
     }
   ],
@@ -1507,6 +1905,296 @@
       "target_kind": "task"
     }
   ],
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A3ee7440b%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p03_live/round00/traj%2Ffakebench%3At1%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p03:live",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+          "version": 1
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p03:live",
+    "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A3ee7440b%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.md": {
+    "__sha256__": "55cd4bdf7eba99ee9fbb469f126b229f3ad52460079ea69eff70dcefc0dba87e"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A3ee7440b%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p03_live/round00/traj%2Ffakebench%3At1%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p03:live",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+          "version": 1
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p03:live",
+    "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A3ee7440b%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.md": {
+    "__sha256__": "e1266aa5ebaf81225b94a7326c639e875fc1fe6bcabeb0532f0bc50535c55aa5"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A312f573b%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p03_live/round00/traj%2Ffakebench%3At2%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p03:live",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+          "version": 1
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p03:live",
+    "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A312f573b%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.md": {
+    "__sha256__": "3e4e909ef7b8e513b2dfa8214441dd2fd58956e6ec86ac0975b06a6fd1c00ce6"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A312f573b%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p03_live/round00/traj%2Ffakebench%3At2%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p03:live",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+          "version": 1
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p03:live",
+    "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01"
+  },
+  "phases/p03_live/answer_sheets/p03%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A312f573b%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.md": {
+    "__sha256__": "f4f87ef6116c70623009192c181b1fcc34696811e70dcdb66bd16385d12b4a89"
+  },
+  "phases/p03_live/coverage.jsonl": [
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    }
+  ],
   "phases/p03_live/phase.json": {
     "index": 2,
     "label": "p03:live",
@@ -1521,7 +2209,7 @@
     "role": "live",
     "skill_usage": null
   },
-  "phases/p03_live/unit_verdicts.jsonl": [
+  "phases/p03_live/reuse_index.jsonl": [
     {
       "cause": "",
       "status": "normal",
@@ -1530,6 +2218,54 @@
     {
       "cause": "",
       "status": "normal",
+      "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+    }
+  ],
+  "phases/p03_live/unit_specs.jsonl": [
+    {
+      "arm": null,
+      "expected_attempts": 2,
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+          "version": 1
+        }
+      ],
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p03:live",
+      "role": "weak",
+      "task_ref": "fakebench:t1",
+      "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+    },
+    {
+      "arm": null,
+      "expected_attempts": 2,
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+          "version": 1
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+          "version": 1
+        }
+      ],
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p03:live",
+      "role": "weak",
+      "task_ref": "fakebench:t2",
       "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
     }
   ],
@@ -1926,6 +2662,296 @@
       "target_kind": "skill"
     }
   ],
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A67d449b6%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p05_live/round01/traj%2Ffakebench%3At1%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p05:live",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6::traj/fakebench:t1/weak/00",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p05:live",
+    "sheet_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6::traj/fakebench:t1/weak/00"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A67d449b6%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.md": {
+    "__sha256__": "e2f648b31de1f4584d5f0ba6a189b6b478f41ab30f5b4180d6ef5ca220dd11f3"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A67d449b6%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p05_live/round01/traj%2Ffakebench%3At1%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p05:live",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6::traj/fakebench:t1/weak/01",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p05:live",
+    "sheet_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6::traj/fakebench:t1/weak/01"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At1%3Aweak%3A67d449b6%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.md": {
+    "__sha256__": "88d9d1416ba6be5e22999e216ff3901feed5607af8126193751b3702e6a43f0a"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A15a15897%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p05_live/round01/traj%2Ffakebench%3At2%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p05:live",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p05:live:fakebench:fakebench:t2:weak:15a15897::traj/fakebench:t2/weak/00",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p05:live",
+    "sheet_id": "p05:live:fakebench:fakebench:t2:weak:15a15897::traj/fakebench:t2/weak/00"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A15a15897%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.md": {
+    "__sha256__": "bcae14cec30c426dcd0f734289ffad690e324c2676da9dd720f76201771ac4b3"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A15a15897%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    },
+    "execution": {
+      "answer": null,
+      "arm": null,
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p05_live/round01/traj%2Ffakebench%3At2%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p05:live",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p05:live:fakebench:fakebench:t2:weak:15a15897::traj/fakebench:t2/weak/01",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p05:live",
+    "sheet_id": "p05:live:fakebench:fakebench:t2:weak:15a15897::traj/fakebench:t2/weak/01"
+  },
+  "phases/p05_live/answer_sheets/p05%3Alive%3Afakebench%3Afakebench%3At2%3Aweak%3A15a15897%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.md": {
+    "__sha256__": "0b042c5a2d77e09b90f9c22e863e9ddcb712b3c893726b0115b757df216ce3b3"
+  },
+  "phases/p05_live/coverage.jsonl": [
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    }
+  ],
   "phases/p05_live/phase.json": {
     "index": 4,
     "label": "p05:live",
@@ -1940,7 +2966,7 @@
     "role": "live",
     "skill_usage": null
   },
-  "phases/p05_live/unit_verdicts.jsonl": [
+  "phases/p05_live/reuse_index.jsonl": [
     {
       "cause": "",
       "status": "normal",
@@ -1949,6 +2975,54 @@
     {
       "cause": "",
       "status": "normal",
+      "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
+    }
+  ],
+  "phases/p05_live/unit_specs.jsonl": [
+    {
+      "arm": null,
+      "expected_attempts": 2,
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+          "version": 2
+        }
+      ],
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p05:live",
+      "role": "weak",
+      "task_ref": "fakebench:t1",
+      "unit_id": "p05:live:fakebench:fakebench:t1:weak:67d449b6"
+    },
+    {
+      "arm": null,
+      "expected_attempts": 2,
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+          "version": 2
+        },
+        {
+          "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+          "version": 2
+        }
+      ],
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p05:live",
+      "role": "weak",
+      "task_ref": "fakebench:t2",
       "unit_id": "p05:live:fakebench:fakebench:t2:weak:15a15897"
     }
   ],
@@ -2343,6 +3417,500 @@
       "target_kind": "skill"
     }
   ],
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "control",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At1%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.md": {
+    "__sha256__": "edb4ed76c79fd003b637528ce01d528957f5b9bb8c4dc07329b368d15e538931"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "control",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At1%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/01",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/01"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.md": {
+    "__sha256__": "8bcf8635663e301814da9da73b6e2a37390161003287867dc72b4e45f327d3f6"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "with_bank",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p07_test/with_bank/traj%2Ffakebench%3At1%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24::traj/fakebench:t1/weak/00",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24::traj/fakebench:t1/weak/00"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F00.md": {
+    "__sha256__": "2134c5726fd672cf1f886d3a4016d1d6e86915b9e2e6ffc07adaec61d8a6f675"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "with_bank",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t1/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p07_test/with_bank/traj%2Ffakebench%3At1%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24::traj/fakebench:t1/weak/01",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t1",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24::traj/fakebench:t1/weak/01"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At1%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At1%2Fweak%2F01.md": {
+    "__sha256__": "a5264bb6e27fb3f010405c3b19d77128b08ae9d9a9e5848ba6ae2c25732d3084"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "control",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At2%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.md": {
+    "__sha256__": "6cbdd0310021f470b980cd669652d4c4762fe60923b296b75a5f480eaf45bc61"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "control",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p01_baseline/weak/traj%2Ffakebench%3At2%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": false,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/01",
+      "skills_injected": null,
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "failure"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/01"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3A140bedbf%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.md": {
+    "__sha256__": "452486c1fdbae3eb2d14f3665fb73f656ff037e814474222421b831cb6ead6bf"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "with_bank",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/00"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p07_test/with_bank/traj%2Ffakebench%3At2%2Fweak%2F00"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 0,
+      "sheet_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24::traj/fakebench:t2/weak/00",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24::traj/fakebench:t2/weak/00"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F00.md": {
+    "__sha256__": "fcb4c5e1f4fc10cbc8f51c5342183179db965fe8494c61bf828c2f70c5ed6703"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.json": {
+    "coverage": {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    "execution": {
+      "answer": null,
+      "arm": "with_bank",
+      "artifacts": {
+        "trajectory_id": "traj/fakebench:t2/weak/01"
+      },
+      "aux": {},
+      "aux_success": null,
+      "kind": "trajectory",
+      "metrics": {
+        "workdir": "<RUN_DIR>/work/p07_test/with_bank/traj%2Ffakebench%3At2%2Fweak%2F01"
+      },
+      "model_name": "weak-model",
+      "model_role": "weak",
+      "phase_label": "p07:test",
+      "raw_correctness": true,
+      "rewards": null,
+      "role": "weak",
+      "sample_index": 1,
+      "sheet_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24::traj/fakebench:t2/weak/01",
+      "skills_injected": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "source": "local",
+      "steps": [
+        {
+          "action": "run",
+          "observation": "the environment state"
+        }
+      ],
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    "grading": {
+      "basis": "scorer: the benchmark's own scorer",
+      "rule_name": "scorer",
+      "verdict": "success"
+    },
+    "phase_label": "p07:test",
+    "sheet_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24::traj/fakebench:t2/weak/01"
+  },
+  "phases/p07_test/answer_sheets/p07%3Atest%3Afakebench%3Afakebench%3At2%3Aweak%3Aede31c24%3A%3Atraj%2Ffakebench%3At2%2Fweak%2F01.md": {
+    "__sha256__": "510a210c3ea041e169eccd50580981bc357d4c3af3e45fbd5453bfb09635c3ed"
+  },
+  "phases/p07_test/coverage.jsonl": [
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 0,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    },
+    {
+      "artifacts": {},
+      "attempt_index": 1,
+      "cause": "",
+      "present": true,
+      "status": "present",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    }
+  ],
   "phases/p07_test/phase.json": {
     "index": 6,
     "label": "p07:test",
@@ -2387,6 +3955,58 @@
       "tasks": 2
     }
   },
+  "phases/p07_test/unit_specs.jsonl": [
+    {
+      "arm": "with_bank",
+      "expected_attempts": 2,
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p07:test",
+      "role": "weak",
+      "task_ref": "fakebench:t1",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:ede31c24"
+    },
+    {
+      "arm": "with_bank",
+      "expected_attempts": 2,
+      "injected_skills": [
+        {
+          "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+          "version": 2
+        }
+      ],
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p07:test",
+      "role": "weak",
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:ede31c24"
+    },
+    {
+      "arm": "control",
+      "expected_attempts": 2,
+      "injected_skills": null,
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p07:test",
+      "role": "weak",
+      "task_ref": "fakebench:t1",
+      "unit_id": "p07:test:fakebench:fakebench:t1:weak:140bedbf"
+    },
+    {
+      "arm": "control",
+      "expected_attempts": 2,
+      "injected_skills": null,
+      "no_valid_cause": "zero_execution",
+      "phase_label": "p07:test",
+      "role": "weak",
+      "task_ref": "fakebench:t2",
+      "unit_id": "p07:test:fakebench:fakebench:t2:weak:140bedbf"
+    }
+  ],
   "phases/p07_test/units.jsonl": [
     {
       "aux": {},

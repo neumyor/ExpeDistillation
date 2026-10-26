@@ -46,7 +46,7 @@ import yaml
 from expedistill.benchmarks.base import BenchmarkPlugin, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.cli import run_experiment
-from expedistill.composites import phase_bank, verdicts
+from expedistill.composites import phase_bank, phase_report, verdicts
 from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.composites.skill_status import stage3_candidates
 from expedistill.core.config import (
@@ -75,6 +75,7 @@ from expedistill.stages.assemble_reuse import (
     skill_lineage_tasks,
 )
 from expedistill.stages.context import StageContext
+from expedistill.stages.phase_execute.phase_disk import REUSE_INDEX_NAME
 from tests.helpers.skills import make_skill
 
 _FAKE = "asmbench"
@@ -1143,7 +1144,7 @@ def test_assembled_run_resumes_under_the_v4_pipeline_with_zero_model_calls(
     # The baseline phase: both bare arms are fully stored, so nothing dispatched
     # and the copied shortfall unit is an accepted hole.
     baseline_verdicts = read_jsonl(
-        run_dir / "phases" / "p01_baseline" / "unit_verdicts.jsonl")
+        run_dir / "phases" / "p01_baseline" / REUSE_INDEX_NAME)
     assert len(baseline_verdicts) == 2
     assert stages["p01:baseline"]["infra_accepted"] == [source.ids["traj"]["t1s"]]
     # The first learn phase (the assembled-context seam): the weak arm
@@ -1234,9 +1235,16 @@ def test_an_assembled_pending_member_that_passes_refreshes_the_seeded_artifact(
 
     # The exam phase measured exactly the ride-along member; the next learn
     # phase accepted it (the keep row's receipt).
-    exam_verdicts = read_jsonl(
-        run_dir / "phases" / "p03_exam" / "unit_verdicts.jsonl")
-    assert [row["status"] for row in exam_verdicts] == ["normal"]
+    exam_report = phase_report.read_phase_report(
+        run_dir / "phases" / "p03_exam", phase_kind="exam",
+        learning_usable=True)
+    assert exam_report is not None
+    measured = [
+        unit for unit in exam_report.units
+        if isinstance(unit.injected_skills, list)
+        and unit.injected_skills
+        and unit.injected_skills[0].get("skill_id") == s_p.skill_id]
+    assert [unit.status for unit in measured] == ["normal"]
     accepted_receipts = [
         row for row in read_jsonl(run_dir / "phases" / "p04_learn"
                                  / "outcomes.jsonl")

@@ -271,12 +271,14 @@ def _attempts_dir(ctx):
 
 
 def _verdicts(ctx, phase):
-    """The phase's minimal per-unit verdicts, in file order."""
-    from expedistill.stages.phase_execute.phase_disk import VERDICTS_NAME
-    from expedistill.composites import phase_bank
-    from expedistill.infra.store import read_jsonl
-    path = phase_bank.phase_bank_dir(ctx.run_dir, phase.label) / VERDICTS_NAME
-    return list(read_jsonl(path))
+    """The phase's with-skill unit summaries, in file order."""
+    from expedistill.composites import phase_bank, phase_report
+    report = phase_report.read_phase_report(
+        phase_bank.phase_bank_dir(ctx.run_dir, phase.label),
+        phase_kind=phase.spec.role, learning_usable=True)
+    assert report is not None
+    return [unit.to_dict() for unit in report.units
+            if unit.injected_skills is not None]
 
 
 def _leak_ledger(ctx):

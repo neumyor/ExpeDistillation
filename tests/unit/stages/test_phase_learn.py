@@ -16,11 +16,19 @@ import threading
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
+from expedistill.composites import answer_sheets as acceptance_sheets
 from expedistill.composites import live_measurement as lm
+from expedistill.composites.acceptance_skill_status import exam_attempts
 from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
 )
+from expedistill.composites.phase_report import (
+    ANSWER_SHEETS_DIR,
+    COVERAGE_NAME,
+    write_unit_specs,
+)
+from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core import ids
 from expedistill.core.config import (
     CompareSpec,
@@ -28,7 +36,8 @@ from expedistill.core.config import (
     LearnPhaseSpec,
     PhaseInstance,
 )
-from expedistill.core.contracts import AcceptanceReportRow, TaskListRow
+from expedistill.core.answer_sheet import UnitSpec, UnitSummary
+from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import (
     Attempt,
     Exam,
@@ -255,7 +264,60 @@ def _seed_exam_phase(store, *, with_skill_verdict, version=1):
     _seed_attempt(store, 0, verdict=False, purpose="bare")
     _seed_attempt(store, 1, skill=skill.skill_id, version=version,
                   verdict=with_skill_verdict)
+    _seed_exam_artifacts(store)
     return skill
+
+
+def _seed_exam_artifacts(store, label="p03:exam"):
+    """Write the exam phase's trial-level artifacts beside the store rows.
+
+    The learn phase reads a completed execute phase as answer sheets +
+    unit specs (``phase_report.read_phase_report``); the attempt rows
+    alone are only the legacy fallback.  Mirrors the driver's
+    construction (``stages/phase_execute/exam.py``): one bare control
+    unit plus one measured unit per judged (skill, version).
+    """
+    bare_unit = make_unit_id(
+        phase_label=label, benchmark=BENCHMARK, task_ref=EXAM_ID,
+        role="weak", skills_injected=None)
+    specs = [UnitSpec(
+        unit_id=bare_unit, phase_label=label, task_ref=EXAM_ID,
+        role="weak", arm=None, expected_attempts=1,
+        injected_skills=None)]
+    executions = []
+    units_by_key = {}
+    for attempt in exam_attempts(store, EXAM_ID):
+        if attempt.judge_verdict is None:
+            continue
+        if attempt.purpose == "bare":
+            executions.append(acceptance_sheets.execution_from_attempt(
+                attempt, unit_id=bare_unit, phase_label=label))
+            continue
+        if attempt.purpose != "acceptance":
+            continue
+        key = (attempt.skill_id, attempt.skill_version)
+        unit_id = units_by_key.get(key)
+        if unit_id is None:
+            injected = [{"skill_id": attempt.skill_id,
+                         "version": attempt.skill_version}]
+            unit_id = make_unit_id(
+                phase_label=label, benchmark=BENCHMARK, task_ref=EXAM_ID,
+                role="weak", skills_injected=injected)
+            units_by_key[key] = unit_id
+            specs.append(UnitSpec(
+                unit_id=unit_id, phase_label=label, task_ref=EXAM_ID,
+                role="weak", arm=None, expected_attempts=1,
+                injected_skills=injected))
+        executions.append(acceptance_sheets.execution_from_attempt(
+            attempt, unit_id=unit_id, phase_label=label))
+    sheets = acceptance_sheets.assemble_answer_sheets(
+        executions, [], phase_label=label)
+    acceptance_sheets.grade_answer_sheets(sheets, "exam_judge")
+    dest = phase_bank_dir(store.run_dir, label)
+    acceptance_sheets.write_answer_sheets(
+        sheets, dest / ANSWER_SHEETS_DIR, render_markdown=False)
+    acceptance_sheets.write_coverage([], dest / COVERAGE_NAME)
+    write_unit_specs(specs, dest)
 
 
 def _seed_attempt(store, serial, *, skill=None, version=None, verdict,
@@ -349,11 +411,11 @@ def _task_list_rows(run_dir, label):
 # ---------------------------------------------------------------------------
 
 def _report_row(unit_id, version):
-    return AcceptanceReportRow(
-        unit_id=unit_id, phase_label="p03:exam", role="weak",
+    return UnitSummary(
+        unit_id=unit_id, phase_label="p03:exam", task_ref="",
+        role="weak", arm=None, expected_attempts=1,
         injected_skills=[{"skill_id": SKILL_ID, "version": version}],
-        runs=[], valid_count=1, success_count=0, status="normal",
-        cause="", artifacts={})
+        valid_count=1, success_count=0, status="normal", cause="")
 
 
 def test_merge_keeps_the_highest_version_row():
@@ -761,6 +823,7 @@ def test_the_d4_merge_decides_for_the_current_version(tmp_path, monkeypatch):
                   verdict=True)
     _seed_attempt(ctx.store, 2, skill=skill.skill_id, version=2,
                   verdict=False)
+    _seed_exam_artifacts(ctx.store)
 
     result = phase_learn.run(ctx, _phase(sequence, phases, 3))
 

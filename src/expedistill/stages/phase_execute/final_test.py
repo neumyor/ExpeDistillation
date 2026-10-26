@@ -5,14 +5,17 @@ Orchestration:
     2. Prepare control arm (three options: reused/fresh/external)
     3. Execute with-bank arm
     4. Execute control arm (if fresh)
-    5. Compute metrics for both arms
-    6. Calculate delta and write summary
+    5. Build trial-level answer sheets (execution + coverage) and grade
+    6. Aggregate unit summaries, compute the delta and write the summary
 
 Components used:
     - composites.external_control: load external campaign scores
     - composites.skill_folder: materialize folder for folder delivery
     - composites.skill_use: parse which skills were read
-    - blocks.metrics: compute task metrics
+    - composites.answer_sheets: trial-level execution/coverage/grading views
+    - composites.coverage: expected-vs-stored coverage per arm
+    - composites.unit_summary: unit and task aggregation (pure functions)
+    - composites.phase_report: the phase's runtime report envelope
     - decision: final_test_delta, control_arm_source
 
 Three control arm options:
@@ -28,16 +31,19 @@ Special rules:
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import resolve_plugin
-from expedistill.blocks import metrics as metrics_block
-from expedistill.composites import decision, shortfall
+from expedistill.composites import answer_sheets as sheet_io
+from expedistill.composites import coverage as coverage_io
+from expedistill.composites import decision, shortfall, verdicts
 from expedistill.composites import external_control
+from expedistill.composites import phase_report, unit_ids, unit_summary
 from expedistill.composites.skill_folder import materialize_skill_folder
 from expedistill.composites.skill_use import skill_files_read
 from expedistill.core import ids
+from expedistill.core.answer_sheet import AnswerSheet, ExecutionRecord, UnitSpec
 from expedistill.core.config import (
     EXTERNAL_CAMPAIGN,
     FOLDER_DELIVERY_NAME,
@@ -100,12 +106,15 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     control_accepted: Set[str] = set()
     reused_control: Optional[List[Trajectory]] = None
     external_metrics: Optional[Dict[str, Dict[str, int]]] = None
+    external_rewards: Optional[Dict[str, List[float]]] = None
     external_record: Optional[Dict[str, Any]] = None
+    external_pinned = None
 
     if against == EXTERNAL_CAMPAIGN:
         # External campaign: load scores from file, copy to phase dir
         assert spec.compare is not None and spec.compare.external is not None
         pinned = spec.compare.external
+        external_pinned = pinned
 
         external_metrics, external_rewards = external_control.\
             load_external_control(
@@ -192,6 +201,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     # 4. EXECUTE CONTROL ARM (if fresh)
     # ========================================================================
     control: Optional[List[Trajectory]]
+    control_store: Optional[Store] = None
 
     if external_metrics is not None:
         control = None
@@ -248,20 +258,83 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
         new_holes = {arm: [] for arm in ("with_bank", "control")}
 
     # ========================================================================
-    # 6. COMPUTE METRICS AND DELTA
+    # 6. BUILD AND GRADE TRIAL-LEVEL ANSWER SHEETS
     # ========================================================================
-    with_bank_metrics = metrics_block.compute_task_metrics(
-        with_bank, expected=expected, aux_scorer=aux_scorer)
+    with_bank_specs = [
+        UnitSpec(unit_id=plan.unit.unit_id, phase_label=phase.label,
+                 task_ref=plan.unit.task_ref, role="weak", arm="with_bank",
+                 expected_attempts=n_attempts,
+                 injected_skills=plan.unit.skills_injected)
+        for plan in plans]
+    control_specs = _control_specs(phase_label=phase.label,
+                                   benchmark=benchmark, expected=expected,
+                                   n_attempts=n_attempts)
+    all_specs = with_bank_specs + control_specs
 
-    if external_metrics is not None:
-        control_metrics = external_metrics
-        control_summary = metrics_block.summarize(
-            control_metrics, n_attempts, aux_metric=None)
+    executions = _with_bank_executions(
+        with_bank, phase_label=phase.label, benchmark=benchmark,
+        aux_scorer=aux_scorer)
+
+    if external_rewards is not None:
+        assert external_pinned is not None
+        control_unit_by_task = {spec.task_ref: spec.unit_id
+                                for spec in control_specs}
+        executions += [
+            sheet_io.execution_from_external(
+                task_ref=task_id, unit_id=control_unit_by_task[task_id],
+                phase_label=phase.label, reward=reward,
+                sample_index=index, source=external_pinned.path,
+                sha256=external_pinned.sha256, arm="control")
+            for task_id in sorted(external_rewards)
+            for index, reward in enumerate(external_rewards[task_id])]
     else:
-        control_metrics = metrics_block.compute_task_metrics(
-            control, expected=expected, aux_scorer=aux_scorer)
-        control_summary = metrics_block.summarize(
-            control_metrics, n_attempts, aux_metric=aux_metric)
+        executions += _control_executions(
+            control, phase_label=phase.label, benchmark=benchmark,
+            aux_scorer=aux_scorer)
+
+    stores = {"with_bank": with_bank_store}
+    if reused_control is not None:
+        # The reused control's trajectories live in the run-level store.
+        stores["control"] = ctx.store
+    elif control_store is not None:
+        stores["control"] = control_store
+
+    coverage = coverage_io.test_coverage(
+        stores=stores, specs=all_specs,
+        accepted_by_arm={"with_bank": with_bank_accepted,
+                         "control": control_accepted},
+        external_rewards=({"control": dict(external_rewards)}
+                          if external_rewards is not None else None))
+
+    sheets = sheet_io.assemble_answer_sheets(
+        executions, coverage, phase_label=phase.label)
+    local_rule = verdicts.default_verdict_rule(benchmark)
+    local_sheets = [sheet for sheet in sheets
+                    if not _is_external(sheet)]
+    external_sheets = [sheet for sheet in sheets if _is_external(sheet)]
+    sheet_io.grade_answer_sheets(local_sheets, local_rule)
+    sheet_io.grade_answer_sheets(external_sheets, "external_reward")
+
+    phase_directory = phase_disk._phase_dir(ctx, phase)
+    sheet_io.write_answer_sheets(
+        sheets, phase_directory / phase_report.ANSWER_SHEETS_DIR)
+    sheet_io.write_coverage(
+        coverage, phase_directory / phase_report.COVERAGE_NAME)
+    phase_report.write_unit_specs(all_specs, phase_directory)
+
+    # ========================================================================
+    # 7. AGGREGATE UNIT SUMMARIES, COMPUTE DELTA, WRITE SUMMARY
+    # ========================================================================
+    report = phase_report.build_phase_report(
+        sheets, all_specs, phase_kind="test", learning_usable=False)
+
+    with_bank_units = [unit for unit in report.units
+                       if unit.arm == "with_bank"]
+    control_units = [unit for unit in report.units if unit.arm == "control"]
+
+    with_bank_metrics = unit_summary.task_metrics(with_bank_units,
+                                                  n_attempts)
+    control_metrics = unit_summary.task_metrics(control_units, n_attempts)
 
     if set(with_bank_metrics) != set(control_metrics):
         raise CodeBugError(
@@ -269,14 +342,16 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
             f"{sorted(with_bank_metrics)} vs control "
             f"{sorted(control_metrics)}")
 
-    with_bank_summary = metrics_block.summarize(
+    with_bank_summary = unit_summary.summarize_metrics(
         with_bank_metrics, n_attempts, aux_metric=aux_metric)
+    # An external control carries campaign rewards, never the plugin's
+    # auxiliary scorer, so its auxiliary column is absent by construction.
+    control_summary = unit_summary.summarize_metrics(
+        control_metrics, n_attempts,
+        aux_metric=(None if external_metrics is not None else aux_metric))
 
-    # ========================================================================
-    # 7. WRITE SUMMARY
-    # ========================================================================
-    n_missing = sum(len(unit_ids) for unit_ids in missing.values())
-    n_new = sum(len(unit_ids) for unit_ids in new_holes.values())
+    n_missing = sum(len(unit_ids_) for unit_ids_ in missing.values())
+    n_new = sum(len(unit_ids_) for unit_ids_ in new_holes.values())
 
     summary = {
         "role": PHASE_ROLE_TEST,
@@ -300,7 +375,10 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     if external_record is not None:
         summary["external_control"] = external_record
 
-    write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
+    report.summary = summary
+    report.external = external_record
+
+    write_json(phase_directory / phase_disk.SUMMARY_NAME,
                summary, indent=2)
 
     if n_new:
@@ -316,6 +394,70 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
 # ============================================================================
 # Supporting functions
 # ============================================================================
+
+def _control_specs(*, phase_label: str, benchmark: str,
+                   expected: Dict[str, int],
+                   n_attempts: int) -> List[UnitSpec]:
+    """One bare (no injection) control unit spec per test task."""
+    return [
+        UnitSpec(
+            unit_id=unit_ids.make_unit_id(
+                phase_label=phase_label, benchmark=benchmark,
+                task_ref=task_id, role="weak", skills_injected=None),
+            phase_label=phase_label, task_ref=task_id, role="weak",
+            arm="control", expected_attempts=n_attempts,
+            injected_skills=None)
+        for task_id in sorted(expected)]
+
+
+def _with_bank_executions(
+        trajectories: List[Trajectory], *, phase_label: str,
+        benchmark: str,
+        aux_scorer: Optional[Callable[[Trajectory], bool]]
+        ) -> List[ExecutionRecord]:
+    """The with-bank arm's trial-level execution records."""
+    return [
+        sheet_io.execution_from_trajectory(
+            trajectory,
+            unit_id=unit_ids.unit_id_for_trajectory(
+                phase_label=phase_label, benchmark=benchmark,
+                trajectory=trajectory),
+            phase_label=phase_label, arm="with_bank",
+            aux_success=_aux_success(aux_scorer, trajectory))
+        for trajectory in trajectories]
+
+
+def _control_executions(
+        trajectories: List[Trajectory], *, phase_label: str,
+        benchmark: str,
+        aux_scorer: Optional[Callable[[Trajectory], bool]]
+        ) -> List[ExecutionRecord]:
+    """The local (fresh or reused) control arm's execution records."""
+    return [
+        sheet_io.execution_from_trajectory(
+            trajectory,
+            unit_id=unit_ids.unit_id_for_trajectory(
+                phase_label=phase_label, benchmark=benchmark,
+                trajectory=trajectory),
+            phase_label=phase_label, arm="control",
+            aux_success=_aux_success(aux_scorer, trajectory))
+        for trajectory in trajectories]
+
+
+def _aux_success(aux_scorer: Optional[Callable[[Trajectory], bool]],
+                 trajectory: Trajectory) -> Optional[bool]:
+    """The plugin-declared auxiliary verdict, computed exactly where the
+    old metrics block computed it (only for trials with a scorer verdict)."""
+    if aux_scorer is None or trajectory.correctness is None:
+        return None
+    return aux_scorer(trajectory)
+
+
+def _is_external(sheet: AnswerSheet) -> bool:
+    """Whether a trial sheet carries an external-campaign execution."""
+    return (sheet.execution is not None
+            and sheet.execution.source == "external")
+
 
 def _require_folder_capability(spec: ExecutePhaseSpec, benchmark: str) -> None:
     """Verify benchmark supports folder delivery if phase uses it."""

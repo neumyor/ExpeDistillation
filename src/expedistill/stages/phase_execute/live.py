@@ -27,17 +27,27 @@ Entry guards (short-circuit conditions):
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import resolve_plugin
-from expedistill.composites import decision, shortfall, verdicts
+from expedistill.composites import (
+    answer_sheets,
+    coverage,
+    decision,
+    phase_report,
+    shortfall,
+    verdicts,
+)
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import live_verdicts as lv
 from expedistill.composites import skill_usage
 from expedistill.composites.skill_folder import materialize_skill_folder
-from expedistill.core import ids
+from expedistill.composites.unit_ids import unit_id_for_trajectory
+from expedistill.core import ids, vocabulary
+from expedistill.core.answer_sheet import UnitSpec
 from expedistill.core.config import PHASE_ROLE_LIVE, ExecutePhaseSpec, PhaseInstance
+from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
 from expedistill.infra.store import Store, append_jsonl, read_jsonl, write_json
 from expedistill.inject import estimate_tokens
@@ -294,32 +304,62 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             infra_failed.add(task_id)
 
     # ========================================================================
-    # 7. WRITE SUMMARY
+    # 7. TRIAL SHEETS + COVERAGE + GRADING
     # ========================================================================
-    # ========================================================================
-    # 7. WRITE THE PER-UNIT VERDICTS
-    # ========================================================================
-    # A group's verdict is its ledger terminal when it wrote one, else
-    # "normal" (it was judged); a unit carried from an earlier pass of
-    # this phase keeps the terminal that pass committed; a reused unit
-    # carries the previous phase's verdict. A group still owing runs is
-    # a zero-execution hole.
-    unit_verdicts: List[Tuple[str, str, str]] = []
-    for unit in all_units:
-        task_id = unit.task_ref
-        if unit.unit_id in reused:
-            status, cause = reused[unit.unit_id]
-        elif task_id in infra_failed:
-            status, cause = (verdicts.STATUS_NOT_TESTABLE,
-                             verdicts.CAUSE_ZERO_EXECUTION)
+    # The current round's universe is the planned groups; a reused unit
+    # already has a previous phase's verdict and is not re-measured here.
+    measured_plans = [plan for plan in plans
+                      if plan.unit.unit_id not in reused]
+    specs = [
+        UnitSpec(
+            unit_id=plan.unit.unit_id,
+            phase_label=phase.label,
+            task_ref=plan.unit.task_ref,
+            role="weak",
+            arm=None,
+            expected_attempts=n_attempts,
+            injected_skills=plan.unit.skills_injected,
+        )
+        for plan in measured_plans
+    ]
+
+    terminal_overrides: Dict[str, str] = {}
+    for plan in measured_plans:
+        task_id = plan.unit.task_ref
+        if task_id in infra_failed:
+            cause = vocabulary.CAUSE_ZERO_EXECUTION
         else:
             terminal = _round_terminal(store, task_id, round_)
-            if terminal is None:
-                status, cause = verdicts.STATUS_NORMAL, ""
-            else:
-                status, cause = verdicts.status_cause_for_terminal(terminal)
-        unit_verdicts.append((unit.unit_id, status, cause))
-    phase_disk._write_verdicts(ctx, phase, unit_verdicts)
+            cause = _coverage_cause_for_terminal(terminal)
+        if cause:
+            terminal_overrides[plan.unit.unit_id] = cause
+
+    coverage_records = coverage.live_coverage(
+        store, specs, round_=round_,
+        terminal_overrides=terminal_overrides,
+        zero_execution_units=(),
+        accepted_holes=accepted)
+
+    round_store = Store(lm.round_dir(store, round_))
+    spec_ids = {spec.unit_id for spec in specs}
+    executions = []
+    for trajectory_id in round_store.ids("trajectories"):
+        trajectory = round_store.load(
+            "trajectories", trajectory_id, Trajectory)
+        unit_id = unit_id_for_trajectory(
+            phase_label=phase.label, benchmark=ctx.config.benchmark,
+            trajectory=trajectory)
+        if unit_id not in spec_ids:
+            continue
+        executions.append(answer_sheets.execution_from_trajectory(
+            trajectory, unit_id=unit_id, phase_label=phase.label,
+            arm=None,
+            aux_success=(aux_scorer(trajectory)
+                         if aux_scorer is not None else None)))
+    sheets = answer_sheets.assemble_answer_sheets(
+        executions, coverage_records, phase_label=phase.label)
+    answer_sheets.grade_answer_sheets(
+        sheets, verdicts.default_verdict_rule(ctx.config.benchmark))
 
     # ========================================================================
     # 8. WRITE SUMMARY
@@ -332,9 +372,25 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
         "infra_shortfall_accepted": bool(accepted),
         "skill_usage": usage_path,
     }
+    report = phase_report.build_phase_report(
+        sheets, specs, phase_kind=PHASE_ROLE_LIVE,
+        learning_usable=True, summary=summary)
 
-    write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
-               summary, indent=2)
+    phase_dir = phase_disk._phase_dir(ctx, phase)
+    answer_sheets.write_answer_sheets(
+        report.sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
+    answer_sheets.write_coverage(
+        coverage_records, phase_dir / phase_report.COVERAGE_NAME)
+    phase_report.write_unit_specs(specs, phase_dir)
+    reuse_rows = [(unit.unit_id, unit.status, unit.cause)
+                  for unit in report.units]
+    reuse_rows.extend(
+        (unit_id, status, cause)
+        for unit_id, (status, cause) in reused.items()
+        if unit_id not in {row[0] for row in reuse_rows})
+    phase_disk._write_reuse_index(ctx, phase, reuse_rows)
+
+    write_json(phase_dir / phase_disk.SUMMARY_NAME, summary, indent=2)
 
     if infra_failed:
         raise InfrastructureError(
@@ -344,6 +400,16 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             "infra_missing, then resume to retry")
 
     return summary
+
+
+def _coverage_cause_for_terminal(terminal: Optional[str]) -> str:
+    """The live ledger terminal -> the coverage cause (empty for a judged
+    normal row, whose None verdict means "no terminal")."""
+    return {
+        lv.WEAK_ALREADY_KNOWS: vocabulary.CAUSE_WEAK_ALREADY_KNOWS,
+        lv.LIVE_INJECTION_OVERFLOW: vocabulary.CAUSE_INJECTION_OVERFLOW,
+        lv.LIVE_UNDETERMINED: vocabulary.CAUSE_ALL_HOLES,
+    }.get(terminal, "")
 
 
 # ============================================================================

@@ -13,8 +13,9 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Sequence, Tuple
 
-from expedistill.composites import decision, verdicts
+from expedistill.composites import decision
 from expedistill.composites import phase_bank
+from expedistill.core import vocabulary
 from expedistill.core.config import PhaseInstance
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill
@@ -26,11 +27,13 @@ __all__ = [
     "GENERATION_FAILURES_NAME",
     "PHASE_RECORD_NAME",
     "REDISPATCH_NAME",
+    "REUSE_INDEX_NAME",
     "VERDICTS_NAME",
     "SUMMARY_NAME",
     "UNITS_NAME",
     "_earlier_pass_unit_ids",
     "_earlier_pass_units",
+    "_write_reuse_index",
 ]
 
 #: The execute-phase layout inside ``<run>/phases/<label>/`` (the
@@ -38,7 +41,8 @@ __all__ = [
 #: phase_bank's.
 PHASE_RECORD_NAME = "phase.json"
 UNITS_NAME = "units.jsonl"
-VERDICTS_NAME = "unit_verdicts.jsonl"
+VERDICTS_NAME = "unit_verdicts.jsonl"   # legacy read fallback only
+REUSE_INDEX_NAME = "reuse_index.jsonl"
 REDISPATCH_NAME = "redispatch.json"
 SUMMARY_NAME = "phase_summary.json"
 GENERATION_FAILURES_NAME = "generation_failures.jsonl"
@@ -121,22 +125,19 @@ def _write_units(ctx: StageContext, phase: PhaseInstance,
                 [asdict(unit) for unit in units])
 
 
-def _write_verdicts(ctx: StageContext, phase: PhaseInstance,
-                    verdicts: Sequence[tuple]) -> None:
-    """Persist the phase's minimal per-unit verdicts, atomically.
+def _write_reuse_index(ctx: StageContext, phase: PhaseInstance,
+                       rows: Sequence[Tuple[str, str, str]]) -> None:
+    """Persist the execution-side rule-1 reuse index.
 
-    One row per planned unit, exactly three fields::
-
-        {"unit_id": ..., "status": ..., "cause": ...}
-
-    The file serves the rule-1 reuse join (a unit's block bytes are in
-    ``units.jsonl``; this file says whether its result is reusable) and
-    the audit's coverage/status checks. It is NOT the acceptance report
-    the learning phase reads -- that one is recomputed from the store.
+    This is deliberately NOT an acceptance report: it is a small
+    ``{unit_id, status, cause}`` cache written by the execute driver so a
+    later phase can answer "is this unchanged unit's result reusable?"
+    without re-reading the trial sheets.  Acceptance itself only produces
+    trial-level answer sheets.
     """
-    write_jsonl(_phase_dir(ctx, phase) / VERDICTS_NAME,
+    write_jsonl(_phase_dir(ctx, phase) / REUSE_INDEX_NAME,
                 [{"unit_id": unit_id, "status": status, "cause": cause}
-                 for unit_id, status, cause in verdicts])
+                 for unit_id, status, cause in rows])
 
 
 def _earlier_pass_unit_ids(ctx: StageContext, phase: PhaseInstance
@@ -191,11 +192,19 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
     """
     reused: Dict[str, tuple] = {}
     for record in _earlier_phases(ctx, phase):
+        if record.get("role") == "test":
+            # The final test never uses rule 1, and its trial sheets must
+            # never seed a later execute phase's reuse map.
+            continue
         directory = phase_bank.phase_bank_dir(ctx.run_dir,
                                               record["label"])
         units_path = directory / UNITS_NAME
-        verdicts_path = directory / VERDICTS_NAME
-        if not units_path.exists() or not verdicts_path.exists():
+        index_path = directory / REUSE_INDEX_NAME
+        if not index_path.exists():
+            # Legacy runs only: the old per-unit verdict ledger.  New runs
+            # write the reuse index above.
+            index_path = directory / VERDICTS_NAME
+        if not units_path.exists() or not index_path.exists():
             continue
         matches = decision.reusable_units(
             new_units, [ExecutionUnitRow(**row)
@@ -204,7 +213,7 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
             continue
         stored = {row["unit_id"]: (row.get("status", ""),
                                    row.get("cause", ""))
-                  for row in read_jsonl(verdicts_path)}
+                  for row in read_jsonl(index_path)}
         for new_id, previous_id in matches.items():
             if new_id in reused:
                 continue  # a more recent phase already answered this unit
@@ -212,12 +221,12 @@ def _reusable_units(ctx: StageContext, phase: PhaseInstance,
             if verdict is None:
                 raise CodeBugError(
                     f"phase {record['label']!r} has a unit {previous_id!r} "
-                    f"but no verdict row for it: {verdicts_path} is "
+                    f"but no reuse row for it: {index_path} is "
                     "internally inconsistent and a human must look at "
                     "this run")
             status, cause = verdict
-            if (status == verdicts.STATUS_NOT_TESTABLE
-                    and cause == verdicts.CAUSE_ZERO_EXECUTION):
+            if (status == vocabulary.STATUS_NOT_TESTABLE
+                    and cause == vocabulary.CAUSE_ZERO_EXECUTION):
                 continue
             reused[new_id] = verdict
     return reused

@@ -1,4 +1,10 @@
-"""The acceptance report reader (layer 5, read-only): ONE report shape.
+"""The LEGACY acceptance report reader (layer 5, read-only).
+
+New runs no longer write a unit-level report: ``phase_report.py`` reads
+``unit_specs.jsonl`` + ``answer_sheets/`` + ``coverage.jsonl`` and
+``unit_summary.py`` derives UnitSummary on demand.  This module is kept
+only as the old-run fallback used by ``phase_learn._read_report``; do not
+add new callers.
 
 R1 (docs/decisions/execute_learn_repair_plan_20261016.md) dissolves G6:
 the three former readers (``baseline_report`` / ``exam_report`` /

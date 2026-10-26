@@ -24,13 +24,10 @@ from typing import (
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks import tasks as tasks_block
-from expedistill.composites import verdicts
-from expedistill.composites.reports import (
-    run_record_from_trajectory,
-)
+from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core import ids
 from expedistill.core.config import PhaseInstance
-from expedistill.core.contracts import AcceptanceReportRow, ExecutionUnitRow
+from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import (
     CodeBugError,
@@ -57,12 +54,11 @@ __all__ = [
     "_plan_units",
     "_prefixed_task_map",
     "_redispatch_state",
+    "_missing_attempts",
     "_run_arm_units",
     "_save_redispatch_state",
     "_skills_for_task",
     "_task_objects",
-    "_unit_row_for",
-    "_unit_runs",
 ]
 
 
@@ -182,7 +178,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
             unit=replace(
                 row,
                 task_ref=ref,
-                unit_id=verdicts.make_unit_id(
+                unit_id=make_unit_id(
                     phase_label=phase_label, benchmark=benchmark,
                     task_ref=ref, role=role,
                     skills_injected=row.skills_injected)),
@@ -265,75 +261,36 @@ def _dispatch_arm(ctx: StageContext, phase: PhaseInstance, *,
     )
 
 
-def _unit_runs(store: Store, plan: _Plan, *, accepted: Set[str],
-               rule_name: str
-               ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """One unit's judged runs: every expected attempt either judged
-    under the named rule, an accepted hole (no run at all) or a missing
-    invalid run. Returns ``(runs, missing_ids)`` -- the frozen reader's
-    shape (the run key is the trajectory id, verdict and basis)."""
-    runs: List[Dict[str, Any]] = []
+def _missing_attempts(store: Store, plan: _Plan, *,
+                      accepted: Set[str]) -> List[str]:
+    """Expected trajectory ids that are neither stored nor accepted holes."""
     missing: List[str] = []
     for attempt in range(plan.n_attempts):
         trajectory_id = ids.make_trajectory_id(
             plan.unit.task_ref, plan.role, attempt)
         if trajectory_id in accepted:
             continue
-        if store.exists("trajectories", trajectory_id):
-            trajectory = store.load("trajectories", trajectory_id,
-                                    Trajectory)
-            verdict, basis = verdicts.verdict_from_run(
-                run_record_from_trajectory(trajectory),
-                rule_name=rule_name)
-        else:
+        if not store.exists("trajectories", trajectory_id):
             missing.append(trajectory_id)
-            verdict = verdicts.RUN_INVALID
-            basis = ("missing: dispatched but never completed (infra "
-                     "retries exhausted)")
-        runs.append({"run": trajectory_id, "verdict": verdict,
-                     "basis": basis})
-    return runs, missing
-
-
-def _unit_row_for(plan: _Plan, *, runs: List[Dict[str, Any]],
-                  missing: int, phase_label: str) -> AcceptanceReportRow:
-    """The unit's report row over its judged runs (the frozen reader's
-    status mapping: any valid run -> normal; every unit a hole or every
-    stored run unscored -> all_holes; a dispatch that died mid-unit ->
-    invalid_redispatch_exhausted)."""
-    if any(run["verdict"] != verdicts.RUN_INVALID for run in runs):
-        status, cause = verdicts.STATUS_NORMAL, ""
-    elif not runs or missing == 0:
-        status, cause = (verdicts.STATUS_NOT_TESTABLE,
-                         verdicts.CAUSE_ALL_HOLES)
-    else:
-        status, cause = (verdicts.STATUS_NOT_TESTABLE,
-                         verdicts.CAUSE_INVALID_REDISPATCH_EXHAUSTED)
-    return verdicts.summarize_unit(
-        unit_id=plan.unit.unit_id, phase_label=phase_label,
-        role=plan.role, injected_skills=plan.unit.skills_injected,
-        runs=runs, status=status, cause=cause,
-        artifacts={"trajectory_ids": [run["run"] for run in runs]})
+    return missing
 
 
 def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
                    plans: Sequence[_Plan], store: Store, arm: str,
-                   rule_name: str, limit: int, accepted: Set[str]
-                   ) -> Tuple[List[AcceptanceReportRow], Set[str]]:
-    """Dispatch, judge and re-dispatch one arm's units.
+                   limit: int, accepted: Set[str]
+                   ) -> Tuple[List[Trajectory], Set[str]]:
+    """Dispatch and re-dispatch one arm's units; return stored trials.
 
-    ``accepted`` is the CALLER's durable accepted-hole set (the baseline
-    phase passes the stage-1 record's): accepted holes are never
-    re-dispatched, never re-raised -- the durable-acceptance contract
-    every later call honours with or without the flag.
+    ``accepted`` is the CALLER's durable accepted-hole set: accepted holes
+    are never re-dispatched and never re-raised.  The re-dispatch loop is
+    the frozen rule 6: a unit whose dispatch died with nothing stored is
+    re-offered to K1 while the budget lasts.  The bookkeeping is durable, so
+    a resumed phase continues the same budget.
 
-    Returns ``(rows, unaccepted_holes)``. The re-dispatch loop is the
-    frozen rule 6: a unit whose dispatch died with nothing stored is
-    re-offered to K1 while the budget lasts. The bookkeeping is durable,
-    so a resumed phase continues the same budget instead of restarting
-    it, and a unit whose budget is already spent never re-enters K1
-    (the initial batch excludes it; its row reports the cause and the
-    phase raises for the operator's shortfall decision)."""
+    This function deliberately builds no report rows: it returns the stored
+    trajectories and the unaccepted hole ids.  Coverage and unit summaries
+    are derived later by the pure functions.
+    """
     state_path = _phase_dir(ctx, phase, arm) / REDISPATCH_NAME
     state = _redispatch_state(state_path)
     open_budget = [plan for plan in plans
@@ -341,13 +298,11 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
                                 {}).get("passes", 0) < limit]
     _dispatch_arm(ctx, phase, plans=open_budget, store=store, arm=arm,
                   skip_unit_ids=accepted)
-    rows: List[AcceptanceReportRow] = []
     holes: Set[str] = set()
     for plan in plans:
         entry = state.setdefault(plan.unit.unit_id, {"passes": 0})
         while True:
-            runs, missing = _unit_runs(store, plan, accepted=accepted,
-                                       rule_name=rule_name)
+            missing = _missing_attempts(store, plan, accepted=accepted)
             if not missing or entry["passes"] >= limit:
                 break  # nothing to re-offer, or the budget is spent
             entry["passes"] += 1  # one more K1 offer of the holes
@@ -356,9 +311,18 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
                           skip_unit_ids=accepted)
         _save_redispatch_state(state_path, state)
         holes.update(missing)
-        rows.append(_unit_row_for(plan, runs=runs, missing=len(missing),
-                                  phase_label=phase.label))
-    return rows, holes
+
+    planned_ids = {
+        ids.make_trajectory_id(plan.unit.task_ref, plan.role, attempt)
+        for plan in plans for attempt in range(plan.n_attempts)
+    }
+    trajectories = [
+        store.load("trajectories", trajectory_id, Trajectory)
+        for trajectory_id in sorted(planned_ids)
+        if trajectory_id not in accepted
+        and store.exists("trajectories", trajectory_id)
+    ]
+    return trajectories, holes
 
 
 def _arm_trajectories(store: Store) -> List[Trajectory]:

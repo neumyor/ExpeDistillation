@@ -58,11 +58,12 @@ scripts and Wave 4's golden regeneration align to that shape), and
 """
 
 import dataclasses
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from expedistill.composites import decision
 from expedistill.composites import decision_strategies
 from expedistill.composites import live_measurement as lm
+from expedistill.composites import phase_report
 from expedistill.composites.live_measurement import round_dir
 from expedistill.composites.phase_bank import (
     load_phase_bank,
@@ -82,12 +83,15 @@ from expedistill.core.config import (
     PhaseResult,
     phase_label,
 )
+from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import AcceptanceReportRow
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import read_json, read_jsonl, write_json
 from expedistill.methods.curation import phase_bank as curation_phase_bank
 from expedistill.stages import learn_add, learn_apply, learn_exam, learn_ledger
+
+ReportRow = Union[UnitSummary, AcceptanceReportRow]
 
 __all__ = ["run"]
 
@@ -277,9 +281,9 @@ def _current_execute_position(names: Sequence[str], specs: dict,
 
 def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
                    index: int) -> Tuple[Optional[str],
-                                        List[AcceptanceReportRow],
+                                        List[ReportRow],
                                         Optional[str],
-                                        Optional[List[AcceptanceReportRow]],
+                                        Optional[List[ReportRow]],
                                         str]:
     """The decision entry's two reports and its compare rule.
 
@@ -326,11 +330,27 @@ def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
 
 
 def _read_report(ctx: Any, names: Sequence[str], specs: dict,
-                 position: int) -> List[AcceptanceReportRow]:
-    """One execute phase's acceptance report, read off the run's disk."""
+                 position: int) -> List[ReportRow]:
+    """One execute phase's unit summaries, read off the run's disk.
+
+    New runs carry ``unit_specs.jsonl`` + ``answer_sheets/`` +
+    ``coverage.jsonl``; the pure summarizer turns them into UnitSummary
+    rows.  A legacy run without those artifacts falls back to the old
+    report reader during the migration.
+    """
     name = names[position]
     spec = specs[name]
     label = phase_label(position, name)
+    kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
+            PHASE_ROLE_LIVE: "live"}.get(spec.role)
+    if kind is not None:
+        report = phase_report.read_phase_report(
+            phase_bank_dir(ctx.run_dir, label),
+            phase_kind=kind, learning_usable=True)
+        if report is not None:
+            return report.units
+
+    # Legacy run fallback (old artifacts, no answer sheets).
     if spec.role == PHASE_ROLE_BASELINE:
         return acceptance_report(
             ctx.store, kind="baseline", benchmark=ctx.config.benchmark,
@@ -352,8 +372,8 @@ def _read_report(ctx: Any, names: Sequence[str], specs: dict,
 
 
 def _with_phase_verdicts(ctx: Any, label: str,
-                         rows: Sequence[AcceptanceReportRow]
-                         ) -> List[AcceptanceReportRow]:
+                         rows: Sequence[ReportRow]
+                         ) -> List[ReportRow]:
     """Override the recomputed exam rows with the phase's own verdicts.
 
     The exam phase records facts the stores cannot carry: a unit whose
@@ -373,7 +393,7 @@ def _with_phase_verdicts(ctx: Any, label: str,
     if not path.exists():
         return list(rows)
     stored = {row["unit_id"]: row for row in read_jsonl(path)}
-    out: List[AcceptanceReportRow] = []
+    out: List[ReportRow] = []
     for row in rows:
         verdict = stored.get(row.unit_id)
         if verdict is None:
@@ -528,7 +548,7 @@ def _group_better_by_task(ctx: Any, round_: int
 
 
 def _skill_statuses(ctx: Any, current_rows: Optional[
-        Sequence[AcceptanceReportRow]]) -> Dict[str, str]:
+        Sequence[ReportRow]]) -> Dict[str, str]:
     """The current store status of every measured skill.
 
     P03/P05's live ``finalize_group`` is the writer of accepted/pending;

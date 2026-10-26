@@ -4,17 +4,24 @@ Orchestration:
     1. Resolve parameters (execution, delivery, verdict rule)
     2. Plan units for both arms (strong, weak)
     3. Execute both arms through K1 (run-level store)
-    4. Write the per-unit verdicts (the rule-1 reuse input)
-    5. Write summary and check for holes
+    4. Build trial-level answer sheets + coverage, grade them
+    5. Write the reuse index and summary; check for holes
 
-Components used:
-    - engine: parameter resolution, unit planning, arm execution
-    - composites.shortfall: stage-1 hole tracking
+The execute driver no longer builds unit-level report rows: coverage and
+unit summaries are derived by pure functions from the trial sheets.
 """
 
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set
 
-from expedistill.composites import shortfall
+from expedistill.composites import (
+    answer_sheets,
+    coverage,
+    phase_report,
+    shortfall,
+)
+from expedistill.composites.unit_ids import unit_id_for_trajectory
+from expedistill.core import vocabulary
+from expedistill.core.answer_sheet import UnitSpec
 from expedistill.core.config import (
     PHASE_ROLE_BASELINE,
     ExecutePhaseSpec,
@@ -30,12 +37,7 @@ __all__ = ["_run_baseline"]
 
 def _run_baseline(ctx: StageContext, phase: PhaseInstance,
                   spec: ExecutePhaseSpec) -> Dict[str, Any]:
-    """Execute baseline phase: both bare arms over train set.
-
-    The strong and weak arms run bare at their frozen depths, stored in
-    the RUN-LEVEL trajectory store. Every frozen consumer (live baseline
-    loading, report reader, test phase reused control) reads them there.
-    """
+    """Execute baseline: both bare arms, then derive trial/unit views."""
     # ========================================================================
     # 1. RESOLVE PARAMETERS
     # ========================================================================
@@ -51,17 +53,29 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 2. PLAN UNITS FOR BOTH ARMS
     # ========================================================================
-    # Note: baseline uses 'none' delivery (bare runs), but we still call
-    # resolve to get the unit rows
     rows = delivery.resolve(None, list(tasks), delivery_params)
 
     plans_by_role: Dict[str, list] = {}
+    specs: List[UnitSpec] = []
     for arm in params.arms:
         role = resolve._ROLE_OF_ARM[arm]
-        plans_by_role[role] = engine._plan_units(
+        plans = engine._plan_units(
             rows, tasks, phase_label=phase.label,
             benchmark=ctx.config.benchmark, role=role,
             n_attempts=depths[role])
+        plans_by_role[role] = plans
+        specs.extend(
+            UnitSpec(
+                unit_id=plan.unit.unit_id,
+                phase_label=phase.label,
+                task_ref=plan.unit.task_ref,
+                role=role,
+                arm=role,
+                expected_attempts=plan.n_attempts,
+                injected_skills=plan.unit.skills_injected,
+                no_valid_cause=vocabulary.CAUSE_ALL_HOLES,
+            )
+            for plan in plans)
 
     phase_disk._write_units(
         ctx, phase,
@@ -71,22 +85,17 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 3. EXECUTE BOTH ARMS (run-level store)
     # ========================================================================
-    # Stage-1 accepted holes: never re-dispatched, never re-raised
     stage1_holes = set(shortfall.stage1_accepted_unit_ids(ctx.run_dir))
     holes: Set[str] = set()
-    verdicts: List[Tuple[str, str, str]] = []
+    trajectories = []
 
     for role in ("strong", "weak"):
-        rows, arm_holes = engine._run_arm_units(
+        arm_trajectories, arm_holes = engine._run_arm_units(
             ctx, phase, plans=plans_by_role[role], store=ctx.store,
-            arm=role, rule_name=rule_name, limit=limit,
-            accepted=set(stage1_holes))
-
-        verdicts.extend((row.unit_id, row.status, row.cause)
-                        for row in rows)
+            arm=role, limit=limit, accepted=set(stage1_holes))
+        trajectories.extend(arm_trajectories)
 
         if arm_holes and ctx.run_settings.allow_infra_shortfall:
-            # Accept new holes and update stage-1 record
             shortfall.write_unit_ids(
                 shortfall.stage1_shortfall_path(ctx.run_dir),
                 stage1_holes | arm_holes)
@@ -95,15 +104,26 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
             holes |= arm_holes
 
     # ========================================================================
-    # 4. WRITE THE PER-UNIT VERDICTS
+    # 4. TRIAL SHEETS + COVERAGE + GRADING
     # ========================================================================
-    phase_disk._write_verdicts(ctx, phase, verdicts)
+    coverage_records = coverage.baseline_coverage(
+        ctx.store, specs, accepted_holes=stage1_holes)
+    executions = [
+        answer_sheets.execution_from_trajectory(
+            trajectory,
+            unit_id=unit_id_for_trajectory(
+                phase_label=phase.label,
+                benchmark=ctx.config.benchmark,
+                trajectory=trajectory),
+            phase_label=phase.label,
+            arm=trajectory.model_role)
+        for trajectory in trajectories
+    ]
+    sheets = answer_sheets.assemble_answer_sheets(
+        executions, coverage_records, phase_label=phase.label)
+    answer_sheets.grade_answer_sheets(sheets, rule_name)
 
-    # ========================================================================
-    # 5. WRITE SUMMARY AND CHECK HOLES
-    # ========================================================================
     every_hole = set(stage1_holes) | holes
-
     summary = {
         "role": PHASE_ROLE_BASELINE,
         "infra_missing": sorted(every_hole),
@@ -111,9 +131,25 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
         "complete": not every_hole,
         "infra_shortfall_accepted": bool(stage1_holes),
     }
+    report = phase_report.build_phase_report(
+        sheets, specs, phase_kind=PHASE_ROLE_BASELINE,
+        learning_usable=True, summary=summary)
 
-    write_json(phase_disk._phase_dir(ctx, phase) / phase_disk.SUMMARY_NAME,
-               summary, indent=2)
+    phase_dir = phase_disk._phase_dir(ctx, phase)
+    answer_sheets.write_answer_sheets(
+        report.sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
+    answer_sheets.write_coverage(
+        coverage_records, phase_dir / phase_report.COVERAGE_NAME)
+    phase_report.write_unit_specs(specs, phase_dir)
+    phase_disk._write_reuse_index(
+        ctx, phase,
+        [(unit.unit_id, unit.status, unit.cause)
+         for unit in report.units])
+
+    # ========================================================================
+    # 5. WRITE SUMMARY AND CHECK HOLES
+    # ========================================================================
+    write_json(phase_dir / phase_disk.SUMMARY_NAME, summary, indent=2)
 
     if holes:
         raise InfrastructureError(
