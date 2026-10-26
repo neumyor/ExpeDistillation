@@ -1,5 +1,9 @@
 # 决定：P04 决策拆成两种策略，归因与写作共享
 
+> 2026-10-23 19:42 更新：本文件的 group 归因方案已被
+> `p04_attempt_window_attribution_20261023.md` 的“触发窗口归因”取代；
+> 决策层的 task_level / skill_level 仍然有效，归因与证据形状以新文件为准。
+
 日期：2026-10-23
 一句话：把 P04/P06 的学习决策从旧的 group + per-skill policy 管道拆成独立的 per-skill 决策模块，支持 `task_level` / `skill_level` 两种策略，归因与写作共用；P02 的 add 路径保持不变。
 对应 log.md：2026-10-23 17:04 条目。
