@@ -64,6 +64,7 @@ from expedistill.composites import decision
 from expedistill.composites import decision_strategies
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import phase_report
+from expedistill.composites import skill_usage
 from expedistill.composites.live_measurement import round_dir
 from expedistill.composites.phase_bank import (
     load_phase_bank,
@@ -159,7 +160,12 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             current_round, superseded)
     else:
         # P04/P06: one per-skill decision row per measured skill.
-        usage_by_task = _usage_by_task(ctx.store, current_round)
+        current_sheets = _read_sheets(ctx, names, specs, current_pos)
+        usage_by_task = _usage_by_task_from_sheets(
+            current_sheets, current_round)
+        if not usage_by_task:
+            # Legacy run: no answer sheets, fall back to the old ledger.
+            usage_by_task = _usage_by_task(ctx.store, current_round)
         task_rows = decision_strategies.decide(
             name=phase.spec.decision.get("name", "task_level"),
             current_kind=current_kind, current_report=current_rows,
@@ -178,9 +184,8 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         infra_failed = learn_apply.execute_decision_rows(
             ctx, phase, effective, current_rows, current_spec,
             current_round,
+            current_sheets=current_sheets,
             usage_by_task=usage_by_task,
-            folder_manifests=_folder_manifests(
-                ctx, names, specs, current_pos),
             delivery=current_spec.delivery.get("name", ""))
 
     summary = _summary(phase, effective, superseded, phase_dir,
@@ -490,33 +495,35 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     }
 
 
-def _folder_manifests(ctx: Any, names: Sequence[str], specs: dict,
-                      position: int) -> Dict[str, Dict[str, Any]]:
-    """The preceding live phase's per-task folder manifests.
+def _read_sheets(ctx: Any, names: Sequence[str], specs: dict,
+                 position: int) -> List[Any]:
+    """The execute phase's trial-level AnswerSheets, if it wrote them."""
+    name = names[position]
+    spec = specs[name]
+    kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
+            PHASE_ROLE_LIVE: "live"}.get(spec.role)
+    if kind is None:
+        return []
+    report = phase_report.read_phase_report(
+        phase_bank_dir(ctx.run_dir, phase_label(position, name)),
+        phase_kind=kind, learning_usable=True)
+    return report.sheets if report is not None else []
 
-    Only folder deliveries carry them; the attribution driver uses the
-    manifests to locate actual cat events. A non-folder live phase
-    returns an empty mapping.
-    """
-    spec = specs[names[position]]
-    if spec.delivery.get("name") not in ("folder", "folder_by_task"):
-        return {}
-    directory = phase_bank_dir(
-        ctx.run_dir, phase_label(position, names[position]))
-    units = directory / "units.jsonl"
-    if not units.exists():
-        return {}
-    out: Dict[str, Dict[str, Any]] = {}
-    for row in read_jsonl(units):
-        aux = row.get("aux") or {}
-        folder = aux.get("skill_folder")
-        if folder:
-            out[str(row.get("task_ref"))] = folder
+
+def _usage_by_task_from_sheets(sheets: Sequence[Any], round_: int
+                               ) -> Dict[str, List[dict]]:
+    """Derive skill-usage rows from the trial-level AnswerSheets."""
+    out: Dict[str, List[dict]] = {}
+    for row in skill_usage.build_usage_rows_from_sheets(
+            sheets, round_=round_):
+        task_id = row.get("task_id")
+        if task_id:
+            out.setdefault(task_id, []).append(row)
     return out
 
 
 def _usage_by_task(store, round_: int) -> Dict[str, List[dict]]:
-    """The round's skill-usage rows, grouped by task id."""
+    """Legacy: the round's skill-usage rows, grouped by task id."""
     out: Dict[str, List[dict]] = {}
     for row in read_jsonl(round_dir(store, round_) / SKILL_USAGE_NAME):
         task_id = row.get("task_id")

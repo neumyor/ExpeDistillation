@@ -1,7 +1,10 @@
 """P04/P06 attribution: one bounded window per attempt (or invocation).
 
-The writer's evidence is built here. The driver is decision-agnostic:
-it receives the skills already chosen for revision and returns one
+The writer's evidence is built here from the trial-level AnswerSheets: each
+present ``ExecutionRecord`` supplies its steps, attempt index, raw
+correctness and the folder manifest.  The old ``store``/``round_`` entry is a
+fallback for pre-answer-sheet runs.  The driver is decision-agnostic: it
+receives the skills already chosen for revision and returns one
 ``SkillAttemptEvidence`` per skill.
 
 Folder deliveries use every actual ``cat`` event and take a fixed
@@ -18,6 +21,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from expedistill.blocks.attribution import attribute_attempts
 from expedistill.blocks.view import render_steps_view
+from expedistill.composites import skill_usage
+from expedistill.composites.answer_sheets import execution_from_trajectory
 from expedistill.composites.live_measurement import task_trajectories
 from expedistill.composites.skill_attempt_evidence import (
     SkillAttemptEvidence,
@@ -28,7 +33,8 @@ from expedistill.composites.skill_use import (
     skill_used_in_attempt,
     window_bounds,
 )
-from expedistill.core.models import Skill, Trajectory
+from expedistill.core.answer_sheet import AnswerSheet, ExecutionRecord
+from expedistill.core.models import Skill
 from expedistill.infra.store import Store
 from expedistill.methods.attribution import AttributionParams
 
@@ -39,13 +45,15 @@ def collect_skill_evidence(
     *,
     task_id: str,
     skills: Sequence[Skill],
-    store: Store,
-    round_: int,
-    n_attempts: int,
+    sheets: Optional[Sequence[AnswerSheet]] = None,
+    store: Optional[Store] = None,
+    round_: Optional[int] = None,
+    phase_label: str = "",
+    n_attempts: int = 0,
     task_instruction: str,
     delivery: str,
-    folder: Optional[Dict[str, Any]],
-    usage_rows: Sequence[Dict[str, Any]],
+    folder: Optional[Dict[str, Any]] = None,
+    usage_rows: Optional[Sequence[Dict[str, Any]]] = None,
     weak_profile: str,
     author_handle: Any,
     view_rules: Any = None,
@@ -53,13 +61,34 @@ def collect_skill_evidence(
     usage: Any = None,
     run_dir: Any = None,
 ) -> Dict[str, SkillAttemptEvidence]:
-    """Collect every window for every target skill of one task."""
+    """Collect every window for every target skill of one task.
+
+    The primary input is the trial-level AnswerSheet set: each present
+    execution supplies its steps, attempt index, raw correctness and the
+    folder manifest (in ``artifacts["skill_folder"]``).  The legacy
+    ``store``/``round_`` pair is accepted only when no sheets are handed
+    in, so old runs/tests keep working while new runs use the answer-sheet
+    path exclusively.
+    """
     if not skills:
         return {}
     params = params or AttributionParams()
-    trajectories = {
-        traj.attempt_index: traj
-        for traj in task_trajectories(store, task_id, round_)}
+    executions = _executions_for_task(task_id, sheets)
+    if not executions and store is not None and round_ is not None:
+        executions = [
+            execution_from_trajectory(
+                trajectory,
+                unit_id=f"legacy:{trajectory.trajectory_id}",
+                phase_label=phase_label,
+                folder=folder)
+            for trajectory in task_trajectories(store, task_id, round_)]
+    records = {execution.sample_index: execution
+               for execution in executions}
+    if usage_rows is None:
+        usage_rows = (
+            skill_usage.build_usage_rows_from_sheets(
+                list(sheets or []), round_=round_ or 0)
+            if sheets else [])
     usage_by_attempt = {
         row.get("attempt"): row for row in usage_rows}
     evidence = {
@@ -67,26 +96,41 @@ def collect_skill_evidence(
             skill_id=skill.skill_id, skill_version=skill.version)
         for skill in skills}
 
-    for attempt in sorted(trajectories):
-        trajectory = trajectories[attempt]
+    for attempt in sorted(records):
+        execution = records[attempt]
+        execution_folder = (
+            execution.artifacts.get("skill_folder") or folder)
         usage_row = usage_by_attempt.get(attempt)
         if delivery in FOLDER_DELIVERIES:
             _collect_folder_attempt(
-                task_id=task_id, attempt=attempt, trajectory=trajectory,
-                usage_row=usage_row, skills=skills, folder=folder,
+                task_id=task_id, attempt=attempt, execution=execution,
+                usage_row=usage_row, skills=skills, folder=execution_folder,
                 task_instruction=task_instruction,
                 weak_profile=weak_profile, handle=author_handle,
                 view_rules=view_rules, params=params, usage=usage,
                 run_dir=run_dir, evidence=evidence)
         else:
             _collect_injected_attempt(
-                task_id=task_id, attempt=attempt, trajectory=trajectory,
+                task_id=task_id, attempt=attempt, execution=execution,
                 usage_row=usage_row, skills=skills,
                 task_instruction=task_instruction,
                 weak_profile=weak_profile, handle=author_handle,
                 view_rules=view_rules, params=params, usage=usage,
                 run_dir=run_dir, evidence=evidence)
     return evidence
+
+
+def _executions_for_task(task_id: str,
+                         sheets: Optional[Sequence[AnswerSheet]]
+                         ) -> List[ExecutionRecord]:
+    out: List[ExecutionRecord] = []
+    for sheet in sheets or ():
+        execution = sheet.execution
+        if execution is None or execution.kind != "trajectory":
+            continue
+        if execution.task_ref == task_id:
+            out.append(execution)
+    return out
 
 
 def _folder_aliases(folder: Optional[Mapping[str, Any]]
@@ -116,7 +160,7 @@ def _folder_aliases(folder: Optional[Mapping[str, Any]]
 
 
 def _collect_folder_attempt(
-    *, task_id: str, attempt: int, trajectory: Trajectory,
+    *, task_id: str, attempt: int, execution: ExecutionRecord,
     usage_row: Optional[Dict[str, Any]], skills: Sequence[Skill],
     folder: Optional[Dict[str, Any]], task_instruction: str,
     weak_profile: str, handle: Any, view_rules: Any,
@@ -126,12 +170,13 @@ def _collect_folder_attempt(
     if usage_row is None:
         return
     aliases = _folder_aliases(folder)
+    steps = execution.steps or []
     groups: Dict[tuple, Dict[str, Any]] = defaultdict(
         lambda: {"skills": [], "trigger_steps": set()})
     for skill in skills:
         use = skill_used_in_attempt(
             skill_id=skill.skill_id, attempt=attempt, delivery="folder",
-            usage_row=usage_row, trajectory=trajectory, folder=folder)
+            usage_row=usage_row, trajectory=execution, folder=folder)
         if not use.used:
             continue
         invocations = list(use.invocations)
@@ -141,7 +186,7 @@ def _collect_folder_attempt(
             if invocation.step_index is None:
                 continue
             start, end = window_bounds(
-                invocation.step_index, len(trajectory.steps),
+                invocation.step_index, len(steps),
                 before=params.before_steps, after=params.after_steps)
             group = groups[(start, end)]
             if skill.skill_id not in group["skills"]:
@@ -151,7 +196,7 @@ def _collect_folder_attempt(
         selected = [skill for skill in skills
                     if skill.skill_id in group["skills"]]
         window = _attribute_window(
-            task_id=task_id, attempt=attempt, trajectory=trajectory,
+            task_id=task_id, attempt=attempt, execution=execution,
             usage_row=usage_row, skills=selected, kind="invocation",
             step_start=start, step_end=end,
             trigger_steps=sorted(group["trigger_steps"]),
@@ -163,17 +208,18 @@ def _collect_folder_attempt(
 
 
 def _collect_injected_attempt(
-    *, task_id: str, attempt: int, trajectory: Trajectory,
+    *, task_id: str, attempt: int, execution: ExecutionRecord,
     usage_row: Optional[Dict[str, Any]], skills: Sequence[Skill],
     task_instruction: str, weak_profile: str, handle: Any,
     view_rules: Any, params: AttributionParams, usage: Any, run_dir: Any,
     evidence: Dict[str, SkillAttemptEvidence],
 ) -> None:
     windows = _start_end_windows(
-        len(trajectory.steps), params.before_steps, params.after_steps)
+        len(execution.steps or []), params.before_steps,
+        params.after_steps)
     for kind, start, end in windows:
         result = _attribute_window(
-            task_id=task_id, attempt=attempt, trajectory=trajectory,
+            task_id=task_id, attempt=attempt, execution=execution,
             usage_row=usage_row, skills=list(skills), kind=kind,
             step_start=start, step_end=end, trigger_steps=[],
             task_instruction=task_instruction, weak_profile=weak_profile,
@@ -226,7 +272,7 @@ def _task_description(initial_prompt: Optional[str],
 
 
 def _attribute_window(
-    *, task_id: str, attempt: int, trajectory: Trajectory,
+    *, task_id: str, attempt: int, execution: ExecutionRecord,
     usage_row: Optional[Dict[str, Any]], skills: Sequence[Skill],
     kind: str, step_start: int, step_end: int,
     trigger_steps: Sequence[int], task_instruction: str,
@@ -234,12 +280,12 @@ def _attribute_window(
     usage: Any, run_dir: Any,
     skill_aliases: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, WindowEvidence]:
-    text = render_steps_view(trajectory.steps[step_start:step_end],
-                             view_rules)
-    initial_prompt = (trajectory.meta.get("initial_prompt")
-                      if isinstance(trajectory.meta, dict) else None)
+    text = render_steps_view(
+        (execution.steps or [])[step_start:step_end], view_rules)
+    meta = execution.metrics if isinstance(execution.metrics, dict) else {}
+    initial_prompt = meta.get("initial_prompt")
     instruction = _task_description(initial_prompt, task_instruction)
-    outcome = (usage_row or {}).get("outcome") or _outcome(trajectory)
+    outcome = (usage_row or {}).get("outcome") or _outcome(execution)
     success = {"success": True, "failure": False}.get(outcome)
     judged = attribute_attempts(
         task_instruction=instruction,
@@ -276,6 +322,6 @@ def _fallback_invocations(usage_row: Dict[str, Any],
         if event.get("skill_id") == skill_id]
 
 
-def _outcome(trajectory: Trajectory) -> str:
+def _outcome(execution: ExecutionRecord) -> str:
     return {True: "success", False: "failure"}.get(
-        trajectory.correctness, "unknown")
+        execution.raw_correctness, "unknown")

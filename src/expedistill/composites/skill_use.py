@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, List, Mapping, Optional, Sequence
 
-from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError
 
 __all__ = [
@@ -116,7 +115,7 @@ def _manifest_files(folder: Mapping[str, Any]) -> List[str]:
     return order
 
 
-def skill_read_events(trajectory: Trajectory,
+def skill_read_events(trajectory: Any,
                       folder: Mapping[str, Any],
                       *, first_only: bool = True) -> List[dict]:
     """The cat events of the manifest's skills in ``trajectory``.
@@ -152,13 +151,13 @@ def skill_read_events(trajectory: Trajectory,
     return events
 
 
-def all_skill_read_events(trajectory: Trajectory,
+def all_skill_read_events(trajectory: Any,
                           folder: Mapping[str, Any]) -> List[dict]:
     """Every cat event, including repeated reads of one skill."""
     return skill_read_events(trajectory, folder, first_only=False)
 
 
-def skill_files_read(trajectory: Trajectory,
+def skill_files_read(trajectory: Any,
                      folder: Mapping[str, Any]) -> List[str]:
     """The skill ids actually cat'd, first-read order, each once."""
     return [event["skill_id"]
@@ -172,7 +171,7 @@ def skill_used_in_attempt(
     delivery: str,
     usage_row: Optional[Mapping[str, Any]] = None,
     injected_skill_ids: Sequence[str] = (),
-    trajectory: Optional[Trajectory] = None,
+    trajectory: Optional[Any] = None,
     folder: Optional[Mapping[str, Any]] = None,
 ) -> SkillUse:
     """Was ``skill_id`` used in ``attempt``? (module docstring)

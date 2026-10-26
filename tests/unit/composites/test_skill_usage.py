@@ -1,6 +1,11 @@
 """The live folder usage ledger: read facts and delivery status."""
 
-from expedistill.composites.skill_usage import build_usage_rows
+from expedistill.composites.answer_sheets import execution_from_trajectory
+from expedistill.composites.skill_usage import (
+    build_usage_rows,
+    build_usage_rows_from_sheets,
+)
+from expedistill.core.answer_sheet import AnswerSheet, CoverageRecord
 from expedistill.core.ids import (
     make_skill_id,
     make_subtask_id,
@@ -103,3 +108,27 @@ def test_a_list_with_the_wrong_names_is_a_manifest_mismatch():
     row = build_usage_rows(task_id=TASK_ID, round_=0,
                            trajectories=[trajectory], folder=manifest)[0]
     assert row["delivery_status"] == "manifest_mismatch"
+
+
+def test_usage_rows_are_built_from_answer_sheets():
+    manifest = _manifest()
+    first = manifest["files"][0]
+    trajectory = _trajectory(
+        "TASK without a stored prompt",
+        [f"cat /opt/openclaw-skills/t1/{first['filename']}\n"])
+    execution = execution_from_trajectory(
+        trajectory, unit_id="unit-1", phase_label="p03:live",
+        arm=None, folder=manifest)
+    sheet = AnswerSheet(
+        sheet_id=execution.sheet_id, phase_label="p03:live",
+        coverage=CoverageRecord(
+            unit_id="unit-1", attempt_index=0, present=True,
+            status="present"),
+        execution=execution)
+
+    rows = build_usage_rows_from_sheets([sheet], round_=0)
+
+    assert len(rows) == 1
+    assert rows[0]["task_id"] == TASK_ID
+    assert rows[0]["read_skill_ids"] == [first["skill_id"]]
+    assert rows[0]["delivery_status"] == "ok"

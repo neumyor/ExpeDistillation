@@ -1,7 +1,9 @@
 """The per-window attribution driver: folder invocations and injected windows."""
 
 
+from expedistill.composites.answer_sheets import execution_from_trajectory
 from expedistill.composites.live_measurement import round_dir
+from expedistill.core.answer_sheet import AnswerSheet, CoverageRecord
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Step, Trajectory
 from expedistill.infra.store import Store
@@ -166,3 +168,51 @@ def test_injected_delivery_uses_start_and_end_windows(tmp_path, monkeypatch):
     assert len(evidence[SKILL_A.skill_id].windows) == 2
     assert evidence[SKILL_A.skill_id].windows[0].step_start == 0
     assert evidence[SKILL_A.skill_id].windows[1].step_end == 30
+
+
+def _sheet(actions, *, folder=FOLDER, delivery_trajectory=True):
+    trajectory = _trajectory(actions)
+    execution = execution_from_trajectory(
+        trajectory, unit_id="unit-1", phase_label="p03:live",
+        arm=None, folder=folder if delivery_trajectory else None)
+    coverage = CoverageRecord(
+        unit_id="unit-1", attempt_index=0, present=True,
+        status="present")
+    return AnswerSheet(sheet_id=execution.sheet_id, phase_label="p03:live",
+                       coverage=coverage, execution=execution)
+
+
+def test_answer_sheet_is_the_folder_attribution_input(monkeypatch):
+    sheet = _sheet(["cat a/SKILL.md\ncat b/SKILL.md", "do something"])
+    calls = []
+    monkeypatch.setattr(skill_attempts, "attribute_attempts",
+                        _fake_attribution(calls))
+
+    evidence = skill_attempts.collect_skill_evidence(
+        task_id=TASK, skills=[SKILL_A, SKILL_B], sheets=[sheet],
+        n_attempts=1, task_instruction="do it", delivery="folder",
+        weak_profile="w", author_handle=object(),
+        params=AttributionParams(before_steps=0, after_steps=0))
+
+    assert len(calls) == 1
+    assert {skill.skill_id for skill in calls[0]["skills"]} == {
+        SKILL_A.skill_id, SKILL_B.skill_id}
+    assert len(evidence[SKILL_A.skill_id].windows) == 1
+    assert len(evidence[SKILL_B.skill_id].windows) == 1
+
+
+def test_answer_sheet_is_the_injected_attribution_input(monkeypatch):
+    sheet = _sheet([f"step {i}" for i in range(30)], folder=None,
+                   delivery_trajectory=False)
+    calls = []
+    monkeypatch.setattr(skill_attempts, "attribute_attempts",
+                        _fake_attribution(calls))
+
+    evidence = skill_attempts.collect_skill_evidence(
+        task_id=TASK, skills=[SKILL_A], sheets=[sheet],
+        n_attempts=1, task_instruction="do it", delivery="whole_bank",
+        weak_profile="w", author_handle=object(),
+        params=AttributionParams(before_steps=5, after_steps=5))
+
+    assert [call["window_kind"] for call in calls] == ["start", "end"]
+    assert len(evidence[SKILL_A.skill_id].windows) == 2

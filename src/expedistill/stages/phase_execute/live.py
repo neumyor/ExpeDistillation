@@ -27,7 +27,7 @@ Entry guards (short-circuit conditions):
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from expedistill.benchmarks.aux import aux_wiring
 from expedistill.benchmarks.registry import resolve_plugin
@@ -250,11 +250,6 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             )
 
     # ========================================================================
-    # 5b. WRITE THE FOLDER USAGE LEDGER
-    # ========================================================================
-    usage_path = _write_skill_usage(ctx, round_, all_units)
-
-    # ========================================================================
     # 6. JUDGE AND FINALIZE GROUPS
     # ========================================================================
     # Handle new shortfalls first
@@ -342,6 +337,10 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
 
     round_store = Store(lm.round_dir(store, round_))
     spec_ids = {spec.unit_id for spec in specs}
+    folder_by_task = {
+        unit.task_ref: unit.aux["skill_folder"]
+        for unit in all_units
+        if unit.aux.get("skill_folder")}
     executions = []
     for trajectory_id in round_store.ids("trajectories"):
         trajectory = round_store.load(
@@ -355,11 +354,13 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
             trajectory, unit_id=unit_id, phase_label=phase.label,
             arm=None,
             aux_success=(aux_scorer(trajectory)
-                         if aux_scorer is not None else None)))
+                         if aux_scorer is not None else None),
+            folder=folder_by_task.get(trajectory.task_id)))
     sheets = answer_sheets.assemble_answer_sheets(
         executions, coverage_records, phase_label=phase.label)
     answer_sheets.grade_answer_sheets(
         sheets, verdicts.default_verdict_rule(ctx.config.benchmark))
+    usage_path = _write_skill_usage_from_sheets(ctx, round_, sheets)
 
     # ========================================================================
     # 8. WRITE SUMMARY
@@ -416,29 +417,18 @@ def _coverage_cause_for_terminal(terminal: Optional[str]) -> str:
 # Supporting functions
 # ============================================================================
 
-def _write_skill_usage(ctx: StageContext, round_: int,
-                       units: List[Any]) -> Optional[str]:
-    """Write the round's read facts for every folder unit with stored runs.
+def _write_skill_usage_from_sheets(ctx: StageContext, round_: int,
+                                   sheets: Sequence[Any]) -> Optional[str]:
+    """Write the round's read facts from the trial-level AnswerSheets.
 
-    Derived entirely from the stored trajectories and the frozen
-    manifest, so a resume rewrites the same bytes.  The unit list is the
-    phase's merged list (earlier passes included), so a finalized group's
-    rows are not lost when the pending universe shrinks on resume.  A
-    round with no folder rows writes nothing.
+    This is a derived cache for audit/legacy readers; the learn phase
+    computes usage from the same AnswerSheets directly.  A round with no
+    folder execution writes nothing.
     """
     directory = lm.round_dir(ctx.store, round_)
     if not directory.exists():
         return None
-    rows: List[dict] = []
-    for unit in units:
-        folder = unit.aux.get("skill_folder")
-        if not folder:
-            continue
-        trajectories = lm._trajectories_from(directory, unit.task_ref,
-                                             round_)
-        rows.extend(skill_usage.build_usage_rows(
-            task_id=unit.task_ref, round_=round_, trajectories=trajectories,
-            folder=folder))
+    rows = skill_usage.build_usage_rows_from_sheets(sheets, round_=round_)
     if not rows:
         return None
     path = directory / skill_usage.SKILL_USAGE_NAME

@@ -11,7 +11,7 @@ injection overflow or unit aggregation: those belong to ``coverage`` and
 """
 
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from expedistill.composites import verdicts
 from expedistill.composites.unit_ids import make_gap_sheet_id
@@ -39,8 +39,17 @@ __all__ = [
 def execution_from_trajectory(
         trajectory: Trajectory, *, unit_id: str, phase_label: str,
         arm: Optional[str] = None,
-        aux_success: Optional[bool] = None) -> ExecutionRecord:
-    """The trial-level view of one stored trajectory."""
+        aux_success: Optional[bool] = None,
+        folder: Optional[Mapping[str, object]] = None) -> ExecutionRecord:
+    """The trial-level view of one stored trajectory.
+
+    ``folder`` is the delivery manifest that made this trajectory's skill
+    files visible; carrying it on the execution record lets the usage and
+    attribution extractors work from the AnswerSheet alone.
+    """
+    artifacts = {"trajectory_id": trajectory.trajectory_id}
+    if folder is not None:
+        artifacts["skill_folder"] = dict(folder)
     return ExecutionRecord(
         # A test phase runs the with-bank and control arms over the same
         # task/attempt trajectory ids; the unit id (which carries the arm's
@@ -58,7 +67,7 @@ def execution_from_trajectory(
         steps=list(trajectory.steps),
         raw_correctness=trajectory.correctness,
         metrics=dict(trajectory.meta or {}),
-        artifacts={"trajectory_id": trajectory.trajectory_id},
+        artifacts=artifacts,
         aux_success=aux_success,
         kind="trajectory",
     )

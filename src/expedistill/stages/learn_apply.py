@@ -18,7 +18,7 @@ from expedistill.blocks import tasks as tasks_block
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.core import ids
-from expedistill.core.answer_sheet import UnitSummary
+from expedistill.core.answer_sheet import AnswerSheet, UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
 from expedistill.infra.parallel import run_parallel
@@ -42,8 +42,8 @@ __all__ = ["execute_decision_rows"]
 def execute_decision_rows(
     ctx: Any, phase: Any, rows: Sequence[TaskListRow],
     current_rows: Optional[List[UnitSummary]], current_spec: Any,
-    current_round: int, *, usage_by_task: Dict[str, List[dict]],
-    folder_manifests: Dict[str, Dict[str, Any]],
+    current_round: int, *, current_sheets: Sequence[AnswerSheet],
+    usage_by_task: Dict[str, List[dict]],
     delivery: str,
 ) -> Set[str]:
     """Land per-skill decisions; return infra-failed target ids."""
@@ -79,7 +79,7 @@ def execute_decision_rows(
             _execute_revise_group(
                 ctx, phase, task_id, task_rows, current_rows, current_spec,
                 current_round, phase_dir, recorder, usage_by_task,
-                folder_manifests, delivery)
+                current_sheets, delivery)
             return task_id, None
         except InfrastructureError as exc:
             recorder.record(task_id, phase.label, exc, exc)
@@ -111,7 +111,7 @@ def _execute_revise_group(
     current_rows: Optional[List[UnitSummary]], current_spec: Any,
     current_round: int, phase_dir, recorder: UnitFailureRecorder,
     usage_by_task: Dict[str, List[dict]],
-    folder_manifests: Dict[str, Dict[str, Any]], delivery: str,
+    current_sheets: Sequence[AnswerSheet], delivery: str,
 ) -> None:
     """One task: one evidence collection, then one writer call per skill."""
     if not rows:
@@ -151,15 +151,20 @@ def _execute_revise_group(
         return
 
     task_instruction = _task_instruction(ctx, task_id)
+    task_sheets = [
+        sheet for sheet in current_sheets
+        if sheet.execution is not None
+        and sheet.execution.task_ref == task_id]
     evidence = collect_skill_evidence(
         task_id=task_id,
         skills=[skill for _, skill in todo],
+        sheets=task_sheets,
         store=store,
         round_=current_round,
+        phase_label=phase.label,
         n_attempts=_n_attempts(ctx, current_spec),
         task_instruction=task_instruction,
         delivery=delivery,
-        folder=folder_manifests.get(task_id),
         usage_rows=usage_by_task.get(task_id, []),
         weak_profile=ctx.config.effective_weak_profile(),
         author_handle=ctx.handle("author"),
