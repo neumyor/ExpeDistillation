@@ -195,11 +195,12 @@ src/expedistill/
     external_control.py   外部 campaign 对照的加载与校验（sha256 钉住、任务
                           覆盖、对齐深度的奖励切出）；test 相位
                           against: external_campaign 时对照臂由此取数，零执行
-    skill_usage.py        live folder 轮次的逐尝试使用事实：可用技能、首轮
-                          <available_skills> 是否与清单一致、读取/未读、
-                          结果；从存储轨迹重算，不拦截执行
-    verdicts.py           R1 起的验收判定核：状态/原因词表、具名判分规则、
-                          统一报告行
+    skill_usage.py        live folder 轮次的逐尝试使用事实：从 trial 级
+                          AnswerSheet 的 ExecutionRecord.steps +
+                          artifacts.skill_folder 提取可用技能、读取/未读、
+                          结果；旧 trajectory 入口仅作兼容
+    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet；
+                          旧 unit report 行保留为 legacy fallback
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`

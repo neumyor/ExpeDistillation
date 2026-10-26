@@ -85,8 +85,9 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 5. **考试也是一种执行**：出题（附参考答案）相当于准备题目，作答时
    "对不对"留空、参考答案作为附带信息传下去，判卷和泄题检查归验收。
 6. **报告只记录"注入了哪些技能"**。模型实际按哪条技能做的，要读轨迹才知道；
-   live folder 交付会把哪条技能被 `cat` 过写进 `skill_usage.jsonl`，属于验收
-   的读取事实，应用与相关判断仍属于找证据的工作。
+   live folder 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 是读取
+   事实的源，`skill_usage.jsonl` 只是从 AnswerSheet 派生的审计缓存；应用与
+   相关判断仍属于找证据的工作。
 7. **决策不读轨迹，找证据不定动作，写作不做测量**。三者之间只通过任务清单
    和证据包交接。
 8. **实战验收的测量单位是"包"，决策单位是"技能"**。live 相位一个任务的整包
@@ -588,7 +589,7 @@ E1 内部的 runner：
 | 冻结步（p00） | D1、D2、B4、`methods/registry.py` 的逐族解析 |
 | baseline | 交付 `none`、E1 × K1（强、弱两臂）、验收判定核（benchmark 默认判分规则）、D3（摘要）、辅助指标 |
 | exam | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
-| live | 交付 `group_by_task` 或 `folder_by_task`、E1 × K1（整组或逐任务文件夹、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用；folder 交付另写 `skill_usage.jsonl` 读取事实 |
+| live | 交付 `group_by_task` 或 `folder_by_task`、E1 × K1（整组或逐任务文件夹、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用；folder 交付的读取事实由 AnswerSheet 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 按需提取 |
 | test | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
 | learn | P02：`decision.decide_task_list` 的 baseline-gap add → `learn_add`（K2 + D6 + G2 + G3）；P04/P06：`decision_strategies`（`task_level` / `skill_level`）→ `learn_apply`（按 task 一次归因、逐 skill 写作/keep/delete）；exam：`learn_exam` 的多版本 merge + 考卷证据；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
 
@@ -764,9 +765,9 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     round00/ round01/            两个轮仓（本轮带注入的 live 轨迹，内部
                                  同轨迹仓布局；injection_audit.jsonl 派发
                                  前首写冻结；accepted_infra_shortfall.json
-                                 按轮记录；folder_by_task 交付另写
-                                 skill_usage.jsonl：每次尝试的读取/未读
-                                 技能、投递状态与结果）
+                                 按轮记录；folder_by_task 的读取/未读事实
+                                 由相位 AnswerSheet 的 execution steps 提取，
+                                 skill_usage.jsonl 仅作派生审计缓存）
 
   —— 相位目录（每个相位一份）——
   phases/pNN_<局部名>/
@@ -904,8 +905,10 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   `n_attempts` 次。交付可选整块注入（`group_by_task`）或逐技能目录
   （`folder_by_task`）：后者把每个技能写成 `<task>/<skill>/SKILL.md`，模型只
   先看到名字和描述，按需读取全文；派发前按任务物化到相位目录的
-  `skill_folder/<task>/`，执行后把每次尝试的读取/未读事实写进该轮的
-  `skill_usage.jsonl`。首轮提示词仍可见时比较 `<available_skills>` 与清单；
+  `skill_folder/<task>/`，执行后由该轮 AnswerSheet 的
+  `ExecutionRecord.steps` + `artifacts.skill_folder` 提取读取/未读事实
+  （`skill_usage.jsonl` 只是派生审计缓存）。首轮提示词仍可见时比较
+  `<available_skills>` 与清单；
   TB 的本地还原从第一条模型命令开始，列表通常不可见，此时有读取即视为投递
   可用，没有读取则记 `unverified`，不误判为投递失败；
 - 轮次规则：序列里第 k 个 live 相位测量第 k-1 轮，轮号只有 {0, 1}

@@ -111,3 +111,25 @@ Markdown 不作为源。
 - 全量 pytest、ruff E9/F、layering 全绿；
 - `audit_live_run.py --self-test` 通过，P07 旧 run 走 legacy fallback
   0 error / 0 warn / 1 info。
+
+## 6. 后续：归因与 skill_usage 改为消费 AnswerSheet
+
+在初版落地后继续收口了下游的事实来源：
+
+- `ExecutionRecord.artifacts` 在 live folder 交付时携带
+  `skill_folder`（folder manifest），AnswerSheet 因此能独立回答“这次
+  attempt 的轨迹和可见技能清单是什么”；
+- `composites/skill_usage.build_usage_rows_from_sheets` 从 AnswerSheet 的
+  `ExecutionRecord.steps` + `artifacts.skill_folder` 提取读取/未读事实；
+  `skill_usage.jsonl` 只保留为相位写出的派生审计缓存；
+- `phase_learn` 从上一执行相位的 `answer_sheets/` 现算
+  `usage_by_task`，不再把 `skill_usage.jsonl` 当作决策/归因的输入；
+- `methods/attribution/skill_attempts.collect_skill_evidence` 的主输入改为
+  `sheets: Sequence[AnswerSheet]`，从 `ExecutionRecord` 取 steps、
+  attempt、raw correctness 和 folder；`store`/`round_` 仅作为旧 run
+  fallback；
+- `learn_apply` 把当前 phase 的 sheets 传给归因，不再传
+  `folder_manifests`。
+
+决策仍消费 UnitSummary（unit 级视图），不直接读 trial 轨迹；这是有意的
+分层。归因/写作消费 trial 级 execution/evidence。
