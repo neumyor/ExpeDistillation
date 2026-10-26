@@ -4,12 +4,11 @@ The decision module emits one ``TaskListRow`` per measured skill. This
 module lands those rows:
 
 * keep / delete rows are independent and run per skill;
-* revise rows are grouped by the measured task, because attribution is
-  one question per group, not one per skill. The group's attribution
-  packages are then handed to the shared writer one skill at a time.
+* revise rows are grouped by task only to share the attempt trajectories;
+  attribution itself builds per-skill, per-window evidence.
 
-No per-skill policy lives here. The row already says keep, revise or
-delete; the attribution driver only explains, and the author only writes.
+No policy lives here: the row says keep/revise/delete; attribution only
+reports facts, and the writer only writes.
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -29,7 +28,8 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import Store
-from expedistill.methods.attribution.group import collect_group_attribution
+from expedistill.methods.attribution import AttributionParams
+from expedistill.methods.attribution.skill_attempts import collect_skill_evidence
 from expedistill.methods.author.revise import revise_one
 from expedistill.prompts import get as get_prompt
 
@@ -38,10 +38,13 @@ from expedistill.stages import learn_ledger as ledger
 __all__ = ["execute_decision_rows"]
 
 
-def execute_decision_rows(ctx: Any, phase: Any,
-                          rows: Sequence[TaskListRow],
-                          current_rows: Optional[List[AcceptanceReportRow]],
-                          current_spec: Any, current_round: int) -> Set[str]:
+def execute_decision_rows(
+    ctx: Any, phase: Any, rows: Sequence[TaskListRow],
+    current_rows: Optional[List[AcceptanceReportRow]], current_spec: Any,
+    current_round: int, *, usage_by_task: Dict[str, List[dict]],
+    folder_manifests: Dict[str, Dict[str, Any]],
+    delivery: str,
+) -> Set[str]:
     """Land per-skill decisions; return infra-failed target ids."""
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     recorder = UnitFailureRecorder(ctx.run_dir)
@@ -72,9 +75,10 @@ def execute_decision_rows(ctx: Any, phase: Any,
                    ) -> Tuple[str, Optional[BaseException]]:
         task_id, task_rows = item
         try:
-            _execute_revise_group(ctx, phase, task_id, task_rows,
-                                  current_rows, current_spec,
-                                  current_round, phase_dir, recorder)
+            _execute_revise_group(
+                ctx, phase, task_id, task_rows, current_rows, current_spec,
+                current_round, phase_dir, recorder, usage_by_task,
+                folder_manifests, delivery)
             return task_id, None
         except InfrastructureError as exc:
             recorder.record(task_id, phase.label, exc, exc)
@@ -101,12 +105,14 @@ def execute_decision_rows(ctx: Any, phase: Any,
             if failure is not None}
 
 
-def _execute_revise_group(ctx: Any, phase: Any, task_id: str,
-                          rows: List[TaskListRow],
-                          current_rows: Optional[List[AcceptanceReportRow]],
-                          current_spec: Any, current_round: int,
-                          phase_dir, recorder: UnitFailureRecorder) -> None:
-    """One task: one attribution call, then one writer call per skill."""
+def _execute_revise_group(
+    ctx: Any, phase: Any, task_id: str, rows: List[TaskListRow],
+    current_rows: Optional[List[AcceptanceReportRow]], current_spec: Any,
+    current_round: int, phase_dir, recorder: UnitFailureRecorder,
+    usage_by_task: Dict[str, List[dict]],
+    folder_manifests: Dict[str, Dict[str, Any]], delivery: str,
+) -> None:
+    """One task: one evidence collection, then one writer call per skill."""
     if not rows:
         return
     basis = rows[0].basis_unit
@@ -114,12 +120,9 @@ def _execute_revise_group(ctx: Any, phase: Any, task_id: str,
         raise CodeBugError(
             f"revise rows for task {task_id!r} name different basis units: "
             f"{sorted({row.basis_unit for row in rows})}")
-    report_row = _report_row_of(current_rows, basis)
+    _report_row_of(current_rows, basis)
     store: Store = ctx.store
-    members = _group_members(store, report_row, task_id)
-    by_id = {skill.skill_id: skill for skill in members}
-
-    todo: List[TaskListRow] = []
+    todo: List[Tuple[TaskListRow, Skill]] = []
     for row in rows:
         skill = store.load("skills", row.target_id, Skill)
         if skill.status not in ledger.ACTABLE_STATUSES:
@@ -132,7 +135,7 @@ def _execute_revise_group(ctx: Any, phase: Any, task_id: str,
         revisions = ledger.revision_rows(phase, row, phase_dir)
         from_version = revisions.get(skill.skill_id)
         if from_version is None:
-            todo.append(row)
+            todo.append((row, skill))
         elif skill.version == from_version + 1:
             ledger.append_outcome(phase, row, skill.skill_id, "revised",
                                   skill.version, phase_dir)
@@ -142,56 +145,51 @@ def _execute_revise_group(ctx: Any, phase: Any, task_id: str,
                 f"but this phase's revision ledger recorded "
                 f"{from_version}: the store drifted from the ledger")
         else:
-            todo.append(row)
+            todo.append((row, skill))
     if not todo:
         return
 
     task_instruction = _task_instruction(ctx, task_id)
-    packages = collect_group_attribution(
+    evidence = collect_skill_evidence(
         task_id=task_id,
-        members=members,
-        report_row=report_row,
+        skills=[skill for _, skill in todo],
         store=store,
         round_=current_round,
         n_attempts=_n_attempts(ctx, current_spec),
         task_instruction=task_instruction,
+        delivery=delivery,
+        folder=folder_manifests.get(task_id),
+        usage_rows=usage_by_task.get(task_id, []),
         weak_profile=ctx.config.effective_weak_profile(),
         author_handle=ctx.handle("author"),
         view_rules=get_plugin(ctx.config.benchmark).view_rules,
+        params=AttributionParams(),
         usage=ctx.usage,
         run_dir=ctx.run_dir)
-    package_by_id = {package.target: package for package in packages}
-
-    for row in todo:
-        skill = by_id.get(row.target_id)
-        if skill is None:
-            raise CodeBugError(
-                f"revise row targets skill {row.target_id!r}, which is not "
-                "a measured member of the group")
-        package = package_by_id.get(skill.skill_id)
+    for row, skill in todo:
+        package = evidence.get(skill.skill_id)
         if package is None:
             raise CodeBugError(
-                f"attribution returned no package for {skill.skill_id!r}")
+                f"attribution returned no evidence for {skill.skill_id!r}")
         ledger.write_revision_plan(phase, row, skill.skill_id,
                                    skill.version, phase_dir)
         try:
             outcome = revise_one(
-                package,
+                skill, package,
                 weak_profile=ctx.config.effective_weak_profile(),
                 handle=ctx.handle("rewriter"),
                 usage=ctx.usage, run_dir=ctx.run_dir)
         except ModelOutputError as exc:
             recorder.record(skill.skill_id, phase.label, exc, exc)
             continue
-        _land_revision(ctx, phase, row, package, outcome, phase_dir)
+        _land_revision(ctx, phase, row, skill, outcome, phase_dir)
 
 
-def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
+def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
                    outcome: Any, phase_dir) -> None:
     """Persist one writer outcome, then its receipt (the store is truth)."""
     store: Store = ctx.store
     skill_id = outcome.skill_id
-    old = package.old_skill
     if outcome.outcome == "unchanged":
         ledger.append_outcome(phase, row, skill_id, "unchanged",
                               old.version, phase_dir)
@@ -201,11 +199,10 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
                               old.version, phase_dir)
         raise InfrastructureError(
             f"the revision of {skill_id!r} failed on infrastructure")
-    if outcome.outcome not in ("revised", "retriggered"):
+    if outcome.outcome != "revised":
         raise CodeBugError(
             f"the writer reported outcome {outcome.outcome!r} for "
-            f"{skill_id!r}; expected revised / retriggered / unchanged / "
-            "infra_failed")
+            f"{skill_id!r}; expected revised / unchanged / infra_failed")
     stored = store.load("skills", skill_id, Skill)
     expected = old.version + 1
     if stored.version == old.version:
@@ -226,25 +223,8 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
             f"skill {skill_id!r} is at version {stored.version} with "
             "content the author did not produce; the store drifted from "
             "the revision ledger")
-    ledger.append_outcome(phase, row, skill_id, outcome.outcome, expected,
+    ledger.append_outcome(phase, row, skill_id, "revised", expected,
                           phase_dir)
-
-
-def _group_members(store: Store, report_row: AcceptanceReportRow,
-                   task_id: str) -> List[Skill]:
-    refs = report_row.injected_skills
-    if isinstance(refs, list) and refs:
-        members = []
-        for ref in refs:
-            if not isinstance(ref, dict) or not ref.get("skill_id"):
-                raise CodeBugError(
-                    f"report row {report_row.unit_id!r} carries a malformed "
-                    f"injected skill reference: {ref!r}")
-            members.append(
-                store.load("skills", ref["skill_id"], Skill))
-        return members
-    from expedistill.composites.live_measurement import pending_groups
-    return list(pending_groups(store).get(task_id, []))
 
 
 def _report_row_of(current_rows: Optional[List[AcceptanceReportRow]],

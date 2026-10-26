@@ -120,7 +120,7 @@ def test_distill_returns_the_protocol_v2_contract(client):
         label="l", description="d", steps_view="s", segment_position="p",
         profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert set(parsed) == {"when_to_use", "steps", "verify",
+    assert set(parsed) == {"when_to_use", "steps",
                            "not_applicable_when", "summary"}
     assert isinstance(parsed["steps"], list) and parsed["steps"]
 
@@ -130,27 +130,27 @@ def test_diagnose_returns_the_protocol_v2_contract(client):
         label="l", description="d", context_summary="c", steps_view="s",
         segment_position="p", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert set(parsed) == {"when_to_use", "steps", "verify",
+    assert set(parsed) == {"when_to_use", "steps",
                            "not_applicable_when", "summary"}
 
 
-def test_revision_appends_the_marker_and_keeps_the_skill(client):
+def test_attempt_revision_appends_the_marker_and_keeps_the_skill(client):
     original = ("[When to use] always\n[Steps] do it\n"
-                "[Verify] done\n[Do not use when] never")
-    user = get_prompt("LIVE_SKILL_REVISION").format(
-        skill_text=original, attribution_report="r", failure_view="f",
-        profile_section="w")
+                "[Do not use when] never")
+    user = get_prompt("SKILL_ATTEMPT_REVISION").format(
+        skill_text=original, attempt_evidence="e", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed["failure_category"] == "wrong_trigger"
     assert parsed["skill_text"] == (
         original + "\n" + REVISION_MARKER +
         ": name the concrete state before acting.")
-    assert parsed["skill_text"] != original  # a new version, not a no-op
+    assert parsed["skill_text"] != original
+    assert parsed["summary"].strip()
+    assert parsed["revision_reason"].strip()
 
 
 def test_rewrite_appends_the_marker(client):
     original = ("[When to use] always\n[Steps] do it\n"
-                "[Verify] done\n[Do not use when] never")
+                "[Do not use when] never")
     user = get_prompt("REWRITE").format(
         skill_text=original, question_text="q", weak_answer="a",
         error_description="e", profile_section="w")
@@ -174,15 +174,15 @@ def test_similarity_with_one_skill_groups_nothing(client):
 
 
 def test_merge_keeps_the_first_sources_markers(client):
-    block = ("### s1\n[When to use] a\n[Steps] b\n[Verify] c\n"
+    block = ("### s1\n[When to use] a\n[Steps] b\n"
              "[Do not use when] d\n\n### s2\n[When to use] e\n"
-             "[Steps] f\n[Verify] g\n[Do not use when] h")
+             "[Steps] f\n[Do not use when] h")
     user = get_prompt("MERGE").format(mode="dedup", skills_block=block)
     parsed = extract_json(client.complete("fake-strong", "s", user))
     merged = parsed["content"]
     assert parsed["summary"]
     assert merged.startswith("[When to use] a")
-    assert merged != ("[When to use] a\n[Steps] b\n[Verify] c\n"
+    assert merged != ("[When to use] a\n[Steps] b\n"
                      "[Do not use when] d")
 
 

@@ -1,5 +1,5 @@
 """Skill-folder M4, the read parse: which skill files a stored
-trajectory's actions actually cat (composites/skill_reads.py).
+trajectory's actions actually cat (composites/skill_use.py).
 
 The parse is benchmark-blind by design (the M4 ruling): no mount path
 constant appears in the module, so these tests pin the coarse edges the
@@ -13,7 +13,7 @@ newline inside the keystrokes JSON-escaped.
 
 import pytest
 
-from expedistill.composites.skill_reads import skill_files_read
+from expedistill.composites.skill_use import skill_files_read
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError
 

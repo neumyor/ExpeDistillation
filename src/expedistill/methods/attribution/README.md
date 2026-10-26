@@ -2,19 +2,27 @@
 
 P04/P06 的共享归因 driver。它只解释“为什么”，不决定 keep/revise/delete。
 
-## `group.collect_group_attribution`
+## `skill_attempts.collect_skill_evidence`
 
-每个 task 调一次 `LIVE_USAGE_ATTRIBUTION`：
+输入：task、目标 skill 列表、round 轨迹、`skill_usage.jsonl`、
+task instruction、delivery 类型、folder manifest。
 
-- 输入：该 task 的成员技能、P01 baseline 事实、P03 轮次轨迹视图、
-  `skill_usage.jsonl` 的读取/未读事实、兄弟技能描述、弱模型画像；
-- 输出：每个成员一个 fact-only `EvidencePackage`，包含
-  `group_diagnosis`、`skill_relevance`、`skill_application`、
-  `skill_problem`、`skill_read_attempts`、`skill_usage`、
-  `failure_view` 等事实；
-- 不做 keep/delete，不写盘；投递失败或没有 usage 行时不调模型。
+- folder / folder_by_task：`skill_use` 找出每个 skill 的 `cat` 调用；
+  每个调用切前后窗口（默认前后 10 步）；
+- group_by_task / whole_bank：没有真实 cat 调用，每个 attempt 只取开头
+  窗口和结尾窗口，中间轨迹忽略；
+- 同一窗口内的多条目标 skill 合并成一次归因调用；
+- folder 的目录名/文件名（模型常混用）通过 `skill_aliases` 归一化到完整
+  skill_id；窗口外技能条目忽略，当前窗口的期望技能仍必须全覆盖；
+- 输出每个 skill 的 `SkillAttemptEvidence`，每个窗口含
+  `trigger_context` / `behavior_after_trigger` / `improvement`。
 
-参数：`AttributionParams`（空）。
+task instruction 只取 P03 初始 prompt 的 `Task Description:` 段，避免把
+Terminal agent 的 `analysis/plan/commands` 输出格式带进 attribution。
+`blocks/attribution.py` 对业务契约失败（如 `skills: null`）重试 2 次。
 
-写作交给 `methods/author/revise.py`；决策交给
+参数：`AttributionParams(before_steps=10, after_steps=10)`。
+
+它不读决策结果，不做 keep/delete，不写技能。写作交给
+`methods/author/revise.py`；决策交给
 `composites/decision_strategies.py`。

@@ -5,7 +5,8 @@ happens in composites/, and prompts/model calls come from the layers below."""
 # registered here centrally by the integrator when a block lands -- parallel
 # implementation agents never edit this file (protocol v2 integration rule).
 from expedistill.blocks.attribution import (
-    revise_skill as revise_skill,
+    attribute_attempts as attribute_attempts,
+    revise_from_attempts as revise_from_attempts,
 )
 from expedistill.blocks.audit import (
     audit_leak as audit_leak,

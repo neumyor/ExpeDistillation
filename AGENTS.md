@@ -108,7 +108,7 @@ src/expedistill/
     author.py             G2 提炼 / 诊断、G6 改写
     exam.py               G3 出考题、G4 作答、G5 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
-    attribution.py        G11 live 修订、G12 usage 归因、G13 触发重写（v3 起进
+    attribution.py        G11 attempt 修订、G12 attempt 归因（v3 起进
                           __init__ 的 import 清单——全量冻结，manifest 冻结全部
                           已注册方法 prompt 的 digest）
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
@@ -140,7 +140,7 @@ src/expedistill/
     audit.py              D8 泄题审计
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
     retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
-    attribution.py        G11 live 修订、G12 usage 归因、G13 触发重写（live_run 验收的模型积木；
+    attribution.py        G11 attempt 修订、G12 attempt 归因（live_run 验收的模型积木；
                           prompt 注册由 prompts/__init__ 全量负责，无需防御性 import）
   composites/             第 5 层：组合积木（负责落盘与续跑）
     batch_execute.py      K1
@@ -166,8 +166,11 @@ src/expedistill/
     decision_strategies.py P04/P06 的 per-skill 决策：task_level（组动作展开）
                           与 skill_level（读取事实 → revise/delete；delivery
                           失败或无证据时 keep）
-    evidence_package.py   fact-only 证据包形状（attribution/evidence/author
-                          共用的第五个交接对象）
+    evidence_package.py   P02/exam 的 fact-only 证据包形状
+    skill_use.py          统一判断 skill 在 attempt 是否被使用、在哪些 step
+                          被 cat；folder 读取解析与 group/whole-bank 的
+                          injected 规则都在这里
+    skill_attempt_evidence.py  P04/P06 的 SkillAttemptEvidence / 窗口证据
     reports.py            报告读取器（M3 起的纯函数，只读）：baseline/exam/live 三件
     shortfall.py          接受空洞的落盘记录（摸底相位的记录在 run 根的
                           stage1_baseline/ 下，live 基线加载与 test 相位的
@@ -176,8 +179,6 @@ src/expedistill/
     external_control.py   外部 campaign 对照的加载与校验（sha256 钉住、任务
                           覆盖、对齐深度的奖励切出）；test 相位
                           against: external_campaign 时对照臂由此取数，零执行
-    skill_reads.py        folder 单元的事后读取统计（M4 纯函数）：从存储
-                          轨迹解析实际 cat 过的技能文件，benchmark 无关
     skill_usage.py        live folder 轮次的逐尝试使用事实：可用技能、首轮
                           <available_skills> 是否与清单一致、读取/未读、
                           结果；从存储轨迹重算，不拦截执行
@@ -207,11 +208,13 @@ src/expedistill/
                           （证据包形状的兼容 re-export；定义在
                           composites/evidence_package.py）
     author/               author 族：AuthoringParams + write 驱动（P02 写新 skill）
-                          + revise.py（P04/P06 每 skill 一次写作；retrigger 是
-                          内部子模式，不做 keep/delete 策略）+ README.md
-    attribution/          attribution 族：AttributionParams + group 驱动
-                          （每 task 一次 LIVE_USAGE_ATTRIBUTION，产出
-                          fact-only 证据包；不做动作决策）
+                          + revise.py（P04/P06 每 skill 一次写作，读
+                          SkillAttemptEvidence；不做 keep/delete 策略）+
+                          README.md
+    attribution/          attribution 族：AttributionParams + skill_attempts
+                          驱动（folder 按 cat 调用点、group/whole bank 按
+                          attempt 开头/结尾窗口；一个窗口一次调用，产出
+                          SkillAttemptEvidence；不做动作决策）
     decision/             decision 族：TaskLevelParams / SkillLevelParams
                           （P04/P06 的 task_level / skill_level 参数契约）
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，

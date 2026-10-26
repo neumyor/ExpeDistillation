@@ -1,9 +1,7 @@
-"""Attribution drivers: read one measured group, produce per-skill facts.
+"""Attribution drivers: turn real attempt windows into per-skill facts.
 
-The driver never decides keep/revise/delete. It gathers the baseline and
-live facts, the recorded usage facts and the sibling descriptions, asks
-the attribution model one question for the whole group, and returns one
-fact-only ``EvidencePackage`` per member for the shared author.
+The driver is decision-agnostic: it receives the skills to revise and
+returns ``SkillAttemptEvidence``. It never decides keep/revise/delete.
 """
 
 from dataclasses import dataclass
@@ -13,4 +11,13 @@ __all__ = ["AttributionParams"]
 
 @dataclass(frozen=True)
 class AttributionParams:
-    """The group attribution method's (empty) parameter set."""
+    """Window sizes for per-attempt attribution."""
+
+    before_steps: int = 10
+    after_steps: int = 10
+
+    def __post_init__(self) -> None:
+        if self.before_steps < 0 or self.after_steps < 0:
+            raise ValueError(
+                "attribution window sizes must be >= 0, got "
+                f"{self.before_steps!r}/{self.after_steps!r}")

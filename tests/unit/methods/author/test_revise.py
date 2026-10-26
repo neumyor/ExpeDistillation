@@ -1,8 +1,11 @@
-"""The shared P04/P06 writer: full rewrite vs trigger-only sub-mode."""
+"""The P04/P06 writer: new SkillAttemptEvidence only, no policy."""
 
+from expedistill.composites.skill_attempt_evidence import (
+    SkillAttemptEvidence,
+    WindowEvidence,
+)
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.revise import revise_one
-from expedistill.methods.evidence.package import EvidencePackage
 from tests.helpers.skills import make_skill
 
 CONTENT = "\n".join([
@@ -10,7 +13,6 @@ CONTENT = "\n".join([
     "[Steps]",
     "1. Check the service status.",
     "2. Restart the service.",
-    "[Verify] The status command reports running.",
     "[Do not use when] The service already runs.",
 ])
 REVISED = "\n".join([
@@ -18,76 +20,72 @@ REVISED = "\n".join([
     "[Steps]",
     "1. Run the status command.",
     "2. Restart with the restart command.",
-    "[Verify] The second status command reports running.",
     "[Do not use when] The service already runs.",
 ])
 WEAK = "a weak model that needs short sentences"
 
 
-def _package(**facts):
-    skill = make_skill("traj/fake/task/strong/00/seg00", content=CONTENT,
-                       summary="old one-liner")
-    base = {
-        "group_diagnosis": "the skill was not followed",
-        "skill_problem": "the trigger is too vague",
-        "failure_view": "step 0: did something else",
-        "skill_usage": "read 1/2",
-        "sibling_descriptions": "other: do another thing",
-        "task_instruction": "restart the service",
-        "first_actions": "ls\ncat file",
-    }
-    base.update(facts)
-    entries = [{"kind": kind, "text": text}
-               for kind, text in base.items() if text is not None]
-    return EvidencePackage(target=skill.skill_id, facts=entries,
-                           old_skill=skill)
+def _evidence(skill, windows=None):
+    return SkillAttemptEvidence(
+        skill_id=skill.skill_id, skill_version=skill.version,
+        windows=(windows if windows is not None else [
+            WindowEvidence(task_id="tb:t1", attempt=0, success=False,
+                           kind="invocation", step_start=0, step_end=3,
+                           trigger_steps=[0],
+                           trigger_context="the service rejects connections",
+                           behavior_after_trigger="the model restarted it",
+                           improvement="name the exact service")]))
 
 
-def test_full_revision_writes_a_new_version():
-    package = _package(skill_read_attempts="1",
-                       skill_relevance="relevant",
-                       skill_application="not_applied")
+def test_revision_writes_a_new_version():
+    skill = make_skill("traj/tb:t1/strong/00/seg00", content=CONTENT)
     handle = make_fake_handle("rewriter", [json_script({
-        "skill_text": REVISED, "failure_category": "missing_step",
+        "skill_text": REVISED,
         "revision_reason": "spelled out the steps",
         "summary": "a sharper one-liner"})])
 
-    outcome = revise_one(package, weak_profile=WEAK, handle=handle)
+    outcome = revise_one(skill, _evidence(skill), weak_profile=WEAK,
+                         handle=handle)
 
     assert outcome.outcome == "revised"
     assert outcome.content == REVISED
     assert outcome.summary == "a sharper one-liner"
-    assert "the trigger is too vague" in handle.client.calls[0]["user"]
+    assert "the service rejects connections" in handle.client.calls[0]["user"]
 
 
-def test_trigger_only_when_relevant_but_never_read():
-    package = _package(skill_read_attempts="0",
-                       skill_relevance="relevant",
-                       skill_application="unclear")
-    handle = make_fake_handle("rewriter", [json_script({
-        "summary": "a sharper trigger",
-        "when_to_use": "At task start, when the service rejects connections.",
-        "reason": "the old trigger was too vague"})])
+def test_no_windows_means_unchanged_without_a_call():
+    skill = make_skill("traj/tb:t1/strong/00/seg00", content=CONTENT)
+    handle = make_fake_handle("rewriter", [])
 
-    outcome = revise_one(package, weak_profile=WEAK, handle=handle)
+    outcome = revise_one(skill, _evidence(skill, windows=[]),
+                         weak_profile=WEAK, handle=handle)
 
-    assert outcome.outcome == "retriggered"
-    assert "At task start, when the service rejects connections." \
-        in outcome.content
-    assert "[Steps]" in outcome.content
-    assert "1. Check the service status." in outcome.content
-    assert outcome.summary == "a sharper trigger"
+    assert outcome.outcome == "unchanged"
+    assert handle.client.calls == []
 
 
 def test_identical_rewrite_is_unchanged():
-    package = _package(skill_read_attempts="1",
-                       skill_relevance="relevant",
-                       skill_application="applied")
+    skill = make_skill("traj/tb:t1/strong/00/seg00", content=CONTENT)
     handle = make_fake_handle("rewriter", [json_script({
-        "skill_text": CONTENT, "failure_category": "other",
-        "revision_reason": "nothing to change", "summary": "same"})])
+        "skill_text": CONTENT, "revision_reason": "nothing",
+        "summary": "same"})])
 
-    outcome = revise_one(package, weak_profile=WEAK, handle=handle)
+    outcome = revise_one(skill, _evidence(skill), weak_profile=WEAK,
+                         handle=handle)
 
     assert outcome.outcome == "unchanged"
-    assert outcome.content is None
+
+
+def test_a_rewrite_that_drops_sections_is_retried():
+    skill = make_skill("traj/tb:t1/strong/00/seg00", content=CONTENT)
+    handle = make_fake_handle("rewriter", [
+        json_script({"skill_text": "plain prose",
+                     "revision_reason": "bad", "summary": "bad"}),
+        json_script({"skill_text": REVISED,
+                     "revision_reason": "fixed", "summary": "good"})])
+
+    outcome = revise_one(skill, _evidence(skill), weak_profile=WEAK,
+                         handle=handle)
+
+    assert outcome.outcome == "revised"
+    assert len(handle.client.calls) == 2

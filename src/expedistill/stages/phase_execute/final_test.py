@@ -11,7 +11,7 @@ Orchestration:
 Components used:
     - composites.external_control: load external campaign scores
     - composites.skill_folder: materialize folder for folder delivery
-    - composites.skill_reads: parse which skills were read
+    - composites.skill_use: parse which skills were read
     - blocks.metrics: compute task metrics
     - decision: final_test_delta, control_arm_source
 
@@ -36,7 +36,7 @@ from expedistill.blocks import metrics as metrics_block
 from expedistill.composites import decision, shortfall
 from expedistill.composites import external_control
 from expedistill.composites.skill_folder import materialize_skill_folder
-from expedistill.composites.skill_reads import skill_files_read
+from expedistill.composites.skill_use import skill_files_read
 from expedistill.core import ids
 from expedistill.core.config import (
     EXTERNAL_CAMPAIGN,

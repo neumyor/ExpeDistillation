@@ -62,6 +62,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites import decision_strategies
+from expedistill.composites import live_measurement as lm
 from expedistill.composites.live_measurement import round_dir
 from expedistill.composites.phase_bank import (
     load_phase_bank,
@@ -154,6 +155,7 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             current_round, superseded)
     else:
         # P04/P06: one per-skill decision row per measured skill.
+        usage_by_task = _usage_by_task(ctx.store, current_round)
         task_rows = decision_strategies.decide(
             name=phase.spec.decision.get("name", "task_level"),
             current_kind=current_kind, current_report=current_rows,
@@ -161,11 +163,21 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             bank=bank, checks_left=checks_left, compare_rule=compare_rule,
             n_attempts_weak=config.n_attempts_weak,
             task_select_rule=config.rules["task_select"],
-            usage_by_task=_usage_by_task(ctx.store, current_round))
+            delivery=current_spec.delivery.get("name", ""),
+            usage_by_task=usage_by_task,
+            group_better_by_task=_group_better_by_task(
+                ctx, current_round),
+            skill_status_by_id=_skill_statuses(ctx, current_rows),
+            unread_in_won_group=phase.spec.decision.get(
+                "unread_in_won_group", "delete"))
         effective, superseded = task_rows, []
         infra_failed = learn_apply.execute_decision_rows(
             ctx, phase, effective, current_rows, current_spec,
-            current_round)
+            current_round,
+            usage_by_task=usage_by_task,
+            folder_manifests=_folder_manifests(
+                ctx, names, specs, current_pos),
+            delivery=current_spec.delivery.get("name", ""))
 
     summary = _summary(phase, effective, superseded, phase_dir,
                        current_phase=names[current_pos],
@@ -458,6 +470,31 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     }
 
 
+def _folder_manifests(ctx: Any, names: Sequence[str], specs: dict,
+                      position: int) -> Dict[str, Dict[str, Any]]:
+    """The preceding live phase's per-task folder manifests.
+
+    Only folder deliveries carry them; the attribution driver uses the
+    manifests to locate actual cat events. A non-folder live phase
+    returns an empty mapping.
+    """
+    spec = specs[names[position]]
+    if spec.delivery.get("name") not in ("folder", "folder_by_task"):
+        return {}
+    directory = phase_bank_dir(
+        ctx.run_dir, phase_label(position, names[position]))
+    units = directory / "units.jsonl"
+    if not units.exists():
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in read_jsonl(units):
+        aux = row.get("aux") or {}
+        folder = aux.get("skill_folder")
+        if folder:
+            out[str(row.get("task_ref"))] = folder
+    return out
+
+
 def _usage_by_task(store, round_: int) -> Dict[str, List[dict]]:
     """The round's skill-usage rows, grouped by task id."""
     out: Dict[str, List[dict]] = {}
@@ -465,6 +502,53 @@ def _usage_by_task(store, round_: int) -> Dict[str, List[dict]]:
         task_id = row.get("task_id")
         if task_id:
             out.setdefault(task_id, []).append(row)
+    return out
+
+
+def _group_better_by_task(ctx: Any, round_: int
+                          ) -> Dict[str, Optional[bool]]:
+    """The live phase's group result for this round: task -> better.
+
+    ``verdicts.jsonl`` is the live phase's own commit ledger; ``better``
+    is True for a winning group, False for a miss, and None for a
+    zero-execution terminal. A missing ledger/round returns an empty
+    map, which the decision keeps as unverified instead of guessing.
+    """
+    path = lm.ledger_path(ctx.store, lm.VERDICTS_LEDGER)
+    if not path.exists():
+        return {}
+    out: Dict[str, Optional[bool]] = {}
+    for row in read_jsonl(path):
+        if row.get("round") != round_:
+            continue
+        task_id = row.get("task_id")
+        if isinstance(task_id, str) and task_id not in out:
+            out[task_id] = row.get("better")
+    return out
+
+
+def _skill_statuses(ctx: Any, current_rows: Optional[
+        Sequence[AcceptanceReportRow]]) -> Dict[str, str]:
+    """The current store status of every measured skill.
+
+    P03/P05's live ``finalize_group`` is the writer of accepted/pending;
+    this map is the decision's view of that terminal fact. A missing
+    store object is a store/decision disagreement and raises from the
+    load rather than becoming a silent default.
+    """
+    out: Dict[str, str] = {}
+    for row in current_rows or ():
+        refs = row.injected_skills
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            skill_id = ref.get("skill_id")
+            if not isinstance(skill_id, str) or skill_id in out:
+                continue
+            out[skill_id] = ctx.store.load(
+                "skills", skill_id, Skill).status
     return out
 
 
