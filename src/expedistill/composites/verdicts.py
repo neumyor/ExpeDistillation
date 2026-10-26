@@ -45,16 +45,11 @@ from typing import Any, Mapping, Tuple
 
 from expedistill.core import vocabulary
 from expedistill.core.answer_sheet import ExecutionRecord, GradingRecord
-from expedistill.core.contracts import RunRecord
 from expedistill.core.registry import make_registry
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
 # Same layer (5).
 from expedistill.composites import exam_grading
-
-# Re-exported for methods/delivery/units.py, which still reads the unit-id
-# rule through this module; the definitions live in unit_ids.
-from expedistill.composites.unit_ids import canonical_skills, make_unit_id
 
 __all__ = [
     "BENCHMARK_VERDICT_RULES",
@@ -74,14 +69,11 @@ __all__ = [
     "STATUS_NOT_RUN_CONTROL_PERFECT",
     "STATUS_NOT_TESTABLE",
     "UNIT_STATUSES",
-    "canonical_skills",
     "default_verdict_rule",
     "get_verdict_rule",
     "grade_attempt",
     "grade_sheet",
-    "make_unit_id",
     "register_verdict_rule",
-    "verdict_from_run",
 ]
 
 
@@ -134,9 +126,9 @@ CAUSE_WEAK_ALREADY_KNOWS = vocabulary.CAUSE_WEAK_ALREADY_KNOWS
 # Named per-run verdict rules (R1: named per benchmark, C11)
 # ---------------------------------------------------------------------------
 
-#: The named-rule registry. A rule consumes one run's reported facts -- a
-#: mapping with the RunRecord's ``correctness`` / ``metrics`` / ``aux``
-#: -- and returns ``(verdict, basis)``. Benchmark-bound logic (TB's
+#: The named-rule registry. A rule consumes one trial's execution facts --
+#: a mapping with the execution record's ``raw_correctness`` / ``metrics``
+#: / ``aux`` -- and returns ``(verdict, basis)``. Benchmark-bound logic (TB's
 #: pseudo-zero guard, an exception taxonomy) stays in the benchmark's
 #: plugin (boundaries doc §2.3): the plugin reports the facts, the rule
 #: draws the conclusion, so swapping a criterion is a new name, never an
@@ -272,21 +264,6 @@ def default_verdict_rule(benchmark: str) -> str:
         raise ConfigError(
             f"no default verdict rule for benchmark {benchmark!r}; "
             f"known: {known}") from None
-
-
-def verdict_from_run(record: RunRecord, *,
-                     rule_name: str) -> Tuple[str, str]:
-    """One run's verdict under the named rule: the frozen-contract entry
-    point (execution hands over RunRecords, acceptance judges them
-    here). The pre-R2b bridges ``verdict_from_trajectory`` /
-    ``verdict_from_attempt`` are gone: a stored Trajectory maps onto a
-    RunRecord (its ``meta`` is the run metrics; an exam Attempt's judge
-    verdict travels ``aux``) and every consumer judges through this
-    entry."""
-    rule = get_verdict_rule(rule_name)
-    return rule({"correctness": record.correctness,
-                 "metrics": record.metrics,
-                 "aux": record.aux})
 
 
 def grade_sheet(execution: ExecutionRecord,

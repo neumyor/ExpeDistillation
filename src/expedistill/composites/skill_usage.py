@@ -2,12 +2,12 @@
 
 The trial-level AnswerSheet's ExecutionRecord carries the terminal session
 and the delivery's folder manifest; this module turns them into one row per
-attempt (``build_usage_rows_from_sheets``).  The legacy trajectory-shaped
-``build_usage_rows`` entry remains for old callers/tests.  The row keeps the
-hard facts only -- which skills the model read, which stayed unread, whether
-the initial prompt carried the skill list -- and the scorer's verdict.
-Application and relevance are judged later, in the learning phase's evidence
-driver; acceptance remains numeric.
+attempt (``build_usage_rows_from_sheets``), with ``build_usage_rows`` as
+the shared per-task row builder.  The row keeps the hard facts only --
+which skills the model read, which stayed unread, whether the initial
+prompt carried the skill list -- and the scorer's verdict. Application and
+relevance are judged later, in the learning phase's evidence driver;
+acceptance remains numeric.
 
 The initial prompt's ``<available_skills>`` block, when the stored
 trajectory still carries it, is compared with the manifest.  TB's local
@@ -156,14 +156,12 @@ def build_usage_rows(*, task_id: str, round_: int,
 
 
 def build_usage_rows_from_sheets(
-        sheets: Sequence[AnswerSheet], *, round_: int,
-        folder_by_task: Optional[Mapping[str, Mapping[str, Any]]] = None
-        ) -> List[dict]:
+        sheets: Sequence[AnswerSheet], *, round_: int) -> List[dict]:
     """Usage rows derived from the trial-level AnswerSheets themselves.
 
     The folder manifest is read from the execution record's artifacts
-    (carried there by the live driver) or from ``folder_by_task`` for a
-    legacy sheet; a sheet without either contributes no usage row.
+    (carried there by the live driver); a sheet without one contributes
+    no usage row.
     """
     by_task: Dict[str, List[ExecutionRecord]] = {}
     for sheet in sheets:
@@ -171,18 +169,13 @@ def build_usage_rows_from_sheets(
         if execution is None or execution.kind != "trajectory":
             continue
         folder = execution.artifacts.get("skill_folder")
-        if folder is None and folder_by_task is not None:
-            folder = folder_by_task.get(execution.task_ref)
         if not folder:
             continue
         by_task.setdefault(execution.task_ref, []).append(execution)
     rows: List[dict] = []
     for task_id in sorted(by_task):
         executions = by_task[task_id]
-        folder = executions[0].artifacts.get("skill_folder") or \
-            (folder_by_task or {}).get(task_id)
-        if not folder:
-            continue
+        folder = executions[0].artifacts["skill_folder"]
         rows.extend(build_usage_rows(
             task_id=task_id, round_=round_, executions=executions,
             folder=folder))

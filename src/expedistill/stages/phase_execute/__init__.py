@@ -6,8 +6,8 @@ core/config.py); the phase's role decides the shape:
 
 * ``baseline`` (D): both bare arms (strong, weak) over the train set,
   stored in the RUN-LEVEL trajectory store -- every frozen consumer of
-  a bare baseline (live baseline loading, the report reader, the C
-  phase's reused control, the audit tooling) reads them there;
+  a bare baseline (live baseline loading, the trial-level report reader,
+  the C phase's reused control, the audit tooling) reads them there;
 * ``exam`` (A): one exam per pending bank skill -- the exam is
   generated at execution time, answered bare, audited for leaks, then
   answered with the skill injected;
@@ -56,13 +56,13 @@ The frozen companions, wired here:
   nothing stored) is re-dispatched up to the limit; a still-invalid
   unit after the budget is spent reports ``not_testable`` /
   ``invalid_redispatch_exhausted`` (or ``all_holes`` when every stored
-  run came back without a scorer verdict -- the same mapping the frozen
-  report reader applies). The pass count is durable per unit
+  run came back without a scorer verdict -- the same mapping
+  ``unit_summary`` applies). The pass count is durable per unit
   (``redispatch.json``), so a resumed phase continues the same budget,
   and a unit whose budget is spent never re-enters K1.
 * unit ids: delivery fills the task ref and the sha8 of the canonical
   injected skills; this driver rebuilds the full frozen key with
-  :func:`verdicts.make_unit_id` (one canonicalization rule, one rebuild
+  :func:`unit_ids.make_unit_id` (one canonicalization rule, one rebuild
   site).
 * the bank: delivery receives the PREVIOUS learn phase's bank artifact
   (:func:`phase_bank.load_phase_bank`), members and versions included;
@@ -70,8 +70,8 @@ The frozen companions, wired here:
   (The live group view keeps its store derivation -- the same one the
   frozen audit line and the pending universe are built from, so the
   ledger and the delivery cannot disagree about what a group is.)
-* judgment: every real run is judged through the acceptance module's
-  frozen entry (:func:`verdicts.verdict_from_run`) under the phase's
+* judgment: every real trial is graded through the acceptance module's
+  per-trial entry (:func:`verdicts.grade_sheet`) under the phase's
   named rule (the config's ``acceptance`` field, else the benchmark's
   default binding -- ``tb_scorer`` for TB, the rule that consumes the
   ``verifier_ran`` / ``exception_type`` facts). The live round judgment

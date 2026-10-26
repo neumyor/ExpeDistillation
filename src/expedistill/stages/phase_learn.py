@@ -139,7 +139,7 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         effective, superseded = task_rows, []
         infra_failed = learn_add.execute_add_rows(ctx, phase, effective)
     elif current_kind == PHASE_ROLE_EXAM:
-        # Legacy exam path: multi-version rows still need the merge.
+        # Exam path: multi-version rows still need the merge.
         task_rows = decision.decide_task_list(
             current_kind=current_kind, current_report=current_rows,
             control_kind=control_kind, control_report=control_rows,

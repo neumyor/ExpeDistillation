@@ -3,6 +3,9 @@
 日期：2026-10-22
 内容：P03/P05 的 live 交付改为逐任务技能文件夹，验收记录逐技能读取事实，学习相位据此选择 keep / retrigger / revise / delete / observe。
 对应 log.md：2026-10-22 的“live 渐进式披露与 usage 感知修订”条目。
+更新：2026-10-26 起 `skill_usage.jsonl` 不再落盘；usage 事实从 trial 级
+AnswerSheet 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 现算，
+见 `docs/decisions/trial_level_answer_sheets_20261026.md`。
 
 ## 背景
 

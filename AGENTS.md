@@ -91,8 +91,9 @@ src/expedistill/
     ids.py                确定性 ID 规则
     config.py             实验配置结构（schema v5：sequence + phases + use_weak_profile 开关）、模型角色表
     config_upgrade.py     v2→v3→v4→v5 升级纯函数（config.py 重新导出）
-    contracts.py          执行—学习循环的四个交接数据类（执行单元行 / 运行记录 /
-                          验收报告行 / 任务清单行，R0 冻结的接口形状）
+    contracts.py          交付与决策的冻结交接形状（执行单元行及其列表别名 /
+                          任务清单行）；执行→验收的 trial 级记录见
+                          answer_sheet.py 的 ExecutionRecord
     answer_sheet.py       trial 级 AnswerSheet / ExecutionRecord / CoverageRecord /
                           GradingRecord，以及 unit 级 UnitSpec / UnitSummary /
                           PhaseReport 的接口形状

@@ -2,8 +2,7 @@
 
 The writer's evidence is built here from the trial-level AnswerSheets: each
 present ``ExecutionRecord`` supplies its steps, attempt index, raw
-correctness and the folder manifest.  The old ``store``/``round_`` entry is a
-fallback for pre-answer-sheet runs.  The driver is decision-agnostic: it
+correctness and the folder manifest.  The driver is decision-agnostic: it
 receives the skills already chosen for revision and returns one
 ``SkillAttemptEvidence`` per skill.
 

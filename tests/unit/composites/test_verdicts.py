@@ -1,10 +1,9 @@
 """The acceptance verdict core's unit tests (composites/verdicts.py, R1).
 
 Pins the vocabulary (per-run verdicts, unit statuses, the fixed cause
-set), the named per-run verdict rules and the stored-object entry
-(``verdict_from_run`` -- R2b deleted the ``verdict_from_trajectory`` /
-``verdict_from_attempt`` bridges) -- plus R4's acceptance side: the
-verdict core never touches the skill bank.
+set), the named per-trial verdict rules and the single grading entry
+(``grade_sheet``) -- plus R4's acceptance side: the verdict core never
+touches the skill bank.
 """
 
 from pathlib import Path
@@ -13,7 +12,7 @@ import pytest
 
 from expedistill.composites import decision
 from expedistill.composites import verdicts
-from expedistill.core.contracts import RunRecord
+from expedistill.core.answer_sheet import ExecutionRecord
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
 
@@ -69,47 +68,50 @@ def test_status_and_cause_sets_are_decisions_one_definition():
 # ---------------------------------------------------------------------------
 
 def _record(**kwargs):
-    fields = dict(unit_id="u", task_ref="t", skills_injected=None,
-                  skills_block="", model_role="weak", model_name="m",
-                  sample_index=0, dispatch_index=0, correctness=None,
-                  metrics={}, aux={}, artifacts={})
+    fields = dict(
+        sheet_id="sheet-1", unit_id="u", phase_label="p03:live",
+        task_ref="t", role="weak", arm=None, model_role="weak",
+        model_name="m", sample_index=0, raw_correctness=None,
+        metrics={}, aux={}, artifacts={})
     fields.update(kwargs)
-    return RunRecord(**fields)
+    return ExecutionRecord(**fields)
+
+
+def _graded(record, rule_name):
+    grading = verdicts.grade_sheet(record, rule_name)
+    return grading.verdict, grading.basis
 
 
 def test_scorer_rule_follows_the_benchmark_scorer():
-    assert verdicts.verdict_from_run(
-        _record(correctness=True), rule_name="scorer") == (
+    assert _graded(_record(raw_correctness=True), "scorer") == (
         "success", "scorer: the benchmark's own scorer")
-    assert verdicts.verdict_from_run(
-        _record(correctness=False), rule_name="scorer") == (
+    assert _graded(_record(raw_correctness=False), "scorer") == (
         "failure", "scorer: the benchmark's own scorer")
 
 
 def test_scorer_rule_judges_an_unscored_run_invalid():
-    # R2b: a run whose scorer verdict never came back (pseudo zero, a
-    # trial that died before its verifier ran) is judged invalid -- no
+    # A run whose scorer verdict never came back (pseudo zero, a trial
+    # that died before its verifier ran) is judged invalid -- no
     # measurement, excluded from every denominator -- never a failure and
     # never a wiring bug.
-    assert verdicts.verdict_from_run(_record(), rule_name="scorer") == (
+    assert _graded(_record(), "scorer") == (
         "invalid", "scorer: no scorer verdict came back for this run")
 
 
 def test_exam_judge_rule_reads_the_judges_verdict_and_reason():
     record = _record(aux={"judge_verdict": True, "judge_reason": "matches"})
-    assert verdicts.verdict_from_run(record, rule_name="exam_judge") == (
+    assert _graded(record, "exam_judge") == (
         "success", "exam_judge: matches")
     record = _record(aux={"judge_verdict": False})
-    assert verdicts.verdict_from_run(record, rule_name="exam_judge") == (
+    assert _graded(record, "exam_judge") == (
         "failure", "exam_judge: the G5 model judge")
     with pytest.raises(CodeBugError, match="no judge verdict"):
-        verdicts.verdict_from_run(_record(), rule_name="exam_judge")
+        verdicts.grade_sheet(_record(), "exam_judge")
 
 
 def test_unknown_rule_name_is_a_config_error():
     with pytest.raises(ConfigError, match="unknown verdict rule"):
-        verdicts.verdict_from_run(_record(correctness=True),
-                                  rule_name="no_such_rule")
+        verdicts.grade_sheet(_record(raw_correctness=True), "no_such_rule")
 
 
 def test_rules_are_named_per_benchmark():
@@ -130,13 +132,16 @@ def test_a_duplicate_rule_name_is_rejected():
 
 
 # ---------------------------------------------------------------------------
-# The stored-object entry (the R2b bridges' replacement)
+# The old run-record entries are gone
 # ---------------------------------------------------------------------------
 
-def test_the_r2b_bridges_are_gone():
-    # R2b deleted them: every consumer judges through verdict_from_run.
+def test_the_old_grading_entries_are_gone():
+    # ``grade_sheet`` is the only per-trial grading entry; the R2b bridges
+    # and the RunRecord-shaped entry were removed with the answer-sheet
+    # refactor.
     assert not hasattr(verdicts, "verdict_from_trajectory")
     assert not hasattr(verdicts, "verdict_from_attempt")
+    assert not hasattr(verdicts, "verdict_from_run")
 
 
 # ---------------------------------------------------------------------------

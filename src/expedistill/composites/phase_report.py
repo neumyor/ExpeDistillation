@@ -75,8 +75,9 @@ def read_phase_report(phase_dir: Path, *, phase_kind: str,
                       ) -> Optional[PhaseReport]:
     """Read a completed execute phase's trial-level artifacts.
 
-    Returns None for a legacy run without the new artifacts; the caller may
-    fall back to the old report reader during migration.
+    Returns None when the phase directory carries no trial-level
+    artifacts; callers treat that as an interrupted or incompatible run,
+    never as an older report shape to guess around.
     """
     phase_dir = Path(phase_dir)
     specs_path = phase_dir / SPECS_NAME

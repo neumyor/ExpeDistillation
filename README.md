@@ -200,7 +200,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 每个相位有一个标签 `pNN:<局部名>`：冻结步恒为 `p00:freeze`；序列第 i 项
 （i 从 0 数）的标签是 `p{i+1:02d}:<局部名>`，例如第一个序列相位是
 `p01:baseline`。标签出现在进度账本（`pipeline_log.jsonl` 的 `stage` 值）、
-`failed_units.jsonl` 和验收报告行的 `phase_label` 里；局部名不得带冒号
+`failed_units.jsonl` 和 AnswerSheet 的 `phase_label` 里；局部名不得带冒号
 （标签按冒号解析）。
 
 每个相位在 run 目录里有自己的目录 `phases/pNN_<局部名>/`（标签里的冒号
@@ -398,7 +398,7 @@ v4 → v5 的身份变化：新增全局 `use_weak_profile`，升级时取 `fals
 | B5 | 并行池 | 与业务无关的线程池 | `infra/parallel.py` |
 | B6 | 可靠性 | 异常分类（基础设施 / 模型输出 / 配置 / 代码 bug）、重试策略、单元失败记录 | `infra/reliability.py` |
 | B7 | 运行锁与用量累计 | run 目录排他锁（防止两个进程写同一个 run）；用量跨进程累加落盘，续跑后不清零 | `infra/runlock.py`、`infra/usage.py` |
-| — | 接口形状 | 执行—学习循环的四个交接数据类（执行单元行、运行记录、验收报告行、任务清单行），见 `core/contracts.py` 的 docstring | `core/contracts.py` |
+| — | 接口形状 | 交付与决策的冻结交接形状（执行单元行及其列表别名、任务清单行），见 `core/contracts.py` 的 docstring；执行→验收的 trial 级记录是 `core/answer_sheet.py` 的 `ExecutionRecord` | `core/contracts.py`、`core/answer_sheet.py` |
 
 **B1 的两种重试**：
 
@@ -1097,7 +1097,7 @@ none：原样入库，预算仍是硬阀），中间的学习相位写原样工�
 
 ### 5.7 判定与无效重派
 
-- 每次真实运行的判定走 `verdicts.verdict_from_run`，规则按相位
+- 每张 trial 的判定走 `verdicts.grade_sheet`，规则按相位
   `acceptance` 字段选（缺省用 benchmark 默认绑定：tb → `tb_scorer`，
   searchqa / alfworld → `scorer`）。判定词汇：success / failure / invalid
   （无效 = 运行没有正常完成，不能算模型成绩：泄题、注入过长、判分器没跑、

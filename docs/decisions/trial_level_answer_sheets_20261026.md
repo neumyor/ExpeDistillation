@@ -137,3 +137,23 @@ Markdown 不作为源。
 
 决策仍消费 UnitSummary（unit 级视图），不直接读 trial 轨迹；这是有意的
 分层。归因/写作消费 trial 级 execution/evidence。
+
+## 7. 后续收口：删掉最后一层旧接口
+
+AnswerSheet 落地后，`core.contracts.RunRecord` 和
+`verdicts.verdict_from_run` 已经没有 `src/` 调用方：执行侧直接产
+`core.answer_sheet.ExecutionRecord`，判分只走 `verdicts.grade_sheet`。
+两者连同以下兼容面一并删除：
+
+- `contracts.py` 只保留交付/决策的形状（`ExecutionUnitRow` /
+  `ExecutionUnitList` / `TaskListRow`）；
+- `verdicts` 不再 re-export `unit_ids` 的 `make_unit_id` /
+  `canonical_skills`，交付侧直接 import `composites.unit_ids`；
+- `skill_usage.build_usage_rows_from_sheets` 删除 `folder_by_task` 兜底，
+  folder manifest 只从 `ExecutionRecord.artifacts["skill_folder"]` 读；
+- 修正声称旧 fallback 仍存在的 docstring/注释（归因、phase report、
+  phase execute、skill_usage），以及 README / AGENTS 里的四形状与
+  `verdict_from_run` 描述。
+
+有意保留的旧读路径只有两类：审计脚本对 pre-v4 run 的 `_audit_legacy`，
+以及 `assemble_reuse` / `fork_run_stage04.py` 对 v2/v3 源 run 的装配支持。

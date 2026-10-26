@@ -1904,9 +1904,9 @@ def render_report(audit: Audit) -> Tuple[str, Dict[str, Any]]:
 
 def _make_unit_id(phase: str, task_ref: str, role: str,
                   skills_injected: Any) -> str:
-    """The frozen unit-id rule (verdicts.make_unit_id), for the fake
+    """The frozen unit-id rule (unit_ids.make_unit_id), for the fake
     phase directories' units / report rows."""
-    from expedistill.composites.verdicts import make_unit_id
+    from expedistill.composites.unit_ids import make_unit_id
     return make_unit_id(phase_label=phase, benchmark="tb",
                         task_ref=task_ref, role=role,
                         skills_injected=skills_injected)

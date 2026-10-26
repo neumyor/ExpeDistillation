@@ -89,7 +89,7 @@ class RevisionOutcome:
 
 
 def _always_revise(package: Any) -> str:
-    """The legacy group writer has no policy: revise every package."""
+    """The group writer has no policy: revise every package."""
     return "revise"
 
 
