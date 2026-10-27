@@ -52,8 +52,16 @@ def review(
     run_dir: Any = None,
     skip_evidence: Optional[
         Callable[[Sequence[TaskListRow]], Sequence[str]]] = None,
+    existing_findings: Sequence[Any] = (),
 ) -> ReviewResult:
     """Run one learn phase's review; returns per-row items and failures."""
+    if params.decision == "trial_level":
+        from expedistill.methods.review.trial_review import run_trial_review
+        return run_trial_review(
+            current=current, bank=bank, context=context,
+            handles=handles, usage=usage, run_dir=run_dir,
+            existing_findings=existing_findings,
+            skip_evidence=skip_evidence)
     rows = assess(
         current=current, control=control, bank=bank,
         context=context, params=params, store=store)

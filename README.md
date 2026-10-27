@@ -190,7 +190,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | 字段 | 说明 |
 |---|---|
 | `role` | 恒为 `learn` |
-| `review` | 审查方法：把决策和找证据合成一个入口。参数 `decision: task_level|skill_level`（P04/P06 的策略，默认 `task_level`）、`unread_in_won_group: delete|keep`（未读但组赢时的策略）、`before_steps` / `after_steps`（归因窗口，默认 10 / 10）、`K` / `retry_limit` / `write_lessons`（P02 add 的切段预算）；说明见 `src/expedistill/methods/review/README.md` |
+| `review` | 审查方法：把决策和找证据合成一个入口。参数 `decision: task_level|skill_level|trial_level`（P04/P06 的策略，默认 `task_level`；`trial_level` 逐 trial 分析）、`unread_in_won_group: delete|keep`（未读但组赢时的策略）、`before_steps` / `after_steps`（归因窗口，默认 10 / 10）、`K` / `retry_limit` / `write_lessons`（P02 add 的切段预算）；说明见 `src/expedistill/methods/review/README.md` |
 | `author` | 写作方法：`distill_diagnose`（默认，无参数，逐 task 逐段写）或 `cluster_by_trigger`（跨 add-authorized task 的 subtask：先分五个 trigger 族，再族内聚类，最后每类写一条 skill；参数 `max_cards_per_prompt` / `max_chars_per_card` / `min_cluster_size` / `classify_retry_limit` / `cluster_retry_limit` / `skill_retry_limit`）；说明见 `src/expedistill/methods/author/README.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
@@ -615,7 +615,7 @@ E1 内部的 runner：
 | exam | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
 | live | 交付 `group_by_task` 或 `folder_by_task`、E1 × K1（整组或逐任务文件夹、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用；folder 交付的读取事实由 AnswerSheet 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 按需提取 |
 | test | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
-| learn | 统一走 `methods/review`：P02 baseline-gap → add 证据 + `learn_add`（G2/G3）；P04/P06 → per-skill 决策 + 归因证据 + `learn_apply`；exam → 多版本 merge + 考卷证据 + `learn_exam`；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
+| learn | 统一走 `methods/review`：P02 baseline-gap → add 证据 + `learn_add`（G2/G3）；P04/P06 → per-skill 决策 + 归因证据 + `learn_apply`；`trial_level` → 逐 trial 分析 + 聚合动作 / 新需求 + `learn_requirement`；exam → 多版本 merge + 考卷证据 + `learn_exam`；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
 
 **复用最多的几块**：
 
@@ -649,6 +649,10 @@ E1 内部的 runner：
 | 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
 | SKILL_ATTEMPT_ATTRIBUTION | G12 | author（学习相位 revise，每窗口一次） |
 | SKILL_ATTEMPT_REVISION | G11 | rewriter（学习相位 revise，逐 skill 整条重写） |
+| TRIAL_FAILURE_ANALYSIS | trial_level review | author（逐失败 trial 并发） |
+| TRIAL_REQUIREMENT_AGGREGATION | trial_level review | author（每相位一次） |
+| PROFILE_UPDATE | trial_level review | author（每相位一次） |
+| REQUIREMENT_SKILL | trial_level review | author（每个新需求一次） |
 
 **全部方法 prompt 全量冻结**：`prompts/__init__.py` 的 import 清单登记
 每个方法 prompt，**每个 run 的 manifest 都冻结全部已注册方法 prompt 的
@@ -841,6 +845,10 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
     curation_log.json             整理日志（agentbrew 方法，最末学习相位）
     learn_summary.json           学习相位摘要（最后写；带 bank 键即该相位
                                  的完成信号）
+    trial_findings.jsonl         trial_level：逐失败 trial 的自由文本诊断
+    new_skill_requirements.jsonl trial_level：聚合后的跨 task 新 skill 需求
+    requirement_outcomes.jsonl   trial_level：新需求的逐条写作回执
+    model_profile.json           trial_level：累积的弱模型画像（初始为空）
     trigger_families.jsonl       cluster_by_trigger：每个 subtask 的五个
                                  trigger 族之一及理由
     clusters.jsonl               cluster_by_trigger：族内聚类结果（theme、
@@ -1057,7 +1065,9 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 **摸底缺口路径**（`decision.decide_task_list`）：本轮报告为空、baseline
 相位报告当对照，对每个弱模型做不好且还没有技能的训练任务发一条 add 行。
 后续 P04/P06 走 `methods/review/strategies.py` 的 `task_level` 或 `skill_level`，
-统一产出 per-skill 的 keep / revise / delete。
+统一产出 per-skill 的 keep / revise / delete。也可以选择 `trial_level`：逐条失败
+trial 并发分析，聚合 agent 产出 per-skill 动作和跨 task 的新 skill 需求，profile
+agent 累积弱模型画像。
 
 **多版本行合并（仅 exam 路径）**：作答仓共享，一条技能可能带好几行报告行
 （不同版本各一行，结论可能互相冲突）。合并规则：**最高版本的那行算数**，

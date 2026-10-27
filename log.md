@@ -1481,3 +1481,21 @@ layering、`git diff --check` 通过。未提交、未推送，未读写正在�
 `tests/unit/`、`tests/golden/harness.py`、`tests/fixtures/golden/`、`README.md`、
 `AGENTS.md`、`src/expedistill/methods/review/README.md`、
 `docs/decisions/review_module_20261027.md`、`docs/runbooks/local_benchmark_live_run_20261020.md`、`docs/runbooks/live_run_acceptance_runbook_20261014.md`、`log.md`
+
+## 2026-10-27 18:29 — 新增 trial-level review
+
+一段话摘要：在 `methods/review` 下新增 `trial_level` 审查策略。它读取当前执行相位的全部 trial 级 AnswerSheet 和当前 skill bank，只对 `grading.verdict == "failure"` 且存在 execution 的 trial 并发调用 `TRIAL_FAILURE_ANALYSIS`，每条 trial 输出自由文本失败原因、profile_note、new_skill_note 和相关 skill id，不使用 failure 枚举。随后 `TRIAL_REQUIREMENT_AGGREGATION` 每相位一次，把全部 findings 合并成每个 skill 一行的 keep / revise / delete，以及一份跨 task、跨 trial 的新 skill 需求文档；`NewSkillRequirement` 只携带 capability、trigger、证据和 source_sheet_ids，与 task/trial 解耦，每个需求对应一个新增 skill。`PROFILE_UPDATE` 每相位一次，把 profile_note 累积进 `phases/pNN_learn/model_profile.json`，初始为空，本相位 author/revise 使用新画像，下一相位继续读取。AnswerSheet 到 `EvidencePackage` / `SkillAttemptEvidence` 的转换集中在 `trial_evidence.py`，新技能由 `methods/author/requirement.py` 写出、`stages/learn_requirement.py` 落地，不复用 task 行。`trial_level` 只允许 live/exam 相位之后使用；旧 `task_level` / `skill_level` 行为不变。验证：全量 2298 passed、4 deselected；golden 10 passed；ruff E9/F、layering、`git diff --check` 通过。未提交、未推送。
+
+工件：`src/expedistill/methods/review/{trial,trial_review,aggregation,profile,trial_evidence,contracts,__init__}.py`、`src/expedistill/prompts/{trial_review,__init__}.py`、`src/expedistill/methods/author/requirement.py`、`src/expedistill/stages/{phase_learn,learn_apply,learn_requirement,model_profile}.py`、`tests/unit/methods/review/{test_trial,test_driver}.py`、`tests/unit/methods/author/test_requirement.py`、`tests/unit/stages/{test_phase_learn_trial,test_learn_requirement,test_model_profile}.py`、`tests/unit/stages/test_stage0.py`、`tests/fixtures/golden/`、`README.md`、`AGENTS.md`、`src/expedistill/methods/review/README.md`、`docs/decisions/trial_level_review_20261027.md`、`log.md`
+
+## 2026-10-27 20:52 — trial_level P04 真实冒烟（纠正第一次误测 skill_level）
+
+一段话摘要：第一次 P04 冒烟错误地沿用了 `review.decision: skill_level`，只验证了旧路径，没有进入 `trial_level`；用户指出后，新建两个只到 P04 的小样本 run，并显式把配置改成 `trial_level`。`dna-insert` 样本（run `runs/tb21_p04_trial_smoke_20261027_2025/`）对 3 条失败 trial 并发调用 `TRIAL_FAILURE_ANALYSIS`，完成 `PROFILE_UPDATE` 和 `TRIAL_REQUIREMENT_AGGREGATION`，聚合输出 `keep 2`、`new_skill_requirements 0`，验证了分析、画像、聚合和 keep 落盘。`reshard-c4-data` 样本（run `runs/tb21_p04_trial_smoke_reshard_20261027_2037/`）同样分析 3 条失败 trial，聚合输出 `keep 1 + revise 1 + 1 条新需求`；随后 `SKILL_ATTEMPT_REVISION` 把 seg01 升到 v2，`REQUIREMENT_SKILL` 写出 `req/c5b863e35f96/seg00/skill`（pending），覆盖了新路径的 revise 和新需求落地产。两次 run 的 P00–P03 都复用已有工件；第一次目录拷贝曾误把 p01 放错层级导致重跑，已停止并清理，最终结果来自干净重跑。旧 `skill_level` run 保留不动。未提交、未推送。
+
+工件：run `runs/tb21_p04_trial_smoke_20261027_2025/`、run `runs/tb21_p04_trial_smoke_reshard_20261027_2037/`、`tmp/tb21_p04_trial_smoke_20261027_2025.yaml`、`tmp/tb21_p04_trial_smoke_reshard_20261027_2037.yaml`、`log.md`
+
+## 2026-10-27 21:10 — trial_level 的 skill id 别名归一化与长轨迹上下文检查
+
+一段话摘要：修复 `TRIAL_FAILURE_ANALYSIS` 对 skill id 的精确匹配问题。此前模型若在 `skills[].skill_id` 写 folder 目录名、文件名或 `-SKILL.md` 形式，整条 trial finding 会因 `unknown skill_id` 丢失；现在复用 `attribution._folder_aliases` 和 `blocks.attribution._canonical_skill_id`，先归一到完整 bank id 再做校验和证据构建。另审计所有把轨迹直接拼进 prompt 的调用，实测 TB21 P03 最长单条 trial 为 858,447 字符 / 244 步，加 47 张 skill 卡约 246k 估算 tokens；正式配置的 author / rewriter / segmenter / examiner 等长轨迹角色均为 524288。新增 `stage0_freeze` 门：`trial_level` 要求 author 和 rewriter 的 `max_input_tokens >= 524288`，否则冻结步直接 `ConfigError`；`call_model` 的 `max_input_tokens` 仍是测量值，端点实际上下文须不小于配置值。验证：新增 alias 测试和预算门测试，目标测试 51 passed；`docs/reviews/long_trajectory_input_audit_20261027.md` 记录审计数据。本次提交包含上述改动，未推送。
+
+工件：`src/expedistill/methods/review/trial.py`、`src/expedistill/methods/review/__init__.py`、`src/expedistill/stages/stage0_freeze.py`、`tests/unit/methods/review/test_trial.py`、`tests/unit/stages/test_stage0.py`、`src/expedistill/methods/review/README.md`、`docs/reviews/long_trajectory_input_audit_20261027.md`、`log.md`

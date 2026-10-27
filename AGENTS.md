@@ -215,16 +215,23 @@ src/expedistill/
     review/               review 族：ReviewParams + `driver.py`（决策后只给
                           revise/add 行收集证据）+ `strategies.py`（P04/P06 的
                           task_level / skill_level 与 exam 多版本合并）+
+                          `trial.py`（逐失败 trial 分析）+ `trial_review.py`
+                          （trial_level 编排：分析、聚合、画像）+
+                          `aggregation.py`（多 trial 合并成动作和新需求）+
+                          `profile.py`（累积模型画像）+
+                          `trial_evidence.py`（AnswerSheet → 既有证据对象）+
                           `attribution.py`（live 窗口证据）+
                           `add_evidence.py` / `segmentation.py`（P02 add 证据）+
                           `exam_evidence.py`（exam 答卷证据）+
                           `contracts.py`（ReviewContext / ReviewItem /
-                          ReviewResult）+ README.md
+                          ReviewResult / TrialFinding / NewSkillRequirement）+
+                          README.md
     author/               author 族：AuthoringParams + write 驱动（P02 写新 skill）
                           + cluster_by_trigger.py（P02 跨 task 的 trigger 族
                           聚类写作，ClusterAuthoringParams）
                           + revise.py（P04/P06 每 skill 一次写作，读
                           SkillAttemptEvidence；不做 keep/delete 策略）+
+                          requirement.py（把一个聚合需求写成一个新 skill）+
                           README.md
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
@@ -249,6 +256,8 @@ src/expedistill/
     learn_apply.py        P04/P06 per-skill apply：keep/delete 逐 skill，
                           revise 按 task 一次归因后逐 skill 写作
     learn_exam.py         exam 路径：多版本 merge、考卷证据、keep/delete/revise
+    learn_requirement.py  trial_level 的新需求落地：每个需求写一个 skill
+    model_profile.py      累积弱模型画像的相位工件（初始为空）
     learn_ledger.py       共享账本：task_list / revisions / outcomes、回执、
                           版本守卫、keep/delete 落地
     context.py            StageContext / RunSettings（相位驱动的公共上下文）

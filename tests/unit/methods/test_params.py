@@ -142,6 +142,9 @@ class TestReviewAndAuthorParams:
         params = resolve_params("review", {"name": "review",
                                            "K": 1, "retry_limit": 0})
         assert (params.K, params.retry_limit) == (1, 0)
+        assert resolve_params(
+            "review", {"name": "review", "decision": "trial_level"}
+        ).decision == "trial_level"
         with pytest.raises(ConfigError, match="K"):
             resolve_params("review", {"name": "review", "K": 0})
 

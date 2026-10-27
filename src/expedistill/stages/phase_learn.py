@@ -57,6 +57,7 @@ scripts and Wave 4's golden regeneration align to that shape), and
 ``learn_summary.json`` mirroring the returned PhaseResult.
 """
 
+import dataclasses
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
@@ -82,12 +83,15 @@ from expedistill.core.config import (
 from expedistill.core.answer_sheet import PhaseReport
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
-from expedistill.infra.store import read_json, read_jsonl, write_json
+from expedistill.infra.store import (
+    read_json, read_jsonl, write_json, write_jsonl)
 from expedistill.methods import resolve_params
 from expedistill.methods.curation import phase_bank as curation_phase_bank
-from expedistill.methods.review.contracts import ReviewContext
+from expedistill.methods.review.contracts import ReviewContext, TrialFinding
 from expedistill.methods.review.driver import review
-from expedistill.stages import learn_add, learn_apply, learn_exam, learn_ledger
+from expedistill.stages import (
+    learn_add, learn_apply, learn_exam, learn_ledger, learn_requirement,
+    model_profile)
 
 __all__ = ["run"]
 
@@ -135,16 +139,28 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             ctx, current_round)
 
     review_params = resolve_params("review", phase.spec.review)
+    trial_mode = review_params.decision == "trial_level"
+    if trial_mode and current_kind not in (PHASE_ROLE_LIVE, PHASE_ROLE_EXAM):
+        raise CodeBugError(
+            "review decision 'trial_level' requires a live or exam phase; "
+            f"got phase kind {current_kind!r}")
+    profile_text, profile_version = (
+        model_profile.load_previous_profile(
+            ctx.run_dir, names, specs, phase.index)
+        if trial_mode else ("", 0))
     context = ReviewContext(
         phase_kind=current_kind or PHASE_ROLE_BASELINE,
         phase_label=phase.label,
+        source_phase_label=phase_label(
+            current_pos, names[current_pos]),
         checks_left=checks_left,
         round=current_round,
         delivery=current_spec.delivery.get("name", ""),
         compare_rule=compare_rule,
         n_attempts_weak=config.n_attempts_weak,
         benchmark=config.benchmark,
-        weak_profile=config.effective_weak_profile(),
+        weak_profile=(profile_text if trial_mode
+                      else config.effective_weak_profile()),
         task_select_rule=config.rules["task_select"],
         trajectory_select=config.rules["trajectory_select"],
         segment_select=config.rules["segment_select"],
@@ -161,7 +177,21 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         usage=ctx.usage,
         run_dir=ctx.run_dir,
         skip_evidence=lambda rows: learn_ledger.revision_skip_targets(
-            ctx.store, phase, rows, phase_dir))
+            ctx.store, phase, rows, phase_dir),
+        existing_findings=(_load_trial_findings(phase_dir)
+                           if trial_mode else ()))
+    if trial_mode:
+        _persist_trial_artifacts(phase_dir, result)
+        author_profile = result.profile_update
+        if author_profile is not None:
+            model_profile.write_profile(
+                phase_dir, phase.label, author_profile,
+                [finding.sheet_id for finding in result.trial_findings],
+                profile_version + 1)
+        else:
+            author_profile = profile_text
+    else:
+        author_profile = None
     effective = [item.row for item in result.items]
     superseded = result.superseded_units
     skip_targets = result.failed_targets | result.model_errors
@@ -175,12 +205,24 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     else:
         infra_failed = learn_apply.execute_decision_rows(
             ctx, phase, result.items, current.units,
-            skip_targets=skip_targets)
+            skip_targets=skip_targets, weak_profile=author_profile)
+    if result.new_skill_requirements:
+        requirement_failed = learn_requirement.execute_requirements(
+            ctx, phase, result.new_skill_requirements,
+            weak_profile=(author_profile
+                          if author_profile is not None
+                          else config.effective_weak_profile()))
+        infra_failed |= requirement_failed
     infra_failed |= result.failed_targets
 
     summary = _summary(phase, effective, superseded, phase_dir,
                        current_phase=names[current_pos],
                        compare_rule=compare_rule, checks_left=checks_left)
+    if trial_mode:
+        summary["trial_findings"] = len(result.trial_findings)
+        summary["new_skill_requirements"] = len(
+            result.new_skill_requirements)
+        summary["profile_updated"] = result.profile_update is not None
     if infra_failed:
         summary["infra_failed"] = sorted(infra_failed)
         write_json(phase_dir / SUMMARY_NAME, summary, indent=2)
@@ -192,6 +234,22 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     summary["bank"] = _produce_bank(ctx, phase, names, specs)
     write_json(phase_dir / SUMMARY_NAME, summary, indent=2)
     return PhaseResult(label=phase.label, summary=summary)
+
+
+def _load_trial_findings(phase_dir) -> List[TrialFinding]:
+    path = phase_dir / "trial_findings.jsonl"
+    if not path.exists():
+        return []
+    return [TrialFinding.from_dict(row) for row in read_jsonl(path)]
+
+
+def _persist_trial_artifacts(phase_dir, result) -> None:
+    write_jsonl(phase_dir / "trial_findings.jsonl",
+                [finding.to_dict() for finding in result.trial_findings])
+    write_jsonl(
+        phase_dir / "new_skill_requirements.jsonl",
+        [dataclasses.asdict(requirement)
+         for requirement in result.new_skill_requirements])
 
 
 # ---------------------------------------------------------------------------

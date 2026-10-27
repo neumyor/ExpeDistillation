@@ -36,7 +36,8 @@ def _unit(phase_label="p01:baseline", role="weak",
 
 def _context(phase_kind="baseline"):
     return ReviewContext(
-        phase_kind=phase_kind, phase_label="p02:learn", checks_left=2,
+        phase_kind=phase_kind, phase_label="p02:learn",
+        source_phase_label="p01:baseline", checks_left=2,
         round=0, delivery="none", compare_rule="strict_rate_gain",
         n_attempts_weak=2, benchmark="tb", weak_profile="",
         task_select_rule="any_weak_failed",

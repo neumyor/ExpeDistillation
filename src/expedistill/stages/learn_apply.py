@@ -38,6 +38,7 @@ def execute_decision_rows(
     ctx: Any, phase: Any, items: Sequence[ReviewItem],
     current_rows: Optional[List[UnitSummary]], *,
     skip_targets: Sequence[str] = (),
+    weak_profile: Optional[str] = None,
 ) -> Set[str]:
     """Land per-skill decisions; return infra-failed target ids."""
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
@@ -82,7 +83,7 @@ def execute_decision_rows(
         try:
             _execute_revise_group(
                 ctx, phase, task_id, task_rows, current_rows, phase_dir,
-                recorder, evidence_by_target)
+                recorder, evidence_by_target, weak_profile)
             return task_id, None
         except InfrastructureError as exc:
             recorder.record(task_id, phase.label, exc, exc)
@@ -114,6 +115,7 @@ def _execute_revise_group(
     current_rows: Optional[List[UnitSummary]], phase_dir,
     recorder: UnitFailureRecorder,
     evidence_by_target: Dict[str, Any],
+    weak_profile: Optional[str] = None,
 ) -> None:
     """One task: one writer call per skill from the review evidence."""
     if not rows:
@@ -162,7 +164,9 @@ def _execute_revise_group(
         try:
             outcome = revise_one(
                 skill, package,
-                weak_profile=ctx.config.effective_weak_profile(),
+                weak_profile=(weak_profile
+                              if weak_profile is not None
+                              else ctx.config.effective_weak_profile()),
                 handle=ctx.handle("rewriter"),
                 usage=ctx.usage, run_dir=ctx.run_dir)
         except ModelOutputError as exc:

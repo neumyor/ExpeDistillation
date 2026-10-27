@@ -8,13 +8,22 @@ review report itself reuses ``PhaseReport``; a review item reuses
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Union
 
 from expedistill.composites.evidence_package import EvidencePackage
-from expedistill.composites.skill_attempt_evidence import SkillAttemptEvidence
+from expedistill.composites.skill_attempt_evidence import (
+    SkillAttemptEvidence,
+    WindowEvidence,
+)
 from expedistill.core.contracts import TaskListRow
 
-__all__ = ["ReviewContext", "ReviewItem", "ReviewResult"]
+__all__ = [
+    "NewSkillRequirement",
+    "ReviewContext",
+    "ReviewItem",
+    "ReviewResult",
+    "TrialFinding",
+]
 
 
 @dataclass(frozen=True)
@@ -23,6 +32,7 @@ class ReviewContext:
 
     phase_kind: str          # "baseline" / "live" / "exam"
     phase_label: str
+    source_phase_label: str
     checks_left: int
     round: int
     delivery: str
@@ -34,6 +44,73 @@ class ReviewContext:
     trajectory_select: str
     segment_select: str
     workers: int = 1
+
+
+@dataclass
+class TrialFinding:
+    """One failed trial's free-text diagnosis and its evidence."""
+
+    sheet_id: str
+    unit_id: str
+    task_ref: str
+    reason: str
+    skill_ids: List[str] = field(default_factory=list)
+    profile_note: str = ""
+    new_skill_note: str = ""
+    step_start: int = 0
+    step_end: int = 0
+    evidence: Dict[str, SkillAttemptEvidence] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "sheet_id": self.sheet_id,
+            "unit_id": self.unit_id,
+            "task_ref": self.task_ref,
+            "reason": self.reason,
+            "skill_ids": list(self.skill_ids),
+            "profile_note": self.profile_note,
+            "new_skill_note": self.new_skill_note,
+            "step_start": self.step_start,
+            "step_end": self.step_end,
+            "evidence": {
+                skill_id: evidence.to_dict()
+                for skill_id, evidence in self.evidence.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "TrialFinding":
+        evidence = {}
+        for skill_id, raw in (data.get("evidence") or {}).items():
+            raw = dict(raw)
+            windows = [WindowEvidence(**window) for window in raw.get(
+                "windows") or []]
+            evidence[skill_id] = SkillAttemptEvidence(
+                skill_id=raw.get("skill_id", skill_id),
+                skill_version=raw.get("skill_version", 1),
+                windows=windows)
+        return cls(
+            sheet_id=str(data.get("sheet_id", "")),
+            unit_id=str(data.get("unit_id", "")),
+            task_ref=str(data.get("task_ref", "")),
+            reason=str(data.get("reason", "")),
+            skill_ids=list(data.get("skill_ids") or []),
+            profile_note=str(data.get("profile_note") or ""),
+            new_skill_note=str(data.get("new_skill_note") or ""),
+            step_start=int(data.get("step_start", 0) or 0),
+            step_end=int(data.get("step_end", 0) or 0),
+            evidence=evidence)
+
+
+@dataclass
+class NewSkillRequirement:
+    """One aggregated capability gap; it is independent of task and trial."""
+
+    requirement_id: str
+    title: str
+    description: str
+    trigger: str
+    evidence: EvidencePackage
+    source_sheet_ids: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -52,3 +129,7 @@ class ReviewResult:
     failed_targets: Set[str] = field(default_factory=set)
     model_errors: Set[str] = field(default_factory=set)
     superseded_units: List[str] = field(default_factory=list)
+    trial_findings: List[TrialFinding] = field(default_factory=list)
+    new_skill_requirements: List[NewSkillRequirement] = field(
+        default_factory=list)
+    profile_update: Optional[str] = None

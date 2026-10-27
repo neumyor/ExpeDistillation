@@ -104,6 +104,7 @@ from expedistill.composites import external_control
 from expedistill.composites.verdicts import get_verdict_rule
 from expedistill.core.config import ExecutePhaseSpec, LearnPhaseSpec
 from expedistill.methods import resolve_params
+from expedistill.methods.review import MIN_TRIAL_LEVEL_INPUT_TOKENS
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import write_json
@@ -325,9 +326,31 @@ def _resolve_phase_methods(config: Any) -> None:
                     spec.compare.external.path,
                     spec.compare.external.sha256)
         elif isinstance(spec, LearnPhaseSpec):
-            resolve_params("review", spec.review)
+            params = resolve_params("review", spec.review)
             resolve_params("author", spec.author)
             resolve_params("curation", spec.curate)
+            if params.decision == "trial_level":
+                _check_trial_level_input_budget(config)
+
+
+def _check_trial_level_input_budget(config: Any) -> None:
+    """Trial-level review sends whole trajectories to two roles.
+
+    The author sees a full failed trial plus every skill card; the
+    rewriter sees every evidence window for a revised skill.  Their
+    configured input budget must be at least 512K, otherwise a long
+    trial can silently exceed the declared context.  This is a config
+    check only: the provider's real context limit still has to be at
+    least the declared value.
+    """
+    for role in ("author", "rewriter"):
+        limit = config.max_input_tokens_for(role)
+        if limit is None or limit < MIN_TRIAL_LEVEL_INPUT_TOKENS:
+            raise ConfigError(
+                "review decision 'trial_level' sends full trial "
+                f"trajectories; model role {role!r} needs "
+                f"max_input_tokens >= {MIN_TRIAL_LEVEL_INPUT_TOKENS}, "
+                f"got {limit!r}")
 
 
 def run(ctx: StageContext) -> Dict[str, Any]:

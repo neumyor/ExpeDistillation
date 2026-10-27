@@ -725,6 +725,10 @@ FROZEN_PROMPT_NAMES = frozenset({
     "SIMILARITY",
     "SKILL_DIAGNOSE",
     "SKILL_DISTILL",
+    "TRIAL_FAILURE_ANALYSIS",
+    "TRIAL_REQUIREMENT_AGGREGATION",
+    "PROFILE_UPDATE",
+    "REQUIREMENT_SKILL",
 })
 
 
@@ -876,6 +880,59 @@ def test_unknown_acceptance_rule_stops_stage0(monkeypatch, tmp_path):
     with pytest.raises(ConfigError, match="no_such_verdict_rule"):
         stage0_freeze.run(ctx)
     assert plugin.load_specs == []
+    assert not (ctx.run_dir / "manifest.json").exists()
+
+
+def _trial_level_phases():
+    phases = copy.deepcopy(PHASES)
+    phases["learn"]["review"]["decision"] = "trial_level"
+    return phases
+
+
+def _trial_level_budgets(*, author=524288, rewriter=524288):
+    return {
+        "default_max_output_tokens": 65536,
+        "roles": {
+            "author": {
+                "max_output_tokens": 65536,
+                "max_input_tokens": author,
+            },
+            "rewriter": {
+                "max_output_tokens": 65536,
+                "max_input_tokens": rewriter,
+            },
+        },
+    }
+
+
+def test_trial_level_accepts_512k_input_budgets(monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config(
+        phases=_trial_level_phases(),
+        token_budgets=_trial_level_budgets()))
+
+    stage0_freeze.run(ctx)
+
+    assert (ctx.run_dir / "manifest.json").exists()
+
+
+@pytest.mark.parametrize("role,limit", [
+    ("author", 262144),
+    ("author", None),
+    ("rewriter", 262144),
+    ("rewriter", None),
+])
+def test_trial_level_rejects_small_or_unset_input_budget(
+        monkeypatch, tmp_path, role, limit):
+    _install_plugin(monkeypatch, StagePlugin())
+    budgets = _trial_level_budgets()
+    budgets["roles"][role]["max_input_tokens"] = limit
+    ctx = make_ctx(tmp_path, make_config(
+        phases=_trial_level_phases(), token_budgets=budgets))
+
+    with pytest.raises(ConfigError, match=f"trial_level.*{role}"):
+        stage0_freeze.run(ctx)
+
     assert not (ctx.run_dir / "manifest.json").exists()
 
 

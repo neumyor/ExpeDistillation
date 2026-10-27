@@ -10,18 +10,29 @@ from dataclasses import dataclass
 
 from expedistill.core.config import ConfigError
 
-__all__ = ["DECISION_NAMES", "ReviewParams", "UNREAD_POLICIES"]
+__all__ = [
+    "DECISION_NAMES",
+    "MIN_TRIAL_LEVEL_INPUT_TOKENS",
+    "ReviewParams",
+    "UNREAD_POLICIES",
+]
 
-DECISION_NAMES = ("task_level", "skill_level")
+DECISION_NAMES = ("task_level", "skill_level", "trial_level")
 UNREAD_POLICIES = ("delete", "keep")
+
+#: ``trial_level`` sends a whole failed trial (plus the whole skill bank)
+#: to the author and all of that skill's window evidence to the rewriter.
+#: Both roles therefore need a declared 512K input budget.
+MIN_TRIAL_LEVEL_INPUT_TOKENS = 524_288
 
 
 @dataclass(frozen=True)
 class ReviewParams:
     """One learn phase's review policy and evidence budgets.
 
-    ``decision`` and ``unread_in_won_group`` are used by the live/exam
-    paths; the baseline-gap add path reads only the evidence fields.
+    ``trial_level`` selects the per-trial review path; the other two names
+    keep the existing live/exam paths.  The baseline-gap add path reads
+    only the evidence fields.
     """
 
     decision: str = "task_level"

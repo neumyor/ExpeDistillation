@@ -33,6 +33,7 @@ from expedistill.prompts import (  # noqa: F401
     llm,
     profile,
     segment,
+    trial_review,
 )
 
 #: Names of the method prompts (everything this package registers). Exact by
