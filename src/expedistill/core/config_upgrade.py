@@ -23,7 +23,7 @@ from expedistill.core.config import (
     ConfigError,
 )
 
-__all__ = ["upgrade_v2_config", "upgrade_v3_config", "upgrade_v4_config"]
+__all__ = ["upgrade_v2_config", "upgrade_v3_config", "upgrade_v4_config", "upgrade_v5_config"]
 
 #: The v3 slot defaults -- schema-v3 knowledge, kept ONLY for
 #: ``upgrade_v3_config`` (the v4 loader has no slots; an absent phase
@@ -443,3 +443,80 @@ def upgrade_v4_config(data: Dict[str, Any]) -> Dict[str, Any]:
     v5["use_weak_profile"] = value
     v5["schema_version"] = 5
     return v5
+
+
+def upgrade_v5_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a schema-v5 CONFIG dict to v6 (the single review slot).
+
+    The v5 learn phase carried ``evidence``, ``attribution`` and
+    ``decision`` as three separate content families.  Schema v6 merges
+    them into ``review``; ``author`` and ``curate`` pass through.  The
+    old defaults are preserved: ``K`` 5, ``retry_limit`` 2,
+    ``write_lessons`` true, attribution windows 10/10, and
+    ``task_level`` for a phase without a decision block.
+
+    Pure stdlib, copy in / copy out.  A non-learn phase and every
+    top-level field other than ``phases`` and ``schema_version`` pass
+    through untouched.
+    """
+    if not isinstance(data, dict):
+        raise TypeError(
+            f"config must be a mapping, got {type(data).__name__}")
+    if data.get("schema_version") != 5:
+        raise ConfigError(
+            "upgrade_v5_config needs a schema-v5 config, got "
+            f"schema_version {data.get('schema_version')!r}")
+    v6 = copy.deepcopy(data)
+    phases = v6.get("phases")
+    if isinstance(phases, dict):
+        for name, spec in phases.items():
+            if not isinstance(spec, dict) or spec.get("kind") != "learn":
+                continue
+            if "review" in spec:
+                # A hand-written v5 file cannot pass parse_phases with this
+                # key; remove the old slots if both shapes are present.
+                spec.pop("evidence", None)
+                spec.pop("attribution", None)
+                spec.pop("decision", None)
+                continue
+            evidence = spec.pop("evidence", None) or {}
+            attribution = spec.pop("attribution", None) or {}
+            decision = spec.pop("decision", None) or {}
+            if not isinstance(evidence, dict):
+                raise ConfigError(
+                    f"phases.{name}.evidence must be a mapping")
+            if not isinstance(attribution, dict):
+                raise ConfigError(
+                    f"phases.{name}.attribution must be a mapping")
+            if not isinstance(decision, dict):
+                raise ConfigError(
+                    f"phases.{name}.decision must be a mapping")
+            evidence_name = evidence.get("name", "segment")
+            if evidence_name != "segment":
+                raise ConfigError(
+                    f"phases.{name}.evidence names {evidence_name!r}; "
+                    "the v6 review slot only carries the segment evidence")
+            attribution_name = attribution.get("name", "skill_attempts")
+            if attribution_name != "skill_attempts":
+                raise ConfigError(
+                    f"phases.{name}.attribution names "
+                    f"{attribution_name!r}; the v6 review slot only "
+                    "carries the skill_attempts evidence")
+            decision_name = decision.get("name", "task_level")
+            if decision_name not in ("task_level", "skill_level"):
+                raise ConfigError(
+                    f"phases.{name}.decision names {decision_name!r}; "
+                    "expected task_level or skill_level")
+            spec["review"] = {
+                "name": "review",
+                "decision": decision_name,
+                "unread_in_won_group": decision.get(
+                    "unread_in_won_group", "delete"),
+                "before_steps": attribution.get("before_steps", 10),
+                "after_steps": attribution.get("after_steps", 10),
+                "K": evidence.get("K", 5),
+                "retry_limit": evidence.get("retry_limit", 2),
+                "write_lessons": evidence.get("write_lessons", True),
+            }
+    v6["schema_version"] = 6
+    return v6

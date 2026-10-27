@@ -137,13 +137,13 @@ class TestExamExecutionParams:
             resolve_params("execution", {"name": "exam", "n_attempts": 1})
 
 
-class TestEvidenceAndAuthorParams:
-    def test_segment_params(self):
-        params = resolve_params("evidence", {"name": "segment",
-                                             "K": 1, "retry_limit": 0})
+class TestReviewAndAuthorParams:
+    def test_review_params(self):
+        params = resolve_params("review", {"name": "review",
+                                           "K": 1, "retry_limit": 0})
         assert (params.K, params.retry_limit) == (1, 0)
         with pytest.raises(ConfigError, match="K"):
-            resolve_params("evidence", {"name": "segment", "K": 0})
+            resolve_params("review", {"name": "review", "K": 0})
 
     def test_author_params(self):
         # distill_diagnose is the author family's one method; its params
@@ -254,10 +254,8 @@ class TestResolveFixed:
             resolve_fixed("delivery", "retrieval")
 
     def test_driver_less_family_refused_by_resolve_fixed(self):
-        # execution/evidence/author have no driver to load; asking for one
-        # is a construction bug in the caller. (evidence.segment cannot
-        # stand in here: its K is required, so the refusal would fire in
-        # the params build before the driver load.)
+        # execution/author have no driver to load; asking for one is a
+        # construction bug in the caller.
         with pytest.raises(ConfigError, match="no driver"):
             resolve_fixed("execution", "real")
 

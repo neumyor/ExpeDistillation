@@ -7,6 +7,7 @@ import pytest
 from expedistill.core import ids
 from expedistill.core.contracts import TaskListRow
 from expedistill.infra.store import read_jsonl
+from expedistill.methods.review.contracts import ReviewItem
 from expedistill.stages import learn_add, learn_ledger
 
 BENCHMARK = "tb"
@@ -66,9 +67,7 @@ def _ctx(tmp_path, store):
 def _phase():
     return SimpleNamespace(
         label="p02:learn",
-        spec=SimpleNamespace(
-            evidence={"name": "segment", "K": 5, "write_lessons": False},
-            author={"name": "distill_diagnose"}))
+        spec=SimpleNamespace(author={"name": "distill_diagnose"}))
 
 
 def test_a_partial_add_resume_writes_the_missing_skill(tmp_path, monkeypatch):
@@ -78,6 +77,7 @@ def test_a_partial_add_resume_writes_the_missing_skill(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path, store)
     row = TaskListRow(target_kind="task", target_id=TASK_ID,
                       action="add", reason="weak fails", basis_unit="u")
+    item = ReviewItem(row=row, evidence=_package())
 
     resolved = []
 
@@ -89,31 +89,22 @@ def test_a_partial_add_resume_writes_the_missing_skill(tmp_path, monkeypatch):
         resolved.append((family, dict(raw)))
         return SimpleNamespace(write_new=fake_write_new), object()
 
-    monkeypatch.setattr(learn_add.segmentation, "segment_add_material",
-                        lambda **kwargs: {})
-    monkeypatch.setattr(learn_add.add_path, "collect_add_evidence",
-                        lambda **kwargs: _package())
     monkeypatch.setattr(learn_add.method_registry, "resolve", fake_resolve)
-    monkeypatch.setattr(learn_add, "get_plugin",
-                        lambda name: SimpleNamespace(view_rules=None))
-    monkeypatch.setattr(
-        learn_add, "resolve_params",
-        lambda family, raw: SimpleNamespace(write_lessons=False))
 
     # The first pass saves skill 0, receipts it, then dies before skill 1.
     store.fail_on_call = 2
     with pytest.raises(RuntimeError, match="disk died"):
-        learn_add._land_add(ctx, _phase(), row, phase_dir)
+        learn_add._land_add(ctx, _phase(), item, phase_dir)
 
     store.fail_on_call = None
-    learn_add._land_add(ctx, _phase(), row, phase_dir)
+    learn_add._land_add(ctx, _phase(), item, phase_dir)
 
     assert sorted(store.saved) == sorted(SKILL_IDS)
     outcomes = read_jsonl(phase_dir / learn_ledger.OUTCOMES_NAME)
     assert [record["skill_id"] for record in outcomes] == SKILL_IDS
 
     # A completed task replays without another write or receipt.
-    learn_add._land_add(ctx, _phase(), row, phase_dir)
+    learn_add._land_add(ctx, _phase(), item, phase_dir)
     assert len(read_jsonl(phase_dir / learn_ledger.OUTCOMES_NAME)) == 2
 
     # The configured author method is the driver that ran.

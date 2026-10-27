@@ -32,6 +32,8 @@ from expedistill.composites.phase_report import (
 )
 from expedistill.composites.unit_ids import make_unit_id
 from expedistill.methods.delivery.folder import skill_folder_manifest
+from expedistill.methods.review import strategies
+from expedistill.methods.review.contracts import ReviewItem
 from expedistill.core import ids
 from expedistill.core.config import (
     CompareSpec,
@@ -63,7 +65,7 @@ from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.author.write import RevisionOutcome
 from expedistill.methods.curation import none as curation_none
 from expedistill.methods.curation import phase_bank as curation_phase_bank
-from expedistill.stages import learn_add, learn_exam, learn_ledger, phase_learn
+from expedistill.stages import learn_add, learn_ledger, phase_learn
 from expedistill.stages.context import RunSettings, StageContext
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
@@ -135,7 +137,7 @@ def _test_spec(against="fresh_bare", delivery="retrieval"):
 
 def _learn_spec():
     return LearnPhaseSpec(
-        evidence={"name": "segment", "K": 5, "write_lessons": False},
+        review={"name": "review", "K": 5, "write_lessons": False},
         author={"name": "distill_diagnose"},
         curate={"name": "none", "token_budget": BIG})
 
@@ -494,7 +496,7 @@ def test_merge_keeps_the_highest_version_row():
     group = TaskListRow(target_kind="group", target_id=TASK_ID,
                         action="keep", reason="improved", basis_unit="u3")
 
-    effective, superseded = learn_exam.merge_task_list(
+    effective, superseded = strategies.merge_exam_rows(
         [old, group, new], [_report_row("u1", 1), _report_row("u2", 2)])
 
     assert effective == [group, new]      # order preserved, v1 dropped
@@ -505,7 +507,7 @@ def test_merge_refuses_a_row_without_a_report_row():
     row = TaskListRow(target_kind="skill", target_id=SKILL_ID,
                       action="keep", reason="improved", basis_unit="u1")
     with pytest.raises(CodeBugError, match="does not carry"):
-        learn_exam.merge_task_list([row], [])
+        strategies.merge_exam_rows([row], [])
 
 
 def test_merge_refuses_two_rows_of_one_version():
@@ -514,7 +516,7 @@ def test_merge_refuses_two_rows_of_one_version():
     second = TaskListRow(target_kind="skill", target_id=SKILL_ID,
                          action="revise", reason="no_gain", basis_unit="u1b")
     with pytest.raises(CodeBugError, match="share version"):
-        learn_exam.merge_task_list(
+        strategies.merge_exam_rows(
             [first, second], [_report_row("u1", 2), _report_row("u1b", 2)])
 
 
@@ -569,20 +571,21 @@ def test_execute_add_rows_parallelizes_independent_targets(
     ctx = _make_ctx(tmp_path, sequence, phases, handles, workers=4)
     phase = _phase(sequence, phases, 1)
     phase_bank_dir(ctx.run_dir, phase.label).mkdir(parents=True, exist_ok=True)
-    rows = [TaskListRow(target_kind="task", target_id=f"t{index}",
-                        action="add", reason="", basis_unit="")
-            for index in range(4)]
-    barrier = threading.Barrier(len(rows))
+    items = [ReviewItem(row=TaskListRow(
+        target_kind="task", target_id=f"t{index}",
+        action="add", reason="", basis_unit=""))
+        for index in range(4)]
+    barrier = threading.Barrier(len(items))
     seen = []
     lock = threading.Lock()
 
-    def fake_land(ctx, phase, row, phase_dir):
+    def fake_land(ctx, phase, item, phase_dir):
         with lock:
-            seen.append(row.target_id)
+            seen.append(item.row.target_id)
         barrier.wait(timeout=5)
 
     monkeypatch.setattr(learn_add, "_land_add", fake_land)
-    failed = learn_add.execute_add_rows(ctx, phase, rows)
+    failed = learn_add.execute_add_rows(ctx, phase, items)
 
     assert failed == set()
     assert sorted(seen) == ["t0", "t1", "t2", "t3"]
@@ -1002,9 +1005,9 @@ def test_skill_level_deletes_unread_and_revises_read(
         tmp_path, monkeypatch):
     sequence, phases = _live_sequence()
     phases["learn"] = LearnPhaseSpec(
-        evidence={"name": "segment", "K": 5, "write_lessons": False},
+        review={"name": "review", "K": 5, "write_lessons": False,
+                "decision": "skill_level"},
         author={"name": "distill_diagnose"},
-        decision={"name": "skill_level"},
         curate={"name": "none", "token_budget": BIG})
     phases["live"] = dataclasses.replace(
         phases["live"], delivery={"name": "folder_by_task"})
@@ -1121,10 +1124,6 @@ def test_a_reused_live_unit_is_visible_to_the_next_learn_phase(tmp_path):
     acceptance_sheets.write_coverage([], dest / COVERAGE_NAME)
     phase_report.write_carried_units([carried], dest)
 
-    units = phase_learn._read_report(ctx, sequence, phases, 4)
-    assert [unit.unit_id for unit in units] == [new_id]
-
-    sheets = phase_learn._read_sheets(ctx, sequence, phases, 4)
-    assert sheets
-    usage = phase_learn._usage_by_task_from_sheets(sheets, round_=1)
-    assert TASK_ID in usage
+    report = phase_learn._load_phase_report(ctx, sequence, phases, 4)
+    assert [unit.unit_id for unit in report.units] == [new_id]
+    assert report.sheets

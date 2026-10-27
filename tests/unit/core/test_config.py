@@ -1,4 +1,4 @@
-"""Unit tests for ExperimentConfig and its YAML round trip (schema v5)."""
+"""Unit tests for ExperimentConfig and its YAML round trip (schema v6)."""
 import copy
 import dataclasses
 
@@ -16,6 +16,7 @@ from expedistill.core.config import (
     upgrade_v2_config,
     upgrade_v3_config,
     upgrade_v4_config,
+    upgrade_v5_config,
 )
 
 #: The minimal v4 method the fixtures carry: a two-arm baseline, one learn
@@ -30,7 +31,7 @@ MIN_PHASES = {
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
-          "evidence": {"name": "segment", "K": 5},
+          "review": {"name": "review", "K": 5},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096}},
     "test": {"kind": "execute", "role": "test", "tasks": "test",
@@ -47,7 +48,7 @@ YAML_METHOD = (
     "  baseline: {kind: execute, role: baseline, tasks: train,"
     " delivery: {name: none},"
     " execution: {name: real, arms: [executor_strong, executor_weak]}}\n"
-    "  learn: {kind: learn, evidence: {name: segment, K: 5},"
+    "  learn: {kind: learn, review: {name: review, K: 5},"
     " author: {name: distill_diagnose},"
     " curate: {name: none, token_budget: 4096}}\n"
     "  test: {kind: execute, role: test, tasks: test,"
@@ -692,9 +693,9 @@ class TestSerialisation:
         with pytest.raises(ConfigError, match="future_field"):
             ExperimentConfig.from_dict(payload)
 
-    def test_schema_version_is_five(self):
+    def test_schema_version_is_six(self):
         # v5: the phase sequence plus the weak-profile switch.
-        assert CONFIG_SCHEMA_VERSION == 5
+        assert CONFIG_SCHEMA_VERSION == 6
 
     def test_future_schema_version_rejected_by_load_config(self, tmp_path):
         cfg_file = tmp_path / "future.yaml"
@@ -819,7 +820,7 @@ class TestSerialisation:
         assert cfg.benchmark == "tb"
         assert cfg.mode == "split"
         assert cfg.split == {"ratio": 0.8, "seed": 7}
-        assert cfg.phases["learn"].evidence["K"] == 5
+        assert cfg.phases["learn"].review["K"] == 5
         assert cfg.rules["task_select"] == "all_weak_fail"
         assert cfg.models["judge"] == "model-s"
         assert cfg.models["answerer"] == "model-w"
@@ -972,9 +973,8 @@ GOLDEN_PHASES = {
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]},
           "compare": None, "acceptance": None, "kind": "execute"},
-    "learn": {"evidence": {"name": "segment", "K": 5},
+    "learn": {"review": {"name": "review", "K": 5},
           "author": {"name": "distill_diagnose"},
-          "decision": {"name": "task_level"},
           "curate": {"name": "none", "token_budget": 4096},
           "kind": "learn", "role": "learn"},
     "test": {"role": "test", "tasks": "test",
@@ -1017,7 +1017,7 @@ GOLDEN_TO_DICT_FULL_FORM = {
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {},
-    "schema_version": 5,
+    "schema_version": 6,
 }
 
 GOLDEN_TO_DICT_SPLIT_FORM = {
@@ -1047,9 +1047,8 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
         # A GIVEN phase freezes verbatim -- no per-key merge with any
         # default (a merge would smuggle one method's params into
         # another's phase).
-        "learn": {"evidence": {"name": "segment", "K": 6},
+        "learn": {"review": {"name": "review", "K": 6},
               "author": {"name": "distill_diagnose"},
-              "decision": {"name": "task_level"},
               "curate": {"name": "none", "token_budget": 4096},
               "kind": "learn", "role": "learn"},
     },
@@ -1062,7 +1061,7 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {"default_max_output_tokens": 65536},
-    "schema_version": 5,
+    "schema_version": 6,
 }
 
 
@@ -1106,7 +1105,7 @@ class TestToDictGolden:
 
     def test_split_form_freezes_byte_identically(self):
         phases = copy.deepcopy(MIN_PHASES)
-        phases["learn"]["evidence"]["K"] = 6
+        phases["learn"]["review"]["K"] = 6
         cfg = make_config(
             mode="split",
             weak_profile="model-w is easily confused by multi-step "
@@ -1167,7 +1166,7 @@ class TestUpgradeV2:
             "token_budgets": {"default_max_output_tokens": 65536},
         }
         cfg = ExperimentConfig.from_dict(
-            upgrade_v4_config(upgrade_v3_config(upgrade_v2_config(v2))))
+            upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(upgrade_v2_config(v2)))))
         assert cfg.sequence == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
         assert cfg.phases["live"].execution["n_attempts"] == 3
         assert cfg.phases["learn"].curate["token_budget"] == 96000
@@ -1222,7 +1221,7 @@ class TestUpgradeCoversEveryV2Config:
             if path.name not in self.PRE_V2_MODELS_OPTIONS:
                 # The config was valid under v2; the chained upgrade loads.
                 ExperimentConfig.from_dict(
-                    upgrade_v4_config(upgrade_v3_config(upgraded)))
+                    upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(upgraded))))
             checked += 1
         assert checked >= 8, f"expected the v2 record set, got {checked}"
 

@@ -1306,15 +1306,17 @@
             "rounds": 3,
             "token_budget": 4096
           },
-          "decision": {
-            "name": "task_level"
-          },
-          "evidence": {
-            "K": 1,
-            "name": "segment",
-            "retry_limit": 2
-          },
           "kind": "learn",
+          "review": {
+            "K": 1,
+            "after_steps": 10,
+            "before_steps": 10,
+            "decision": "task_level",
+            "name": "review",
+            "retry_limit": 2,
+            "unread_in_won_group": "delete",
+            "write_lessons": true
+          },
           "role": "learn"
         },
         "test": {
@@ -1361,7 +1363,7 @@
         "task_select": "any_weak_failed",
         "trajectory_select": "strong2_weak2"
       },
-      "schema_version": 5,
+      "schema_version": 6,
       "sequence": [
         "baseline",
         "learn",

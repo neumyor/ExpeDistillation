@@ -1,4 +1,4 @@
-"""Convert schema-v3/v2 experiment configs to v5 (the current schema).
+"""Convert older experiment configs to v6 (the current schema).
 
 Usage:
     .venv/bin/python scripts/run/convert_v3_configs.py [--dir configs/experiments] [files...]
@@ -6,19 +6,20 @@ Usage:
 Input: explicit file paths, or (the default) every schema_version: 3
 config in --dir -- the seven frozen v3 experiment records. A v2 (or
 pre-schema) file may be passed EXPLICITLY; it chains upgrade_v2_config ->
-upgrade_v3_config -> upgrade_v4_config in memory. A v2 file whose
+upgrade_v3_config -> upgrade_v4_config -> upgrade_v5_config in memory.
+A v2 file whose
 <stem>_v3.yaml already exists is refused with a pointer at that v3
 record: the one-time v2 -> v3 conversion already wrote the file of
 record, and converting the v2 file again would freeze a second identity
 for the same experiment.
 
-Output: <stem>_v5.yaml next to the input (NEVER overwritten; v3 files
+Output: <stem>_v6.yaml next to the input (NEVER overwritten; v3 files
 are frozen experiment records, AGENTS section 6). The write is atomic
 (temp file + rename, the Wave 3 review O4 ruling): an interrupted run
-leaves the previous state, never a half-written *_v5.yaml that the
-never-overwrite rule would then lock in. The mapping is
-core.config.upgrade_v3_config then upgrade_v4_config -- the same pure
-functions the reuse assembler applies to an older source run's manifest.
+leaves the previous state, never a half-written *_v6.yaml that the
+never-overwrite rule would then lock in. The mapping is the pure
+upgrade_v2 -> v3 -> v4 -> v5 -> v6 chain -- the same functions the
+reuse assembler applies to an older source run's manifest.
 
 Every written file is verified by loading it back through load_config,
 which runs the full current load-time checklist (the phase sequence, the
@@ -46,6 +47,7 @@ from expedistill.core.config import (  # noqa: E402
     upgrade_v2_config,
     upgrade_v3_config,
     upgrade_v4_config,
+    upgrade_v5_config,
 )
 
 
@@ -82,10 +84,6 @@ def convert_file(path: Path, *, out_dir=None) -> str:
     version = detect_version(raw)
     if version >= CONFIG_SCHEMA_VERSION:
         return f"{path.name}: already schema v{version}, skipped"
-    if version == 4:
-        return (f"{path.name}: schema v4, skipped (load_config upgrades "
-                "it in memory; upgrade_v4_config writes a v5 file when a "
-                "frozen record is needed)")
     if version < 3:
         v3_record = path.with_name(path.stem + "_v3.yaml")
         if v3_record.exists():
@@ -97,20 +95,26 @@ def convert_file(path: Path, *, out_dir=None) -> str:
     # combination) or that fails the v4 load-time checklist is refused
     # per file, never a converter bug.
     try:
-        upgraded = (upgrade_v3_config(upgrade_v2_config(raw))
-                    if version < 3 else upgrade_v3_config(raw))
-        upgraded = upgrade_v4_config(upgraded)
+        upgraded = raw
+        if version == 2:
+            upgraded = upgrade_v2_config(upgraded)
+        if version in (2, 3):
+            upgraded = upgrade_v3_config(upgraded)
+        if version in (2, 3, 4):
+            upgraded = upgrade_v4_config(upgraded)
+        if version in (2, 3, 4, 5):
+            upgraded = upgrade_v5_config(upgraded)
         # from_dict runs the whole current load-time checklist
         # (parse_phases included) BEFORE anything is written.
         config = ExperimentConfig.from_dict(upgraded)
     except (ValueError, TypeError) as exc:
         return f"{path.name}: REFUSED ({exc})"
     out = (Path(out_dir) if out_dir is not None
-           else path.parent) / f"{path.stem}_v5.yaml"
+           else path.parent) / f"{path.stem}_v6.yaml"
     if out.exists():
         return f"{out.name}: exists, left untouched"
     # Atomic write (O4): a temp file in the destination directory, then
-    # rename. A crash mid-write leaves no half *_v4.yaml behind -- the
+    # rename. A crash mid-write leaves no half *_v6.yaml behind -- the
     # never-overwrite rule would otherwise lock a truncated file in and
     # silently block the retry. The verification loads the TEMP file, so
     # only a file today's code accepts is ever renamed into place.

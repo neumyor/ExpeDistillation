@@ -9,7 +9,7 @@ the acceptance criterion leans on: no action anywhere in a package.
 import pytest
 
 from expedistill.core.models import Skill
-from expedistill.methods.evidence.package import (
+from expedistill.composites.evidence_package import (
     ACTION_FACT_KINDS,
     EvidencePackage,
     ensure_fact_only,

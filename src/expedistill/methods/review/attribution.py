@@ -32,9 +32,30 @@ from expedistill.composites.skill_use import (
 )
 from expedistill.core.answer_sheet import AnswerSheet, ExecutionRecord
 from expedistill.core.models import Skill
-from expedistill.methods.attribution import AttributionParams
+from expedistill.infra.reliability import CodeBugError
+from expedistill.methods.review import ReviewParams
 
-__all__ = ["collect_skill_evidence"]
+__all__ = ["collect_skill_evidence", "task_instruction_for"]
+
+
+def task_instruction_for(benchmark: str, task_id: str) -> str:
+    """The benchmark task's execution prompt for one task id."""
+    from expedistill.benchmarks.registry import get_plugin
+    from expedistill.blocks import tasks as tasks_block
+    from expedistill.core import ids
+    from expedistill.prompts import get as get_prompt
+
+    plugin = get_plugin(benchmark)
+    raw_id = ids.raw_task_id(task_id, benchmark)
+    loaded = tasks_block.load_tasks(benchmark, [raw_id])
+    match = [task for task in loaded if task.task_id == raw_id]
+    if not match:
+        raise CodeBugError(
+            f"benchmark {benchmark!r} did not load task {raw_id!r} for "
+            f"group {task_id!r}: the arms must never run a different "
+            "set than the groups")
+    return get_prompt(plugin.task_prompt_name).format(
+        instruction=match[0].instruction, skills_block="", history="")
 
 
 def collect_skill_evidence(
@@ -49,7 +70,7 @@ def collect_skill_evidence(
     weak_profile: str,
     author_handle: Any,
     view_rules: Any = None,
-    params: Optional[AttributionParams] = None,
+    params: Optional[ReviewParams] = None,
     usage: Any = None,
     run_dir: Any = None,
 ) -> Dict[str, SkillAttemptEvidence]:
@@ -62,7 +83,7 @@ def collect_skill_evidence(
     """
     if not skills:
         return {}
-    params = params or AttributionParams()
+    params = params or ReviewParams()
     executions = _executions_for_task(task_id, sheets)
     records = {execution.sample_index: execution
                for execution in executions}
@@ -140,7 +161,7 @@ def _collect_folder_attempt(
     usage_row: Optional[Dict[str, Any]], skills: Sequence[Skill],
     folder: Optional[Dict[str, Any]], task_instruction: str,
     weak_profile: str, handle: Any, view_rules: Any,
-    params: AttributionParams, usage: Any, run_dir: Any,
+    params: ReviewParams, usage: Any, run_dir: Any,
     evidence: Dict[str, SkillAttemptEvidence],
 ) -> None:
     if usage_row is None:
@@ -187,7 +208,7 @@ def _collect_injected_attempt(
     *, task_id: str, attempt: int, execution: ExecutionRecord,
     usage_row: Optional[Dict[str, Any]], skills: Sequence[Skill],
     task_instruction: str, weak_profile: str, handle: Any,
-    view_rules: Any, params: AttributionParams, usage: Any, run_dir: Any,
+    view_rules: Any, params: ReviewParams, usage: Any, run_dir: Any,
     evidence: Dict[str, SkillAttemptEvidence],
 ) -> None:
     windows = _start_end_windows(

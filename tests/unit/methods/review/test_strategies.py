@@ -1,6 +1,7 @@
 """The two P04/P06 decision strategies: per-skill rows from reports/usage."""
 
-from expedistill.composites import decision, decision_strategies
+from expedistill.composites import decision
+from expedistill.methods.review import strategies as decision_strategies
 from expedistill.core import ids
 from expedistill.core.answer_sheet import UnitSummary
 from tests.helpers.skills import make_skill

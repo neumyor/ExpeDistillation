@@ -67,6 +67,7 @@ from expedistill.core.config import (
     save_config,
     upgrade_v3_config,
     upgrade_v4_config,
+    upgrade_v5_config,
 )
 from expedistill.llm.fake import FakeClient, json_script
 
@@ -431,7 +432,7 @@ def write_config(path: Path, combo: Dict[str, str]) -> Path:
         "schema_version": 3,
     }
     config = ExperimentConfig.from_dict(
-        upgrade_v4_config(upgrade_v3_config(v3)))
+        upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(v3))))
     save_config(config, str(path))
     return path
 

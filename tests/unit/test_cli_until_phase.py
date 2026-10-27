@@ -33,7 +33,7 @@ PHASES = {
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
-          "evidence": {"name": "segment", "K": 1},
+          "review": {"name": "review", "K": 1},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096}},
     "test": {"kind": "execute", "role": "test", "tasks": "test",

@@ -68,7 +68,7 @@ __all__ = ["segment_checked"]
 _AUDIT_PATH = Path("stage2_segments") / "segmentation_audit.jsonl"
 
 #: Public spelling of the audit channel's path for the evidence family's
-#: segmentation wiring (methods.evidence.segmentation), which appends the
+#: segmentation wiring (methods.review.segmentation), which appends the
 #: old stage 2's "empty trajectory" exclusion records to the same file.
 #: The old stage duplicated the constant; one owner is cheaper to keep
 #: correct.

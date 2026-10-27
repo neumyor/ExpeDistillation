@@ -112,7 +112,7 @@ _ROLE_BUDGET_KEYS = ("max_output_tokens", "max_input_tokens")
 #: v4: the method is a ``sequence`` of phases; every method parameter
 #: lives in the phase definitions under ``phases`` (R9). v3 and older
 #: are refused with a pointer at the upgrade mapping and the converter.
-CONFIG_SCHEMA_VERSION = 5
+CONFIG_SCHEMA_VERSION = 6
 
 
 class ConfigError(ValueError):
@@ -317,23 +317,18 @@ class ExecutePhaseSpec:
 
 @dataclass(frozen=True)
 class LearnPhaseSpec:
-    """One learn phase (decision -> evidence -> author -> curate).
+    """One learn phase (review -> author -> curate).
 
     Learn phases are not registry entries (plan R8); their content
-    families resolve through the registry like any other: ``evidence``
-    (the add path's cutting budget), ``author`` (the add path's writing
-    method), ``attribution`` (the P04/P06 window sizes), ``decision``
-    (the task_level / skill_level strategy) and ``curate`` (agentbrew
-    with merge_check, or none). Curation runs only at the sequence's
-    LAST learn phase -- the driver branches on the sequence position, not
-    on this spec.
+    families resolve through the registry like any other: ``review``
+    (decision plus evidence), ``author`` (the writing method) and
+    ``curate`` (agentbrew with merge_check, or none).  Curation runs only
+    at the sequence's LAST learn phase -- the driver branches on the
+    sequence position, not on this spec.
     """
 
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    review: Dict[str, Any] = field(default_factory=dict)
     author: Dict[str, Any] = field(default_factory=dict)
-    attribution: Dict[str, Any] = field(default_factory=dict)
-    decision: Dict[str, Any] = field(
-        default_factory=lambda: {"name": "task_level"})
     curate: Dict[str, Any] = field(default_factory=dict)
     kind: str = "learn"
     role: str = PHASE_ROLE_LEARN
@@ -388,8 +383,7 @@ class PhaseResult:
 #: silent drop -- the same discipline as the unknown top-level key).
 _EXECUTE_FIELDS = frozenset({"kind", "role", "tasks", "delivery", "execution",
                              "compare", "acceptance"})
-_LEARN_FIELDS = frozenset({"kind", "role", "evidence", "author",
-                           "attribution", "decision", "curate"})
+_LEARN_FIELDS = frozenset({"kind", "role", "review", "author", "curate"})
 
 #: The baseline phase's two arms: fixed by design (the strong arm feeds
 #: the add path, the weak arm is every later comparison's control).
@@ -624,15 +618,8 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
         raise ConfigError(
             f"phases.{name} is kind 'learn' but carries key(s) {unknown}; "
             f"a learn phase accepts {sorted(_LEARN_FIELDS)}")
-    evidence = _method_mapping(raw.get("evidence"), f"phases.{name}.evidence")
+    review = _method_mapping(raw.get("review"), f"phases.{name}.review")
     author = _method_mapping(raw.get("author"), f"phases.{name}.author")
-    attribution_raw = raw.get("attribution")
-    attribution = ({} if attribution_raw is None else
-                   _method_mapping(attribution_raw,
-                                   f"phases.{name}.attribution"))
-    decision = _method_mapping(
-        raw.get("decision", {"name": "task_level"}),
-        f"phases.{name}.decision")
     if "exams" in author:
         # The v3 authoring switch has no v4 image: upgrade_v3_config
         # refuses every combination but the one legal ablation pair, so
@@ -649,8 +636,7 @@ def _parse_learn_phase(name: str, raw: Dict[str, Any]) -> LearnPhaseSpec:
             f"phases.{name}.role must be {PHASE_ROLE_LEARN!r} for a learn "
             f"phase, got {role!r}")
     return LearnPhaseSpec(
-        evidence=evidence, author=author, attribution=attribution,
-        decision=decision, curate=curate, kind="learn",
+        review=review, author=author, curate=curate, kind="learn",
         role=PHASE_ROLE_LEARN)
 
 
@@ -878,10 +864,7 @@ def phase_spec_to_raw(spec: PhaseSpec) -> Dict[str, Any]:
     (the manifest comparison depends on that). An absent attribution
     block stays absent: old manifests have no such key and must keep
     comparing equal until a config actually sets one."""
-    raw = dataclasses.asdict(spec)
-    if isinstance(spec, LearnPhaseSpec) and not spec.attribution:
-        raw.pop("attribution", None)
-    return raw
+    return dataclasses.asdict(spec)
 
 
 def _normalise_tasks(tasks: Any) -> Union[None, str, List[str]]:
@@ -1298,9 +1281,10 @@ def _check_schema_version(version: Any, where: str) -> None:
             f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
             "update the repository and retry")
     if version < CONFIG_SCHEMA_VERSION:
-        remedy = ("upgrade_v4_config" if version == 4
-                  else "upgrade_v3_config (a v2 file chains through "
-                       "upgrade_v2_config first)")
+        remedy = ("upgrade_v5_config" if version == 5 else
+                  "upgrade_v4_config" if version == 4 else
+                  "upgrade_v3_config (a v2 file chains through "
+                  "upgrade_v2_config first)")
         raise ConfigError(
             f"{where} has schema_version {version}; this code speaks "
             f"schema {CONFIG_SCHEMA_VERSION} -- "
@@ -1351,7 +1335,9 @@ def load_config(path: str) -> ExperimentConfig:
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
     if data.get("schema_version") == 4:
-        data = upgrade_v4_config(data)
+        data = upgrade_v5_config(upgrade_v4_config(data))
+    elif data.get("schema_version") == 5:
+        data = upgrade_v5_config(data)
     # A file without schema_version predates v4, so it is refused.
     _check_schema_version(data.get("schema_version", 3), str(path))
     known_file_keys = ({f.name for f in fields(ExperimentConfig)}
@@ -1406,4 +1392,5 @@ from expedistill.core.config_upgrade import (  # noqa: E402
     upgrade_v2_config as upgrade_v2_config,
     upgrade_v3_config as upgrade_v3_config,
     upgrade_v4_config as upgrade_v4_config,
+    upgrade_v5_config as upgrade_v5_config,
 )

@@ -110,8 +110,12 @@ def _phases() -> Dict[str, Any]:
         "learn": {
             "kind": "learn",
             "role": "learn",
-            "evidence": {
-                "name": "segment",
+            "review": {
+                "name": "review",
+                "decision": "task_level",
+                "unread_in_won_group": "delete",
+                "before_steps": 10,
+                "after_steps": 10,
                 "K": 5,
                 "retry_limit": 2,
                 "write_lessons": True,
@@ -199,7 +203,7 @@ def build_config(benchmark: str, ids: Dict[str, List[str]], *,
         "n_attempts_weak": 3,
         "phases": _phases(),
         "rules": dict(RULES),
-        "schema_version": 5,
+        "schema_version": 6,
         "sequence": list(SEQUENCE),
         "split": {
             "train": list(ids["train"]),

@@ -10,7 +10,7 @@ steps view from its source trajectory, and packages them as one
 evidence package's ``source_experiences`` -- the material the author
 module writes new skills from. No actions, no store writes, no model
 calls: segmentation itself is the evidence family's ``segment`` method
-(K2 territory -- ``methods.evidence.segmentation.segment_add_material``,
+(K2 territory -- ``methods.review.segmentation.segment_add_material``,
 which the landing calls right before this collector reads the store);
 this driver only gathers what it produced.
 """
@@ -25,7 +25,7 @@ from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Subtask, Trajectory
 from expedistill.infra.store import Store
 
-from expedistill.methods.evidence.package import EvidencePackage
+from expedistill.composites.evidence_package import EvidencePackage
 
 __all__ = ["NoAddMaterial", "collect_add_evidence", "segment_position"]
 

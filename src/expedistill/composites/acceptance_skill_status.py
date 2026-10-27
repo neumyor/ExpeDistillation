@@ -13,7 +13,7 @@ the exam phase driver's replay guard). Read-only; the consumers are the
 trial-level coverage/report path (composites/coverage.py,
 composites/phase_report.py), the exam phase driver
 (stages/phase_execute.py) and the exam evidence collector
-(methods/evidence/exam_sheet.py), and the leak verdicts are
+(methods/review/exam_evidence.py), and the leak verdicts are
 composites/acceptance_leak.py.
 """
 

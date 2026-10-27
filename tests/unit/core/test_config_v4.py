@@ -46,6 +46,7 @@ from expedistill.core.config import (
     phase_spec_to_raw,
     upgrade_v3_config,
     upgrade_v4_config,
+    upgrade_v5_config,
 )
 
 #: The repository root (the 7 v3 configs live under configs/experiments/).
@@ -87,20 +88,31 @@ def _v3_raw(*, acceptance="exam", **overrides):
     return raw
 
 
+def _current(raw):
+    return upgrade_v5_config(upgrade_v4_config(raw))
+
+
 @pytest.fixture()
 def exam_v4():
-    return upgrade_v3_config(_v3_raw())
+    return _current(upgrade_v3_config(_v3_raw()))
 
 
 @pytest.fixture()
 def live_v4():
-    return upgrade_v3_config(_v3_raw(acceptance="live_run"))
+    return _current(upgrade_v3_config(_v3_raw(acceptance="live_run")))
 
 
 def _parse(v4):
+    version = v4.get("schema_version")
+    if version == 4:
+        v6 = upgrade_v5_config(upgrade_v4_config(v4))
+    elif version == 5:
+        v6 = upgrade_v5_config(v4)
+    else:
+        v6 = v4
     return parse_phases(
-        v4["phases"], v4["sequence"],
-        n_attempts_weak=v4.get("n_attempts_weak", 1))
+        v6["phases"], v6["sequence"],
+        n_attempts_weak=v6.get("n_attempts_weak", 1))
 
 
 # ---------------------------------------------------------------------------
@@ -158,32 +170,28 @@ class TestParsedShapes:
         assert isinstance(learn, LearnPhaseSpec)
         assert learn.kind == "learn"
         assert learn.role == PHASE_ROLE_LEARN
-        assert learn.evidence == {"name": "segment", "K": 5,
-                                  "retry_limit": 2}
+        assert learn.review["name"] == "review"
+        assert learn.review["decision"] == "task_level"
+        assert learn.review["K"] == 5
         assert learn.author == {"name": "distill_diagnose"}
-        assert learn.decision == {"name": "task_level"}
         assert learn.curate["name"] == "agentbrew"
         assert learn.curate["merge_check"] == "exam"
 
     def test_learn_phase_decision_strategy_parses(self, exam_v4):
         raw = copy.deepcopy(exam_v4)
-        raw["phases"]["learn"]["decision"] = {"name": "skill_level"}
+        raw["phases"]["learn"]["review"] = {
+            "name": "review", "decision": "skill_level"}
         learn = _parse(raw)["learn"]
-        assert learn.decision == {"name": "skill_level"}
+        assert learn.review["decision"] == "skill_level"
 
     def test_learn_phase_attribution_windows_parse(self, exam_v4):
         raw = copy.deepcopy(exam_v4)
-        raw["phases"]["learn"]["attribution"] = {
-            "name": "skill_attempts", "before_steps": 3, "after_steps": 4}
+        raw["phases"]["learn"]["review"] = {
+            "name": "review", "before_steps": 3, "after_steps": 4}
         learn = _parse(raw)["learn"]
-        assert learn.attribution == {
-            "name": "skill_attempts", "before_steps": 3, "after_steps": 4}
-        assert phase_spec_to_raw(learn)["attribution"] == learn.attribution
-
-    def test_an_absent_attribution_block_stays_absent(self, exam_v4):
-        learn = _parse(exam_v4)["learn"]
-        assert learn.attribution == {}
-        assert "attribution" not in phase_spec_to_raw(learn)
+        assert learn.review["before_steps"] == 3
+        assert learn.review["after_steps"] == 4
+        assert phase_spec_to_raw(learn)["review"] == learn.review
 
     def test_live_sequence_shape(self, live_v4):
         assert live_v4["sequence"] == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
@@ -461,22 +469,23 @@ class TestCheckedInConfigs:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             v4 = upgrade_v3_config(raw)
             v5 = upgrade_v4_config(v4)
-            specs = _parse(v5)
-            assert set(specs) == set(v5["phases"]) == set(v5["sequence"])
+            v6 = upgrade_v5_config(v5)
+            specs = _parse(v6)
+            assert set(specs) == set(v6["phases"]) == set(v6["sequence"])
             # Every emitted phase carries its R8 role, and the v4-only
             # global is pinned at the default.
             for spec in specs.values():
                 assert spec.role in (PHASE_ROLE_BASELINE, PHASE_ROLE_EXAM,
                                      PHASE_ROLE_LIVE, PHASE_ROLE_TEST,
                                      PHASE_ROLE_LEARN)
-            assert v5["invalid_redispatch_limit"] == \
+            assert v6["invalid_redispatch_limit"] == \
                 DEFAULT_INVALID_REDISPATCH_LIMIT
-            # The whole converted identity loads under the v5 gate: the
+            # The whole converted identity loads under the v6 gate: the
             # checklist runs from ExperimentConfig's own __post_init__,
             # role tables and token budgets included.
             from expedistill.core.config import ExperimentConfig
-            cfg = ExperimentConfig.from_dict(v5)
-            assert cfg.sequence == v5["sequence"]
+            cfg = ExperimentConfig.from_dict(v6)
+            assert cfg.sequence == v6["sequence"]
             # The canonical (all-keys) to_dict round-trips: the frozen
             # manifest of a converted run compares equal on resume.
             assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg

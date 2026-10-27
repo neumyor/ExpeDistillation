@@ -16,8 +16,8 @@ from expedistill.methods.registry import FAMILIES, _ENTRIES
 
 def test_the_table_is_organised_by_the_method_families():
     # R8's acceptance: named families, no slots.
-    assert FAMILIES == ("delivery", "execution", "evidence", "author",
-                        "attribution", "decision", "curation")
+    assert FAMILIES == ("delivery", "execution", "review", "author",
+                        "curation")
     by_family = {}
     for (family, name) in _ENTRIES:
         by_family.setdefault(family, []).append(name)
@@ -27,10 +27,8 @@ def test_the_table_is_organised_by_the_method_families():
         "folder", "folder_by_task"])
     assert sorted(by_family["execution"]) == [
         "exam", "real", "real_folder"]
-    assert by_family["evidence"] == ["segment"]
+    assert by_family["review"] == ["review"]
     assert by_family["author"] == ["distill_diagnose", "cluster_by_trigger"]
-    assert by_family["attribution"] == ["skill_attempts"]
-    assert by_family["decision"] == ["task_level", "skill_level"]
     assert sorted(by_family["curation"]) == ["agentbrew", "none"]
 
 
@@ -55,8 +53,8 @@ def test_the_retired_families_offer_nothing():
 def test_unknown_name_lists_the_known_ones():
     with pytest.raises(
             ConfigError,
-            match=r"known: \['segment'\]"):
-        resolve_params("evidence", {"name": "windows", "K": 5})
+            match=r"known: \['review'\]"):
+        resolve_params("review", {"name": "windows"})
     with pytest.raises(
             ConfigError,
             match=r"known: \['distill_diagnose', 'cluster_by_trigger'\]"):
@@ -66,29 +64,17 @@ def test_unknown_name_lists_the_known_ones():
 
 
 def test_required_params_still_fail_loudly():
-    # A named entry with required fields cannot be resolved without them.
-    with pytest.raises(ConfigError, match="missing required parameter"):
-        resolve_params("evidence", {"name": "segment"})
+    with pytest.raises(ConfigError, match="K"):
+        resolve_params("review", {"name": "review", "K": 0})
 
 
-def test_the_group_slots_resolve_their_drivers():
-    from expedistill.methods import resolve_params
-
-    assert resolve_params(
-        "decision", {"name": "task_level"}).__class__.__name__ == \
-        "TaskLevelParams"
-    assert resolve_params(
-        "decision", {"name": "skill_level"}).__class__.__name__ == \
-        "SkillLevelParams"
-
-
-def test_the_evidence_and_author_families_resolve_their_params():
+def test_the_review_and_author_families_resolve_their_params():
     from expedistill.methods.author import AuthoringParams
-    from expedistill.methods.evidence import SegmentationParams
+    from expedistill.methods.review import ReviewParams
 
-    assert resolve_params("evidence", {"name": "segment", "K": 5,
-                                       "retry_limit": 2}) == \
-        SegmentationParams(K=5, retry_limit=2)
+    assert resolve_params("review", {"name": "review", "K": 5,
+                                     "retry_limit": 2}) == \
+        ReviewParams(K=5, retry_limit=2)
     assert resolve_params("author", {"name": "distill_diagnose"}) == \
         AuthoringParams()
 
@@ -116,13 +102,14 @@ def test_the_cluster_authoring_family_resolves_its_params():
                        "max_cards_per_prompt": "many"})
 
 
-def test_the_attribution_family_resolves_its_window_params():
-    from expedistill.methods.attribution import AttributionParams
+def test_the_review_family_resolves_its_window_params():
+    from expedistill.methods.review import ReviewParams
 
-    assert resolve_params("attribution", {}) == AttributionParams()
+    assert resolve_params("review", {"name": "review"}) == ReviewParams()
     assert resolve_params(
-        "attribution", {"name": "skill_attempts", "before_steps": 3,
-                        "after_steps": 4}) == \
-        AttributionParams(before_steps=3, after_steps=4)
+        "review", {"name": "review", "before_steps": 3,
+                   "after_steps": 4}) == \
+        ReviewParams(before_steps=3, after_steps=4)
     with pytest.raises(ConfigError, match="must be <class 'int'>"):
-        resolve_params("attribution", {"before_steps": "wide"})
+        resolve_params("review", {"name": "review",
+                                  "before_steps": "wide"})

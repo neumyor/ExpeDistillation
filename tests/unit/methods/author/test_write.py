@@ -29,7 +29,7 @@ from expedistill.methods.author.write import (
     revise_group,
     write_new,
 )
-from expedistill.methods.evidence.package import EvidencePackage
+from expedistill.composites.evidence_package import EvidencePackage
 
 WEAK_PROFILE = "A small model; known to skip intermediate steps."
 DIAGNOSIS = "the steps were skipped"

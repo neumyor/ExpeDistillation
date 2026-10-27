@@ -89,7 +89,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 7. **决策不读轨迹，找证据不定动作，写作不做测量**。三者之间只通过任务清单
    和证据包交接。
 8. **实战验收的测量单位是"包"，决策单位是"技能"**。live 相位一个任务的整包
-   技能一起上场，组级结论只说明这包有没有提升；P04 的 `decision` 策略把组级
+   技能一起上场，组级结论只说明这包有没有提升；P04 的 `review` 策略把组级
    结论（或逐技能 usage 事实）展开成每条技能的 keep / revise / delete，归因
    负责解释，写作只负责改内容。整包是否继续被测由这些逐技能动作共同决定。
 9. **测试结果不流进学习**。test 相位的报告只进入最终成绩；"带技能库比裸跑
@@ -145,12 +145,12 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 
 ---
 
-## 二、方法 = 相位序列（配置 schema v5）
+## 二、方法 = 相位序列（配置 schema v6）
 
 一种方法写成配置里的两块内容：`sequence`（相位名单，可重复）和
 `phases`（每个名字一份相位定义）。旧版本（v1/v2/v3/v4）的配置是冻结的历史
-记录：v4 由加载器在内存里升级，v3 及更早的加载器直接拒收并指向转换工具
-（见 2.5）。
+记录：v5/v4 由加载器在内存里依次升级，v3 及更早的加载器直接拒收并指向
+转换工具（见 2.5）。
 
 ### 2.1 配置字段
 
@@ -172,7 +172,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | `rules` | 具名规则的选择（`task_select` / `segment_select` / `trajectory_select`），缺项由 `DEFAULT_RULES` 补齐 |
 | `model_options` | 按模型名给出的额外调用参数（如 `reasoning_effort`）；不得携带 `max_tokens`（token 上限只归 `token_budgets` 管） |
 | `token_budgets` | 每个角色的 token 上限（`default_max_output_tokens` 必填，`roles.<role>` 可逐角色覆盖） |
-| `schema_version` | 当前为 5；v4 文件由 `load_config` 在内存里升级（`use_weak_profile` 默认 false），v3/v2 文件先用转换脚本转成新文件 |
+| `schema_version` | 当前为 6；v5/v4 文件由 `load_config` 在内存里升级（v5→v6 把三个学习槽位合并成 `review`），v3/v2 文件先用转换脚本转成新文件 |
 
 **执行相位的字段**（`kind: execute`）：
 
@@ -190,10 +190,8 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | 字段 | 说明 |
 |---|---|
 | `role` | 恒为 `learn` |
-| `evidence` | 找证据方法（新增路径）：`segment`（带 `K` 与 `retry_limit`，是 add 路径的切段预算；`write_lessons` 默认 `true`，add 路径同时从弱模型失败段学，`false` 只学强模型成功段）；说明见 `src/expedistill/methods/evidence/README.md` |
-| `author` | 写作方法（新增路径）：`distill_diagnose`（默认，无参数，逐 task 逐段写）或 `cluster_by_trigger`（跨 add-authorized task 的 subtask：先分五个 trigger 族，再族内聚类，最后每类写一条 skill；参数 `max_cards_per_prompt` / `max_chars_per_card` / `min_cluster_size` / `classify_retry_limit` / `cluster_retry_limit` / `skill_retry_limit`）；说明见 `src/expedistill/methods/author/README.md` |
-| `attribution` | P04/P06 归因窗口：`skill_attempts`（默认；`before_steps` / `after_steps` 默认 10 / 10，必须是非负整数）；模式仍由上一执行相位的 `delivery.name` 决定，见 `src/expedistill/methods/attribution/README.md` |
-| `decision` | P04/P06 的决策策略：`task_level`（任务组级五种情况，展开到每个 skill，默认）/ `skill_level`（先按 unit 终态走共享动作表：control-perfect / not-testable 删除，leak 有余次改写到末次删除，zero_execution 不产行；正常单元触发且组赢 → keep 不改写，触发且组没赢 → 有余次 revise、末次 delete，未读 → delete；usage 缺失或交付不可信时 keep，原因 `unverified_delivery`；参数 `unread_in_won_group: delete|keep` 决定“未读但组赢”的 32 条）；两种都输出 per-skill 的 keep / revise / delete，见 `docs/decisions/p04_decision_strategy_split_20261023.md` 与 `docs/decisions/p04_p06_revise_only_not_won_20261024.md` |
+| `review` | 审查方法：把决策和找证据合成一个入口。参数 `decision: task_level|skill_level`（P04/P06 的策略，默认 `task_level`）、`unread_in_won_group: delete|keep`（未读但组赢时的策略）、`before_steps` / `after_steps`（归因窗口，默认 10 / 10）、`K` / `retry_limit` / `write_lessons`（P02 add 的切段预算）；说明见 `src/expedistill/methods/review/README.md` |
+| `author` | 写作方法：`distill_diagnose`（默认，无参数，逐 task 逐段写）或 `cluster_by_trigger`（跨 add-authorized task 的 subtask：先分五个 trigger 族，再族内聚类，最后每类写一条 skill；参数 `max_cards_per_prompt` / `max_chars_per_card` / `min_cluster_size` / `classify_retry_limit` / `cluster_retry_limit` / `skill_retry_limit`）；说明见 `src/expedistill/methods/author/README.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
 ### 2.2 相位标签与相位目录
@@ -238,7 +236,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
    深度和注入 token 预算来自 `real` 的参数。
 
 另外：stage 0（冻结步）在写任何文件之前，把每个相位的每个方法族
-（delivery / execution / evidence / author / curation）都解析一遍并校验
+（delivery / execution / review / author / curation）都解析一遍并校验
 参数（`methods/registry.py` 的 `resolve_params`），配置里的方法名拼错、
 参数类型错都在这里停下。
 
@@ -254,7 +252,7 @@ phases:
        execution: {name: real, arms: [executor_strong, executor_weak]}}
   exam: {kind: execute, role: exam,
        delivery: {name: per_skill}, execution: {name: exam}}
-  learn: {kind: learn, evidence: {name: segment, K: 5, retry_limit: 2},
+  learn: {kind: learn, review: {name: review, K: 5, retry_limit: 2},
        author: {name: distill_diagnose},
        curate: {name: agentbrew, merge_check: exam, token_budget: ..., rounds: 3}}
   test: {kind: execute, role: test, tasks: test,
@@ -284,15 +282,17 @@ phases:
        execution: {name: real, n_attempts: 3, max_injection_tokens: null},
        compare: {against: baseline, rule: strict_rate_gain}}
   learn: {kind: learn,
-       evidence: {name: segment, K: 5, retry_limit: 2, write_lessons: true},
+       review: {name: review, decision: task_level,
+                unread_in_won_group: delete,
+                before_steps: 10, after_steps: 10,
+                K: 5, retry_limit: 2, write_lessons: true},
        author: {name: distill_diagnose},
-       attribution: {name: skill_attempts, before_steps: 10, after_steps: 10},
-       decision: {name: task_level},
        curate: {name: agentbrew, ...}}
 ```
 
-`decision` 不写时默认 `task_level`；`attribution` 不写时默认
-`skill_attempts` + 10/10。P02 的 add 路径不使用 `decision` / `attribution`。
+`review.decision` 不写时默认 `task_level`；`before_steps` / `after_steps`
+不写时默认 10/10。P02 的 add 路径只使用 `K` / `retry_limit` /
+`write_lessons`，P04/P06 只使用决策和归因字段。
 
 P02 也可以换成跨 task 的 trigger-族聚类写作（只影响 `add` 的写作落地，
 P04/P06 仍走 `revise.py`）：
@@ -360,6 +360,11 @@ live 相位）；live 方法的整理 `merge_check` 写 `none`（live 序列没�
 v4 → v5 的身份变化：新增全局 `use_weak_profile`，升级时取 `false`——画像
 文本原样保留，但写作、改写、live 归因与 live 修订的提示词收到中性段落；
 要复现 v4 的画像行为必须显式写 `true`。
+
+v5 → v6 的身份变化：学习相位的 `evidence` / `attribution` / `decision`
+三个槽位合并为 `review`。`K` / `retry_limit` / `write_lessons` 来自原
+`evidence`；`before_steps` / `after_steps` 来自原 `attribution`；
+`decision` / `unread_in_won_group` 来自原 `decision`。未写出的字段取原有默认值。
 
 ### 2.6 方法组合的计数
 
@@ -557,7 +562,7 @@ E1 内部的 runner：
 | — | unit 汇总 | `summarize_unit` / `summarize_phase` / `task_metrics`：由 AnswerSheet + UnitSpec 纯函数算出 UnitSummary；决策/审计/test 共用 | `composites/unit_summary.py` |
 | — | 相位报告 envelope | 读取 `unit_specs.jsonl` + `answer_sheets/` + `coverage.jsonl`，现算 UnitSummary；不是持久 report card | `composites/phase_report.py` |
 | — | unit/sheet 身份 | `make_unit_id` / `canonical_skills` / gap sheet id | `composites/unit_ids.py` |
-| — | 决策 | `decide_task_list`（P02 baseline-gap / exam）、`decision_strategies`（P04/P06 的 `task_level` / `skill_level`）、动作表、cause 词表、`final_test_delta`（test 相位汇总）、规则 1 的单元复用连接 | `composites/decision.py`、`decision_strategies.py` |
+| — | 审查 | `methods/review`：`decide_task_list`（P02 baseline-gap / exam）、`strategies`（P04/P06 的 `task_level` / `skill_level` 与 exam 多版本合并）、归因窗口、P02 切段与 add 证据、exam 证据 | `methods/review/`；动作表、cause 词表、`final_test_delta` 仍在 `composites/decision.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
 | — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
@@ -610,7 +615,7 @@ E1 内部的 runner：
 | exam | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
 | live | 交付 `group_by_task` 或 `folder_by_task`、E1 × K1（整组或逐任务文件夹、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用；folder 交付的读取事实由 AnswerSheet 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 按需提取 |
 | test | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
-| learn | P02：`decision.decide_task_list` 的 baseline-gap add → `learn_add`（K2 + D6 + G2 + G3）；P04/P06：`decision_strategies`（`task_level` / `skill_level`）→ `learn_apply`（按 task 一次归因、逐 skill 写作/keep/delete）；exam：`learn_exam` 的多版本 merge + 考卷证据；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
+| learn | 统一走 `methods/review`：P02 baseline-gap → add 证据 + `learn_add`（G2/G3）；P04/P06 → per-skill 决策 + 归因证据 + `learn_apply`；exam → 多版本 merge + 考卷证据 + `learn_exam`；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
 
 **复用最多的几块**：
 
@@ -957,7 +962,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   终态、规则 1 复用表）推导，不读本 pass 的计划清单，重放落在一次跑完
   的同一些字节上；
 - **归因与修订不在这个相位**：没提升的组由下一个学习相位按
-  `decision.name` 先产出 per-skill 的 keep / revise / delete；`learn_apply`
+  `review.decision` 先产出 per-skill 的 keep / revise / delete；`review`
   按 `skill_use` 找到触发点：folder 按每个 cat 调用切前后窗口，group/whole
   bank 每个 attempt 只取开头和结尾窗口；同一窗口内多条 skill 合并一次
   `SKILL_ATTEMPT_ATTRIBUTION`，然后逐 skill 写 `SKILL_ATTEMPT_REVISION`。
@@ -1051,7 +1056,7 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 剩余检验次数由序列位置算出。紧跟摸底相位的第一个学习相位走
 **摸底缺口路径**（`decision.decide_task_list`）：本轮报告为空、baseline
 相位报告当对照，对每个弱模型做不好且还没有技能的训练任务发一条 add 行。
-后续 P04/P06 走 `decision_strategies` 的 `task_level` 或 `skill_level`，
+后续 P04/P06 走 `methods/review/strategies.py` 的 `task_level` 或 `skill_level`，
 统一产出 per-skill 的 keep / revise / delete。
 
 **多版本行合并（仅 exam 路径）**：作答仓共享，一条技能可能带好几行报告行
@@ -1071,19 +1076,19 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
   结尾窗口，同一窗口内多条 skill 合并一次归因，再逐 skill 整条重写
   （记 `revised`）。改写没产出新版本 = 没变化（版本不动，记 unchanged，
   下次学习再试）；
-- **add**：把该任务的强模型成功段提炼成新的待定技能；evidence 的
+- **add**：把该任务的强模型成功段提炼成新的待定技能；review 的
   `write_lessons` 开着（默认）时，弱模型失败段也用诊断写法写成技能，
   结构与提炼产物相同（一段一技能，`make_skill_id(subtask_id)` 编号）。
 
 **切段在相位世界里的位置**（关键设计，2026-10-16 Wave 3-S）：
 **切段发生在学习相位内部、add 行执行的时候**。流程世界没有独立的切段
-相位：`learn_add` 的 add 行先调 evidence 族的 segment 方法
-（`methods/evidence/segmentation.py`），它从 **run 级轨迹仓**（正是摸底
+相位：`learn_add` 的 add 行先调 review 的 segment 方法
+（`methods/review/segmentation.py`），它从 **run 级轨迹仓**（正是摸底
 相位两臂的裸跑轨迹）按 `trajectory_select` 具名规则逐任务挑轨迹、
 **切其中的强角色轨迹，`write_lessons` 开着时连弱角色轨迹一起切**
 （关掉时弱臂段落没有消费者，弱臂的钱不花），逐条交给
 K2（确定 ID、逐单元落盘、按存量跳过、D7 校验、重切预算、耗尽审计全部
-沿用 K2 的既有机制）。参数（`K`、`retry_limit`、`write_lessons`）来自学习相位的 evidence
+沿用 K2 的既有机制）。参数（`K`、`retry_limit`、`write_lessons`）来自学习相位的 `review`
 槽位。0 步轨迹在规则之前排除并写一次性的 "empty trajectory" 审计行。
 切不出可学材料（没有轨迹、全被段筛选规则筛掉、或 K2 重切耗尽——本 run
 内终态）时记 `skipped_no_material` 回执并继续，**不抛错**（抛错会让续跑

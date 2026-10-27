@@ -89,7 +89,7 @@ src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     ids.py                确定性 ID 规则
-    config.py             实验配置结构（schema v5：sequence + phases + use_weak_profile 开关）、模型角色表
+    config.py             实验配置结构（schema v6：sequence + phases + review 槽位 + use_weak_profile 开关）、模型角色表
     config_upgrade.py     v2→v3→v4→v5 升级纯函数（config.py 重新导出）
     contracts.py          交付与决策的冻结交接形状（执行单元行及其列表别名 /
                           任务清单行）；执行→验收的 trial 级记录见
@@ -171,9 +171,6 @@ src/expedistill/
     decision.py           决策规则（M3 起的纯函数）：P02 baseline-gap 与
                           exam 的统一入口 decide_task_list、4.2/4.3 规则表；
                           discard_reason 词表与 strict 短路规则集的定义处
-    decision_strategies.py P04/P06 的 per-skill 决策：task_level（组动作展开）
-                          与 skill_level（读取事实 → revise/delete；delivery
-                          失败或无证据时 keep）
     unit_ids.py           unit id / canonical injected skills / gap sheet id
                           的纯身份规则
     answer_sheets.py      trial 级 ExecutionRecord 构建、coverage 与 execution
@@ -210,32 +207,25 @@ src/expedistill/
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
-    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（R8 七族：
-                          delivery / execution / evidence / author /
-                          attribution / decision / curation）
+    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（五族：
+                          delivery / execution / review / author / curation）
     execution/            execution 族参数契约：RealExecutionParams /
                           ExamExecutionParams / RealFolderExecutionParams
                           （无驱动，相位驱动直接消费）+ README.md（模块说明与参数表）
-    evidence/             evidence 族：SegmentationParams +
-                          采集器 add_path（加分路径）、exam_sheet（考卷答卷材料）
-                          + segmentation.py
-                          （segment 方法驱动：add 行的 K2 切段接线，切强角色
-                          轨迹，write_lessons 开着时连弱角色一起切）+ README.md
-                          （模块说明与参数表）+ package.py
-                          （证据包形状的兼容 re-export；定义在
-                          composites/evidence_package.py）
+    review/               review 族：ReviewParams + `driver.py`（决策后只给
+                          revise/add 行收集证据）+ `strategies.py`（P04/P06 的
+                          task_level / skill_level 与 exam 多版本合并）+
+                          `attribution.py`（live 窗口证据）+
+                          `add_evidence.py` / `segmentation.py`（P02 add 证据）+
+                          `exam_evidence.py`（exam 答卷证据）+
+                          `contracts.py`（ReviewContext / ReviewItem /
+                          ReviewResult）+ README.md
     author/               author 族：AuthoringParams + write 驱动（P02 写新 skill）
                           + cluster_by_trigger.py（P02 跨 task 的 trigger 族
                           聚类写作，ClusterAuthoringParams）
                           + revise.py（P04/P06 每 skill 一次写作，读
                           SkillAttemptEvidence；不做 keep/delete 策略）+
                           README.md
-    attribution/          attribution 族：AttributionParams + skill_attempts
-                          驱动（folder 按 cat 调用点、group/whole bank 按
-                          attempt 开头/结尾窗口；一个窗口一次调用，产出
-                          SkillAttemptEvidence；不做动作决策）
-    decision/             decision 族：TaskLevelParams / SkillLevelParams
-                          （P04/P06 的 task_level / skill_level 参数契约）
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
                           成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
@@ -359,7 +349,7 @@ configs/
   experiments/   每个实验一份配置：benchmark、模式（split / full）、模型角色表、
                  采样次数、相位序列（sequence + phases，方法参数全部在相位
                  定义里）、无效重派预算、具名规则的名字；
-                 schema_version 5（v1/v2/v3/v4 文件是冻结的历史记录，转换走
+                 schema_version 6（v1/v2/v3/v4/v5 文件是冻结的历史记录，转换走
                  scripts/run/convert_v3_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
   seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，

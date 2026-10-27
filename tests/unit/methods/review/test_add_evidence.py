@@ -15,9 +15,9 @@ from expedistill.core.ids import (
 )
 from expedistill.core.models import Step, Subtask, Trajectory
 from expedistill.infra.store import Store
-from expedistill.methods.evidence.package import ensure_fact_only
+from expedistill.composites.evidence_package import ensure_fact_only
 
-from expedistill.methods.evidence.add_path import (
+from expedistill.methods.review.add_evidence import (
     collect_add_evidence,
     segment_position,
 )

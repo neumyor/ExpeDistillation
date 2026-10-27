@@ -301,7 +301,7 @@ def test_folder_unit_ids_join_the_reuse_plumbing():
 
 _LEARN = {
     "kind": "learn",
-    "evidence": {"name": "segment", "K": 5, "retry_limit": 2},
+    "review": {"name": "review", "K": 5, "retry_limit": 2},
     "author": {"name": "distill_diagnose"},
     "curate": {"name": "none", "token_budget": 4096},
 }

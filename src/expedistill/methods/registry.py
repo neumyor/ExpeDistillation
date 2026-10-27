@@ -2,11 +2,11 @@
 
 Plain data on purpose (the plan's "explicit list, no auto-discovery"
 discipline). R8 re-keyed the table to the five CONTENT families --
-``delivery``, ``execution``, ``evidence``, ``author``, ``curation`` --
+``delivery``, ``execution``, ``review``, ``author``, ``curation`` --
 and retired the four v3 slot keys (segmentation.llm,
 authoring.distill_diagnose, acceptance.exam, acceptance.live_run): the
 v4 config declares phases, not slots, and a learn PHASE is never a
-registry entry -- its content methods (evidence/author/curation) are.
+registry entry -- its content methods (review/author/curation) are.
 Resolving a family imports only what that resolution needs:
 
 * ``resolve_params`` imports the family's light params package (never a
@@ -30,7 +30,7 @@ name asked for by the config that is not in the table is a ConfigError
 listing what the family offers -- same contract as the named-rule
 registries (blocks/rules.py).
 
-Driver-less entries (execution, evidence, attribution, decision) are not a gap: the
+Driver-less entries (execution) are not a gap: the
 phase driver consumes their params directly (there is no uniform driver
 surface to dispatch to, and inventing one ahead of the first consumer
 is the over-design the repair plan forbids). Cross-constraint checks
@@ -48,12 +48,9 @@ from expedistill.methods.params import build_params
 
 __all__ = ["FAMILIES", "resolve", "resolve_fixed", "resolve_params"]
 
-#: The seven method families (R8, the P04 decision split, and the
-#: attribution window contract). Execute phases name delivery, execution
-#: and decision; learn phases name evidence, author, attribution and
-#: curation.
-FAMILIES = ("delivery", "execution", "evidence", "author", "attribution",
-            "decision", "curation")
+#: The five method families. Execute phases name delivery and execution;
+#: learn phases name review, author and curation.
+FAMILIES = ("delivery", "execution", "review", "author", "curation")
 
 #: One table entry: the driver module (None while the phase driver
 #: consumes the params directly), the light module holding the params
@@ -108,9 +105,6 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("execution", "real_folder"):
         _Entry(None, "expedistill.methods.execution",
                "RealFolderExecutionParams"),
-    ("evidence", "segment"):
-        _Entry(None, "expedistill.methods.evidence",
-               "SegmentationParams"),
     ("author", "distill_diagnose"):
         _Entry("expedistill.methods.author.write",
                "expedistill.methods.author", "AuthoringParams"),
@@ -120,15 +114,12 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("author", "cluster_by_trigger"):
         _Entry("expedistill.methods.author.cluster_by_trigger",
                "expedistill.methods.author", "ClusterAuthoringParams"),
-    # P04/P06 attribution windows: driver-less, the learn driver consumes
-    # the params directly.
-    ("attribution", "skill_attempts"):
-        _Entry(None, "expedistill.methods.attribution",
-               "AttributionParams"),
-    ("decision", "task_level"):
-        _Entry(None, "expedistill.methods.decision", "TaskLevelParams"),
-    ("decision", "skill_level"):
-        _Entry(None, "expedistill.methods.decision", "SkillLevelParams"),
+    # The learn phase's decision + evidence driver.  It replaces the
+    # former evidence / attribution / decision slots and owns the
+    # baseline-gap, live and exam review strategies.
+    ("review", "review"):
+        _Entry("expedistill.methods.review.driver",
+               "expedistill.methods.review", "ReviewParams"),
     ("curation", "agentbrew"):
         _Entry("expedistill.methods.curation.agentbrew",
                "expedistill.methods.curation", "AgentBrewParams"),
@@ -208,7 +199,7 @@ def resolve_params(family: str, raw: Mapping[str, Any]) -> Any:
 def resolve(family: str, raw: Mapping[str, Any]) -> Tuple[Any, Any]:
     """(driver module, params) for the family; imports the driver now.
 
-    For a driver-less family (execution, evidence, attribution, decision)
+    For a driver-less family (execution)
     this is a construction bug in the caller: the phase driver owns those params
     and must not ask for a driver that does not exist.
     """

@@ -11,7 +11,7 @@ expected set, the round skip set, the frozen injection-audit row, and the
 survivors-and-block derivation that round 1 and the group_by_task
 delivery inject. No judgment, no attribution, no skill-status write:
 judgment lives in composites/live_verdicts.py; attribution and revision
-are the phase world's evidence/author families (methods/evidence,
+are the phase world's review/author families (methods/review,
 methods/author).
 
 State is derived from disk only (decision section 2.4 -- no new state

@@ -57,7 +57,7 @@ PHASES = {
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
-          "evidence": {"name": "segment", "K": 2},
+          "review": {"name": "review", "K": 2},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "none", "token_budget": 4096}},
     "live": {"kind": "execute", "role": "live", "tasks": "train",

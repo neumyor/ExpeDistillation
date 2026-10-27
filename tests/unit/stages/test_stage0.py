@@ -136,7 +136,7 @@ PHASES = {
           "execution": {"name": "real",
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
-          "evidence": {"name": "segment", "K": 4},
+          "review": {"name": "review", "K": 4},
           "author": {"name": "distill_diagnose"},
           "curate": {"name": "agentbrew", "token_budget": 4096,
                      "rounds": 3, "merge_check": "exam"}},
@@ -212,8 +212,8 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert manifest["prompt_digests"]["SEGMENT"]
     # The frozen config copy carries the digests (core.config contract).
     assert manifest["config"]["prompts_digests"] == manifest["prompt_digests"]
-    assert (manifest["config"]["phases"]["learn"]["evidence"]["K"]
-            == config.phases["learn"].evidence["K"])
+    assert (manifest["config"]["phases"]["learn"]["review"]["K"]
+            == config.phases["learn"].review["K"])
     # Explicit-list configs load exactly the union of the lists (reserved
     # included -- held-back tasks are still loaded).
     assert plugin.load_specs == [["t1", "t2", "t3"]]
@@ -333,10 +333,10 @@ def test_changed_config_on_frozen_run_raises(monkeypatch, tmp_path):
     stage0_freeze.run(ctx)
 
     phases = copy.deepcopy(PHASES)
-    phases["learn"]["evidence"]["K"] = 9
+    phases["learn"]["review"]["K"] = 9
     changed = make_ctx(tmp_path, make_config(phases=phases))
     with pytest.raises(FrozenProtocolChanged,
-                       match=r"config\.phases\.learn\.evidence\.K"):
+                       match=r"config\.phases\.learn\.review\.K"):
         stage0_freeze.run(changed)
 
 

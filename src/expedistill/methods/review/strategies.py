@@ -18,7 +18,7 @@ Both return ``TaskListRow`` rows with ``target_kind='skill'``. The caller
 writes them to the phase's ``task_list.jsonl``.
 """
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
 from expedistill.core import ids
@@ -44,6 +44,7 @@ __all__ = [
     "REASON_WON_GROUP_UNREAD",
     "UNREAD_POLICIES",
     "decide",
+    "merge_exam_rows",
 ]
 
 TASK_LEVEL = "task_level"
@@ -61,6 +62,52 @@ REASON_UNVERIFIED_GROUP = "unverified_group"
 REASON_UNVERIFIED_STATUS = "unverified_status"
 
 UNREAD_POLICIES = ("delete", "keep")
+
+
+def merge_exam_rows(rows: Sequence[TaskListRow],
+                    report_rows: Sequence[UnitSummary]
+                    ) -> Tuple[List[TaskListRow], List[str]]:
+    """Collapse the exam report's multi-version rows to one per skill."""
+    by_unit = {row.unit_id: row for row in report_rows}
+    best: Dict[str, Tuple[int, str]] = {}
+    superseded: List[str] = []
+    for row in rows:
+        if row.target_kind != "skill":
+            continue
+        report_row = by_unit.get(row.basis_unit)
+        if report_row is None:
+            raise CodeBugError(
+                f"task-list row for {row.target_id!r} names basis unit "
+                f"{row.basis_unit!r}, which the current report does not "
+                "carry: the decision and the merge disagree")
+        version = _injected_version(report_row)
+        current = best.get(row.target_id)
+        if current is None:
+            best[row.target_id] = (version, row.basis_unit)
+        elif version > current[0]:
+            superseded.append(current[1])
+            best[row.target_id] = (version, row.basis_unit)
+        elif version < current[0]:
+            superseded.append(row.basis_unit)
+        else:
+            raise CodeBugError(
+                f"two task-list rows for skill {row.target_id!r} share "
+                f"version {version} ({current[1]!r} and {row.basis_unit!r}"
+                "); the report carries one row per (skill, version)")
+    dropped = set(superseded)
+    effective = [row for row in rows if row.basis_unit not in dropped]
+    return effective, superseded
+
+
+def _injected_version(summary: UnitSummary) -> int:
+    injected = summary.injected_skills
+    if (not isinstance(injected, list) or len(injected) != 1
+            or not isinstance(injected[0], dict)
+            or not isinstance(injected[0].get("version"), int)):
+        raise CodeBugError(
+            f"unit summary {summary.unit_id!r} injects {injected!r}; an "
+            "exam-phase unit injects exactly one {skill_id, version}")
+    return injected[0]["version"]
 
 
 def decide(*, name: str,

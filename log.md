@@ -1454,3 +1454,30 @@ future、3 个 worker 在 _poll、29 个 worker 空闲且队列已空——即�
 一段话摘要：按用户的 TB21 新协议准备正式实验。第一，`scripts/run/freeze_tb_split.py` 支持两种划分协议：`agentbrew25`（当前协议，`data/splits/tb21_agentbrew25/` 的 25 个 evolve 映射为 train、64 个 test，无 validation）和 `legacy`（41/28/20，旧 run 的冻结记录），逐元素核对配置的划分列表、键集合与并集 89。第二，远端 Terminus 的上下文上限此前固定为 runner 默认的 131072；现在 `ExperimentConfig.max_input_tokens_for(role)` 读 `token_budgets.roles.<role>.max_input_tokens`，`cli._build_handles` 写进 ModelHandle，TB 插件经 `TBENCH_MAX_INPUT_TOKENS` 传给 runner，生成 YAML 的 `model_info.max_input_tokens`，并记入启动条件与 meta；用户决定弱模型（`executor_weak`、`answerer`）256K，其余角色 512K。第三，新增三份配置：`tb21_split_folder_cluster_trigger_agentbrew25_20261026.yaml`（D L B L B L C，P02 用 `cluster_by_trigger`，P04/P06 用 `skill_level`，P07 对照外部 campaign），已在 `runs/tb21_agentbrew25_cluster_20261026_2122/` 启动，P01–P03 完成，P04 只写出初始任务清单后暂停；`tb21_p02bank_p07_20261027.yaml`（只跑 P07，库取上述 run 的 P02 工件并改为 accepted，run `runs/tb21_p02bank_p07_20261027_1108/`）；`tb21_ideal6_p07_20261026.yaml`（六张手写卡的 P07，run 已停止，见上一条）。验证：全量 2289 passed、4 deselected；ruff E9/F、`git diff --check` 通过。
 
 工件：`scripts/run/freeze_tb_split.py`、`src/expedistill/core/config.py`、`src/expedistill/cli.py`、`src/expedistill/benchmarks/tb/plugin.py`、`tests/unit/benchmarks/test_tb_plugin.py`、`tests/unit/test_cli_run_loop.py`、`configs/experiments/tb21_split_folder_cluster_trigger_agentbrew25_20261026.yaml`、`configs/experiments/tb21_p02bank_p07_20261027.yaml`、`configs/experiments/tb21_ideal6_p07_20261026.yaml`、run `runs/tb21_agentbrew25_cluster_20261026_2122/`、run `runs/tb21_p02bank_p07_20261027_1108/`、`log.md`
+
+## 2026-10-27 17:36 — 学习相位的决策与归因合并为 review 方法
+
+一段话摘要：把 P02/P04/P06 三个学习相位的 `evidence` / `attribution` / `decision`
+槽位合并为 `methods/review` 一个方法族，配置 schema 升到 6。`ReviewParams`
+承载决策策略、未读但组赢策略、归因窗口和 P02 切段预算；`ReviewContext` 承载
+相位类型、剩余检查次数、轮次、交付方式和规则名；`ReviewItem` 把
+`TaskListRow` 与 `EvidencePackage` / `SkillAttemptEvidence` 配成一对，
+`ReviewResult` 额外携带基础设施失败、模型输出失败和 exam 被取代行。输入复用
+`PhaseReport`（AnswerSheet + UnitSummary）和 `Skill` 列表，不再单独传 usage
+行、技能状态和 better 映射。`phase_learn` 只负责读取当前/对照报告、库快照和
+上下文，然后调用 review；`learn_add`、`learn_add_cluster`、`learn_apply`、
+`learn_exam` 只负责落地。P02 走 baseline add 策略，P04/P06 走 live 的
+`skill_level` / `task_level`，exam 走多版本合并；`keep` / `delete` 不调用
+归因模型，已经完成改写的目标由 `learn_ledger.revision_skip_targets` 过滤。
+旧 v5 配置由 `upgrade_v5_config` 转换为 review 槽位；三份当前 TB21 配置已改为
+schema 6。验证：全量 2292 passed、4 deselected；golden 10 passed；ruff E9/F、
+layering、`git diff --check` 通过。未提交、未推送，未读写正在运行的 run。
+
+工件：`src/expedistill/methods/review/`、`src/expedistill/core/config.py`、
+`src/expedistill/core/config_upgrade.py`、`src/expedistill/stages/{phase_learn,learn_add,learn_add_cluster,learn_apply,learn_exam,stage0_freeze,assemble_reuse,learn_ledger}.py`、
+`src/expedistill/methods/registry.py`、`scripts/run/{build_local_live_config,convert_v3_configs}.py`、
+`scripts/audit/audit_live_run.py`、`configs/experiments/tb21_split_folder_cluster_trigger_agentbrew25_20261026.yaml`、
+`configs/experiments/tb21_p02bank_p07_20261027.yaml`、`configs/experiments/tb21_ideal6_p07_20261026.yaml`、
+`tests/unit/`、`tests/golden/harness.py`、`tests/fixtures/golden/`、`README.md`、
+`AGENTS.md`、`src/expedistill/methods/review/README.md`、
+`docs/decisions/review_module_20261027.md`、`docs/runbooks/local_benchmark_live_run_20261020.md`、`docs/runbooks/live_run_acceptance_runbook_20261014.md`、`log.md`

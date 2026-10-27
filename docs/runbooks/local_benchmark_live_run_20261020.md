@@ -45,7 +45,7 @@ ALFWorld 需要：
 ```
 
 脚本从 SkillOpt 冻结清单读取划分（SearchQA 400 训练 / 1400 测试，
-ALFWorld 39 训练 / 134 测试），生成 schema v5 配置，并通过真实插件
+ALFWorld 39 训练 / 134 测试），生成 schema v6 配置，并通过真实插件
 加载全部任务做校验。校验现有文件是否与生成结果一致：
 
 ```bash

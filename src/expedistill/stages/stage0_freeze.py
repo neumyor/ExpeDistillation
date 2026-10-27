@@ -325,10 +325,8 @@ def _resolve_phase_methods(config: Any) -> None:
                     spec.compare.external.path,
                     spec.compare.external.sha256)
         elif isinstance(spec, LearnPhaseSpec):
-            resolve_params("evidence", spec.evidence)
+            resolve_params("review", spec.review)
             resolve_params("author", spec.author)
-            resolve_params("attribution", spec.attribution)
-            resolve_params("decision", spec.decision)
             resolve_params("curation", spec.curate)
 
 

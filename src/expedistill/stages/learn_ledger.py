@@ -36,6 +36,7 @@ __all__ = [
     "outcome_skills",
     "receipted_skills",
     "revision_rows",
+    "revision_skip_targets",
     "rows_of",
     "write_revision_plan",
     "write_task_list",
@@ -144,6 +145,39 @@ def revision_rows(phase: Any, row: TaskListRow,
     for record in rows_of(phase_dir / REVISIONS_NAME, phase.label,
                           row.target_id):
         out.setdefault(record["skill_id"], record["from_version"])
+    return out
+
+
+def revision_skip_targets(store: Store, phase: Any,
+                          rows: Sequence[TaskListRow], phase_dir) -> Set[str]:
+    """Targets whose revision is already settled in this phase.
+
+    A row whose skill already carries the version this phase's revision
+    plan records, or whose receipt is present, needs no new evidence.
+    """
+    out: Set[str] = set()
+    path = phase_dir / OUTCOMES_NAME
+    receipts = ([record for record in read_jsonl(path)
+                 if record.get("phase_label") == phase.label]
+                if path.exists() else [])
+    for row in rows:
+        if getattr(row, "action", None) != "revise":
+            continue
+        if not store.exists("skills", row.target_id):
+            continue
+        skill = store.load("skills", row.target_id, Skill)
+        if skill.status not in ACTABLE_STATUSES:
+            out.add(row.target_id)
+            continue
+        if any(record.get("target_id") == row.target_id
+               and record.get("skill_id") == skill.skill_id
+               for record in receipts):
+            out.add(row.target_id)
+            continue
+        revisions = revision_rows(phase, row, phase_dir)
+        from_version = revisions.get(skill.skill_id)
+        if from_version is not None and skill.version == from_version + 1:
+            out.add(row.target_id)
     return out
 
 

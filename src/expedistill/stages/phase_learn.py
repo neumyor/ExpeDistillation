@@ -20,7 +20,7 @@ is one learn phase of the frozen sequence; the per-target landing lives in
    version's summary decides) and the landing semantics are documented on
    ``learn_add / learn_apply / learn_exam``; the answer-sheet evidence of an exam
    revise comes from the evidence family's collector
-   (``methods.evidence.exam_sheet``).
+   (``methods.review.exam_evidence``).
 3. **Curation** (section 2.7): every learn phase ends with its own bank
    artifact (R7). The sequence's LAST learn phase runs the configured
    curation (``methods.curation.phase_bank.produce`` -- agentbrew with
@@ -60,10 +60,8 @@ scripts and Wave 4's golden regeneration align to that shape), and
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from expedistill.composites import decision
-from expedistill.composites import decision_strategies
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import phase_report
-from expedistill.composites import skill_usage
 from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
@@ -81,11 +79,14 @@ from expedistill.core.config import (
     PhaseResult,
     phase_label,
 )
-from expedistill.core.answer_sheet import UnitSummary
+from expedistill.core.answer_sheet import PhaseReport
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import read_json, read_jsonl, write_json
+from expedistill.methods import resolve_params
 from expedistill.methods.curation import phase_bank as curation_phase_bank
+from expedistill.methods.review.contracts import ReviewContext
+from expedistill.methods.review.driver import review
 from expedistill.stages import learn_add, learn_apply, learn_exam, learn_ledger
 
 __all__ = ["run"]
@@ -115,69 +116,67 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         # .jsonl and the bank artifact would be re-derived from the
         # CURRENT store (a later learn phase's accepted skills would
         # leak into this one's snapshot). The summary with its "bank"
-        # entry is the phase's commit point -- it is written last,
-        # after the artifact -- so it is the completion signal.
+        # entry is the phase's commit point -- it is written last, after
+        # the artifact -- so it is the completion signal.
         return PhaseResult(label=phase.label, summary=finished)
+
     names, specs = _sequence(config, phase)
     phase_dir.mkdir(parents=True, exist_ok=True)
-
-    (current_kind, current_rows, control_kind, control_rows,
-     compare_rule) = _report_inputs(ctx, names, specs, phase.index)
+    current_kind, current, control, compare_rule = _review_reports(
+        ctx, names, specs, phase.index)
     current_pos = _current_execute_position(names, specs, phase.index)
     current_spec = specs[names[current_pos]]
     bank = _previous_bank(ctx, names, specs, phase.index)
     checks_left = decision.remaining_checks(
         [specs[name].role for name in names], phase.index)
     current_round = _live_round(names, specs, current_pos)
+    if current_kind == PHASE_ROLE_LIVE:
+        current.summary["better_by_task"] = _group_better_by_task(
+            ctx, current_round)
+
+    review_params = resolve_params("review", phase.spec.review)
+    context = ReviewContext(
+        phase_kind=current_kind or PHASE_ROLE_BASELINE,
+        phase_label=phase.label,
+        checks_left=checks_left,
+        round=current_round,
+        delivery=current_spec.delivery.get("name", ""),
+        compare_rule=compare_rule,
+        n_attempts_weak=config.n_attempts_weak,
+        benchmark=config.benchmark,
+        weak_profile=config.effective_weak_profile(),
+        task_select_rule=config.rules["task_select"],
+        trajectory_select=config.rules["trajectory_select"],
+        segment_select=config.rules["segment_select"],
+        workers=max(1, int(getattr(ctx.run_settings, "workers", 1) or 1)),
+    )
+    result = review(
+        current=current,
+        control=control,
+        bank=bank,
+        context=context,
+        params=review_params,
+        store=ctx.store,
+        handles=ctx.handles,
+        usage=ctx.usage,
+        run_dir=ctx.run_dir,
+        skip_evidence=lambda rows: learn_ledger.revision_skip_targets(
+            ctx.store, phase, rows, phase_dir))
+    effective = [item.row for item in result.items]
+    superseded = result.superseded_units
+    skip_targets = result.failed_targets | result.model_errors
     if current_kind is None:
-        # P02: the baseline-gap add path stays exactly as it was.
-        task_rows = decision.decide_task_list(
-            current_kind=current_kind, current_report=current_rows,
-            control_kind=control_kind, control_report=control_rows,
-            bank=bank, checks_left=checks_left, compare_rule=compare_rule,
-            n_attempts_weak=config.n_attempts_weak,
-            task_select_rule=config.rules["task_select"])
-        effective, superseded = task_rows, []
-        infra_failed = learn_add.execute_add_rows(ctx, phase, effective)
+        infra_failed = learn_add.execute_add_rows(
+            ctx, phase, result.items, skip_targets=skip_targets)
     elif current_kind == PHASE_ROLE_EXAM:
-        # Exam path: multi-version rows still need the merge.
-        task_rows = decision.decide_task_list(
-            current_kind=current_kind, current_report=current_rows,
-            control_kind=control_kind, control_report=control_rows,
-            bank=bank, checks_left=checks_left, compare_rule=compare_rule,
-            n_attempts_weak=config.n_attempts_weak,
-            task_select_rule=config.rules["task_select"])
-        effective, superseded = learn_exam.merge_task_list(
-            task_rows, list(current_rows or ()))
         infra_failed = learn_exam.execute_exam_rows(
-            ctx, phase, effective, current_rows, current_spec,
-            current_round, superseded)
+            ctx, phase, result.items, current.units, superseded,
+            skip_targets=skip_targets)
     else:
-        # P04/P06: one per-skill decision row per measured skill.
-        current_sheets = _read_sheets(ctx, names, specs, current_pos)
-        usage_by_task = _usage_by_task_from_sheets(
-            current_sheets, current_round)
-        task_rows = decision_strategies.decide(
-            name=phase.spec.decision.get("name", "task_level"),
-            current_kind=current_kind, current_report=current_rows,
-            control_kind=control_kind, control_report=control_rows,
-            bank=bank, checks_left=checks_left, compare_rule=compare_rule,
-            n_attempts_weak=config.n_attempts_weak,
-            task_select_rule=config.rules["task_select"],
-            delivery=current_spec.delivery.get("name", ""),
-            usage_by_task=usage_by_task,
-            group_better_by_task=_group_better_by_task(
-                ctx, current_round),
-            skill_status_by_id=_skill_statuses(ctx, current_rows),
-            unread_in_won_group=phase.spec.decision.get(
-                "unread_in_won_group", "delete"))
-        effective, superseded = task_rows, []
         infra_failed = learn_apply.execute_decision_rows(
-            ctx, phase, effective, current_rows, current_spec,
-            current_round,
-            current_sheets=current_sheets,
-            usage_by_task=usage_by_task,
-            delivery=current_spec.delivery.get("name", ""))
+            ctx, phase, result.items, current.units,
+            skip_targets=skip_targets)
+    infra_failed |= result.failed_targets
 
     summary = _summary(phase, effective, superseded, phase_dir,
                        current_phase=names[current_pos],
@@ -275,37 +274,33 @@ def _current_execute_position(names: Sequence[str], specs: dict,
         f"{[names[j] for j in range(index)]!r}")
 
 
-def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
-                   index: int) -> Tuple[Optional[str],
-                                        List[UnitSummary],
-                                        Optional[str],
-                                        Optional[List[UnitSummary]],
-                                        str]:
-    """The decision entry's two reports and its compare rule.
+def _review_reports(ctx: Any, names: Sequence[str], specs: dict,
+                    index: int) -> Tuple[Optional[str],
+                                         PhaseReport,
+                                         Optional[PhaseReport],
+                                         str]:
+    """The current and control phase reports for one review.
 
-    * the nearest preceding execute phase is the CURRENT measurement
-      (a baseline there means no acceptance phase has run since: the
-      first-learn baseline-gap path, current report empty, the D report
-      as the control);
-    * an exam/live phase's ``compare`` names the control: an earlier
-      phase's report, or ``fresh_bare`` / no compare -- the phase's own
-      no-injection rows, which the decision entry reads out of the
-      current report itself (control report None).
+    The nearest preceding execute phase is the current measurement.  A
+    baseline there means the first learn phase: the baseline report is
+    the input and there is no separate control.  Otherwise ``compare``
+    names the control phase (or ``fresh_bare``/nothing, which leaves the
+    control empty and lets the decision read the phase's own no-injection
+    rows).
     """
     current_pos = _current_execute_position(names, specs, index)
     name = names[current_pos]
     spec = specs[name]
     if spec.role == PHASE_ROLE_BASELINE:
-        control_rows = _read_report(ctx, names, specs, current_pos)
-        return (None, [], PHASE_ROLE_BASELINE, control_rows,
-                decision.DEFAULT_COMPARE_RULE)
-    current_rows = _read_report(ctx, names, specs, current_pos)
+        baseline = _load_phase_report(ctx, names, specs, current_pos)
+        return (None, baseline, None, decision.DEFAULT_COMPARE_RULE)
+    current = _load_phase_report(ctx, names, specs, current_pos)
     compare = spec.compare
     rule = (compare.rule
             if compare is not None and compare.rule is not None
             else decision.DEFAULT_COMPARE_RULE)
     if compare is None or compare.against == FRESH_BARE:
-        return spec.role, current_rows, None, None, rule
+        return spec.role, current, None, rule
     earlier = [position for position in range(current_pos)
                if names[position] == compare.against]
     if not earlier:
@@ -321,20 +316,13 @@ def _report_inputs(ctx: Any, names: Sequence[str], specs: dict,
             f"{control_spec.role!r}; a control is a baseline phase's "
             "weak bare arm (the config's load-time checklist should "
             "have refused this shape)")
-    control_rows = _read_report(ctx, names, specs, control_pos)
-    return spec.role, current_rows, control_spec.role, control_rows, rule
+    control = _load_phase_report(ctx, names, specs, control_pos)
+    return spec.role, current, control, rule
 
 
-def _read_report(ctx: Any, names: Sequence[str], specs: dict,
-                 position: int) -> List[UnitSummary]:
-    """One execute phase's unit summaries, read off the run's disk.
-
-    Every execute phase writes ``unit_specs.jsonl`` + ``answer_sheets/``
-    + ``coverage.jsonl``; a missing set is an interrupted/incompatible
-    run, not a legacy shape to guess around. Reused units are not
-    measured in this phase, so their carried summaries are appended --
-    rule 1 must not hide a unit the learn phase still has to decide.
-    """
+def _load_phase_report(ctx: Any, names: Sequence[str], specs: dict,
+                       position: int) -> PhaseReport:
+    """One execute phase's trial-level report plus its carried units."""
     name = names[position]
     kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
             PHASE_ROLE_LIVE: "live"}.get(specs[name].role)
@@ -351,9 +339,13 @@ def _read_report(ctx: Any, names: Sequence[str], specs: dict,
             f"phase {name!r} has no trial-level artifacts "
             "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl); "
             "this run predates the answer-sheet protocol")
-    return list(report.units) + phase_report.read_carried_units(phase_dir)
-
-
+    return PhaseReport(
+        phase_kind=kind,
+        learning_usable=True,
+        sheets=list(report.sheets) + _carried_source_sheets(ctx, phase_dir),
+        units=list(report.units) + phase_report.read_carried_units(phase_dir),
+        summary=dict(report.summary),
+        external=report.external)
 def _live_round(names: Sequence[str], specs: dict, position: int) -> int:
     """The round a live phase measured in: its 0-based index among the
     sequence's live phases (the k-th live phase uses round k-1; the
@@ -383,11 +375,27 @@ def _previous_bank(ctx: Any, names: Sequence[str], specs: dict,
     previous = [position for position in range(index)
                 if isinstance(specs[names[position]], LearnPhaseSpec)]
     if not previous:
-        return [Skill.from_dict(row) for row in ctx.store.bank()]
+        return _refresh_skills(ctx, ctx.store.bank())
     position = previous[-1]
     rows = load_phase_bank(ctx.run_dir,
                            phase_label(position, names[position]))
-    return [Skill.from_dict(row) for row in rows]
+    return _refresh_skills(ctx, rows)
+
+
+def _refresh_skills(ctx: Any, rows: Sequence[dict]) -> List[Skill]:
+    """Read each bank row's CURRENT store object when one exists.
+
+    A phase bank stores a snapshot from the moment the phase ended; the
+    live phase's finalize_group later flips pending winners to accepted.
+    The review decision must see the current status, not the snapshot.
+    """
+    out: List[Skill] = []
+    for row in rows:
+        skill = Skill.from_dict(row)
+        if ctx.store.exists("skills", skill.skill_id):
+            skill = ctx.store.load("skills", skill.skill_id, Skill)
+        out.append(skill)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -442,31 +450,6 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     }
 
 
-def _read_sheets(ctx: Any, names: Sequence[str], specs: dict,
-                 position: int) -> List[Any]:
-    """The execute phase's trial-level AnswerSheets.
-
-    A measured execute phase must have written them; a missing set is an
-    interrupted or incompatible run, the same rule ``_read_report``
-    applies, not an empty measurement.
-    """
-    name = names[position]
-    spec = specs[name]
-    kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
-            PHASE_ROLE_LIVE: "live"}.get(spec.role)
-    if kind is None:
-        return []
-    phase_dir = phase_bank_dir(ctx.run_dir, phase_label(position, name))
-    report = phase_report.read_phase_report(
-        phase_dir, phase_kind=kind, learning_usable=True)
-    if report is None:
-        raise CodeBugError(
-            f"phase {name!r} has no trial-level artifacts "
-            "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl); "
-            "this run predates the answer-sheet protocol")
-    return list(report.sheets) + _carried_source_sheets(ctx, phase_dir)
-
-
 def _carried_source_sheets(ctx: Any, phase_dir) -> List[Any]:
     """The original sheets behind this phase's reused units.
 
@@ -507,18 +490,6 @@ def _carried_source_sheets(ctx: Any, phase_dir) -> List[Any]:
     return out
 
 
-def _usage_by_task_from_sheets(sheets: Sequence[Any], round_: int
-                               ) -> Dict[str, List[dict]]:
-    """Derive skill-usage rows from the trial-level AnswerSheets."""
-    out: Dict[str, List[dict]] = {}
-    for row in skill_usage.build_usage_rows_from_sheets(
-            sheets, round_=round_):
-        task_id = row.get("task_id")
-        if task_id:
-            out.setdefault(task_id, []).append(row)
-    return out
-
-
 def _group_better_by_task(ctx: Any, round_: int
                           ) -> Dict[str, Optional[bool]]:
     """The live phase's group result for this round: task -> better.
@@ -538,31 +509,6 @@ def _group_better_by_task(ctx: Any, round_: int
         task_id = row.get("task_id")
         if isinstance(task_id, str) and task_id not in out:
             out[task_id] = row.get("better")
-    return out
-
-
-def _skill_statuses(ctx: Any, current_rows: Optional[
-        Sequence[UnitSummary]]) -> Dict[str, str]:
-    """The current store status of every measured skill.
-
-    P03/P05's live ``finalize_group`` is the writer of accepted/pending;
-    this map is the decision's view of that terminal fact. A missing
-    store object is a store/decision disagreement and raises from the
-    load rather than becoming a silent default.
-    """
-    out: Dict[str, str] = {}
-    for row in current_rows or ():
-        refs = row.injected_skills
-        if not isinstance(refs, list):
-            continue
-        for ref in refs:
-            if not isinstance(ref, dict):
-                continue
-            skill_id = ref.get("skill_id")
-            if not isinstance(skill_id, str) or skill_id in out:
-                continue
-            out[skill_id] = ctx.store.load(
-                "skills", skill_id, Skill).status
     return out
 
 

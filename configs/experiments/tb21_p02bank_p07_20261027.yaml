@@ -40,7 +40,7 @@ rules:
   segment_select: strong_success_weak_failed
   task_select: any_weak_failed
   trajectory_select: strong1_weak1
-schema_version: 5
+schema_version: 6
 sequence:
 - test
 split:

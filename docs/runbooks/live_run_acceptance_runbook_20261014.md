@@ -23,7 +23,7 @@ ALFWorld 义务清单；供首个 live_run 实验（候选配置
 | stage-1 弱臂裸跑（基线） | 序列第 0 项的 baseline 相位（D），轨迹与已接受空洞仍在 `stage1_baseline/` 下 |
 | 阶段 4 live_run 模式 | 序列里的 B 相位（live 角色），轮次固定为 {0, 1}：第 k 个 B 相位测第 k-1 轮 |
 | `methods.acceptance` 槽位（n_attempts / improvement / max_injection_tokens） | B 相位的 `execution`（n_attempts、max_injection_tokens）与 `compare`（against: D、rule: improvement 名） |
-| G10 归因 / G11 修订发生在阶段 4 | 发生在 B 相位**之后**的学习相位（L）：找证据（`methods/evidence/live_group`）→ 写作（`methods/author` 的组修订），回执写进该 L 相位目录的 `outcomes.jsonl`（旧 `attributions.jsonl` 已由它接替） |
+| G10 归因 / G11 修订发生在阶段 4 | 发生在 B 相位**之后**的学习相位（L）：找证据（`methods/review/attribution`）→ 写作（`methods/author` 的组修订），回执写进该 L 相位目录的 `outcomes.jsonl`（旧 `attributions.jsonl` 已由它接替） |
 | `stage4_summary.json` 的 live 形状 | B 相位目录的 `phase_summary.json`（逐组明细字段名沿用旧形状） |
 | 重跑"阶段 1"补空洞 | 同一条命令续跑即可：D 相位按磁盘上已有的轨迹跳过、只补缺失单元 |
 | `--until-stage` | `--until-phase N`（N 从 0 数，含义见 README 第六节） |

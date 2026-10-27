@@ -1,7 +1,7 @@
 """Unit tests for scripts/run/build_local_live_config.py.
 
 The script renders the TB21 live-run method for a local benchmark. These
-tests pin the generated shape (schema v5, sequence, phases, split), the
+tests pin the generated shape (schema v6, sequence, phases, split), the
 split extraction's count and duplicate checks, and that the checked-in
 configs load through the real loader.
 """
@@ -85,7 +85,7 @@ def test_render_config_matches_the_live_run_method(tmp_path):
     ids = BUILDER.extract_ids(tmp_path, "searchqa")
     config = yaml.safe_load(BUILDER.render_config("searchqa", ids))
 
-    assert config["schema_version"] == 5
+    assert config["schema_version"] == 6
     assert config["benchmark"] == "searchqa"
     assert config["mode"] == "split"
     assert config["sequence"] == [
@@ -104,9 +104,11 @@ def test_render_config_matches_the_live_run_method(tmp_path):
     phases = config["phases"]
     assert phases["baseline"]["execution"]["arms"] == [
         "executor_strong", "executor_weak"]
-    assert phases["learn"]["evidence"] == {
-        "name": "segment", "K": 5, "retry_limit": 2,
-        "write_lessons": True}
+    assert phases["learn"]["review"] == {
+        "name": "review", "decision": "task_level",
+        "unread_in_won_group": "delete",
+        "before_steps": 10, "after_steps": 10,
+        "K": 5, "retry_limit": 2, "write_lessons": True}
     assert phases["learn"]["curate"]["rounds"] == 3
     assert phases["learn"]["curate"]["grouping_input"] == "full"
     assert phases["learn"]["curate"]["similarity_input"] == "summary"
@@ -138,7 +140,7 @@ def test_generated_config_loads_through_the_real_loader(tmp_path):
     path.write_text(BUILDER.render_config("searchqa", ids), encoding="utf-8")
 
     config = load_config(str(path))
-    assert config.schema_version == 5
+    assert config.schema_version == 6
     assert config.benchmark == "searchqa"
     assert config.sequence == [
         "baseline", "learn", "live", "learn", "live", "learn", "test"]
@@ -174,7 +176,7 @@ def test_checked_in_configs_load():
                  "alfworld_split_live_run_20261020.yaml"):
         config = load_config(
             str(_REPO / "configs" / "experiments" / name))
-        assert config.schema_version == 5
+        assert config.schema_version == 6
         assert config.sequence == [
             "baseline", "learn", "live", "learn", "live", "learn", "test"]
         assert config.use_weak_profile is False

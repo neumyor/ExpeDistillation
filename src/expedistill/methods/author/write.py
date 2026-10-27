@@ -4,7 +4,7 @@ The author module takes what the decision module authorized (a
 TaskListRow) and what the evidence module gathered (evidence
 packages), and produces skill CONTENT: a revision's new text, or a new
 skill distilled from source experiences. The P04/P06 per-skill decision
-lives in ``composites/decision_strategies.py``; this module's
+lives in ``methods/review/strategies.py``; this module's
 ``revise_group`` is the exam-compatible group writer and always revises
 each package. It accepts only exam answer-sheet packages (an exam
 question, the weak answer and the judge reason); the P04/P06 path uses

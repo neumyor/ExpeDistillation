@@ -88,6 +88,7 @@ from expedistill.core.config import (
     upgrade_v2_config,
     upgrade_v3_config,
     upgrade_v4_config,
+    upgrade_v5_config,
 )
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import (
@@ -300,12 +301,12 @@ def _source_config(source_manifest: Mapping[str, Any],
             "frozen config; only a run frozen by stage 0 can be reused")
     version = raw.get("schema_version", 3)
     if not isinstance(version, int) or isinstance(version, bool) \
-            or version not in (2, 3, 4, 5):
+            or version not in (2, 3, 4, 5, 6):
         raise ConfigError(
             f"the source run {source_run} froze config schema v{version!r}; "
-            "only schema v2, v3, v4 and v5 source runs can be reused (the "
-            "older ones chain through upgrade_v2_config, upgrade_v3_config "
-            "and upgrade_v4_config)")
+            "only schema v2 to v6 source runs can be reused (the older "
+            "ones chain through upgrade_v2_config, upgrade_v3_config, "
+            "upgrade_v4_config and upgrade_v5_config)")
     try:
         if version == 2:
             raw = upgrade_v2_config(raw)
@@ -313,11 +314,13 @@ def _source_config(source_manifest: Mapping[str, Any],
             raw = upgrade_v3_config(raw)
         if version in (2, 3, 4):
             raw = upgrade_v4_config(raw)
+        if version in (2, 3, 4, 5):
+            raw = upgrade_v5_config(raw)
         return ExperimentConfig.from_dict(raw), version
     except ValueError as exc:
         raise ConfigError(
             f"the source run {source_run} has a config that cannot be "
-            f"upgraded to schema v5 for the identity walk: {exc}; the "
+            f"upgraded to schema v6 for the identity walk: {exc}; the "
             "source is corrupt or of an unsupported shape") from exc
 
 

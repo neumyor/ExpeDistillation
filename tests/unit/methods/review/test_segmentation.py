@@ -4,7 +4,7 @@ learn-phase call site.
 Two levels, per AGENTS.md section 8 rule 2 (the interrupt-resume test is
 mandatory for anything that lands units):
 
-* the DRIVER (``methods.evidence.segmentation.segment_add_material``)
+* the DRIVER (``methods.review.segmentation.segment_add_material``)
   against K2 with a scripted segmenter: the named trajectory_select
   rule over the task's both-roles set, the strong-only cut, the
   0-step exclusion with its once-only audit records, mid-batch crash ->
@@ -39,7 +39,7 @@ from expedistill.core.answer_sheet import UnitSpec
 from expedistill.core.models import Skill, Step, Subtask, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import json_script, make_fake_handle
-from expedistill.methods.evidence.segmentation import segment_add_material
+from expedistill.methods.review.segmentation import segment_add_material
 from expedistill.stages import learn_ledger, phase_learn
 from expedistill.stages.context import StageContext
 from tests.helpers.plugins import ensure_plugin
@@ -139,7 +139,8 @@ def _baseline_spec():
 
 def _learn_spec(write_lessons=False):
     return LearnPhaseSpec(
-        evidence={"name": "segment", "K": 5, "write_lessons": write_lessons},
+        review={"name": "review", "K": 5,
+                "write_lessons": write_lessons},
         author={"name": "distill_diagnose"},
         curate={"name": "none", "token_budget": BIG})
 
@@ -218,8 +219,8 @@ def _outcomes(run_dir, label):
 
 
 def _params(**overrides):
-    from expedistill.methods.evidence import SegmentationParams
-    return SegmentationParams(**{"K": 5, "retry_limit": 1,
+    from expedistill.methods.review import ReviewParams
+    return ReviewParams(**{"K": 5, "retry_limit": 1,
                                  "write_lessons": False, **overrides})
 
 
@@ -529,8 +530,8 @@ def test_write_lessons_segments_the_weak_trajectories_too(tmp_path):
 
 
 def test_write_lessons_is_on_by_default():
-    from expedistill.methods.evidence import SegmentationParams
-    assert SegmentationParams(K=5).write_lessons is True
+    from expedistill.methods.review import ReviewParams
+    assert ReviewParams(K=5).write_lessons is True
 
 
 def test_an_add_row_with_write_lessons_lands_a_distill_and_a_diagnose_skill(

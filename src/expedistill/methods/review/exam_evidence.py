@@ -25,7 +25,7 @@ from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import CodeBugError
 from expedistill.infra.store import Store
 
-from expedistill.methods.evidence.package import EvidencePackage
+from expedistill.composites.evidence_package import EvidencePackage
 
 __all__ = ["collect_exam_evidence", "injected_version"]
 

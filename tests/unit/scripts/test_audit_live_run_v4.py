@@ -61,7 +61,7 @@ def test_a_v4_manifest_goes_to_the_phase_paths(tmp_path):
     assert "phase-dirs" not in checks  # clean: silent
     # The manifest is the v4 shape (the dispatch really keyed off it).
     config = read_json(run_dir / "manifest.json")["config"]
-    assert config["schema_version"] == 4
+    assert config["schema_version"] == 6
 
 
 def test_a_pre_v4_manifest_keeps_the_legacy_paths(tmp_path):

@@ -2023,7 +2023,8 @@ def _build_fake_v4_run(root: Path) -> Path:
 
     sequence = ["baseline", "learn_seed", "live_1", "learn_mid", "live_2",
                 "learn_final", "test"]
-    learn_spec = {"kind": "learn", "evidence": {"name": "segment", "K": 1},
+    learn_spec = {"kind": "learn",
+                  "review": {"name": "review", "K": 1},
                   "author": {"name": "distill_diagnose"},
                   "curate": {"name": "none"}}
     phases = {
@@ -2052,7 +2053,7 @@ def _build_fake_v4_run(root: Path) -> Path:
     (run_dir / "manifest.json").write_text(json.dumps({
         "benchmark": "tb", "mode": "split",
         "split": {"train": ["t1"], "test": ["tt"], "reserved": []},
-        "config": {"schema_version": 4, "benchmark": "tb", "mode": "split",
+        "config": {"schema_version": 6, "benchmark": "tb", "mode": "split",
                    "sequence": sequence, "phases": phases,
                    "n_attempts_strong": 1, "n_attempts_weak": n_attempts,
                    "models": {"executor_weak": "weak-model",

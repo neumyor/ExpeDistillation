@@ -12,6 +12,7 @@ from expedistill.core.ids import (
 from expedistill.core.models import Skill
 from expedistill.infra.store import read_json, read_jsonl
 from expedistill.methods.author import ClusterAuthoringParams
+from expedistill.methods.review.contracts import ReviewItem
 from expedistill.stages import learn_add, learn_add_cluster
 
 TASK_A = make_task_id("tb", "t1")
@@ -70,9 +71,7 @@ def _ctx(tmp_path, store):
 def _phase():
     return SimpleNamespace(
         label="p02:learn",
-        spec=SimpleNamespace(
-            evidence={"name": "segment", "K": 5, "write_lessons": True},
-            author={"name": "cluster_by_trigger"}))
+        spec=SimpleNamespace(author={"name": "cluster_by_trigger"}))
 
 
 def _row(task_id):
@@ -81,27 +80,14 @@ def _row(task_id):
                        basis_unit="u")
 
 
-def _install(monkeypatch, packages):
-    from expedistill.methods.evidence import add_path
+def _item(task_id, experiences):
+    package = SimpleNamespace(
+        target=task_id, facts=[], segments=[],
+        source_experiences=list(experiences))
+    return ReviewItem(row=_row(task_id), evidence=package)
 
-    monkeypatch.setattr(
-        learn_add_cluster, "resolve_params",
-        lambda family, raw: (
-            SimpleNamespace(write_lessons=True)
-            if family == "evidence" else ClusterAuthoringParams(
-                max_cards_per_prompt=40, max_chars_per_card=800,
-                cluster_retry_limit=2, skill_retry_limit=2)))
-    monkeypatch.setattr(
-        learn_add_cluster, "get_plugin",
-        lambda name: SimpleNamespace(view_rules=None))
-    monkeypatch.setattr(
-        learn_add_cluster.segmentation, "segment_add_material",
-        lambda **kwargs: {})
-    monkeypatch.setattr(
-        add_path, "collect_add_evidence",
-        lambda **kwargs: SimpleNamespace(
-            source_experiences=packages[kwargs["task_row"].target_id]))
 
+def _install(monkeypatch):
     calls = {"classify": 0, "cluster": 0, "write": 0}
 
     def classify(experience, **kwargs):
@@ -145,10 +131,11 @@ def test_cluster_path_writes_one_skill_and_its_artifacts(
     phase_dir.mkdir()
     experiences_a = [_experience(TASK_A, 0), _experience(TASK_A, 1)]
     experiences_b = [_experience(TASK_B, 0)]
-    calls = _install(monkeypatch, {TASK_A: experiences_a, TASK_B: experiences_b})
+    calls = _install(monkeypatch)
 
     failed = learn_add_cluster.execute_add_rows(
-        ctx, phase, [_row(TASK_A), _row(TASK_B)], phase_dir,
+        ctx, phase, [_item(TASK_A, experiences_a),
+                     _item(TASK_B, experiences_b)], phase_dir,
         author_params=ClusterAuthoringParams(max_chars_per_card=800))
 
     assert failed == set()
@@ -181,15 +168,16 @@ def test_a_completed_cluster_is_not_reclassified_or_rewritten(
     phase_dir = tmp_path / "phase"
     phase_dir.mkdir()
     experiences_a = [_experience(TASK_A, 0), _experience(TASK_A, 1)]
-    calls = _install(monkeypatch, {TASK_A: experiences_a})
+    calls = _install(monkeypatch)
+    items = [_item(TASK_A, experiences_a)]
 
     learn_add_cluster.execute_add_rows(
-        ctx, phase, [_row(TASK_A)], phase_dir,
+        ctx, phase, items, phase_dir,
         author_params=ClusterAuthoringParams(max_chars_per_card=800))
     assert calls == {"classify": 2, "cluster": 1, "write": 1}
 
     learn_add_cluster.execute_add_rows(
-        ctx, phase, [_row(TASK_A)], phase_dir,
+        ctx, phase, items, phase_dir,
         author_params=ClusterAuthoringParams(max_chars_per_card=800))
 
     assert calls == {"classify": 2, "cluster": 1, "write": 1}
@@ -204,17 +192,18 @@ def test_a_missing_receipt_is_recovered_as_skipped_existing(
     phase_dir = tmp_path / "phase"
     phase_dir.mkdir()
     experiences_a = [_experience(TASK_A, 0), _experience(TASK_A, 1)]
-    calls = _install(monkeypatch, {TASK_A: experiences_a})
+    calls = _install(monkeypatch)
+    items = [_item(TASK_A, experiences_a)]
 
     learn_add_cluster.execute_add_rows(
-        ctx, phase, [_row(TASK_A)], phase_dir,
+        ctx, phase, items, phase_dir,
         author_params=ClusterAuthoringParams(max_chars_per_card=800))
     # Simulate a crash after store.save but before the outcome receipt.
     (phase_dir / "cluster_outcomes.jsonl").unlink()
     calls_before = dict(calls)
 
     learn_add_cluster.execute_add_rows(
-        ctx, phase, [_row(TASK_A)], phase_dir,
+        ctx, phase, items, phase_dir,
         author_params=ClusterAuthoringParams(max_chars_per_card=800))
 
     assert calls == calls_before  # the cluster is read from disk, not re-asked
@@ -229,16 +218,11 @@ def test_a_no_material_task_gets_the_old_skipped_receipt(
     phase = _phase()
     phase_dir = tmp_path / "phase"
     phase_dir.mkdir()
-    _install(monkeypatch, {TASK_A: []})
-    from expedistill.methods.evidence import add_path
-
-    def no_material(**kwargs):
-        raise add_path.NoAddMaterial("nothing to learn")
-
-    monkeypatch.setattr(add_path, "collect_add_evidence", no_material)
+    _install(monkeypatch)
 
     learn_add_cluster.execute_add_rows(
-        ctx, phase, [_row(TASK_A)], phase_dir,
+        ctx, phase, [ReviewItem(row=_row(TASK_A), evidence=None)],
+        phase_dir,
         author_params=ClusterAuthoringParams(max_chars_per_card=800))
 
     outcomes = read_jsonl(phase_dir / "outcomes.jsonl")
@@ -253,13 +237,14 @@ def test_learn_add_dispatches_the_new_author_method(monkeypatch, tmp_path):
         lambda family, raw: (object(), ClusterAuthoringParams()))
     monkeypatch.setattr(
         learn_add_cluster, "execute_add_rows",
-        lambda ctx, phase, rows, phase_dir, author_params=None: (
-            called.append((len(rows), author_params)) or set()))
+        lambda ctx, phase, items, phase_dir, author_params=None,
+        skip_targets=(): (
+            called.append((len(items), author_params)) or set()))
     ctx = SimpleNamespace(run_dir=tmp_path / "run")
     phase = _phase()
-    row = _row(TASK_A)
+    item = _item(TASK_A, [])
 
-    failed = learn_add.execute_add_rows(ctx, phase, [row])
+    failed = learn_add.execute_add_rows(ctx, phase, [item])
 
     assert failed == set()
     assert called and called[0][0] == 1

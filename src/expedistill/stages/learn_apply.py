@@ -1,24 +1,21 @@
 """The P04/P06 per-skill apply path.
 
-The decision module emits one ``TaskListRow`` per measured skill. This
-module lands those rows:
+The review driver has already decided each skill's action and collected
+the evidence for the revise rows.  This module only lands those rows:
 
-* keep / delete rows are independent and run per skill;
-* revise rows are grouped by task only to share the attempt trajectories;
-  attribution itself builds per-skill, per-window evidence.
+* keep / delete are independent and run per skill;
+* revise rows are grouped by task only to share the stored trajectories;
+  the evidence for each skill comes from the review item.
 
-No policy lives here: the row says keep/revise/delete; attribution only
-reports facts, and the writer only writes.
+No policy lives here: the row says keep/revise/delete; the writer only
+writes.
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from expedistill.benchmarks.registry import get_plugin
-from expedistill.blocks import tasks as tasks_block
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.core import ids
-from expedistill.core.answer_sheet import AnswerSheet, UnitSummary
+from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
 from expedistill.infra.parallel import run_parallel
@@ -29,10 +26,8 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import Store
-from expedistill.methods import resolve_params
-from expedistill.methods.attribution.skill_attempts import collect_skill_evidence
 from expedistill.methods.author.revise import revise_one
-from expedistill.prompts import get as get_prompt
+from expedistill.methods.review.contracts import ReviewItem
 
 from expedistill.stages import learn_ledger as ledger
 
@@ -40,21 +35,21 @@ __all__ = ["execute_decision_rows"]
 
 
 def execute_decision_rows(
-    ctx: Any, phase: Any, rows: Sequence[TaskListRow],
-    current_rows: Optional[List[UnitSummary]], current_spec: Any,
-    current_round: int, *, current_sheets: Sequence[AnswerSheet],
-    usage_by_task: Dict[str, List[dict]],
-    delivery: str,
+    ctx: Any, phase: Any, items: Sequence[ReviewItem],
+    current_rows: Optional[List[UnitSummary]], *,
+    skip_targets: Sequence[str] = (),
 ) -> Set[str]:
     """Land per-skill decisions; return infra-failed target ids."""
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
-    attribution_params = resolve_params(
-        "attribution",
-        getattr(phase.spec, "attribution", None)
-        or {"name": "skill_attempts"})
+    rows = [item.row for item in items]
     recorder = UnitFailureRecorder(ctx.run_dir)
     ledger.write_task_list(phase_dir, phase.label, rows)
     _assert_unique(rows)
+    skipped = set(skip_targets)
+    evidence_by_target = {
+        item.row.target_id: item.evidence
+        for item in items
+        if item.row.action == decision.REVISE}
 
     simple = [row for row in rows
               if row.action in (decision.KEEP, decision.DELETE)]
@@ -66,6 +61,8 @@ def execute_decision_rows(
         grouped.setdefault(task_id, []).append(row)
 
     def land_simple(row: TaskListRow) -> Tuple[str, Optional[BaseException]]:
+        if row.target_id in skipped:
+            return row.target_id, None
         try:
             ledger.land_keep_or_delete(ctx.store, phase, row, phase_dir)
             return row.target_id, None
@@ -79,11 +76,13 @@ def execute_decision_rows(
     def land_group(item: Tuple[str, List[TaskListRow]]
                    ) -> Tuple[str, Optional[BaseException]]:
         task_id, task_rows = item
+        if task_id in skipped or any(
+                row.target_id in skipped for row in task_rows):
+            return task_id, None
         try:
             _execute_revise_group(
-                ctx, phase, task_id, task_rows, current_rows, current_spec,
-                current_round, phase_dir, recorder, usage_by_task,
-                current_sheets, delivery, attribution_params)
+                ctx, phase, task_id, task_rows, current_rows, phase_dir,
+                recorder, evidence_by_target)
             return task_id, None
         except InfrastructureError as exc:
             recorder.record(task_id, phase.label, exc, exc)
@@ -112,13 +111,11 @@ def execute_decision_rows(
 
 def _execute_revise_group(
     ctx: Any, phase: Any, task_id: str, rows: List[TaskListRow],
-    current_rows: Optional[List[UnitSummary]], current_spec: Any,
-    current_round: int, phase_dir, recorder: UnitFailureRecorder,
-    usage_by_task: Dict[str, List[dict]],
-    current_sheets: Sequence[AnswerSheet], delivery: str,
-    attribution_params: Any,
+    current_rows: Optional[List[UnitSummary]], phase_dir,
+    recorder: UnitFailureRecorder,
+    evidence_by_target: Dict[str, Any],
 ) -> None:
-    """One task: one evidence collection, then one writer call per skill."""
+    """One task: one writer call per skill from the review evidence."""
     if not rows:
         return
     basis = rows[0].basis_unit
@@ -155,30 +152,11 @@ def _execute_revise_group(
     if not todo:
         return
 
-    task_instruction = _task_instruction(ctx, task_id)
-    task_sheets = [
-        sheet for sheet in current_sheets
-        if sheet.execution is not None
-        and sheet.execution.task_ref == task_id]
-    evidence = collect_skill_evidence(
-        task_id=task_id,
-        skills=[skill for _, skill in todo],
-        sheets=task_sheets,
-        round_=current_round,
-        task_instruction=task_instruction,
-        delivery=delivery,
-        usage_rows=usage_by_task.get(task_id, []),
-        weak_profile=ctx.config.effective_weak_profile(),
-        author_handle=ctx.handle("author"),
-        view_rules=get_plugin(ctx.config.benchmark).view_rules,
-        params=attribution_params,
-        usage=ctx.usage,
-        run_dir=ctx.run_dir)
     for row, skill in todo:
-        package = evidence.get(skill.skill_id)
+        package = evidence_by_target.get(skill.skill_id)
         if package is None:
             raise CodeBugError(
-                f"attribution returned no evidence for {skill.skill_id!r}")
+                f"review returned no evidence for {skill.skill_id!r}")
         ledger.write_revision_plan(phase, row, skill.skill_id,
                                    skill.version, phase_dir)
         try:
@@ -248,21 +226,6 @@ def _report_row_of(current_rows: Optional[List[UnitSummary]],
     raise CodeBugError(
         f"task-list row names basis unit {basis_unit!r}, which the "
         "current report does not carry")
-
-
-def _task_instruction(ctx: Any, task_id: str) -> str:
-    benchmark = ctx.config.benchmark
-    plugin = get_plugin(benchmark)
-    raw_id = ids.raw_task_id(task_id, benchmark)
-    loaded = tasks_block.load_tasks(benchmark, [raw_id])
-    match = [task for task in loaded if task.task_id == raw_id]
-    if not match:
-        raise CodeBugError(
-            f"benchmark {benchmark!r} did not load task {raw_id!r} for "
-            f"group {task_id!r}: the arms must never run a different "
-            "set than the groups")
-    return get_prompt(plugin.task_prompt_name).format(
-        instruction=match[0].instruction, skills_block="", history="")
 
 
 def _assert_unique(rows: Sequence[TaskListRow]) -> None:

@@ -5,9 +5,8 @@ writes one skill per selected segment and receipts it immediately. This
 module keeps the SAME decision input (the baseline-gap add rows) and
 the SAME evidence collectors, but replaces only the writing landing:
 
-1. prepare every add-authorized task (segment + collect) and drop
-   subtasks already covered by a terminal cluster receipt or by an
-   existing single-subtask skill;
+1. consume the review's add items and drop subtasks already covered by
+   a terminal cluster receipt or by an existing single-subtask skill;
 2. classify every remaining segment into one of five trigger families;
 3. cluster each family by the problem the segments handle;
 4. write one skill per cluster (anchor = the smallest subtask id).
@@ -39,16 +38,11 @@ already exists is skipped with a receipt.
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from expedistill.benchmarks.registry import get_plugin
 from expedistill.core.ids import make_skill_id
 from expedistill.core.models import Skill
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
-    CodeBugError,
-    InfrastructureError,
-    ModelOutputError,
-    UnitFailureRecorder,
-)
+    CodeBugError, InfrastructureError, ModelOutputError)
 from expedistill.infra.store import (
     Store,
     append_jsonl,
@@ -59,7 +53,7 @@ from expedistill.infra.store import (
 from expedistill.methods import resolve_params
 from expedistill.methods.author import ClusterAuthoringParams
 from expedistill.methods.author import cluster_by_trigger as author
-from expedistill.methods.evidence import add_path, segmentation
+from expedistill.methods.review.contracts import ReviewItem
 from expedistill.stages import learn_ledger as ledger
 
 __all__ = [
@@ -86,41 +80,6 @@ _CLUSTER_OUTCOME_SCHEMA = "cluster-outcome-v1"
 def _has_outcome(phase: Any, row: Any, phase_dir: Path) -> bool:
     return bool(ledger.rows_of(phase_dir / ledger.OUTCOMES_NAME,
                                phase.label, row.target_id))
-
-
-def _prepare_task(ctx: Any, phase: Any, row: Any, phase_dir: Path,
-                  params: Any, view_rules: Any) -> List[dict]:
-    """Segment one add task and return its selected source experiences.
-
-    This mirrors ``learn_add._land_add``'s preparation half on purpose:
-    the existing path stays byte-for-byte untouched, while this new path
-    uses the same K2 and D6 collectors. A no-material task gets the same
-    task-level receipt the old path writes; the "already has a skill"
-    filter runs later because only the cluster receipts know that all
-    members of a multi-subtask cluster are done.
-    """
-    store: Store = ctx.store
-    segmentation.segment_add_material(
-        store=store,
-        task_id=row.target_id,
-        params=params,
-        trajectory_select=ctx.config.rules["trajectory_select"],
-        view_rules=view_rules,
-        handle=ctx.handle("segmenter"),
-        usage=ctx.usage,
-        run_dir=ctx.run_dir)
-    try:
-        package = add_path.collect_add_evidence(
-            task_row=row, store=store,
-            rule_name=ctx.config.rules["segment_select"],
-            write_lessons=params.write_lessons,
-            view_rules=view_rules)
-    except add_path.NoAddMaterial:
-        if not _has_outcome(phase, row, phase_dir):
-            ledger.append_outcome(phase, row, None, "skipped_no_material",
-                                  None, phase_dir)
-        return []
-    return list(package.source_experiences)
 
 
 def _trigger_rows(path: Path) -> Dict[str, Dict[str, Any]]:
@@ -349,10 +308,10 @@ def _write_cluster_views(phase_dir: Path,
             "\n".join(lines), encoding="utf-8")
 
 
-def execute_add_rows(ctx: Any, phase: Any, rows: Sequence[Any],
+def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
                      phase_dir: Path, *,
-                     author_params: Optional[ClusterAuthoringParams] = None
-                     ) -> Set[str]:
+                     author_params: Optional[ClusterAuthoringParams] = None,
+                     skip_targets: Sequence[str] = ()) -> Set[str]:
     """Run the cluster-by-trigger P02 landing; return infra-failed task ids."""
     phase_dir = Path(phase_dir)
     params = author_params or resolve_params("author", phase.spec.author)
@@ -360,31 +319,19 @@ def execute_add_rows(ctx: Any, phase: Any, rows: Sequence[Any],
         raise TypeError(
             "cluster_by_trigger received the wrong params class: "
             f"{type(params).__name__}")
-    evidence_params = resolve_params("evidence", phase.spec.evidence)
-    view_rules = get_plugin(ctx.config.benchmark).view_rules
-    recorder = UnitFailureRecorder(ctx.run_dir)
 
-    def prepare(row: Any):
-        try:
-            experiences = _prepare_task(
-                ctx, phase, row, phase_dir, evidence_params, view_rules)
-            return row.target_id, experiences, None
-        except InfrastructureError as exc:
-            recorder.record(row.target_id, phase.label, exc, exc)
-            return row.target_id, [], exc
-        except ModelOutputError as exc:
-            recorder.record(row.target_id, phase.label, exc, exc)
-            return row.target_id, [], None
-
-    prepared = run_parallel(
-        prepare, list(rows),
-        max(1, min(int(ctx.run_settings.workers), len(rows))),
-        thread=True)
-    failed_tasks: Set[str] = {
-        target_id for target_id, _experiences, failure in prepared
-        if failure is not None}
-    experiences = [experience for _target, items, _failure in prepared
-                   for experience in items]
+    skipped = set(skip_targets)
+    failed_tasks: Set[str] = set()
+    experiences: List[dict] = []
+    for item in items:
+        if item.row.target_id in skipped:
+            continue
+        if item.evidence is None:
+            if not _has_outcome(phase, item.row, phase_dir):
+                ledger.append_outcome(phase, item.row, None,
+                                      "skipped_no_material", None, phase_dir)
+            continue
+        experiences.extend(item.evidence.source_experiences)
 
     clusters_path = phase_dir / CLUSTERS_NAME
     existing_clusters = _clusters_by_family(clusters_path)
@@ -407,16 +354,14 @@ def execute_add_rows(ctx: Any, phase: Any, rows: Sequence[Any],
 
     eligible_ids = {experience["subtask"].subtask_id
                     for experience in experiences}
-    row_by_target = {row.target_id: row for row in rows}
-    for target_id, items, failure in prepared:
-        if failure is not None or not items:
+    for item in items:
+        if item.row.target_id in skipped or item.evidence is None:
             continue
         if any(experience["subtask"].subtask_id in eligible_ids
-               for experience in items):
+               for experience in item.evidence.source_experiences):
             continue
-        row = row_by_target.get(target_id)
-        if row is not None and not _has_outcome(phase, row, phase_dir):
-            ledger.append_outcome(phase, row, None, "skipped_existing",
+        if not _has_outcome(phase, item.row, phase_dir):
+            ledger.append_outcome(phase, item.row, None, "skipped_existing",
                                   None, phase_dir)
 
     if not experiences:

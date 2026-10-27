@@ -1,12 +1,11 @@
-"""The exam learn path: multi-version rows and answer-sheet revisions.
+"""The exam learn landing: review items -> keep / delete / revise.
 
-TB21's live sequence does not use an exam phase, but the golden matrix
-still covers the exam combinations. This module keeps that path out of
-the P02 add and P04 per-skill paths: it merges the exam report's
-per-version rows and lands keep / delete / revise on single skills.
+The review driver merges the exam report's multi-version rows and
+collects the answer-sheet evidence.  This module only lands the rows and
+keeps the revision ledger's version guard.
 """
 
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, List, Optional, Sequence, Set, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
@@ -22,80 +21,50 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store
 from expedistill.methods.author import write as author
-from expedistill.methods.evidence import exam_sheet
+from expedistill.methods.review.contracts import ReviewItem
 
 from expedistill.stages import learn_ledger as ledger
 
-__all__ = ["execute_exam_rows", "merge_task_list"]
+__all__ = ["execute_exam_rows"]
 
 
-def merge_task_list(rows: Sequence[TaskListRow],
-                    report_rows: Sequence[UnitSummary]
-                    ) -> Tuple[List[TaskListRow], List[str]]:
-    """Collapse the exam report's multi-version rows to one per skill."""
-    by_unit = {row.unit_id: row for row in report_rows}
-    best: Dict[str, Tuple[int, str]] = {}
-    superseded: List[str] = []
-    for row in rows:
-        if row.target_kind != "skill":
-            continue
-        report_row = by_unit.get(row.basis_unit)
-        if report_row is None:
-            raise CodeBugError(
-                f"task-list row for {row.target_id!r} names basis unit "
-                f"{row.basis_unit!r}, which the current report does not "
-                "carry: the decision and the merge disagree")
-        version = exam_sheet.injected_version(report_row)
-        current = best.get(row.target_id)
-        if current is None:
-            best[row.target_id] = (version, row.basis_unit)
-        elif version > current[0]:
-            superseded.append(current[1])
-            best[row.target_id] = (version, row.basis_unit)
-        elif version < current[0]:
-            superseded.append(row.basis_unit)
-        else:
-            raise CodeBugError(
-                f"two task-list rows for skill {row.target_id!r} share "
-                f"version {version} ({current[1]!r} and {row.basis_unit!r}"
-                "); the report carries one row per (skill, version)")
-    dropped = set(superseded)
-    effective = [row for row in rows if row.basis_unit not in dropped]
-    return effective, superseded
-
-
-def execute_exam_rows(ctx: Any, phase: Any, rows: Sequence[TaskListRow],
+def execute_exam_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
                       current_rows: Optional[List[UnitSummary]],
-                      current_spec: Any, current_round: int,
-                      superseded: Sequence[str]) -> Set[str]:
+                      superseded: Sequence[str], *,
+                      skip_targets: Sequence[str] = ()) -> Set[str]:
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     recorder = UnitFailureRecorder(ctx.run_dir)
+    rows = [item.row for item in items]
     ledger.write_task_list(phase_dir, phase.label, rows, superseded)
     _assert_unique(rows)
+    skipped = set(skip_targets)
 
-    def land(row: TaskListRow) -> Tuple[str, Optional[BaseException]]:
+    def land(item: ReviewItem) -> Tuple[str, Optional[BaseException]]:
+        if item.row.target_id in skipped:
+            return item.row.target_id, None
         try:
-            _execute_row(ctx, phase, row, current_rows, phase_dir)
-            return row.target_id, None
+            _execute_row(ctx, phase, item, current_rows, phase_dir)
+            return item.row.target_id, None
         except InfrastructureError as exc:
-            recorder.record(row.target_id, phase.label, exc, exc)
-            return row.target_id, exc
+            recorder.record(item.row.target_id, phase.label, exc, exc)
+            return item.row.target_id, exc
         except ModelOutputError as exc:
-            recorder.record(row.target_id, phase.label, exc, exc)
-            return row.target_id, None
+            recorder.record(item.row.target_id, phase.label, exc, exc)
+            return item.row.target_id, None
 
     workers = max(1, int(getattr(ctx.run_settings, "workers", 1) or 1))
-    if workers == 1 or len(rows) <= 1:
-        results = [land(row) for row in rows]
+    if workers == 1 or len(items) <= 1:
+        results = [land(item) for item in items]
     else:
-        results = run_parallel(land, list(rows), workers, thread=True)
+        results = run_parallel(land, list(items), workers, thread=True)
     return {target_id for target_id, failure in results
             if failure is not None}
 
 
-def _execute_row(ctx: Any, phase: Any, row: TaskListRow,
+def _execute_row(ctx: Any, phase: Any, item: ReviewItem,
                  current_rows: Optional[List[UnitSummary]],
                  phase_dir) -> None:
+    row = item.row
     if row.target_kind != "skill":
         raise CodeBugError(
             f"the exam path expects skill rows, got "
@@ -105,17 +74,18 @@ def _execute_row(ctx: Any, phase: Any, row: TaskListRow,
     elif row.action == decision.DELETE:
         ledger.land_delete(ctx.store, phase, row, phase_dir)
     elif row.action == decision.REVISE:
-        _land_revise(ctx, phase, row, current_rows, phase_dir)
+        _land_revise(ctx, phase, item, current_rows, phase_dir)
     else:
         raise CodeBugError(
             f"the exam task list carries action {row.action!r} on target "
             f"{row.target_id!r}; expected keep / revise / delete")
 
 
-def _land_revise(ctx: Any, phase: Any, row: TaskListRow,
+def _land_revise(ctx: Any, phase: Any, item: ReviewItem,
                  current_rows: Optional[List[UnitSummary]],
                  phase_dir) -> None:
     store: Store = ctx.store
+    row = item.row
     skill = store.load("skills", row.target_id, Skill)
     if skill.status not in ledger.ACTABLE_STATUSES:
         ledger.append_outcome(phase, row, skill.skill_id,
@@ -136,8 +106,11 @@ def _land_revise(ctx: Any, phase: Any, row: TaskListRow,
                 f"skill {skill.skill_id!r} is at version {skill.version} "
                 f"but this phase's revision ledger recorded "
                 f"{from_version}: the store drifted from the ledger")
-    report_row = _report_row_of(current_rows, row.basis_unit)
-    package = exam_sheet.collect_exam_evidence(store, report_row, skill)
+    _report_row_of(current_rows, row.basis_unit)
+    package = item.evidence
+    if package is None:
+        raise CodeBugError(
+            f"review returned no exam evidence for {skill.skill_id!r}")
     ledger.write_revision_plan(phase, row, skill.skill_id, skill.version,
                                phase_dir)
     outcomes = author.revise_group(
@@ -189,7 +162,7 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
               and stored.summary == outcome.summary):
         raise CodeBugError(
             f"skill {skill_id!r} is at version {stored.version} with "
-            "content the author did not produce; the store drifted from "
+            "content the author did not produce: the store drifted from "
             "the revision ledger")
     ledger.append_outcome(phase, row, skill_id, outcome.outcome, expected,
                           phase_dir)

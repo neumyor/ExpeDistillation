@@ -4,7 +4,8 @@ from expedistill.composites.answer_sheets import execution_from_trajectory
 from expedistill.core.answer_sheet import AnswerSheet, CoverageRecord
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Step, Trajectory
-from expedistill.methods.attribution import AttributionParams, skill_attempts
+from expedistill.methods.review import ReviewParams
+from expedistill.methods.review import attribution as skill_attempts
 from tests.helpers.skills import make_skill
 
 TASK = make_task_id("tb", "t1")
@@ -86,7 +87,7 @@ def test_folder_uses_each_cat_event_and_batches_the_window(monkeypatch):
         task_id=TASK, skills=[SKILL_A, SKILL_B], sheets=[sheet],
         round_=0, task_instruction="do it", delivery="folder",
         usage_rows=usage, weak_profile="w",
-        author_handle=object(), params=AttributionParams(before_steps=0,
+        author_handle=object(), params=ReviewParams(before_steps=0,
                                                         after_steps=0))
 
     assert len(calls) == 1
@@ -118,7 +119,7 @@ def test_attribution_uses_only_the_task_description(monkeypatch):
         task_id=TASK, skills=[SKILL_A], sheets=[sheet], round_=0,
         task_instruction="fallback", delivery="folder",
         usage_rows=_folder_usage(), weak_profile="w",
-        author_handle=object(), params=AttributionParams(before_steps=0,
+        author_handle=object(), params=ReviewParams(before_steps=0,
                                                         after_steps=0))
 
     assert calls[0]["task_instruction"] == (
@@ -136,7 +137,7 @@ def test_folder_marks_an_unread_skill_with_no_windows(monkeypatch):
         task_id=TASK, skills=[SKILL_A, SKILL_B], sheets=[sheet],
         round_=0, task_instruction="do it", delivery="folder",
         usage_rows=_folder_usage(), weak_profile="w",
-        author_handle=object(), params=AttributionParams(before_steps=0,
+        author_handle=object(), params=ReviewParams(before_steps=0,
                                                         after_steps=0))
 
     assert len(evidence[SKILL_A.skill_id].windows) == 1
@@ -154,7 +155,7 @@ def test_injected_delivery_uses_start_and_end_windows(monkeypatch):
         task_id=TASK, skills=[SKILL_A, SKILL_B], sheets=[sheet],
         round_=0, task_instruction="do it", delivery="whole_bank",
         usage_rows=[], weak_profile="w",
-        author_handle=object(), params=AttributionParams(before_steps=5,
+        author_handle=object(), params=ReviewParams(before_steps=5,
                                                         after_steps=5))
 
     assert len(calls) == 2
@@ -176,7 +177,7 @@ def test_answer_sheet_is_the_folder_attribution_input(monkeypatch):
         task_id=TASK, skills=[SKILL_A, SKILL_B], sheets=[sheet],
         round_=0, task_instruction="do it", delivery="folder",
         weak_profile="w", author_handle=object(),
-        params=AttributionParams(before_steps=0, after_steps=0))
+        params=ReviewParams(before_steps=0, after_steps=0))
 
     assert len(calls) == 1
     assert {skill.skill_id for skill in calls[0]["skills"]} == {
@@ -197,7 +198,7 @@ def test_answer_sheet_does_not_read_the_trajectory_store(monkeypatch):
         task_id=TASK, skills=[SKILL_A], sheets=[sheet], round_=0,
         task_instruction="do it", delivery="whole_bank",
         usage_rows=[], weak_profile="w", author_handle=object(),
-        params=AttributionParams(before_steps=5, after_steps=5))
+        params=ReviewParams(before_steps=5, after_steps=5))
 
     assert [call["window_kind"] for call in calls] == ["start", "end"]
     assert len(evidence[SKILL_A.skill_id].windows) == 2
@@ -223,7 +224,7 @@ def test_folder_window_text_keeps_the_original_step_numbers(monkeypatch):
         task_id=TASK, skills=[SKILL_A], sheets=[sheet], round_=0,
         task_instruction="do it", delivery="folder", usage_rows=usage,
         weak_profile="w", author_handle=object(),
-        params=AttributionParams(before_steps=2, after_steps=2))
+        params=ReviewParams(before_steps=2, after_steps=2))
 
     assert calls[0]["step_start"] == 10
     assert calls[0]["trajectory_window"].startswith(

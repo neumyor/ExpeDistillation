@@ -8,7 +8,7 @@ skeleton (D L A L A L A L C) as one smoke.
 Every phase here is the production driver -- no seeded report files, no
 seeded artifacts, no hand-written acceptance rows, and since Wave 3-S no
 seeded SUBTASK either: the add path segments the baseline phase's strong
-trajectory itself (methods.evidence.segmentation through learn_add / learn_apply),
+trajectory itself (methods.review.segmentation through learn_add / learn_apply),
 so the chain from the baseline-phase trajectories to the new skill is real end
 to end.
 """
@@ -150,7 +150,7 @@ def _phases(retry_rounds=3):
               "execution": {"name": "real",
                             "arms": ["executor_strong", "executor_weak"]}},
         "learn": {"kind": "learn",
-              "evidence": {"name": "segment", "K": 5,
+              "review": {"name": "review", "K": 5,
                            "write_lessons": False},
               "author": {"name": "distill_diagnose"},
               "curate": {"name": "none", "token_budget": BIG}},

@@ -56,6 +56,7 @@ from expedistill.core.config import (
     phase_label,
     upgrade_v3_config,
     upgrade_v4_config,
+    upgrade_v5_config,
 )
 from expedistill.core.models import (
     Attempt,
@@ -161,14 +162,20 @@ LIVE_SEQUENCE = ["baseline", "learn", "live", "learn", "live", "learn", "test"]
 
 _LEARN_EXAM = {
     "kind": "learn",
-    "evidence": {"name": "segment", "K": 4, "retry_limit": 2},
+    "review": {"name": "review", "decision": "task_level",
+               "unread_in_won_group": "delete",
+               "before_steps": 10, "after_steps": 10,
+               "K": 4, "retry_limit": 2, "write_lessons": True},
     "author": {"name": "distill_diagnose"},
     "curate": {"name": "agentbrew", "merge_check": "exam",
                "token_budget": 4096, "rounds": 3},
 }
 _LEARN_LIVE = {
     "kind": "learn",
-    "evidence": {"name": "segment", "K": 4, "retry_limit": 2},
+    "review": {"name": "review", "decision": "task_level",
+               "unread_in_won_group": "delete",
+               "before_steps": 10, "after_steps": 10,
+               "K": 4, "retry_limit": 2, "write_lessons": True},
     "author": {"name": "distill_diagnose"},
     # A live sequence has no exam phase, so its merges are proven by the
     # round-1 group re-execution (the upgrade's mapping for live_run).
@@ -299,7 +306,7 @@ def baseline_config_dict(*, live=False):
         "phases": copy.deepcopy(LIVE_PHASES if live else EXAM_PHASES),
     }
     learn = config["phases"]["learn"]
-    learn["evidence"] = {"name": "segment", "K": 9, "retry_limit": 5}
+    learn["review"] = {"name": "review", "K": 9, "retry_limit": 5}
     learn["curate"] = {"name": "none", "token_budget": 12345}
     if live:
         # The baseline level pins n_attempts (1), so the live target's B
@@ -654,7 +661,8 @@ def build_v3_source_run(tmp_path: Path, source_tasks=None) -> SourceRun:
     # must reproduce the frozen v4 identity (through the canonical
     # parse the identity walk itself uses).
     assert ExperimentConfig.from_dict(
-        upgrade_v4_config(upgrade_v3_config(v3_config))).to_dict() == \
+        upgrade_v5_config(upgrade_v4_config(
+            upgrade_v3_config(v3_config)))).to_dict() == \
         manifest["config"]
     manifest["config"] = v3_config
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -711,7 +719,7 @@ def test_assembles_train_lineage_with_full_chain_bank_filter(tmp_path):
     assert counts["generation_failure_rows"] == 0  # a v4 source has none
     assert counts["accepted_infra_shortfall_units"] == 1  # train unit only
     assert summary["split_sizes"] == {"train": 1, "test": 1, "reserved": 1}
-    assert summary["source_schema"] == 5
+    assert summary["source_schema"] == 6
     assert summary["preseeded_phase_bank"] == "p08:learn"
 
     # The full-chain criterion (the "42-equivalent" assertion): the mixed
@@ -1289,8 +1297,8 @@ def _assemble_with_config(tmp_path, config):
 @pytest.mark.parametrize(
     ("path", "key", "value", "match", "refused_before_write"),
     [
-        (("phases", "learn", "evidence"), "K", 9,
-         r"config\.phases\.learn\.evidence\.K", True),
+        (("phases", "learn", "review"), "K", 9,
+         r"config\.phases\.learn\.review\.K", True),
         (("models",), "executor_strong", "other-strong",
          "model_roles.executor_strong", False),
         (("rules",), "task_select", "any_weak_failed", "rules", False),
