@@ -620,9 +620,16 @@ def _folder_of(task: Task) -> Optional[Tuple[Dict[str, Any], Path]]:
     return manifest, Path(folder_dir)
 
 
+#: The Terminus adapter's fallback context ceiling when the caller does
+#: not supply one.  Kept explicit so every job records the effective
+#: value instead of silently inheriting a code default.
+DEFAULT_MAX_INPUT_TOKENS = 131072
+
+
 def runner_env(run_id: str, jobs_dir: str, retry_archive_root: str,
                task_name: str, model_name: str, eval_mode: str,
-               skill_root: Optional[str]) -> Dict[str, str]:
+               skill_root: Optional[str],
+               max_input_tokens: Optional[int] = None) -> Dict[str, str]:
     """The environment the tb21 runner is launched with, verbatim.
 
     ``_submit`` puts exactly these variables in front of ``bash <runner>``
@@ -646,6 +653,11 @@ def runner_env(run_id: str, jobs_dir: str, retry_archive_root: str,
         "TBENCH_N_ATTEMPTS": "1",
         "TBENCH_N_CONCURRENT": "1",
         "TBENCH_MAX_TRIAL_RETRIES": "0",
+        # The runner emits this as Terminus model_info.max_input_tokens.
+        # The adapter default (131072) is made explicit so every launch
+        # records the actual value in the launch conditions.
+        "TBENCH_MAX_INPUT_TOKENS": str(
+            max_input_tokens or DEFAULT_MAX_INPUT_TOKENS),
         # The runner adds the openai/ provider prefix itself.
         "MODEL_NAME": model_name,
     }
@@ -761,6 +773,7 @@ class TBPlugin(BenchmarkPlugin):
         """
         task_name = self._task_name(task)
         model_name = self._model_name(handle)
+        max_input_tokens = self._max_input_tokens(handle)
         skills_block = skills_block or ""
         workdir = Path(workdir)
         workdir.mkdir(parents=True, exist_ok=True)
@@ -788,6 +801,7 @@ class TBPlugin(BenchmarkPlugin):
             "task_name": task_name,
             "model": model_name,
             "run_id": run_id,
+            "max_input_tokens": max_input_tokens,
             "prompt_name": folder_prompt_name,
         }
         try:
@@ -802,7 +816,8 @@ class TBPlugin(BenchmarkPlugin):
                                                      skill_md, folder)
             meta.update(skill_meta)
             record_file = workdir / _RECORD_DIR / f"{run_id}.json"
-            conditions = self._conditions(run_id, eval_mode, skill_md, folder)
+            conditions = self._conditions(
+                run_id, eval_mode, skill_md, folder, max_input_tokens)
             record = self._read_record(record_file, run_id)
             recorded_pid = record.get("pid") if record else None
             # The pre-submit probe is a connection too: gate it with the
@@ -841,7 +856,8 @@ class TBPlugin(BenchmarkPlugin):
                                               conditions, folder)
                     pid = self._submit(link, root, run_id, task_name,
                                        model_name, eval_mode,
-                                       skill_meta.get("remote_skill_root"))
+                                       skill_meta.get("remote_skill_root"),
+                                       max_input_tokens)
                 write_json(record_file, dict(conditions, pid=pid))
             launched = True
             meta["remote_pid"] = pid
@@ -935,6 +951,25 @@ class TBPlugin(BenchmarkPlugin):
             raise CodeBugError(
                 f"TB runner needs handle.name (the model id), got {handle!r}")
         return name
+
+    def _max_input_tokens(self, handle: Any) -> int:
+        """The remote Terminus context ceiling for this handle.
+
+        ``ModelHandle.max_input_tokens`` is wired from the experiment
+        config's per-role token budgets (weak 256K / strong 512K in the
+        current configs). A hand-built handle without one keeps the
+        adapter's historical 131072 default, but the exact value is
+        always recorded in meta and launch conditions.
+        """
+        value = getattr(handle, "max_input_tokens", None)
+        if value is None:
+            return DEFAULT_MAX_INPUT_TOKENS
+        if isinstance(value, bool) or not isinstance(value, int) \
+                or value <= 0:
+            raise CodeBugError(
+                "TB runner needs handle.max_input_tokens to be a positive "
+                f"int or None, got {value!r}")
+        return value
 
     def _make_run_id(self, task_name: str, task: Task) -> str:
         """``ed_<task>_<namespace>_<attempt token>``, or ``ed_<task>_<token>``
@@ -1197,10 +1232,11 @@ class TBPlugin(BenchmarkPlugin):
     # ------------------------------------------------------------------
 
     def _conditions(self, run_id: str, eval_mode: str, skill_md: str,
-                    folder: Optional[Tuple[Dict[str, Any], Path]]
-                    ) -> Dict[str, Any]:
+                    folder: Optional[Tuple[Dict[str, Any], Path]],
+                    max_input_tokens: int) -> Dict[str, Any]:
         """What the launch of ``run_id`` depends on beyond the run id:
-        the forwarded runner knobs and the uploaded content's bytes.
+        the forwarded runner knobs, the context ceiling and the uploaded
+        content's bytes.
 
         Skills mode digests the SKILL.md; a folder unit additionally
         folds in the manifest's bank fingerprint, catalog text and the
@@ -1209,6 +1245,7 @@ class TBPlugin(BenchmarkPlugin):
         re-curated bank or different frontmatter) must not be reused as
         if it were the same trial."""
         knobs = {knob: os.environ.get(knob) or "" for knob in _FORWARDED_KNOBS}
+        knobs["TBENCH_MAX_INPUT_TOKENS"] = str(max_input_tokens)
         env_digest = hashlib.sha256(json.dumps(
             knobs, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         skill_digest = None
@@ -1230,6 +1267,7 @@ class TBPlugin(BenchmarkPlugin):
             "run_id": run_id,
             "env_sha256": env_digest.hexdigest(),
             "skill_sha256": skill_digest,
+            "max_input_tokens": max_input_tokens,
         }
 
     def _read_record(self, record_file: Path,
@@ -1375,7 +1413,7 @@ class TBPlugin(BenchmarkPlugin):
 
     def _submit(self, link: RemoteLink, root: str, run_id: str, task_name: str,
                 model_name: str, eval_mode: str,
-                skill_root: Optional[str]) -> int:
+                skill_root: Optional[str], max_input_tokens: int) -> int:
         """Launch the runner detached from the ssh session; return its pid.
 
         The launch environment comes from :func:`runner_env` (one Harbor
@@ -1383,7 +1421,8 @@ class TBPlugin(BenchmarkPlugin):
         """
         log_path = f"{root}/logs/{run_id}.log"
         env = runner_env(run_id, f"{root}/jobs", f"{root}/retry_archives",
-                         task_name, model_name, eval_mode, skill_root)
+                         task_name, model_name, eval_mode, skill_root,
+                         max_input_tokens)
         exports = " ".join(f"{key}={_q(value)}" for key, value in env.items())
         runner_script = (self._runner_script
                          or os.environ.get(RUNNER_ENV, DEFAULT_RUNNER))

@@ -1232,6 +1232,24 @@ class ExperimentConfig:
             return entry["max_output_tokens"]
         return self.token_budgets["default_max_output_tokens"]
 
+    def max_input_tokens_for(self, role: str) -> Optional[int]:
+        """Effective input/context cap for a role, or None when unset.
+
+        ``roles[role].max_input_tokens`` wins, then the global
+        ``token_budgets.max_input_tokens``; both are optional and ``None``
+        means "measure only" locally.  The TB plugin forwards a non-None
+        value to the remote Terminus agent as ``model_info.max_input_tokens``.
+        """
+        if role not in ROLE_DEFAULTS:
+            raise KeyError(
+                f"unknown model role {role!r}; known: {list(ROLE_DEFAULTS)}")
+        if not self.token_budgets:
+            return None
+        entry = self.token_budgets.get("roles", {}).get(role)
+        if entry is not None and "max_input_tokens" in entry:
+            return entry["max_input_tokens"]
+        return self.token_budgets.get("max_input_tokens")
+
     def effective_weak_profile(self) -> str:
         """The weak-profile text prompts receive (empty when disabled)."""
         return self.weak_profile if self.use_weak_profile else ""

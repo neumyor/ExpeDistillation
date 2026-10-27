@@ -451,6 +451,34 @@ def test_build_handles_wires_output_budget_per_role(plugin, tmp_path):
         assert handles[role].max_tokens == expected, role
 
 
+def test_build_handles_wires_input_budget_per_role(plugin, tmp_path):
+    # The TB plugin forwards a handle's max_input_tokens to the remote
+    # Terminus model_info; unlisted roles stay None (the adapter's
+    # historical 131072 fallback).
+    config = ExperimentConfig(
+        benchmark=_FAKE, mode="full",
+        models={"executor_strong": "strong-model",
+                "executor_weak": "weak-model"},
+        sequence=["baseline", "learn", "test"],
+        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
+        token_budgets={
+            "default_max_output_tokens": 65536,
+            "roles": {
+                "executor_weak": {"max_output_tokens": 65536,
+                                  "max_input_tokens": 262144},
+                "executor_strong": {"max_output_tokens": 65536,
+                                    "max_input_tokens": 524288},
+            },
+        },
+    )
+    handles = cli._build_handles(
+        config, tmp_path / "experiment.yaml", ClientLog().make_client,
+        infra_retries=0, infra_backoff_seconds=0.0)
+    assert handles["executor_weak"].max_input_tokens == 262144
+    assert handles["executor_strong"].max_input_tokens == 524288
+    assert handles["judge"].max_input_tokens is None
+
+
 def test_config_without_token_budgets_stops_before_the_freeze(
         plugin, tmp_path, drivers):
     # The token_budgets field is optional at load time, but the helper

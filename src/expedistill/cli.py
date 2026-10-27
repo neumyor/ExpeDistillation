@@ -233,6 +233,10 @@ def _build_handles(
             # not list (never a shared mutable default).
             extra_body=dict(cfg.model_options.get(model_name, {})),
             max_tokens=budget,
+            # Optional context ceiling.  A non-None value is forwarded by
+            # the TB plugin to the remote Terminus model_info; local
+            # call_model only records an input_violation fact.
+            max_input_tokens=cfg.max_input_tokens_for(role),
             infra_retries=infra_retries,
             infra_backoff_seconds=infra_backoff_seconds,
         )

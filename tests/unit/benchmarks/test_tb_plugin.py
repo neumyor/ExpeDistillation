@@ -371,17 +371,36 @@ def test_runner_env_is_the_submission_contract(monkeypatch):
         "TBENCH_N_ATTEMPTS": "1",
         "TBENCH_N_CONCURRENT": "1",
         "TBENCH_MAX_TRIAL_RETRIES": "0",
+        "TBENCH_MAX_INPUT_TOKENS": "131072",
         "MODEL_NAME": "qwen3.6-flash-distill",
     }
     env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "skills",
                      "/data2/niuyiming/expedistill/skills/ed_x_a00")
     assert env["TBENCH_SKILL_ROOT"] == (
         "/data2/niuyiming/expedistill/skills/ed_x_a00")
+    env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "bare", None,
+                     max_input_tokens=262144)
+    assert env["TBENCH_MAX_INPUT_TOKENS"] == "262144"
 
 
 # ---------------------------------------------------------------------------
 # run(): end to end against the fake link
 # ---------------------------------------------------------------------------
+
+def test_run_forwards_the_handle_context_limit(tmp_path):
+    link = FakeRemoteLink(
+        polls=["PENDING\n", f"RESULT {TRIAL}/result.json\n"],
+        remote_files=_completed_trial_files())
+    handle = ModelHandle(name="weak-model", role="executor_weak",
+                         client=None, max_input_tokens=262144)
+    plugin = _make_plugin(link)
+    outcome = plugin.run(TASK, handle, "", tmp_path / "work")
+
+    submit = [cmd for cmd in link.commands if "nohup" in cmd]
+    assert len(submit) == 1
+    assert "TBENCH_MAX_INPUT_TOKENS=262144" in submit[0]
+    assert outcome.meta["max_input_tokens"] == 262144
+
 
 def test_run_success_end_to_end(tmp_path):
     link = FakeRemoteLink(
