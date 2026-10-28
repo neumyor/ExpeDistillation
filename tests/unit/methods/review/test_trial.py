@@ -14,8 +14,8 @@ from expedistill.core.answer_sheet import (
 )
 from expedistill.core.models import Step
 from expedistill.llm import json_script, make_fake_handle
-from expedistill.methods.review import trial, trial_review
-from expedistill.methods.review.contracts import ReviewContext
+from expedistill.methods.review import aggregation, trial, trial_review
+from expedistill.methods.review.contracts import ReviewContext, TrialFinding
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
 
@@ -185,3 +185,78 @@ def test_trial_review_aggregates_actions_requirements_and_profile(monkeypatch):
     assert result.new_skill_requirements[0].source_sheet_ids == [
         sheet.sheet_id]
     assert result.profile_update == ""
+
+
+def test_aggregation_defaults_unmentioned_measured_skills_to_keep():
+    """Every measured skill gets a row, even when no finding mentions it."""
+    other = make_skill("traj/tb:t1/weak/00/seg01", "second skill",
+                       summary="second")
+    units = [
+        _unit_for("unit-a", SKILL),
+        _unit_for("unit-b", other),
+    ]
+    report = PhaseReport(
+        phase_kind="live", learning_usable=True, sheets=[], units=units)
+    finding = TrialFinding(
+        sheet_id="sheet-1", unit_id="unit-a", task_ref=TASK,
+        reason="the first skill was not applied",
+        skill_ids=[SKILL.skill_id], step_start=0, step_end=1)
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [{
+            "skill_id": SKILL.skill_id, "action": "keep",
+            "reason": "the card itself is correct"}],
+        "new_skill_requirements": [],
+    })])
+
+    items, requirements = aggregation.aggregate_findings(
+        findings=[finding], bank=[SKILL, other], current=report,
+        context=_context(), handle=handle)
+
+    assert requirements == []
+    assert [item.row.target_id for item in items] == [
+        SKILL.skill_id, other.skill_id]
+    assert [item.row.action for item in items] == ["keep", "keep"]
+    assert items[1].row.reason.startswith("no trial finding implicated")
+    assert items[1].row.basis_unit == "unit-b"
+
+
+def _unit_for(unit_id, skill):
+    return UnitSummary(
+        unit_id=unit_id, phase_label="p03:live", task_ref=TASK,
+        role="weak", arm=None, expected_attempts=1,
+        injected_skills=[{"skill_id": skill.skill_id, "version": 1}],
+        valid_count=1, success_count=0, status="normal", cause="")
+
+
+def test_aggregation_accepts_prompt_compliant_keep_without_finding():
+    """The prompt now tells the model to emit keep for every measured skill.
+
+    A keep row with no supporting finding is valid; it must not hit the
+    old "no finding supports" error.
+    """
+    other = make_skill("traj/tb:t1/weak/00/seg01", "second skill",
+                       summary="second")
+    report = PhaseReport(
+        phase_kind="live", learning_usable=True, sheets=[],
+        units=[_unit_for("unit-a", SKILL), _unit_for("unit-b", other)])
+    finding = TrialFinding(
+        sheet_id="sheet-1", unit_id="unit-a", task_ref=TASK,
+        reason="the first skill was not applied",
+        skill_ids=[SKILL.skill_id], step_start=0, step_end=1)
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [
+            {"skill_id": SKILL.skill_id, "action": "keep",
+             "reason": "the card itself is correct"},
+            {"skill_id": other.skill_id, "action": "keep",
+             "reason": "no finding implicated this measured skill"},
+        ],
+        "new_skill_requirements": [],
+    })])
+
+    items, requirements = aggregation.aggregate_findings(
+        findings=[finding], bank=[SKILL, other], current=report,
+        context=_context(), handle=handle)
+
+    assert requirements == []
+    assert [item.row.action for item in items] == ["keep", "keep"]
+    assert items[1].row.basis_unit == "unit-b"

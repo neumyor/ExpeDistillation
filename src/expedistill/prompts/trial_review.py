@@ -52,6 +52,11 @@ category. Distinguish, when the evidence supports it:
 - no skill in the bank addresses this failure, so a new capability is
   needed.
 
+Before writing the reason, check every skill under SKILLS ACTUALLY DELIVERED.
+If a delivered skill matched the situation but was not opened, or was opened
+but not followed, include it in `skills` with the concrete issue. Do not omit
+a relevant delivered skill from that list.
+
 Use only evidence visible in the steps and skills. If the cause is unclear,
 say what is unclear instead of inventing certainty.
 
@@ -85,16 +90,21 @@ TRIAL FINDINGS:
 CURRENT SKILL BANK:
 {skills}
 
+MEASURED SKILLS (one action is required for every id below):
+{measured_skills}
+
 Do two jobs.
 
 1. Skill actions.
-For every skill mentioned by the findings, choose exactly one action:
+For every skill in MEASURED SKILLS, choose exactly one action:
 keep, revise, or delete. Merge all trials that point at the same skill into
 one row. A missing invocation is a reason to revise the skill's trigger or
 description. A defective skill is a reason to revise its content. A correct
 skill the model still could not use stays kept; its evidence belongs in the
-profile, not in a rewrite. Use ordinary prose for reasons. Never emit two
-rows for one skill.
+profile, not in a rewrite. If no finding mentions a measured skill, choose
+keep and say explicitly that no finding implicated it. Use ordinary prose
+for reasons. Never emit two rows for one skill, and never omit a measured
+skill.
 
 2. New capability requirements.
 Aggregate all ``new_skill_note`` values into a small set of capability

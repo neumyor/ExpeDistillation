@@ -79,6 +79,13 @@ ReviewResult
 folder manifest 的别名归一化（目录名、文件名、`-SKILL.md` 形式都映射回完整 id），
 否则一条 trial 的 finding 不会因为模型写了文件夹名而整条丢失。
 
+`TRIAL_FAILURE_ANALYSIS` 的 prompt 要求模型检查每个
+`SKILLS ACTUALLY DELIVERED`：如果一个 skill 场景适配但没被打开，或打开了却没
+执行，必须写进 `skills[]`。`TRIAL_REQUIREMENT_AGGREGATION` 的 prompt 会收到
+`MEASURED SKILLS`，要求每个 measured skill 恰好一行；即使模型漏掉，代码也会为
+它补一行 `keep`（理由写明“no trial finding implicated this measured skill”），
+保证 measured 集合和 task list 一一对应。
+
 `trial_level` 的长输入角色要求：
 
 - `author`：`TRIAL_FAILURE_ANALYSIS` 的整条 trial + 整库 skill 卡；

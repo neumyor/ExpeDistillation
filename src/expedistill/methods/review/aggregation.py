@@ -36,11 +36,13 @@ def aggregate_findings(
     run_dir: Any = None,
 ) -> Tuple[List[ReviewItem], List[NewSkillRequirement]]:
     """One agent call turns all findings into the phase's final review."""
+    measured = _measured_skills(current)
     parsed = call_model(
         handle, "TRIAL_REQUIREMENT_AGGREGATION",
         {
             "findings": _findings_text(findings),
             "skills": _skill_cards(bank),
+            "measured_skills": _measured_text(measured),
         },
         output_json=True, usage=usage, run_dir=run_dir)
     if not isinstance(parsed, dict):
@@ -79,10 +81,16 @@ def aggregate_findings(
                 "TRIAL_REQUIREMENT_AGGREGATION: reason must be a non-empty "
                 f"string for {skill_id!r}")
         origin = findings_by_skill.get(skill_id) or []
-        if not origin:
+        if not origin and action != "keep":
             raise ModelOutputError(
                 "TRIAL_REQUIREMENT_AGGREGATION: no finding supports "
-                f"{skill_id!r}")
+                f"{action} for {skill_id!r}")
+        basis_unit = (origin[0].unit_id if origin
+                      else measured.get(skill_id))
+        if basis_unit is None:
+            raise ModelOutputError(
+                "TRIAL_REQUIREMENT_AGGREGATION: keep for a skill that "
+                f"was not measured: {skill_id!r}")
         evidence = None
         if action == "revise":
             windows = []
@@ -104,8 +112,29 @@ def aggregate_findings(
                 target_id=skill_id,
                 action=action,
                 reason=reason.strip(),
-                basis_unit=origin[0].unit_id),
+                basis_unit=basis_unit),
             evidence=evidence))
+        seen.add(skill_id)
+
+    # The aggregation prompt asks for every measured skill, but the model
+    # can still omit one.  Never let a measured skill fall through
+    # unreviewed: keep it by default, with an explicit reason and the
+    # unit that measured it as provenance.
+    for skill_id in sorted(measured):
+        if skill_id in seen:
+            continue
+        if skill_id not in by_id:
+            raise CodeBugError(
+                "TRIAL_REQUIREMENT_AGGREGATION: measured skill "
+                f"{skill_id!r} is not in the bank")
+        items.append(ReviewItem(
+            row=TaskListRow(
+                target_kind="skill",
+                target_id=skill_id,
+                action="keep",
+                reason="no trial finding implicated this measured skill; "
+                       "keep by default",
+                basis_unit=measured[skill_id])))
         seen.add(skill_id)
 
     requirements: List[NewSkillRequirement] = []
@@ -191,6 +220,31 @@ def _requirement_evidence(
         source_experiences=[
             experience for package in packages
             for experience in package.source_experiences])
+
+
+def _measured_skills(current: PhaseReport) -> Dict[str, str]:
+    """Measured skill id -> the first unit that injected it.
+
+    The unit members are the contract's measured set; aggregation must
+    decide every one of them, even when no finding mentions it.
+    """
+    measured: Dict[str, str] = {}
+    for unit in current.units:
+        refs = unit.injected_skills
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            skill_id = ref.get("skill_id")
+            if isinstance(skill_id, str) and skill_id:
+                measured.setdefault(skill_id, unit.unit_id)
+    return measured
+
+
+def _measured_text(measured: Dict[str, str]) -> str:
+    return "\n".join(f"- {skill_id}" for skill_id in sorted(measured)) \
+        or "(none)"
 
 
 def _findings_text(findings: Sequence[TrialFinding]) -> str:

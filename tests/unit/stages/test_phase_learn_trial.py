@@ -1,5 +1,7 @@
 """phase_learn's trial_level wiring: analysis -> requirements -> bank."""
 
+import json
+
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401
@@ -73,6 +75,9 @@ def _phases():
 def _seed_live(tmp_path):
     run_dir = tmp_path / "run"
     store = Store(run_dir)
+    store.save(SKILL, "skills")
+    (run_dir / "skill_bank.jsonl").write_text(
+        json.dumps(SKILL.to_dict()) + "\n", encoding="utf-8")
     unit = make_unit_id(
         phase_label="p02:live", benchmark="tb", task_ref=TASK, role="weak",
         skills_injected=[{"skill_id": SKILL.skill_id, "version": 1}])

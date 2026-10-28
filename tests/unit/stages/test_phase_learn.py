@@ -11,7 +11,9 @@ and the curation sequence-position branch.
 
 
 import dataclasses
+import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -1127,3 +1129,22 @@ def test_a_reused_live_unit_is_visible_to_the_next_learn_phase(tmp_path):
     report = phase_learn._load_phase_report(ctx, sequence, phases, 4)
     assert [unit.unit_id for unit in report.units] == [new_id]
     assert report.sheets
+
+
+def test_learn_summary_includes_cluster_outcomes(tmp_path):
+    """The cluster add path has no task-level outcomes.jsonl.
+
+    Its terminal receipts live in cluster_summary.json; the phase summary
+    must include them instead of reporting an empty outcomes mapping.
+    """
+    phase_dir = tmp_path / "phase"
+    phase_dir.mkdir()
+    (phase_dir / "cluster_summary.json").write_text(
+        json.dumps({"outcomes": {"added": 42}}), encoding="utf-8")
+    phase = SimpleNamespace(spec=SimpleNamespace(role="learn"))
+
+    summary = phase_learn._summary(
+        phase, [], [], phase_dir, current_phase="baseline",
+        compare_rule="strict_rate_gain", checks_left=2)
+
+    assert summary["outcomes"] == {"added": 42}

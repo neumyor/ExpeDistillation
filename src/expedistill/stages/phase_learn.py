@@ -495,6 +495,11 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     for record in records:
         outcome = record["outcome"]
         outcomes[outcome] = outcomes.get(outcome, 0) + 1
+    # cluster_by_trigger keeps its own per-cluster receipts; the task-level
+    # outcomes ledger is absent on that path.  The cluster summary is the
+    # authoritative count there, so merge it without double-counting shared
+    # keys.
+    outcomes.update(_cluster_outcomes(phase_dir))
     actions: Dict[str, int] = {}
     for row in rows:
         actions[row.action] = actions.get(row.action, 0) + 1
@@ -505,6 +510,27 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
         "checks_left": checks_left,
         "task_list": {**actions, "superseded_rows": len(superseded)},
         "outcomes": outcomes,
+    }
+
+
+def _cluster_outcomes(phase_dir) -> Dict[str, int]:
+    """The cluster path's terminal counts, or an empty mapping.
+
+    ``learn_add_cluster`` writes ``cluster_outcomes.jsonl`` and a
+    cumulative ``cluster_summary.json``; it does not write the regular
+    task-level ``outcomes.jsonl``.  The summary reader therefore has to
+    include this ledger explicitly.
+    """
+    path = phase_dir / "cluster_summary.json"
+    if not path.exists():
+        return {}
+    payload = read_json(path)
+    raw = payload.get("outcomes") if isinstance(payload, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(name): value for name, value in raw.items()
+        if isinstance(value, int) and not isinstance(value, bool)
     }
 
 
