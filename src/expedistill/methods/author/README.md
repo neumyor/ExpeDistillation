@@ -48,7 +48,11 @@ author:
 单条 skill 仍是 `pending`、`version=1`，由后续 live/exam 路径正常验收。
 `source_subtasks` 只是来源记录；live 的分组仍按锚点 subtask 所在的 task
 进行，因此一个跨 task cluster 在 live 上只在锚点 task 组里被测量，
-P07 的全局 folder 仍会交付它。
+P07 的全局 folder 仍会交付它。`cluster_summary.json` / `learn_summary.json`
+用 `uncovered_add_tasks` 报告“被授权 add 但没有锚点技能”的任务，逐条给出
+task id、add 行序号、基线轨迹里是否至少一次强模型判对且一次弱模型判错、
+被哪些 cluster 吸收；这是只读报告，不改变分组或投递，`failed_tasks` 也不
+与之混用。`eligible` 统计的是基线 trajectory 的判分，不是被选中的段。
 
 ## P04/P06 的 revise 写作
 

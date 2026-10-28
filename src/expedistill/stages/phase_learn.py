@@ -508,7 +508,7 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
     actions: Dict[str, int] = {}
     for row in rows:
         actions[row.action] = actions.get(row.action, 0) + 1
-    return {
+    summary = {
         "role": phase.spec.role,
         "current_phase": current_phase,
         "compare_rule": compare_rule,
@@ -516,6 +516,10 @@ def _summary(phase: PhaseInstance, rows: Sequence[Any],
         "task_list": {**actions, "superseded_rows": len(superseded)},
         "outcomes": outcomes,
     }
+    uncovered = _cluster_uncovered(phase_dir)
+    if uncovered is not None:
+        summary["uncovered_add_tasks"] = uncovered
+    return summary
 
 
 def _cluster_outcomes(phase_dir) -> Dict[str, int]:
@@ -537,6 +541,17 @@ def _cluster_outcomes(phase_dir) -> Dict[str, int]:
         str(name): value for name, value in raw.items()
         if isinstance(value, int) and not isinstance(value, bool)
     }
+
+
+def _cluster_uncovered(phase_dir) -> Optional[List[dict]]:
+    """The cluster path's add-authorizations without an anchored skill."""
+    path = phase_dir / "cluster_summary.json"
+    if not path.exists():
+        return None
+    payload = read_json(path)
+    raw = payload.get("uncovered_add_tasks") if isinstance(
+        payload, dict) else None
+    return raw if isinstance(raw, list) else []
 
 
 def _carried_source_sheets(ctx: Any, phase_dir) -> List[Any]:

@@ -1143,8 +1143,18 @@ def test_learn_summary_includes_cluster_outcomes(tmp_path):
     """
     phase_dir = tmp_path / "phase"
     phase_dir.mkdir()
+    uncovered = [{
+        "task_id": "tb:t2",
+        "add_index": 2,
+        "eligible": False,
+        "strong_success": True,
+        "weak_failure": False,
+        "absorbed_by": ["cluster-1"],
+    }]
     (phase_dir / "cluster_summary.json").write_text(
-        json.dumps({"outcomes": {"added": 42}}), encoding="utf-8")
+        json.dumps({"outcomes": {"added": 42},
+                    "uncovered_add_tasks": uncovered}),
+        encoding="utf-8")
     phase = SimpleNamespace(spec=SimpleNamespace(role="learn"))
 
     summary = phase_learn._summary(
@@ -1152,3 +1162,4 @@ def test_learn_summary_includes_cluster_outcomes(tmp_path):
         compare_rule="strict_rate_gain", checks_left=2)
 
     assert summary["outcomes"] == {"added": 42}
+    assert summary["uncovered_add_tasks"] == uncovered

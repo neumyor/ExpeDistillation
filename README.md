@@ -865,7 +865,11 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  （added / skipped_existing / failed /
                                  infra_failed）
     cluster_summary.json         cluster_by_trigger：跨 task 写作摘要（族、
-                                 类、skill、回执计数）
+                                 类、skill、回执计数，以及
+                                 uncovered_add_tasks：授权 add 但无锚点
+                                 skill 的任务、基线里是否至少一次强模型
+                                 成功且一次弱模型失败、被哪些 cluster
+                                 吸收；只读报告，不改分组）
 
   —— 其他 ——
   skill_bank.jsonl               run 根整库（装配产出的 run 由装配器写入；

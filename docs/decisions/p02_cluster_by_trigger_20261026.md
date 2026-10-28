@@ -43,6 +43,16 @@ task 各自写一条。
 
 - cluster skill 在 live 上只属于锚点 subtask 所在的 task 组；`source_subtasks`
   是来源记录，不扩展 live 的分组。P07 的全局 folder 仍会交付它。
+- 因此，一个 add-authorized task 可能只贡献来源 subtask、没有自己的锚点 skill，
+  live 不会为它生成 group。`cluster_summary.json` 和 `learn_summary.json` 的
+  `uncovered_add_tasks` 逐条报告这类任务（task id、add 行序号、该任务的基线
+  轨迹里是否至少一次强模型判对、一次弱模型判错、被哪些 cluster 吸收）；这是
+  只读报告，不改变分组或投递。`failed_tasks` 仍只表示模型/聚类层面的失败，
+  不混入覆盖缺口。
+- `eligible` 按存储的基线 trajectory 判分统计，不按被选中的段统计：弱模型失败
+  但段全被切段规则丢掉时，这个任务仍然算有弱失败；这样它和“任务是否具备两臂
+  证据”的问题一致。字段是机制层面的可见性，与任何一条具体 run 无关；作废的
+  run 只被用来检查它能否列出该 run 的缺口，其数字不进入结论。
 - v1 在一个 family 超过 `max_cards_per_prompt` 时按 subtask id 分 chunk
   聚类，不做跨 chunk 的二次合并；五个 family 之间、family 内 chunk 之间
   都并行，family 内并发额度按 run 的 `workers` 分摊。

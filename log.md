@@ -1541,3 +1541,15 @@ layering、`git diff --check` 通过。未提交、未推送，未读写正在�
 一段话摘要：按 `tmp/tb21_split_small_train_20261027.yaml` 把实验改为 20 train / 30 val / 39 test。框架没有独立 val 相位，沿用既有约定把 val 放进 `reserved`（不进化、不终测），因此 manifest 的 split 是 train 20 / test 39 / reserved 30，和 small20 正式 run 的划分一致；新建 `configs/experiments/tb21_p02p06_exam_small20_20261028.yaml`，不修改旧的 25/64 exam 配置。复用 `runs/tb21_agentbrew_small20_cluster_20261027_2139/` 已完成的 P01（20 train、120 条 sheet、120 条轨迹）创建 `runs/tb21_p02p06_exam_small20_20261028_1322/`，只实际跑 P02–P06（P03/P05 exam，P04/P06 trial_level），不跑 P07。结果：P02 17 条 add、37 个 skill；P03 37/37 coverage present；P04 28 keep + 9 revise、30 条 finding、4 条新需求全部 added；P05 13/13 coverage present；P06 13 keep、13 条 finding、无新需求；P06 curation 12 次 merge 全部 kept，最终库 26 个成员。只读审计 0 ERROR / 0 WARN。该 run 的 stage0 冻结校验为 split 20/39/30，配置 schema 7。
 
 工件：`configs/experiments/tb21_p02p06_exam_small20_20261028.yaml`、run `runs/tb21_p02p06_exam_small20_20261028_1322/`、`log.md`
+
+## 2026-10-28 18:00 — P02 cluster 覆盖缺口只读报告字段
+
+一段话摘要：按管理员决定实现只读字段 `uncovered_add_tasks`，让 cluster-by-trigger 路径下“被授权 add 但没有锚点技能”的任务可见，不改变任何实验行为。每条记录给出 task id、add 行序号、strong/weak 证据是否达标（strong 至少一次成功且 weak 至少一次失败）、以及被哪些 cluster 吸收了它的 subtask；`failed_tasks` 语义不变，仍是模型/聚类层面的失败。字段同时写进学习相位的 `cluster_summary.json` 和 `learn_summary`；分组与投递仍按锚点 subtask 所在 task，未扩展到 `source_subtasks`，task 级 fallback 也按决定推迟。验证：新增“被吸收任务证据达标”的单元测试，cluster summary 与 phase summary 两处断言同步更新；全量 2378 passed、2 skipped、4 deselected；ruff E9/F、layering、`git diff --check` 通过。未提交、未推送。
+
+工件：`src/expedistill/stages/learn_add_cluster.py`、`src/expedistill/stages/phase_learn.py`、`tests/unit/stages/test_learn_add_cluster.py`、`tests/unit/stages/test_phase_learn.py`、`docs/decisions/p02_cluster_by_trigger_20261026.md`、`src/expedistill/methods/author/README.md`、`README.md`、`log.md`
+
+## 2026-10-28 18:05 — 更正：覆盖缺口的 eligible 改用基线轨迹判分
+
+一段话摘要：更正 18:00 条目的口径并补一项验证。`uncovered_add_tasks` 的 `eligible` 原本按“被选中的 source_experiences 里有没有强成功段和弱失败段”统计，但这会把“弱模型确实失败、只是段全被切段规则丢掉”的任务判成不合格；按决定里的定义（strong 至少一次成功且 weak 至少一次失败）应看该任务的基线轨迹判分。现在 `_baseline_arms` 只对有覆盖缺口的任务读 store 里的 trajectory，按 `correctness` 统计两臂，不再依赖被选中的段；cluster_summary 的两条写盘路径都把 `ctx.store` 传进去。按管理员要求，用已作废的 small20 run `runs/tb21_agentbrew_small20_cluster_20261027_2139/` 的 P02 产物做只读验证（`tmp/check_uncovered_aborted_run.py`，不写 run 目录）：17 条 add、4 个任务无锚点技能（filter-js-from-html、pytorch-model-recovery、raman-fitting、torch-tensor-parallelism），其中 2 个 eligible（pytorch、torch），与先前审计一致；该 run 的数字仍不进入任何结论。测试：新增“弱失败段被全部切掉但仍算 eligible”的用例，核对 add_index、absorbed_by；全量 2379 passed、2 skipped、4 deselected；ruff E9/F、layering、`git diff --check` 通过。未提交、未推送。
+
+工件：`src/expedistill/stages/learn_add_cluster.py`、`tests/unit/stages/test_learn_add_cluster.py`、`README.md`、`docs/decisions/p02_cluster_by_trigger_20261026.md`、`src/expedistill/methods/author/README.md`、`tmp/check_uncovered_aborted_run.py`（只读验证脚本，不进 git）、`log.md`

@@ -22,15 +22,27 @@ TASK_B = make_task_id("tb", "t2")
 class _Store:
     def __init__(self):
         self.saved = {}
+        self.trajectories = {}
 
     def exists(self, kind, object_id):
         return object_id in self.saved
 
+    def ids(self, kind):
+        return sorted(self.trajectories) if kind == "trajectories" else []
+
     def load(self, kind, object_id, cls=None):
+        if kind == "trajectories":
+            return self.trajectories[object_id]
         return self.saved[object_id]
 
     def save(self, obj, kind):
         self.saved[obj.skill_id] = obj
+
+
+def _record_run(store, task_id, role, success, attempt=0):
+    store.trajectories[make_trajectory_id(task_id, role, attempt)] = (
+        SimpleNamespace(task_id=task_id, model_role=role,
+                        correctness=success))
 
 
 def _subtask(task_id, segment, source="strong", success=True):
@@ -131,6 +143,8 @@ def test_cluster_path_writes_one_skill_and_its_artifacts(
     phase_dir.mkdir()
     experiences_a = [_experience(TASK_A, 0), _experience(TASK_A, 1)]
     experiences_b = [_experience(TASK_B, 0)]
+    _record_run(store, TASK_A, "strong", True)
+    _record_run(store, TASK_B, "strong", True)
     calls = _install(monkeypatch)
 
     failed = learn_add_cluster.execute_add_rows(
@@ -158,6 +172,14 @@ def test_cluster_path_writes_one_skill_and_its_artifacts(
     summary = read_json(phase_dir / "cluster_summary.json")
     assert summary["skills"] == 1
     assert summary["outcomes"] == {"added": 1}
+    assert summary["uncovered_add_tasks"] == [{
+        "task_id": TASK_B,
+        "add_index": 2,
+        "eligible": False,
+        "strong_success": True,
+        "weak_failure": False,
+        "absorbed_by": [clusters[0]["cluster_id"]],
+    }]
 
 
 def test_a_completed_cluster_is_not_reclassified_or_rewritten(
@@ -250,3 +272,61 @@ def test_learn_add_dispatches_the_new_author_method(monkeypatch, tmp_path):
     assert called and called[0][0] == 1
     assert (tmp_path / "run" / "phases" / "p02_learn"
             / "task_list.jsonl").exists()
+
+
+def test_uncovered_add_task_marks_eligible_runs(monkeypatch, tmp_path):
+    store = _Store()
+    ctx = _ctx(tmp_path, store)
+    phase = _phase()
+    phase_dir = tmp_path / "phase"
+    phase_dir.mkdir()
+    experiences_a = [_experience(TASK_A, 0)]
+    experiences_b = [_experience(TASK_B, 0),
+                     _experience(TASK_B, 1, source="weak", success=False)]
+    _record_run(store, TASK_A, "strong", True)
+    _record_run(store, TASK_B, "strong", True)
+    _record_run(store, TASK_B, "weak", False)
+    _install(monkeypatch)
+    items = [_item(TASK_A, experiences_a), _item(TASK_B, experiences_b)]
+
+    learn_add_cluster.execute_add_rows(
+        ctx, phase, items, phase_dir,
+        author_params=ClusterAuthoringParams(max_chars_per_card=800))
+
+    summary = read_json(phase_dir / "cluster_summary.json")
+    uncovered = summary["uncovered_add_tasks"]
+    assert len(uncovered) == 1
+    assert uncovered[0]["task_id"] == TASK_B
+    assert uncovered[0]["add_index"] == 2
+    assert uncovered[0]["eligible"] is True
+    assert uncovered[0]["strong_success"] is True
+    assert uncovered[0]["weak_failure"] is True
+    assert uncovered[0]["absorbed_by"]
+
+
+def test_uncovered_eligibility_reads_all_baseline_runs(
+        monkeypatch, tmp_path):
+    """A weak failure whose segments were all cut away still counts."""
+    store = _Store()
+    ctx = _ctx(tmp_path, store)
+    phase = _phase()
+    phase_dir = tmp_path / "phase"
+    phase_dir.mkdir()
+    experiences_a = [_experience(TASK_A, 0)]
+    experiences_b = [_experience(TASK_B, 0)]
+    _record_run(store, TASK_A, "strong", True)
+    _record_run(store, TASK_B, "strong", True)
+    _record_run(store, TASK_B, "weak", False)
+    _install(monkeypatch)
+    items = [_item(TASK_A, experiences_a), _item(TASK_B, experiences_b)]
+
+    learn_add_cluster.execute_add_rows(
+        ctx, phase, items, phase_dir,
+        author_params=ClusterAuthoringParams(max_chars_per_card=800))
+
+    uncovered = read_json(phase_dir / "cluster_summary.json")[
+        "uncovered_add_tasks"]
+    assert len(uncovered) == 1
+    assert uncovered[0]["task_id"] == TASK_B
+    assert uncovered[0]["eligible"] is True
+    assert uncovered[0]["weak_failure"] is True

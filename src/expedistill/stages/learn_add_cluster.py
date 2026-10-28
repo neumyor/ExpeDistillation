@@ -40,7 +40,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from expedistill.composites.skill_origins import append_origin, source_ref
 from expedistill.composites.unit_ids import unit_id_for_trajectory
-from expedistill.core.ids import make_skill_id
+from expedistill.core.ids import (
+    make_skill_id,
+    parse_subtask_id,
+    parse_trajectory_id,
+)
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
@@ -327,6 +331,100 @@ def _write_cluster_views(phase_dir: Path,
             "\n".join(lines), encoding="utf-8")
 
 
+def _task_of_subtask(subtask_id: str) -> Optional[str]:
+    try:
+        trajectory_id, _segment = parse_subtask_id(subtask_id)
+        return parse_trajectory_id(trajectory_id)[0]
+    except (TypeError, ValueError):
+        return None
+
+
+def _baseline_arms(store: Any,
+                   task_ids: Set[str]) -> Dict[str, Dict[str, bool]]:
+    """Whether each task's baseline runs include a strong success and a
+    weak failure.
+
+    The check is on the stored trajectories' scorer verdicts, not on the
+    segments the add evidence happened to keep: a failed weak run whose
+    segments were all cut away still shows the task had a weak failure
+    to learn from.
+    """
+    arms = {task_id: {"strong_success": False, "weak_failure": False}
+            for task_id in task_ids}
+    for trajectory_id in store.ids("trajectories"):
+        try:
+            task_id, role, _attempt = parse_trajectory_id(trajectory_id)
+        except (TypeError, ValueError):
+            continue
+        if task_id not in arms or role not in ("strong", "weak"):
+            continue
+        trajectory = store.load("trajectories", trajectory_id, Trajectory)
+        if role == "strong" and trajectory.correctness is True:
+            arms[task_id]["strong_success"] = True
+        if role == "weak" and trajectory.correctness is False:
+            arms[task_id]["weak_failure"] = True
+    return arms
+
+
+def _uncovered_add_tasks(
+    items: Sequence[ReviewItem],
+    clusters: Sequence[Mapping[str, Any]],
+    skill_rows: Sequence[Mapping[str, Any]],
+    store: Any,
+) -> List[dict]:
+    """Tasks authorized for add but left without an anchored skill.
+
+    This is a report-only view.  ``cluster_by_trigger`` deliberately
+    anchors one skill per cluster on the smallest subtask id, so a task
+    that only contributed source subtasks has no live group of its own.
+    The list records that fact, the add-row order, whether the task had
+    eligible evidence (at least one strong success and one weak failure
+    among its baseline runs), and which clusters absorbed its subtasks.
+    It never changes grouping or delivery.
+    """
+    cluster_by_id = {str(cluster.get("cluster_id")): cluster
+                     for cluster in clusters}
+    absorbed: Dict[str, List[str]] = {}
+    for cluster in clusters:
+        cluster_id = str(cluster.get("cluster_id"))
+        for subtask_id in cluster.get("subtask_ids") or ():
+            task_id = _task_of_subtask(str(subtask_id))
+            if task_id:
+                absorbed.setdefault(task_id, []).append(cluster_id)
+
+    covered: Set[str] = set()
+    for row in skill_rows:
+        cluster = cluster_by_id.get(str(row.get("cluster_id")))
+        if cluster is None:
+            continue
+        subtask_ids = sorted(str(item)
+                             for item in cluster.get("subtask_ids") or ())
+        if subtask_ids:
+            task_id = _task_of_subtask(subtask_ids[0])
+            if task_id:
+                covered.add(task_id)
+
+    uncovered = [item.row.target_id for item in items
+                 if item.row.target_id not in covered]
+    arms = _baseline_arms(store, set(uncovered))
+    out: List[dict] = []
+    for index, item in enumerate(items, start=1):
+        task_id = item.row.target_id
+        if task_id in covered:
+            continue
+        strong_success = arms[task_id]["strong_success"]
+        weak_failure = arms[task_id]["weak_failure"]
+        out.append({
+            "task_id": task_id,
+            "add_index": index,
+            "eligible": strong_success and weak_failure,
+            "strong_success": strong_success,
+            "weak_failure": weak_failure,
+            "absorbed_by": sorted(set(absorbed.get(task_id, []))),
+        })
+    return out
+
+
 def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
                      phase_dir: Path, *,
                      author_params: Optional[ClusterAuthoringParams] = None,
@@ -400,6 +498,9 @@ def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
             "skills": len(existing_skill_rows),
             "outcomes": terminal_counts,
             "failed_tasks": sorted(failed_tasks),
+            "uncovered_add_tasks": _uncovered_add_tasks(
+                items, existing_cluster_rows, existing_skill_rows,
+                ctx.store),
         }, indent=2)
         return failed_tasks
 
@@ -521,6 +622,8 @@ def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
         "skills": len(existing_skill_rows),
         "outcomes": counts,
         "failed_tasks": sorted(failed_tasks),
+        "uncovered_add_tasks": _uncovered_add_tasks(
+            items, all_clusters, existing_skill_rows, ctx.store),
     }, indent=2)
     return failed_tasks
 
