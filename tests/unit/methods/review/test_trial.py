@@ -332,3 +332,31 @@ def test_exam_trial_revision_builds_exam_evidence_package():
     assert package.fact("exam_question") == "The service is down."
     assert package.fact("weak_answer") == "PLAN: restart the service"
     assert package.fact("judge_reason") == "the plan misses verification"
+
+
+def test_aggregation_drops_requirement_with_no_finding_source():
+    """A requirement citing a non-finding sheet is dropped, not fatal."""
+    report = PhaseReport(
+        phase_kind="live", learning_usable=True, sheets=[],
+        units=[_unit_for("unit-a", SKILL)])
+    finding = TrialFinding(
+        sheet_id="sheet-1", unit_id="unit-a", task_ref=TASK,
+        reason="the skill was not applied", skill_ids=[SKILL.skill_id],
+        step_start=0, step_end=1)
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [{
+            "skill_id": SKILL.skill_id, "action": "keep",
+            "reason": "the card is correct"}],
+        "new_skill_requirements": [{
+            "title": "missing capability",
+            "description": "teach it",
+            "trigger": "when needed",
+            "source_sheet_ids": ["not-a-finding-sheet"]}],
+    })])
+
+    items, requirements = aggregation.aggregate_findings(
+        findings=[finding], bank=[SKILL], current=report,
+        context=_context(), handle=handle)
+
+    assert [item.row.action for item in items] == ["keep"]
+    assert requirements == []

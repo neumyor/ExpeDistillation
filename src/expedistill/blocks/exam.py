@@ -76,7 +76,12 @@ def _normalize_skill_name(name: str) -> str:
     text = text.rstrip("/")
     for suffix in _SKILL_FILE_SUFFIXES:
         if text.endswith(suffix):
-            return text[: -len(suffix)]
+            text = text[: -len(suffix)]
+            break
+    # A model may drop the skill id's trailing ``/skill`` segment while
+    # keeping the rest of the id; treat that as the same catalog entry.
+    if text.endswith("/skill"):
+        text = text[: -len("/skill")]
     return text
 
 
@@ -259,7 +264,14 @@ def write_plan(
     if not isinstance(parsed, dict):
         raise ModelOutputError(
             f"EXAM_PLAN must return a JSON object, got {type(parsed).__name__}")
-    return _require_text("EXAM_PLAN", "plan", parsed.get("plan"))
+    plan = parsed.get("plan")
+    if isinstance(plan, list):
+        if not all(isinstance(item, str) and item.strip()
+                   for item in plan):
+            raise ModelOutputError(
+                "EXAM_PLAN: plan list entries must be non-empty strings")
+        plan = "\n".join(item.strip() for item in plan)
+    return _require_text("EXAM_PLAN", "plan", plan)
 
 
 def judge(

@@ -168,6 +168,15 @@ def aggregate_findings(
             raise ModelOutputError(
                 "TRIAL_REQUIREMENT_AGGREGATION: requirement source_sheet_ids "
                 "must be a non-empty list of strings")
+        # Requirements may only cite sheets that actually produced a
+        # finding; a model sometimes names a successful/unknown sheet.
+        # Such a requirement has no failure evidence and is dropped
+        # rather than allowed to abort the whole aggregation.
+        finding_sheets = {finding.sheet_id for finding in findings}
+        source_ids = [item for item in source_ids
+                      if item in finding_sheets]
+        if not source_ids:
+            continue
         requirement_id = requirement_id_for(title, source_ids)
         evidence = _requirement_evidence(
             requirement_id, description, source_ids, findings, current,

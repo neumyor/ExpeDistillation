@@ -107,7 +107,11 @@ def _aliases(folder: Mapping[str, Any]) -> Dict[str, str]:
         if not isinstance(skill_id, str) or not isinstance(filename, str):
             continue
         dirname = filename.split("/", 1)[0]
-        for name in (skill_id, filename, dirname, f"{dirname}-SKILL.md"):
+        compact = skill_id.replace("/", "-")
+        head, sep, tail = skill_id.partition("/")
+        mixed = f"{head}{sep}{tail.replace('/', '-')}" if sep else skill_id
+        for name in (skill_id, compact, mixed, filename,
+                     dirname, f"{dirname}-SKILL.md"):
             aliases.setdefault(name, skill_id)
     return aliases
 

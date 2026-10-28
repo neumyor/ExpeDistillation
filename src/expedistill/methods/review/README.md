@@ -86,6 +86,12 @@ folder manifest 的别名归一化（目录名、文件名、`-SKILL.md` 形式�
 它补一行 `keep`（理由写明“no trial finding implicated this measured skill”），
 保证 measured 集合和 task list 一一对应。
 
+`trial_level` 在 exam 之后沿用 `learn_exam` 的改写器；聚合会把 revise 行从
+来源 exam 的 AnswerSheet 组装成带 `exam_question` / `weak_answer` /
+`judge_reason` 的 `EvidencePackage`，而不是 live 路径的
+`SkillAttemptEvidence`。新需求只接受确实有 trial finding 的 `source_sheet_ids`；
+模型若引用了成功或未知的 sheet，该需求会被丢弃，不会让整个聚合报错。
+
 `trial_level` 的长输入角色要求：
 
 - `author`：`TRIAL_FAILURE_ANALYSIS` 的整条 trial + 整库 skill 卡；

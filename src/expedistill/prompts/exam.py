@@ -131,7 +131,7 @@ Write a plan the reader would follow now:
   does not give.
 
 Output ONLY JSON with exactly these fields:
-{{"plan": "<the ordered plan: actions, what to verify, and why>"}}
+{{"plan": "<the ordered plan as one string, or an ordered array of step strings>"}}
 """,
         description=(
             "G4 exam plan: write an ordered plan for a scene from the opened "

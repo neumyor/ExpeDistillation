@@ -391,3 +391,11 @@ def test_entry_validation_fails_loudly():
 def test_an_acceptance_phase_with_no_units_decides_nothing():
     assert decide_task_list(current_kind=decision.PHASE_EXAM,
                             current_report=[], bank=[], checks_left=1) == []
+
+
+def test_requirement_exam_unit_id_is_parseable():
+    """Requirement skills have no benchmark colon; their exam unit ids
+    still name the synthetic ``req/...`` skill chain."""
+    exam_id = "req/abc123/seg00/skill/v01/exam"
+    unit_id = f"p05:exam:tb:{exam_id}:weak:aaaaaaaa"
+    assert decision.parse_unit_id(unit_id) == (exam_id, "weak")

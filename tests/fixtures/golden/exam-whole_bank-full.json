@@ -377,7 +377,7 @@
       },
       "prompt_name": "EXAM_PLAN",
       "request_id": "<request_id>",
-      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan: actions, what to verify, and why>\"}\n",
+      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan as one string, or an ordered array of step strings>\"}\n",
       "response_text": "```json\n{\"plan\": \"Inspect the state first, then act.\"}\n```",
       "role": "answerer",
       "status": "ok",
@@ -396,7 +396,7 @@
       },
       "prompt_name": "EXAM_PLAN",
       "request_id": "<request_id>",
-      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan: actions, what to verify, and why>\"}\n",
+      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan as one string, or an ordered array of step strings>\"}\n",
       "response_text": "```json\n{\"plan\": \"Inspect the state first, then act.\"}\n```",
       "role": "answerer",
       "status": "ok",
@@ -415,7 +415,7 @@
       },
       "prompt_name": "EXAM_PLAN",
       "request_id": "<request_id>",
-      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan: actions, what to verify, and why>\"}\n",
+      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan as one string, or an ordered array of step strings>\"}\n",
       "response_text": "```json\n{\"plan\": \"Inspect the state first, then act.\"}\n```",
       "role": "answerer",
       "status": "ok",
@@ -434,7 +434,7 @@
       },
       "prompt_name": "EXAM_PLAN",
       "request_id": "<request_id>",
-      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan: actions, what to verify, and why>\"}\n",
+      "request_text": "Write an action plan for the situation below, using the skills that were\nopened for it.\n\nSCENE:\nA service reports an unexpected state and stops. What should be done before anything else?\n\nWHY THESE SKILLS WERE OPENED:\n\n\nOPENED SKILLS:\n\n\nWrite a plan the reader would follow now:\n- say what to do first, then the following steps, in order;\n- follow the opened skills where they apply; if none applies, plan from your\n  own knowledge;\n- name what to check after each step that changes the state;\n- stop at what can be decided from the scene: do not invent facts the scene\n  does not give.\n\nOutput ONLY JSON with exactly these fields:\n{\"plan\": \"<the ordered plan as one string, or an ordered array of step strings>\"}\n",
       "response_text": "```json\n{\"plan\": \"Inspect the state first, then act.\"}\n```",
       "role": "answerer",
       "status": "ok",
@@ -445,70 +445,6 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 189,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "EXAM_PLAN",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 189,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "EXAM_PLAN",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 189,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "EXAM_PLAN",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 189,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "weak-model",
-      "out_tokens": null,
-      "prompt": "EXAM_PLAN",
-      "request_id": "<request_id>",
-      "role": "answerer",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
         "estimated_in": 1892,
         "finish_reason": null,
         "format_retries": 0,
@@ -535,6 +471,70 @@
       "prompt": "SKILL_DISTILL",
       "request_id": "<request_id>",
       "role": "author",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 193,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "EXAM_PLAN",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 193,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "EXAM_PLAN",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 193,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "EXAM_PLAN",
+      "request_id": "<request_id>",
+      "role": "answerer",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 193,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "weak-model",
+      "out_tokens": null,
+      "prompt": "EXAM_PLAN",
+      "request_id": "<request_id>",
+      "role": "answerer",
       "status": "ok",
       "time": "<time>"
     },
@@ -870,7 +870,7 @@
         "CLUSTER_TRIGGER_FAMILY": "9111c3c1a54c6281146a03ac9b18544a78b2be9fb9a589726f4c757dfad7ef10",
         "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
         "EXAM_JUDGE": "9c316898fedd11ab902f0bdcad202d021b5fa64f2399890608e584dab480d8e3",
-        "EXAM_PLAN": "9c19d9999e98536bf5158ce1ad8d13556b36f78d97cf5fe27848e48e466678c9",
+        "EXAM_PLAN": "620b595ba0fcdad92c2191c069de444f280d6a4dfcb12fee343936af38e676c4",
         "EXAM_SCENE": "7722b8a06b6e898f8a82b4f1db6b8f4863f40cc89652ad3de450061a7d057ae2",
         "EXAM_TRIGGER": "90150597fecee9fc13bf216257d35495d30c369b28f27385b6c0452c71d1b4c1",
         "FAKE_TASK": "72c29397193f7275ea9356dcadd3d2cef2b4bd6e135af7ffe032d908a9396d98",
@@ -934,7 +934,7 @@
       "CLUSTER_TRIGGER_FAMILY": "9111c3c1a54c6281146a03ac9b18544a78b2be9fb9a589726f4c757dfad7ef10",
       "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
       "EXAM_JUDGE": "9c316898fedd11ab902f0bdcad202d021b5fa64f2399890608e584dab480d8e3",
-      "EXAM_PLAN": "9c19d9999e98536bf5158ce1ad8d13556b36f78d97cf5fe27848e48e466678c9",
+      "EXAM_PLAN": "620b595ba0fcdad92c2191c069de444f280d6a4dfcb12fee343936af38e676c4",
       "EXAM_SCENE": "7722b8a06b6e898f8a82b4f1db6b8f4863f40cc89652ad3de450061a7d057ae2",
       "EXAM_TRIGGER": "90150597fecee9fc13bf216257d35495d30c369b28f27385b6c0452c71d1b4c1",
       "FAKE_TASK": "72c29397193f7275ea9356dcadd3d2cef2b4bd6e135af7ffe032d908a9396d98",

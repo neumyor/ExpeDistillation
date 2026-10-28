@@ -581,7 +581,8 @@ def parse_unit_id(unit_id: str) -> Tuple[str, str]:
     prefix = head.split(":", 3)
     if (len(prefix) != 4
             or not _PHASE_HEAD_RE.fullmatch(prefix[0])
-            or ":" not in prefix[3]
+            or (":" not in prefix[3]
+                and not prefix[3].startswith("req/"))
             or role not in MODEL_ROLES
             or not _UNIT_SHA_RE.fullmatch(sha)):
         raise CodeBugError(f"malformed unit id {unit_id!r}")

@@ -107,6 +107,7 @@ def test_choose_skills_allows_an_empty_selection():
     # -SKILL.md form; the model may answer in any of those forms too. The
     # matched entry comes back in the CALLER's spelling.
     ("subtask/skill", "subtask/skill"),
+    ("subtask", "subtask/skill"),
     ("rotate-credential/SKILL.md", "rotate-credential"),
     ("./rotate-credential", "rotate-credential"),
     ("rotate-credential-SKILL.md", "rotate-credential"),
@@ -306,3 +307,10 @@ def test_blocks_forward_usage_and_run_dir(tmp_path):
 def test_retired_exam_prompt_names_are_gone(retired):
     with pytest.raises(PromptNotFoundError):
         get_prompt(retired)
+
+
+def test_write_plan_accepts_an_ordered_array_of_steps():
+    handle = make_fake_handle(script=json_script({
+        "plan": ["  Rotate the credential.  ", "Restart and verify."]}))
+    assert write_plan(SCENE, "body", "reason", handle) == (
+        "Rotate the credential.\nRestart and verify.")
