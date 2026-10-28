@@ -32,11 +32,12 @@ from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.composites.exam_answering import answer_exam
+from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam
 from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store
 from expedistill.llm.call import ModelHandle
-from expedistill.llm.fake import make_fake_handle
+from expedistill.llm.fake import json_script, make_fake_handle
 from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink, trial_files
 
 _FAKE = "fakebench"
@@ -235,23 +236,27 @@ def test_only_an_infrastructure_failure_is_retried(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _exam():
+    skill_id = "searchqa:q1:weak:0:seg0000:skill0000"
     return Exam(
-        exam_id="searchqa:q1:exam0000",
-        question_text="What is the capital of France?",
+        exam_id=ids.make_exam_id(skill_id, 1),
+        skill_id=skill_id, skill_version=1,
+        scene_text="What is the capital of France?",
+        expected_behavior="Name Paris.",
         reference_answer="Paris",
-        subtask_id="searchqa:q1:weak:0:seg0000",
-        skill_id="searchqa:q1:weak:0:seg0000:skill0000",
+        source_ref={"phase_label": "p01:baseline", "scene_step": 0},
     )
 
 
 def test_answer_exam_persists_an_unjudged_attempt_and_never_grades(tmp_path):
-    handle = make_fake_handle("weak", script=["Paris, the city of light."])
+    handle = make_fake_handle(
+        "weak", script=[json_script({"plan": "Paris, the city of light."})])
     store = Store(tmp_path / "run")
     attempt = answer_exam(
         store=store,
         exam=_exam(),
         answerer_handle=handle,
-        skills_block="",
+        skill_folder=None,
+        skills_block=None,
         purpose="acceptance",
     )
     # Correctness is blank: answering is execution, the judge is acceptance.

@@ -65,7 +65,7 @@ def task_ref(task: Any) -> str:
     """A unit's task reference: the string itself, or the object's id.
 
     Delivery's tasks are whatever the phase hands over -- ``Task``
-    objects, exam refs (``<subtask_id>/exam``), prefixed task ids -- and
+    objects, exam refs (``<skill_id>/vNN/exam``), prefixed task ids -- and
     a row's ``task_ref`` is that task's identity as a string.
     """
     if isinstance(task, str):

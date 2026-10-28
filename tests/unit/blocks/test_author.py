@@ -1,4 +1,4 @@
-"""Unit tests for the G2/G3/G6 authoring blocks (llm.fake only, no disk IO).
+"""Unit tests for the G2/G6 authoring blocks (llm.fake only, no disk IO).
 
 Wiring is asserted exactly: the user message sent to the client must equal the
 named prompt template rendered with the expected variables, so a variable that
@@ -18,7 +18,6 @@ tmp_path or run_dir: the blocks must not write anything anywhere.
 import pytest
 
 from expedistill.core.ids import (
-    make_exam_id,
     make_skill_id,
     make_subtask_id,
     make_task_id,
@@ -35,7 +34,6 @@ from expedistill.prompts.profile import NO_WEAK_PROFILE_SECTION, profile_section
 from expedistill.prompts.registry import get as get_prompt
 from expedistill.blocks.author import (
     NO_SEGMENT_POSITION,
-    gen_exam,
     has_skill_sections,
     render_skill_content,
     rewrite_skill,
@@ -394,7 +392,7 @@ def test_write_skill_strips_self_numbered_checklist_items():
     ],
 )
 def test_write_skill_bad_fields_raise(field, value):
-    # Field-level failures are terminal (gen_exam precedent): no in-block
+    # Field-level failures are terminal (the exam blocks' precedent): no in-block
     # retry, the unit lands in the model_output_failed ledger. Multi-line
     # values are NOT on this list since the 2026-10-13 incident: the newline
     # rejection killed legal heredoc-shaped commands. The marker defense
@@ -550,7 +548,7 @@ def test_render_is_deterministic():
 def test_validate_skill_sections_accepts_legal_payloads():
     validate_skill_sections("distill", DISTILL_SECTIONS)
     validate_skill_sections("diagnose", DIAGNOSE_SECTIONS)
-    # Extra keys are ignored (lenient read, gen_exam precedent)...
+    # Extra keys are ignored (lenient read, the exam blocks' precedent)...
     validate_skill_sections("distill", {**DISTILL_SECTIONS, "extra": "x"})
     # ...but the checklist type check is never skipped.
     with pytest.raises(ModelOutputError, match="steps"):
@@ -692,64 +690,6 @@ def test_has_skill_sections_is_line_start_anchored():
     indented = "\n".join("    " + line
                          for line in DISTILL_CONTENT.split("\n"))
     assert not has_skill_sections(indented)
-
-
-# ---------------------------------------------------------------------------
-# G3 gen_exam
-# ---------------------------------------------------------------------------
-
-def test_gen_exam_wiring_and_fields():
-    subtask = make_subtask()
-    handle = make_fake_handle(script=json_script({
-        "question_text": "A service rejects your login. What do you check first?",
-        "reference_answer": "Whether the credentials in the config are valid.",
-    }))
-
-    exam = gen_exam(subtask, STEPS_VIEW, handle)
-
-    assert len(handle.client.calls) == 1
-    expected = get_prompt("EXAM_GEN").format(
-        label=subtask.label,
-        description=subtask.description,
-        steps_view=STEPS_VIEW,
-    )
-    assert handle.client.calls[0]["user"] == expected
-
-    assert exam.exam_id == make_exam_id(subtask.subtask_id)
-    assert exam.subtask_id == subtask.subtask_id
-    assert exam.skill_id == make_skill_id(subtask.subtask_id)
-    assert exam.question_text == "A service rejects your login. What do you check first?"
-    assert exam.reference_answer == "Whether the credentials in the config are valid."
-
-
-def test_gen_exam_empty_question_raises():
-    subtask = make_subtask()
-    handle = make_fake_handle(script=json_script({
-        "question_text": "",
-        "reference_answer": "valid reference",
-    }))
-
-    with pytest.raises(ModelOutputError, match="question_text"):
-        gen_exam(subtask, STEPS_VIEW, handle)
-
-
-def test_gen_exam_missing_reference_answer_raises():
-    subtask = make_subtask()
-    handle = make_fake_handle(script=json_script({"question_text": "q"}))
-
-    with pytest.raises(ModelOutputError, match="reference_answer"):
-        gen_exam(subtask, STEPS_VIEW, handle)
-
-
-def test_gen_exam_non_string_field_raises():
-    subtask = make_subtask()
-    handle = make_fake_handle(script=json_script({
-        "question_text": 7,
-        "reference_answer": "r",
-    }))
-
-    with pytest.raises(ModelOutputError, match="question_text"):
-        gen_exam(subtask, STEPS_VIEW, handle)
 
 
 # ---------------------------------------------------------------------------

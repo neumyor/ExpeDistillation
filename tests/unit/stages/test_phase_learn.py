@@ -87,7 +87,7 @@ TASK_ID = ids.make_task_id(BENCHMARK, "t1")
 TRAJECTORY_ID = ids.make_trajectory_id(TASK_ID, "strong", 0)
 SUBTASK_ID = ids.make_subtask_id(TRAJECTORY_ID, 0)
 SKILL_ID = ids.make_skill_id(SUBTASK_ID)
-EXAM_ID = ids.make_exam_id(SUBTASK_ID)
+EXAM_ID = ids.make_exam_id(SKILL_ID, 1)
 WEAK_PROFILE = "a weak model that needs short sentences"
 BIG = 10 ** 6
 
@@ -120,7 +120,7 @@ def _baseline_spec():
 
 def _exam_spec():
     return ExecutePhaseSpec(
-        role="exam", tasks="train", delivery={"name": "per_skill"},
+        role="exam", tasks="train", delivery={"name": "exam_folder"},
         execution={"name": "exam"})
 
 
@@ -300,10 +300,12 @@ def _seed_exam_phase(store, *, with_skill_verdict, version=1):
     answer and one judged with-skill attempt of ``version``."""
     skill = _skill()
     store.save(skill, "skills")
-    store.save(Exam(exam_id=EXAM_ID, question_text="How do you restart?",
-                    reference_answer="restart and verify",
-                    subtask_id=SUBTASK_ID, skill_id=skill.skill_id),
-               "exams")
+    store.save(Exam(
+        exam_id=EXAM_ID, skill_id=skill.skill_id, skill_version=1,
+        scene_text="How do you restart?", expected_behavior="restart and verify",
+        reference_answer="restart and verify",
+        source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+        "exams")
     _seed_attempt(store, 0, verdict=False, purpose="bare")
     _seed_attempt(store, 1, skill=skill.skill_id, version=version,
                   verdict=with_skill_verdict)
@@ -581,7 +583,7 @@ def test_execute_add_rows_parallelizes_independent_targets(
     seen = []
     lock = threading.Lock()
 
-    def fake_land(ctx, phase, item, phase_dir):
+    def fake_land(ctx, phase, item, phase_dir, source_phase_label=""):
         with lock:
             seen.append(item.row.target_id)
         barrier.wait(timeout=5)
@@ -887,10 +889,12 @@ def test_the_d4_merge_decides_for_the_current_version(tmp_path, monkeypatch):
     _seed_finished_learn(ctx.store, ctx.run_dir)
     skill = _skill(version=2)
     ctx.store.save(skill, "skills")
-    ctx.store.save(Exam(exam_id=EXAM_ID, question_text="How do you restart?",
-                        reference_answer="restart and verify",
-                        subtask_id=SUBTASK_ID, skill_id=skill.skill_id),
-                   "exams")
+    ctx.store.save(Exam(
+        exam_id=EXAM_ID, skill_id=skill.skill_id, skill_version=2,
+        scene_text="How do you restart?", expected_behavior="restart and verify",
+        reference_answer="restart and verify",
+        source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+        "exams")
     _seed_attempt(ctx.store, 0, verdict=False, purpose="bare")
     _seed_attempt(ctx.store, 1, skill=skill.skill_id, version=1,
                   verdict=True)

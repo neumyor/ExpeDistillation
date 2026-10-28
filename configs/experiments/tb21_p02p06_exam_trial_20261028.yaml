@@ -1,0 +1,400 @@
+benchmark: tb
+invalid_redispatch_limit: 1
+mode: split
+model_options:
+  deepseek-v4-flash-0731--ali:
+    reasoning_effort: max
+models:
+  answerer: qwen3.6-flash-distill
+  auditor: deepseek-v4-flash-0731--ali
+  author: deepseek-v4-flash-0731--ali
+  curator: deepseek-v4-flash-0731--ali
+  examiner: deepseek-v4-flash-0731--ali
+  executor_strong: deepseek-v4-flash-0731--ali
+  executor_weak: qwen3.6-flash-distill
+  judge: deepseek-v4-flash-0731--ali
+  rewriter: deepseek-v4-flash-0731--ali
+  segmenter: deepseek-v4-flash-0731--ali
+n_attempts_strong: 3
+n_attempts_weak: 3
+phases:
+  test:
+    acceptance: null
+    compare:
+      against: external_campaign
+      external:
+        model_key: qwen
+        path: ../seed/tb21_agentbrew_campaign_summary.json
+        sha256: 1b5c483cebdc35d8c44c2370de2a76c4e6ef06f607fe9368e06815b730666da2
+      rule: null
+    delivery:
+      description_mode: summary_then_when_to_use
+      name: folder
+    execution:
+      name: real_folder
+    kind: execute
+    role: test
+    tasks: test
+  baseline:
+    acceptance: null
+    compare: null
+    delivery:
+      name: none
+    execution:
+      arms:
+      - executor_strong
+      - executor_weak
+      name: real
+    kind: execute
+    role: baseline
+    tasks: train
+  learn:
+    author:
+      name: cluster_by_trigger
+      max_cards_per_prompt: 40
+      max_chars_per_card: 1200
+      min_cluster_size: 1
+      classify_retry_limit: 2
+      cluster_retry_limit: 2
+      skill_retry_limit: 2
+    curate:
+      drop_low_value: false
+      grouping_input: full
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      similarity_input: summary
+      token_budget: null
+    review:
+      name: review
+      decision: trial_level
+      unread_in_won_group: delete
+      before_steps: 10
+      after_steps: 10
+      K: 5
+      retry_limit: 2
+      write_lessons: true
+    kind: learn
+    role: learn
+  learn_add:
+    author:
+      name: cluster_by_trigger
+      max_cards_per_prompt: 40
+      max_chars_per_card: 1200
+      min_cluster_size: 1
+      classify_retry_limit: 2
+      cluster_retry_limit: 2
+      skill_retry_limit: 2
+    curate:
+      drop_low_value: false
+      grouping_input: full
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      similarity_input: summary
+      token_budget: null
+    review:
+      name: review
+      decision: skill_level
+      unread_in_won_group: delete
+      before_steps: 10
+      after_steps: 10
+      K: 5
+      retry_limit: 2
+      write_lessons: true
+    kind: learn
+    role: learn
+  learn_trial:
+    author:
+      name: cluster_by_trigger
+      max_cards_per_prompt: 40
+      max_chars_per_card: 1200
+      min_cluster_size: 1
+      classify_retry_limit: 2
+      cluster_retry_limit: 2
+      skill_retry_limit: 2
+    curate:
+      drop_low_value: false
+      grouping_input: full
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      similarity_input: summary
+      token_budget: null
+    review:
+      name: review
+      decision: trial_level
+      unread_in_won_group: delete
+      before_steps: 10
+      after_steps: 10
+      K: 5
+      retry_limit: 2
+      write_lessons: true
+    kind: learn
+    role: learn
+  exam:
+    acceptance: null
+    compare: null
+    delivery:
+      description_mode: summary_then_when_to_use
+      name: exam_folder
+    execution:
+      bare_control: false
+      leak_audit: false
+      max_skill_reads: 3
+      name: exam
+    kind: execute
+    role: exam
+    tasks: train
+prompts_digests: {}
+rules:
+  segment_select: strong_success_weak_failed
+  task_select: any_weak_failed
+  trajectory_select: strong1_weak1
+schema_version: 7
+sequence:
+- baseline
+- learn_add
+- exam
+- learn
+- exam
+- learn_trial
+- test
+split:
+  train:
+  - build-pmars
+  - caffe-cifar-10
+  - code-from-image
+  - crack-7z-hash
+  - custom-memory-heap-crash
+  - dna-insert
+  - feal-differential-cryptanalysis
+  - fix-code-vulnerability
+  - fix-ocaml-gc
+  - gcode-to-text
+  - git-leak-recovery
+  - git-multibranch
+  - large-scale-text-editing
+  - merge-diff-arc-agi-task
+  - modernize-scientific-stack
+  - multi-source-data-merger
+  - polyglot-c-py
+  - prove-plus-comm
+  - pytorch-model-recovery
+  - qemu-startup
+  - regex-chess
+  - reshard-c4-data
+  - sam-cell-seg
+  - schemelike-metacircular-eval
+  - sqlite-with-gcov
+  test:
+  - adaptive-rejection-sampler
+  - bn-fit-modify
+  - break-filter-js-from-html
+  - build-cython-ext
+  - build-pov-ray
+  - cancel-async-tasks
+  - chess-best-move
+  - circuit-fibsqrt
+  - cobol-modernization
+  - compile-compcert
+  - configure-git-webserver
+  - constraints-scheduling
+  - count-dataset-tokens
+  - db-wal-recovery
+  - distribution-search
+  - dna-assembly
+  - extract-elf
+  - extract-moves-from-video
+  - feal-linear-cryptanalysis
+  - filter-js-from-html
+  - financial-document-processor
+  - fix-git
+  - gpt2-codegolf
+  - headless-terminal
+  - hf-model-inference
+  - install-windows-3.11
+  - kv-store-grpc
+  - largest-eigenval
+  - llm-inference-batching-scheduler
+  - log-summary-date-ranges
+  - mailman
+  - make-doom-for-mips
+  - make-mips-interpreter
+  - mcmc-sampling-stan
+  - model-extraction-relu-logits
+  - mteb-leaderboard
+  - mteb-retrieve
+  - nginx-request-logging
+  - openssl-selfsigned-cert
+  - overfull-hbox
+  - password-recovery
+  - path-tracing
+  - path-tracing-reverse
+  - polyglot-rust-c
+  - portfolio-optimization
+  - protein-assembly
+  - pypi-server
+  - pytorch-model-cli
+  - qemu-alpine-ssh
+  - query-optimize
+  - raman-fitting
+  - regex-log
+  - rstan-to-pystan
+  - sanitize-git-repo
+  - sparql-university
+  - sqlite-db-truncate
+  - torch-pipeline-parallelism
+  - torch-tensor-parallelism
+  - train-fasttext
+  - tune-mjcf
+  - video-processing
+  - vulnerable-secret
+  - winning-avg-corewars
+  - write-compressor
+tasks:
+- adaptive-rejection-sampler
+- bn-fit-modify
+- break-filter-js-from-html
+- build-cython-ext
+- build-pmars
+- build-pov-ray
+- caffe-cifar-10
+- cancel-async-tasks
+- chess-best-move
+- circuit-fibsqrt
+- cobol-modernization
+- code-from-image
+- compile-compcert
+- configure-git-webserver
+- constraints-scheduling
+- count-dataset-tokens
+- crack-7z-hash
+- custom-memory-heap-crash
+- db-wal-recovery
+- distribution-search
+- dna-assembly
+- dna-insert
+- extract-elf
+- extract-moves-from-video
+- feal-differential-cryptanalysis
+- feal-linear-cryptanalysis
+- filter-js-from-html
+- financial-document-processor
+- fix-code-vulnerability
+- fix-git
+- fix-ocaml-gc
+- gcode-to-text
+- git-leak-recovery
+- git-multibranch
+- gpt2-codegolf
+- headless-terminal
+- hf-model-inference
+- install-windows-3.11
+- kv-store-grpc
+- large-scale-text-editing
+- largest-eigenval
+- llm-inference-batching-scheduler
+- log-summary-date-ranges
+- mailman
+- make-doom-for-mips
+- make-mips-interpreter
+- mcmc-sampling-stan
+- merge-diff-arc-agi-task
+- model-extraction-relu-logits
+- modernize-scientific-stack
+- mteb-leaderboard
+- mteb-retrieve
+- multi-source-data-merger
+- nginx-request-logging
+- openssl-selfsigned-cert
+- overfull-hbox
+- password-recovery
+- path-tracing
+- path-tracing-reverse
+- polyglot-c-py
+- polyglot-rust-c
+- portfolio-optimization
+- protein-assembly
+- prove-plus-comm
+- pypi-server
+- pytorch-model-cli
+- pytorch-model-recovery
+- qemu-alpine-ssh
+- qemu-startup
+- query-optimize
+- raman-fitting
+- regex-chess
+- regex-log
+- reshard-c4-data
+- rstan-to-pystan
+- sam-cell-seg
+- sanitize-git-repo
+- schemelike-metacircular-eval
+- sparql-university
+- sqlite-db-truncate
+- sqlite-with-gcov
+- torch-pipeline-parallelism
+- torch-tensor-parallelism
+- train-fasttext
+- tune-mjcf
+- video-processing
+- vulnerable-secret
+- winning-avg-corewars
+- write-compressor
+token_budgets:
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    answerer:
+      max_output_tokens: 65536
+      max_input_tokens: 262144
+    auditor:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    author:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    curator:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    examiner:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    executor_strong:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    executor_weak:
+      max_output_tokens: 65536
+      max_input_tokens: 262144
+    judge:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    rewriter:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    segmenter:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+use_weak_profile: true
+weak_profile: 'qwen3.6-flash-distill is a small, fast, distilled terminal agent: in the
+
+  TB2.1 campaign over these 89 tasks it solved 47% of attempts on average
+
+  (avg@5 0.4697) against the strong model''s 63%. Its terminal interaction is
+
+  fragile: 11 of its 13 kept-as-model-failure trials died in the tmux keystroke
+
+  layer (unparseable command rounds, or keystrokes fired before tmux was even
+
+  installed), two more overran the agent time cap (AgentTimeoutError), and it
+
+  intermittently emits unparseable output turns that waste interaction rounds.
+
+  When it does run to completion it writes plausible-looking but subtly wrong
+
+  numerical or statistical code and declares success without validating the
+
+  result against the task''s tests, so skills should give exact commands,
+
+  concrete verification steps, and explicit guards against its early-exit habit.'

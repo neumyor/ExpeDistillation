@@ -1,6 +1,6 @@
 """D8 leak-audit judge prompt (blocks/audit.py).
 
-The judge IS the audit: it reads the skill, the exam question and the
+The judge IS the audit: it reads the skill, the exam scene and the
 protected reference answer, and decides whether the skill reveals the answer
 material. Its ``reason`` is reused as the rewrite (G6) error description when
 K4 voids a version, so the prompt forbids restating the reference answer --
@@ -14,10 +14,10 @@ __all__ = ["LEAK_AUDIT_JUDGE"]
 LEAK_AUDIT_JUDGE = register(
     PromptSpec(
         name="LEAK_AUDIT_JUDGE",
-        template="""Judge whether the skill below leaks the answer to the exam question.
+        template="""Judge whether the skill below leaks the answer to the exam scene.
 
-EXAM QUESTION:
-{question_text}
+EXAM SCENE:
+{scene_text}
 
 REFERENCE ANSWER (protected material; the skill's reader never sees it):
 {reference_answer}
@@ -33,7 +33,7 @@ answer this exam by lookup instead of ability.
 The skill does NOT leak when it only gives generic method advice that would
 help on ANY similar task, even when that advice also fits this exam.
 Protocol words, action names, and environment feedback strings are never
-leaks, even when the same words appear in the question or the reference
+leaks, even when the same words appear in the scene or the reference
 answer.
 
 Judge the skill text only; do not judge the exam or its answer.

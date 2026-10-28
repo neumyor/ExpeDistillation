@@ -66,7 +66,10 @@ Output ONLY JSON:
   "skills": [
     {{"skill_id": "<exact bank skill id or empty string>",
       "issue": "<what this skill did or failed to do>",
-      "step_start": <0-based first relevant step>,
+      "step_start": <the 0-based step where this skill should have been
+                     opened, or where its guidance went wrong; for a skill
+                     the model never opened, use the step where the failure
+                     first became visible>,
       "step_end": <exclusive end step>}}
   ],
   "new_skill_note": "<what new capability is missing, or an empty string>"}}

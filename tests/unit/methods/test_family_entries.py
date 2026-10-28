@@ -23,7 +23,7 @@ def test_the_table_is_organised_by_the_method_families():
         by_family.setdefault(family, []).append(name)
     assert set(by_family) == set(FAMILIES)
     assert sorted(by_family["delivery"]) == sorted([
-        "whole_bank", "retrieval", "none", "per_skill", "group_by_task",
+        "whole_bank", "retrieval", "none", "exam_folder", "group_by_task",
         "folder", "folder_by_task"])
     assert sorted(by_family["execution"]) == [
         "exam", "real", "real_folder"]

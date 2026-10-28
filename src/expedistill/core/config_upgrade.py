@@ -23,7 +23,13 @@ from expedistill.core.config import (
     ConfigError,
 )
 
-__all__ = ["upgrade_v2_config", "upgrade_v3_config", "upgrade_v4_config", "upgrade_v5_config"]
+__all__ = [
+    "upgrade_v2_config",
+    "upgrade_v3_config",
+    "upgrade_v4_config",
+    "upgrade_v5_config",
+    "upgrade_v6_config",
+]
 
 #: The v3 slot defaults -- schema-v3 knowledge, kept ONLY for
 #: ``upgrade_v3_config`` (the v4 loader has no slots; an absent phase
@@ -520,3 +526,52 @@ def upgrade_v5_config(data: Dict[str, Any]) -> Dict[str, Any]:
             }
     v6["schema_version"] = 6
     return v6
+
+
+def upgrade_v6_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a schema-v6 CONFIG dict to v7 (the generalization exam).
+
+    The old exam phase delivered one skill with ``per_skill``.  Schema v7
+    replaces that delivery with ``exam_folder`` and records the new exam
+    execution knobs on the phase.  The old exam always ran a bare control
+    and the leak audit, so the upgrade keeps both enabled; new configs may
+    turn them off.
+
+    Pure stdlib, copy in / copy out.  Every non-exam phase and every
+    top-level field other than ``phases`` and ``schema_version`` passes
+    through untouched.
+    """
+    if not isinstance(data, dict):
+        raise TypeError(
+            f"config must be a mapping, got {type(data).__name__}")
+    if data.get("schema_version") != 6:
+        raise ConfigError(
+            "upgrade_v6_config needs a schema-v6 config, got "
+            f"schema_version {data.get('schema_version')!r}")
+    v7 = copy.deepcopy(data)
+    phases = v7.get("phases")
+    if isinstance(phases, dict):
+        for name, spec in phases.items():
+            if not isinstance(spec, dict) or spec.get("kind") != "execute" \
+                    or spec.get("role") != "exam":
+                continue
+            delivery = spec.get("delivery")
+            if not isinstance(delivery, dict):
+                delivery = {}
+            description_mode = delivery.get(
+                "description_mode", "summary_then_when_to_use")
+            spec["delivery"] = {
+                "name": "exam_folder",
+                "description_mode": description_mode,
+            }
+            execution = spec.get("execution")
+            if not isinstance(execution, dict):
+                execution = {}
+            execution = dict(execution)
+            execution["name"] = "exam"
+            execution.setdefault("max_skill_reads", 3)
+            execution.setdefault("bare_control", True)
+            execution.setdefault("leak_audit", True)
+            spec["execution"] = execution
+    v7["schema_version"] = 7
+    return v7

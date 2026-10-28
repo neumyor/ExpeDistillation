@@ -5,13 +5,15 @@ collects the answer-sheet evidence.  This module only lands the rows and
 keeps the revision ledger's version guard.
 """
 
+import json
 from typing import Any, List, Optional, Sequence, Set, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
+from expedistill.composites.skill_origins import append_origin, source_ref_for_unit
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
-from expedistill.core.models import Skill
+from expedistill.core.models import Exam, Skill
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError,
@@ -31,7 +33,8 @@ __all__ = ["execute_exam_rows"]
 def execute_exam_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
                       current_rows: Optional[List[UnitSummary]],
                       superseded: Sequence[str], *,
-                      skip_targets: Sequence[str] = ()) -> Set[str]:
+                      skip_targets: Sequence[str] = (),
+                      source_phase_label: str = "") -> Set[str]:
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     recorder = UnitFailureRecorder(ctx.run_dir)
     rows = [item.row for item in items]
@@ -120,7 +123,8 @@ def _land_revise(ctx: Any, phase: Any, item: ReviewItem,
         decide=_always_revise, usage=ctx.usage, run_dir=ctx.run_dir)
     if not outcomes:
         return
-    _land_revision(ctx, phase, row, package, outcomes[0], phase_dir)
+    _land_revision(ctx, phase, row, package, outcomes[0], phase_dir,
+                   current_rows)
 
 
 def _always_revise(package: Any) -> str:
@@ -128,7 +132,8 @@ def _always_revise(package: Any) -> str:
 
 
 def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
-                   outcome: Any, phase_dir) -> None:
+                   outcome: Any, phase_dir,
+                   current_rows: Optional[List[UnitSummary]] = None) -> None:
     store: Store = ctx.store
     skill_id = outcome.skill_id
     if outcome.outcome == "unchanged":
@@ -164,6 +169,25 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
             f"skill {skill_id!r} is at version {stored.version} with "
             "content the author did not produce: the store drifted from "
             "the revision ledger")
+    summary = _report_row_of(current_rows, row.basis_unit)
+    exam = None
+    if summary.task_ref:
+        try:
+            exam = store.load("exams", summary.task_ref, Exam)
+        except Exception:
+            exam = None
+    ref = (exam.source_ref if exam is not None
+           else source_ref_for_unit(
+               summary.unit_id,
+               sheet_id=(summary.sheet_ids[0] if summary.sheet_ids else None)))
+    append_origin(
+        phase_dir, skill_id=skill_id, version=expected,
+        phase_label=phase.label,
+        change_note=(outcome.revision_reason
+                     or package.fact("judge_reason")
+                     or "exam revision"),
+        context_text=json.dumps(package.facts, ensure_ascii=False),
+        source_ref=ref)
     ledger.append_outcome(phase, row, skill_id, outcome.outcome, expected,
                           phase_dir)
 

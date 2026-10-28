@@ -36,12 +36,14 @@ def test_subtask_id_is_parent_plus_suffix():
 
 def test_skill_and_exam_ids_share_parent():
     seg = "traj/tb:task-1/strong/00/seg01"
-    assert make_skill_id(seg) == f"{seg}/skill"
-    assert make_exam_id(seg) == f"{seg}/exam"
+    skill = make_skill_id(seg)
+    assert skill == f"{seg}/skill"
+    assert make_exam_id(skill, 1) == f"{skill}/v01/exam"
 
 
 def test_attempt_id_serial_is_two_digits():
-    exam = "traj/tb:task-1/strong/00/seg01/exam"
+    exam = make_exam_id(
+        make_skill_id("traj/tb:task-1/strong/00/seg01"), 1)
     assert make_attempt_id(exam, 0) == f"{exam}/att00"
     assert make_attempt_id(exam, 13) == f"{exam}/att13"
 
@@ -68,11 +70,11 @@ def test_child_id_embeds_parent_id():
     traj = make_trajectory_id(task, "weak", 3)
     seg = make_subtask_id(traj, 2)
     skill = make_skill_id(seg)
-    exam = make_exam_id(seg)
+    exam = make_exam_id(skill, 1)
     att = make_attempt_id(exam, 0)
     # The trajectory id is the one child that wraps its parent in a prefix.
     assert traj.startswith(f"traj/{task}/")
-    for parent, child in [(traj, seg), (seg, skill), (seg, exam),
+    for parent, child in [(traj, seg), (seg, skill), (skill, exam),
                           (exam, att)]:
         assert child.startswith(parent + "/")
 

@@ -28,10 +28,10 @@ from expedistill.infra.store import Store
 from expedistill.inject import bank_reference, format_skills_block
 from expedistill.methods import resolve_fixed
 from expedistill.methods.delivery import (
+    ExamFolderParams,
     FolderParams,
     GroupByTaskParams,
     NoneParams,
-    PerSkillParams,
     RetrievalParams,
     WholeBankParams,
 )
@@ -76,8 +76,9 @@ def _operands(name: str):
         return None, [task], NoneParams()
     if name == "whole_bank":
         return [skill], [task], WholeBankParams()
-    if name == "per_skill":
-        return [skill], [make_exam_id(skill.subtask_id)], PerSkillParams()
+    if name == "exam_folder":
+        return ([skill], [make_exam_id(skill.skill_id, skill.version)],
+                ExamFolderParams())
     if name == "group_by_task":
         return {prefixed: [skill]}, [prefixed], GroupByTaskParams()
     if name == "folder":
@@ -90,7 +91,7 @@ def _operands(name: str):
 
 
 @pytest.mark.parametrize("name", [
-    "none", "whole_bank", "per_skill", "group_by_task", "retrieval",
+    "none", "whole_bank", "exam_folder", "group_by_task", "retrieval",
     "folder",
 ])
 def test_frozen_signature_returns_unit_rows(name):
@@ -138,31 +139,33 @@ def test_whole_bank_rows_carry_the_bank_digest():
     assert [row.task_ref for row in rows] == ["t1", "t2"]
 
 
-def test_per_skill_resolves_exam_refs():
+def test_exam_folder_resolves_exam_refs():
     # The exam-phase operand contract: tasks are the deterministic exam
-    # identifiers (<subtask_id>/exam); delivery resolves the identifier,
-    # it never writes the exam itself (R5).
+    # identifiers (<subtask_id>/exam); delivery resolves the identifier
+    # opaquely and renders the whole-bank catalog (R5, the
+    # generalization-exam ruling).
+    from expedistill.methods.delivery.folder import render_catalog
+
     skill = _skill(make_task_id(BENCHMARK, "t1"))
-    exam = make_exam_id(skill.subtask_id)
-    driver = _driver("per_skill")
-    rows = driver.resolve([skill], [exam], PerSkillParams())
+    exam = make_exam_id(skill.skill_id, skill.version)
+    driver = _driver("exam_folder")
+    rows = driver.resolve([skill], [exam], ExamFolderParams())
     assert len(rows) == 1
     row = rows[0]
     assert row.task_ref == exam
-    assert row.skills_injected == [
-        {"skill_id": skill.skill_id, "version": skill.version}]
-    assert row.skills_block == format_skills_block([skill])
+    assert row.skills_injected == bank_reference([skill])
+    assert row.skills_block == render_catalog([skill])
 
 
-def test_per_skill_refuses_unknown_exam_and_malformed_ref():
-    skill = _skill(make_task_id(BENCHMARK, "t1"))
-    driver = _driver("per_skill")
-    params = PerSkillParams()
-    with pytest.raises(CodeBugError, match="has no skill in the bank"):
-        driver.resolve([skill], [make_exam_id("traj/tb:other/strong/00/seg00")],
-                       params)
-    with pytest.raises(CodeBugError, match="is not an exam ref"):
-        driver.resolve([skill], ["traj/tb:t1/strong/00/seg00"], params)
+def test_exam_folder_keeps_any_ref_and_renders_an_empty_catalog():
+    # The driver does not join a ref back to a skill (the exam's own
+    # bookkeeping owns that); it renders one catalog row per given ref.
+    # An empty bank renders no catalog at all (the D9 null-state rule).
+    driver = _driver("exam_folder")
+    rows = driver.resolve([], ["whatever"], ExamFolderParams())
+    assert [row.task_ref for row in rows] == ["whatever"]
+    assert rows[0].skills_block == ""
+    assert rows[0].aux["skill_folder"]["files"] == []
 
 
 def test_group_by_task_rows_match_the_pending_group(tmp_path):
@@ -266,7 +269,7 @@ def test_unit_id_digest_rules():
 
 
 @pytest.mark.parametrize("name", [
-    "none", "whole_bank", "per_skill", "group_by_task", "retrieval",
+    "none", "whole_bank", "exam_folder", "group_by_task", "retrieval",
     "folder",
 ])
 def test_malformed_resolve_calls_fail_loudly(name):

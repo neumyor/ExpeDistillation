@@ -5,7 +5,7 @@ synthetic subtasks for the failure window, so the requirement writer can keep
 using the existing ``EvidencePackage`` and ``SkillAttemptEvidence`` shapes.
 """
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites.evidence_package import EvidencePackage
@@ -55,30 +55,32 @@ def evidence_for_skills(
     step_start: int,
     step_end: int,
     bank: Sequence[Skill],
+    ranges: Optional[Mapping[str, Tuple[int, int]]] = None,
 ) -> Dict[str, SkillAttemptEvidence]:
     """One SkillAttemptEvidence per mentioned skill."""
     execution = sheet.execution
     if execution is None:
         return {}
     versions = {skill.skill_id: skill.version for skill in bank}
-    windows = [WindowEvidence(
-        task_id=execution.task_ref,
-        attempt=execution.sample_index,
-        success=False,
-        kind="trial",
-        step_start=step_start,
-        step_end=step_end,
-        trigger_context=issue,
-        behavior_after_trigger="",
-        improvement=reason,
-    )]
-    return {
-        skill_id: SkillAttemptEvidence(
+    out: Dict[str, SkillAttemptEvidence] = {}
+    for skill_id in skill_ids:
+        lo, hi = (ranges or {}).get(skill_id, (step_start, step_end))
+        window = WindowEvidence(
+            task_id=execution.task_ref,
+            attempt=execution.sample_index,
+            success=False,
+            kind="trial",
+            step_start=lo,
+            step_end=hi,
+            trigger_context=issue,
+            behavior_after_trigger="",
+            improvement=reason,
+        )
+        out[skill_id] = SkillAttemptEvidence(
             skill_id=skill_id,
             skill_version=versions.get(skill_id, 1),
-            windows=list(windows))
-        for skill_id in skill_ids
-    }
+            windows=[window])
+    return out
 
 
 def requirement_evidence(

@@ -141,7 +141,7 @@ PHASES = {
           "curate": {"name": "agentbrew", "token_budget": 4096,
                      "rounds": 3, "merge_check": "exam"}},
     "exam": {"kind": "execute", "role": "exam", "tasks": "train",
-          "delivery": {"name": "per_skill"},
+          "delivery": {"name": "exam_folder"},
           "execution": {"name": "exam"}},
     "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
@@ -706,15 +706,16 @@ def test_duplicate_ids_in_task_file_rejected_before_split(
 #: moves with the text, and the freeze still refuses an old run directory:
 #: a deliberate text change is a new experiment).
 FROZEN_PROMPT_NAMES = frozenset({
-    "ANSWER",
     "CLUSTER_SKILL",
     "CLUSTER_SUBTASKS",
     "CLUSTER_TRIGGER_FAMILY",
     "DEFAULT_SYSTEM",
-    "EXAM_GEN",
+    "EXAM_JUDGE",
+    "EXAM_PLAN",
+    "EXAM_SCENE",
+    "EXAM_TRIGGER",
     "FAKE_TASK",
     "GROUP",
-    "JUDGE",
     "LEAK_AUDIT_JUDGE",
     "SKILL_ATTEMPT_ATTRIBUTION",
     "SKILL_ATTEMPT_REVISION",

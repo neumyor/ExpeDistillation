@@ -48,6 +48,7 @@ from expedistill.core.config import (  # noqa: E402
     upgrade_v3_config,
     upgrade_v4_config,
     upgrade_v5_config,
+    upgrade_v6_config,
 )
 
 
@@ -104,13 +105,15 @@ def convert_file(path: Path, *, out_dir=None) -> str:
             upgraded = upgrade_v4_config(upgraded)
         if version in (2, 3, 4, 5):
             upgraded = upgrade_v5_config(upgraded)
+        if version in (2, 3, 4, 5, 6):
+            upgraded = upgrade_v6_config(upgraded)
         # from_dict runs the whole current load-time checklist
         # (parse_phases included) BEFORE anything is written.
         config = ExperimentConfig.from_dict(upgraded)
     except (ValueError, TypeError) as exc:
         return f"{path.name}: REFUSED ({exc})"
     out = (Path(out_dir) if out_dir is not None
-           else path.parent) / f"{path.stem}_v6.yaml"
+           else path.parent) / f"{path.stem}_v7.yaml"
     if out.exists():
         return f"{out.name}: exists, left untouched"
     # Atomic write (O4): a temp file in the destination directory, then

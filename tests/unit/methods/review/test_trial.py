@@ -1,8 +1,11 @@
 """Trial-level review: failed-trial selection, analysis and aggregation."""
 
+import dataclasses
+
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401
+from expedistill.composites.evidence_package import EvidencePackage
 from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core.answer_sheet import (
     AnswerSheet,
@@ -14,7 +17,12 @@ from expedistill.core.answer_sheet import (
 )
 from expedistill.core.models import Step
 from expedistill.llm import json_script, make_fake_handle
-from expedistill.methods.review import aggregation, trial, trial_review
+from expedistill.methods.review import (
+    aggregation,
+    trial,
+    trial_evidence,
+    trial_review,
+)
 from expedistill.methods.review.contracts import ReviewContext, TrialFinding
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
@@ -260,3 +268,67 @@ def test_aggregation_accepts_prompt_compliant_keep_without_finding():
     assert requirements == []
     assert [item.row.action for item in items] == ["keep", "keep"]
     assert items[1].row.basis_unit == "unit-b"
+
+
+def test_evidence_keeps_one_window_per_skill():
+    sheet = _sheet(correct=False)
+    evidence = trial_evidence.evidence_for_skills(
+        sheet, skill_ids=[SKILL.skill_id, "other/skill"],
+        issue="the trigger was missed", reason="wrong behavior",
+        step_start=0, step_end=2, bank=[SKILL],
+        ranges={SKILL.skill_id: (0, 1), "other/skill": (1, 2)})
+    assert evidence[SKILL.skill_id].windows[0].step_start == 0
+    assert evidence[SKILL.skill_id].windows[0].step_end == 1
+    assert evidence["other/skill"].windows[0].step_start == 1
+    assert evidence["other/skill"].windows[0].step_end == 2
+
+
+def test_exam_trial_revision_builds_exam_evidence_package():
+    exam_task = "traj/tb:t1/weak/00/seg00/skill/v01/exam"
+    execution = ExecutionRecord(
+        sheet_id="exam-sheet-1", unit_id="exam-unit",
+        phase_label="p03:exam", task_ref=exam_task, role="weak", arm=None,
+        model_role="weak", model_name="weak-model", sample_index=0,
+        skills_injected=[{"skill_id": SKILL.skill_id, "version": 1}],
+        steps=[Step(action="select skill", observation=""),
+               Step(action="write plan", observation="")],
+        answer="PLAN: restart the service",
+        metrics={"scene_text": "The service is down."},
+        aux={"judge_reason": "the plan misses verification"},
+        kind="trajectory")
+    sheet = AnswerSheet(
+        sheet_id=execution.sheet_id, phase_label="p03:exam",
+        coverage=CoverageRecord(
+            unit_id="exam-unit", attempt_index=0, present=True,
+            status="present"),
+        execution=execution,
+        grading=GradingRecord(
+            verdict="failure", basis="exam_judge",
+            rule_name="exam_judge"))
+    report = PhaseReport(
+        phase_kind="exam", learning_usable=True, sheets=[sheet],
+        units=[_unit_for("exam-unit", SKILL)])
+    finding = TrialFinding(
+        sheet_id=sheet.sheet_id, unit_id="exam-unit", task_ref=exam_task,
+        reason="the plan misses verification", skill_ids=[SKILL.skill_id],
+        step_start=0, step_end=2)
+    context = dataclasses.replace(
+        _context(), phase_kind="exam", source_phase_label="p03:exam")
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [{
+            "skill_id": SKILL.skill_id, "action": "revise",
+            "reason": "make the verification step explicit"}],
+        "new_skill_requirements": [],
+    })])
+
+    items, requirements = aggregation.aggregate_findings(
+        findings=[finding], bank=[SKILL], current=report,
+        context=context, handle=handle)
+
+    assert requirements == []
+    package = items[0].evidence
+    assert isinstance(package, EvidencePackage)
+    assert package.old_skill.skill_id == SKILL.skill_id
+    assert package.fact("exam_question") == "The service is down."
+    assert package.fact("weak_answer") == "PLAN: restart the service"
+    assert package.fact("judge_reason") == "the plan misses verification"

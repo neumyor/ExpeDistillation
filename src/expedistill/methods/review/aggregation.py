@@ -93,19 +93,23 @@ def aggregate_findings(
                 f"was not measured: {skill_id!r}")
         evidence = None
         if action == "revise":
-            windows = []
-            for finding in origin:
-                package = finding.evidence.get(skill_id)
-                if package is not None:
-                    windows.extend(package.windows)
-            if not windows:
-                raise ModelOutputError(
-                    "TRIAL_REQUIREMENT_AGGREGATION: revise needs evidence "
-                    f"for {skill_id!r}")
-            evidence = SkillAttemptEvidence(
-                skill_id=skill_id,
-                skill_version=by_id[skill_id].version,
-                windows=windows)
+            if context.phase_kind == "exam":
+                evidence = _exam_revision_evidence(
+                    skill_id, origin, current, by_id)
+            else:
+                windows = []
+                for finding in origin:
+                    package = finding.evidence.get(skill_id)
+                    if package is not None:
+                        windows.extend(package.windows)
+                if not windows:
+                    raise ModelOutputError(
+                        "TRIAL_REQUIREMENT_AGGREGATION: revise needs evidence "
+                        f"for {skill_id!r}")
+                evidence = SkillAttemptEvidence(
+                    skill_id=skill_id,
+                    skill_version=by_id[skill_id].version,
+                    windows=windows)
         items.append(ReviewItem(
             row=TaskListRow(
                 target_kind="skill",
@@ -174,7 +178,8 @@ def aggregate_findings(
             description=description.strip(),
             trigger=trigger.strip(),
             evidence=evidence,
-            source_sheet_ids=[str(item) for item in source_ids]))
+            source_sheet_ids=[str(item) for item in source_ids],
+            source_phase_label=context.source_phase_label))
     return items, requirements
 
 
@@ -220,6 +225,44 @@ def _requirement_evidence(
         source_experiences=[
             experience for package in packages
             for experience in package.source_experiences])
+
+
+def _exam_revision_evidence(
+    skill_id: str,
+    origin: Sequence[TrialFinding],
+    current: PhaseReport,
+    by_id: Dict[str, Skill],
+) -> EvidencePackage:
+    """Build the exam answer-sheet package for a trial-level revise row.
+
+    The exam learn landing owns the exam revision writer, which expects
+    the same question / weak answer / judge reason package as the old
+    exam path.  The latest failed finding supplies the source attempt.
+    """
+    sheets = {sheet.sheet_id: sheet for sheet in current.sheets}
+    finding = origin[-1]
+    sheet = sheets.get(finding.sheet_id)
+    if sheet is None or sheet.execution is None:
+        raise CodeBugError(
+            "TRIAL_REQUIREMENT_AGGREGATION: exam finding names a missing "
+            f"sheet {finding.sheet_id!r}")
+    execution = sheet.execution
+    metrics = execution.metrics if isinstance(execution.metrics, dict) else {}
+    aux = execution.aux if isinstance(execution.aux, dict) else {}
+    scene = metrics.get("scene_text") or finding.reason
+    return EvidencePackage(
+        target=skill_id,
+        facts=[
+            {"kind": "exam_question", "text": scene},
+            {"kind": "weak_answer", "text": execution.answer or ""},
+            {"kind": "judge_reason",
+             "text": aux.get("judge_reason") or finding.reason},
+        ],
+        segments=[{
+            "sheet_id": finding.sheet_id,
+            "step_range": [finding.step_start, finding.step_end],
+        }],
+        old_skill=by_id[skill_id])
 
 
 def _measured_skills(current: PhaseReport) -> Dict[str, str]:

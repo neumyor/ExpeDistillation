@@ -100,8 +100,10 @@ def _analyze_one(
     parsed = call_model(
         handle, "TRIAL_FAILURE_ANALYSIS",
         {
-            "task_instruction": attribution.task_instruction_for(
-                context.benchmark, execution.task_ref),
+            "task_instruction": (
+                (execution.metrics or {}).get("scene_text")
+                or attribution.task_instruction_for(
+                    context.benchmark, execution.task_ref)),
             "trial_steps": render_steps_view(steps, view_rules),
             "available_skills": _skill_ids(available),
             "all_skills": _skill_cards(bank),
@@ -127,7 +129,8 @@ def _analyze_one(
         folder if isinstance(folder, dict) else None)
     mentioned: List[str] = []
     issues: Dict[str, str] = {}
-    start, end = 0, len(steps)
+    ranges: Dict[str, tuple] = {}
+    overall_start, overall_end = len(steps), 0
     raw_skills = parsed.get("skills") or []
     if not isinstance(raw_skills, list):
         raise ModelOutputError(
@@ -151,17 +154,23 @@ def _analyze_one(
             raise ModelOutputError(
                 "TRIAL_FAILURE_ANALYSIS: skill issue must be a string")
         issues[skill_id] = issue
-        if entry.get("step_start") is not None:
-            start = max(0, min(_step_index(
-                entry["step_start"], "step_start"), len(steps)))
-        if entry.get("step_end") is not None:
-            end = max(start, min(_step_index(
-                entry["step_end"], "step_end"), len(steps)))
+        lo = (max(0, min(_step_index(entry["step_start"], "step_start"),
+                         len(steps)))
+              if entry.get("step_start") is not None else 0)
+        hi = (max(lo, min(_step_index(entry["step_end"], "step_end"),
+                          len(steps)))
+              if entry.get("step_end") is not None else len(steps))
+        ranges[skill_id] = (lo, hi)
+        overall_start = min(overall_start, lo)
+        overall_end = max(overall_end, hi)
+    if not ranges:
+        overall_start, overall_end = 0, len(steps)
     evidence = trial_evidence.evidence_for_skills(
         sheet, skill_ids=mentioned, issue="; ".join(
             f"{skill_id}: {issues.get(skill_id, '')}"
             for skill_id in mentioned),
-        reason=reason, step_start=start, step_end=end, bank=bank)
+        reason=reason, step_start=overall_start,
+        step_end=overall_end, bank=bank, ranges=ranges)
     return TrialFinding(
         sheet_id=sheet.sheet_id,
         unit_id=sheet.coverage.unit_id,
@@ -170,8 +179,8 @@ def _analyze_one(
         skill_ids=mentioned,
         profile_note=profile_note.strip(),
         new_skill_note=new_skill_note.strip(),
-        step_start=start,
-        step_end=end,
+        step_start=overall_start,
+        step_end=overall_end,
         evidence=evidence)
 
 

@@ -12,8 +12,8 @@ from expedistill.inject.skill_text import (
     DESCRIPTION_MODES,
 )
 
-__all__ = ["FolderParams", "GroupByTaskParams", "NoneParams",
-           "PerSkillParams", "RetrievalParams", "WholeBankParams"]
+__all__ = ["ExamFolderParams", "FolderParams", "GroupByTaskParams",
+           "NoneParams", "RetrievalParams", "WholeBankParams"]
 
 
 @dataclass(frozen=True)
@@ -53,11 +53,6 @@ class NoneParams:
 
 
 @dataclass(frozen=True)
-class PerSkillParams:
-    """No parameters: one skill, one single-skill block."""
-
-
-@dataclass(frozen=True)
 class GroupByTaskParams:
     """No parameters: the pending group of the task being injected."""
 
@@ -84,3 +79,23 @@ class RetrievalParams:
             raise ConfigError(
                 "methods.delivery.retrieval min_score must be a number in "
                 f"[0, 1), got {self.min_score}")
+
+
+def __getattr__(name: str):
+    """Lazily re-export ``ExamFolderParams`` from its driver module.
+
+    The exam catalog's params class lives in ``exam_folder.py`` beside
+    the driver it configures (one self-contained unit), while this
+    package must stay driver-free so stage 0 can validate every phase
+    without loading drivers. Resolving the name on first access keeps
+    both: importing the package loads no driver, and
+    ``from expedistill.methods.delivery import ExamFolderParams`` still
+    works.
+    """
+    if name == "ExamFolderParams":
+        from expedistill.methods.delivery.exam_folder import (
+            ExamFolderParams,
+        )
+        return ExamFolderParams
+    raise AttributeError(
+        f"module {__name__!r} has no attribute {name!r}")

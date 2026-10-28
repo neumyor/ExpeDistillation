@@ -27,10 +27,10 @@ def grouping(mapping):
 
 
 def correct():
-    """A JUDGE reply grading the answer correct."""
-    return json_script({"verdict": "correct", "error_description": ""})
+    """An EXAM_JUDGE reply grading the plan correct."""
+    return json_script({"verdict": "success", "reason": ""})
 
 
 def incorrect():
-    """A JUDGE reply grading the answer incorrect."""
-    return json_script({"verdict": "incorrect", "error_description": "wrong"})
+    """An EXAM_JUDGE reply grading the plan incorrect."""
+    return json_script({"verdict": "failure", "reason": "wrong"})

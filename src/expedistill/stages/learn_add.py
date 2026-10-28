@@ -7,9 +7,12 @@ resume never calls the segmenter again for a task whose review result is
 already on disk.
 """
 
-from typing import Any, Sequence, Set, Tuple
+from typing import Any, Optional, Sequence, Set, Tuple
 
 from expedistill.composites.phase_bank import phase_bank_dir
+from expedistill.composites.skill_origins import append_origin, source_ref
+from expedistill.composites.unit_ids import unit_id_for_trajectory
+from expedistill.core.models import Subtask, Trajectory
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     InfrastructureError,
@@ -26,8 +29,9 @@ __all__ = ["execute_add_rows"]
 
 
 def execute_add_rows(ctx: Any, phase: Any,
-                     items: Sequence[ReviewItem],
-                     *, skip_targets: Sequence[str] = ()) -> Set[str]:
+                     items: Sequence[ReviewItem], *,
+                     skip_targets: Sequence[str] = (),
+                     source_phase_label: str = "") -> Set[str]:
     """Land every add item; return infra-failed task ids."""
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     rows = [item.row for item in items]
@@ -44,7 +48,8 @@ def execute_add_rows(ctx: Any, phase: Any,
             "author", phase.spec.author)
         return learn_add_cluster.execute_add_rows(
             ctx, phase, items, phase_dir, author_params=author_params,
-            skip_targets=skip_targets)
+            skip_targets=skip_targets,
+            source_phase_label=source_phase_label)
 
     skipped = set(skip_targets)
     recorder = UnitFailureRecorder(ctx.run_dir)
@@ -54,7 +59,7 @@ def execute_add_rows(ctx: Any, phase: Any,
         if row.target_id in skipped:
             return row.target_id, None
         try:
-            _land_add(ctx, phase, item, phase_dir)
+            _land_add(ctx, phase, item, phase_dir, source_phase_label)
             return row.target_id, None
         except InfrastructureError as exc:
             recorder.record(row.target_id, phase.label, exc, exc)
@@ -77,7 +82,8 @@ def _has_outcome(phase: Any, row: Any, phase_dir) -> bool:
                                phase.label, row.target_id))
 
 
-def _land_add(ctx: Any, phase: Any, item: ReviewItem, phase_dir) -> None:
+def _land_add(ctx: Any, phase: Any, item: ReviewItem, phase_dir,
+              source_phase_label: str = "") -> None:
     """One task's add landing; a per-skill receipt is the completion proof."""
     store: Store = ctx.store
     row = item.row
@@ -111,6 +117,23 @@ def _land_add(ctx: Any, phase: Any, item: ReviewItem, phase_dir) -> None:
         usage=ctx.usage, run_dir=ctx.run_dir, params=author_params)
     for skill in skills:
         store.save(skill, "skills")
+        subtask_id = getattr(skill, "subtask_id", None)
+        experience = next(
+            (exp for exp in package.source_experiences
+             if exp["subtask"].subtask_id == subtask_id),
+            package.source_experiences[0])
+        subtask = experience["subtask"]
+        ref = source_ref(
+            source_phase_label or _source_label_of_subtask(ctx, subtask),
+            unit_id=_unit_of_subtask(ctx, source_phase_label, subtask),
+            scene_step=(getattr(subtask, "step_range", (0, 0))[0]))
+        append_origin(
+            phase_dir, skill_id=skill.skill_id, version=skill.version,
+            phase_label=phase.label,
+            change_note=(f"P02 {experience.get('mode', 'distill')}: "
+                         f"{getattr(subtask, 'label', '')}"),
+            context_text=str(experience.get("steps_view") or ""),
+            source_ref=ref)
         ledger.append_outcome(phase, row, skill.skill_id, "added",
                               skill.version, phase_dir)
 
@@ -118,3 +141,25 @@ def _land_add(ctx: Any, phase: Any, item: ReviewItem, phase_dir) -> None:
 def _skill_id_for(experience: Any) -> str:
     from expedistill.core.ids import make_skill_id
     return make_skill_id(experience["subtask"].subtask_id)
+
+
+def _source_label_of_subtask(ctx: Any, subtask: Subtask) -> str:
+    """A fallback source phase label for a stored subtask."""
+    # The first learn phase follows the baseline; later P02 add phases do
+    # not exist in the current sequence, so this is the baseline label.
+    return "p01:baseline"
+
+
+def _unit_of_subtask(ctx: Any, phase_label: str,
+                     subtask: Subtask) -> Optional[str]:
+    """The unit id of a baseline subtask's trajectory, when it is stored."""
+    if not phase_label:
+        return None
+    try:
+        trajectory = ctx.store.load(
+            "trajectories", subtask.trajectory_id, Trajectory)
+        return unit_id_for_trajectory(
+            phase_label=phase_label, benchmark=ctx.config.benchmark,
+            trajectory=trajectory)
+    except Exception:
+        return None

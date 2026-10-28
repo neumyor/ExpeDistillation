@@ -238,7 +238,7 @@ def test_learn_add_dispatches_the_new_author_method(monkeypatch, tmp_path):
     monkeypatch.setattr(
         learn_add_cluster, "execute_add_rows",
         lambda ctx, phase, items, phase_dir, author_params=None,
-        skip_targets=(): (
+        skip_targets=(), source_phase_label="": (
             called.append((len(items), author_params)) or set()))
     ctx = SimpleNamespace(run_dir=tmp_path / "run")
     phase = _phase()

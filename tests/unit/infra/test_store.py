@@ -41,12 +41,14 @@ def a_skill(subtask="traj/tb:task-1/strong/00/seg01"):
 
 
 def an_exam(subtask="traj/tb:task-1/strong/00/seg01"):
-    return Exam(exam_id=make_exam_id(subtask), question_text="q?",
-                reference_answer="a", subtask_id=subtask,
-                skill_id=make_skill_id(subtask))
+    skill_id = make_skill_id(subtask)
+    return Exam(exam_id=make_exam_id(skill_id, 1), skill_id=skill_id,
+                skill_version=1, scene_text="q?", expected_behavior="b",
+                reference_answer="a",
+                source_ref={"phase_label": "p02:learn", "scene_step": 0})
 
 
-def an_attempt(exam="traj/tb:task-1/strong/00/seg01/exam"):
+def an_attempt(exam="traj/tb:task-1/strong/00/seg01/skill/v01/exam"):
     return Attempt(attempt_id=make_attempt_id(exam, 0), exam_id=exam,
                    purpose="bare", weak_answer="answer")
 

@@ -15,7 +15,8 @@ from expedistill.infra.store import Store
 
 TASK = "tb:task-1"
 EXAM = ids.make_exam_id(
-    ids.make_subtask_id(ids.make_trajectory_id(TASK, "weak", 0), 0))
+    ids.make_skill_id(ids.make_subtask_id(
+        ids.make_trajectory_id(TASK, "weak", 0), 0)), 1)
 
 
 def _trajectory(task_ref=TASK, role="weak", attempt=0,

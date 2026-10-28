@@ -38,8 +38,10 @@ already exists is skipped with a receipt.
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
+from expedistill.composites.skill_origins import append_origin, source_ref
+from expedistill.composites.unit_ids import unit_id_for_trajectory
 from expedistill.core.ids import make_skill_id
-from expedistill.core.models import Skill
+from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError, InfrastructureError, ModelOutputError)
@@ -170,7 +172,8 @@ def _classify_pending(ctx: Any, pending: Sequence[Mapping[str, Any]],
 def _write_cluster(ctx: Any, phase: Any, cluster: Mapping[str, Any],
                    experiences_by_id: Mapping[str, Mapping[str, Any]],
                    params: ClusterAuthoringParams, handle: Any,
-                   weak_profile: str) -> Tuple[dict, Any, Optional[Any]]:
+                   weak_profile: str, source_phase_label: str = "",
+                   ) -> Tuple[dict, Any, Optional[Any]]:
     """Write one cluster's skill; return (outcome row, skill, error)."""
     store: Store = ctx.store
     ids = list(cluster["subtask_ids"])
@@ -204,6 +207,21 @@ def _write_cluster(ctx: Any, phase: Any, cluster: Mapping[str, Any],
                 weak_profile=weak_profile, handle=handle, params=params,
                 usage=ctx.usage, run_dir=ctx.run_dir)
             store.save(skill, "skills")
+            anchor = sorted(ids)[0]
+            experience = experiences_by_id[anchor]
+            subtask = experience["subtask"]
+            unit_id = _unit_of_subtask(
+                ctx, source_phase_label, subtask)
+            append_origin(
+                phase_dir=_phase_dir(ctx, phase),
+                skill_id=skill.skill_id, version=skill.version,
+                phase_label=phase.label,
+                change_note=(f"P02 cluster {cluster.get('family', '')}: "
+                             f"{cluster.get('theme', '')}"),
+                context_text=str(experience.get("steps_view") or ""),
+                source_ref=source_ref(
+                    source_phase_label or "p01:baseline",
+                    unit_id=unit_id, scene_step=subtask.step_range[0]))
             return ({
                 "schema": _CLUSTER_OUTCOME_SCHEMA,
                 "phase_label": phase.label,
@@ -237,12 +255,13 @@ def _write_cluster(ctx: Any, phase: Any, cluster: Mapping[str, Any],
 def _write_clusters(ctx: Any, phase: Any, clusters: Sequence[Mapping[str, Any]],
                     experiences_by_id: Mapping[str, Mapping[str, Any]],
                     params: ClusterAuthoringParams, handle: Any,
-                    weak_profile: str) -> Tuple[List[dict], List[dict], Set[str]]:
+                    weak_profile: str, source_phase_label: str = "",
+                    ) -> Tuple[List[dict], List[dict], Set[str]]:
     """Write all clusters in parallel, then append receipts in input order."""
     def one(cluster: Mapping[str, Any]):
         return _write_cluster(
             ctx, phase, cluster, experiences_by_id, params, handle,
-            weak_profile)
+            weak_profile, source_phase_label)
 
     try:
         results = run_parallel(
@@ -311,7 +330,8 @@ def _write_cluster_views(phase_dir: Path,
 def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
                      phase_dir: Path, *,
                      author_params: Optional[ClusterAuthoringParams] = None,
-                     skip_targets: Sequence[str] = ()) -> Set[str]:
+                     skip_targets: Sequence[str] = (),
+                     source_phase_label: str = "") -> Set[str]:
     """Run the cluster-by-trigger P02 landing; return infra-failed task ids."""
     phase_dir = Path(phase_dir)
     params = author_params or resolve_params("author", phase.spec.author)
@@ -475,7 +495,8 @@ def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
         and set(cluster.get("subtask_ids") or ()) <= eligible_ids]
     outcomes, skills, cluster_failed = _write_clusters(
         ctx, phase, pending_clusters, experiences_by_id, params,
-        ctx.handle("author"), ctx.config.effective_weak_profile())
+        ctx.handle("author"), ctx.config.effective_weak_profile(),
+        source_phase_label)
     failed_tasks |= cluster_failed
     for outcome in outcomes:
         append_jsonl(outcomes_path, outcome)
@@ -502,3 +523,21 @@ def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
         "failed_tasks": sorted(failed_tasks),
     }, indent=2)
     return failed_tasks
+
+
+def _unit_of_subtask(ctx: Any, phase_label: str, subtask: Any) -> Any:
+    if not phase_label:
+        return None
+    try:
+        trajectory = ctx.store.load(
+            "trajectories", subtask.trajectory_id, Trajectory)
+        return unit_id_for_trajectory(
+            phase_label=phase_label, benchmark=ctx.config.benchmark,
+            trajectory=trajectory)
+    except Exception:
+        return None
+
+
+def _phase_dir(ctx: Any, phase: Any) -> Path:
+    from expedistill.composites.phase_bank import phase_bank_dir
+    return phase_bank_dir(ctx.run_dir, phase.label)

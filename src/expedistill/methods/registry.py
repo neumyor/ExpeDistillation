@@ -74,9 +74,13 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("delivery", "none"):
         _Entry("expedistill.methods.delivery.none",
                "expedistill.methods.delivery", "NoneParams"),
-    ("delivery", "per_skill"):
-        _Entry("expedistill.methods.delivery.per_skill",
-               "expedistill.methods.delivery", "PerSkillParams"),
+    # The generalization exam's delivery: the whole-bank catalog the
+    # model searches before opening a skill (text only, no folder on
+    # disk). Paired with the ``exam`` execution by the phase driver.
+    ("delivery", "exam_folder"):
+        _Entry("expedistill.methods.delivery.exam_folder",
+               "expedistill.methods.delivery.exam_folder",
+               "ExamFolderParams"),
     ("delivery", "group_by_task"):
         _Entry("expedistill.methods.delivery.group_by_task",
                "expedistill.methods.delivery", "GroupByTaskParams"),

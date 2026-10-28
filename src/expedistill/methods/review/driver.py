@@ -108,7 +108,8 @@ def assess(
             checks_left=context.checks_left,
             compare_rule=context.compare_rule,
             n_attempts_weak=context.n_attempts_weak,
-            task_select_rule=context.task_select_rule)
+            task_select_rule=context.task_select_rule,
+            exam_control=context.exam_control)
     if context.phase_kind != "live":
         raise CodeBugError(
             f"review received unknown phase kind {context.phase_kind!r}; "

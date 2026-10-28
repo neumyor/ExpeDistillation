@@ -164,6 +164,7 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         task_select_rule=config.rules["task_select"],
         trajectory_select=config.rules["trajectory_select"],
         segment_select=config.rules["segment_select"],
+        exam_control=bool(current_spec.execution.get("bare_control", True)),
         workers=max(1, int(getattr(ctx.run_settings, "workers", 1) or 1)),
     )
     result = review(
@@ -197,21 +198,25 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     skip_targets = result.failed_targets | result.model_errors
     if current_kind is None:
         infra_failed = learn_add.execute_add_rows(
-            ctx, phase, result.items, skip_targets=skip_targets)
+            ctx, phase, result.items, skip_targets=skip_targets,
+            source_phase_label=context.source_phase_label)
     elif current_kind == PHASE_ROLE_EXAM:
         infra_failed = learn_exam.execute_exam_rows(
             ctx, phase, result.items, current.units, superseded,
-            skip_targets=skip_targets)
+            skip_targets=skip_targets,
+            source_phase_label=context.source_phase_label)
     else:
         infra_failed = learn_apply.execute_decision_rows(
             ctx, phase, result.items, current.units,
-            skip_targets=skip_targets, weak_profile=author_profile)
+            skip_targets=skip_targets, weak_profile=author_profile,
+            source_phase_label=context.source_phase_label)
     if result.new_skill_requirements:
         requirement_failed = learn_requirement.execute_requirements(
             ctx, phase, result.new_skill_requirements,
             weak_profile=(author_profile
                           if author_profile is not None
-                          else config.effective_weak_profile()))
+                          else config.effective_weak_profile()),
+            source_phase_label=context.source_phase_label)
         infra_failed |= requirement_failed
     infra_failed |= result.failed_targets
 

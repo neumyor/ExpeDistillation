@@ -11,10 +11,12 @@ No policy lives here: the row says keep/revise/delete; the writer only
 writes.
 """
 
+import json
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
+from expedistill.composites.skill_origins import append_origin, source_ref_for_unit
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
@@ -39,6 +41,7 @@ def execute_decision_rows(
     current_rows: Optional[List[UnitSummary]], *,
     skip_targets: Sequence[str] = (),
     weak_profile: Optional[str] = None,
+    source_phase_label: str = "",
 ) -> Set[str]:
     """Land per-skill decisions; return infra-failed target ids."""
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
@@ -172,11 +175,14 @@ def _execute_revise_group(
         except ModelOutputError as exc:
             recorder.record(skill.skill_id, phase.label, exc, exc)
             continue
-        _land_revision(ctx, phase, row, skill, outcome, phase_dir)
+        _land_revision(ctx, phase, row, skill, outcome, phase_dir,
+                       current_rows, package)
 
 
 def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
-                   outcome: Any, phase_dir) -> None:
+                   outcome: Any, phase_dir,
+                   current_rows: Optional[List[UnitSummary]] = None,
+                   package: Any = None) -> None:
     """Persist one writer outcome, then its receipt (the store is truth)."""
     store: Store = ctx.store
     skill_id = outcome.skill_id
@@ -213,6 +219,18 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
             f"skill {skill_id!r} is at version {stored.version} with "
             "content the author did not produce; the store drifted from "
             "the revision ledger")
+    summary = _report_row_of(current_rows, row.basis_unit)
+    append_origin(
+        phase_dir, skill_id=skill_id, version=expected,
+        phase_label=phase.label,
+        change_note=(outcome.revision_reason or "revised"),
+        context_text=json.dumps(
+            package.to_dict() if hasattr(package, "to_dict") else package,
+            ensure_ascii=False, default=str),
+        source_ref=source_ref_for_unit(
+            summary.unit_id,
+            sheet_id=(summary.sheet_ids[0] if summary.sheet_ids else None),
+            scene_step=_scene_step(package)))
     ledger.append_outcome(phase, row, skill_id, "revised", expected,
                           phase_dir)
 
@@ -240,3 +258,13 @@ def _assert_unique(rows: Sequence[TaskListRow]) -> None:
                 f"the decision carries two rows for target "
                 f"{row.target_id!r}; each target must have exactly one")
         seen.add(row.target_id)
+
+
+def _scene_step(package: Any) -> int:
+    windows = getattr(package, "windows", None) or []
+    for window in windows:
+        triggers = getattr(window, "trigger_steps", None) or []
+        if triggers:
+            return max(0, int(triggers[0]))
+        return max(0, int(getattr(window, "step_start", 0) or 0))
+    return 0

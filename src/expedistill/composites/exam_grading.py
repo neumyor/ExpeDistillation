@@ -63,7 +63,9 @@ def judge_budget_exhausted(attempt: Attempt) -> bool:
 
 def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
                                  judge_handle: ModelHandle, usage: Any,
-                                 run_dir: Optional[Union[str, Path]]
+                                 run_dir: Optional[Union[str, Path]],
+                                 *,
+                                 skill_catalog: str = "",
                                  ) -> Tuple[bool, str]:
     """G5 with a repair budget that survives a crash (module docstring).
 
@@ -78,9 +80,14 @@ def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
             f"({failures} failed tries stored)")
     while True:
         try:
+            selected = _selected_skill_text(attempt)
             return judge(
-                exam.question_text,
+                exam.scene_text,
+                exam.expected_behavior,
                 exam.reference_answer,
+                skill_catalog,
+                selected,
+                "",
                 attempt.weak_answer,
                 judge_handle,
                 usage=usage,
@@ -92,3 +99,16 @@ def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
             store.save(attempt, "attempts")
             if failures >= _BLOCK_REPAIR_ATTEMPTS:
                 raise
+
+
+def _selected_skill_text(attempt: Attempt) -> str:
+    """The skill-read turn recorded in the attempt, for the judge prompt.
+
+    The first step is the selection turn; the second is the plan.  A
+    comment-only first step is the bare control (or the regression
+    fallback), so it contributes no selected-skill text.
+    """
+    if not attempt.steps:
+        return ""
+    action = attempt.steps[0].action
+    return action if action and not action.startswith("#") else ""

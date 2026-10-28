@@ -31,10 +31,22 @@ EXPECTED = {
         "G6",
         {"skill_text", "question_text", "weak_answer", "error_description", "profile_section"},
     ),
-    "EXAM_GEN": ("G3", {"label", "description", "steps_view"}),
-    "ANSWER": ("G4", {"question_text", "skills_block"}),
-    "JUDGE": ("G5", {"question_text", "reference_answer", "weak_answer"}),
-    "LEAK_AUDIT_JUDGE": ("D8", {"skill_text", "question_text", "reference_answer"}),
+    "EXAM_SCENE": (
+        "G3",
+        {"task_instruction", "prior_steps", "future_steps", "skill_content",
+         "change_note"},
+    ),
+    "EXAM_TRIGGER": (
+        "G3",
+        {"scene_text", "skill_catalog", "max_skill_reads"},
+    ),
+    "EXAM_PLAN": ("G4", {"scene_text", "selection_reason", "selected_skills"}),
+    "EXAM_JUDGE": (
+        "G5",
+        {"scene_text", "expected_behavior", "reference_answer",
+         "skill_catalog", "selected_skills", "selection_reason", "plan"},
+    ),
+    "LEAK_AUDIT_JUDGE": ("D8", {"skill_text", "scene_text", "reference_answer"}),
     "SIMILARITY": ("G7", {"skills_listing"}),
     "MERGE": ("G8", {"mode", "skills_block"}),
     "GROUP": ("G9", {"skills_listing"}),
@@ -117,27 +129,48 @@ def test_profile_section_off_is_neutral():
     assert profile_section("HEADER", "a profile") == "HEADER\na profile"
 
 
-def test_answer_template_renders_with_empty_skills_block():
-    rendered = get("ANSWER").format(question_text="q?", skills_block="")
-    assert "q?" in rendered
-
-
 def test_templates_are_nonempty():
     for name in EXPECTED:
         assert get(name).strip()
 
 
-def test_judge_error_description_forbids_handing_over_the_fix():
-    # G6 (rewrite) consumes error_description verbatim, so if the judge may
-    # say or imply how to fix the answer, "rewrite changes wording, not the
-    # idea" loses its independence. The JUDGE template must keep the
-    # never-reveal-the-answer rule AND explicitly forbid the fix direction.
-    template = get("JUDGE")
-    assert "Never restate, quote, or paraphrase" in template
-    assert "how to fix" in template
-    assert "should have said instead" in template
-    # The JSON field description repeats both prohibitions.
-    assert "never how to fix it" in template
+def test_retired_exam_prompt_names_are_gone():
+    # The generalization exam (docs/decisions/generalization_exam_20261027.md)
+    # replaces the single-question exam; nothing may still register the old
+    # names, or a stale caller would silently keep the old protocol alive.
+    for retired in ("EXAM_GEN", "ANSWER", "JUDGE"):
+        assert retired not in PROMPTS
+
+
+def test_exam_json_contracts_name_the_validated_fields():
+    # Each "Output ONLY JSON" example must name exactly the fields its block
+    # validates; drift surfaces as model_output_failed units at run time.
+    assert _json_contract_keys(get("EXAM_SCENE")) == {
+        "scene_text", "expected_behavior", "reference_answer"}
+    assert _json_contract_keys(get("EXAM_TRIGGER")) == {"skills", "reason"}
+    assert _json_contract_keys(get("EXAM_PLAN")) == {"plan"}
+    assert _json_contract_keys(get("EXAM_JUDGE")) == {"verdict", "reason"}
+
+
+def test_exam_scene_must_not_name_the_skill_or_the_exam():
+    # The scene is what the examined reader sees before it looks at the
+    # catalog: a scene that names the skill under examination hands over the
+    # trigger answer.
+    text = _normalized(get("EXAM_SCENE"))
+    assert "must NOT name or allude to any skill" in text
+    assert "the skill catalog" in text
+    assert "from an exam or a trajectory" in text
+
+
+def test_exam_judge_forbids_handing_over_the_fix():
+    # The judge's reason is evidence for the review/rewrite path, so it may
+    # say WHAT is wrong but never how to fix it -- otherwise the rewriter is
+    # handed the fix instead of rephrasing the idea.
+    text = _normalized(get("EXAM_JUDGE"))
+    assert "say only WHAT is wrong with the plan" in text
+    assert "Do not state or imply how to fix it" in text
+    assert "what the plan should have said instead" in text
+    assert '"verdict": "<success|failure>"' in text
 
 
 # ---------------------------------------------------------------------------

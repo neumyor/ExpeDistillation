@@ -89,6 +89,7 @@ from expedistill.core.config import (
     upgrade_v3_config,
     upgrade_v4_config,
     upgrade_v5_config,
+    upgrade_v6_config,
 )
 from expedistill.core.ids import make_task_id, parse_trajectory_id
 from expedistill.core.models import (
@@ -301,12 +302,12 @@ def _source_config(source_manifest: Mapping[str, Any],
             "frozen config; only a run frozen by stage 0 can be reused")
     version = raw.get("schema_version", 3)
     if not isinstance(version, int) or isinstance(version, bool) \
-            or version not in (2, 3, 4, 5, 6):
+            or version not in (2, 3, 4, 5, 6, 7):
         raise ConfigError(
             f"the source run {source_run} froze config schema v{version!r}; "
-            "only schema v2 to v6 source runs can be reused (the older "
+            "only schema v2 to v7 source runs can be reused (the older "
             "ones chain through upgrade_v2_config, upgrade_v3_config, "
-            "upgrade_v4_config and upgrade_v5_config)")
+            "upgrade_v4_config, upgrade_v5_config and upgrade_v6_config)")
     try:
         if version == 2:
             raw = upgrade_v2_config(raw)
@@ -316,6 +317,8 @@ def _source_config(source_manifest: Mapping[str, Any],
             raw = upgrade_v4_config(raw)
         if version in (2, 3, 4, 5):
             raw = upgrade_v5_config(raw)
+        if version in (2, 3, 4, 5, 6):
+            raw = upgrade_v6_config(raw)
         return ExperimentConfig.from_dict(raw), version
     except ValueError as exc:
         raise ConfigError(
@@ -952,7 +955,7 @@ def _keep_sets(store: Mapping[str, Dict[str, Any]],
         if skill_lineage_tasks(skill, subtasks, skills_by_id=skills)
         <= train_ids}
     kept_exams = {obj_id: obj for obj_id, obj in store["exams"].items()
-                  if obj.subtask_id in kept_subtasks}
+                  if obj.skill_id in kept_skills}
     return {
         "trajectories": {
             obj_id: obj for obj_id, obj in store["trajectories"].items()
