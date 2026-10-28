@@ -36,7 +36,7 @@ __all__ = ["audit_leak"]
 
 def audit_leak(
     skill_content: str,
-    question_text: str,
+    scene_text: str,
     reference_answer: str,
     handle: ModelHandle,
     *,
@@ -53,7 +53,7 @@ def audit_leak(
     """
     parsed = call_model(
         handle, "LEAK_AUDIT_JUDGE",
-        {"skill_text": skill_content, "question_text": question_text,
+        {"skill_text": skill_content, "scene_text": scene_text,
          "reference_answer": reference_answer},
         output_json=True, usage=usage, run_dir=run_dir,
     )

@@ -20,7 +20,7 @@ head_keep=1000, tail_keep=1000)` 渲染后，按角色列出长轨迹输入：
 | `SKILL_ATTEMPT_ATTRIBUTION` | author | 一个 10+10 的 attempt 窗口 | 524288 |
 | `SKILL_ATTEMPT_REVISION` | rewriter | 一个 skill 的全部证据窗口 | 524288 |
 | `SEGMENT`（P02） | segmenter | strong/weak 轨迹视图 | 524288 |
-| `EXAM_GEN` | examiner | 一张考卷的轨迹窗口 | 524288 |
+| `EXAM_SCENE` / `EXAM_TRIGGER` / `EXAM_PLAN` / `EXAM_JUDGE` | examiner / answerer / judge | 场景、候选目录、打开的技能、计划 | 512K / 256K / 512K |
 | `CURATE` / 审计 | curator / auditor | 库成员或轨迹证据 | 524288 |
 
 正式配置 `configs/experiments/tb21_split_folder_cluster_trigger_agentbrew25_20261026.yaml`

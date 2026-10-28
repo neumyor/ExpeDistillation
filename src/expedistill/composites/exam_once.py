@@ -74,7 +74,7 @@ unjudged answer with the identical key (above), never a judged attempt.
 """
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Mapping, Optional, Union
 
 from expedistill.composites import verdicts
 from expedistill.composites.exam_answering import (
@@ -95,11 +95,13 @@ def exam_once(
     exam: Exam,
     answerer_handle: ModelHandle,
     judge_handle: ModelHandle,
-    skills_block: str,
+    skill_folder: Optional[Mapping[str, Any]] = None,
+    skills_block: Optional[str] = None,
     purpose: str,
     skill_id: Optional[str] = None,
     skill_version: Optional[int] = None,
     retry_round: int = 0,
+    max_skill_reads: int = 3,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Attempt:
@@ -140,9 +142,11 @@ def exam_once(
         if attempt is None:
             attempt = answer_exam(
                 store=store, exam=exam, answerer_handle=answerer_handle,
-                skills_block=skills_block, purpose=purpose,
-                skill_id=skill_id, skill_version=skill_version,
-                retry_round=retry_round, usage=usage, run_dir=run_dir)
+                skill_folder=skill_folder, skills_block=skills_block,
+                purpose=purpose, skill_id=skill_id,
+                skill_version=skill_version, retry_round=retry_round,
+                max_skill_reads=max_skill_reads, usage=usage,
+                run_dir=run_dir)
 
         verdict, error_description = verdicts.grade_attempt(
             store=store, exam=exam, attempt=attempt,

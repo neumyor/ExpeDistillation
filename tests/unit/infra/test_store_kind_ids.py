@@ -1,30 +1,33 @@
 """Regression: objects carry foreign-key ids, so the persisted ID must be
 resolved through the store kind, not by first-match scanning. Exam has both
-exam_id and subtask_id; before this fix it was stored under subtask_id and
-two exams of one subtask silently overwrote each other."""
+exam_id and skill_id; without the kind it would be stored under the foreign
+key and two exams would silently overwrite each other."""
 from expedistill.core import Attempt, Exam, Skill, Subtask, Trajectory
 from expedistill.infra import Store
 
 
 def _exam(i):
-    return Exam(exam_id=f"t/x/seg0{i}/exam", question_text="q",
-                reference_answer="a", subtask_id="t/x/seg01",
-                skill_id=f"t/x/seg0{i}/skill")
+    skill_id = f"t/x/seg0{i}/skill"
+    return Exam(exam_id=f"{skill_id}/v01/exam", skill_id=skill_id,
+                skill_version=1, scene_text="q", expected_behavior="b",
+                reference_answer="a",
+                source_ref={"phase_label": "p02:learn", "scene_step": 0})
 
 
 def test_exam_stored_by_exam_id(tmp_path):
     s = Store(tmp_path)
     s.save(_exam(1), "exams")
-    assert s.exists("exams", "t/x/seg01/exam")
-    assert s.ids("exams") == ["t/x/seg01/exam"]
-    assert s.load("exams", "t/x/seg01/exam", Exam).question_text == "q"
+    assert s.exists("exams", "t/x/seg01/skill/v01/exam")
+    assert s.ids("exams") == ["t/x/seg01/skill/v01/exam"]
+    assert s.load("exams", "t/x/seg01/skill/v01/exam", Exam).scene_text == "q"
 
 
 def test_two_exams_of_one_subtask_do_not_collide(tmp_path):
     s = Store(tmp_path)
     s.save(_exam(1), "exams")
     s.save(_exam(2), "exams")
-    assert s.ids("exams") == ["t/x/seg01/exam", "t/x/seg02/exam"]
+    assert s.ids("exams") == ["t/x/seg01/skill/v01/exam",
+                              "t/x/seg02/skill/v01/exam"]
 
 
 def test_skill_and_subtask_ids_resolve_via_kind(tmp_path):

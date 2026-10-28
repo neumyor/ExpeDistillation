@@ -47,6 +47,7 @@ from expedistill.core.config import (
     upgrade_v3_config,
     upgrade_v4_config,
     upgrade_v5_config,
+    upgrade_v6_config,
 )
 
 #: The repository root (the 7 v3 configs live under configs/experiments/).
@@ -89,7 +90,7 @@ def _v3_raw(*, acceptance="exam", **overrides):
 
 
 def _current(raw):
-    return upgrade_v5_config(upgrade_v4_config(raw))
+    return upgrade_v6_config(upgrade_v5_config(upgrade_v4_config(raw)))
 
 
 @pytest.fixture()
@@ -105,9 +106,11 @@ def live_v4():
 def _parse(v4):
     version = v4.get("schema_version")
     if version == 4:
-        v6 = upgrade_v5_config(upgrade_v4_config(v4))
+        v6 = upgrade_v6_config(upgrade_v5_config(upgrade_v4_config(v4)))
     elif version == 5:
-        v6 = upgrade_v5_config(v4)
+        v6 = upgrade_v6_config(upgrade_v5_config(v4))
+    elif version == 6:
+        v6 = upgrade_v6_config(v4)
     else:
         v6 = v4
     return parse_phases(
@@ -158,7 +161,9 @@ class TestParsedShapes:
         assert d.compare is None and d.acceptance is None
         a = specs["exam"]
         assert a.role == PHASE_ROLE_EXAM
-        assert a.execution == {"name": "exam"}
+        assert a.execution == {
+            "name": "exam", "max_skill_reads": 3,
+            "bare_control": True, "leak_audit": True}
         c = specs["test"]
         assert c.role == PHASE_ROLE_TEST
         assert c.tasks == "test"
@@ -295,7 +300,7 @@ class TestChecklist:
         raw["live"] = dict(raw.pop("exam"), role=PHASE_ROLE_LIVE)
         raw["live"]["execution"] = {"name": "exam"}
         sequence = ["baseline", "learn", "live", "learn", "test"]
-        with pytest.raises(ConfigError, match="that role runs 'real'"):
+        with pytest.raises(ConfigError, match="exam_folder|that role runs"):
             parse_phases(raw, sequence, n_attempts_weak=1)
 
     def test_baseline_arms_are_fixed(self, exam_v4):
@@ -468,8 +473,8 @@ class TestCheckedInConfigs:
         for path in v3:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             v4 = upgrade_v3_config(raw)
-            v5 = upgrade_v4_config(v4)
-            v6 = upgrade_v5_config(v5)
+            v5 = upgrade_v5_config(upgrade_v4_config(v4))
+            v6 = upgrade_v6_config(v5)
             specs = _parse(v6)
             assert set(specs) == set(v6["phases"]) == set(v6["sequence"])
             # Every emitted phase carries its R8 role, and the v4-only

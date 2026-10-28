@@ -43,7 +43,7 @@ ReviewResult
 |---|---|
 | `add` | `EvidencePackage`（`source_experiences` 是切好的段落） |
 | `revise` + live | `SkillAttemptEvidence`（每个 skill 的归因窗口） |
-| `revise` + exam | `EvidencePackage`（考题、弱模型答案、判卷理由） |
+| `revise` + exam | `EvidencePackage`（场景、期望行为、打开的技能与计划、判卷理由） |
 | `keep` / `delete` | `None`，不调用模型 |
 | `trial_level` 新需求 | `NewSkillRequirement`，每个需求携带 `EvidencePackage` |
 

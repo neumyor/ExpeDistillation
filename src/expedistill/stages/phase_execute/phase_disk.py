@@ -115,6 +115,34 @@ def _bank_skills(ctx: StageContext, phase: PhaseInstance) -> List[Skill]:
     return [Skill.from_dict(row) for row in ctx.store.bank()]
 
 
+def _bank_before_previous(ctx: StageContext,
+                          phase: PhaseInstance) -> List[Skill]:
+    """The bank artifact BEFORE the previous learn phase's artifact.
+
+    The exam selector compares the latest learn artifact with the one
+    before it to find newly created and version-increased skills.  With no
+    earlier artifact (the first learn phase produced the only one), the
+    pre-learn run-level bank stands in; a from-scratch run has none, which
+    makes every member of the latest artifact "new".
+    """
+    phases_dir = Path(ctx.run_dir) / phase_bank.PHASES_DIR
+    if not phases_dir.exists():
+        return [Skill.from_dict(row) for row in ctx.store.bank()]
+    found = []
+    for entry in phases_dir.iterdir():
+        match = _PHASE_DIR_RE.fullmatch(entry.name)
+        if match is None or int(match.group(1)) - 1 >= phase.index:
+            continue
+        if (entry / phase_bank.BANK_NAME).exists():
+            found.append((int(match.group(1)),
+                          f"p{int(match.group(1)):02d}:{match.group(2)}"))
+    if len(found) < 2:
+        return [Skill.from_dict(row) for row in ctx.store.bank()]
+    label = sorted(found)[-2][1]
+    return [Skill.from_dict(row)
+            for row in phase_bank.load_phase_bank(ctx.run_dir, label)]
+
+
 def _write_units(ctx: StageContext, phase: PhaseInstance,
                  units: Sequence[ExecutionUnitRow]) -> None:
     """Persist the resolved unit list (one resolution per phase; the

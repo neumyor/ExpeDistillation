@@ -102,6 +102,9 @@ def test_a_partial_add_resume_writes_the_missing_skill(tmp_path, monkeypatch):
     assert sorted(store.saved) == sorted(SKILL_IDS)
     outcomes = read_jsonl(phase_dir / learn_ledger.OUTCOMES_NAME)
     assert [record["skill_id"] for record in outcomes] == SKILL_IDS
+    origins = read_jsonl(phase_dir / "skill_origins.jsonl")
+    assert [row["skill_id"] for row in origins] == SKILL_IDS
+    assert all(row["source_ref"].get("phase_label") for row in origins)
 
     # A completed task replays without another write or receipt.
     learn_add._land_add(ctx, _phase(), item, phase_dir)

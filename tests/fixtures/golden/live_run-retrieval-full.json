@@ -1119,16 +1119,17 @@
         }
       },
       "prompts_digests": {
-        "ANSWER": "35bc0de88ed2152f1605c01da693cddf976733995950f10919dd146bc6113f42",
         "CLUSTER_SKILL": "2a38472538d25cf68310b4e82cd1e1ea397ea1abf03b79fa32b67b5b42d5a707",
         "CLUSTER_SUBTASKS": "d13d39ef540a969ebbeaaff35207413cff25cfa527bb72165025e411be38897f",
         "CLUSTER_TRIGGER_FAMILY": "9111c3c1a54c6281146a03ac9b18544a78b2be9fb9a589726f4c757dfad7ef10",
         "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
-        "EXAM_GEN": "54e6f98deed982d76bd652c23170ca73a9f090a22790c703f297294b331aa3b6",
+        "EXAM_JUDGE": "9c316898fedd11ab902f0bdcad202d021b5fa64f2399890608e584dab480d8e3",
+        "EXAM_PLAN": "9c19d9999e98536bf5158ce1ad8d13556b36f78d97cf5fe27848e48e466678c9",
+        "EXAM_SCENE": "7722b8a06b6e898f8a82b4f1db6b8f4863f40cc89652ad3de450061a7d057ae2",
+        "EXAM_TRIGGER": "90150597fecee9fc13bf216257d35495d30c369b28f27385b6c0452c71d1b4c1",
         "FAKE_TASK": "72c29397193f7275ea9356dcadd3d2cef2b4bd6e135af7ffe032d908a9396d98",
         "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
-        "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
-        "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
+        "LEAK_AUDIT_JUDGE": "e0de810406adb5be7446d98523481c8cbf8482b5b83dd044b3228bb11249def6",
         "MERGE": "89b91dfa9b3a33cce4b610571a3dac5e5e5aaf1bb1767f84375b1e311f935da7",
         "PROFILE_UPDATE": "e2b6db0a6402be26f562f947788d9aca0cf9895da3a0fff0e316a3733b1efeac",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
@@ -1140,7 +1141,7 @@
         "SKILL_ATTEMPT_REVISION": "d8b2980cc5edeb8069edcd0b2adf2dd945af4a31a639089dcca98602e2707855",
         "SKILL_DIAGNOSE": "f2ac62c356d86d76635cbb6fcf97eb701061ead8be6d20d988c51ebb3ab87a28",
         "SKILL_DISTILL": "03cad5979ec7ee26cbb79700daf6ea69469f78c0d9edebf56da48e6ea56099c9",
-        "TRIAL_FAILURE_ANALYSIS": "1b3d393d8f79309f408c0d2a8089a5a9f40be03043667bc224ae06f94ce1d04e",
+        "TRIAL_FAILURE_ANALYSIS": "d0f9bd0833d2ee444b1af65cf7ea6062f8df4a74eb7e44ecfd553e3fe8922838",
         "TRIAL_REQUIREMENT_AGGREGATION": "3cbdbe46d9c156895437de5f66a6c9bf4bfaeaecd9c4bc68c27284a6236fe359"
       },
       "rules": {
@@ -1148,7 +1149,7 @@
         "task_select": "any_weak_failed",
         "trajectory_select": "strong2_weak2"
       },
-      "schema_version": 6,
+      "schema_version": 7,
       "sequence": [
         "baseline",
         "learn",
@@ -1180,16 +1181,17 @@
       "segmenter": "strong-model"
     },
     "prompt_digests": {
-      "ANSWER": "35bc0de88ed2152f1605c01da693cddf976733995950f10919dd146bc6113f42",
       "CLUSTER_SKILL": "2a38472538d25cf68310b4e82cd1e1ea397ea1abf03b79fa32b67b5b42d5a707",
       "CLUSTER_SUBTASKS": "d13d39ef540a969ebbeaaff35207413cff25cfa527bb72165025e411be38897f",
       "CLUSTER_TRIGGER_FAMILY": "9111c3c1a54c6281146a03ac9b18544a78b2be9fb9a589726f4c757dfad7ef10",
       "DEFAULT_SYSTEM": "8eefa21c49e174e2e48ea6834a1511e58039bda895dea12a3653a19198c73bb0",
-      "EXAM_GEN": "54e6f98deed982d76bd652c23170ca73a9f090a22790c703f297294b331aa3b6",
+      "EXAM_JUDGE": "9c316898fedd11ab902f0bdcad202d021b5fa64f2399890608e584dab480d8e3",
+      "EXAM_PLAN": "9c19d9999e98536bf5158ce1ad8d13556b36f78d97cf5fe27848e48e466678c9",
+      "EXAM_SCENE": "7722b8a06b6e898f8a82b4f1db6b8f4863f40cc89652ad3de450061a7d057ae2",
+      "EXAM_TRIGGER": "90150597fecee9fc13bf216257d35495d30c369b28f27385b6c0452c71d1b4c1",
       "FAKE_TASK": "72c29397193f7275ea9356dcadd3d2cef2b4bd6e135af7ffe032d908a9396d98",
       "GROUP": "b92d616f6cc04c7463b9943372de340186417bc77f9149bbb4ad803bd6c30dd0",
-      "JUDGE": "7d84174e22ddabd93743d1715a6602332c881995508b82c089d38d033af236fb",
-      "LEAK_AUDIT_JUDGE": "526ccb6d5a54b34264edf2cf2cde2f4d0ece8e4888647887b33db5bda85b508b",
+      "LEAK_AUDIT_JUDGE": "e0de810406adb5be7446d98523481c8cbf8482b5b83dd044b3228bb11249def6",
       "MERGE": "89b91dfa9b3a33cce4b610571a3dac5e5e5aaf1bb1767f84375b1e311f935da7",
       "PROFILE_UPDATE": "e2b6db0a6402be26f562f947788d9aca0cf9895da3a0fff0e316a3733b1efeac",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
@@ -1201,7 +1203,7 @@
       "SKILL_ATTEMPT_REVISION": "d8b2980cc5edeb8069edcd0b2adf2dd945af4a31a639089dcca98602e2707855",
       "SKILL_DIAGNOSE": "f2ac62c356d86d76635cbb6fcf97eb701061ead8be6d20d988c51ebb3ab87a28",
       "SKILL_DISTILL": "03cad5979ec7ee26cbb79700daf6ea69469f78c0d9edebf56da48e6ea56099c9",
-      "TRIAL_FAILURE_ANALYSIS": "1b3d393d8f79309f408c0d2a8089a5a9f40be03043667bc224ae06f94ce1d04e",
+      "TRIAL_FAILURE_ANALYSIS": "d0f9bd0833d2ee444b1af65cf7ea6062f8df4a74eb7e44ecfd553e3fe8922838",
       "TRIAL_REQUIREMENT_AGGREGATION": "3cbdbe46d9c156895437de5f66a6c9bf4bfaeaecd9c4bc68c27284a6236fe359"
     },
     "rules": {
@@ -1901,6 +1903,83 @@
       "version": 1
     }
   ],
+  "phases/p02_learn/skill_origins.jsonl": [
+    {
+      "change_note": "P02 distill: whole",
+      "context_text": "step 0\naction: run\nobservation: the environment state",
+      "phase_label": "p02:learn",
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p01:baseline",
+        "scene_step": 0,
+        "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
+      },
+      "version": 1
+    },
+    {
+      "change_note": "P02 diagnose: whole",
+      "context_text": "step 0\naction: run\nobservation: the environment state",
+      "phase_label": "p02:learn",
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p01:baseline",
+        "scene_step": 0,
+        "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+      },
+      "version": 1
+    },
+    {
+      "change_note": "P02 diagnose: whole",
+      "context_text": "step 0\naction: run\nobservation: the environment state",
+      "phase_label": "p02:learn",
+      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "source_ref": {
+        "phase_label": "p01:baseline",
+        "scene_step": 0,
+        "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
+      },
+      "version": 1
+    },
+    {
+      "change_note": "P02 distill: whole",
+      "context_text": "step 0\naction: run\nobservation: the environment state",
+      "phase_label": "p02:learn",
+      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p01:baseline",
+        "scene_step": 0,
+        "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
+      },
+      "version": 1
+    },
+    {
+      "change_note": "P02 diagnose: whole",
+      "context_text": "step 0\naction: run\nobservation: the environment state",
+      "phase_label": "p02:learn",
+      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p01:baseline",
+        "scene_step": 0,
+        "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+      },
+      "version": 1
+    },
+    {
+      "change_note": "P02 diagnose: whole",
+      "context_text": "step 0\naction: run\nobservation: the environment state",
+      "phase_label": "p02:learn",
+      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "source_ref": {
+        "phase_label": "p01:baseline",
+        "scene_step": 0,
+        "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
+      },
+      "version": 1
+    }
+  ],
+  "phases/p02_learn/skill_origins.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "phases/p02_learn/task_list.jsonl": [
     {
       "action": "add",
@@ -2621,6 +2700,89 @@
       "version": 2
     }
   ],
+  "phases/p04_learn/skill_origins.jsonl": [
+    {
+      "change_note": "made the trigger condition concrete",
+      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t1\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t1\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
+      "phase_label": "p04:learn",
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p03:live",
+        "scene_step": 0,
+        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+        "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+      },
+      "version": 2
+    },
+    {
+      "change_note": "made the trigger condition concrete",
+      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t1\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t1\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
+      "phase_label": "p04:learn",
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p03:live",
+        "scene_step": 0,
+        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+        "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+      },
+      "version": 2
+    },
+    {
+      "change_note": "made the trigger condition concrete",
+      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t1/weak/01/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t1\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t1\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
+      "phase_label": "p04:learn",
+      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "source_ref": {
+        "phase_label": "p03:live",
+        "scene_step": 0,
+        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+        "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
+      },
+      "version": 2
+    },
+    {
+      "change_note": "made the trigger condition concrete",
+      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t2/strong/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t2\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t2\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
+      "phase_label": "p04:learn",
+      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p03:live",
+        "scene_step": 0,
+        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+        "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+      },
+      "version": 2
+    },
+    {
+      "change_note": "made the trigger condition concrete",
+      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t2/weak/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t2\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t2\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
+      "phase_label": "p04:learn",
+      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "source_ref": {
+        "phase_label": "p03:live",
+        "scene_step": 0,
+        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+        "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+      },
+      "version": 2
+    },
+    {
+      "change_note": "made the trigger condition concrete",
+      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t2/weak/01/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t2\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t2\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
+      "phase_label": "p04:learn",
+      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "source_ref": {
+        "phase_label": "p03:live",
+        "scene_step": 0,
+        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+        "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
+      },
+      "version": 2
+    }
+  ],
+  "phases/p04_learn/skill_origins.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "phases/p04_learn/task_list.jsonl": [
     {
       "action": "revise",

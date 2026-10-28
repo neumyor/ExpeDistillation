@@ -35,6 +35,7 @@ from expedistill.infra.store import (
     write_json,
 )
 from expedistill.llm import make_fake_handle
+from expedistill.llm.fake import json_script
 from tests.helpers.replies import (
     correct as _correct,
     grouping as _grouping,
@@ -76,7 +77,7 @@ def _scripts():
         _grouping({M2: "g3", _sid(3): "g2"}),                    # 6 G9 r2
     ]
     # A: exams 0, 1; B: exams 2, 3 (3 fails); C: exams 0, 1, 2.
-    answerer = [f"answer {i}" for i in range(7)]
+    answerer = [json_script({"plan": f"answer {i}"}) for i in range(7)]
     judge = [_correct(), _correct(),
              _correct(), _incorrect(),
              _correct(), _correct(), _correct()]
@@ -130,11 +131,14 @@ def _seed(store):
                          source_subtasks=[_subtask(index)],
                          status="accepted"),
                    "skills")
-        store.save(Exam(exam_id=ids.make_exam_id(_subtask(index)),
-                        question_text=f"question {index}",
-                        reference_answer=f"reference {index}",
-                        subtask_id=_subtask(index),
-                        skill_id=_sid(index)), "exams")
+        store.save(Exam(
+            exam_id=ids.make_exam_id(_sid(index), 1),
+            skill_id=_sid(index), skill_version=1,
+            scene_text=f"question {index}",
+            expected_behavior=f"answer question {index}",
+            reference_answer=f"reference {index}",
+            source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+            "exams")
 
 
 def _handles(scripts):
@@ -205,7 +209,7 @@ def test_merge_of_merge_regression_covers_all_transitive_sources(reference):
         assert attempt["purpose"] == "regression"
         exams_for.setdefault(attempt["skill_id"], []).append(
             attempt["exam_id"])
-    expected = sorted(ids.make_exam_id(_subtask(i)) for i in range(3))
+    expected = sorted(ids.make_exam_id(_sid(i), 1) for i in range(3))
     assert sorted(exams_for[M2]) == expected
     assert len(exams_for[M2]) == 3  # no exam examined twice
 

@@ -112,7 +112,7 @@ _ROLE_BUDGET_KEYS = ("max_output_tokens", "max_input_tokens")
 #: v4: the method is a ``sequence`` of phases; every method parameter
 #: lives in the phase definitions under ``phases`` (R9). v3 and older
 #: are refused with a pointer at the upgrade mapping and the converter.
-CONFIG_SCHEMA_VERSION = 6
+CONFIG_SCHEMA_VERSION = 7
 
 
 class ConfigError(ValueError):
@@ -182,6 +182,12 @@ FOLDER_DELIVERY_NAME = "folder"
 #: are that execution's parameters, while the folder shape comes from the
 #: delivery's manifest.
 FOLDER_BY_TASK_DELIVERY_NAME = "folder_by_task"
+
+#: The exam phase's catalog delivery: every exam unit receives the current
+#: bank's skill catalog (accepted and pending members), while the answerer
+#: opens only the skills it chooses.  Exam-only; it is a text catalog, not
+#: a materialized folder.
+EXAM_FOLDER_DELIVERY_NAME = "exam_folder"
 
 #: The execution family's ``real_folder`` name: the skill-folder
 #: execution (skill-folder M3), ``real``'s folder twin. Legal on a
@@ -452,6 +458,18 @@ def _parse_execute_phase(name: str, raw: Dict[str, Any]) -> ExecutePhaseSpec:
             f"{FOLDER_BY_TASK_DELIVERY_NAME!r} with role {role!r}: the "
             "per-task skill-folder delivery is a live-acceptance "
             f"delivery, legal only for role {PHASE_ROLE_LIVE!r}")
+    if delivery["name"] == EXAM_FOLDER_DELIVERY_NAME and \
+            role != PHASE_ROLE_EXAM:
+        raise ConfigError(
+            f"phases.{name} declares delivery name "
+            f"{EXAM_FOLDER_DELIVERY_NAME!r} with role {role!r}: the exam "
+            f"catalog delivery is legal only for role {PHASE_ROLE_EXAM!r}")
+    if role == PHASE_ROLE_EXAM and \
+            delivery["name"] != EXAM_FOLDER_DELIVERY_NAME:
+        raise ConfigError(
+            f"phases.{name} has role {PHASE_ROLE_EXAM!r} with delivery "
+            f"{delivery['name']!r}; an exam phase uses "
+            f"{EXAM_FOLDER_DELIVERY_NAME!r}")
     execution = _method_mapping(raw.get("execution"),
                                 f"phases.{name}.execution")
     exec_name = execution["name"]
@@ -1281,7 +1299,8 @@ def _check_schema_version(version: Any, where: str) -> None:
             f"{CONFIG_SCHEMA_VERSION}; this config needs newer code -- "
             "update the repository and retry")
     if version < CONFIG_SCHEMA_VERSION:
-        remedy = ("upgrade_v5_config" if version == 5 else
+        remedy = ("upgrade_v6_config" if version == 6 else
+                  "upgrade_v5_config" if version == 5 else
                   "upgrade_v4_config" if version == 4 else
                   "upgrade_v3_config (a v2 file chains through "
                   "upgrade_v2_config first)")
@@ -1335,9 +1354,11 @@ def load_config(path: str) -> ExperimentConfig:
     if not isinstance(data, dict):
         raise ValueError(f"{path} does not contain a YAML mapping")
     if data.get("schema_version") == 4:
-        data = upgrade_v5_config(upgrade_v4_config(data))
+        data = upgrade_v6_config(upgrade_v5_config(upgrade_v4_config(data)))
     elif data.get("schema_version") == 5:
-        data = upgrade_v5_config(data)
+        data = upgrade_v6_config(upgrade_v5_config(data))
+    elif data.get("schema_version") == 6:
+        data = upgrade_v6_config(data)
     # A file without schema_version predates v4, so it is refused.
     _check_schema_version(data.get("schema_version", 3), str(path))
     known_file_keys = ({f.name for f in fields(ExperimentConfig)}
@@ -1393,4 +1414,5 @@ from expedistill.core.config_upgrade import (  # noqa: E402
     upgrade_v3_config as upgrade_v3_config,
     upgrade_v4_config as upgrade_v4_config,
     upgrade_v5_config as upgrade_v5_config,
+    upgrade_v6_config as upgrade_v6_config,
 )

@@ -140,7 +140,7 @@ class World:
         fault = self.answer_faults.pop((question, marker), None)
         if fault is not None:
             raise fault
-        return f"ans q{question} with {marker}"
+        return json_script({"plan": f"ans q{question} with {marker}"})
 
     def judge_resolve(self, user):
         question = int(_QUESTION_RE.search(user).group(1))
@@ -149,9 +149,8 @@ class World:
         if fault is not None:
             raise fault
         if (question, marker) in self.fail:
-            return json_script({"verdict": "incorrect",
-                                "error_description": "wrong"})
-        return json_script({"verdict": "correct", "error_description": ""})
+            return json_script({"verdict": "failure", "reason": "wrong"})
+        return json_script({"verdict": "success", "reason": ""})
 
 
 def subtask_id(index):
@@ -163,7 +162,7 @@ def skill_id(index):
 
 
 def exam_id(index):
-    return ids.make_exam_id(subtask_id(index))
+    return ids.make_exam_id(skill_id(index), 1)
 
 
 def merge_id(serial):
@@ -177,11 +176,13 @@ def seed(store, world):
                          source_subtasks=[subtask_id(index)],
                          status="accepted"),
                   "skills")
-        store.save(Exam(exam_id=exam_id(index),
-                        question_text=f"question {index}",
-                        reference_answer=f"reference {index}",
-                        subtask_id=subtask_id(index),
-                        skill_id=skill_id(index)), "exams")
+        store.save(Exam(
+            exam_id=exam_id(index), skill_id=skill_id(index), skill_version=1,
+            scene_text=f"question {index}",
+            expected_behavior=f"answer question {index}",
+            reference_answer=f"reference {index}",
+            source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+            "exams")
 
 
 def run(store, world, workers=1, budget=600, rounds=3):

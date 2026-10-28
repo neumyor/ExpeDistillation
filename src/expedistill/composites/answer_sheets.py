@@ -75,12 +75,27 @@ def execution_from_trajectory(
 
 def execution_from_attempt(
         attempt: Attempt, *, unit_id: str, phase_label: str,
-        arm: Optional[str] = None) -> ExecutionRecord:
-    """The trial-level view of one exam answer (no scorer correctness)."""
+        arm: Optional[str] = None,
+        folder: Optional[Mapping[str, object]] = None,
+        exam: Optional[object] = None) -> ExecutionRecord:
+    """The trial-level view of one exam answer (no scorer correctness).
+
+    ``folder`` is the exam's candidate catalog manifest.  It travels in
+    ``artifacts["skill_folder"]`` so the same skill-usage and trial-review
+    extractors that read live folder trials can read exam trials.  The
+    answer is represented as a trajectory: the exam's two turns (skill
+    selection and plan) are ``Attempt.steps``.
+    """
     skills = None
     if attempt.skill_id is not None:
         skills = [{"skill_id": attempt.skill_id,
                    "version": attempt.skill_version}]
+    artifacts = {"attempt_id": attempt.attempt_id}
+    if folder is not None:
+        artifacts["skill_folder"] = dict(folder)
+    metrics = {}
+    if exam is not None:
+        metrics["scene_text"] = getattr(exam, "scene_text", "")
     return ExecutionRecord(
         sheet_id=attempt.attempt_id,
         unit_id=unit_id,
@@ -92,13 +107,14 @@ def execution_from_attempt(
         model_name="",
         sample_index=ids.parse_attempt_id(attempt.attempt_id)[1],
         skills_injected=skills,
+        steps=list(getattr(attempt, "steps", None) or []),
         answer=attempt.weak_answer,
         raw_correctness=None,
-        metrics={},
+        metrics=metrics,
         aux={"judge_verdict": attempt.judge_verdict,
              "judge_reason": attempt.judge_reason},
-        artifacts={"attempt_id": attempt.attempt_id},
-        kind="attempt",
+        artifacts=artifacts,
+        kind="trajectory",
     )
 
 

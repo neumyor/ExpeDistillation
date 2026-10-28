@@ -128,13 +128,79 @@ class TestRealExecutionParams:
 
 
 class TestExamExecutionParams:
-    def test_the_exam_entry_has_no_parameters(self):
+    """The generalization exam's three knobs (schema v7): the model may
+    open a bounded number of skill files, and the old bare-answer and
+    leak-audit arms stay available but off by default."""
+
+    def test_the_exam_entry_defaults(self):
+        from expedistill.methods.execution import ExamExecutionParams
+
         params = resolve_params("execution", {"name": "exam"})
-        assert params == resolve_params("execution", {"name": "exam"})
+        assert params == ExamExecutionParams()
+        assert params.max_skill_reads == 3
+        assert params.bare_control is False
+        assert params.leak_audit is False
+
+    def test_all_params_load(self):
+        params = resolve_params("execution", {
+            "name": "exam", "max_skill_reads": 5,
+            "bare_control": True, "leak_audit": True})
+        assert params.max_skill_reads == 5
+        assert params.bare_control is True
+        assert params.leak_audit is True
+
+    @pytest.mark.parametrize("bad", [0, -1, True, "3", 2.5, None])
+    def test_max_skill_reads_must_be_an_int_at_least_one(self, bad):
+        with pytest.raises(ConfigError, match="max_skill_reads"):
+            resolve_params("execution", {"name": "exam",
+                                          "max_skill_reads": bad})
+
+    def test_max_skill_reads_bound_is_inclusive_one(self):
+        params = resolve_params("execution", {"name": "exam",
+                                              "max_skill_reads": 1})
+        assert params.max_skill_reads == 1
+
+    @pytest.mark.parametrize("key", ["bare_control", "leak_audit"])
+    @pytest.mark.parametrize("bad", ["yes", 1, 0, None])
+    def test_the_control_switches_must_be_bools(self, key, bad):
+        with pytest.raises(ConfigError, match=key):
+            resolve_params("execution", {"name": "exam", key: bad})
 
     def test_rejects_real_params(self):
         with pytest.raises(ConfigError, match="unknown parameter"):
             resolve_params("execution", {"name": "exam", "n_attempts": 1})
+
+
+class TestExamFolderParams:
+    """The generalization exam's delivery: the shared catalog params."""
+
+    def test_defaults_to_the_folder_catalog_mode(self):
+        from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
+        from expedistill.methods.delivery import ExamFolderParams
+
+        params = resolve_params("delivery", {"name": "exam_folder"})
+        assert params == ExamFolderParams()
+        assert params.description_mode == DEFAULT_DESCRIPTION_MODE
+
+    def test_description_mode_loads(self):
+        from expedistill.methods.delivery import ExamFolderParams
+
+        params = resolve_params("delivery", {"name": "exam_folder",
+                                             "description_mode": "summary"})
+        assert params == ExamFolderParams(description_mode="summary")
+
+    def test_unknown_key_rejected(self):
+        # The retired ``per_skill`` delivery name is not a parameter
+        # either; the params builder refuses unknown keys loudly.
+        with pytest.raises(ConfigError, match="unknown parameter"):
+            resolve_params("delivery", {"name": "exam_folder",
+                                         "per_skill": True})
+
+    def test_description_mode_is_validated_by_the_folder_rule(self):
+        # One validation rule for both catalogs: the folder module's.
+        with pytest.raises(ValueError, match="description_mode"):
+            resolve_params("delivery", {"name": "exam_folder",
+                                         "description_mode": "unknown"})
 
 
 class TestReviewAndAuthorParams:

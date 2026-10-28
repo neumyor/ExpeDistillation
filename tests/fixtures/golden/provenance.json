@@ -1,21 +1,21 @@
 {
-  "base_commit": "6083ae82b01990eeaf8872a857f79f3e44a69327",
+  "base_commit": "00fb38300e9da8ff1e07f13050f2aa81a95eb35d",
   "combos": {
     "exam-retrieval-split": {
       "crash_points": [
-        5,
-        11,
-        17
+        3,
+        6,
+        9
       ],
-      "model_calls": 18
+      "model_calls": 10
     },
     "exam-whole_bank-full": {
       "crash_points": [
-        10,
-        20,
-        32
+        6,
+        12,
+        19
       ],
-      "model_calls": 34
+      "model_calls": 20
     },
     "live_run-retrieval-full": {
       "crash_points": [

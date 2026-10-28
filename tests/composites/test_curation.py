@@ -55,16 +55,21 @@ def _add_skill(store: Store, index: int, content: str,
 
 
 def _add_exam(store: Store, index: int) -> Exam:
-    exam = Exam(exam_id=ids.make_exam_id(_subtask(index)),
-                question_text=f"question {index}",
-                reference_answer=f"reference {index}",
-                subtask_id=_subtask(index),
-                skill_id=_skill_id(index))
+    exam = Exam(
+        exam_id=ids.make_exam_id(_skill_id(index), 1),
+        skill_id=_skill_id(index), skill_version=1,
+        scene_text=f"scene {index}", expected_behavior=f"behavior {index}",
+        reference_answer=f"reference {index}",
+        source_ref={"phase_label": "p01:baseline", "scene_step": 0})
     store.save(exam, "exams")
     return exam
 
 
 def _handles(curator_script, answer_script, judge_script):
+    from expedistill.llm.fake import json_script
+    answer_script = [
+        json_script({"plan": item}) if isinstance(item, str) else item
+        for item in answer_script]
     return {
         "curator_handle": make_fake_handle("curator", curator_script),
         "answerer_handle": make_fake_handle("weak", answer_script),
@@ -641,7 +646,7 @@ def test_over_budget_second_round_merges_more(store):
         for aid in store.ids("attempts")
         if store.load("attempts", aid, Attempt).skill_id == "bank/merge/0001")
     assert regression_exams == sorted(
-        ids.make_exam_id(_subtask(i)) for i in range(3))
+        ids.make_exam_id(_skill_id(i), 1) for i in range(3))
 
 
 # ---------------------------------------------------------------------------
@@ -853,7 +858,7 @@ def test_merge_of_merge_of_merge_resolves_sources_transitively(store):
     exams = [store.load("attempts", aid, Attempt).exam_id
              for aid in store.ids("attempts")]
     assert sorted(exams) == sorted(
-        ids.make_exam_id(_subtask(i)) for i in range(4))
+        ids.make_exam_id(_skill_id(i), 1) for i in range(4))
 
 
 # ---------------------------------------------------------------------------

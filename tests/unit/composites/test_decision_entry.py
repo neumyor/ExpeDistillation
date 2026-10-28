@@ -24,7 +24,7 @@ from expedistill.core.answer_sheet import UnitSummary
 from expedistill.infra.reliability import CodeBugError, ConfigError
 from tests.helpers.skills import make_skill
 
-_EXAM = "traj/tb:t1/strong/00/seg00/exam"
+_EXAM = "traj/tb:t1/strong/00/seg00/skill/v02/exam"
 _SKILL = "traj/tb:t1/strong/00/seg00/skill"
 _EXAM_UNIT = f"p01:exam:tb:{_EXAM}:weak:11111111"
 _BARE_EXAM_UNIT = f"p01:exam:tb:{_EXAM}:weak:00000000"
@@ -106,7 +106,7 @@ def test_exam_row_without_an_exam_id_is_a_wiring_bug():
         # and the exam-id check itself fires.
         _row(unit_id="p01:exam:tb:tb:t1:weak:00000000", injected=None),
     ]
-    with pytest.raises(CodeBugError, match="not an exam id"):
+    with pytest.raises(CodeBugError, match="not a generalization exam id"):
         decide_task_list(current_kind=decision.PHASE_EXAM,
                          current_report=rows, bank=_bank(), checks_left=1)
 

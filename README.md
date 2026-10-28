@@ -61,7 +61,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | 执行阶段 | 题 | 注入的技能 | 谁做、做几次 |
 |---|---|---|---|
 | baseline 摸底 | 每个训练任务 | 不注入 | 强、弱模型各做若干次 |
-| exam 纸面验收 | 每条待定（pending）技能对应的考题 | 这一条技能 | 弱模型答 1 次 |
+| exam 泛化考试 | 每条新建/修改技能版本对应的一道场景题 | 全库技能目录，模型自己选 | 弱模型选技能 + 写计划，LLM judge 判卷 |
 | live 实战验收 | 每个有技能的训练任务 | 该任务的整包技能（整块注入或逐技能文件夹） | 弱模型做 n 次 |
 | test 最终测试 | 每个测试任务 | 检索出的若干条，或整个技能库，或一个技能文件夹 | 弱模型做 n 次 |
 
@@ -145,7 +145,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 
 ---
 
-## 二、方法 = 相位序列（配置 schema v6）
+## 二、方法 = 相位序列（配置 schema v7）
 
 一种方法写成配置里的两块内容：`sequence`（相位名单，可重复）和
 `phases`（每个名字一份相位定义）。旧版本（v1/v2/v3/v4）的配置是冻结的历史
@@ -172,7 +172,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | `rules` | 具名规则的选择（`task_select` / `segment_select` / `trajectory_select`），缺项由 `DEFAULT_RULES` 补齐 |
 | `model_options` | 按模型名给出的额外调用参数（如 `reasoning_effort`）；不得携带 `max_tokens`（token 上限只归 `token_budgets` 管） |
 | `token_budgets` | 每个角色的 token 上限（`default_max_output_tokens` 必填，`roles.<role>` 可逐角色覆盖） |
-| `schema_version` | 当前为 6；v5/v4 文件由 `load_config` 在内存里升级（v5→v6 把三个学习槽位合并成 `review`），v3/v2 文件先用转换脚本转成新文件 |
+| `schema_version` | 当前为 7；v6/v5/v4 文件由 `load_config` 在内存里升级（v6→v7 把 exam 的 `per_skill` 改成 `exam_folder` 并补执行参数），v3/v2 文件先用转换脚本转成新文件 |
 
 **执行相位的字段**（`kind: execute`）：
 
@@ -180,8 +180,8 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 |---|---|
 | `role` | 相位角色，显式声明，加载期核对与字段一致。执行相位四选一：`baseline` / `exam` / `live` / `test`；学习相位恒为 `learn` |
 | `tasks` | 跑冻结的哪个列表：`train` 或 `test`（`test` 角色与 `test` 列表是同一件事，两者必须同时成立） |
-| `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `per_skill` / `group_by_task` / `folder_by_task`（live 的逐任务文件夹交付，只用 `real` 执行，流程见 5.4）/ `folder`（test 的技能文件夹交付，与 `real_folder` 执行一对一配对，流程见 5.5）；说明见 `src/expedistill/methods/delivery/README.md` |
-| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（考题执行）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 与 `exam` 一样**没有执行参数**——test 相位的采样深度沿用全局 `n_attempts_weak`，与旧 test 相位行为一致，配置里写参数键会因未知键检查响亮失败；说明见 `src/expedistill/methods/execution/README.md` |
+| `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `group_by_task` / `folder_by_task` / `folder` / `exam_folder`（live 的逐任务文件夹交付，只用 `real` 执行，流程见 5.4）/ `folder`（test 的技能文件夹交付，与 `real_folder` 执行一对一配对，流程见 5.5）；说明见 `src/expedistill/methods/delivery/README.md` |
+| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（泛化考试：选技能 + 写计划，不跑真实环境）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 没有参数，`exam` 带 `max_skill_reads` / `bare_control` / `leak_audit`；说明见 `src/expedistill/methods/execution/README.md` |
 | `compare` | 对照来源（可选）：`against` 指向更早的相位名、`fresh_bare`（相位内现场跑一条裸臂）或 `external_campaign`（对照读外部 campaign 的冻结成绩文件，零执行，只有 test 角色相位可用，且必须带 `external` 块钉住文件身份：`path`（相对路径相对配置文件所在目录解析，冻结为绝对路径）+ `sha256`（成绩文件字节的校验和，防漂移）+ `model_key`（campaign 汇总里对应本 run 弱模型的前缀））；对照口径 = 每任务取前 `n_attempts_weak` 次采样的奖励均值（与旧外部对照报告的"前 3 次"对齐列同口径），`rule` 指定比较规则名 |
 | `acceptance` | 验收判分规则名（可选；缺省用 benchmark 的默认绑定，TB 是 `tb_scorer`） |
 
@@ -251,7 +251,9 @@ phases:
        delivery: {name: none},
        execution: {name: real, arms: [executor_strong, executor_weak]}}
   exam: {kind: execute, role: exam,
-       delivery: {name: per_skill}, execution: {name: exam}}
+       delivery: {name: exam_folder, description_mode: summary_then_when_to_use},
+       execution: {name: exam, max_skill_reads: 3,
+                   bare_control: false, leak_audit: false}}
   learn: {kind: learn, review: {name: review, K: 5, retry_limit: 2},
        author: {name: distill_diagnose},
        curate: {name: agentbrew, merge_check: exam, token_budget: ..., rounds: 3}}
@@ -338,7 +340,7 @@ v4 及更早的配置文件是冻结的实验记录，不修改：v4 由加载�
 ```
 scripts/run/convert_v3_configs.py   # v3 → v5（写出 <原名>_v5.yaml；
                                     # 显式传入 v2 文件时在内存里链式
-                                    # 走 v2→v3→v4→v5）
+                                    # 走 v2→v3→v4→v5→v6）
 ```
 
 v2 → v3 的一次性转换在 commit `78db71f` 完成，当时的转换脚本
@@ -534,9 +536,9 @@ E1 内部的 runner：
 |---|---|---|
 | G1 | 切段 | （轨迹视图, K, 模型）→ 段列表（未校验）。模型只给每段的起止步号和 label / description / success |
 | G2 | 写 skill | （Subtask, 写法 = 提炼 / 诊断, 弱模型画像, 段位置, 模型）→ Skill v1。两种写法产出同一种三节结构 `[When to use]`/`[Steps]`/`[Do not use when]`（2026-10-19 起统一，技能是做法还是教训看来源段的 `Subtask.source`）；前提守卫：提炼要求段成功、诊断要求段失败。2026-10-23 起：`[When to use]` 以 5 种触发时机之一的固定短语开头（`At task start,` / `After the first environment check,` / `When a command fails, hangs, or repeats,` / `Before submitting,` / `At any step,`），summary 只写“教什么”、`[When to use]` 只写“什么时候打开”，两者合计最好 ≤400、最长 ≤1,000 字符；段位置（第 i/n 段、原轨迹步号范围）由 add 路径证据采集器算出，作为选时机的提示（`docs/decisions/p02_trigger_timing_and_length_20261023.md`） |
-| G3 | 出考题 | （Subtask, 模型）→ Exam。不接收 skill |
-| G4 | 作答 | （模型, Exam, skill 列表（可选））→ 作答文本 |
-| G5 | 判卷 | （Exam, 作答, 模型）→ 对 / 错 + 错误描述（只说哪里不对，不复述正确答案，也不暗示该怎么改） |
+| G3 | 复原考场 | （来源轨迹前缀、任务说明、技能正文、修改原因, examiner 模型）→ `scene_text` / `expected_behavior` / `reference_answer`。场景里不出现技能名 |
+| G4 | 选技能与写计划 | （场景、候选目录、已打开技能正文, answerer 模型）→ 打开了哪些技能、理由、计划 |
+| G5 | 判卷 | （场景、期望行为、参考答案、候选目录、程序记录的已打开技能、理由、计划, judge 模型）→ success / failure + 自然语言理由 |
 | G6 | 改写 skill | （上一版 Skill, 考题, 错误作答, 错误描述, 弱模型画像, 模型）→ 新版本 + 错因归类。不接收参考答案 |
 | G7 | 找相似、冲突与低价值 | （skill 列表, 模型, 输入方式 全文/摘要）→ 候选合并组、冲突对、低价值技能列表 |
 | G8 | 合并 skill | （一组 skill 或一对冲突 skill, 模型）→ 合并后的 Skill 正文 + 一句话摘要（JSON；泛化优先，冲突先析因） |
@@ -552,7 +554,7 @@ E1 内部的 runner：
 |---|---|---|---|
 | K1 | 批量执行 | E1 × 题目 × 采样次数，经 B5 并行；每完成一次执行就落盘一条 Trajectory，可续跑；`InfrastructureError` 按 B6 重试，耗尽的单元记失败账本 | `composites/batch_execute.py` |
 | K2 | 切段（带校验） | D5 → G1 → D7；不通过就把错误清单交给 G1 重切，次数上限 `retry_limit`；耗尽则记审计日志、本 run 内终态 | `composites/segment_checked.py` |
-| K3 | 考一次 | D9 → G4 → G5 → 记一条 Attempt；先存作答、再判卷；判卷预算跨崩溃持续 | `composites/exam_once.py`、`exam_answering.py`、`exam_grading.py` |
+| K3 | 考一次 | EXAM_PLAN → EXAM_JUDGE → 记一条 Attempt；先存作答、再判卷；判卷预算跨崩溃持续 | `composites/exam_once.py`、`exam_answering.py`、`exam_grading.py` |
 | K4 | 泄题判定 | D8 的判定与 leak_verdicts 账本：每个 (skill, 版本) 恰一行、首判为准，续跑不重问 | `composites/acceptance_leak.py` |
 | K5 | 库整理 | G7 →（可选）丢弃低价值 → G8 →（可选）K3 回归考试 → G9 → D10，合并与丢弃日志先写后改、续跑按日志重放 | `composites/curation.py` |
 | K6 | live 判定账本 | 轮判定（judge_round，append-once、首判为准、续跑重算逐字节核对）、组终态提交（finalize_group）、基线与轮仓读取、注入审计行 | `composites/live_verdicts.py`、`live_measurement.py` |
@@ -612,15 +614,15 @@ E1 内部的 runner：
 |---|---|
 | 冻结步（p00） | D1、D2、B4、`methods/registry.py` 的逐族解析 |
 | baseline | 交付 `none`、E1 × K1（强、弱两臂）、验收判定核（benchmark 默认判分规则）、D3（摘要）、辅助指标 |
-| exam | 交付 `per_skill`、G3（执行时点现场生成考题）、K3（裸答 + 带技能作答判卷）、K4（D8 泄题判定，先于带技能调用）、验收判定核（`exam_judge`）、规则 1 复用 |
+| exam | 交付 `exam_folder`、`EXAM_SCENE`（现场复原场景）、`EXAM_TRIGGER` / `EXAM_PLAN`（选技能与写计划）、`EXAM_JUDGE`（LLM 判卷）、可选裸答 / 泄题审计、K3 记账、规则 1 复用 |
 | live | 交付 `group_by_task` 或 `folder_by_task`、E1 × K1（整组或逐任务文件夹、`n_attempts` 次）、K6 判定账本（`ACCEPTANCE_IMPROVE` 比较规则）、D10（注入 token 估算）、D5（视图，预算内裁剪）、规则 1 复用；folder 交付的读取事实由 AnswerSheet 的 `ExecutionRecord.steps` + `artifacts.skill_folder` 按需提取 |
 | test | 配置的交付方法（`whole_bank` / `retrieval` + D11 / `folder` + 技能文件夹物化）、E1 × K1（带库臂 + 对照臂）、D3、`decision.final_test_delta` |
-| learn | 统一走 `methods/review`：P02 baseline-gap → add 证据 + `learn_add`（G2/G3）；P04/P06 → per-skill 决策 + 归因证据 + `learn_apply`；`trial_level` → 逐 trial 分析 + 聚合动作 / 新需求 + `learn_requirement`；exam → 多版本 merge + 考卷证据 + `learn_exam`；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
+| learn | 统一走 `methods/review`：P02 baseline-gap → add 证据 + `learn_add`（G2）；P04/P06 → per-skill 决策 + 归因证据 + `learn_apply`；`trial_level` → 逐 trial 分析 + 聚合动作 / 新需求 + `learn_requirement`；exam → 多版本 merge + 考卷证据 + `learn_exam`；整理（最末相位）：K5（G7、G8、K3、G9、D10）或 none；相位库工件 |
 
 **复用最多的几块**：
 
-- **D9 skill 注入**：exam 相位的作答、live 相位的真实执行、test 相位的带库执行都
-  通过它把 skill 拼进 prompt，注入格式只有一份实现；
+- **D9 skill 注入**：live 相位的真实执行、test 相位的带库执行通过它把 skill 拼进
+  prompt；exam 相位改为把全库目录交给模型自己选择，再读取被选中技能的正文；
 - **K1 / E1 执行**：四种执行相位全部是它；
 - **D5 轨迹视图**：G1 切段看整条轨迹，找证据看段内步骤与失败视图；
 - **D3 成绩统计**：各执行相位的摘要与 test 相位的 delta 都是它。
@@ -638,9 +640,9 @@ E1 内部的 runner：
 | 切段 | G1 | segmenter（学习相位 add） |
 | skill 提炼（强模型段） | G2 | author（学习相位 add） |
 | skill 诊断（弱模型段） | G2 | author（学习相位 add） |
-| 出考题 | G3 | examiner（exam 相位） |
-| 作答（带 skill / 裸答共用） | G4 | answerer（exam 相位、整理的回归考试） |
-| 判卷 | G5 | judge（exam 相位、整理的回归考试） |
+| 复原场景 | EXAM_SCENE | examiner（exam 相位） |
+| 选技能 / 写计划 | EXAM_TRIGGER / EXAM_PLAN | answerer（exam 相位、整理的回归考试） |
+| 判卷 | EXAM_JUDGE | judge（exam 相位、整理的回归考试） |
 | 改写 skill | G6 | rewriter（学习相位 revise，exam 证据路径） |
 | 找相似、冲突与低价值 | G7 | curator（最末学习相位） |
 | 合并 skill | G8 | curator（最末学习相位） |
@@ -705,13 +707,15 @@ Skill（schema v3）
   rewrite_history[ 旧版正文、旧摘要、错因归类与改写原因 ],
   merged_from[ skill_id ... ](仅整理产物)
 
-Exam（考题，schema v2）
-  exam_id, question_text, reference_answer(判卷参考), subtask_id(→段),
-  skill_id(该考题考的 skill)
+Exam（泛化考题，schema v3）
+  exam_id(skill_id + version), skill_id, skill_version,
+  scene_text(自然语言场景), expected_behavior(自然语言期望行为),
+  reference_answer(判卷参考), source_ref(来源相位/unit/sheet/场景步号)
 
 Attempt（作答记录）
   attempt_id, exam_id, skill_id + skill_version(都为 null = 裸答),
   purpose(bare / acceptance / regression), weak_answer,
+  steps(选技能与计划的作答轮次),
   judge_verdict(null = 已作答、尚未判卷), judge_reason, retry_round
 ```
 
@@ -839,6 +843,8 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  每条技能只写一行，续跑按版本号重放）
     outcomes.jsonl               学习相位：逐技能回执（见 5.6 的结局清单；
                                  同一目标每条技能至多一条回执，重放不补写）
+    skill_origins.jsonl          学习相位：每个技能版本的来源记录（来源执行
+                                 相位 / unit / sheet / 场景步号 / 修改原因）
     skill_bank.jsonl             学习相位：本相位的技能库工件（全体成员，
                                  含待定；下一个执行相位的交付从这里读）
     bank_summary.json            工件摘要（成员 / 大小 / 整库 digest）
@@ -914,34 +920,36 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
   只补空洞；接受的空洞是本 run 的持久决定（见 5.9）；
 - 摘要含两臂的 D3 成绩与辅助指标。
 
-### 5.3 纸面验收相位（exam）
+### 5.3 泛化考试相位（exam）
 
-考题按"执行时点现场生成"的规则在相位内部产出（G3，examiner 角色），宇宙
-= 技能库工件里的全部**待定**成员（已接受 / 已合并 / 已弃用的成员有自己的
-结论，不再考）。每个考题单元内的顺序固定：
+泛化考试检查弱模型能否在场景中**找到并正确使用**技能，不执行真实终端环境。
+每个新建或版本升高的技能版本生成一道考题，`exam_id = skill_id + version`；
+curation 的合并产物不考。考题的场景从技能版本的 `skill_origins.jsonl` 来源
+记录复原：截取来源轨迹的真实前缀，后面交给 examiner 用 `EXAM_SCENE` 写成
+自然语言场景、期望行为和参考答案。
 
-1. **裸答**（K3，不注入）：裸答就答对 → 对照全对守卫生效，带技能作答直接
-   跳过（`not_run_control_perfect`），决策据此得出"无提升空间"；
-2. **泄题审计**（D8，auditor 角色）：在带技能调用**之前**做，泄露的版本
-   不花带技能作答的调用；判决按 (skill, 版本) 落盘、首判为准；
-3. **带技能作答**（K3，只注入这一条技能）→ 判卷（G5，judge 角色）。
+每个考题单元内的顺序：
 
-作答与判卷记录写进 run 级作答仓（考题 ID 锚定，跨相位不冲突）；出题的
-模型输出失败是本 run 内终态（`generation_failures.jsonl`，每道考题首行即
-定）。**改写循环不在这个相位**：考不过的技能由下一个学习相位决定修改
-（revise 行），改写后的新版本由再下一个 exam 相位重新测量——规则 1 保证没变
-的单元零成本沿用旧结论。这个相位的判分规则恒为 `exam_judge`（消费判卷
-结论）。
+1. **选技能**（`EXAM_TRIGGER`）：把当前库全部成员（accepted + pending）的
+   目录交给弱模型，目录描述与 test/live 的 folder 一致；模型可以打开 0 到
+   `max_skill_reads` 条技能，并给出理由；
+2. **写计划**（`EXAM_PLAN`）：把被打开技能的正文交给模型，要求它写出接下来
+   的预期计划；没有打开技能时也写计划；
+3. **判卷**（`EXAM_JUDGE`）：judge 读取场景、期望行为、参考答案、候选目录、
+   程序记录的已打开技能、选择理由和计划，判 success / failure；读取了哪条
+   技能是程序事实，不由模型自述；
+4. **可选步骤**（默认关闭）：裸答对照（不给目录）和泄题审计（D8）。旧配置
+   升级到 v7 时保留这两项；新配置默认关闭。
 
-**同一相位的重放保护**（K3 不幂等：每次调用都是一条新答卷，重答会把已测量
-的结果替换掉）：驱动在每次调用 K3 前按 (考题, purpose, skill, 版本, 轮次)
-查最新**已判**答卷（`acceptance_skill_status.find_judged_attempt`，与
-K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判即直接沿用、
-不再调模型、判卷也不重跑。查的适用范围是"同一相位实例此前已规划过的单元"
-——标记取本相位 `units.jsonl` 被**覆写前**的内容（unit_id 带相位标签，
-只有本相位写过它）；之后的 exam 相位是新一轮测量，不在保护范围内（裸答重新
-作答，泄题审计按新版本另判）。考题本体与泄题判定沿用各自的落盘事实
-（考题仓的 exists 检查、leak 账本首判为准），不重生成。
+作答轮次写进 `Attempt.steps`，AnswerSheet 的 `ExecutionRecord` 带这些 steps
+和技能目录清单，所以 `skill_usage`、`trial_level` 审查和 live 路径共享同一套
+读取事实。重放保护沿用 K3：同一考题已判卷的 attempt 直接复用；同一相位实例
+已规划过的单元从覆写前的 `units.jsonl` 识别。
+
+`skill_origins.jsonl` 由学习相位的五类写作点写入：P02 逐段、P02 按簇、
+`learn_apply` 改写、`learn_requirement` 新需求、`learn_exam` 改写。来源行
+缺失时 exam 记 `exam_generation_failed`；旧 / 装配 run 没有来源行时，驱动
+按技能锚点 subtask 和已存轨迹回退找来源 sheet，仍找不到才失败。
 
 ### 5.4 实战验收相位（live）
 
@@ -982,8 +990,8 @@ K3 自己只认**未判**答卷的 `_pending_attempt` 互为对偶），已判�
 - 在 test 列表（split 模式）或全部任务（full 模式）上跑带库臂：交付方法
   由配置给出（`whole_bank` 整库注入 / `retrieval` 逐任务检索注入 /
   `folder` 目录清单交付 / …），`whole_bank`、`retrieval` 与 `folder` 都
-  只用**已接受**成员，`per_skill` 与 `group_by_task` 面向待定成员（沿用
-  阶段世界的行为）；
+  只用**已接受**成员；`exam_folder` 面向考试的全库候选，`group_by_task`
+  面向 live 的待定组；
 - **`folder` 交付（技能文件夹）**：其余交付把技能文本拼进提示词，folder
   把技能放进执行环境里的一个文件夹。每个已接受技能写成自己的目录
   `<skill>/SKILL.md`，文件开头是 YAML 头（`name` 和 `description`），
@@ -1235,7 +1243,7 @@ tests/
 ```python
 # 名称集合固定（协议表面）
 FROZEN_PROMPT_NAMES = frozenset({
-    "ANSWER", "EXAM_GEN", "SEGMENT", ...  # 16 个名称
+    "EXAM_SCENE", "EXAM_TRIGGER", "EXAM_PLAN", "EXAM_JUDGE", "SEGMENT", ...
 })
 
 # digest 值重新计算（不捕获字面量）

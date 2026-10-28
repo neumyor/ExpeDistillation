@@ -21,13 +21,15 @@ from expedistill.core.answer_sheet import (
 from expedistill.core.ids import (
     make_attempt_id,
     make_exam_id,
+    make_skill_id,
     make_subtask_id,
     make_trajectory_id,
 )
 from expedistill.core.models import Attempt, Step, Trajectory
 
 TASK = "tb:task-1"
-EXAM = make_exam_id(make_subtask_id(make_trajectory_id(TASK, "weak", 0), 0))
+EXAM = make_exam_id(
+    make_skill_id(make_subtask_id(make_trajectory_id(TASK, "weak", 0), 0)), 1)
 
 
 def _sheet(execution, *, unit_id="unit-1", attempt=0, grading=None):
@@ -114,6 +116,8 @@ def test_exam_sheet_renders_the_answer_and_the_judge_grading():
         skill_version=2,
         purpose="acceptance",
         weak_answer="the answer is 42",
+        steps=[Step(action="cat foo/SKILL.md", observation="rule"),
+               Step(action="the answer is 42", observation="")],
         judge_verdict=True,
         judge_reason="correct",
         retry_round=1,
@@ -127,7 +131,7 @@ def test_exam_sheet_renders_the_answer_and_the_judge_grading():
     text = render_answer_sheet(_sheet(
         execution, unit_id="unit-2", attempt=1, grading=grading))
 
-    assert "## Exam answer" in text
+    assert "## Trajectory" in text
     assert "the answer is 42" in text
     assert "- verdict: `success`" in text
     assert "- basis: exam_judge: correct" in text

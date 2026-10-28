@@ -1,4 +1,4 @@
-"""G2 skill writing, G3 exam generation, G6 skill rewrite (layer 4).
+"""G2 skill writing and G6 skill rewrite (layer 4).
 
 Pure computation plus model calls (AGENTS.md block rules): the blocks know no
 stage, write no disk, and take the segment steps as an already-rendered text
@@ -55,11 +55,10 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
-from expedistill.core.ids import make_exam_id, make_skill_id
+from expedistill.core.ids import make_skill_id
 from expedistill.prompts.profile import profile_section
 from expedistill.core.models import (
     SKILL_MARKERS,
-    Exam,
     Skill,
     Subtask,
 )
@@ -71,7 +70,6 @@ __all__ = [
     "NO_SEGMENT_POSITION",
     "SKILL_SECTION_FIELDS",
     "SKILL_SUMMARY_FIELD",
-    "gen_exam",
     "has_skill_sections",
     "render_skill_content",
     "rewrite_skill",
@@ -254,7 +252,7 @@ def validate_skill_sections(mode: str, sections: Dict[str, Any]) -> None:
     multi-line license does NOT cover: it is a directory line, so
     ``_validate_summary`` rejects any embedded newline. The checked bytes
     are the same ``_normalize_newlines`` bytes the renderer will write.
-    Extra keys are ignored (lenient read, gen_exam precedent) but the
+    Extra keys are ignored (lenient read, the exam blocks' precedent) but the
     checklist type check is never skipped. Raises ModelOutputError
     otherwise.
     """
@@ -336,8 +334,8 @@ def write_skill(
     marker text is what lands in ``Skill.content``. The response's
     ``summary`` (schema v3) lands verbatim -- stripped and
     newline-normalized -- in ``Skill.summary``. Field-level failures
-    raise ModelOutputError and are terminal for the unit (gen_exam
-    precedent): call_model's format retries only cover JSON parsing,
+    raise ModelOutputError and are terminal for the unit (the exam
+    blocks' precedent): call_model's format retries only cover JSON parsing,
     never field content.
 
     ``segment_position`` is plain text saying where the segment sits in
@@ -390,54 +388,6 @@ def write_skill(
         version=1,
         status="pending",
         rewrite_history=[],
-    )
-
-
-def gen_exam(
-    subtask: Subtask,
-    steps_view: str,
-    handle: ModelHandle,
-    *,
-    usage: Any = None,
-    run_dir: Optional[Union[str, Path]] = None,
-) -> Exam:
-    """Generate the exam question for one subtask (G3).
-
-    The exam is written from the subtask only, never from a skill (README
-    section 2). The JSON shape is part of the EXAM_GEN prompt contract;
-    a parsed response missing keys or carrying empty values is a
-    ModelOutputError.
-    """
-    variables = {
-        "label": subtask.label,
-        "description": subtask.description,
-        "steps_view": steps_view,
-    }
-    parsed = call_model(
-        handle, "EXAM_GEN", variables,
-        output_json=True, usage=usage, run_dir=run_dir,
-    )
-    if not isinstance(parsed, dict):
-        raise ModelOutputError(
-            f"EXAM_GEN: expected a JSON object, got {type(parsed).__name__}")
-
-    question_text = parsed.get("question_text")
-    reference_answer = parsed.get("reference_answer")
-    for name, value in (
-        ("question_text", question_text),
-        ("reference_answer", reference_answer),
-    ):
-        if not isinstance(value, str) or not value.strip():
-            raise ModelOutputError(
-                f"EXAM_GEN: field {name!r} must be a non-empty string, "
-                f"got {value!r}")
-
-    return Exam(
-        exam_id=make_exam_id(subtask.subtask_id),
-        question_text=question_text.strip(),
-        reference_answer=reference_answer.strip(),
-        subtask_id=subtask.subtask_id,
-        skill_id=make_skill_id(subtask.subtask_id),
     )
 
 

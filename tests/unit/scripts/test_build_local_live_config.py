@@ -140,7 +140,7 @@ def test_generated_config_loads_through_the_real_loader(tmp_path):
     path.write_text(BUILDER.render_config("searchqa", ids), encoding="utf-8")
 
     config = load_config(str(path))
-    assert config.schema_version == 6
+    assert config.schema_version == 7
     assert config.benchmark == "searchqa"
     assert config.sequence == [
         "baseline", "learn", "live", "learn", "live", "learn", "test"]
@@ -176,7 +176,7 @@ def test_checked_in_configs_load():
                  "alfworld_split_live_run_20261020.yaml"):
         config = load_config(
             str(_REPO / "configs" / "experiments" / name))
-        assert config.schema_version == 6
+        assert config.schema_version == 7
         assert config.sequence == [
             "baseline", "learn", "live", "learn", "live", "learn", "test"]
         assert config.use_weak_profile is False

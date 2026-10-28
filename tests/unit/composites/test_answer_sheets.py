@@ -13,6 +13,7 @@ from expedistill.core.answer_sheet import CoverageRecord
 from expedistill.core.ids import (
     make_attempt_id,
     make_exam_id,
+    make_skill_id,
     make_subtask_id,
     make_trajectory_id,
 )
@@ -20,7 +21,8 @@ from expedistill.core.models import Attempt, Step, Trajectory
 from expedistill.infra.store import object_filename, read_json, read_jsonl
 
 TASK = "tb:task-1"
-EXAM = make_exam_id(make_subtask_id(make_trajectory_id(TASK, "weak", 0), 0))
+EXAM = make_exam_id(
+    make_skill_id(make_subtask_id(make_trajectory_id(TASK, "weak", 0), 0)), 1)
 
 
 def _trajectory(**overrides):
@@ -107,13 +109,13 @@ def test_execution_from_attempt_carries_the_answer_and_judge_facts():
     assert record.sample_index == 0
     assert record.skills_injected == [{"skill_id": "skill-1", "version": 2}]
     assert record.answer == "42"
-    assert record.steps is None
+    assert record.steps == []
     assert record.raw_correctness is None
     assert record.metrics == {}
     assert record.aux == {"judge_verdict": True,
                           "judge_reason": "the answer is right"}
     assert record.artifacts == {"attempt_id": attempt.attempt_id}
-    assert record.kind == "attempt"
+    assert record.kind == "trajectory"
     assert record.source == "local"
 
 

@@ -79,7 +79,7 @@ def leak_verdict_for(
     verdict = find_leak_verdict(store, skill_id, skill_version)
     if verdict is None:
         leaked, reason = audit_leak(
-            skill_content, exam.question_text, exam.reference_answer,
+            skill_content, exam.scene_text, exam.reference_answer,
             auditor_handle, usage=usage, run_dir=run_dir)
         verdict = {"skill_id": skill_id,
                    "skill_version": skill_version,

@@ -674,7 +674,7 @@ def _source_exams(store: Store, sources: Sequence[Skill],
     exams: List[Exam] = []
     seen = set()
     for source in originals:
-        exam_id = ids.make_exam_id(source.subtask_id)
+        exam_id = ids.make_exam_id(source.skill_id, source.version)
         if exam_id in seen:
             continue
         seen.add(exam_id)

@@ -68,6 +68,7 @@ from expedistill.core.config import (
     upgrade_v3_config,
     upgrade_v4_config,
     upgrade_v5_config,
+    upgrade_v6_config,
 )
 from expedistill.llm.fake import FakeClient, json_script
 
@@ -272,7 +273,26 @@ def _script(system: str, user: str) -> str:
             "summary": "name the concrete state before acting on it "
                        "(revised)",
         })
-    # -- the exam conversation ----------------------------------------
+    # -- the generalization exam --------------------------------------
+    if user.startswith("Reconstruct one exam scene"):
+        return json_script({
+            "scene_text": "A service reports an unexpected state and stops. "
+                          "What should be done before anything else?",
+            "expected_behavior": "Inspect the reported state first, then "
+                                 "take the matching corrective action.",
+            "reference_answer": "Inspect the state first.",
+        })
+    if user.startswith("Choose which skills"):
+        import re
+        match = re.search(r"([^\s|]+)/SKILL\.md", user)
+        selected = [match.group(1)] if match else []
+        return json_script({"skills": selected,
+                            "reason": "the catalog line matches the scene"})
+    if user.startswith("Write an action plan"):
+        return json_script({"plan": "Inspect the state first, then act."})
+    if user.startswith("Judge whether the plan"):
+        return json_script({"verdict": "success", "reason": ""})
+    # -- the old exam conversation (kept for historical fixtures) -----
     if user.startswith("You are given the view"):
         success = "(final status: success)" in user
         return json_script([{
@@ -432,7 +452,8 @@ def write_config(path: Path, combo: Dict[str, str]) -> Path:
         "schema_version": 3,
     }
     config = ExperimentConfig.from_dict(
-        upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(v3))))
+        upgrade_v6_config(upgrade_v5_config(
+            upgrade_v4_config(upgrade_v3_config(v3)))))
     save_config(config, str(path))
     return path
 

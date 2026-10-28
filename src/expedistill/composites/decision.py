@@ -593,11 +593,13 @@ def _exam_target(row: UnitSummary) -> Tuple[str, str]:
     stage-3 skill, from the ID chain (the report's injected refs are
     evidence, not targeting -- the exam id is the address)."""
     exam_id, _ = parse_unit_id(row.unit_id)
-    if not exam_id.endswith("/exam"):
+    try:
+        skill_id, _version = ids.parse_exam_id(exam_id)
+    except ValueError:
         raise CodeBugError(
             f"exam-phase unit {row.unit_id!r} names {exam_id!r}, which is "
-            "not an exam id")
-    return "skill", ids.make_skill_id(exam_id[: -len("/exam")])
+            "not a generalization exam id") from None
+    return "skill", skill_id
 
 
 def _baseline_rows(*, control_kind: Optional[str],
@@ -649,6 +651,7 @@ def decide_task_list(
     compare_rule: str = DEFAULT_COMPARE_RULE,
     n_attempts_weak: int = 0,
     task_select_rule: str = "any_weak_failed",
+    exam_control: bool = True,
 ) -> List[TaskListRow]:
     """The unified decision entry (boundary doc section 2.4): this
     round's unit summaries, the control summaries, the current bank and
@@ -742,19 +745,29 @@ def decide_task_list(
     for row in sorted(targets, key=lambda r: r.unit_id):
         task_id, _ = parse_unit_id(row.unit_id)
         matched = controls.get(task_id, [])
-        if not matched:
+        if not matched and current_kind == PHASE_EXAM and not exam_control:
+            # The generalization exam may run without a bare control.  Its
+            # target unit is then judged on its own: at least one valid
+            # successful trial is an improvement; everything else is a
+            # miss for the action table.
+            conclusion = (CONCLUSION_IMPROVED
+                          if row.valid_count > 0 and row.success_count > 0
+                          else CONCLUSION_NO_GAIN)
+            cause = ""
+        elif not matched:
             raise CodeBugError(
                 f"no control row for unit {row.unit_id!r} (task "
                 f"{task_id!r}): an acceptance phase's units are "
                 "compared against the bare control the phase config names")
-        control_valid = sum(r.valid_count for r in matched)
-        control_success = sum(r.success_count for r in matched)
-        control_cause = next((r.cause for r in matched
-                              if r.status != ROW_NORMAL), "")
-        conclusion, cause = compare_conclusion(
-            row=row, control_valid=control_valid,
-            control_success=control_success, control_cause=control_cause,
-            compare_rule=compare_rule, n_attempts=n_attempts_weak)
+        else:
+            control_valid = sum(r.valid_count for r in matched)
+            control_success = sum(r.success_count for r in matched)
+            control_cause = next((r.cause for r in matched
+                                  if r.status != ROW_NORMAL), "")
+            conclusion, cause = compare_conclusion(
+                row=row, control_valid=control_valid,
+                control_success=control_success, control_cause=control_cause,
+                compare_rule=compare_rule, n_attempts=n_attempts_weak)
         if (row.status == ROW_NOT_TESTABLE
                 and row.cause == CAUSE_ZERO_EXECUTION):
             # B1's one-meaning rule: zero_execution is a visibility

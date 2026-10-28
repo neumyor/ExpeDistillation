@@ -68,13 +68,29 @@ def make_skill(**overrides):
 
 def make_attempt(**overrides):
     base = dict(
-        attempt_id="traj/tb:task-1/strong/00/seg00/exam/att00",
-        exam_id="traj/tb:task-1/strong/00/seg00/exam",
+        attempt_id="traj/tb:task-1/strong/00/seg00/skill/v01/exam/att00",
+        exam_id="traj/tb:task-1/strong/00/seg00/skill/v01/exam",
         purpose="bare",
         weak_answer="run ls",
     )
     base.update(overrides)
     return Attempt(**base)
+
+
+def make_exam(**overrides):
+    skill_id = "traj/tb:task-1/strong/00/seg00/skill"
+    base = dict(
+        exam_id=make_exam_id(skill_id, 2),
+        skill_id=skill_id,
+        skill_version=2,
+        scene_text="The workspace is empty after ls.",
+        expected_behavior="Find where the config lives before editing it.",
+        reference_answer="Run pwd, then list the project root.",
+        source_ref={"phase_label": "p02:learn", "unit_id": "u1",
+                    "sheet_id": "s1", "scene_step": 3},
+    )
+    base.update(overrides)
+    return Exam(**base)
 
 
 class TestTrajectory:
@@ -230,30 +246,62 @@ class TestSkill:
 
 class TestExam:
     def test_round_trip(self):
-        exam = Exam(
-            exam_id="traj/tb:task-1/strong/00/seg00/exam",
-            question_text="The output of ls is empty; what next?",
-            reference_answer="Check the working directory with pwd.",
-            subtask_id="traj/tb:task-1/strong/00/seg00",
-            skill_id="traj/tb:task-1/strong/00/seg00/skill",
-        )
-        assert Exam.from_dict(exam.to_dict()) == exam
+        exam = make_exam()
+        restored = Exam.from_dict(exam.to_dict())
+        assert restored == exam
+        assert restored.schema_version == EXAM_SCHEMA_VERSION == 3
+        assert restored.source_ref == {
+            "phase_label": "p02:learn", "unit_id": "u1",
+            "sheet_id": "s1", "scene_step": 3}
 
-    def test_skill_id_is_required(self):
-        with pytest.raises(TypeError, match="skill_id"):
-            Exam(exam_id="traj/tb:t/strong/00/seg00/exam",
-                 question_text="q", reference_answer="a",
-                 subtask_id="traj/tb:t/strong/00/seg00")
+    def test_identity_fields_are_required(self):
+        # Every identity/scene field has no default: a forgotten one fails
+        # at construction instead of silently storing a broken exam.
+        for name in ("exam_id", "skill_id", "skill_version", "scene_text",
+                     "expected_behavior", "reference_answer", "source_ref"):
+            payload = make_exam().to_dict()
+            del payload[name]
+            with pytest.raises(TypeError, match=name):
+                Exam.from_dict(payload)
 
-    def test_v2_record_missing_skill_id_raises(self):
-        payload = Exam(
-            exam_id="traj/tb:task-1/strong/00/seg00/exam",
-            question_text="q?", reference_answer="a.",
-            subtask_id="traj/tb:task-1/strong/00/seg00",
-            skill_id="traj/tb:task-1/strong/00/seg00/skill").to_dict()
-        del payload["skill_id"]
-        with pytest.raises(TypeError, match="skill_id"):
+    def test_from_dict_ignores_unknown_keys(self):
+        payload = {**make_exam().to_dict(), "future_field": "ignored"}
+        assert Exam.from_dict(payload) == make_exam()
+
+    @pytest.mark.parametrize("version", [1, 2])
+    def test_old_protocol_record_is_refused_loudly(self, version):
+        # Old exam rows carry question_text + subtask_id and no scene; the
+        # decision doc rules out migrating them, so from_dict names the
+        # break instead of reading a half-record into v3 defaults.
+        payload = {
+            "exam_id": "traj/tb:task-1/strong/00/seg00/exam",
+            "question_text": "q?",
+            "reference_answer": "a.",
+            "subtask_id": "traj/tb:task-1/strong/00/seg00",
+            "skill_id": "traj/tb:task-1/strong/00/seg00/skill",
+            "schema_version": version,
+        }
+        with pytest.raises(ValueError, match="no longer supported"):
             Exam.from_dict(payload)
+        with pytest.raises(ValueError, match=f"schema-v{version}"):
+            Exam.from_dict(payload)
+
+    def test_record_without_a_version_is_refused_loudly(self):
+        payload = make_exam().to_dict()
+        del payload["schema_version"]
+        with pytest.raises(ValueError, match="no longer supported"):
+            Exam.from_dict(payload)
+
+
+class TestExamId:
+    def test_exam_id_is_per_skill_version(self):
+        skill_id = make_skill_id("traj/tb:task-1/strong/00/seg00")
+        assert make_exam_id(skill_id, 1) == f"{skill_id}/v01/exam"
+        assert make_exam_id(skill_id, 12) == f"{skill_id}/v12/exam"
+
+    def test_negative_version_raises(self):
+        with pytest.raises(ValueError, match="version"):
+            make_exam_id(make_skill_id("traj/tb:t/strong/00/seg00"), -1)
 
 
 class TestAttempt:
@@ -283,6 +331,33 @@ class TestAttempt:
     def test_from_dict_ignores_unknown_keys(self):
         payload = {**make_attempt().to_dict(), "future_field": []}
         assert Attempt.from_dict(payload) == make_attempt()
+
+    def test_steps_round_trip(self):
+        att = make_attempt(steps=[
+            Step(action="cat skills/a.md", observation="a: do x"),
+            Step(action="plan", observation="1. do x"),
+        ])
+        payload = att.to_dict()
+        assert payload["steps"] == [
+            {"action": "cat skills/a.md", "observation": "a: do x"},
+            {"action": "plan", "observation": "1. do x"},
+        ]
+        restored = Attempt.from_dict(payload)
+        assert restored == att
+        assert isinstance(restored.steps[0], Step)
+
+    def test_steps_accept_plain_dicts(self):
+        att = make_attempt(steps=[{"action": "ls", "observation": ""}])
+        assert att.steps == [Step(action="ls", observation="")]
+
+    def test_old_record_without_steps_defaults_to_empty(self):
+        # steps was added without a schema bump; a v1 record written
+        # before the field must still load, with an empty list.
+        payload = make_attempt().to_dict()
+        del payload["steps"]
+        restored = Attempt.from_dict(payload)
+        assert restored.steps == []
+        assert restored.schema_version == 1
 
 
 class TestStep:
@@ -363,27 +438,17 @@ class TestV1ToV2Migration:
         with pytest.raises(ValueError, match="cannot be derived"):
             Skill.from_dict(row)
 
-    def test_from_dict_derives_exam_skill_id(self):
+    def test_from_dict_rejects_a_v1_exam_row(self):
+        # The v1 -> v2 exam migration was removed with the generalization
+        # exam: old exam rows are not supported, not silently re-derived.
         row = {
-            "exam_id": make_exam_id(_SUB_A),
+            "exam_id": f"{_SUB_A}/exam",
             "question_text": "q?",
             "reference_answer": "a.",
             "subtask_id": _SUB_A,
             "schema_version": 1,
         }
-        exam = Exam.from_dict(row)
-        assert exam.skill_id == make_skill_id(_SUB_A)
-        assert exam.schema_version == EXAM_SCHEMA_VERSION
-
-    def test_from_dict_rejects_v1_exam_of_unknown_shape(self):
-        row = {
-            "exam_id": "somewhere/else",
-            "question_text": "q?",
-            "reference_answer": "a.",
-            "subtask_id": _SUB_A,
-            "schema_version": 1,
-        }
-        with pytest.raises(ValueError, match="cannot be derived"):
+        with pytest.raises(ValueError, match="no longer supported"):
             Exam.from_dict(row)
 
     def test_migrate_record_derives_a_segment_row(self):

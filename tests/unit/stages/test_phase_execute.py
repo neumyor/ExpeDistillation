@@ -28,12 +28,15 @@ from expedistill.benchmarks.base import (
 )
 from expedistill.benchmarks.registry import ConfigError, _reset_registry, register_plugin
 from expedistill.composites import (
+    answer_sheets as _answer_sheets,
     phase_bank,
     phase_report,
     shortfall,
     unit_ids,
     verdicts,
 )
+from expedistill.composites.skill_origins import append_origin, source_ref
+from expedistill.core.answer_sheet import CoverageRecord, UnitSpec
 from expedistill.core.config import (
     PHASE_ROLE_BASELINE,
     PHASE_ROLE_EXAM,
@@ -55,6 +58,7 @@ from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import json_script, make_fake_handle
+from expedistill.methods.delivery import folder as skill_folder
 from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages import phase_execute
 from expedistill.stages.context import RunSettings, StageContext
@@ -256,8 +260,9 @@ def live_spec(**overrides):
 
 def exam_spec(**overrides):
     spec = dict(role="exam", tasks="train",
-                delivery={"name": "per_skill"},
-                execution={"name": "exam"})
+                delivery={"name": "exam_folder"},
+                execution={"name": "exam", "bare_control": True,
+                           "leak_audit": True, "max_skill_reads": 3})
     spec.update(overrides)
     return ExecutePhaseSpec(**spec)
 
@@ -781,27 +786,63 @@ def _exam_universe(ctx, tmp_path):
     # The learning phase writes the candidate; the recomputed acceptance
     # report enumerates the store's candidates.
     ctx.store.save(skill, "skills")
+    unit_id = unit_ids.unit_id_for_trajectory(
+        phase_label="p01:baseline", benchmark=_FAKE, trajectory=trajectory)
+    execution = _answer_sheets.execution_from_trajectory(
+        trajectory, unit_id=unit_id, phase_label="p01:baseline")
+    sheet = _answer_sheets.assemble_answer_sheets(
+        [execution], [CoverageRecord(
+            unit_id=unit_id, attempt_index=0, present=True,
+            status="present")], phase_label="p01:baseline")
+    dest = phase_bank.phase_bank_dir(ctx.run_dir, "p01:baseline")
+    _answer_sheets.write_answer_sheets(
+        sheet, dest / phase_report.ANSWER_SHEETS_DIR, render_markdown=False)
+    _answer_sheets.write_coverage(
+        [CoverageRecord(unit_id=unit_id, attempt_index=0, present=True,
+                        status="present")],
+        dest / phase_report.COVERAGE_NAME)
+    phase_report.write_unit_specs(
+        [UnitSpec(unit_id=unit_id, phase_label="p01:baseline",
+                  task_ref=task_id, role="strong", arm="strong",
+                  expected_attempts=1, injected_skills=None)],
+        dest)
+    append_origin(
+        phase_bank.phase_bank_dir(ctx.run_dir, "p02:learn"),
+        skill_id=skill.skill_id, version=skill.version,
+        phase_label="p02:learn", change_note="restart the service",
+        context_text="check, restart",
+        source_ref=source_ref(
+            "p01:baseline", unit_id=unit_id, scene_step=1))
     return skill
 
 
 def _exam_script(bare_correct, leaked=False, with_skill_correct=None):
-    """(answerer, judge, auditor) handles for one exam unit."""
+    """Handles for one generalization exam unit."""
     examiner = make_fake_handle(
         "examiner", [json_script({
-            "question_text": "The service rejects connections. What next?",
+            "scene_text": "The service rejects connections. What next?",
+            "expected_behavior": "Restart the service and verify it.",
             "reference_answer": "Restart the service."})])
-    answerer = make_fake_handle("weak", ["bare answer", "skilled answer"])
-    verdicts_script = [
-        json_script({"verdict": "correct" if bare_correct else "incorrect",
-                     "error_description": "" if bare_correct else "vague"}),
-    ]
+    dirname = skill_folder.skill_dirname(
+        make_skill_id(make_subtask_id(
+            make_trajectory_id(_prefixed("t1"), "strong", 0), 0)))
+    answerer_replies = [json_script({"plan": "bare plan"})]
     if not bare_correct and not leaked:
-        verdicts_script.append(json_script({
-            "verdict": ("correct" if (with_skill_correct is None or
-                                      with_skill_correct)
-                        else "incorrect"),
-            "error_description": ""}))
-    judge = make_fake_handle("judge", verdicts_script)
+        answerer_replies.extend([
+            json_script({"skills": [dirname], "reason": "restart"}),
+            json_script({"plan": "restart and verify"}),
+        ])
+    answerer = make_fake_handle("answerer", answerer_replies)
+    judge_replies = [json_script({
+        "verdict": "success" if bare_correct else "failure",
+        "reason": "" if bare_correct else "vague"})]
+    if not bare_correct and not leaked:
+        judge_replies.append(json_script({
+            "verdict": ("success" if (with_skill_correct is None or
+                                      with_skill_correct) else "failure"),
+            "reason": "" if with_skill_correct is None or with_skill_correct
+            else "wrong plan"}))
+    judge = make_fake_handle("judge", judge_replies)
     auditor = make_fake_handle(
         "auditor", [] if bare_correct else
         [json_script({"leaked": leaked, "reason": "because"})])
@@ -841,22 +882,12 @@ def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
     second = phase_of(4, "exam", exam_spec())
     phase_execute.run(ctx, second)
 
-    assert [unit.status for unit in phase_units(ctx, second)
-            if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]
-    # Zero model calls: the exam, the answers and the audits all stand.
+    # The second exam has no changed skill version to test: the bank is
+    # byte-identical, so the phase plans no unit and makes no model call.
+    assert phase_units(ctx, second) == []
     assert sum(len(handle.client.calls)
                for handle in ctx.handles.values()) == calls_after_first
-    # The reused row is the previous verdict under the new unit id.
-    second_rows = {row.unit_id: row for row in report_rows(ctx, second)}
-    first_row = next(row for row in first_rows.values()
-                     if row.injected_skills is not None)
-    second_row = next(row for row in second_rows.values()
-                      if row.injected_skills is not None)
-    assert second_row.unit_id == first_row.unit_id.replace(
-        first.label, second.label)
-    assert (second_row.status, second_row.valid_count,
-            second_row.success_count) == (
-        first_row.status, first_row.valid_count, first_row.success_count)
+    assert first_rows
 
 
 def test_exam_bare_correct_skips_the_with_skill_answer(monkeypatch,
@@ -903,7 +934,7 @@ def test_exam_measures_the_with_skill_answer(monkeypatch, tmp_path):
     phase_execute.run(ctx, phase)
 
     # Bare wrong -> leak audit (clean) -> with-skill answer -> judged.
-    assert len(answerer.client.calls) == 2
+    assert len(answerer.client.calls) == 3
     assert len(auditor.client.calls) == 1
     assert [unit.status for unit in phase_units(ctx, phase)
             if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]

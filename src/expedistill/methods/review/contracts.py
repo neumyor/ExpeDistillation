@@ -43,6 +43,7 @@ class ReviewContext:
     task_select_rule: str
     trajectory_select: str
     segment_select: str
+    exam_control: bool = True
     workers: int = 1
 
 
@@ -111,6 +112,7 @@ class NewSkillRequirement:
     trigger: str
     evidence: EvidencePackage
     source_sheet_ids: List[str] = field(default_factory=list)
+    source_phase_label: str = ""
 
 
 @dataclass

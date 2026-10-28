@@ -11,7 +11,7 @@ Rules (each ``make_*`` implements exactly one line of this table)::
     trajectory_id      = f"traj/{task_id}/{role}/{attempt:02d}"
     subtask_id         = f"{trajectory_id}/seg{index:02d}"
     skill_id           = f"{subtask_id}/skill"
-    exam_id            = f"{subtask_id}/exam"
+    exam_id            = f"{skill_id}/v{version:02d}/exam"
     attempt_id         = f"{exam_id}/att{serial:02d}"
     merged skill_id    = f"bank/merge/{serial:04d}"
 
@@ -89,8 +89,13 @@ def make_skill_id(subtask_id: str) -> str:
     return f"{subtask_id}/skill"
 
 
-def make_exam_id(subtask_id: str) -> str:
-    return f"{subtask_id}/exam"
+def make_exam_id(skill_id: str, version: int) -> str:
+    """One exam per skill version (generalization exam, decision doc
+    generalization_exam_20261027). The version is the ``Skill.version`` the
+    exam tests, zero-padded like the other serials."""
+    if version < 0:
+        raise ValueError(f"skill version must be >= 0, got {version}")
+    return f"{skill_id}/v{version:02d}/exam"
 
 
 def make_attempt_id(exam_id: str, serial: int) -> str:
@@ -172,6 +177,18 @@ def parse_subtask_id(subtask_id: str) -> Tuple[str, int]:
         return trajectory_id, _parse_serial(suffix[len(_SEG):])
     except ValueError:
         raise ValueError(f"malformed subtask id: {subtask_id!r}") from None
+
+
+def parse_exam_id(exam_id: str) -> Tuple[str, int]:
+    """Return (skill_id, version) from a generalization exam id."""
+    skill_id, sep, tail = exam_id.rpartition("/v")
+    if not sep or not tail.endswith("/exam"):
+        raise ValueError(f"malformed exam id: {exam_id!r}")
+    version = tail[:-len("/exam")]
+    try:
+        return skill_id, _parse_serial(version)
+    except ValueError:
+        raise ValueError(f"malformed exam id: {exam_id!r}") from None
 
 
 def parse_attempt_id(attempt_id: str) -> Tuple[str, int]:

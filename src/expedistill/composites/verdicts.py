@@ -289,7 +289,8 @@ def grade_sheet(execution: ExecutionRecord,
 # ---------------------------------------------------------------------------
 
 def grade_attempt(*, store, exam, attempt, judge_handle,
-                  usage=None, run_dir=None) -> Tuple[bool, str]:
+                  usage=None, run_dir=None,
+                  skill_catalog: str = "") -> Tuple[bool, str]:
     """Judge one answered exam attempt: the G5 model judge under
     ``exam_grading``'s crash-persistent repair budget (a resumed call
     continues the remaining tries and raises without a model call when
@@ -297,4 +298,5 @@ def grade_attempt(*, store, exam, attempt, judge_handle,
     this is the entry execution-side wiring (``exam_once``) calls; the
     budget protocol itself lives in ``exam_grading``."""
     return exam_grading.judge_with_persistent_budget(
-        store, exam, attempt, judge_handle, usage, run_dir)
+        store, exam, attempt, judge_handle, usage, run_dir,
+        skill_catalog=skill_catalog)

@@ -13,9 +13,11 @@ policies:
   still fail loudly instead of silently becoming defaults. Records written
   by an OLDER schema version migrate explicitly when the derivation is
   local to the record (a v1 Skill segment row derives ``source_subtasks``
-  from its id, a v1 Exam row derives ``skill_id``); a v1 Skill merge
-  product needs its sibling records and raises with a pointer to
-  ``migrate_skill_record`` -- never a silent default either way.
+  from its id); a v1 Skill merge product needs its sibling records and
+  raises with a pointer to ``migrate_skill_record`` -- never a silent
+  default either way. ``Exam`` is the one exception: the generalization
+  exam (schema v3) replaced the old protocol outright, so a v1/v2 exam
+  row raises instead of migrating.
 
 IDs are not generated here: they follow the deterministic rules in
 ``expedistill.core.ids`` and are assigned by the caller. Objects reference each
@@ -44,7 +46,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 TRAJECTORY_SCHEMA_VERSION = 2
 SUBTASK_SCHEMA_VERSION = 1
 SKILL_SCHEMA_VERSION = 3
-EXAM_SCHEMA_VERSION = 2
+# Exam v3 (generalization exam, 2026-10-27): one exam per skill version,
+# rebuilt from the source trajectory; ``scene_text`` / ``source_ref``
+# were replaced by ``scene_text`` and the source/skill identity fields.
+# Old v1/v2 exam rows are NOT migrated (the record no longer carries the
+# scenario), so ``Exam.from_dict`` refuses them loudly.
+EXAM_SCHEMA_VERSION = 3
 ATTEMPT_SCHEMA_VERSION = 1
 
 # ---------------------------------------------------------------------------
@@ -289,26 +296,57 @@ class Skill(_Record):
 
 @dataclass
 class Exam(_Record):
-    """One text exam question for a Subtask's capability (G3 output).
+    """One text exam generated for one skill version (generalization exam).
 
-    ``skill_id`` (schema v2) names the skill this exam tests. Questions
-    are still written without seeing the skill; the link used to live
-    only implicitly in the shared ``subtask_id`` and is now stored
-    explicitly so consumers read the field instead of re-deriving it.
+    Schema v3 (decision doc generalization_exam_20261027): the exam is a
+    reconstructed scene, not a question written from the skill's own
+    subtask. ``exam_id`` is ``ids.make_exam_id(skill_id, skill_version)``,
+    so a skill version has exactly one exam and a version bump gets a new
+    one.
+
+    ``scene_text`` is the situation restored from the source trajectory's
+    real prefix; ``expected_behavior`` says what a model that understands
+    the skill should do in it; ``reference_answer`` is the answer the
+    judge compares against. All three are natural language.
+
+    ``source_ref`` is the origin pointer written by the learn phase
+    (``composites.skill_origins.source_ref``): ``phase_label``,
+    ``unit_id``, ``sheet_id`` and ``scene_step``, with the optional keys
+    absent rather than None. It is free-form by design -- it names where
+    the evidence came from, it is not an enum.
+
+    Old v1/v2 exam rows are not migrated: they carry a question and a
+    prompt-writing path that the generalization exam no longer uses (and
+    no scene), so ``from_dict`` refuses them with a loud ValueError
+    (decision doc "已知边界": old runs keep their own code branch).
     """
 
     exam_id: str
-    question_text: str
-    reference_answer: str
-    subtask_id: str
-    #: The tested skill (ids.make_skill_id(subtask_id)).
+    #: The tested skill (its ``Skill.skill_id``).
     skill_id: str
+    #: The tested ``Skill.version``.
+    skill_version: int
+    #: The reconstructed situation, natural language.
+    scene_text: str
+    #: What a model that understands the skill should do, natural language.
+    expected_behavior: str
+    reference_answer: str
+    #: Origin pointer; see the class docstring.
+    source_ref: Dict[str, Any]
     schema_version: int = EXAM_SCHEMA_VERSION
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Exam":
-        if data.get("schema_version") == 1:
-            data = _migrate_v1_exam_row(data)
+        version = data.get("schema_version")
+        if version != EXAM_SCHEMA_VERSION:
+            raise ValueError(
+                f"exam {data.get('exam_id')!r} is a schema-v{version} "
+                "record; the generalization exam stores schema v3 only "
+                "(exam_id / skill_id / skill_version / scene_text / "
+                "expected_behavior / reference_answer / source_ref). Old "
+                "exam protocol records are no longer supported: they are "
+                "not migrated and an old run's exams are not reused "
+                "(docs/decisions/generalization_exam_20261027.md)")
         return cls(**_known_kwargs(cls, data))
 
 
@@ -322,6 +360,11 @@ class Attempt(_Record):
 
     ``skill_id``/``skill_version`` are None for bare answers, so every record
     distinguishes "no skill" from "skill X version N".
+
+    ``steps`` (generalization exam) is the answering episode itself -- the
+    skill-directory reads and the plan the weak model produced. It was an
+    optional addition that needs no schema bump: an old record without it
+    loads with an empty list (AGENTS.md "修改数据对象" rule 2).
     """
 
     attempt_id: str
@@ -330,6 +373,7 @@ class Attempt(_Record):
     skill_version: Optional[int] = None
     purpose: str = "bare"
     weak_answer: str = ""
+    steps: List[Step] = field(default_factory=list)
     #: None until judged; True/False after G5.
     judge_verdict: Optional[bool] = None
     judge_reason: str = ""
@@ -338,6 +382,8 @@ class Attempt(_Record):
 
     def __post_init__(self) -> None:
         _check_vocab(self.purpose, ATTEMPT_PURPOSES, "Attempt", "purpose")
+        self.steps = [Step(**step) if isinstance(step, dict) else step
+                      for step in self.steps]
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Attempt":
@@ -387,9 +433,6 @@ def _migrate_v1_trajectory_row(data: Dict[str, Any]) -> Dict[str, Any]:
 #: not import ids: ids imports models). The migration unit tests pin the
 #: equivalence, so the mirror cannot drift unnoticed.
 _SKILL_ID_SUFFIX = "/skill"
-
-#: The exam id suffix, mirroring ``ids.make_exam_id`` (same mirroring rule).
-_EXAM_ID_SUFFIX = "/exam"
 
 
 def _v1_segment_source_subtasks(
@@ -447,19 +490,6 @@ def _migrate_v2_skill_row(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     return {**data, "summary": data.get("summary", ""),
             "schema_version": SKILL_SCHEMA_VERSION}
-
-
-def _migrate_v1_exam_row(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Derive ``skill_id`` for one schema-v1 exam row (v2 row out)."""
-    exam_id = data.get("exam_id")
-    subtask_id = data.get("subtask_id")
-    if exam_id != f"{subtask_id}{_EXAM_ID_SUFFIX}":
-        raise ValueError(
-            f"exam {exam_id!r} is a schema-v1 record whose id is not its "
-            f"subtask's exam id (subtask {subtask_id!r}); skill_id cannot "
-            "be derived -- a human must look at this run")
-    return {**data, "skill_id": f"{subtask_id}{_SKILL_ID_SUFFIX}",
-            "schema_version": EXAM_SCHEMA_VERSION}
 
 
 def merged_source_subtasks(

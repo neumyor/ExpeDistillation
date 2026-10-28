@@ -89,8 +89,8 @@ src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     ids.py                确定性 ID 规则
-    config.py             实验配置结构（schema v6：sequence + phases + review 槽位 + use_weak_profile 开关）、模型角色表
-    config_upgrade.py     v2→v3→v4→v5 升级纯函数（config.py 重新导出）
+    config.py             实验配置结构（schema v7：sequence + phases + review 槽位 + use_weak_profile 开关）、模型角色表
+    config_upgrade.py     v2→v3→v4→v5→v6 升级纯函数（config.py 重新导出）
     contracts.py          交付与决策的冻结交接形状（执行单元行及其列表别名 /
                           任务清单行）；执行→验收的 trial 级记录见
                           answer_sheet.py 的 ExecutionRecord
@@ -114,7 +114,8 @@ src/expedistill/
     author.py             G2 提炼 / 诊断、G6 改写
     cluster_author.py     P02 cluster_by_trigger：trigger 分族、族内聚类、
                           按类写 skill 的三个 prompt
-    exam.py               G3 出考题、G4 作答、G5 判卷
+    exam.py               EXAM_SCENE 复原考场、EXAM_TRIGGER 选技能、
+                          EXAM_PLAN 写计划、EXAM_JUDGE 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
     attribution.py        G11 attempt 修订、G12 attempt 归因（v3 起进
                           __init__ 的 import 清单——全量冻结，manifest 冻结全部
@@ -143,8 +144,8 @@ src/expedistill/
     view.py               D5 轨迹视图
     segment.py            G1 切段、D7 切段校验
     select.py             D6 段筛选
-    author.py             G2 写 skill、G3 出考题、G6 改写 skill
-    exam.py               G4 作答、G5 判卷
+    author.py             G2 写 skill、G6 改写 skill
+    exam.py               EXAM_TRIGGER / EXAM_PLAN 作答、EXAM_JUDGE 判卷
     audit.py              D8 泄题审计
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
     retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
@@ -199,6 +200,8 @@ src/expedistill/
                           artifacts.skill_folder 提取可用技能、读取/未读、结果
     verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
+    skill_origins.py      每个技能版本的来源账本（执行相位 / unit / sheet /
+                          场景步号 / 修改原因；exam 用它复原考场）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
                           （带 YAML 头）并写 catalog.md 兜底；test 相位派发前
@@ -236,7 +239,7 @@ src/expedistill/
     curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
                           成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
-    delivery/             注入驱动 whole_bank.py、retrieval.py、per_skill.py、
+    delivery/             注入驱动 whole_bank.py、retrieval.py、exam_folder.py、
                           group_by_task.py、none.py、folder.py（test 技能文件夹
                           交付）、folder_by_task.py（live 逐任务技能文件夹）+
                           各自的 Params + README.md（模块说明与参数表）
@@ -246,7 +249,7 @@ src/expedistill/
                           phase_disk 相位目录/早相位/库产物/复用连接；resolve
                           配置映射到驱动与参数；engine 派发→判分→重派引擎；
                           baseline / exam / live / final_test 四种 role 各一
-                          个模块（baseline 摸底 / exam 纸面验收 / live 实战验收 / test 终测）
+                          个模块（baseline 摸底 / exam 泛化考试 / live 实战验收 / test 终测）
     phase_learn.py        learn 相位驱动（R9）：按 P02/P04/P06/exam 分流
     learn_add.py          P02 add 路径：切段、证据、写新 skill、回执；
                           author.name=cluster_by_trigger 时转交
@@ -329,7 +332,7 @@ scripts/
               （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
               freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
               convert_v3_configs.py：一次性 schema v3→v5 配置转换（写新文件名；
-                                  显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5）
+                                  显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5→v6）
               launch_tb21_live_run.py：正式实验的 detached 启动器
   remote/     远程（node29）相关：部署代码、同步产物、查看进度、停止任务
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
@@ -358,7 +361,7 @@ configs/
   experiments/   每个实验一份配置：benchmark、模式（split / full）、模型角色表、
                  采样次数、相位序列（sequence + phases，方法参数全部在相位
                  定义里）、无效重派预算、具名规则的名字；
-                 schema_version 6（v1/v2/v3/v4/v5 文件是冻结的历史记录，转换走
+                 schema_version 7（v1/v2/v3/v4/v5/v6 文件是冻结的历史记录，转换走
                  scripts/run/convert_v3_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
   seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，
@@ -520,14 +523,14 @@ python tests/golden/generate.py
 ```python
 # ❌ 不推荐：硬编码 14 个 sha256 字面量
 _GOLDEN_PROMPT_DIGESTS = {
-    "ANSWER": "a1b2c3...",
+    "EXAM_SCENE": "a1b2c3...",
     "SEGMENT": "d4e5f6...",
     ...
 }
 
 # ✅ 推荐：固定名称集合，digest 值重新计算
 FROZEN_PROMPT_NAMES = frozenset({
-    "ANSWER", "EXAM_GEN", "SEGMENT", ...
+    "EXAM_SCENE", "EXAM_TRIGGER", "EXAM_PLAN", "EXAM_JUDGE", "SEGMENT", ...
 })
 
 def _expected_prompt_digests():

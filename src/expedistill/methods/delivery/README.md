@@ -10,7 +10,7 @@
 | 方法 | 每道题注入什么 | 用在哪个阶段 | 参数 |
 |---|---|---|---|
 | `none` | 不注入（裸跑） | baseline（摸底） | 无 |
-| `per_skill` | 这道考题对应的那一条技能 | exam（纸面验收） | 无 |
+| `exam_folder` | 全库技能目录（accepted + pending）；模型自己选择要打开的技能 | exam（泛化考试） | `description_mode` |
 | `group_by_task` | 这道题名下还待验收的整包技能（整块注入） | live（实战验收） | 无 |
 | `folder_by_task` | 这道题名下还待验收的整包技能（逐技能目录，模型按需读取） | live（实战验收） | 见下 |
 | `whole_bank` | 技能库里所有已接受的技能 | test（最终测试） | 无 |

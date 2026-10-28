@@ -119,7 +119,8 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                 phase_label: str, benchmark: str, role: str,
                 n_attempts: int,
                 skill_folder_dir: Optional[str] = None,
-                skill_folder_dirs: Optional[Mapping[str, str]] = None
+                skill_folder_dirs: Optional[Mapping[str, str]] = None,
+                attach_folder: bool = True,
                 ) -> List[_Plan]:
     """Rebuild each delivery row's full frozen unit id (unit_ids' frozen
     rule; the row's task ref and sha8 already carry the pieces -- the
@@ -161,7 +162,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     "disagree")
         task = tasks[ref] if tasks is not None else None
         manifest = _folder_manifest_of(row)
-        if manifest is not None and manifest.get("files"):
+        if attach_folder and manifest is not None and manifest.get("files"):
             folder_dir = (skill_folder_dirs.get(ref)
                           if skill_folder_dirs is not None
                           else skill_folder_dir)

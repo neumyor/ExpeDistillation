@@ -118,18 +118,31 @@ def test_none_supplies_the_bare_rows():
         ("task-a", None, ""), ("task-b", None, "")]
 
 
-def test_per_skill_block_matches_the_k4_rendering():
-    # The driver must delegate to the same layer-1 renderer K4 uses,
-    # so acceptance-time and test-time injection stay one rendering.
-    # (The legacy resolve(ctx, params, skill) compat shape never had a
-    # production caller and was removed; the frozen signature carries
-    # the same equivalence.)
-    skill = make_group_skill(make_task_id(BENCHMARK, "t1"))
-    delivery, params = resolve_fixed("delivery", "per_skill")
-    rows = delivery.resolve([skill],
-                            [make_exam_id(skill.subtask_id)], params)
-    assert [row.skills_block for row in rows] == [
-        format_skills_block([skill])]
+def test_exam_folder_catalog_covers_the_full_bank():
+    # The generalization exam shows every current member -- pending
+    # included -- so the model can find a not-yet-accepted skill. The
+    # block is the same layer-1 catalog the folder delivery renders, and
+    # the injected digest is the FULL bank's (never the accepted subset).
+    from expedistill.inject import bank_reference
+    from expedistill.methods.delivery.folder import render_catalog
+
+    accepted = make_group_skill(make_task_id(BENCHMARK, "t1"))
+    accepted.status = "accepted"
+    pending = make_group_skill(make_task_id(BENCHMARK, "t2"))
+    pending.status = "pending"
+    bank = [accepted, pending]
+    exam = make_exam_id(accepted.skill_id, accepted.version)
+
+    delivery, params = resolve_fixed("delivery", "exam_folder")
+    rows = delivery.resolve(bank, [exam], params)
+
+    assert [row.task_ref for row in rows] == [exam]
+    assert rows[0].skills_injected == bank_reference(bank)
+    assert rows[0].skills_block == render_catalog(bank)
+    assert pending.skill_id in rows[0].skills_block
+    assert [entry["skill_id"]
+            for entry in rows[0].aux["skill_folder"]["files"]] == [
+        accepted.skill_id, pending.skill_id]
 
 
 def test_group_by_task_resolves_each_tasks_pending_group(tmp_path):

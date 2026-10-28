@@ -17,6 +17,7 @@ from expedistill.core.config import (
     upgrade_v3_config,
     upgrade_v4_config,
     upgrade_v5_config,
+    upgrade_v6_config,
 )
 
 #: The minimal v4 method the fixtures carry: a two-arm baseline, one learn
@@ -693,9 +694,9 @@ class TestSerialisation:
         with pytest.raises(ConfigError, match="future_field"):
             ExperimentConfig.from_dict(payload)
 
-    def test_schema_version_is_six(self):
+    def test_schema_version_is_seven(self):
         # v5: the phase sequence plus the weak-profile switch.
-        assert CONFIG_SCHEMA_VERSION == 6
+        assert CONFIG_SCHEMA_VERSION == 7
 
     def test_future_schema_version_rejected_by_load_config(self, tmp_path):
         cfg_file = tmp_path / "future.yaml"
@@ -1017,7 +1018,7 @@ GOLDEN_TO_DICT_FULL_FORM = {
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {},
-    "schema_version": 6,
+    "schema_version": 7,
 }
 
 GOLDEN_TO_DICT_SPLIT_FORM = {
@@ -1061,7 +1062,7 @@ GOLDEN_TO_DICT_SPLIT_FORM = {
     "prompts_digests": {},
     "model_options": {},
     "token_budgets": {"default_max_output_tokens": 65536},
-    "schema_version": 6,
+    "schema_version": 7,
 }
 
 
@@ -1166,7 +1167,7 @@ class TestUpgradeV2:
             "token_budgets": {"default_max_output_tokens": 65536},
         }
         cfg = ExperimentConfig.from_dict(
-            upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(upgrade_v2_config(v2)))))
+            upgrade_v6_config(upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(upgrade_v2_config(v2))))))
         assert cfg.sequence == ["baseline", "learn", "live", "learn", "live", "learn", "test"]
         assert cfg.phases["live"].execution["n_attempts"] == 3
         assert cfg.phases["learn"].curate["token_budget"] == 96000
@@ -1221,7 +1222,7 @@ class TestUpgradeCoversEveryV2Config:
             if path.name not in self.PRE_V2_MODELS_OPTIONS:
                 # The config was valid under v2; the chained upgrade loads.
                 ExperimentConfig.from_dict(
-                    upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(upgraded))))
+                    upgrade_v6_config(upgrade_v5_config(upgrade_v4_config(upgrade_v3_config(upgraded)))))
             checked += 1
         assert checked >= 8, f"expected the v2 record set, got {checked}"
 

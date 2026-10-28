@@ -24,10 +24,10 @@ from expedistill.core.models import Attempt, Exam, Skill
 from expedistill.infra.reliability import ConfigError as InfraConfigError
 from expedistill.infra.store import Store, read_json, write_jsonl
 from expedistill.llm import make_fake_handle
+from expedistill.llm.fake import json_script
 from expedistill.methods.curation import phase_bank as phase_bank_entry
 from expedistill.stages.context import StageContext
 from tests.helpers.replies import (
-    correct as _correct,
     grouping as _grouping,
     merged as _merged,
     similarity as _similarity,
@@ -57,11 +57,12 @@ def _add_skill(store: Store, index: int, content: str,
 
 
 def _add_exam(store: Store, index: int) -> Exam:
-    exam = Exam(exam_id=ids.make_exam_id(_subtask(index)),
-                question_text=f"question {index}",
-                reference_answer=f"reference {index}",
-                subtask_id=_subtask(index),
-                skill_id=_skill_id(index))
+    exam = Exam(
+        exam_id=ids.make_exam_id(_skill_id(index), 1),
+        skill_id=_skill_id(index), skill_version=1,
+        scene_text=f"scene {index}", expected_behavior=f"behavior {index}",
+        reference_answer=f"reference {index}",
+        source_ref={"phase_label": "p01:baseline", "scene_step": 0})
     store.save(exam, "exams")
     return exam
 
@@ -113,8 +114,10 @@ _MERGE_SCRIPTS = dict(
     curator=(_similarity(groups=[[_skill_id(0), _skill_id(1)]]),
              _merged("Read the log file before doing anything else."),
              _grouping({"bank/merge/0000": "error handling"})),
-    answerer=("first answer", "second answer"),
-    judge=(_correct(), _correct()),
+    answerer=(json_script({"plan": "first plan"}),
+              json_script({"plan": "second plan"})),
+    judge=(json_script({"verdict": "success", "reason": ""}),
+           json_script({"verdict": "success", "reason": ""})),
 )
 
 

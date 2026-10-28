@@ -96,10 +96,18 @@ def collect_exam_evidence(store: Store, summary: UnitSummary,
             reason = (source.judge_reason or "").strip()
             error = (f"{reason} {_VOID_NOTE}{report}" if reason
                      else f"{_VOID_NOTE}{report}")
+    selected = "\n".join(
+        step.action for step in (source.steps or [])[:-1]
+        if step.action and not step.action.startswith("#"))
+    answer = ("\n\n".join(part for part in (
+        f"SKILLS OPENED:\n{selected}" if selected else "",
+        f"PLAN:\n{source.weak_answer}") if part))
     return EvidencePackage(
         target=skill.skill_id,
-        facts=[{"kind": "exam_question", "text": exam.question_text},
-               {"kind": "weak_answer", "text": source.weak_answer},
+        facts=[{"kind": "exam_question", "text": exam.scene_text},
+               {"kind": "expected_behavior",
+                "text": exam.expected_behavior},
+               {"kind": "weak_answer", "text": answer},
                {"kind": "judge_reason", "text": error or ""}],
         segments=[{"exam_id": exam_id, "attempt_id": source.attempt_id}],
         old_skill=skill)

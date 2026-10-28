@@ -145,7 +145,8 @@ def aggregate_findings(
             description=description.strip(),
             trigger=trigger.strip(),
             evidence=evidence,
-            source_sheet_ids=[str(item) for item in source_ids]))
+            source_sheet_ids=[str(item) for item in source_ids],
+            source_phase_label=context.source_phase_label))
     return items, requirements
 
 

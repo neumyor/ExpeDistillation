@@ -14,7 +14,7 @@ from expedistill.core.answer_sheet import (
 )
 from expedistill.core.models import Step
 from expedistill.llm import json_script, make_fake_handle
-from expedistill.methods.review import trial, trial_review
+from expedistill.methods.review import trial, trial_evidence, trial_review
 from expedistill.methods.review.contracts import ReviewContext
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
@@ -185,3 +185,16 @@ def test_trial_review_aggregates_actions_requirements_and_profile(monkeypatch):
     assert result.new_skill_requirements[0].source_sheet_ids == [
         sheet.sheet_id]
     assert result.profile_update == ""
+
+
+def test_evidence_keeps_one_window_per_skill():
+    sheet = _sheet(correct=False)
+    evidence = trial_evidence.evidence_for_skills(
+        sheet, skill_ids=[SKILL.skill_id, "other/skill"],
+        issue="the trigger was missed", reason="wrong behavior",
+        step_start=0, step_end=2, bank=[SKILL],
+        ranges={SKILL.skill_id: (0, 1), "other/skill": (1, 2)})
+    assert evidence[SKILL.skill_id].windows[0].step_start == 0
+    assert evidence[SKILL.skill_id].windows[0].step_end == 1
+    assert evidence["other/skill"].windows[0].step_start == 1
+    assert evidence["other/skill"].windows[0].step_end == 2

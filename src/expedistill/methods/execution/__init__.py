@@ -81,10 +81,32 @@ class RealExecutionParams:
 
 @dataclass(frozen=True)
 class ExamExecutionParams:
-    """The exam execution has no parameters: one answer per exam, no
-    sampling depth (a baseline phase cannot run it and the load-time
-    checklist enforces that), no injection cap (a single skill's exam
-    is bounded by the skill itself)."""
+    """The generalization exam's knobs (schema v7).
+
+    One text exam per skill version: the model reads the whole-bank
+    catalog, opens up to ``max_skill_reads`` skill files, and writes a
+    plan. There is no sampling depth (a baseline phase cannot run it and
+    the load-time checklist enforces that) and no injection cap.
+
+    * ``max_skill_reads`` -- how many skill files the model may open
+      before answering; at least one, because an exam with no readable
+      skill would test nothing.
+    * ``bare_control`` -- run the old bare-answer arm beside the exam
+      (default off).
+    * ``leak_audit`` -- run the old leak audit beside the exam (default
+      off). Both controls are retrospective arms of the old exam; the
+      generalization exam keeps them available but opt-in.
+    """
+
+    max_skill_reads: int = 3
+    bare_control: bool = False
+    leak_audit: bool = False
+
+    def __post_init__(self) -> None:
+        if self.max_skill_reads < 1:
+            raise ConfigError(
+                "execution.exam max_skill_reads must be >= 1, got "
+                f"{self.max_skill_reads!r}")
 
 
 @dataclass(frozen=True)

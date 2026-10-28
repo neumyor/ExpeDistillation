@@ -11,7 +11,12 @@ from expedistill.blocks.attribution import (
 from expedistill.blocks.audit import (
     audit_leak as audit_leak,
 )
-from expedistill.blocks.exam import answer as answer, judge as judge
+from expedistill.blocks.exam import (
+    choose_skills as choose_skills,
+    judge as judge,
+    write_plan as write_plan,
+    write_scene as write_scene,
+)
 from expedistill.blocks.metrics import (
     compute_task_metrics as compute_task_metrics,
     failed_tasks as failed_tasks,
