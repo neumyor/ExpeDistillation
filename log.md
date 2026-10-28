@@ -1553,3 +1553,21 @@ layering、`git diff --check` 通过。未提交、未推送，未读写正在�
 一段话摘要：更正 18:00 条目的口径并补一项验证。`uncovered_add_tasks` 的 `eligible` 原本按“被选中的 source_experiences 里有没有强成功段和弱失败段”统计，但这会把“弱模型确实失败、只是段全被切段规则丢掉”的任务判成不合格；按决定里的定义（strong 至少一次成功且 weak 至少一次失败）应看该任务的基线轨迹判分。现在 `_baseline_arms` 只对有覆盖缺口的任务读 store 里的 trajectory，按 `correctness` 统计两臂，不再依赖被选中的段；cluster_summary 的两条写盘路径都把 `ctx.store` 传进去。按管理员要求，用已作废的 small20 run `runs/tb21_agentbrew_small20_cluster_20261027_2139/` 的 P02 产物做只读验证（`tmp/check_uncovered_aborted_run.py`，不写 run 目录）：17 条 add、4 个任务无锚点技能（filter-js-from-html、pytorch-model-recovery、raman-fitting、torch-tensor-parallelism），其中 2 个 eligible（pytorch、torch），与先前审计一致；该 run 的数字仍不进入任何结论。测试：新增“弱失败段被全部切掉但仍算 eligible”的用例，核对 add_index、absorbed_by；全量 2379 passed、2 skipped、4 deselected；ruff E9/F、layering、`git diff --check` 通过。未提交、未推送。
 
 工件：`src/expedistill/stages/learn_add_cluster.py`、`tests/unit/stages/test_learn_add_cluster.py`、`README.md`、`docs/decisions/p02_cluster_by_trigger_20261026.md`、`src/expedistill/methods/author/README.md`、`tmp/check_uncovered_aborted_run.py`（只读验证脚本，不进 git）、`log.md`
+
+## 2026-10-28 20:02 — P07 扩到 32 worker 重启
+
+一段话摘要：按用户要求把进行中的 P07（`runs/tb21_p02p06_exam_small20_20261028_1322`，exam 验收链路的协议验证）从 8 worker 扩到 32 worker 加速。并发数只能在启动时指定，因此先停掉驱动（pid 36125，SIGTERM），确认退出并释放 `run.lock`；同时清理本 run 在 node29 上的 8 个远程 runner（其中 2 个属于已完成单元、已经是孤儿），再以完全相同的配置、`--k1-stagger 30`、`--llm-timeout 1500` 等参数重启，只把 `--workers` 改为 32（新 pid 53528，写入 `driver.pids`）。重启后 K1 接管陈旧锁并派发 103 个未完成单元，已完成的 14 个 trial 全部按落盘跳过，不重跑。这次改动只影响并发，不改变方法参数、配置或判定口径。风险：node29 上同时会有 32 个 TB runner，远高于此前的 8 个；如果出现 ssh 拥塞或大面积超时，按现状观察 K1 重试，不进一步加并发。
+
+工件：run `runs/tb21_p02p06_exam_small20_20261028_1322/`（`driver.pids`、`console.log`）、`log.md`
+
+## 2026-10-28 20:23 — 按要求停止 P07
+
+一段话摘要：用户要在另一个会话修 bug，要求停止 P07（`runs/tb21_p02p06_exam_small20_20261028_1322`）。先 SIGTERM 停驱动（pid 53528），确认退出；再清理本 run 在 node29 上的全部远程 runner（79 个记录 pid 里，多数已结束，1 个仍在运行，TERM 后 KILL），复查 cwd 在 `/data2/niuyiming/expedistill` 下的 runner 剩余 0。停止时 P07 已落盘 33/117 个 trial，0 失败；重启前完成的 14 个和 32 worker 下的 19 个都在盘上，run 可续跑，未改配置、未改判定口径。每 30 分钟的自动检查与后台看门狗都已取消。
+
+工件：run `runs/tb21_p02p06_exam_small20_20261028_1322/`（`driver.pids`、`console.log`）、`log.md`
+
+## 2026-10-28 20:48 — exam 相位 trial_level 的答卷分析与考题契约
+
+一段话摘要：修复 run `runs/tb21_p02p06_exam_small20_20261028_1322/` 复盘时发现的两个缺陷，用户为此停止了该 run 的 P07。第一，P04/P06 的逐 trial 分析把 exam 纸面答卷当成执行轨迹：`TRIAL_FAILURE_ANALYSIS` 只看到“读技能 + 一段计划、observation 为空”，没有裁判判词和期望行为，于是把大量失败归因为“只写计划不执行”（P03 的 30 条判错理由中没有一条这样批评，P04 却有 16 个保留基于这个理由），这个误读还写进了累积画像并产生了与答卷格式冲突的新需求技能。现在 exam 相位改用新提示词 `TRIAL_EXAM_ANALYSIS`，输入取自答卷（场景、期望行为、裁判判词、被考技能正文、作答时的目录、实际打开的技能、计划），规定计划不带执行输出是答卷格式、只讨论这个切点上适用的技能，并对被考技能给出必填的 `exam_skill_issue`；答卷构建时写入考题的 `expected_behavior`；聚合收到每条 finding 的逐技能问题；bare 对照答卷不进入 exam 复盘。第二，改写依据取错了考题：聚合按“第一个提到该技能的 finding”取 basis、按“最后一个”取证据，P04 的 9 条改写里 8 条的依据来自别的技能的考题，`learn_exam` 又用 basis 考题的切点记录 v2 来源，导致 P05 在错误切点重考（6 条早于自己的锚点段）。现在 exam 相位每个技能的 basis 是它本相位最高版本的考题，revise / delete 只能由这道考题的失败 finding 支撑（自己考过的保持 keep），改写证据取自这道考题，没考到的技能不产生动作行；v2 因此回到自己原来的切点重考。验证：对 run 1322 的 P03 数据只读回算，9 条改写技能的新切点全部落在各自锚点段内（原来 6 条在段外）；用真实 author 模型对 5 张 P03 判错答卷做冒烟（`tmp/smoke_exam_review.py`，输出在 `tmp/exam_review_smoke_20261028/`），5 条新诊断都引用裁判指出的具体缺陷、没有一条归因为“未执行”，判出 2 条内容缺陷和 3 条触发缺陷；新增分析、聚合与 `learn_exam` 来源的单元测试，golden 重新生成（变化只有新提示词摘要和答卷的 `expected_behavior`，调用数不变），全量 2389 passed、2 skipped、4 deselected，ruff E9/F、layering、`git diff --check` 通过。新提示词进入 manifest，是新的实验身份，run 1322 只保留为协议验证记录，不在新代码上续跑。
+
+工件：`src/expedistill/prompts/trial_review.py`、`src/expedistill/methods/review/trial.py`、`src/expedistill/methods/review/aggregation.py`、`src/expedistill/composites/answer_sheets.py`、`tests/unit/methods/review/test_trial.py`、`tests/unit/stages/test_learn_exam.py`、`tests/unit/stages/test_stage0.py`、`tests/fixtures/golden/`、`docs/decisions/exam_trial_review_20261028.md`、`docs/decisions/generalization_exam_20261027.md`、`src/expedistill/methods/review/README.md`、`README.md`、`log.md`、`tmp/smoke_exam_review.py`（冒烟脚本，不进 git）

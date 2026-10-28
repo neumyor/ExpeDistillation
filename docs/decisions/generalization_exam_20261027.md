@@ -82,6 +82,7 @@ execution: exam
 ## 已知边界
 
 - 未触发而改写的技能依赖 `trial_level` 按技能保存步骤窗口；该前置缺口在本次实现中一并修复。
+- `trial_level` 在 exam 相位的分析与动作契约见 `docs/decisions/exam_trial_review_20261028.md`：改写后的版本沿用自己上一版考题的切点。
 - 来源行缺失时，exam 记 `exam_generation_failed`，不生成错误考场。
 - 旧 Exam v2 记录不迁移；旧 run 不复用旧考题。
 - 插件不需要新增真实执行能力；searchqa/alfworld 也可以使用文本考场。

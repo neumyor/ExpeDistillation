@@ -54,6 +54,11 @@ def aggregate_findings(
     for finding in findings:
         for skill_id in finding.skill_ids:
             findings_by_skill.setdefault(skill_id, []).append(finding)
+    # An exam unit examines one skill version in the scene recorded for it,
+    # so in an exam phase a skill answers only to its own exam: that exam is
+    # its basis unit, its revision evidence and the source of its next scene.
+    exam_units = (_exam_units(current) if context.phase_kind == "exam"
+                  else None)
     items: List[ReviewItem] = []
     seen = set()
     for entry in parsed.get("skill_actions") or []:
@@ -80,20 +85,33 @@ def aggregate_findings(
             raise ModelOutputError(
                 "TRIAL_REQUIREMENT_AGGREGATION: reason must be a non-empty "
                 f"string for {skill_id!r}")
-        origin = findings_by_skill.get(skill_id) or []
-        if not origin and action != "keep":
-            raise ModelOutputError(
-                "TRIAL_REQUIREMENT_AGGREGATION: no finding supports "
-                f"{action} for {skill_id!r}")
-        basis_unit = (origin[0].unit_id if origin
-                      else measured.get(skill_id))
-        if basis_unit is None:
-            raise ModelOutputError(
-                "TRIAL_REQUIREMENT_AGGREGATION: keep for a skill that "
-                f"was not measured: {skill_id!r}")
+        if exam_units is not None:
+            if skill_id not in exam_units:
+                # Not examined in this phase: outside this review's scope.
+                continue
+            basis_unit = exam_units[skill_id]
+            origin = [finding for finding in findings
+                      if finding.unit_id == basis_unit]
+            if not origin and action != "keep":
+                action = "keep"
+                reason = ("the skill's own exam produced no failure finding; "
+                          "in an exam phase only the skill's own exam can "
+                          "revise or delete it")
+        else:
+            origin = findings_by_skill.get(skill_id) or []
+            if not origin and action != "keep":
+                raise ModelOutputError(
+                    "TRIAL_REQUIREMENT_AGGREGATION: no finding supports "
+                    f"{action} for {skill_id!r}")
+            basis_unit = (origin[0].unit_id if origin
+                          else measured.get(skill_id))
+            if basis_unit is None:
+                raise ModelOutputError(
+                    "TRIAL_REQUIREMENT_AGGREGATION: keep for a skill that "
+                    f"was not measured: {skill_id!r}")
         evidence = None
         if action == "revise":
-            if context.phase_kind == "exam":
+            if exam_units is not None:
                 evidence = _exam_revision_evidence(
                     skill_id, origin, current, by_id)
             else:
@@ -138,7 +156,8 @@ def aggregate_findings(
                 action="keep",
                 reason="no trial finding implicated this measured skill; "
                        "keep by default",
-                basis_unit=measured[skill_id])))
+                basis_unit=(exam_units[skill_id] if exam_units is not None
+                            else measured[skill_id]))))
         seen.add(skill_id)
 
     requirements: List[NewSkillRequirement] = []
@@ -246,7 +265,8 @@ def _exam_revision_evidence(
 
     The exam learn landing owns the exam revision writer, which expects
     the same question / weak answer / judge reason package as the old
-    exam path.  The latest failed finding supplies the source attempt.
+    exam path.  ``origin`` holds the findings of the skill's own exam; the
+    latest one supplies the source attempt.
     """
     sheets = {sheet.sheet_id: sheet for sheet in current.sheets}
     finding = origin[-1]
@@ -274,6 +294,24 @@ def _exam_revision_evidence(
         old_skill=by_id[skill_id])
 
 
+def _exam_units(current: PhaseReport) -> Dict[str, str]:
+    """Examined skill id -> the unit of its highest examined version."""
+    best: Dict[str, Tuple[int, str]] = {}
+    for unit in current.units:
+        refs = unit.injected_skills
+        if not isinstance(refs, list) or len(refs) != 1 \
+                or not isinstance(refs[0], dict):
+            continue
+        skill_id = refs[0].get("skill_id")
+        version = refs[0].get("version")
+        if not isinstance(skill_id, str) or not skill_id:
+            continue
+        version = version if isinstance(version, int) else 0
+        if skill_id not in best or version > best[skill_id][0]:
+            best[skill_id] = (version, unit.unit_id)
+    return {skill_id: unit_id for skill_id, (_, unit_id) in best.items()}
+
+
 def _measured_skills(current: PhaseReport) -> Dict[str, str]:
     """Measured skill id -> the first unit that injected it.
 
@@ -299,6 +337,16 @@ def _measured_text(measured: Dict[str, str]) -> str:
         or "(none)"
 
 
+def _finding_issues(finding: TrialFinding) -> str:
+    """The per-skill issue text the analysis wrote (shared by all windows)."""
+    for skill_id in finding.skill_ids:
+        package = finding.evidence.get(skill_id)
+        if package is not None and package.windows \
+                and package.windows[0].trigger_context:
+            return package.windows[0].trigger_context
+    return ""
+
+
 def _findings_text(findings: Sequence[TrialFinding]) -> str:
     lines = []
     for finding in findings:
@@ -306,6 +354,7 @@ def _findings_text(findings: Sequence[TrialFinding]) -> str:
             f"SHEET_ID: {finding.sheet_id}\n"
             f"TASK: {finding.task_ref}\n"
             f"SKILLS: {', '.join(finding.skill_ids) or '(none)'}\n"
+            f"SKILL_ISSUES:\n{_finding_issues(finding) or '(none)'}\n"
             f"REASON:\n{finding.reason}\n"
             f"PROFILE_NOTE:\n{finding.profile_note or '(none)'}\n"
             f"NEW_SKILL_NOTE:\n{finding.new_skill_note or '(none)'}")

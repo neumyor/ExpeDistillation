@@ -651,7 +651,8 @@ E1 内部的 runner：
 | 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
 | SKILL_ATTEMPT_ATTRIBUTION | G12 | author（学习相位 revise，每窗口一次） |
 | SKILL_ATTEMPT_REVISION | G11 | rewriter（学习相位 revise，逐 skill 整条重写） |
-| TRIAL_FAILURE_ANALYSIS | trial_level review | author（逐失败 trial 并发） |
+| TRIAL_FAILURE_ANALYSIS | trial_level review（live 相位） | author（逐失败 trial 并发） |
+| TRIAL_EXAM_ANALYSIS | trial_level review（exam 相位，按裁判判词分析纸面答卷） | author（逐失败答卷并发） |
 | TRIAL_REQUIREMENT_AGGREGATION | trial_level review | author（每相位一次） |
 | PROFILE_UPDATE | trial_level review | author（每相位一次） |
 | REQUIREMENT_SKILL | trial_level review | author（每个新需求一次） |
@@ -1079,7 +1080,9 @@ curation 的合并产物不考。考题的场景从技能版本的 `skill_origin
 后续 P04/P06 走 `methods/review/strategies.py` 的 `task_level` 或 `skill_level`，
 统一产出 per-skill 的 keep / revise / delete。也可以选择 `trial_level`：逐条失败
 trial 并发分析，聚合 agent 产出 per-skill 动作和跨 task 的新 skill 需求，profile
-agent 累积弱模型画像。
+agent 累积弱模型画像。exam 相位的 `trial_level` 按纸面答卷分析（裁判判词 +
+期望行为），每个技能的动作、改写证据和下一次考题的切点都只取自它自己的考题
+（见 `src/expedistill/methods/review/README.md`）。
 
 **多版本行合并（仅 exam 路径）**：作答仓共享，一条技能可能带好几行报告行
 （不同版本各一行，结论可能互相冲突）。合并规则：**最高版本的那行算数**，

@@ -1,8 +1,11 @@
 """Prompts for the trial-level review and its requirement/profile agents.
 
-Four calls make the new review path:
+Five prompts make the review path:
 
-* ``TRIAL_FAILURE_ANALYSIS`` -- explain one failed trial in free text;
+* ``TRIAL_FAILURE_ANALYSIS`` -- explain one failed executed trial in free
+  text;
+* ``TRIAL_EXAM_ANALYSIS`` -- explain one failed paper exam from the judge's
+  reason (the plan is the answer format, nothing was executed);
 * ``TRIAL_REQUIREMENT_AGGREGATION`` -- merge all findings into final
   skill actions and the global new-skill requirement document;
 * ``PROFILE_UPDATE`` -- merge profile notes into the accumulated model
@@ -16,6 +19,7 @@ from expedistill.prompts.registry import PromptSpec, register
 __all__ = [
     "PROFILE_UPDATE",
     "REQUIREMENT_SKILL",
+    "TRIAL_EXAM_ANALYSIS",
     "TRIAL_FAILURE_ANALYSIS",
     "TRIAL_REQUIREMENT_AGGREGATION",
 ]
@@ -77,6 +81,82 @@ Output ONLY JSON:
         description=(
             "Trial review: explain one failed trial and separate model limits "
             "from skill defects and missing capabilities."
+        ),
+    )
+)
+
+
+TRIAL_EXAM_ANALYSIS = register(
+    PromptSpec(
+        name="TRIAL_EXAM_ANALYSIS",
+        template="""You analyze ONE failed paper exam of a weaker terminal agent on Terminal
+Bench V2.1. Your job is diagnosis, not action selection.
+
+How the exam works: the scene below was cut from a real task at one point in
+time. The examined model saw only the scene and the skill catalog, chose up to
+a few skills to open, read them, and wrote a plan for what to do from this
+point. Nothing was executed. A plan in prose with no command output is the
+required answer format, so never give "the model did not execute commands"
+or "the trial stopped after a plan" as a cause. A judge compared the plan with
+the expected behavior and marked it failed for the reason given below.
+
+SCENE:
+{scene_text}
+
+EXPECTED BEHAVIOR (the grading standard the judge used):
+{expected_behavior}
+
+JUDGE'S REASON FOR THE FAILURE:
+{judge_reason}
+
+SKILL UNDER EXAMINATION (this exam was written for it):
+SKILL_ID: {exam_skill_id}
+{exam_skill_content}
+
+SKILL CATALOG (exactly what the examined model saw when choosing):
+{skill_catalog}
+
+SKILLS THE MODEL OPENED:
+{opened_skills}
+
+THE MODEL'S PLAN:
+{plan}
+
+Explain the defect the judge named. Take the judge's reason as the fact to
+explain; if the scene itself contradicts it, say so plainly.
+
+Only the stage this scene is about matters. A skill meant for an earlier or
+later stage is not applicable here, so not opening it is never a defect.
+
+For the skill under examination, decide which of these holds:
+- it was not opened, and its catalog line should have matched this scene:
+  its trigger or description is defective;
+- it was not opened, and its catalog line rightly does not match this
+  scene: the model chose wrongly, or the scene is outside the skill's stage;
+- it was opened, and it covers what the judge says is missing or wrong:
+  the model did not follow a correct skill (a model limitation);
+- it was opened, and it does not cover the defect, or it misleads: its
+  content is defective.
+
+List other skills only when they apply to this scene and contributed to the
+failure (opened and misleading, or matching but not opened).
+
+Use only evidence visible above. If the cause is unclear, say what is
+unclear instead of inventing certainty.
+
+Output ONLY JSON:
+{{"reason": "<a clear paragraph explaining the failure>",
+  "exam_skill_issue": "<which case above holds for the skill under examination, and the concrete evidence>",
+  "profile_note": "<what this says about the model as a student, or an empty string>",
+  "skills": [
+    {{"skill_id": "<exact bank skill id of another applicable skill>",
+      "issue": "<what this skill did or failed to do in this scene>"}}
+  ],
+  "new_skill_note": "<what new capability is missing, or an empty string>"}}
+""",
+        description=(
+            "Trial review on a paper exam: explain one failed exam plan from "
+            "the judge's reason, separating skill defects from model limits."
         ),
     )
 )

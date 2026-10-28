@@ -360,3 +360,256 @@ def test_aggregation_drops_requirement_with_no_finding_source():
 
     assert [item.row.action for item in items] == ["keep"]
     assert requirements == []
+
+
+OTHER = make_skill("traj/tb:t1/weak/00/seg01", "check the output file",
+                   summary="check the output")
+
+
+def _folder(*skills):
+    return {
+        "files": [{"skill_id": skill.skill_id,
+                   "filename": skill.skill_id.replace("/", "-").replace(
+                       ":", "-") + "/SKILL.md"}
+                  for skill in skills],
+        "catalog_text": "\n".join(
+            f"{skill.skill_id} | {skill.summary}" for skill in skills),
+    }
+
+
+def _exam_sheet(skill, unit_id, *, opened=(), verdict="failure",
+                scene="The service is down.", version=1,
+                expected="restart the service and verify it answers",
+                judge="the plan never verifies the service answers"):
+    folder = _folder(SKILL, OTHER)
+    cats = "\n".join(
+        "cat " + entry["filename"] for entry in folder["files"]
+        if entry["skill_id"] in {item.skill_id for item in opened})
+    metrics = {"scene_text": scene}
+    if expected is not None:
+        metrics["expected_behavior"] = expected
+    execution = ExecutionRecord(
+        sheet_id=f"{unit_id}/att00", unit_id=unit_id,
+        phase_label="p03:exam",
+        task_ref=f"{skill.skill_id}/v{version:02d}/exam", role="weak",
+        arm=None, model_role="weak", model_name="weak-model",
+        sample_index=0,
+        skills_injected=[{"skill_id": skill.skill_id, "version": version}],
+        steps=[Step(action=cats or "# no skill opened", observation="..."),
+               Step(action="restart the service", observation="")],
+        answer="restart the service",
+        metrics=metrics,
+        aux={"judge_verdict": verdict, "judge_reason": judge},
+        artifacts={"skill_folder": folder},
+        kind="trajectory")
+    return AnswerSheet(
+        sheet_id=execution.sheet_id, phase_label="p03:exam",
+        coverage=CoverageRecord(
+            unit_id=unit_id, attempt_index=0, present=True,
+            status="present"),
+        execution=execution,
+        grading=GradingRecord(verdict=verdict, basis="exam_judge",
+                              rule_name="exam_judge"))
+
+
+def _exam_unit(unit_id, skill, version=1):
+    return UnitSummary(
+        unit_id=unit_id, phase_label="p03:exam",
+        task_ref=f"{skill.skill_id}/v{version:02d}/exam", role="weak",
+        arm=None, expected_attempts=1,
+        injected_skills=[{"skill_id": skill.skill_id, "version": version}],
+        valid_count=1, success_count=0, status="normal", cause="")
+
+
+def _exam_context():
+    return dataclasses.replace(
+        _context(), phase_kind="exam", source_phase_label="p03:exam")
+
+
+def test_exam_trial_analysis_reads_the_judge_and_names_the_exam_skill():
+    sheet = _exam_sheet(SKILL, "exam-a", opened=[OTHER])
+    report = PhaseReport(phase_kind="exam", learning_usable=True,
+                         sheets=[sheet], units=[_exam_unit("exam-a", SKILL)])
+    handle = make_fake_handle("author", [json_script({
+        "reason": "the opened card pointed at the output file instead",
+        "exam_skill_issue": "not opened; its catalog line matches a down "
+                            "service, so its trigger is too narrow",
+        "profile_note": "",
+        "skills": [{"skill_id": OTHER.skill_id,
+                    "issue": "opened and misleading here"}],
+        "new_skill_note": "",
+    })])
+
+    findings, failed, model_errors = trial.analyze_trials(
+        current=report, bank=[SKILL, OTHER], context=_exam_context(),
+        handle=handle)
+
+    assert not failed and not model_errors
+    prompt = handle.client.calls[0]["user"]
+    assert "paper exam" in prompt
+    assert "the plan never verifies the service answers" in prompt
+    assert "restart the service and verify it answers" in prompt
+    assert SKILL.content in prompt
+    assert f"SKILL_ID: {OTHER.skill_id}\n{OTHER.content}" in prompt
+    finding = findings[0]
+    assert finding.skill_ids == [SKILL.skill_id, OTHER.skill_id]
+    assert (finding.step_start, finding.step_end) == (0, 2)
+    issues = finding.evidence[SKILL.skill_id].windows[0].trigger_context
+    assert issues.startswith(f"{SKILL.skill_id}: not opened")
+    assert "trigger is too narrow" in aggregation._findings_text(findings)
+
+
+def test_live_trial_analysis_keeps_the_executed_trial_prompt(monkeypatch):
+    sheet = _sheet(correct=False)
+    report = PhaseReport(phase_kind="live", learning_usable=True,
+                         sheets=[sheet], units=[_unit(sheet)])
+    monkeypatch.setattr(
+        trial.attribution, "task_instruction_for",
+        lambda benchmark, task: "do the task")
+    handle = make_fake_handle("author", [json_script({
+        "reason": "wrong command", "profile_note": "", "skills": [],
+        "new_skill_note": ""})])
+
+    trial.analyze_trials(current=report, bank=[SKILL], context=_context(),
+                         handle=handle)
+
+    prompt = handle.client.calls[0]["user"]
+    assert "TRIAL STEPS:" in prompt and "paper exam" not in prompt
+
+
+def test_exam_trial_analysis_needs_the_expected_behavior():
+    sheet = _exam_sheet(SKILL, "exam-a", expected=None)
+    report = PhaseReport(phase_kind="exam", learning_usable=True,
+                         sheets=[sheet], units=[_exam_unit("exam-a", SKILL)])
+
+    with pytest.raises(trial.CodeBugError, match="expected_behavior"):
+        trial.analyze_trials(
+            current=report, bank=[SKILL, OTHER], context=_exam_context(),
+            handle=make_fake_handle("author", []))
+
+
+def test_exam_trial_analysis_requires_a_verdict_on_the_exam_skill():
+    sheet = _exam_sheet(SKILL, "exam-a")
+    report = PhaseReport(phase_kind="exam", learning_usable=True,
+                         sheets=[sheet], units=[_exam_unit("exam-a", SKILL)])
+    handle = make_fake_handle("author", [json_script({
+        "reason": "unclear", "exam_skill_issue": " ", "profile_note": "",
+        "skills": [], "new_skill_note": ""})])
+
+    findings, failed, model_errors = trial.analyze_trials(
+        current=report, bank=[SKILL, OTHER], context=_exam_context(),
+        handle=handle)
+
+    assert findings == [] and not failed
+    assert model_errors == {sheet.sheet_id}
+
+
+def _exam_finding(sheet, skills):
+    return TrialFinding(
+        sheet_id=sheet.sheet_id, unit_id=sheet.coverage.unit_id,
+        task_ref=sheet.execution.task_ref, reason="the plan is wrong",
+        skill_ids=[skill.skill_id for skill in skills],
+        step_start=0, step_end=2)
+
+
+def test_exam_actions_answer_only_to_the_skills_own_exam():
+    sheet_a = _exam_sheet(SKILL, "exam-a", scene="Scene of skill A.")
+    sheet_b = _exam_sheet(OTHER, "exam-b", scene="Scene of skill B.")
+    report = PhaseReport(
+        phase_kind="exam", learning_usable=True, sheets=[sheet_b, sheet_a],
+        units=[_exam_unit("exam-b", OTHER), _exam_unit("exam-a", SKILL)])
+    findings = [_exam_finding(sheet_b, [OTHER, SKILL]),
+                _exam_finding(sheet_a, [SKILL])]
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [
+            {"skill_id": SKILL.skill_id, "action": "revise",
+             "reason": "widen its trigger"},
+            {"skill_id": OTHER.skill_id, "action": "revise",
+             "reason": "fix its steps"}],
+        "new_skill_requirements": [],
+    })])
+
+    items, _ = aggregation.aggregate_findings(
+        findings=findings, bank=[SKILL, OTHER], current=report,
+        context=_exam_context(), handle=handle)
+
+    by_skill = {item.row.target_id: item for item in items}
+    assert by_skill[SKILL.skill_id].row.basis_unit == "exam-a"
+    assert by_skill[SKILL.skill_id].evidence.fact(
+        "exam_question") == "Scene of skill A."
+    assert by_skill[OTHER.skill_id].row.basis_unit == "exam-b"
+    assert by_skill[OTHER.skill_id].evidence.fact(
+        "exam_question") == "Scene of skill B."
+
+
+def test_exam_skill_that_passed_its_own_exam_is_kept():
+    sheet_a = _exam_sheet(SKILL, "exam-a", verdict="success")
+    sheet_b = _exam_sheet(OTHER, "exam-b")
+    report = PhaseReport(
+        phase_kind="exam", learning_usable=True, sheets=[sheet_a, sheet_b],
+        units=[_exam_unit("exam-a", SKILL), _exam_unit("exam-b", OTHER)])
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [
+            {"skill_id": SKILL.skill_id, "action": "revise",
+             "reason": "it was not opened in another scene"},
+            {"skill_id": OTHER.skill_id, "action": "keep",
+             "reason": "model limitation"}],
+        "new_skill_requirements": [],
+    })])
+
+    items, _ = aggregation.aggregate_findings(
+        findings=[_exam_finding(sheet_b, [OTHER, SKILL])],
+        bank=[SKILL, OTHER], current=report, context=_exam_context(),
+        handle=handle)
+
+    row = {item.row.target_id: item.row for item in items}[SKILL.skill_id]
+    assert row.action == "keep"
+    assert row.basis_unit == "exam-a"
+    assert "own exam" in row.reason
+
+
+def test_exam_review_ignores_skills_not_examined_this_phase():
+    unexamined = make_skill("traj/tb:t1/weak/00/seg02", "unrelated card",
+                            summary="unrelated")
+    sheet_a = _exam_sheet(SKILL, "exam-a")
+    report = PhaseReport(
+        phase_kind="exam", learning_usable=True, sheets=[sheet_a],
+        units=[_exam_unit("exam-a", SKILL)])
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [
+            {"skill_id": SKILL.skill_id, "action": "keep", "reason": "ok"},
+            {"skill_id": unexamined.skill_id, "action": "keep",
+             "reason": "mentioned elsewhere"}],
+        "new_skill_requirements": [],
+    })])
+
+    items, _ = aggregation.aggregate_findings(
+        findings=[_exam_finding(sheet_a, [SKILL, unexamined])],
+        bank=[SKILL, OTHER, unexamined], current=report,
+        context=_exam_context(), handle=handle)
+
+    assert [item.row.target_id for item in items] == [SKILL.skill_id]
+
+
+def test_exam_basis_is_the_highest_examined_version():
+    report = PhaseReport(
+        phase_kind="exam", learning_usable=True, sheets=[],
+        units=[_exam_unit("exam-a-v2", SKILL, version=2),
+               _exam_unit("exam-a-v1", SKILL, version=1)])
+    assert aggregation._exam_units(report) == {SKILL.skill_id: "exam-a-v2"}
+
+
+def test_exam_review_skips_a_failed_bare_control_answer():
+    bare = dataclasses.replace(
+        _exam_sheet(SKILL, "exam-bare"), sheet_id="bare-sheet")
+    bare = dataclasses.replace(
+        bare, execution=dataclasses.replace(
+            bare.execution, sheet_id="bare-sheet", skills_injected=None))
+    report = PhaseReport(phase_kind="exam", learning_usable=True,
+                         sheets=[bare], units=[])
+
+    findings, failed, model_errors = trial.analyze_trials(
+        current=report, bank=[SKILL, OTHER], context=_exam_context(),
+        handle=make_fake_handle("author", []))
+
+    assert findings == [] and not failed and not model_errors

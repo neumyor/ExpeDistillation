@@ -96,6 +96,7 @@ def execution_from_attempt(
     metrics = {}
     if exam is not None:
         metrics["scene_text"] = getattr(exam, "scene_text", "")
+        metrics["expected_behavior"] = getattr(exam, "expected_behavior", "")
     return ExecutionRecord(
         sheet_id=attempt.attempt_id,
         unit_id=unit_id,

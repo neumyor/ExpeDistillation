@@ -51,7 +51,8 @@ ReviewResult
 
 - **baseline**：`decision.decide_task_list` 的 baseline-gap 路径，输出 task 级 `add`；
 - **live**：`strategies.skill_level` 或 `task_level`，输出 skill 级 keep / revise / delete；
-- **trial_level**：对每个失败 trial 并发调用 `TRIAL_FAILURE_ANALYSIS`，再由
+- **trial_level**：对每个失败 trial 并发调用 `TRIAL_FAILURE_ANALYSIS`（exam
+  相位的答卷改用 `TRIAL_EXAM_ANALYSIS`），再由
   `TRIAL_REQUIREMENT_AGGREGATION` 合并成 skill 动作和跨 task 的新 skill 需求；
   `PROFILE_UPDATE` 累积模型画像；
 - **exam**：`decision.decide_task_list` 后做 `strategies.merge_exam_rows`，输出合并后的 skill 行。
@@ -86,11 +87,39 @@ folder manifest 的别名归一化（目录名、文件名、`-SKILL.md` 形式�
 它补一行 `keep`（理由写明“no trial finding implicated this measured skill”），
 保证 measured 集合和 task list 一一对应。
 
-`trial_level` 在 exam 之后沿用 `learn_exam` 的改写器；聚合会把 revise 行从
-来源 exam 的 AnswerSheet 组装成带 `exam_question` / `weak_answer` /
-`judge_reason` 的 `EvidencePackage`，而不是 live 路径的
-`SkillAttemptEvidence`。新需求只接受确实有 trial finding 的 `source_sheet_ids`；
-模型若引用了成功或未知的 sheet，该需求会被丢弃，不会让整个聚合报错。
+聚合收到的每条 finding 带 `SKILL_ISSUES`：分析模型为每个技能写的具体问题，
+和整段 `REASON` 一起作为决定动作的依据。
+
+### exam 相位的 trial_level
+
+exam 的答卷是一次纸面作答：模型在一个切点上看目录、选技能、读技能、写计划，
+不执行任何命令。`TRIAL_EXAM_ANALYSIS` 因此按答卷的事实分析，输入全部取自答卷：
+场景（`metrics.scene_text`）、期望行为（`metrics.expected_behavior`）、裁判
+判词（`aux.judge_reason`）、被考技能（`skills_injected` 唯一一项）的正文、作答时
+看到的目录（`artifacts.skill_folder.catalog_text`）、实际打开的技能（第一步的
+`cat`，由 `composites.skill_use.skill_files_read` 解析）和计划（`answer`）。
+任何一项缺失都是接线错误，直接抛 `CodeBugError`。
+
+提示词规定：计划不带执行输出是答卷格式，不能当作失败原因；以裁判判词为准
+解释缺陷；只讨论这个切点上适用的技能，其他阶段的技能没打开不算缺陷；对被考
+技能必须在 `exam_skill_issue` 里给出四种情况之一（该匹配却没打开 = 触发缺陷；
+本就不匹配 = 模型选错或场景不在它的阶段；打开且覆盖判词指出的问题 = 模型
+局限；打开但没覆盖或误导 = 内容缺陷）。finding 的 `skill_ids` 第一项固定是
+被考技能，所有技能的范围都是整张答卷。
+
+聚合在 exam 相位按“一题一个技能”的契约决定每个技能的动作：
+
+- 基准单元（`basis_unit`）是该技能本相位最高版本的那道考题；
+- revise / delete 只能由这道考题的失败 finding 支撑；自己考过了的技能，即使
+  在别的考题里被提到，也保持 keep，理由写明“只有自己的考题能改写或删除它”；
+- revise 的 `EvidencePackage`（`exam_question` / `weak_answer` /
+  `judge_reason`）取自这道考题的答卷；
+- 本相位没有考到的技能不产生动作行。
+
+`learn_exam` 用基准单元对应考题的 `source_ref` 记录新版本的来源，因此改写后的
+版本在下一次 exam 中回到自己原来的切点重考，P03 → P05 的同一技能是逐题配对的
+比较。新需求只接受确实有 trial finding 的 `source_sheet_ids`；模型若引用了成功
+或未知的 sheet，该需求会被丢弃，不会让整个聚合报错。
 
 `trial_level` 的长输入角色要求：
 
