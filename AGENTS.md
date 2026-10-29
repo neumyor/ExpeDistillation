@@ -342,7 +342,9 @@ scripts/
               convert_v3_configs.py：一次性 schema v3→v5 配置转换（写新文件名；
                                   显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5→v6）
               launch_tb21_live_run.py：正式实验的 detached 启动器
-  remote/     远程（node29）相关：部署代码、同步产物、查看进度、停止任务
+  remote/     node29 上运行实验：deploy_node29.sh（rsync 部署一个提交一个目录）、
+              start_run_node29.sh（在 node29 上起/续跑 run）、README.md（运维手册）；
+              driver 与 Harbor 同机，run 目录、分析、审计都留在 node29
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
   audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节
 ```
@@ -358,7 +360,10 @@ scripts/
    `start_new_session=True` 起 supervisor，追踪自己 spawn 的 child PID，
    **不用 `pgrep -f`** 判活；从新的 shell 确认任务还活着；
 5. TB 远程链路以外层 `scripts/tb21/` 为参考实现，`scripts/remote/` 调 Harbor
-   的方式（镜像、重试名单、超时参数）与其保持一致，有差异要在脚本开头注明。
+   的方式（镜像、重试名单、超时参数）与其保持一致，有差异要在脚本开头注明；
+6. 正式实验在 node29 上运行：`EXPEDISTILL_TB_HOST=local`，driver 与 Harbor 同机，
+   不再经 ssh/scp。run 目录放 `/data2/niuyiming/expedistill_runs/`，代码放
+   `/data2/niuyiming/expedistill_code/<commit>/`，结果不拉回本机，分析也在 node29 上做。
 
 ## 六、配置与产物
 

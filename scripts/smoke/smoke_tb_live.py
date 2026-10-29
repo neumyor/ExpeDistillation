@@ -12,10 +12,10 @@ one attempt, weak model qwen3.6-flash-distill. Four phases, each timed:
                   after launch (simulated crash), then the same run id is
                   called again: must REJOIN the live runner (resumed=
                   "alive") without resubmitting and finish the trial.
-  4. evidence  -- the skills trial's trajectory step 0 must name
-                  /opt/openclaw-skills/<task>/SKILL.md (the vendor agent
-                  appends that to the instruction) and the trial dir must
-                  hold skill_activation.json: the SKILL.md really reached
+  4. evidence  -- the trial dir must hold skill_activation.json naming the
+                  /opt/openclaw-skills mount, and the trajectory's step 0
+                  must carry the vendor skill-reading suffix (it points the
+                  agent at <available_skills>): the SKILL.md really reached
                   the sandbox (the handover's unverified link, its §6).
 
 Usage:
@@ -110,7 +110,7 @@ def _run_once(plugin, task, handle, skills, workdir, label):
     start = time.time()
     outcome = plugin.run(task, handle, skills, workdir)
     elapsed = time.time() - start
-    print(f"[{label}] status={outcome.status} "
+    print(f"[{label}] correctness={outcome.correctness} "
           f"reward={outcome.meta.get('reward')} "
           f"resumed={outcome.meta.get('resumed')} "
           f"steps={len(outcome.steps)} "
@@ -130,6 +130,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", default="git-leak-recovery")
     parser.add_argument("--model", default="qwen3.6-flash-distill")
+    parser.add_argument("--token-suffix", default="",
+                        help="appended to the fixed attempt tokens; a new "
+                             "value gives fresh remote run ids")
     args = parser.parse_args()
 
     out_root = REPO / "runs" / f"smoke_tb_live_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -142,16 +145,16 @@ def main() -> int:
     # ---- phase 1: bare live rollout ------------------------------------
     workdir = out_root / "bare"
     plugin = TBPlugin(link=link, usage_recorder=recorder)
-    task = _task(args.task, "live1")
+    task = _task(args.task, "live1" + args.token_suffix)
     outcome, _ = _run_once(plugin, task, handle, "", workdir, "bare")
-    ok = _check(outcome.status in ("success", "failure"),
-                "bare verdict is success/failure (not infra)",
-                f"status={outcome.status}")
+    ok = _check(outcome.correctness is not None,
+                "bare run has a scorer verdict (not infra)",
+                f"correctness={outcome.correctness}")
     ok &= _check(len(outcome.steps) > 0, "trajectory reconstructed to steps",
                  f"{len(outcome.steps)} steps, "
                  f"skipped={outcome.meta.get('skipped_steps')}")
     verifier = workdir / "verifier_test_stdout.txt"
-    if outcome.status in ("success", "failure"):
+    if outcome.correctness is not None:
         ok &= _check(verifier.exists() and "collected" in
                      verifier.read_text(encoding="utf-8", errors="replace"),
                      "verifier log shows pytest ran (no pseudo zero)")
@@ -175,7 +178,7 @@ def main() -> int:
 
     # ---- phase 3: skills live rollout with a mid-poll crash -------------
     skills_workdir = out_root / "skills"
-    skills_task = _task(args.task, "live2")
+    skills_task = _task(args.task, "live2" + args.token_suffix)
     child = os.fork()
     if child == 0:
         # Child: launch the skills trial, die at the first poll.
@@ -196,9 +199,9 @@ def main() -> int:
                  f"resumed={outcome3.meta.get('resumed')}")
     ok &= _check(link.submits == 0, "no resubmit on rejoin",
                  f"submits={link.submits}")
-    ok &= _check(outcome3.status in ("success", "failure"),
-                 "skills verdict is success/failure",
-                 f"status={outcome3.status}")
+    ok &= _check(outcome3.correctness is not None,
+                 "skills run has a scorer verdict",
+                 f"correctness={outcome3.correctness}")
     ok &= _check(outcome3.meta.get("eval_mode") == "skills"
                  and outcome3.meta.get("skills_injected") is True,
                  "skills mode recorded in meta")
@@ -227,10 +230,10 @@ def main() -> int:
     delivered = False
     if traj_path.exists():
         steps0 = json.loads(traj_path.read_text(encoding="utf-8"))["steps"][0]
-        expected = f"/opt/openclaw-skills/{args.task}/SKILL.md"
-        delivered = expected in str(steps0.get("message", ""))
-    ok &= _check(delivered, "trajectory step 0 tells the agent to read the "
-                 "mounted SKILL.md")
+        message = str(steps0.get("message", ""))
+        delivered = "<available_skills>" in message and "SKILL.md" in message
+    ok &= _check(delivered, "trajectory step 0 points the agent at the "
+                 "skill directory (<available_skills>)")
     ok &= _check(SKILLS_BLOCK.splitlines()[0] in
                  real_link.run(f"cat {remote_root}/skills/"
                                f"{outcome3.meta['run_id']}/{args.task}/"

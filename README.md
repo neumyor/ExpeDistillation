@@ -490,7 +490,7 @@ E1 内部的 runner：
 
 | Runner | Benchmark | 执行方式 |
 |---|---|---|
-| TB runner | TerminalBench | 委托远程执行（Harbor + 腾讯沙箱一次 rollout），结束后从 Harbor trial 目录还原逐步轨迹 |
+| TB runner | TerminalBench | 委托 Harbor + 腾讯沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地一步一步执行到结束（外层 `benchmark/searchqa-eval/`） |
 | ALFWorld runner | ALFWorld | 本地一步一步执行到结束（外层 `benchmark/alfworld-eval/`，须用其 venv 并加载 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC`） |
 
@@ -503,7 +503,8 @@ E1 内部的 runner：
 - 远程 run id = `ed_<task>_<命名空间>_<attempt token>`。命名空间由 K1 计算：
   run 目录的真实路径、角色、模型名、注入的 skill 引用、渲染后 skill 文本块的
   摘要，合起来取 sha256 前 10 位。有了命名空间，不同臂、不同相位的执行不会
-  撞 id；
+  撞 id。run 目录的真实路径是命名空间的一部分，所以把 run 搬到另一台机器
+  （路径变了）不能续跑，要在新位置新建 run；
 - **同一个 run id 只提交一次**。提交时记两份启动条件：本地
   `<单元工作目录>/tb_remote/<run_id>.json`（另记 runner pid）和远程
   `jobs/<run_id>.ed_meta.json`。续跑时只有两份记录都在、且都与本次请求一致
@@ -1453,6 +1454,73 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
 
 "本 run 内终态"的意思：一个 run 是一次冻结的实验，同一个 run 目录里不再
 重试；想换一次采样再试，就开新 run 目录。
+
+### 在 node29 上运行（TB 正式实验）
+
+TB 的 rollout 在 node29 上由 Harbor 执行。driver 也放在 node29 上，命令和文件
+都不再经过本机到 node29 的 ssh/scp，所以本机网络波动和 ssh 并发限制不再影响
+实验。**run 目录、审计和分析都留在 node29，结果不拉回本机。**
+详细的运维手册在 `scripts/remote/README.md`，下面是完整流程。
+
+**位置**
+
+| 位置 | 内容 |
+|---|---|
+| `/data2/niuyiming/expedistill_code/<commit>/` | 一个提交一个目录：`src/`、`configs/`、`scripts/`、`.venv/`、`DEPLOYED_FROM`；从不覆盖，正式 run 固定在启动它的目录上续跑 |
+| `/data2/niuyiming/expedistill_runs/<run 名>/` | run 目录：`phases/`、`llm_requests/`、`driver.pid`、`driver.console.log` |
+| `/data2/niuyiming/expedistill/` | Harbor 的工作根（`jobs/`、`logs/`、`skills/`），已有，不动 |
+| `~/niuyiming/expedistill.env` | 密钥和连接变量，权限 600，不进 git |
+
+**一次性准备**：在 node29 上创建 `~/niuyiming/expedistill.env`（`chmod 600`）：
+
+```bash
+EXPEDISTILL_LLM_ENDPOINT=<端点>
+EXPEDISTILL_LLM_API_KEY=<密钥>
+EXPEDISTILL_TB_HOST=local
+EXPEDISTILL_TB_ROOT=/data2/niuyiming/expedistill
+EXPEDISTILL_TB_RUNNER=/data2/niuyiming/scripts/run_tencent_tb21_smoke_niuyiming.sh
+```
+
+`EXPEDISTILL_TB_HOST=local` 表示 driver 就在基准主机上：命令走本机 `bash`，
+文件走本机复制，不需要 `EXPEDISTILL_TB_KEY`。留空仍是配置错误，防止本机漏配后
+把远程命令跑在本机。本机模式下 runner 继承的是干净环境（与 ssh 登录会话
+一致），driver 的密钥不会传给 runner。
+
+**部署**（在本机，提交之后）：
+
+```bash
+scripts/remote/deploy_node29.sh          # 部署 HEAD；工作区有未提交改动时要加 --force
+```
+
+node29 访问不了 GitHub，所以用 `rsync` 推送；脚本在 node29 上建 venv 并
+`pip install -e .`（只装 `openai`、`pyyaml`），最后一行输出是 node29 上的代码目录。
+
+**启动与续跑**（在 node29 上）：
+
+```bash
+ssh <node29>
+cd /data2/niuyiming/expedistill_code/<commit>
+WORKERS=64 scripts/remote/start_run_node29.sh <配置名> [run 名] [--llm-timeout 1500 ...]
+```
+
+run 名已存在就是续跑，不写则新建 `<配置 stem>_<YYYYMMDD_HHMM>`。工作进程数
+不得低于 32。driver 是独立会话并写 pidfile，ssh 断开不影响它。
+续跑必须使用同一个代码目录和同一个 run 名：TB 的远程 run id 含 run 目录的
+真实路径，换路径等于新 run。
+
+**查看与分析**（都在 node29 上）：
+
+```bash
+RUN=/data2/niuyiming/expedistill_runs/<run 名>
+kill -0 "$(cat $RUN/driver.pid)" && echo alive    # 存活只看 pidfile，不用 pgrep -f
+tail -f $RUN/driver.console.log
+cd /data2/niuyiming/expedistill_code/<commit>
+.venv/bin/expedistill summary --run-dir $RUN
+.venv/bin/python scripts/audit/audit_live_run.py --run-dir $RUN --out $RUN/audit.json
+```
+
+**边界**：node29 是共享机器，只在 `~/niuyiming/` 与 `/data2/niuyiming/` 下工作，
+不碰他人进程；driver 所在的会话被清理或机器重启后，用同一条启动命令续跑。
 
 ---
 
