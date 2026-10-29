@@ -4,7 +4,7 @@
 的场景全部取自 baseline 的 attempt 02，而技能锚点来自 attempt 00/01（0/37 命中），
 另有 4 道题的切点越界。因此 P03/P05 判分、P04/P06 的审阅归因、以及本报告的
 终测数字（0.4487 / 0.5897）都来自被污染的考场，**不能作为结果引用**。
-修复见 `docs/decisions/exam_scene_source_sheet_20261029.md`；需要新建 run 重跑
+修复见 `docs/archive/exam_scene_source_sheet_20261029.md`；需要新建 run 重跑
 P03–P07。正文保留为过程记录，不再更新。P07 的逐 trial 失败归因
 （`docs/reports/p07_failure_analysis_20261029/synthesis.md`）仍是对那批轨迹的
 有效分析，但其“技能库”来自被污染的决策链。

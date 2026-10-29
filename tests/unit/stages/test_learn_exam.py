@@ -7,14 +7,17 @@ from expedistill.core import ids
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Exam
+from expedistill.core.trace import TraceRef
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.stages import learn_exam
 from tests.helpers.skills import make_skill
+from tests.helpers.traces import baseline_sheet, write_baseline_sheets
 
 SKILL = make_skill("traj/tb:t1/strong/00/seg03", "validate the outputs",
                    summary="validate outputs")
 OTHER = make_skill("traj/tb:t1/strong/00/seg01", "inspect the inputs",
                    summary="inspect inputs")
+SHEET = baseline_sheet("tb:t1", "strong", 0, n_steps=10)
 
 
 def _exam(skill, scene_step):
@@ -22,8 +25,7 @@ def _exam(skill, scene_step):
         exam_id=ids.make_exam_id(skill.skill_id, 1), skill_id=skill.skill_id,
         skill_version=1, scene_text=f"scene at step {scene_step}",
         expected_behavior="act", reference_answer="act",
-        source_ref={"phase_label": "p01:baseline", "unit_id": "u",
-                    "scene_step": scene_step})
+        scene=TraceRef("p01:baseline", SHEET.sheet_id, scene_step))
 
 
 def _unit(unit_id, skill):
@@ -36,7 +38,9 @@ def _unit(unit_id, skill):
 
 
 def test_a_revision_records_the_scene_of_its_basis_exam(tmp_path):
-    store = Store(tmp_path / "run")
+    run_dir = tmp_path / "run"
+    store = Store(run_dir)
+    write_baseline_sheets(run_dir, [SHEET])
     store.save(SKILL, "skills")
     store.save(_exam(SKILL, 6), "exams")
     store.save(_exam(OTHER, 4), "exams")
@@ -52,10 +56,14 @@ def test_a_revision_records_the_scene_of_its_basis_exam(tmp_path):
     package = EvidencePackage(target=SKILL.skill_id, old_skill=SKILL)
 
     learn_exam._land_revision(
-        SimpleNamespace(store=store), SimpleNamespace(label="p04:learn"),
+        SimpleNamespace(store=store, run_dir=run_dir),
+        SimpleNamespace(label="p04:learn"),
         row, package, outcome, phase_dir,
         [_unit("exam-other", OTHER), _unit("exam-own", SKILL)])
 
-    origin = read_jsonl(phase_dir / "skill_origins.jsonl")[0]
-    assert origin["version"] == 2
-    assert origin["source_ref"]["scene_step"] == 6
+    origin = read_jsonl(phase_dir / "provenance.jsonl")[0]
+    assert origin["version"] == 2 and origin["cause"] == "revise"
+    # Cut at the skill's OWN exam (step 6), not the other skill's (step 4),
+    # and at the same real execution the first exam used.
+    assert origin["scene"] == {"phase_label": "p01:baseline",
+                               "sheet_id": SHEET.sheet_id, "step": 6}

@@ -114,9 +114,16 @@ def _revise_once(
     if exam_question is not None:
         weak_answer = package.fact("weak_answer") or ""
         judge_reason = package.fact("judge_reason") or ""
+        source_context = package.fact("source_context")
+        if not source_context:
+            raise CodeBugError(
+                f"the exam evidence package of {package.target!r} carries "
+                "no source_context: a rewrite must see the real situation "
+                "its exam was cut from")
         result = rewrite_skill(
             skill, exam_question, weak_answer, judge_reason,
-            weak_profile, handle, usage=usage, run_dir=run_dir)
+            weak_profile, handle, source_context=source_context,
+            usage=usage, run_dir=run_dir)
         return {"content": result["content"],
                 "failure_category": result["failure_category"],
                 "revision_reason": result["rewrite_reason"],

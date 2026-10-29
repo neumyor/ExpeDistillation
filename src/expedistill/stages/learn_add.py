@@ -7,12 +7,11 @@ resume never calls the segmenter again for a task whose review result is
 already on disk.
 """
 
-from typing import Any, Optional, Sequence, Set, Tuple
+from typing import Any, Sequence, Set, Tuple
 
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.composites.skill_origins import append_origin, source_ref
-from expedistill.composites.unit_ids import unit_id_for_trajectory
-from expedistill.core.models import Subtask, Trajectory
+from expedistill.composites.trace import trace_of_trajectory
+from expedistill.core.trace import Provenance
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     InfrastructureError,
@@ -116,24 +115,23 @@ def _land_add(ctx: Any, phase: Any, item: ReviewItem, phase_dir,
         weak_profile=ctx.config.effective_weak_profile(),
         usage=ctx.usage, run_dir=ctx.run_dir, params=author_params)
     for skill in skills:
-        store.save(skill, "skills")
         subtask_id = getattr(skill, "subtask_id", None)
         experience = next(
             (exp for exp in package.source_experiences
              if exp["subtask"].subtask_id == subtask_id),
             package.source_experiences[0])
         subtask = experience["subtask"]
-        ref = source_ref(
-            source_phase_label or _source_label_of_subtask(ctx, subtask),
-            unit_id=_unit_of_subtask(ctx, source_phase_label, subtask),
-            scene_step=(getattr(subtask, "step_range", (0, 0))[0]))
-        append_origin(
-            phase_dir, skill_id=skill.skill_id, version=skill.version,
-            phase_label=phase.label,
-            change_note=(f"P02 {experience.get('mode', 'distill')}: "
-                         f"{getattr(subtask, 'label', '')}"),
-            context_text=str(experience.get("steps_view") or ""),
-            source_ref=ref)
+        scene = trace_of_trajectory(
+            ctx.run_dir, source_phase_label or "p01:baseline",
+            subtask.trajectory_id, subtask.step_range[0])
+        ledger.record_version(
+            store, phase_dir, ctx.run_dir, skill,
+            Provenance(
+                skill_id=skill.skill_id, version=skill.version,
+                phase_label=phase.label, cause="add", scene=scene,
+                sources=[scene],
+                note=(f"P02 {experience.get('mode', 'distill')}: "
+                      f"{getattr(subtask, 'label', '')}")))
         ledger.append_outcome(phase, row, skill.skill_id, "added",
                               skill.version, phase_dir)
 
@@ -141,25 +139,3 @@ def _land_add(ctx: Any, phase: Any, item: ReviewItem, phase_dir,
 def _skill_id_for(experience: Any) -> str:
     from expedistill.core.ids import make_skill_id
     return make_skill_id(experience["subtask"].subtask_id)
-
-
-def _source_label_of_subtask(ctx: Any, subtask: Subtask) -> str:
-    """A fallback source phase label for a stored subtask."""
-    # The first learn phase follows the baseline; later P02 add phases do
-    # not exist in the current sequence, so this is the baseline label.
-    return "p01:baseline"
-
-
-def _unit_of_subtask(ctx: Any, phase_label: str,
-                     subtask: Subtask) -> Optional[str]:
-    """The unit id of a baseline subtask's trajectory, when it is stored."""
-    if not phase_label:
-        return None
-    try:
-        trajectory = ctx.store.load(
-            "trajectories", subtask.trajectory_id, Trajectory)
-        return unit_id_for_trajectory(
-            phase_label=phase_label, benchmark=ctx.config.benchmark,
-            trajectory=trajectory)
-    except Exception:
-        return None

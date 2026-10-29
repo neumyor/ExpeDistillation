@@ -38,14 +38,14 @@ already exists is skipped with a receipt.
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
-from expedistill.composites.skill_origins import append_origin, source_ref
-from expedistill.composites.unit_ids import unit_id_for_trajectory
+from expedistill.composites.trace import trace_of_trajectory
 from expedistill.core.ids import (
     make_skill_id,
     parse_subtask_id,
     parse_trajectory_id,
 )
 from expedistill.core.models import Skill, Trajectory
+from expedistill.core.trace import Provenance
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError, InfrastructureError, ModelOutputError)
@@ -210,22 +210,20 @@ def _write_cluster(ctx: Any, phase: Any, cluster: Mapping[str, Any],
                 cluster, experiences_by_id,
                 weak_profile=weak_profile, handle=handle, params=params,
                 usage=ctx.usage, run_dir=ctx.run_dir)
-            store.save(skill, "skills")
             anchor = sorted(ids)[0]
             experience = experiences_by_id[anchor]
             subtask = experience["subtask"]
-            unit_id = _unit_of_subtask(
-                ctx, source_phase_label, subtask)
-            append_origin(
-                phase_dir=_phase_dir(ctx, phase),
-                skill_id=skill.skill_id, version=skill.version,
-                phase_label=phase.label,
-                change_note=(f"P02 cluster {cluster.get('family', '')}: "
-                             f"{cluster.get('theme', '')}"),
-                context_text=str(experience.get("steps_view") or ""),
-                source_ref=source_ref(
-                    source_phase_label or "p01:baseline",
-                    unit_id=unit_id, scene_step=subtask.step_range[0]))
+            scene = trace_of_trajectory(
+                ctx.run_dir, source_phase_label or "p01:baseline",
+                subtask.trajectory_id, subtask.step_range[0])
+            ledger.record_version(
+                store, _phase_dir(ctx, phase), ctx.run_dir, skill,
+                Provenance(
+                    skill_id=skill.skill_id, version=skill.version,
+                    phase_label=phase.label, cause="add", scene=scene,
+                    sources=[scene],
+                    note=(f"P02 cluster {cluster.get('family', '')}: "
+                          f"{cluster.get('theme', '')}")))
             return ({
                 "schema": _CLUSTER_OUTCOME_SCHEMA,
                 "phase_label": phase.label,
@@ -626,19 +624,6 @@ def execute_add_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
             items, all_clusters, existing_skill_rows, ctx.store),
     }, indent=2)
     return failed_tasks
-
-
-def _unit_of_subtask(ctx: Any, phase_label: str, subtask: Any) -> Any:
-    if not phase_label:
-        return None
-    try:
-        trajectory = ctx.store.load(
-            "trajectories", subtask.trajectory_id, Trajectory)
-        return unit_id_for_trajectory(
-            phase_label=phase_label, benchmark=ctx.config.benchmark,
-            trajectory=trajectory)
-    except Exception:
-        return None
 
 
 def _phase_dir(ctx: Any, phase: Any) -> Path:

@@ -1,5 +1,6 @@
 """The P04/P06 writer: new SkillAttemptEvidence only, no policy."""
 
+from expedistill.core.trace import TraceRef
 from expedistill.composites.skill_attempt_evidence import (
     SkillAttemptEvidence,
     WindowEvidence,
@@ -31,10 +32,15 @@ def _evidence(skill, windows=None):
         windows=(windows if windows is not None else [
             WindowEvidence(task_id="tb:t1", attempt=0, success=False,
                            kind="invocation", step_start=0, step_end=3,
+                           ref=TraceRef("p03:live", "sheet-0", 0),
                            trigger_steps=[0],
                            trigger_context="the service rejects connections",
                            behavior_after_trigger="the model restarted it",
                            improvement="name the exact service")]))
+
+
+CONTEXT_OF = lambda ref: (  # noqa: E731
+    f"real steps of {ref.phase_label}/{ref.sheet_id}@{ref.step}")
 
 
 def test_revision_writes_a_new_version():
@@ -45,12 +51,15 @@ def test_revision_writes_a_new_version():
         "summary": "a sharper one-liner"})])
 
     outcome = revise_one(skill, _evidence(skill), weak_profile=WEAK,
-                         handle=handle)
+                         handle=handle, context_of=CONTEXT_OF)
 
     assert outcome.outcome == "revised"
     assert outcome.content == REVISED
     assert outcome.summary == "a sharper one-liner"
-    assert "the service rejects connections" in handle.client.calls[0]["user"]
+    prompt = handle.client.calls[0]["user"]
+    assert "the service rejects connections" in prompt
+    # The window is shown with the real steps around its own pointer.
+    assert "real steps of p03:live/sheet-0@0" in prompt
 
 
 def test_no_windows_means_unchanged_without_a_call():
@@ -58,7 +67,8 @@ def test_no_windows_means_unchanged_without_a_call():
     handle = make_fake_handle("rewriter", [])
 
     outcome = revise_one(skill, _evidence(skill, windows=[]),
-                         weak_profile=WEAK, handle=handle)
+                         weak_profile=WEAK, handle=handle,
+                         context_of=CONTEXT_OF)
 
     assert outcome.outcome == "unchanged"
     assert handle.client.calls == []
@@ -71,7 +81,7 @@ def test_identical_rewrite_is_unchanged():
         "summary": "same"})])
 
     outcome = revise_one(skill, _evidence(skill), weak_profile=WEAK,
-                         handle=handle)
+                         handle=handle, context_of=CONTEXT_OF)
 
     assert outcome.outcome == "unchanged"
 
@@ -85,7 +95,7 @@ def test_a_rewrite_that_drops_sections_is_retried():
                      "revision_reason": "fixed", "summary": "good"})])
 
     outcome = revise_one(skill, _evidence(skill), weak_profile=WEAK,
-                         handle=handle)
+                         handle=handle, context_of=CONTEXT_OF)
 
     assert outcome.outcome == "revised"
     assert len(handle.client.calls) == 2

@@ -42,7 +42,9 @@ def test_writes_one_pending_skill_anchored_on_the_source_subtask():
     })])
 
     skill = write_requirement(
-        _requirement(), weak_profile="be concrete", handle=handle)
+        _requirement(), weak_profile="be concrete",
+        source_context="step 0\naction: check\nobservation: error",
+        handle=handle)
 
     assert isinstance(skill, Skill)
     assert skill.skill_id == make_skill_id(make_subtask_id("req/abc", 0))
@@ -50,3 +52,8 @@ def test_writes_one_pending_skill_anchored_on_the_source_subtask():
     assert skill.version == 1
     assert skill.source_subtasks == ["traj/tb:t1/weak/00/seg00"]
     assert "When a command fails" in skill.content
+
+    # The writer reads the resolved real steps it was given, not any
+    # window text carried on the requirement's evidence.
+    prompt = handle.client.calls[0]["user"]
+    assert "action: check" in prompt

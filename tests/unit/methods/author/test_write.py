@@ -83,7 +83,9 @@ def exam_package(skill):
                {"kind": "judge_reason",
                 "text": "the answer omits the verification step"},
                {"kind": "skill_problem",
-                "text": "the answer omits the verification step"}],
+                "text": "the answer omits the verification step"},
+               {"kind": "source_context",
+                "text": "step 4: the service was restarted but never probed"}],
         old_skill=skill)
 
 
@@ -144,7 +146,20 @@ def test_exam_shaped_package_goes_to_the_exam_rewrite_block():
     assert "How do you restart?" in prompt
     assert "I would restart it." in prompt
     assert "the answer omits the verification step" in prompt
+    # The rewriter also reads the real situation the exam was cut from.
+    assert "the service was restarted but never probed" in prompt
     assert MARKED_A in prompt
+
+
+def test_an_exam_package_without_a_real_scene_is_a_caller_bug():
+    skill = make_skill()
+    package = exam_package(skill)
+    package.facts = [fact for fact in package.facts
+                     if fact["kind"] != "source_context"]
+    with pytest.raises(CodeBugError, match="source_context"):
+        revise_group(task_row=revise_row(), packages=[package],
+                     rewriter_handle=make_fake_handle("rewriter", []),
+                     weak_profile=WEAK_PROFILE)
 
 
 def test_a_package_without_an_old_skill_is_a_caller_bug():

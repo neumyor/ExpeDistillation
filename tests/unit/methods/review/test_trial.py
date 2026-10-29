@@ -1,6 +1,7 @@
 """Trial-level review: failed-trial selection, analysis and aggregation."""
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,7 +16,8 @@ from expedistill.core.answer_sheet import (
     PhaseReport,
     UnitSummary,
 )
-from expedistill.core.models import Step
+from expedistill.core.models import Exam, Step
+from expedistill.core.trace import TraceRef
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.methods.review import (
     aggregation,
@@ -440,11 +442,21 @@ def test_exam_trial_analysis_reads_the_judge_and_names_the_exam_skill():
         "new_skill_note": "",
     })])
 
+    real_scene = TraceRef("p01:baseline", "real-sheet", 4)
+    store = SimpleNamespace(load=lambda kind, object_id, cls=None: Exam(
+        exam_id=object_id, skill_id=SKILL.skill_id, skill_version=1,
+        scene_text="s", expected_behavior="e", reference_answer="r",
+        scene=real_scene))
+
     findings, failed, model_errors = trial.analyze_trials(
         current=report, bank=[SKILL, OTHER], context=_exam_context(),
-        handle=handle)
+        handle=handle, store=store)
 
     assert not failed and not model_errors
+    # Every window of a paper answer points at the exam's REAL scene.
+    assert all(window.ref == real_scene
+               for evidence in findings[0].evidence.values()
+               for window in evidence.windows)
     prompt = handle.client.calls[0]["user"]
     assert "paper exam" in prompt
     assert "the plan never verifies the service answers" in prompt

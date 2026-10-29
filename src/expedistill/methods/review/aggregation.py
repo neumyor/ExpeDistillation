@@ -213,7 +213,10 @@ def aggregate_findings(
             trigger=trigger.strip(),
             evidence=evidence,
             source_sheet_ids=[str(item) for item in source_ids],
-            source_phase_label=context.source_phase_label))
+            source_phase_label=context.source_phase_label,
+            source_steps={
+                finding.sheet_id: finding.step_start
+                for finding in findings if finding.sheet_id in source_ids}))
     return items, requirements
 
 

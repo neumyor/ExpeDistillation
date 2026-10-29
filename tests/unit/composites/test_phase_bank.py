@@ -12,6 +12,7 @@ Fake models only (AGENTS.md section 8); no network.
 
 import pytest
 
+from expedistill.core.trace import TraceRef
 from expedistill.composites.phase_bank import (
     load_phase_bank,
     load_phase_bank_summary,
@@ -62,7 +63,7 @@ def _add_exam(store: Store, index: int) -> Exam:
         skill_id=_skill_id(index), skill_version=1,
         scene_text=f"scene {index}", expected_behavior=f"behavior {index}",
         reference_answer=f"reference {index}",
-        source_ref={"phase_label": "p01:baseline", "scene_step": 0})
+        scene=TraceRef("p01:baseline", "sheet-0", 0))
     store.save(exam, "exams")
     return exam
 

@@ -124,13 +124,23 @@ exam 的答卷是一次纸面作答：模型在一个切点上看目录、选技
 - revise / delete 只能由这道考题的失败 finding 支撑；自己考过了的技能，即使
   在别的考题里被提到，也保持 keep，理由写明“只有自己的考题能改写或删除它”；
 - revise 的 `EvidencePackage`（`exam_question` / `weak_answer` /
-  `judge_reason`）取自这道考题的答卷；
+  `judge_reason`）取自这道考题的答卷；落地前 `learn_exam` 再追加
+  `source_context`：`resolve(exam.scene)` 渲染出的真实轨迹，`REWRITE` 同时读到
+  “纸面答错了什么”和“真实情境是什么”（缺 `source_context` 是 `CodeBugError`）；
 - 本相位没有考到的技能不产生动作行。
 
-`learn_exam` 用基准单元对应考题的 `source_ref` 记录新版本的来源，因此改写后的
+`learn_exam` 用基准单元对应考题的 `scene`（一个 `TraceRef`）记录新版本的来源，因此改写后的
 版本在下一次 exam 中回到自己原来的切点重考，P03 → P05 的同一技能是逐题配对的
 比较。新需求只接受确实有 trial finding 的 `source_sheet_ids`；模型若引用了成功
 或未知的 sheet，该需求会被丢弃，不会让整个聚合报错。
+
+**窗口与来源指针**：每个 `WindowEvidence` 必带 `ref: TraceRef`（它自己的答卷和触发步，
+由 `trace_of_execution` 从同一条执行记录构造，步号与 attempt 不会错配）；exam 答卷是
+纸面，它的窗口 `ref` 是考题的真实场景 `exam.scene`。live 改写写 `Provenance` 时取第一个
+窗口的 `ref` 作 `scene`，`revise_one` 渲染每个窗口时附上 `resolve(ref)` 的真实步骤。
+需求落地（`learn_requirement`）对每个来源答卷：真实执行取 `trace_at(答卷, 失败窗口起点)`，
+考试答卷则经 `scene_of` 回到真实场景，所以需求技能的考题不会变成“考试的考试”，
+`REQUIREMENT_SKILL` 读到的也是真实步骤。
 
 `trial_level` 的长输入角色要求：
 

@@ -606,7 +606,8 @@ def test_rewrite_skill_missing_or_bad_summary_raises():
     ):
         handle = make_fake_handle(script=json_script(payload))
         with pytest.raises(ModelOutputError, match="summary"):
-            rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+            rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")
 
 
 def test_rewrite_summary_can_differ_from_the_originals():
@@ -626,7 +627,8 @@ def test_rewrite_summary_can_differ_from_the_originals():
         "summary": "a different, fresher one-liner",
     }))
 
-    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")
 
     assert result["summary"] == "a different, fresher one-liner"
 
@@ -643,7 +645,8 @@ def test_rewrite_accepts_a_long_summary():
         "summary": long_summary,
     }))
 
-    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")
 
     assert result["summary"] == long_summary
 
@@ -713,11 +716,13 @@ def test_rewrite_skill_wiring_and_result():
         error_description="The answer skips the verification step.",
         weak_profile=WEAK_PROFILE,
         handle=handle,
+        source_context="the real steps",
     )
 
     assert len(handle.client.calls) == 1
     expected = get_prompt("REWRITE").format(
         skill_text=skill.content,
+        source_context="the real steps",
         question_text="What should you do when X?",
         weak_answer="I would do X.",
         error_description="The answer skips the verification step.",
@@ -754,7 +759,8 @@ def test_rewrite_skill_keeps_the_marker_set():
         "summary": "check the login credentials before every login",
     }))
 
-    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")
 
     assert result["content"] == rewritten
     assert result["failure_category"] == "misread"
@@ -775,7 +781,8 @@ def test_rewrite_skill_dropping_the_markers_raises():
     }))
 
     with pytest.raises(ModelOutputError, match="bracket sections"):
-        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")
 
 
 def test_rewrite_skill_unmarked_original_skips_the_marker_check():
@@ -791,7 +798,8 @@ def test_rewrite_skill_unmarked_original_skips_the_marker_check():
         "summary": "do X when Y",
     }))
 
-    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+    result = rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")
 
     assert result["content"] == "Do X when Y, still plain prose."
 
@@ -809,8 +817,8 @@ def test_rewrite_skill_invalid_category_raises(category):
 
     with pytest.raises(ModelOutputError, match="failure_category"):
         rewrite_skill(
-            skill, "q", "a", "err", WEAK_PROFILE, handle
-        )
+            skill, "q", "a", "err", WEAK_PROFILE, handle,
+            source_context="the real steps")
 
 
 def test_rewrite_skill_empty_skill_text_raises():
@@ -824,4 +832,5 @@ def test_rewrite_skill_empty_skill_text_raises():
     }))
 
     with pytest.raises(ModelOutputError, match="skill_text"):
-        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle)
+        rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
+                      source_context="the real steps")

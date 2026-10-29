@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from expedistill.core.trace import TraceRef
 from expedistill.core.ids import (
     make_attempt_id, make_exam_id, make_skill_id, make_subtask_id,
     make_task_id, make_trajectory_id,
@@ -45,7 +46,7 @@ def an_exam(subtask="traj/tb:task-1/strong/00/seg01"):
     return Exam(exam_id=make_exam_id(skill_id, 1), skill_id=skill_id,
                 skill_version=1, scene_text="q?", expected_behavior="b",
                 reference_answer="a",
-                source_ref={"phase_label": "p02:learn", "scene_step": 0})
+                scene=TraceRef("p02:learn", "sheet-0", 0))
 
 
 def an_attempt(exam="traj/tb:task-1/strong/00/seg01/skill/v01/exam"):

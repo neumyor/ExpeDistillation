@@ -29,7 +29,8 @@ EXPECTED = {
     ),
     "REWRITE": (
         "G6",
-        {"skill_text", "question_text", "weak_answer", "error_description", "profile_section"},
+        {"skill_text", "question_text", "source_context", "weak_answer",
+         "error_description", "profile_section"},
     ),
     "EXAM_SCENE": (
         "G3",

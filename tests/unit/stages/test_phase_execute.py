@@ -35,7 +35,9 @@ from expedistill.composites import (
     unit_ids,
     verdicts,
 )
-from expedistill.composites.skill_origins import append_origin, source_ref
+from expedistill.composites.provenance import record_version
+from expedistill.composites.trace import trace_at
+from expedistill.core.trace import Provenance
 from expedistill.core.answer_sheet import CoverageRecord, UnitSpec
 from expedistill.core.config import (
     PHASE_ROLE_BASELINE,
@@ -806,13 +808,14 @@ def _exam_universe(ctx, tmp_path):
                   task_ref=task_id, role="strong", arm="strong",
                   expected_attempts=1, injected_skills=None)],
         dest)
-    append_origin(
-        phase_bank.phase_bank_dir(ctx.run_dir, "p02:learn"),
-        skill_id=skill.skill_id, version=skill.version,
-        phase_label="p02:learn", change_note="restart the service",
-        context_text="check, restart",
-        source_ref=source_ref(
-            "p01:baseline", unit_id=unit_id, scene_step=1))
+    scene = trace_at(sheet[0], 1)
+    record_version(
+        ctx.store, phase_bank.phase_bank_dir(ctx.run_dir, "p02:learn"),
+        ctx.run_dir, skill,
+        Provenance(
+            skill_id=skill.skill_id, version=skill.version,
+            phase_label="p02:learn", cause="add", scene=scene,
+            sources=[scene], note="restart the service"))
     return skill
 
 

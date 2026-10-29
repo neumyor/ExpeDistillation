@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 import expedistill.benchmarks.tb  # noqa: F401  (registers the plugin + TB_TASK_PROMPT)
+from expedistill.core.trace import TraceRef
 from expedistill.composites import answer_sheets as acceptance_sheets
 from expedistill.composites import coverage as coverage_io
 from expedistill.composites import live_measurement as lm
@@ -69,6 +70,7 @@ from expedistill.methods.curation import none as curation_none
 from expedistill.methods.curation import phase_bank as curation_phase_bank
 from expedistill.stages import learn_add, learn_ledger, phase_learn
 from expedistill.stages.context import RunSettings, StageContext
+from tests.helpers.traces import baseline_sheet, write_baseline_sheets
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.skills import make_skill
 
@@ -295,16 +297,21 @@ def _seed_finished_learn(store, run_dir, label="p02:learn"):
     curation_none.write_as_is(store, dest, BIG)
 
 
+_BASE_SHEET = baseline_sheet(TASK_ID, "strong", 0)
+
+
 def _seed_exam_phase(store, *, with_skill_verdict, version=1):
     """The exam phase's on-disk state: the skill, its exam, a wrong bare
-    answer and one judged with-skill attempt of ``version``."""
+    answer and one judged with-skill attempt of ``version``. The exam's
+    scene names a real baseline sheet, as a generated exam's does."""
     skill = _skill()
+    write_baseline_sheets(store.run_dir, [_BASE_SHEET])
     store.save(skill, "skills")
     store.save(Exam(
         exam_id=EXAM_ID, skill_id=skill.skill_id, skill_version=1,
         scene_text="How do you restart?", expected_behavior="restart and verify",
         reference_answer="restart and verify",
-        source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+        scene=TraceRef("p01:baseline", _BASE_SHEET.sheet_id, 0)),
         "exams")
     _seed_attempt(store, 0, verdict=False, purpose="bare")
     _seed_attempt(store, 1, skill=skill.skill_id, version=version,
@@ -888,12 +895,13 @@ def test_the_d4_merge_decides_for_the_current_version(tmp_path, monkeypatch):
     _install_curation(monkeypatch)
     _seed_finished_learn(ctx.store, ctx.run_dir)
     skill = _skill(version=2)
+    write_baseline_sheets(ctx.run_dir, [_BASE_SHEET])
     ctx.store.save(skill, "skills")
     ctx.store.save(Exam(
         exam_id=EXAM_ID, skill_id=skill.skill_id, skill_version=2,
         scene_text="How do you restart?", expected_behavior="restart and verify",
         reference_answer="restart and verify",
-        source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+        scene=TraceRef("p01:baseline", _BASE_SHEET.sheet_id, 0)),
         "exams")
     _seed_attempt(ctx.store, 0, verdict=False, purpose="bare")
     _seed_attempt(ctx.store, 1, skill=skill.skill_id, version=1,

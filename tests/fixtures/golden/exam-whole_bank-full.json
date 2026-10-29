@@ -880,7 +880,7 @@
         "PROFILE_UPDATE": "e2b6db0a6402be26f562f947788d9aca0cf9895da3a0fff0e316a3733b1efeac",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
         "REQUIREMENT_SKILL": "e19db0a1521c7ba2b96daaa290ba657b6310146900c53b338a076ba10da63fea",
-        "REWRITE": "ae1f94ec6efadd09d9c16a092ea44aacb6c08e58a8272645690e2754b8a48c34",
+        "REWRITE": "9351ca1882e452b5797412b818f4e39e5b3a6aaadf15952e274e28b8163f0e7a",
         "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
         "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
         "SKILL_ATTEMPT_ATTRIBUTION": "2c609a18018f623e54f755215889b91e6c37012095d59cdcd2f96f0e9170b5fc",
@@ -945,7 +945,7 @@
       "PROFILE_UPDATE": "e2b6db0a6402be26f562f947788d9aca0cf9895da3a0fff0e316a3733b1efeac",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
       "REQUIREMENT_SKILL": "e19db0a1521c7ba2b96daaa290ba657b6310146900c53b338a076ba10da63fea",
-      "REWRITE": "ae1f94ec6efadd09d9c16a092ea44aacb6c08e58a8272645690e2754b8a48c34",
+      "REWRITE": "9351ca1882e452b5797412b818f4e39e5b3a6aaadf15952e274e28b8163f0e7a",
       "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
       "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
       "SKILL_ATTEMPT_ATTRIBUTION": "2c609a18018f623e54f755215889b91e6c37012095d59cdcd2f96f0e9170b5fc",
@@ -1413,6 +1413,87 @@
   "phases/p02_learn/outcomes.jsonl.lock": {
     "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
+  "phases/p02_learn/provenance.jsonl": [
+    {
+      "cause": "add",
+      "note": "P02 distill: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 diagnose: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 distill: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 diagnose: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    }
+  ],
+  "phases/p02_learn/provenance.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "phases/p02_learn/skill_bank.jsonl": [
     {
       "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
@@ -1479,59 +1560,6 @@
       "version": 1
     }
   ],
-  "phases/p02_learn/skill_origins.jsonl": [
-    {
-      "change_note": "P02 distill: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 diagnose: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 distill: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 diagnose: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
-      },
-      "version": 1
-    }
-  ],
-  "phases/p02_learn/skill_origins.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
   "phases/p02_learn/task_list.jsonl": [
     {
       "action": "add",
@@ -3153,57 +3181,57 @@
     "exam_id": "traj/fakebench:t1/strong/00/seg00/skill/v01/exam",
     "expected_behavior": "Inspect the reported state first, then take the matching corrective action.",
     "reference_answer": "Inspect the state first.",
-    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
-    "schema_version": 3,
-    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-    "skill_version": 1,
-    "source_ref": {
+    "scene": {
       "phase_label": "p01:baseline",
-      "scene_step": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
-    }
+      "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00",
+      "step": 0
+    },
+    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
+    "schema_version": 4,
+    "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+    "skill_version": 1
   },
   "stage3_generation/exams/traj%2Ffakebench%3At1%2Fweak%2F00%2Fseg00%2Fskill%2Fv01%2Fexam.json": {
     "exam_id": "traj/fakebench:t1/weak/00/seg00/skill/v01/exam",
     "expected_behavior": "Inspect the reported state first, then take the matching corrective action.",
     "reference_answer": "Inspect the state first.",
-    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
-    "schema_version": 3,
-    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-    "skill_version": 1,
-    "source_ref": {
+    "scene": {
       "phase_label": "p01:baseline",
-      "scene_step": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
-    }
+      "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+      "step": 0
+    },
+    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
+    "schema_version": 4,
+    "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+    "skill_version": 1
   },
   "stage3_generation/exams/traj%2Ffakebench%3At2%2Fstrong%2F00%2Fseg00%2Fskill%2Fv01%2Fexam.json": {
     "exam_id": "traj/fakebench:t2/strong/00/seg00/skill/v01/exam",
     "expected_behavior": "Inspect the reported state first, then take the matching corrective action.",
     "reference_answer": "Inspect the state first.",
-    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
-    "schema_version": 3,
-    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-    "skill_version": 1,
-    "source_ref": {
+    "scene": {
       "phase_label": "p01:baseline",
-      "scene_step": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
-    }
+      "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00",
+      "step": 0
+    },
+    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
+    "schema_version": 4,
+    "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+    "skill_version": 1
   },
   "stage3_generation/exams/traj%2Ffakebench%3At2%2Fweak%2F00%2Fseg00%2Fskill%2Fv01%2Fexam.json": {
     "exam_id": "traj/fakebench:t2/weak/00/seg00/skill/v01/exam",
     "expected_behavior": "Inspect the reported state first, then take the matching corrective action.",
     "reference_answer": "Inspect the state first.",
-    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
-    "schema_version": 3,
-    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-    "skill_version": 1,
-    "source_ref": {
+    "scene": {
       "phase_label": "p01:baseline",
-      "scene_step": 0,
-      "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
-    }
+      "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+      "step": 0
+    },
+    "scene_text": "A service reports an unexpected state and stops. What should be done before anything else?",
+    "schema_version": 4,
+    "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+    "skill_version": 1
   },
   "stage3_generation/skills/traj%2Ffakebench%3At1%2Fstrong%2F00%2Fseg00%2Fskill.json": {
     "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",

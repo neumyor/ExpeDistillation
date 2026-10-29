@@ -5,15 +5,17 @@ collects the answer-sheet evidence.  This module only lands the rows and
 keeps the revision ledger's version guard.
 """
 
-import json
 from typing import Any, List, Optional, Sequence, Set, Tuple
 
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.composites.skill_origins import append_origin, source_ref_for_unit
+from expedistill.benchmarks.registry import get_plugin
+from expedistill.composites import trace
+from expedistill.composites.trace import render_context, scene_of
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Exam, Skill
+from expedistill.core.trace import Provenance
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError,
@@ -23,6 +25,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store
 from expedistill.methods.author import write as author
+from expedistill.methods.review import attribution
 from expedistill.methods.review.contracts import ReviewItem
 
 from expedistill.stages import learn_ledger as ledger
@@ -116,6 +119,9 @@ def _land_revise(ctx: Any, phase: Any, item: ReviewItem,
             f"review returned no exam evidence for {skill.skill_id!r}")
     ledger.write_revision_plan(phase, row, skill.skill_id, skill.version,
                                phase_dir)
+    package.facts.append({
+        "kind": "source_context",
+        "text": _source_context_of(ctx, current_rows, row)})
     outcomes = author.revise_group(
         task_row=row, packages=[package],
         rewriter_handle=ctx.handle("rewriter"),
@@ -125,6 +131,23 @@ def _land_revise(ctx: Any, phase: Any, item: ReviewItem,
         return
     _land_revision(ctx, phase, row, package, outcomes[0], phase_dir,
                    current_rows)
+
+
+def _source_context_of(ctx: Any, current_rows: Optional[List[UnitSummary]],
+                       row: TaskListRow) -> str:
+    """The real trajectory the basis exam was cut from, rendered once.
+
+    The rewriter is shown the same steps the exam scene was written from,
+    next to the paper answer that failed, so it learns from the actual
+    situation rather than from the exam's paraphrase of it.
+    """
+    summary = _report_row_of(current_rows, row.basis_unit)
+    exam = ctx.store.load("exams", summary.task_ref, Exam)
+    return render_context(trace.resolve(
+        ctx.run_dir, scene_of(exam),
+        instruction_for=lambda task: attribution.task_instruction_for(
+            ctx.config.benchmark, task),
+        view_rules=get_plugin(ctx.config.benchmark).view_rules))
 
 
 def _always_revise(package: Any) -> str:
@@ -161,7 +184,6 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
         stored.content = outcome.content
         stored.summary = outcome.summary
         stored.version = expected
-        store.save(stored, "skills")
     elif not (stored.version == expected
               and stored.content == outcome.content
               and stored.summary == outcome.summary):
@@ -170,24 +192,21 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, package: Any,
             "content the author did not produce: the store drifted from "
             "the revision ledger")
     summary = _report_row_of(current_rows, row.basis_unit)
-    exam = None
-    if summary.task_ref:
-        try:
-            exam = store.load("exams", summary.task_ref, Exam)
-        except Exception:
-            exam = None
-    ref = (exam.source_ref if exam is not None
-           else source_ref_for_unit(
-               summary.unit_id,
-               sheet_id=(summary.sheet_ids[0] if summary.sheet_ids else None)))
-    append_origin(
-        phase_dir, skill_id=skill_id, version=expected,
-        phase_label=phase.label,
-        change_note=(outcome.revision_reason
-                     or package.fact("judge_reason")
-                     or "exam revision"),
-        context_text=json.dumps(package.facts, ensure_ascii=False),
-        source_ref=ref)
+    if not summary.task_ref or not store.exists("exams", summary.task_ref):
+        raise CodeBugError(
+            f"the exam {summary.task_ref!r} behind the revision of "
+            f"{skill_id!r} is not stored; a rewrite must be cut from the "
+            "same real scene as the exam that judged it")
+    exam = store.load("exams", summary.task_ref, Exam)
+    # The rewrite is examined again at the original cut, so P03 -> P05
+    # compares the same scene before and after the change.
+    ledger.record_version(
+        store, phase_dir, ctx.run_dir, stored,
+        Provenance(
+            skill_id=skill_id, version=expected, phase_label=phase.label,
+            cause="revise", scene=scene_of(exam), sources=[scene_of(exam)],
+            note=(outcome.revision_reason
+                  or package.fact("judge_reason") or "exam revision")))
     ledger.append_outcome(phase, row, skill_id, outcome.outcome, expected,
                           phase_dir)
 

@@ -14,10 +14,12 @@ calls and resume rules.
 
 from typing import Any, Dict, List, Optional, Sequence, Set
 
+from expedistill.composites import provenance as _provenance
 from expedistill.composites.decision import KEEP, DELETE
 from expedistill.composites.skill_status import discard_skill
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
+from expedistill.core.trace import Provenance
 from expedistill.infra.store import (
     Store,
     append_jsonl,
@@ -34,6 +36,7 @@ __all__ = [
     "land_delete",
     "land_keep",
     "outcome_skills",
+    "record_version",
     "receipted_skills",
     "revision_rows",
     "revision_skip_targets",
@@ -233,3 +236,13 @@ def land_keep_or_delete(store: Store, phase: Any, row: TaskListRow,
         land_delete(store, phase, row, phase_dir)
     else:
         raise ValueError(f"not a keep/delete row: {row.action!r}")
+
+
+def record_version(store: Store, phase_dir, run_dir, skill: Skill,
+                   provenance: Provenance) -> None:
+    """Save a new or revised skill version together with its provenance.
+
+    The one door for every learn path (P02 add, live revise, exam revise,
+    requirement): see ``composites.provenance.record_version``.
+    """
+    _provenance.record_version(store, phase_dir, run_dir, skill, provenance)

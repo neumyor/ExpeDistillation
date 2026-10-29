@@ -15,9 +15,8 @@ policies:
   local to the record (a v1 Skill segment row derives ``source_subtasks``
   from its id); a v1 Skill merge product needs its sibling records and
   raises with a pointer to ``migrate_skill_record`` -- never a silent
-  default either way. ``Exam`` is the one exception: the generalization
-  exam (schema v3) replaced the old protocol outright, so a v1/v2 exam
-  row raises instead of migrating.
+  default either way. ``Exam`` reads only its current schema and raises
+  on any other.
 
 IDs are not generated here: they follow the deterministic rules in
 ``expedistill.core.ids`` and are assigned by the caller. Objects reference each
@@ -33,6 +32,8 @@ This module depends on the standard library only (layer 0).
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from expedistill.core.trace import TraceRef
+
 # Per-object schema versions. Bump the affected object's constant whenever a
 # field is added or its meaning changes (README section 2 is the contract).
 # Trajectory v2 (R2b): the three-value run status (success / failure /
@@ -46,12 +47,8 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 TRAJECTORY_SCHEMA_VERSION = 2
 SUBTASK_SCHEMA_VERSION = 1
 SKILL_SCHEMA_VERSION = 3
-# Exam v3 (generalization exam, 2026-10-27): one exam per skill version,
-# rebuilt from the source trajectory; ``scene_text`` / ``source_ref``
-# were replaced by ``scene_text`` and the source/skill identity fields.
-# Old v1/v2 exam rows are NOT migrated (the record no longer carries the
-# scenario), so ``Exam.from_dict`` refuses them loudly.
-EXAM_SCHEMA_VERSION = 3
+# Exam v4: the scene is a ``TraceRef`` (one answer sheet and a step).
+EXAM_SCHEMA_VERSION = 4
 ATTEMPT_SCHEMA_VERSION = 1
 
 # ---------------------------------------------------------------------------
@@ -298,27 +295,22 @@ class Skill(_Record):
 class Exam(_Record):
     """One text exam generated for one skill version (generalization exam).
 
-    Schema v3 (decision doc generalization_exam_20261027): the exam is a
-    reconstructed scene, not a question written from the skill's own
-    subtask. ``exam_id`` is ``ids.make_exam_id(skill_id, skill_version)``,
-    so a skill version has exactly one exam and a version bump gets a new
-    one.
+    Schema v4 (decision docs generalization_exam_20261027 and
+    provenance_trace_context_20261029): the exam is a reconstructed scene,
+    not a question written from the skill's own subtask. ``exam_id`` is
+    ``ids.make_exam_id(skill_id, skill_version)``, so a skill version has
+    exactly one exam and a version bump gets a new one.
 
     ``scene_text`` is the situation restored from the source trajectory's
     real prefix; ``expected_behavior`` says what a model that understands
     the skill should do in it; ``reference_answer`` is the answer the
     judge compares against. All three are natural language.
 
-    ``source_ref`` is the origin pointer written by the learn phase
-    (``composites.skill_origins.source_ref``): ``phase_label``,
-    ``unit_id``, ``sheet_id`` and ``scene_step``, with the optional keys
-    absent rather than None. It is free-form by design -- it names where
-    the evidence came from, it is not an enum.
+    ``scene`` is the ``TraceRef`` the scene was cut at -- one execution
+    answer sheet and a step, copied from the skill version's
+    ``Provenance.scene`` when the exam was generated, so every exam names
+    its own source without replaying a resolver.
 
-    Old v1/v2 exam rows are not migrated: they carry a question and a
-    prompt-writing path that the generalization exam no longer uses (and
-    no scene), so ``from_dict`` refuses them with a loud ValueError
-    (decision doc "已知边界": old runs keep their own code branch).
     """
 
     exam_id: str
@@ -331,8 +323,8 @@ class Exam(_Record):
     #: What a model that understands the skill should do, natural language.
     expected_behavior: str
     reference_answer: str
-    #: Origin pointer; see the class docstring.
-    source_ref: Dict[str, Any]
+    #: Where the scene was cut; see the class docstring.
+    scene: TraceRef
     schema_version: int = EXAM_SCHEMA_VERSION
 
     @classmethod
@@ -341,13 +333,11 @@ class Exam(_Record):
         if version != EXAM_SCHEMA_VERSION:
             raise ValueError(
                 f"exam {data.get('exam_id')!r} is a schema-v{version} "
-                "record; the generalization exam stores schema v3 only "
-                "(exam_id / skill_id / skill_version / scene_text / "
-                "expected_behavior / reference_answer / source_ref). Old "
-                "exam protocol records are no longer supported: they are "
-                "not migrated and an old run's exams are not reused "
-                "(docs/decisions/generalization_exam_20261027.md)")
-        return cls(**_known_kwargs(cls, data))
+                f"record; this code reads schema v{EXAM_SCHEMA_VERSION} only")
+        kwargs = _known_kwargs(cls, data)
+        if "scene" in kwargs:
+            kwargs["scene"] = TraceRef.from_dict(kwargs["scene"])
+        return cls(**kwargs)
 
 
 # ---------------------------------------------------------------------------

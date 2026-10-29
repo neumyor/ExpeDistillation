@@ -9,6 +9,7 @@ from expedistill.core.contracts import TaskListRow
 from expedistill.infra.store import read_jsonl
 from expedistill.methods.review.contracts import ReviewItem
 from expedistill.stages import learn_add, learn_ledger
+from tests.helpers.traces import baseline_sheet, write_baseline_sheets
 
 BENCHMARK = "tb"
 TASK_ID = ids.make_task_id(BENCHMARK, "t1")
@@ -38,17 +39,20 @@ class _FlakyStore:
 
 def _package():
     experiences = [
-        {"subtask": SimpleNamespace(subtask_id=subtask_id),
+        {"subtask": SimpleNamespace(
+            subtask_id=subtask_id, trajectory_id=TRAJECTORY_ID,
+            step_range=(index, index + 2), label=f"segment {index}"),
          "steps_view": "steps", "mode": "distill",
          "segment_position": ""}
-        for subtask_id in SUBTASK_IDS
+        for index, subtask_id in enumerate(SUBTASK_IDS)
     ]
     return SimpleNamespace(target=TASK_ID, facts=[], segments=[],
                            source_experiences=experiences)
 
 
 def _skill(subtask_id):
-    return SimpleNamespace(skill_id=ids.make_skill_id(subtask_id), version=1)
+    return SimpleNamespace(skill_id=ids.make_skill_id(subtask_id), version=1,
+                           subtask_id=subtask_id)
 
 
 def _ctx(tmp_path, store):
@@ -73,6 +77,7 @@ def _phase():
 def test_a_partial_add_resume_writes_the_missing_skill(tmp_path, monkeypatch):
     phase_dir = tmp_path / "phase"
     phase_dir.mkdir()
+    write_baseline_sheets(tmp_path / "run", [baseline_sheet(TASK_ID, "strong", 0)])
     store = _FlakyStore()
     ctx = _ctx(tmp_path, store)
     row = TaskListRow(target_kind="task", target_id=TASK_ID,
@@ -94,20 +99,24 @@ def test_a_partial_add_resume_writes_the_missing_skill(tmp_path, monkeypatch):
     # The first pass saves skill 0, receipts it, then dies before skill 1.
     store.fail_on_call = 2
     with pytest.raises(RuntimeError, match="disk died"):
-        learn_add._land_add(ctx, _phase(), item, phase_dir)
+        learn_add._land_add(ctx, _phase(), item, phase_dir, "p01:baseline")
 
     store.fail_on_call = None
-    learn_add._land_add(ctx, _phase(), item, phase_dir)
+    learn_add._land_add(ctx, _phase(), item, phase_dir, "p01:baseline")
 
     assert sorted(store.saved) == sorted(SKILL_IDS)
     outcomes = read_jsonl(phase_dir / learn_ledger.OUTCOMES_NAME)
     assert [record["skill_id"] for record in outcomes] == SKILL_IDS
-    origins = read_jsonl(phase_dir / "skill_origins.jsonl")
+    origins = read_jsonl(phase_dir / "provenance.jsonl")
     assert [row["skill_id"] for row in origins] == SKILL_IDS
-    assert all(row["source_ref"].get("phase_label") for row in origins)
+    # Every scene is the exact attempt that ran the skill's own trajectory.
+    assert all(row["cause"] == "add" for row in origins)
+    assert [row["scene"]["step"] for row in origins] == [0, 1]
+    assert {row["scene"]["sheet_id"].split("::")[1] for row in origins} == {
+        TRAJECTORY_ID}
 
     # A completed task replays without another write or receipt.
-    learn_add._land_add(ctx, _phase(), item, phase_dir)
+    learn_add._land_add(ctx, _phase(), item, phase_dir, "p01:baseline")
     assert len(read_jsonl(phase_dir / learn_ledger.OUTCOMES_NAME)) == 2
 
     # The configured author method is the driver that ran.

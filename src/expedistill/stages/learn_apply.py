@@ -11,15 +11,16 @@ No policy lives here: the row says keep/revise/delete; the writer only
 writes.
 """
 
-import json
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from expedistill.composites import decision
+from expedistill.benchmarks.registry import get_plugin
+from expedistill.composites import decision, trace
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.composites.skill_origins import append_origin, source_ref_for_unit
+from expedistill.composites.trace import render_context
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
+from expedistill.core.trace import Provenance
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError,
@@ -29,6 +30,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store
 from expedistill.methods.author.revise import revise_one
+from expedistill.methods.review import attribution
 from expedistill.methods.review.contracts import ReviewItem
 
 from expedistill.stages import learn_ledger as ledger
@@ -171,12 +173,27 @@ def _execute_revise_group(
                               if weak_profile is not None
                               else ctx.config.effective_weak_profile()),
                 handle=ctx.handle("rewriter"),
+                context_of=_context_renderer(ctx),
                 usage=ctx.usage, run_dir=ctx.run_dir)
         except ModelOutputError as exc:
             recorder.record(skill.skill_id, phase.label, exc, exc)
             continue
         _land_revision(ctx, phase, row, skill, outcome, phase_dir,
                        current_rows, package)
+
+
+def _context_renderer(ctx: Any):
+    """``TraceRef`` -> the rendered real steps around it (one lookup)."""
+    plugin = get_plugin(ctx.config.benchmark)
+
+    def render(ref):
+        return render_context(trace.resolve(
+            ctx.run_dir, ref,
+            instruction_for=lambda task: attribution.task_instruction_for(
+                ctx.config.benchmark, task),
+            view_rules=plugin.view_rules))
+
+    return render
 
 
 def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
@@ -211,7 +228,6 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
         stored.content = outcome.content
         stored.summary = outcome.summary
         stored.version = expected
-        store.save(stored, "skills")
     elif not (stored.version == expected
               and stored.content == outcome.content
               and stored.summary == outcome.summary):
@@ -219,18 +235,21 @@ def _land_revision(ctx: Any, phase: Any, row: TaskListRow, old: Skill,
             f"skill {skill_id!r} is at version {stored.version} with "
             "content the author did not produce; the store drifted from "
             "the revision ledger")
-    summary = _report_row_of(current_rows, row.basis_unit)
-    append_origin(
-        phase_dir, skill_id=skill_id, version=expected,
-        phase_label=phase.label,
-        change_note=(outcome.revision_reason or "revised"),
-        context_text=json.dumps(
-            package.to_dict() if hasattr(package, "to_dict") else package,
-            ensure_ascii=False, default=str),
-        source_ref=source_ref_for_unit(
-            summary.unit_id,
-            sheet_id=(summary.sheet_ids[0] if summary.sheet_ids else None),
-            scene_step=_scene_step(package)))
+    _report_row_of(current_rows, row.basis_unit)
+    windows = list(getattr(package, "windows", None) or [])
+    if not windows:
+        raise CodeBugError(
+            f"revision evidence for {skill_id!r} carries no window")
+    # The first window is the one the writer is shown first; its own
+    # attempt and step are the scene, so the next exam is cut from the very
+    # place the rewrite was learned from.
+    ledger.record_version(
+        store, phase_dir, ctx.run_dir, stored,
+        Provenance(
+            skill_id=skill_id, version=expected, phase_label=phase.label,
+            cause="revise", scene=windows[0].ref,
+            sources=[window.ref for window in windows],
+            note=outcome.revision_reason or "revised"))
     ledger.append_outcome(phase, row, skill_id, "revised", expected,
                           phase_dir)
 
@@ -258,13 +277,3 @@ def _assert_unique(rows: Sequence[TaskListRow]) -> None:
                 f"the decision carries two rows for target "
                 f"{row.target_id!r}; each target must have exactly one")
         seen.add(row.target_id)
-
-
-def _scene_step(package: Any) -> int:
-    windows = getattr(package, "windows", None) or []
-    for window in windows:
-        triggers = getattr(window, "trigger_steps", None) or []
-        if triggers:
-            return max(0, int(triggers[0]))
-        return max(0, int(getattr(window, "step_start", 0) or 0))
-    return 0

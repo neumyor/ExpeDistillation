@@ -708,10 +708,22 @@ Skill（schema v3）
   rewrite_history[ 旧版正文、旧摘要、错因归类与改写原因 ],
   merged_from[ skill_id ... ](仅整理产物)
 
-Exam（泛化考题，schema v3）
+Exam（泛化考题，schema v4）
   exam_id(skill_id + version), skill_id, skill_version,
   scene_text(自然语言场景), expected_behavior(自然语言期望行为),
-  reference_answer(判卷参考), source_ref(来源相位/unit/sheet/场景步号)
+  reference_answer(判卷参考),
+  scene(TraceRef：来源相位 + 一张答卷 id + 场景切点步号；出题时从该技能
+        版本的 Provenance.scene 复制)
+
+TraceRef（精确位置，值对象，core/trace.py）
+  phase_label, sheet_id(恰好一张执行答卷), step(该答卷 steps 的 0 起下标)
+  —— 不存 unit / task / attempt：这些都能从答卷推出，存了就会有歧义
+
+Provenance（技能版本的来源，值对象，每个版本一条）
+  skill_id, version, phase_label(产出该版本的 learn 相位),
+  cause(add / revise / requirement / merge),
+  scene(TraceRef | null：该版本的考题从哪里切；合并产物为 null),
+  sources[ TraceRef ](背后全部证据位置，审计用), note(写作 / 改写原因)
 
 Attempt（作答记录）
   attempt_id, exam_id, skill_id + skill_version(都为 null = 裸答),
@@ -844,8 +856,9 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  每条技能只写一行，续跑按版本号重放）
     outcomes.jsonl               学习相位：逐技能回执（见 5.6 的结局清单；
                                  同一目标每条技能至多一条回执，重放不补写）
-    skill_origins.jsonl          学习相位：每个技能版本的来源记录（来源执行
-                                 相位 / unit / sheet / 场景步号 / 修改原因）
+    provenance.jsonl             学习相位：每个技能版本一条 Provenance
+                                 （scene / sources 均为 TraceRef；唯一的
+                                 写入口是 ledger.record_version）
     skill_bank.jsonl             学习相位：本相位的技能库工件（全体成员，
                                  含待定；下一个执行相位的交付从这里读）
     bank_summary.json            工件摘要（成员 / 大小 / 整库 digest）
@@ -930,9 +943,10 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
 
 泛化考试检查弱模型能否在场景中**找到并正确使用**技能，不执行真实终端环境。
 每个新建或版本升高的技能版本生成一道考题，`exam_id = skill_id + version`；
-curation 的合并产物不考。考题的场景从技能版本的 `skill_origins.jsonl` 来源
-记录复原：截取来源轨迹的真实前缀，后面交给 examiner 用 `EXAM_SCENE` 写成
-自然语言场景、期望行为和参考答案。
+curation 的合并产物不考（整理阶段的合并回归考试复用各源技能已有的考题）。
+考题的场景从技能版本的 `Provenance.scene`（一个 `TraceRef`）复原：
+`resolve(scene)` 取回来源执行的真实前缀和后续，examiner 用 `EXAM_SCENE`
+写成自然语言场景、期望行为和参考答案；`Exam.scene` 保存这个 `TraceRef`。
 
 每个考题单元内的顺序：
 
@@ -952,16 +966,26 @@ curation 的合并产物不考。考题的场景从技能版本的 `skill_origin
 读取事实。重放保护沿用 K3：同一考题已判卷的 attempt 直接复用；同一相位实例
 已规划过的单元从覆写前的 `units.jsonl` 识别。
 
-`skill_origins.jsonl` 由学习相位的五类写作点写入：P02 逐段、P02 按簇、
-`learn_apply` 改写、`learn_requirement` 新需求、`learn_exam` 改写。来源行
-缺失时 exam 记 `exam_generation_failed`；旧 / 装配 run 没有来源行时，驱动
-按技能锚点 subtask 和已存轨迹回退找来源 sheet，仍找不到才失败。
+**来源与上下文（一条主线）**：来源指针和写作上下文共用同一个 `TraceRef`，
+细节与取舍见 `docs/decisions/provenance_trace_context_20261029.md`。
 
-来源答卷的定位按优先级：origin 的 `sheet_id` → 技能锚点 `subtask_id` 对应的
-轨迹（匹配答卷的 `execution.artifacts.trajectory_id`）→ `unit_id`。最后一条只在
-没有前两者时使用，且必须唯一命中；同一个 task+role 的三个 attempt 共用一个
-`unit_id`，多命中直接报错，不再取最后一张
-（`docs/decisions/exam_scene_source_sheet_20261029.md`）。
+- `TraceRef` 只能由 `trace_at(sheet, step)` 构造：参数必须是一张**执行**答卷
+  对象，校验 `0 <= step < len(steps)`，并拒绝考试答卷；因此“只有 unit 的
+  模糊指针”和“考试的考试”都写不出来。
+- `resolve(run, ref)` 是读取来源上下文的唯一出口，返回 `TraceContext`
+  （任务说明、切点前后的渲染步骤、源执行自己的判分）。写作类 prompt 里的
+  轨迹文本和出题用的前缀必须经过它，所以“写作时看到的”和“下一次考试切出来
+  的”是同一段步骤。找不到答卷或越界直接报错，不扫目录、不排优先级。
+- `scene_of(exam)` 返回 `exam.scene`：考试答卷（纸面）想回到真实场景，只能
+  经由它的考题。
+- 五类写作点统一经 `ledger.record_version(skill, provenance)` 落盘；
+  `scene` 的取值：P02 = 锚点轨迹答卷在段起点；live 改写 = 窗口自己的
+  `ref`；exam 改写 = `scene_of(被考的 exam)`（原切点，保证 P03→P05 逐题
+  配对）；需求 = 它第一个来源的真实位置（来源是考试答卷时经 `scene_of`
+  回溯）；合并 = null。
+- 边界检查：每个 learn 相位结束与每个 exam 相位开考前，都校验每个版本有
+  Provenance、`scene` 可解析、`scene` 不是考试答卷；P02 版本还要求
+  `scene` 的轨迹等于技能锚点轨迹。审计脚本做同一项检查。
 
 ### 5.4 实战验收相位（live）
 

@@ -16,8 +16,9 @@ from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks.attribution import _canonical_skill_id
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites.skill_use import skill_files_read
+from expedistill.composites.trace import scene_of
 from expedistill.core.answer_sheet import AnswerSheet, PhaseReport
-from expedistill.core.models import Skill
+from expedistill.core.models import Exam, Skill
 from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import (
     CodeBugError,
@@ -46,6 +47,7 @@ def analyze_trials(
     usage: Any = None,
     run_dir: Any = None,
     existing: Sequence[TrialFinding] = (),
+    store: Any = None,
 ) -> Tuple[List[TrialFinding], Set[str], Set[str]]:
     """Analyze every missing failed trial; return findings and failures."""
     known = {finding.sheet_id: finding for finding in existing}
@@ -61,7 +63,7 @@ def analyze_trials(
             return sheet, _analyze_one(
                 sheet, bank=bank, context=context,
                 handle=handle, usage=usage, run_dir=run_dir,
-                view_rules=view_rules), None, None
+                view_rules=view_rules, store=store), None, None
         except InfrastructureError as exc:
             return sheet, None, exc, "infra"
         except ModelOutputError as exc:
@@ -105,6 +107,7 @@ def _analyze_one(
     usage: Any,
     run_dir: Any,
     view_rules: Any,
+    store: Any = None,
 ) -> TrialFinding:
     execution = sheet.execution
     if execution is None:
@@ -200,8 +203,10 @@ def _analyze_one(
         overall_start, overall_end = 0, len(steps)
     if not ranges:
         overall_start, overall_end = 0, len(steps)
+    scene = (scene_of(store.load("exams", execution.task_ref, Exam))
+             if exam_skill is not None else None)
     evidence = trial_evidence.evidence_for_skills(
-        sheet, skill_ids=mentioned, issue="; ".join(
+        sheet, scene=scene, skill_ids=mentioned, issue="; ".join(
             f"{skill_id}: {issues.get(skill_id, '')}"
             for skill_id in mentioned),
         reason=reason, step_start=overall_start,

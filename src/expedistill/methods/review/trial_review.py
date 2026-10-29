@@ -28,6 +28,7 @@ def run_trial_review(
     usage: Any = None,
     run_dir: Any = None,
     existing_findings: Sequence[TrialFinding] = (),
+    store: Any = None,
     skip_evidence: Optional[
         Callable[[Sequence[TaskListRow]], Sequence[str]]] = None,
 ) -> ReviewResult:
@@ -35,7 +36,7 @@ def run_trial_review(
     findings, failed, model_errors = trial.analyze_trials(
         current=current, bank=bank, context=context,
         handle=handles["author"], usage=usage, run_dir=run_dir,
-        existing=existing_findings)
+        existing=existing_findings, store=store)
     notes = [finding.profile_note for finding in findings]
     try:
         updated_profile = profile.update_profile(

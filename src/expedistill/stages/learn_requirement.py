@@ -1,19 +1,24 @@
 """Land aggregated review requirements as new pending skills."""
 
-from typing import Any, Sequence, Set
+from typing import Any, List, Sequence, Set
 
-import json
 
+from expedistill.benchmarks.registry import get_plugin
+from expedistill.composites import trace
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.composites.skill_origins import append_origin, source_ref
+from expedistill.core.models import Exam
+from expedistill.core.trace import Provenance, TraceRef
 from expedistill.infra.reliability import (
+    CodeBugError,
     InfrastructureError,
     ModelOutputError,
     UnitFailureRecorder,
 )
 from expedistill.infra.store import append_jsonl, read_jsonl
 from expedistill.methods.author.requirement import write_requirement
+from expedistill.methods.review import attribution
 from expedistill.methods.review.contracts import NewSkillRequirement
+from expedistill.stages import learn_ledger as ledger
 
 __all__ = ["DEFERRED_OUTCOME", "OUTCOMES_NAME", "execute_requirements",
            "record_deferred"]
@@ -57,6 +62,57 @@ def record_deferred(phase_dir, phase_label: str,
     return written
 
 
+def _scenes_of(ctx: Any, requirement: NewSkillRequirement) -> List[TraceRef]:
+    """The real places a requirement's evidence came from.
+
+    A source sheet that ran a real execution is cut at the start of the
+    failure window the review named. A paper exam answer is not a scene:
+    its exam's own ``scene`` is the real situation it was cut from, so the
+    new skill's exam never becomes an exam of an exam.
+    """
+    scenes: List[TraceRef] = []
+    for sheet_id in requirement.source_sheet_ids:
+        sheet = _load_source_sheet(ctx, requirement, sheet_id)
+        if trace.is_exam_answer(sheet):
+            exam = ctx.store.load("exams", sheet.execution.task_ref, Exam)
+            ref = trace.scene_of(exam)
+        else:
+            step = requirement.source_steps.get(sheet_id, 0)
+            steps = len(sheet.execution.steps or [])
+            ref = trace.trace_at(sheet, max(0, min(step, steps - 1)))
+        if ref not in scenes:
+            scenes.append(ref)
+    if not scenes:
+        raise CodeBugError(
+            f"requirement {requirement.requirement_id!r} names no source "
+            "sheet to cut a scene from")
+    return scenes
+
+
+def _render_scenes(ctx: Any, scenes: List[TraceRef]) -> str:
+    """The real steps around each scene, one block per source."""
+    plugin = get_plugin(ctx.config.benchmark)
+    blocks = []
+    for index, ref in enumerate(scenes, start=1):
+        blocks.append(f"[evidence {index}]\n" + trace.render_context(
+            trace.resolve(
+                ctx.run_dir, ref,
+                instruction_for=lambda task: attribution.task_instruction_for(
+                    ctx.config.benchmark, task),
+                view_rules=plugin.view_rules)))
+    return "\n\n".join(blocks)
+
+
+def _load_source_sheet(ctx: Any, requirement: NewSkillRequirement,
+                       sheet_id: str):
+    label = requirement.source_phase_label
+    if not label:
+        raise CodeBugError(
+            f"requirement {requirement.requirement_id!r} has no source "
+            "phase label")
+    return trace.load_sheet(ctx.run_dir, TraceRef(label, sheet_id, 0))
+
+
 def execute_requirements(
     ctx: Any,
     phase: Any,
@@ -75,10 +131,12 @@ def execute_requirements(
     for requirement in requirements:
         if requirement.requirement_id in done:
             continue
+        scenes = _scenes_of(ctx, requirement)
         try:
             skill = write_requirement(
                 requirement,
                 weak_profile=weak_profile,
+                source_context=_render_scenes(ctx, scenes),
                 handle=ctx.handle("author"),
                 usage=ctx.usage,
                 run_dir=ctx.run_dir)
@@ -89,22 +147,13 @@ def execute_requirements(
         except ModelOutputError as exc:
             recorder.record(requirement.requirement_id, phase.label, exc, exc)
             continue
-        ctx.store.save(skill, "skills")
-        segment = next(iter(requirement.evidence.segments), {})
-        sheet_id = segment.get("sheet_id")
-        step_range = segment.get("step_range") or [0, 0]
-        scene_step = (int(step_range[0])
-                      if isinstance(step_range, list) and step_range else 0)
-        append_origin(
-            phase_dir, skill_id=skill.skill_id, version=skill.version,
-            phase_label=phase.label,
-            change_note=(requirement.title + ": " +
-                         requirement.description),
-            context_text=json.dumps(
-                requirement.evidence.facts, ensure_ascii=False),
-            source_ref=source_ref(
-                requirement.source_phase_label or source_phase_label,
-                sheet_id=sheet_id, scene_step=scene_step))
+        ledger.record_version(
+            ctx.store, phase_dir, ctx.run_dir, skill,
+            Provenance(
+                skill_id=skill.skill_id, version=skill.version,
+                phase_label=phase.label, cause="requirement",
+                scene=scenes[0], sources=scenes,
+                note=requirement.title + ": " + requirement.description))
         append_jsonl(path, {
             "schema": "requirement-outcome-v1",
             "phase_label": phase.label,

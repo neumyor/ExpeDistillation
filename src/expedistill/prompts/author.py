@@ -375,6 +375,10 @@ SKILL (current version):
 EXAM QUESTION:
 {question_text}
 
+REAL SITUATION THE EXAM WAS CUT FROM (the trajectory the skill was
+learned from; use it to see what the skill must really cover):
+{source_context}
+
 WEAK MODEL'S ANSWER:
 {weak_answer}
 

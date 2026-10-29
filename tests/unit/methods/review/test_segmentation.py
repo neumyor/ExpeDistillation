@@ -174,14 +174,15 @@ def _phase(sequence, phases, index):
                          spec=phases[name], task_ids=())
 
 
-def _seed_d_phase(store, *, strong=True, weak_attempts=2):
+def _seed_d_phase(store, *, strong=True, weak_attempts=2, strong_attempts=1):
     """The baseline phase's on-disk state: the strong arm all-success, the weak
     arm failing every attempt (the baseline gap that authorizes add)."""
     trajectories = []
     if strong:
-        trajectory = _trajectory("strong", 0)
-        store.save(trajectory, "trajectories")
-        trajectories.append(trajectory)
+        for attempt in range(strong_attempts):
+            trajectory = _trajectory("strong", attempt)
+            store.save(trajectory, "trajectories")
+            trajectories.append(trajectory)
     for attempt in range(weak_attempts):
         trajectory = _trajectory("weak", attempt, correctness=False)
         store.save(trajectory, "trajectories")
@@ -192,7 +193,7 @@ def _seed_d_phase(store, *, strong=True, weak_attempts=2):
                 phase_label="p01:baseline", benchmark=BENCHMARK,
                 task_ref=TASK_ID, role=role, skills_injected=None),
             phase_label="p01:baseline", task_ref=TASK_ID, role=role,
-            arm=role, expected_attempts=(1 if role == "strong"
+            arm=role, expected_attempts=(strong_attempts if role == "strong"
                                          else weak_attempts),
             injected_skills=None, no_valid_cause="all_holes")
         for role in ("strong", "weak")]
@@ -481,8 +482,7 @@ def test_the_add_path_resume_after_a_crash_cuts_only_the_missing(
                    "segmenter",
                    [json_script([_cut()]), RuntimeError("crash")])}
     ctx = _make_ctx(tmp_path, sequence, phases, handles)
-    _seed_d_phase(ctx.store)
-    ctx.store.save(_trajectory("strong", 1), "trajectories")
+    _seed_d_phase(ctx.store, strong_attempts=2)
 
     with pytest.raises(RuntimeError, match="crash"):
         phase_learn.run(ctx, _phase(sequence, phases, 1))

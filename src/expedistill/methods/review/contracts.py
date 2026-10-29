@@ -83,7 +83,7 @@ class TrialFinding:
         evidence = {}
         for skill_id, raw in (data.get("evidence") or {}).items():
             raw = dict(raw)
-            windows = [WindowEvidence(**window) for window in raw.get(
+            windows = [WindowEvidence.from_dict(window) for window in raw.get(
                 "windows") or []]
             evidence[skill_id] = SkillAttemptEvidence(
                 skill_id=raw.get("skill_id", skill_id),
@@ -113,6 +113,11 @@ class NewSkillRequirement:
     evidence: EvidencePackage
     source_sheet_ids: List[str] = field(default_factory=list)
     source_phase_label: str = ""
+    #: For each source sheet that is a paper exam answer, nothing; for a
+    #: real execution, the exact place its failure window starts. The
+    #: lander resolves exam answers to the exam's own scene, so the new
+    #: skill's exam is cut from a real execution either way.
+    source_steps: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

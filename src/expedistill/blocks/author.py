@@ -399,10 +399,14 @@ def rewrite_skill(
     weak_profile: str,
     handle: ModelHandle,
     *,
+    source_context: str,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, str]:
     """Rewrite a failed skill (G6); returns the new version's fields.
+
+    ``source_context`` is the rendered real trajectory the exam was cut
+    from; the rewriter reads it next to the paper answer.
 
     No reference answer is ever passed in (README stage 4). The returned dict
     is ``{"content", "failure_category", "rewrite_reason", "summary"}``;
@@ -424,6 +428,7 @@ def rewrite_skill(
     variables = {
         "skill_text": skill.content,
         "question_text": question_text,
+        "source_context": source_context,
         "weak_answer": weak_answer,
         "error_description": error_description,
         "profile_section": profile_section(

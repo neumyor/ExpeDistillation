@@ -362,7 +362,7 @@
       },
       "prompt_name": "SKILL_ATTEMPT_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    },\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
+      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task one\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    },\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task one\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
       "response_text": "```json\n{\"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -383,7 +383,7 @@
       },
       "prompt_name": "SKILL_ATTEMPT_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t1/weak/01/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    },\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
+      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t1/weak/01/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task one\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    },\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task one\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
       "response_text": "```json\n{\"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -404,7 +404,7 @@
       },
       "prompt_name": "SKILL_ATTEMPT_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t2/weak/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    },\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
+      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t2/weak/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task two\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    },\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task two\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
       "response_text": "```json\n{\"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -425,7 +425,7 @@
       },
       "prompt_name": "SKILL_ATTEMPT_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t2/weak/01/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    },\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
+      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] about to act on a report without inspecting it first: the action would not match the actual state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] the state was already inspected\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t2/weak/01/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task two\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    },\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task two\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
       "response_text": "```json\n{\"skill_text\": \"[When to use] about to act on a report without inspecting it first: the action would not match the actual state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] the state was already inspected\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -446,7 +446,7 @@
       },
       "prompt_name": "SKILL_ATTEMPT_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    },\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
+      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task one\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    },\n    {\n      \"task_id\": \"fakebench:t1\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task one\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
       "response_text": "```json\n{\"skill_text\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] no state was reported\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -467,7 +467,7 @@
       },
       "prompt_name": "SKILL_ATTEMPT_REVISION",
       "request_id": "<request_id>",
-      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t2/strong/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    },\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
+      "request_text": "A skill was active in real attempts of a terminal task. Rewrite it using\nthe per-window evidence below. The evidence may contain several attempts,\nand several windows per attempt; reconcile them yourself.\n\nSKILL (current version):\n[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported\n\nATTEMPT EVIDENCE:\n{\n  \"schema\": \"skill-attempt-evidence-v1\",\n  \"skill_id\": \"traj/fakebench:t2/strong/00/seg00/skill\",\n  \"skill_version\": 1,\n  \"windows\": [\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 0,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task two\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    },\n    {\n      \"task_id\": \"fakebench:t2\",\n      \"attempt\": 1,\n      \"success\": false,\n      \"kind\": \"start\",\n      \"step_start\": 0,\n      \"step_end\": 1,\n      \"ref\": {\n        \"phase_label\": \"p03:live\",\n        \"sheet_id\": \"p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01\",\n        \"step\": 0\n      },\n      \"trigger_steps\": [],\n      \"trigger_context\": \"the window shows the task context\",\n      \"behavior_after_trigger\": \"the model followed the observed procedure\",\n      \"improvement\": \"name the concrete state before acting\",\n      \"real_steps\": \"TASK:\\nSolve the task: inspect the reported state of the service for task two\\n\\n\\n\\nSTEPS FROM THE CUT:\\nstep 0\\naction: run\\nobservation: the environment state\\n\\nThe execution this comes from failed.\"\n    }\n  ]\n}\n\nNo weak-model profile is provided. Treat the reader as a generally capable terminal agent: every step must be a concrete action it can carry out, one action per step. Do not assume any specific weakness.\n\nRules:\n- Keep the three bracket sections exactly:\n  [When to use] / [Steps] / [Do not use when].\n- Rewrite the skill for a DIFFERENT task of the same kind: no task names,\n  file names, entity names or concrete values; use <placeholders>.\n- Every step must be grounded in the evidence; do not invent actions the\n  windows do not support.\n- When windows conflict, prefer the most directly observed behavior and\n  state the remaining condition explicitly instead of averaging the\n  advice.\n- Keep the weak-model style: short sentences, one action per step,\n  observable conditions and exact verification.\n- A script may appear only as its input, output and invocation; never\n  include its implementation. Do not use code blocks longer than three\n  lines.\n- Keep the card between 1,500 and 2,500 characters.\n- Produce a fresh one-line summary: the reusable capability this card\n  teaches, with no task or subtask names.\n\nOutput ONLY JSON with exactly these fields:\n{\"skill_text\": \"<the rewritten skill, plain text>\",\n  \"revision_reason\": \"<one or two sentences: what changed and why>\",\n  \"summary\": \"<one line: the reusable capability; no task names>\"}\n",
       "response_text": "```json\n{\"skill_text\": \"[When to use] when a service reports an unexpected state\\n[Steps]\\n1. inspect the reported state\\n2. run the command that matches the state\\n[Do not use when] no state was reported\\nREVISED-BY-G11: name the concrete state before acting.\", \"revision_reason\": \"made the trigger condition concrete\", \"summary\": \"name the concrete state before acting on it (revised)\"}\n```",
       "role": "rewriter",
       "status": "ok",
@@ -902,102 +902,6 @@
     {
       "in_tokens": null,
       "meta": {
-        "estimated_in": 688,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_ATTEMPT_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 688,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_ATTEMPT_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 704,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_ATTEMPT_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 704,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_ATTEMPT_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 704,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_ATTEMPT_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
-        "estimated_in": 704,
-        "finish_reason": null,
-        "format_retries": 0,
-        "requested_max_tokens": 65536
-      },
-      "model": "strong-model",
-      "out_tokens": null,
-      "prompt": "SKILL_ATTEMPT_REVISION",
-      "request_id": "<request_id>",
-      "role": "rewriter",
-      "status": "ok",
-      "time": "<time>"
-    },
-    {
-      "in_tokens": null,
-      "meta": {
         "estimated_in": 799,
         "finish_reason": null,
         "format_retries": 0,
@@ -1008,6 +912,102 @@
       "prompt": "SIMILARITY",
       "request_id": "<request_id>",
       "role": "curator",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 887,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_ATTEMPT_REVISION",
+      "request_id": "<request_id>",
+      "role": "rewriter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 887,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_ATTEMPT_REVISION",
+      "request_id": "<request_id>",
+      "role": "rewriter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 903,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_ATTEMPT_REVISION",
+      "request_id": "<request_id>",
+      "role": "rewriter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 903,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_ATTEMPT_REVISION",
+      "request_id": "<request_id>",
+      "role": "rewriter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 903,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_ATTEMPT_REVISION",
+      "request_id": "<request_id>",
+      "role": "rewriter",
+      "status": "ok",
+      "time": "<time>"
+    },
+    {
+      "in_tokens": null,
+      "meta": {
+        "estimated_in": 903,
+        "finish_reason": null,
+        "format_retries": 0,
+        "requested_max_tokens": 65536
+      },
+      "model": "strong-model",
+      "out_tokens": null,
+      "prompt": "SKILL_ATTEMPT_REVISION",
+      "request_id": "<request_id>",
+      "role": "rewriter",
       "status": "ok",
       "time": "<time>"
     }
@@ -1134,7 +1134,7 @@
         "PROFILE_UPDATE": "e2b6db0a6402be26f562f947788d9aca0cf9895da3a0fff0e316a3733b1efeac",
         "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
         "REQUIREMENT_SKILL": "e19db0a1521c7ba2b96daaa290ba657b6310146900c53b338a076ba10da63fea",
-        "REWRITE": "ae1f94ec6efadd09d9c16a092ea44aacb6c08e58a8272645690e2754b8a48c34",
+        "REWRITE": "9351ca1882e452b5797412b818f4e39e5b3a6aaadf15952e274e28b8163f0e7a",
         "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
         "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
         "SKILL_ATTEMPT_ATTRIBUTION": "2c609a18018f623e54f755215889b91e6c37012095d59cdcd2f96f0e9170b5fc",
@@ -1197,7 +1197,7 @@
       "PROFILE_UPDATE": "e2b6db0a6402be26f562f947788d9aca0cf9895da3a0fff0e316a3733b1efeac",
       "REPAIR_INSTRUCTION": "dea3ada843291850d76759cd9a476f8b4a3a9b357e4ca60b3cf785b9afbc727c",
       "REQUIREMENT_SKILL": "e19db0a1521c7ba2b96daaa290ba657b6310146900c53b338a076ba10da63fea",
-      "REWRITE": "ae1f94ec6efadd09d9c16a092ea44aacb6c08e58a8272645690e2754b8a48c34",
+      "REWRITE": "9351ca1882e452b5797412b818f4e39e5b3a6aaadf15952e274e28b8163f0e7a",
       "SEGMENT": "5f2fe612a5a26dc39e4a32d6b1f25f63d218c72b36508adfcc370c1ac716c4f9",
       "SIMILARITY": "be3f978eacd08b8098a4e1f6ff5500591c9becf1a65ebb61b5511ee1a0cb8c4b",
       "SKILL_ATTEMPT_ATTRIBUTION": "2c609a18018f623e54f755215889b91e6c37012095d59cdcd2f96f0e9170b5fc",
@@ -1807,6 +1807,125 @@
   "phases/p02_learn/outcomes.jsonl.lock": {
     "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
+  "phases/p02_learn/provenance.jsonl": [
+    {
+      "cause": "add",
+      "note": "P02 distill: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf::traj/fakebench:t1/strong/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 diagnose: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 diagnose: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/01",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf::traj/fakebench:t1/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 distill: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf::traj/fakebench:t2/strong/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 diagnose: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/00",
+          "step": 0
+        }
+      ],
+      "version": 1
+    },
+    {
+      "cause": "add",
+      "note": "P02 diagnose: whole",
+      "phase_label": "p02:learn",
+      "scene": {
+        "phase_label": "p01:baseline",
+        "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/01",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p01:baseline",
+          "sheet_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf::traj/fakebench:t2/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 1
+    }
+  ],
+  "phases/p02_learn/provenance.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "phases/p02_learn/skill_bank.jsonl": [
     {
       "content": "[When to use] when a service reports an unexpected state\n[Steps]\n1. inspect the reported state\n2. run the command that matches the state\n[Do not use when] no state was reported",
@@ -1905,83 +2024,6 @@
       "version": 1
     }
   ],
-  "phases/p02_learn/skill_origins.jsonl": [
-    {
-      "change_note": "P02 distill: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t1:strong:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 diagnose: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 diagnose: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t1:weak:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 distill: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t2:strong:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 diagnose: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
-      },
-      "version": 1
-    },
-    {
-      "change_note": "P02 diagnose: whole",
-      "context_text": "step 0\naction: run\nobservation: the environment state",
-      "phase_label": "p02:learn",
-      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
-      "source_ref": {
-        "phase_label": "p01:baseline",
-        "scene_step": 0,
-        "unit_id": "p01:baseline:fakebench:fakebench:t2:weak:140bedbf"
-      },
-      "version": 1
-    }
-  ],
-  "phases/p02_learn/skill_origins.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
   "phases/p02_learn/task_list.jsonl": [
     {
       "action": "add",
@@ -2509,6 +2551,155 @@
   "phases/p04_learn/outcomes.jsonl.lock": {
     "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
+  "phases/p04_learn/provenance.jsonl": [
+    {
+      "cause": "revise",
+      "note": "made the trigger condition concrete",
+      "phase_label": "p04:learn",
+      "scene": {
+        "phase_label": "p03:live",
+        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+          "step": 0
+        },
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 2
+    },
+    {
+      "cause": "revise",
+      "note": "made the trigger condition concrete",
+      "phase_label": "p04:learn",
+      "scene": {
+        "phase_label": "p03:live",
+        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+          "step": 0
+        },
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 2
+    },
+    {
+      "cause": "revise",
+      "note": "made the trigger condition concrete",
+      "phase_label": "p04:learn",
+      "scene": {
+        "phase_label": "p03:live",
+        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
+          "step": 0
+        },
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 2
+    },
+    {
+      "cause": "revise",
+      "note": "made the trigger condition concrete",
+      "phase_label": "p04:learn",
+      "scene": {
+        "phase_label": "p03:live",
+        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+          "step": 0
+        },
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 2
+    },
+    {
+      "cause": "revise",
+      "note": "made the trigger condition concrete",
+      "phase_label": "p04:learn",
+      "scene": {
+        "phase_label": "p03:live",
+        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+          "step": 0
+        },
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 2
+    },
+    {
+      "cause": "revise",
+      "note": "made the trigger condition concrete",
+      "phase_label": "p04:learn",
+      "scene": {
+        "phase_label": "p03:live",
+        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+        "step": 0
+      },
+      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
+      "sources": [
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
+          "step": 0
+        },
+        {
+          "phase_label": "p03:live",
+          "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/01",
+          "step": 0
+        }
+      ],
+      "version": 2
+    }
+  ],
+  "phases/p04_learn/provenance.jsonl.lock": {
+    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "phases/p04_learn/revisions.jsonl": [
     {
       "from_version": 1,
@@ -2702,89 +2893,6 @@
       "version": 2
     }
   ],
-  "phases/p04_learn/skill_origins.jsonl": [
-    {
-      "change_note": "made the trigger condition concrete",
-      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t1/strong/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t1\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t1\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
-      "phase_label": "p04:learn",
-      "skill_id": "traj/fakebench:t1/strong/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p03:live",
-        "scene_step": 0,
-        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
-        "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
-      },
-      "version": 2
-    },
-    {
-      "change_note": "made the trigger condition concrete",
-      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t1/weak/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t1\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t1\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
-      "phase_label": "p04:learn",
-      "skill_id": "traj/fakebench:t1/weak/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p03:live",
-        "scene_step": 0,
-        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
-        "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
-      },
-      "version": 2
-    },
-    {
-      "change_note": "made the trigger condition concrete",
-      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t1/weak/01/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t1\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t1\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
-      "phase_label": "p04:learn",
-      "skill_id": "traj/fakebench:t1/weak/01/seg00/skill",
-      "source_ref": {
-        "phase_label": "p03:live",
-        "scene_step": 0,
-        "sheet_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b::traj/fakebench:t1/weak/00",
-        "unit_id": "p03:live:fakebench:fakebench:t1:weak:3ee7440b"
-      },
-      "version": 2
-    },
-    {
-      "change_note": "made the trigger condition concrete",
-      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t2/strong/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t2\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t2\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
-      "phase_label": "p04:learn",
-      "skill_id": "traj/fakebench:t2/strong/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p03:live",
-        "scene_step": 0,
-        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
-        "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
-      },
-      "version": 2
-    },
-    {
-      "change_note": "made the trigger condition concrete",
-      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t2/weak/00/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t2\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t2\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
-      "phase_label": "p04:learn",
-      "skill_id": "traj/fakebench:t2/weak/00/seg00/skill",
-      "source_ref": {
-        "phase_label": "p03:live",
-        "scene_step": 0,
-        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
-        "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
-      },
-      "version": 2
-    },
-    {
-      "change_note": "made the trigger condition concrete",
-      "context_text": "{\"schema\": \"skill-attempt-evidence-v1\", \"skill_id\": \"traj/fakebench:t2/weak/01/seg00/skill\", \"skill_version\": 1, \"windows\": [{\"task_id\": \"fakebench:t2\", \"attempt\": 0, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}, {\"task_id\": \"fakebench:t2\", \"attempt\": 1, \"success\": false, \"kind\": \"start\", \"step_start\": 0, \"step_end\": 1, \"trigger_steps\": [], \"trigger_context\": \"the window shows the task context\", \"behavior_after_trigger\": \"the model followed the observed procedure\", \"improvement\": \"name the concrete state before acting\"}]}",
-      "phase_label": "p04:learn",
-      "skill_id": "traj/fakebench:t2/weak/01/seg00/skill",
-      "source_ref": {
-        "phase_label": "p03:live",
-        "scene_step": 0,
-        "sheet_id": "p03:live:fakebench:fakebench:t2:weak:312f573b::traj/fakebench:t2/weak/00",
-        "unit_id": "p03:live:fakebench:fakebench:t2:weak:312f573b"
-      },
-      "version": 2
-    }
-  ],
-  "phases/p04_learn/skill_origins.jsonl.lock": {
-    "__sha256__": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-  },
   "phases/p04_learn/task_list.jsonl": [
     {
       "action": "revise",

@@ -88,6 +88,7 @@ docs/
 src/expedistill/
   core/                   第 0 层：只依赖标准库
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
+    trace.py              值对象 TraceRef / Provenance / TraceContext（只做形状校验）
     ids.py                确定性 ID 规则
     config.py             实验配置结构（schema v7：sequence + phases + review 槽位 + use_weak_profile 开关）、模型角色表
     config_upgrade.py     v2→v3→v4→v5→v6 升级纯函数（config.py 重新导出）
@@ -200,8 +201,12 @@ src/expedistill/
                           artifacts.skill_folder 提取可用技能、读取/未读、结果
     verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
-    skill_origins.py      每个技能版本的来源账本（执行相位 / unit / sheet /
-                          场景步号 / 修改原因；exam 用它复原考场）
+    trace.py              来源指针的三个函数：trace_at（唯一构造 TraceRef，拒绝
+                          考试答卷与越界步号）、resolve（唯一还原来源上下文）、
+                          scene_of（考试回到真实场景）；render_context 渲染给 prompt
+    provenance.py         每个技能版本一条 Provenance 的账本：record_version（唯一
+                          写入口，技能与来源一起落盘）、find_provenance、
+                          check_provenance（learn 相位末与 exam 开考前的边界检查）
     skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
                           （带 YAML 头）并写 catalog.md 兜底；test 相位派发前

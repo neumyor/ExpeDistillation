@@ -152,7 +152,7 @@ def test_rewrite_appends_the_marker(client):
     original = ("[When to use] always\n[Steps] do it\n"
                 "[Do not use when] never")
     user = get_prompt("REWRITE").format(
-        skill_text=original, question_text="q", weak_answer="a",
+        skill_text=original, question_text="q", source_context="ctx", weak_answer="a",
         error_description="e", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert REVISION_MARKER in parsed["skill_text"]

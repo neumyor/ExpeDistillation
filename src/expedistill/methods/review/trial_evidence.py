@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites.evidence_package import EvidencePackage
+from expedistill.composites.trace import trace_of_execution
+from expedistill.core.trace import TraceRef
 from expedistill.composites.skill_attempt_evidence import (
     SkillAttemptEvidence,
     WindowEvidence,
@@ -56,8 +58,14 @@ def evidence_for_skills(
     step_end: int,
     bank: Sequence[Skill],
     ranges: Optional[Mapping[str, Tuple[int, int]]] = None,
+    scene: Optional[TraceRef] = None,
 ) -> Dict[str, SkillAttemptEvidence]:
-    """One SkillAttemptEvidence per mentioned skill."""
+    """One SkillAttemptEvidence per mentioned skill.
+
+    A window's ``ref`` is the real place it was cut at: the window start of
+    a real execution, or - for a paper exam answer, which is not a place -
+    the ``scene`` the exam was cut from.
+    """
     execution = sheet.execution
     if execution is None:
         return {}
@@ -72,6 +80,8 @@ def evidence_for_skills(
             kind="trial",
             step_start=lo,
             step_end=hi,
+            ref=scene if scene is not None
+            else trace_of_execution(execution, lo),
             trigger_context=issue,
             behavior_after_trigger="",
             improvement=reason,

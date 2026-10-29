@@ -9,6 +9,7 @@ skill-read step that the usage scanner reads, and the judge fields.
 
 import pytest
 
+from expedistill.core.trace import TraceRef
 from expedistill.composites import exam_once
 from expedistill.core import ids
 from expedistill.core.models import Attempt, Exam, Skill
@@ -29,7 +30,7 @@ def make_exam() -> Exam:
         scene_text="The service rejects connections. What next?",
         expected_behavior="Restart the service and verify it.",
         reference_answer="Restart the service.",
-        source_ref={"phase_label": "p01:baseline", "scene_step": 0})
+        scene=TraceRef("p01:baseline", "sheet-0", 0))
 
 
 def make_folder() -> dict:

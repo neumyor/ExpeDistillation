@@ -67,6 +67,10 @@ from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
 )
+from expedistill.composites.provenance import (
+    PROVENANCE_NAME,
+    check_provenance,
+)
 from expedistill.composites.unit_ids import phase_label_of_unit_id
 from expedistill.core.config import (
     FRESH_BARE,
@@ -245,9 +249,37 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             "pending on infrastructure errors "
             f"({', '.join(sorted(infra_failed))}); see failed_units.jsonl, "
             "then resume the run to retry them")
+    _check_phase_provenance(ctx, phase, phase_dir)
     summary["bank"] = _produce_bank(ctx, phase, names, specs)
     write_json(phase_dir / SUMMARY_NAME, summary, indent=2)
     return PhaseResult(label=phase.label, summary=summary)
+
+
+def _check_phase_provenance(ctx: Any, phase: PhaseInstance,
+                            phase_dir) -> None:
+    """Refuse to publish a phase whose new versions have a bad origin.
+
+    Only the versions THIS phase recorded are checked (earlier phases
+    answered for theirs). A scene that does not resolve, points at a paper
+    exam answer, or - for an add - was cut from another attempt than the
+    skill's anchor is caught here, before any exam spends model calls.
+    """
+    path = phase_dir / PROVENANCE_NAME
+    if not path.exists():
+        return
+    skills = []
+    for row in read_jsonl(path):
+        if row.get("phase_label") != phase.label:
+            continue
+        key = (row["skill_id"], row["version"])
+        stored = ctx.store.load("skills", key[0], Skill)
+        if stored.version == key[1]:
+            skills.append(stored)
+    problems = check_provenance(ctx.run_dir, skills)
+    if problems:
+        raise CodeBugError(
+            f"{phase.label}: {len(problems)} new skill version(s) have a "
+            f"bad provenance: {problems[:5]}")
 
 
 def _load_trial_findings(phase_dir) -> List[TrialFinding]:

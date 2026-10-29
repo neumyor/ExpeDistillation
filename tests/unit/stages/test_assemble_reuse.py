@@ -43,6 +43,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from expedistill.core.trace import TraceRef
 from expedistill.benchmarks.base import BenchmarkPlugin, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.cli import run_experiment
@@ -401,7 +402,7 @@ def _exam(subtask_id):
         scene_text=f"scene for {subtask_id}",
         expected_behavior="the expected behavior",
         reference_answer="the answer",
-        source_ref={"phase_label": "p01:baseline", "scene_step": 0},
+        scene=TraceRef("p01:baseline", "sheet-0", 0),
     )
 
 

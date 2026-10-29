@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.ids import (
     make_skill_id,
@@ -14,6 +15,7 @@ from expedistill.infra.store import read_json, read_jsonl
 from expedistill.methods.author import ClusterAuthoringParams
 from expedistill.methods.review.contracts import ReviewItem
 from expedistill.stages import learn_add, learn_add_cluster
+from tests.helpers.traces import baseline_sheet, write_baseline_sheets
 
 TASK_A = make_task_id("tb", "t1")
 TASK_B = make_task_id("tb", "t2")
@@ -64,6 +66,15 @@ def _experience(task_id, segment, **kwargs):
         "mode": "distill" if subtask.success else "diagnose",
         "segment_position": f"segment {segment + 1}",
     }
+
+
+def _seed_sheets(tmp_path, *task_ids):
+    """Baseline sheets for the attempt-0 strong and weak runs of each task."""
+    sheets = []
+    for task_id in task_ids:
+        sheets.append(baseline_sheet(task_id, "strong", 0))
+        sheets.append(baseline_sheet(task_id, "weak", 0))
+    write_baseline_sheets(tmp_path / "run", sheets)
 
 
 def _ctx(tmp_path, store):
@@ -136,6 +147,7 @@ def _install(monkeypatch):
 
 def test_cluster_path_writes_one_skill_and_its_artifacts(
         monkeypatch, tmp_path):
+    _seed_sheets(tmp_path, TASK_A, TASK_B)
     store = _Store()
     ctx = _ctx(tmp_path, store)
     phase = _phase()
@@ -184,6 +196,7 @@ def test_cluster_path_writes_one_skill_and_its_artifacts(
 
 def test_a_completed_cluster_is_not_reclassified_or_rewritten(
         monkeypatch, tmp_path):
+    _seed_sheets(tmp_path, TASK_A)
     store = _Store()
     ctx = _ctx(tmp_path, store)
     phase = _phase()
@@ -208,6 +221,7 @@ def test_a_completed_cluster_is_not_reclassified_or_rewritten(
 
 def test_a_missing_receipt_is_recovered_as_skipped_existing(
         monkeypatch, tmp_path):
+    _seed_sheets(tmp_path, TASK_A)
     store = _Store()
     ctx = _ctx(tmp_path, store)
     phase = _phase()
@@ -275,6 +289,7 @@ def test_learn_add_dispatches_the_new_author_method(monkeypatch, tmp_path):
 
 
 def test_uncovered_add_task_marks_eligible_runs(monkeypatch, tmp_path):
+    _seed_sheets(tmp_path, TASK_A, TASK_B)
     store = _Store()
     ctx = _ctx(tmp_path, store)
     phase = _phase()
@@ -306,6 +321,7 @@ def test_uncovered_add_task_marks_eligible_runs(monkeypatch, tmp_path):
 
 def test_uncovered_eligibility_reads_all_baseline_runs(
         monkeypatch, tmp_path):
+    _seed_sheets(tmp_path, TASK_A, TASK_B)
     """A weak failure whose segments were all cut away still counts."""
     store = _Store()
     ctx = _ctx(tmp_path, store)
@@ -330,3 +346,35 @@ def test_uncovered_eligibility_reads_all_baseline_runs(
     assert uncovered[0]["task_id"] == TASK_B
     assert uncovered[0]["eligible"] is True
     assert uncovered[0]["weak_failure"] is True
+
+
+def test_cluster_scene_is_cut_from_the_anchor_trajectory(
+        monkeypatch, tmp_path):
+    """A cross-task cluster anchors on its smallest member; the exam scene
+    must come from that member's own attempt, not another member's."""
+    store = _Store()
+    ctx = _ctx(tmp_path, store)
+    phase = _phase()
+    phase_dir = tmp_path / "phase"
+    phase_dir.mkdir()
+    # TASK_A also has attempts 1 and 2 stored; only attempt 0 is the anchor.
+    write_baseline_sheets(tmp_path / "run", [
+        baseline_sheet(TASK_A, "strong", 0), baseline_sheet(TASK_A, "strong", 1),
+        baseline_sheet(TASK_A, "strong", 2), baseline_sheet(TASK_B, "strong", 0),
+        baseline_sheet(TASK_A, "weak", 0), baseline_sheet(TASK_B, "weak", 0)])
+    _install(monkeypatch)
+    items = [_item(TASK_A, [_experience(TASK_A, 1)]),
+             _item(TASK_B, [_experience(TASK_B, 0)])]
+
+    learn_add_cluster.execute_add_rows(
+        ctx, phase, items, phase_dir,
+        author_params=ClusterAuthoringParams(max_chars_per_card=800))
+
+    rows = read_jsonl(
+        phase_bank_dir(tmp_path / "run", phase.label) / "provenance.jsonl")
+    assert len(rows) == 1
+    scene = rows[0]["scene"]
+    anchor = min(item["subtask"].subtask_id
+                 for item in (_experience(TASK_A, 1), _experience(TASK_B, 0)))
+    assert scene["sheet_id"].endswith("::" + anchor.rsplit("/", 1)[0])
+    assert scene["phase_label"] == "p01:baseline"

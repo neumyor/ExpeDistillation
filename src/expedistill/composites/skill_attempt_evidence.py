@@ -9,26 +9,42 @@ model's trigger-context / behavior / improvement text.
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from expedistill.core.trace import TraceRef
+
 __all__ = ["SkillAttemptEvidence", "WindowEvidence"]
 
 
 @dataclass
 class WindowEvidence:
-    """One attribution window of one attempt for one skill."""
+    """One attribution window of one attempt for one skill.
+
+    ``ref`` is the exact place the window was cut at: its own answer sheet
+    and the trigger step (or the window start), so the step number and the
+    attempt can never come from different executions.
+    """
 
     task_id: str
     attempt: int
     success: Optional[bool]
-    kind: str                 # "invocation" / "start" / "end"
+    kind: str                 # "invocation" / "start" / "end" / "trial"
     step_start: int
     step_end: int
+    ref: TraceRef
     trigger_steps: List[int] = field(default_factory=list)
     trigger_context: str = ""
     behavior_after_trigger: str = ""
     improvement: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["ref"] = self.ref.to_dict()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WindowEvidence":
+        data = dict(data)
+        data["ref"] = TraceRef.from_dict(data["ref"])
+        return cls(**data)
 
 
 @dataclass

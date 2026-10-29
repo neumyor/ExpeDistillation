@@ -2,6 +2,7 @@
 import pytest
 
 from expedistill.core.ids import make_exam_id, make_skill_id
+from expedistill.core.trace import TraceRef
 from expedistill.core.models import (
     ATTEMPT_PURPOSES,
     EXAM_SCHEMA_VERSION,
@@ -86,8 +87,7 @@ def make_exam(**overrides):
         scene_text="The workspace is empty after ls.",
         expected_behavior="Find where the config lives before editing it.",
         reference_answer="Run pwd, then list the project root.",
-        source_ref={"phase_label": "p02:learn", "unit_id": "u1",
-                    "sheet_id": "s1", "scene_step": 3},
+        scene=TraceRef("p02:learn", "s1", 3),
     )
     base.update(overrides)
     return Exam(**base)
@@ -249,16 +249,16 @@ class TestExam:
         exam = make_exam()
         restored = Exam.from_dict(exam.to_dict())
         assert restored == exam
-        assert restored.schema_version == EXAM_SCHEMA_VERSION == 3
-        assert restored.source_ref == {
-            "phase_label": "p02:learn", "unit_id": "u1",
-            "sheet_id": "s1", "scene_step": 3}
+        assert restored.schema_version == EXAM_SCHEMA_VERSION == 4
+        assert restored.scene == TraceRef("p02:learn", "s1", 3)
+        assert exam.to_dict()["scene"] == {
+            "phase_label": "p02:learn", "sheet_id": "s1", "step": 3}
 
     def test_identity_fields_are_required(self):
         # Every identity/scene field has no default: a forgotten one fails
         # at construction instead of silently storing a broken exam.
         for name in ("exam_id", "skill_id", "skill_version", "scene_text",
-                     "expected_behavior", "reference_answer", "source_ref"):
+                     "expected_behavior", "reference_answer", "scene"):
             payload = make_exam().to_dict()
             del payload[name]
             with pytest.raises(TypeError, match=name):
@@ -268,28 +268,22 @@ class TestExam:
         payload = {**make_exam().to_dict(), "future_field": "ignored"}
         assert Exam.from_dict(payload) == make_exam()
 
-    @pytest.mark.parametrize("version", [1, 2])
-    def test_old_protocol_record_is_refused_loudly(self, version):
-        # Old exam rows carry question_text + subtask_id and no scene; the
-        # decision doc rules out migrating them, so from_dict names the
-        # break instead of reading a half-record into v3 defaults.
-        payload = {
-            "exam_id": "traj/tb:task-1/strong/00/seg00/exam",
-            "question_text": "q?",
-            "reference_answer": "a.",
-            "subtask_id": "traj/tb:task-1/strong/00/seg00",
-            "skill_id": "traj/tb:task-1/strong/00/seg00/skill",
-            "schema_version": version,
-        }
-        with pytest.raises(ValueError, match="no longer supported"):
-            Exam.from_dict(payload)
+    @pytest.mark.parametrize("version", [1, 2, 3, 5])
+    def test_only_the_current_schema_is_read(self, version):
+        payload = {**make_exam().to_dict(), "schema_version": version}
         with pytest.raises(ValueError, match=f"schema-v{version}"):
             Exam.from_dict(payload)
 
     def test_record_without_a_version_is_refused_loudly(self):
         payload = make_exam().to_dict()
         del payload["schema_version"]
-        with pytest.raises(ValueError, match="no longer supported"):
+        with pytest.raises(ValueError, match="schema-vNone"):
+            Exam.from_dict(payload)
+
+    def test_a_malformed_scene_is_refused(self):
+        payload = make_exam().to_dict()
+        payload["scene"] = {"phase_label": "p02:learn", "sheet_id": "s1"}
+        with pytest.raises(ValueError, match="missing"):
             Exam.from_dict(payload)
 
 
@@ -437,19 +431,6 @@ class TestV1ToV2Migration:
         row["skill_id"] = "bank/somewhere/else"
         with pytest.raises(ValueError, match="cannot be derived"):
             Skill.from_dict(row)
-
-    def test_from_dict_rejects_a_v1_exam_row(self):
-        # The v1 -> v2 exam migration was removed with the generalization
-        # exam: old exam rows are not supported, not silently re-derived.
-        row = {
-            "exam_id": f"{_SUB_A}/exam",
-            "question_text": "q?",
-            "reference_answer": "a.",
-            "subtask_id": _SUB_A,
-            "schema_version": 1,
-        }
-        with pytest.raises(ValueError, match="no longer supported"):
-            Exam.from_dict(row)
 
     def test_migrate_record_derives_a_segment_row(self):
         row = _v1_segment_row(_SUB_A)

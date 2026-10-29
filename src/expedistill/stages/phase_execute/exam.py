@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.blocks.exam import write_scene
-from expedistill.blocks.view import render_steps_view
 from expedistill.composites import (
     answer_sheets,
     coverage,
@@ -32,16 +31,17 @@ from expedistill.composites.acceptance_skill_status import (
     find_judged_attempt,
 )
 from expedistill.composites.exam_once import exam_once
-from expedistill.composites.phase_bank import (
-    PHASES_DIR,
-    phase_bank_dir,
+from expedistill.composites import trace
+from expedistill.composites.provenance import (
+    check_provenance,
+    find_provenance,
 )
-from expedistill.composites.skill_origins import find_origin, source_ref
 from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core import ids, vocabulary
 from expedistill.core.answer_sheet import UnitSpec
 from expedistill.core.config import PHASE_ROLE_EXAM, ExecutePhaseSpec, PhaseInstance
-from expedistill.core.models import Exam, Skill, Subtask, Trajectory
+from expedistill.core.models import Exam, Skill
+from expedistill.core.trace import Provenance, TraceContext
 from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
     CodeBugError,
@@ -51,7 +51,7 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import (
-    append_jsonl, read_json, read_jsonl, write_json)
+    append_jsonl, read_jsonl, write_json)
 from expedistill.methods.review import attribution
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
@@ -85,180 +85,41 @@ def _changed_skills(ctx: StageContext, previous: Sequence[Skill],
     return sorted(out, key=lambda skill: skill.skill_id)
 
 
-def _fallback_origin(ctx: StageContext, skill: Skill) -> Optional[Dict[str, Any]]:
-    """Build an origin for a skill that predates the origin ledger.
+def _scene_context(ctx: StageContext, provenance: Provenance,
+                   view_rules: Any) -> TraceContext:
+    """The real situation a skill version's exam is cut from.
 
-    Old and assembled banks carry no ``skill_origins.jsonl``.  The skill's
-    anchor subtask and its stored trajectory still name a measured source
-    sheet in one of the run's execute phases, so the scene can be rebuilt;
-    a skill with no such source is a generation failure instead.
+    One exact lookup of ``Provenance.scene``; nothing is searched or
+    guessed. The task instruction comes from the benchmark when it can
+    load the task, else from the sheet's recorded initial prompt.
     """
-    try:
-        subtask = ctx.store.load("subtasks", skill.subtask_id, Subtask)
-        ctx.store.load("trajectories", subtask.trajectory_id, Trajectory)
-    except Exception:
-        return None
-    for directory in sorted(
-            (ctx.run_dir / PHASES_DIR).glob("p*_*"), reverse=True):
-        report = phase_report.read_phase_report(
-            directory, phase_kind="source", learning_usable=True)
-        if report is None:
-            continue
-        for sheet in report.sheets:
-            execution = sheet.execution
-            if execution is None:
-                continue
-            if (execution.artifacts or {}).get("trajectory_id")                     != subtask.trajectory_id:
-                continue
-            record_path = directory / phase_disk.PHASE_RECORD_NAME
-            label = (read_json(record_path).get("label")
-                     if record_path.exists() else
-                     directory.name.replace("_", ":", 1))
-            return {
-                "skill_id": skill.skill_id,
-                "version": skill.version,
-                "phase_label": label,
-                "change_note": "source recovered from the stored trajectory",
-                "context_text": "",
-                "source_ref": source_ref(
-                    label, unit_id=sheet.coverage.unit_id,
-                    sheet_id=sheet.sheet_id,
-                    scene_step=subtask.step_range[0]),
-            }
-    return None
+    benchmark = ctx.config.benchmark
 
+    def instruction_for(task_ref: str) -> str:
+        return attribution.task_instruction_for(benchmark, task_ref)
 
-def _anchor_trajectory(skill: Skill) -> Optional[str]:
-    """The trajectory a skill's anchor subtask ran, or None.
-
-    ``Skill.subtask_id`` is the skill's own anchor (the cluster's smallest
-    member, or the segment in the classic path), so its trajectory is the
-    one piece of provenance that is unique even when a task's attempts
-    share a unit id. Requirement skills carry a synthetic ``req/...``
-    subtask that is not a trajectory; they return None and fall back to
-    the origin's exact sheet id.
-    """
-    subtask_id = getattr(skill, "subtask_id", None)
-    if not isinstance(subtask_id, str):
-        return None
-    try:
-        trajectory_id, _segment = ids.parse_subtask_id(subtask_id)
-        ids.parse_trajectory_id(trajectory_id)
-    except (TypeError, ValueError):
-        return None
-    return trajectory_id
-
-
-def _source_sheet(ctx: StageContext, skill: Skill,
-                  source_ref: Dict[str, Any]):
-    """The source phase's AnswerSheet named by one origin pointer.
-
-    Precedence: the origin's exact sheet id; the skill's anchor
-    trajectory; then a unit id, but only when it names exactly one sheet.
-    Unit ids are shared by a task's attempts (``phase:benchmark:task:role:
-    sha``), so a multi-match unit is an error -- silently taking the last
-    attempt is how P03 once reconstructed every scene from attempt 02
-    instead of the trajectory the skill came from.
-    """
-    phase_label = source_ref.get("phase_label")
-    if not isinstance(phase_label, str) or not phase_label:
-        raise ModelOutputError("skill origin has no source phase label")
-    directory = phase_bank_dir(ctx.run_dir, phase_label)
-    report = phase_report.read_phase_report(
-        directory, phase_kind="source", learning_usable=True)
-    if report is None:
-        raise ModelOutputError(
-            f"source phase {phase_label!r} has no trial-level report")
-    sheet_id = source_ref.get("sheet_id")
-    if isinstance(sheet_id, str) and sheet_id:
-        exact = [sheet for sheet in report.sheets
-                 if sheet.sheet_id == sheet_id]
-        if not exact:
-            raise ModelOutputError(
-                f"source phase {phase_label!r} has no answer sheet "
-                f"{sheet_id!r}")
-        return exact[0]
-    trajectory_id = _anchor_trajectory(skill)
-    if trajectory_id is not None:
-        anchored = [
-            sheet for sheet in report.sheets
-            if (sheet.execution.artifacts or {}).get("trajectory_id")
-            == trajectory_id]
-        if len(anchored) == 1:
-            return anchored[0]
-        if len(anchored) > 1:
-            raise CodeBugError(
-                f"source phase {phase_label!r} has {len(anchored)} sheets "
-                f"for trajectory {trajectory_id!r}; the origin must name "
-                "one sheet")
-    unit_id = source_ref.get("unit_id")
-    if isinstance(unit_id, str) and unit_id:
-        same_unit = [sheet for sheet in report.sheets
-                     if sheet.coverage.unit_id == unit_id]
-        if len(same_unit) == 1:
-            return same_unit[0]
-        if len(same_unit) > 1:
-            raise CodeBugError(
-                f"source phase {phase_label!r} has {len(same_unit)} sheets "
-                f"under unit {unit_id!r} and the skill names no anchor "
-                "trajectory; the origin must name a sheet")
-    raise ModelOutputError(
-        f"source phase {phase_label!r} has no sheet named by "
-        f"{source_ref!r}")
-
-
-def _scene_inputs(ctx: StageContext, skill: Skill,
-                  origin: Dict[str, Any], view_rules: Any):
-    """Render the source prefix/future and the natural-language note."""
-    source_ref = origin.get("source_ref")
-    if not isinstance(source_ref, dict):
-        raise ModelOutputError(
-            f"skill {skill.skill_id!r} version {skill.version} has no "
-            "source_ref")
-    sheet = _source_sheet(ctx, skill, source_ref)
-    execution = sheet.execution
-    if execution is None:
-        raise ModelOutputError(
-            f"source sheet {sheet.sheet_id!r} has no execution")
-    steps = list(execution.steps or [])
-    if not steps:
-        raise ModelOutputError(
-            f"source sheet {sheet.sheet_id!r} has no steps")
-    raw_step = source_ref.get("scene_step", 0)
-    if isinstance(raw_step, bool) or not isinstance(raw_step, int):
-        raise ModelOutputError(
-            f"skill origin scene_step is not an int: {raw_step!r}")
-    scene_step = max(0, min(raw_step, len(steps)))
-    try:
-        task_instruction = attribution.task_instruction_for(
-            ctx.config.benchmark, execution.task_ref)
-    except Exception:
-        # A benchmark may not register its task prompt in a test fixture;
-        # the recorded initial prompt is the best available context.
-        task_instruction = str(
-            (execution.metrics or {}).get("initial_prompt") or "")
-    return (
-        task_instruction,
-        render_steps_view(steps[:scene_step], view_rules),
-        render_steps_view(steps[scene_step:scene_step + 30], view_rules),
-        str(origin.get("change_note") or ""),
-        source_ref,
-    )
+    return trace.resolve(
+        ctx.run_dir, provenance.scene,
+        instruction_for=instruction_for, view_rules=view_rules)
 
 
 def _exam_or_generate(ctx: StageContext, exam_id: str, skill: Skill,
-                      origin: Dict[str, Any], view_rules: Any,
+                      provenance: Provenance, view_rules: Any,
                       terminal: bool) -> Optional[Exam]:
-    """Load an exam or generate it from the skill's recorded origin."""
+    """Load an exam or generate it from the skill version's provenance."""
     if ctx.store.exists("exams", exam_id):
         return ctx.store.load("exams", exam_id, Exam)
     if terminal:
         return None
-    task_instruction, prior, future, change_note, source_ref = _scene_inputs(
-        ctx, skill, origin, view_rules)
+    if provenance.scene is None:
+        raise ModelOutputError(
+            f"skill {skill.skill_id!r} version {skill.version} has no "
+            "scene to cut an exam from")
+    context = _scene_context(ctx, provenance, view_rules)
     scene = write_scene(
-        task_instruction, prior, future, skill.content, change_note,
-        ctx.handle("examiner"), usage=ctx.usage, run_dir=ctx.run_dir)
+        context.task_instruction, context.before, context.after,
+        skill.content, provenance.note, ctx.handle("examiner"),
+        usage=ctx.usage, run_dir=ctx.run_dir)
     exam = Exam(
         exam_id=exam_id,
         skill_id=skill.skill_id,
@@ -266,7 +127,7 @@ def _exam_or_generate(ctx: StageContext, exam_id: str, skill: Skill,
         scene_text=scene["scene_text"],
         expected_behavior=scene["expected_behavior"],
         reference_answer=scene["reference_answer"],
-        source_ref=source_ref,
+        scene=provenance.scene,
     )
     ctx.store.save(exam, "exams")
     return exam
@@ -298,6 +159,19 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
         for skill in changed}
     exam_ids = sorted(skill_by_exam)
 
+    # Fail before any model call: a version whose scene cannot be followed
+    # to a real execution would otherwise surface as one generation
+    # failure per exam deep into the phase.
+    unexamined = [
+        skill for exam_id, skill in skill_by_exam.items()
+        if not ctx.store.exists("exams", exam_id)]
+    problems = check_provenance(ctx.run_dir, unexamined)
+    if problems:
+        raise CodeBugError(
+            f"phase {phase.label!r}: {len(problems)} skill version(s) have "
+            "no usable provenance, so their exam cannot be cut from a real "
+            f"scene: {problems[:5]}")
+
     rows = delivery.resolve(bank, exam_ids, delivery_params)
     plans = engine._plan_units(
         rows, None, phase_label=phase.label,
@@ -326,15 +200,14 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
         if plan.unit.unit_id in reused:
             return "reused", exam_id
         try:
-            origin = (find_origin(
+            provenance = find_provenance(
                 ctx.run_dir, skill.skill_id, skill.version)
-                or _fallback_origin(ctx, skill))
-            if origin is None:
+            if provenance is None:
                 raise ModelOutputError(
-                    f"no skill origin for {skill.skill_id!r} "
+                    f"no provenance for {skill.skill_id!r} "
                     f"version {skill.version}")
             exam = _exam_or_generate(
-                ctx, exam_id, skill, origin, plugin.view_rules,
+                ctx, exam_id, skill, provenance, plugin.view_rules,
                 terminal=exam_id in terminal_generation)
             if exam is None:
                 return "generation_failed", exam_id

@@ -1,17 +1,20 @@
 """The shared P04/P06 revision writer.
 
 The decision module has already chosen ``revise``. This module only writes
-the new content from the new ``SkillAttemptEvidence`` package; it has no
-keep/delete policy and does not read full trajectories.
+the new content from the ``SkillAttemptEvidence`` package; it has no
+keep/delete policy. Each window is shown with the real steps around its own
+``TraceRef`` (rendered by the caller-supplied ``context_of``), next to the
+attribution model's reading of them.
 """
 
 import json
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from expedistill.blocks.attribution import revise_from_attempts
 from expedistill.blocks.author import has_skill_sections
 from expedistill.core.models import Skill
+from expedistill.core.trace import TraceRef
 from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
@@ -31,6 +34,7 @@ def revise_one(
     *,
     weak_profile: str,
     handle: ModelHandle,
+    context_of: Callable[[TraceRef], str],
     attempts: int = _REVISION_ATTEMPTS,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
@@ -46,8 +50,10 @@ def revise_one(
         return RevisionOutcome(
             skill_id=skill.skill_id, decision="revise",
             outcome="unchanged")
-    serialized = json.dumps(evidence.to_dict(), ensure_ascii=False,
-                            indent=2)
+    payload = evidence.to_dict()
+    for window, raw in zip(windows, payload["windows"]):
+        raw["real_steps"] = context_of(window.ref)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
     for _ in range(attempts):
         try:
             result = revise_from_attempts(

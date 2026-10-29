@@ -1,3 +1,7 @@
+> **已过时（2026-10-29）**：本文的读取端优先级（sheet_id → 锚点轨迹 → unit_id）已被
+> 写入端的精确指针取代，`_source_sheet`、`_fallback_origin` 与 `skill_origins.jsonl`
+> 均已删除。替代文档：`docs/decisions/provenance_trace_context_20261029.md`。
+
 # 决定：考场场景按技能的锚点轨迹定位来源答卷
 
 日期：2026-10-29

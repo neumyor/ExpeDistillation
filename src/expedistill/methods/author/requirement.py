@@ -15,11 +15,18 @@ def write_requirement(
     requirement: Any,
     *,
     weak_profile: str,
+    source_context: str,
     handle: Any,
     usage: Any = None,
     run_dir: Optional[Any] = None,
 ) -> Skill:
-    """Render the requirement's evidence into one pending skill."""
+    """Render the requirement's evidence into one pending skill.
+
+    ``source_context`` is the real situation the requirement was cut from,
+    rendered from its resolved ``TraceRef`` scenes by the lander; the
+    review-time window text is not used, because for an exam finding it
+    would be a paper answer.
+    """
     experiences = list(requirement.evidence.source_experiences)
     if not experiences:
         raise CodeBugError(
@@ -42,12 +49,9 @@ def write_requirement(
         success=False,
         context_summary=requirement.trigger,
     )
-    steps_view = "\n\n".join(
-        str(experience.get("steps_view") or "")
-        for experience in experiences)
     skill = write_skill(
         anchor,
-        steps_view,
+        source_context,
         weak_profile,
         "diagnose",
         handle,

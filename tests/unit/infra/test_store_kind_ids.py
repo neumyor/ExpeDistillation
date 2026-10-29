@@ -2,6 +2,7 @@
 resolved through the store kind, not by first-match scanning. Exam has both
 exam_id and skill_id; without the kind it would be stored under the foreign
 key and two exams would silently overwrite each other."""
+from expedistill.core.trace import TraceRef
 from expedistill.core import Attempt, Exam, Skill, Subtask, Trajectory
 from expedistill.infra import Store
 
@@ -11,7 +12,7 @@ def _exam(i):
     return Exam(exam_id=f"{skill_id}/v01/exam", skill_id=skill_id,
                 skill_version=1, scene_text="q", expected_behavior="b",
                 reference_answer="a",
-                source_ref={"phase_label": "p02:learn", "scene_step": 0})
+                scene=TraceRef("p02:learn", "sheet-0", 0))
 
 
 def test_exam_stored_by_exam_id(tmp_path):

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from expedistill.blocks.attribution import attribute_attempts
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites import skill_usage
+from expedistill.composites.trace import trace_of_execution
 from expedistill.composites.skill_attempt_evidence import (
     SkillAttemptEvidence,
     WindowEvidence,
@@ -309,10 +310,12 @@ def _attribute_window(
         usage=usage,
         run_dir=run_dir,
         skill_aliases=skill_aliases)
+    ref = trace_of_execution(
+        execution, min(trigger_steps) if trigger_steps else step_start)
     return {
         skill_id: WindowEvidence(
             task_id=task_id, attempt=attempt, success=success, kind=kind,
-            step_start=step_start, step_end=step_end,
+            step_start=step_start, step_end=step_end, ref=ref,
             trigger_steps=list(trigger_steps),
             trigger_context=values["trigger_context"],
             behavior_after_trigger=values["behavior_after_trigger"],

@@ -27,6 +27,7 @@ import types
 
 import pytest
 
+from expedistill.core.trace import TraceRef
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.benchmarks.tb import TBPlugin
@@ -243,7 +244,7 @@ def _exam():
         scene_text="What is the capital of France?",
         expected_behavior="Name Paris.",
         reference_answer="Paris",
-        source_ref={"phase_label": "p01:baseline", "scene_step": 0},
+        scene=TraceRef("p01:baseline", "sheet-0", 0),
     )
 
 

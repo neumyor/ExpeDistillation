@@ -23,6 +23,7 @@ import json
 
 import pytest
 
+from expedistill.core.trace import TraceRef
 from expedistill.composites import curation
 from expedistill.composites.curation import LOG_DIR, LOG_NAME, curate_bank
 from expedistill.core import ids
@@ -137,7 +138,7 @@ def _seed(store):
             scene_text=f"question {index}",
             expected_behavior=f"answer question {index}",
             reference_answer=f"reference {index}",
-            source_ref={"phase_label": "p01:baseline", "scene_step": 0}),
+            scene=TraceRef("p01:baseline", "sheet-0", 0)),
             "exams")
 
 
