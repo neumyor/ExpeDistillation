@@ -5,7 +5,9 @@
 #   scripts/remote/start_run_bench_host.sh <config name or path> [run name] [extra CLI args...]
 #
 # Environment (all optional):
-#   WORKERS   parallel workers (default 64; the team minimum is 32)
+#   WORKERS   parallel workers for steps that only call the LLM endpoint
+#             (default 64; the team minimum is 32)
+#   ROLLOUT_WORKERS  parallel benchmark rollouts (default: same as WORKERS)
 #   RUNS_DIR  where run directories live (required)
 #   EXPEDISTILL_ENV_FILE  the secrets file (default ~/.config/expedistill/expedistill.env)
 #
@@ -49,6 +51,8 @@ if [[ -n "$NAME" && "$NAME" != --* ]]; then shift; else NAME="${STEM}_$(date +%Y
 RUNS_DIR="${RUNS_DIR:?RUNS_DIR is not set: the directory that holds run directories}"
 RUN_DIR="$RUNS_DIR/$NAME"
 WORKERS="${WORKERS:-64}"
+ROLLOUT=()
+[[ -n "${ROLLOUT_WORKERS:-}" ]] && ROLLOUT=(--rollout-workers "$ROLLOUT_WORKERS")
 mkdir -p "$RUN_DIR"
 
 PYTHON="$CODE/.venv/bin/python"
@@ -64,4 +68,5 @@ PYTHONUNBUFFERED=1 exec "$PYTHON" "$CODE/scripts/smoke/launch_detached.py" \
         --config "$CONFIG" \
         --run-dir "$RUN_DIR" \
         --workers "$WORKERS" \
+        "${ROLLOUT[@]}" \
         "$@"

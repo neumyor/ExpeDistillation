@@ -615,3 +615,70 @@ def test_schema_invalid_response_is_infrastructure(monkeypatch, stub_sdk):
     client = OpenAICompatClient.from_env()
     with pytest.raises(InfrastructureError, match="invalid response"):
         client.complete("model-a", "s", "u")
+
+
+def test_aliases_change_only_the_wire_model_and_rotate(monkeypatch, stub_sdk):
+    from expedistill.llm.client import ALIASES_ENV
+
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(ALIASES_ENV, "model-a=wire-1,wire-2")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+
+    client.complete("model-a", "s", "u")
+    first = StubSDKClient.last.create_kwargs["model"]
+    stub_sdk(response=chat_response("ok"))
+    client2 = OpenAICompatClient.from_env()
+    client2.complete("model-a", "s", "u")
+    client2.complete("model-a", "s", "u")
+    wires = {first, StubSDKClient.last.create_kwargs["model"]}
+
+    assert wires == {"wire-1", "wire-2"}
+
+
+def test_a_model_not_in_the_alias_table_is_sent_unchanged(
+        monkeypatch, stub_sdk):
+    from expedistill.llm.client import ALIASES_ENV
+
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(ALIASES_ENV, "model-a=wire-1")
+    stub_sdk(response=chat_response("ok"))
+
+    OpenAICompatClient.from_env().complete("model-b", "s", "u")
+
+    assert StubSDKClient.last.create_kwargs["model"] == "model-b"
+
+
+def test_a_429_rests_that_wire_id_and_the_error_names_the_logical_model(
+        monkeypatch, stub_sdk):
+    from expedistill.llm.client import ALIASES_ENV
+
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(ALIASES_ENV, "model-a=wire-1,wire-2")
+    stub_sdk(error=_status_error(429))
+    client = OpenAICompatClient.from_env()
+
+    with pytest.raises(InfrastructureError) as info:
+        client.complete("model-a", "s", "u")
+    limited = StubSDKClient.last.create_kwargs["model"]
+    other = {"wire-1", "wire-2"} - {limited}
+    picks = {client._aliases.pick("model-a") for _ in range(4)}
+
+    assert "model-a" in str(info.value) and "wire-" not in str(info.value)
+    assert picks == other
+
+
+def test_a_malformed_alias_table_stops_the_run_at_client_build(
+        monkeypatch, stub_sdk):
+    from expedistill.llm.client import ALIASES_ENV
+
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(ALIASES_ENV, "model-a")
+    stub_sdk()
+
+    with pytest.raises(ConfigError, match=ALIASES_ENV):
+        OpenAICompatClient.from_env()

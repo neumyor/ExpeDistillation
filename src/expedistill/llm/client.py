@@ -19,8 +19,10 @@ and never logged, stored, or returned.
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from expedistill.infra.reliability import (
     ConfigError,
@@ -30,14 +32,26 @@ from expedistill.infra.reliability import (
 )
 
 __all__ = [
+    "ALIASES_ENV",
     "API_KEY_ENV",
     "ENDPOINT_ENV",
+    "AliasPool",
     "CompletionResult",
     "OpenAICompatClient",
+    "parse_aliases",
 ]
 
 ENDPOINT_ENV = "EXPEDISTILL_LLM_ENDPOINT"
 API_KEY_ENV = "EXPEDISTILL_LLM_API_KEY"
+
+#: ``logical=alias1,alias2;other=aliasA,aliasB``. A gateway that rate-limits
+#: per request id (not per model) serves one model under several ids; the
+#: pool spreads requests over them. Gateway ids are access details, so they
+#: live in the environment and never in a config, manifest or log.
+ALIASES_ENV = "EXPEDISTILL_LLM_MODEL_ALIASES"
+
+#: Seconds an alias rests after the gateway rate-limited it.
+ALIAS_COOLDOWN_SECONDS = 20.0
 
 #: finish_reason values that mean the provider refused the content policy.
 _REFUSAL_FINISH_REASONS = frozenset({"content_filter"})
@@ -182,6 +196,69 @@ def _drain_stream(stream: Iterable[Any]) -> _StreamedReply:
     )
 
 
+def parse_aliases(raw: str) -> Dict[str, List[str]]:
+    """``logical=a,b;other=c`` -> ``{"logical": ["a", "b"], "other": ["c"]}``.
+
+    An empty string means no aliases. A malformed entry is a configuration
+    error that names the variable, not the value (the ids are access
+    details)."""
+    table: Dict[str, List[str]] = {}
+    for entry in (part.strip() for part in raw.split(";")):
+        if not entry:
+            continue
+        logical, sep, tail = entry.partition("=")
+        names = [name.strip() for name in tail.split(",") if name.strip()]
+        if not sep or not logical.strip() or not names:
+            raise ConfigError(
+                f"{ALIASES_ENV} entries must look like "
+                "'logical=alias1,alias2'; one entry is malformed")
+        if logical.strip() in table:
+            raise ConfigError(
+                f"{ALIASES_ENV} names one logical model twice")
+        table[logical.strip()] = list(dict.fromkeys(names))
+    return table
+
+
+class AliasPool:
+    """Which wire id a request for a logical model goes out under.
+
+    Callers keep addressing the logical name (it is the model's identity in
+    the manifest, the usage ledger and the stored trajectories); only the
+    ``model`` field on the wire changes. Requests rotate over a model's
+    aliases; an alias the gateway just rate-limited is skipped until its
+    cooldown ends, and when every alias is cooling the one that recovers
+    first is used. A logical name without aliases goes out unchanged.
+    """
+
+    def __init__(self, table: Optional[Dict[str, List[str]]] = None,
+                 cooldown_seconds: float = ALIAS_COOLDOWN_SECONDS,
+                 clock: Any = time.monotonic):
+        self._table = {name: list(ids) for name, ids in (table or {}).items()}
+        self._cooldown = float(cooldown_seconds)
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._next: Dict[str, int] = {}
+        self._rested_until: Dict[str, float] = {}
+
+    def pick(self, logical: str) -> str:
+        ids = self._table.get(logical)
+        if not ids:
+            return logical
+        with self._lock:
+            now = self._clock()
+            start = self._next.get(logical, 0)
+            self._next[logical] = (start + 1) % len(ids)
+            ordered = ids[start:] + ids[:start]
+            for alias in ordered:
+                if self._rested_until.get(alias, 0.0) <= now:
+                    return alias
+            return min(ordered, key=lambda alias: self._rested_until[alias])
+
+    def rate_limited(self, alias: str) -> None:
+        with self._lock:
+            self._rested_until[alias] = self._clock() + self._cooldown
+
+
 class OpenAICompatClient:
     """Thin synchronous chat client over any OpenAI-compatible endpoint.
 
@@ -190,7 +267,9 @@ class OpenAICompatClient:
     """
 
     def __init__(self, endpoint: str, api_key: str,
-                 timeout_sec: float = 300.0):
+                 timeout_sec: float = 300.0,
+                 aliases: Optional[AliasPool] = None):
+        self._aliases = aliases or AliasPool()
         # Imported lazily so test doubles can patch this attribute without
         # importing the SDK for registry-only use.
         from openai import OpenAI
@@ -230,7 +309,9 @@ class OpenAICompatClient:
                 + ", ".join(missing)
                 + "; copy .env.example to .env and fill them in (never commit .env)"
             )
-        return cls(endpoint=endpoint, api_key=api_key, timeout_sec=timeout_sec)
+        aliases = AliasPool(parse_aliases(os.environ.get(ALIASES_ENV, "")))
+        return cls(endpoint=endpoint, api_key=api_key, timeout_sec=timeout_sec,
+                   aliases=aliases)
 
     def complete(
         self,
@@ -273,8 +354,9 @@ class OpenAICompatClient:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": user})
+        wire_model = self._aliases.pick(model)
         payload: Dict[str, Any] = {
-            "model": model,
+            "model": wire_model,
             "messages": messages,
             "temperature": temperature,
         }
@@ -321,6 +403,8 @@ class OpenAICompatClient:
                 # Status and error type only: the SDK message carries the
                 # provider's error body, which may echo the request.
                 status = getattr(exc, "status_code", None)
+                if status == 429:
+                    self._aliases.rate_limited(wire_model)
                 detail = (f"LLM endpoint HTTP error for model {model}: "
                           f"status={status} type={type(exc).__name__}")
                 if _status_is_permanent(status):

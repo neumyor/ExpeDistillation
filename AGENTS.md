@@ -126,7 +126,7 @@ src/expedistill/
                           已注册方法 prompt 的 digest）
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
   llm/                    第 2 层：B1 调用模型
-    client.py             底层客户端（OpenAI 兼容接口）
+    client.py             底层客户端（OpenAI 兼容接口）+ 请求 ID 别名池（同一模型的多个网关 ID 轮转）
     providers.py          provider 注册表（纯数据表：名字 → builder；环境变量选择）
     call.py               call_model：取 prompt → 请求 → 解析 → 格式错误重试 → 记账落盘
     fake.py               测试用假模型（按脚本返回固定内容）

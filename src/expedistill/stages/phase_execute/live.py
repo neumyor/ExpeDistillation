@@ -244,7 +244,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
                              / f"round{round_:02d}"),
                 usage=ctx.usage,
                 run_dir=ctx.run_dir,
-                workers=ctx.run_settings.workers,
+                workers=ctx.run_settings.rollout,
                 dispatch_stagger=ctx.run_settings.k1_stagger,
                 skip_unit_ids=skip_unit_ids,
             )

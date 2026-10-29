@@ -48,6 +48,9 @@ EXPEDISTILL_TB_ALLOWED_ROOTS=<可选：":" 分隔的绝对前缀>
 - `EXPEDISTILL_TB_ALLOWED_ROOTS` 是共享主机上的保护：设置后 `EXPEDISTILL_TB_ROOT` 必须
   落在其中某个前缀之下，写错路径时报错而不是写进别人的目录；
 - `EXPEDISTILL_LLM_PROVIDER` 可选，缺省为 `openai_compat`；
+- `EXPEDISTILL_LLM_MODEL_ALIASES` 可选：网关按请求 ID 限流时，把同一个模型的多个请求 ID
+  填成 `逻辑名=别名1,别名2;…`，client 在别名之间轮转，收到 429 的别名休息 20 秒。逻辑名
+  仍是 manifest 和用量账本里的身份；Harbor 的模型请求不经过它；
 - 本机模式下 runner 继承的是干净环境（与 ssh 登录会话一致），driver 的密钥不会传给
   runner。
 
@@ -64,11 +67,13 @@ scripts/remote/deploy_bench_host.sh          # 部署已提交的 HEAD；有未�
 
 ```bash
 cd <deploy-base>/<commit>
-RUNS_DIR=<runs-dir> WORKERS=64 scripts/remote/start_run_bench_host.sh <配置名> [run 名] [其余 CLI 参数]
+RUNS_DIR=<runs-dir> WORKERS=128 ROLLOUT_WORKERS=64 scripts/remote/start_run_bench_host.sh <配置名> [run 名] [其余 CLI 参数]
 ```
 
 - run 名已存在就是续跑；不写则新建 `<配置 stem>_<YYYYMMDD_HHMM>`；
-- 工作进程数不得低于 32；
+- 并行度有两个，分开设置：`WORKERS` 管只调用 LLM 端点的步骤（写作、审阅、整理、
+  exam 单元），`ROLLOUT_WORKERS` 管基准主机上的真实 rollout，不设则等于 `WORKERS`。
+  两者都不得低于 32；
 - driver 是独立会话并写 pidfile，ssh 断开不影响它；
 - 续跑必须使用同一个代码目录和同一个 run 名：TB 的远程 run id 含 run 目录的真实
   路径，换路径等于新 run。

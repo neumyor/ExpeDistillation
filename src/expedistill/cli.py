@@ -247,7 +247,8 @@ def _build_handles(
 def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
                         llm_infra_backoff_seconds: Any, llm_timeout_sec: Any,
                         k1_stagger: Any,
-                        allow_infra_shortfall: Any) -> None:
+                        allow_infra_shortfall: Any,
+                        rollout_workers: Any = None) -> None:
     """Reject bad run settings as ConfigError before anything runs.
 
     Each value would otherwise only be rejected deep inside K1 or
@@ -264,6 +265,10 @@ def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
     problems = []
     if not is_int(workers) or workers < 1:
         problems.append(f"workers must be an int >= 1, got {workers!r}")
+    if rollout_workers is not None and (
+            not is_int(rollout_workers) or rollout_workers < 1):
+        problems.append("rollout_workers must be an int >= 1 or unset, got "
+                        f"{rollout_workers!r}")
     if not is_int(llm_infra_retries) or llm_infra_retries < 0:
         problems.append("llm_infra_retries must be an int >= 0, got "
                         f"{llm_infra_retries!r}")
@@ -320,6 +325,7 @@ def run_experiment(
     allow_infra_shortfall: bool = False,
     k1_stagger: float = 0.0,
     until_phase: Optional[int] = None,
+    rollout_workers: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Freeze, then run the config's phase sequence over ``run_dir``;
     return the LAST EXECUTED step's summary.
@@ -378,7 +384,8 @@ def run_experiment(
         llm_infra_backoff_seconds=llm_infra_backoff_seconds,
         llm_timeout_sec=llm_timeout_sec,
         k1_stagger=k1_stagger,
-        allow_infra_shortfall=allow_infra_shortfall)
+        allow_infra_shortfall=allow_infra_shortfall,
+        rollout_workers=rollout_workers)
     config_path = Path(config_path)
     run_dir = Path(run_dir)
     try:
@@ -427,6 +434,7 @@ def run_experiment(
             # phase drivers read ctx.run_settings.<field>).
             run_settings=RunSettings(
                 workers=workers,
+                rollout_workers=rollout_workers,
                 k1_stagger=k1_stagger,
                 allow_infra_shortfall=allow_infra_shortfall),
         )
@@ -531,6 +539,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         allow_infra_shortfall=args.allow_infra_shortfall,
         k1_stagger=args.k1_stagger,
         until_phase=args.until_phase,
+        rollout_workers=args.rollout_workers,
     )
     return 0
 
@@ -548,6 +557,8 @@ def _resume_command(args: argparse.Namespace) -> str:
         "--llm-timeout", str(args.llm_timeout),
         "--k1-stagger", str(args.k1_stagger),
     ]
+    if args.rollout_workers is not None:
+        argv += ["--rollout-workers", str(args.rollout_workers)]
     if args.until_phase is not None:
         # Kept so re-running the hint stops at the same phase again; a run
         # stopped early continues by re-running with a higher --until-phase.
@@ -674,7 +685,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="run directory (created; holds manifest, phases, "
                           "ledger)")
     run.add_argument("--workers", type=int, default=1,
-                     help="parallel workers for execution units (default 1)")
+                     help="parallel workers for steps that only call the LLM "
+                          "endpoint: authoring, review, curation and exam "
+                          "units (default 1)")
+    run.add_argument("--rollout-workers", type=int, default=None,
+                     help="parallel benchmark rollouts (real executions on "
+                          "the benchmark host); default: same as --workers")
     # Operational, like --workers: not frozen into the manifest, so a resume
     # may change them. (--allow-infra-shortfall below is the exception in
     # kind: what it accepts is recorded durably in the run directory.)

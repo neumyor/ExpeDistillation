@@ -508,6 +508,8 @@ def test_config_without_token_budgets_stops_before_the_freeze(
     {"llm_timeout_sec": 0},
     {"k1_stagger": -0.5},
     {"allow_infra_shortfall": "yes"},
+    {"rollout_workers": 0},
+    {"rollout_workers": True},
 ])
 def test_bad_run_settings_are_config_errors_before_anything_runs(kwargs):
     with pytest.raises(InfraConfigError, match="invalid run setting"):
@@ -519,7 +521,8 @@ def test_bad_run_settings_are_config_errors_before_anything_runs(kwargs):
             llm_timeout_sec=kwargs.get("llm_timeout_sec", 300.0),
             k1_stagger=kwargs.get("k1_stagger", 0.0),
             allow_infra_shortfall=kwargs.get(
-                "allow_infra_shortfall", False))
+                "allow_infra_shortfall", False),
+            rollout_workers=kwargs.get("rollout_workers"))
 
 
 def test_a_stopped_run_replays_from_the_first_phase(

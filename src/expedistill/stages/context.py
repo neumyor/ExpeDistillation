@@ -9,7 +9,7 @@ llm.ModelHandle.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 __all__ = ["RunSettings", "StageContext"]
 
@@ -28,13 +28,25 @@ class RunSettings:
     deliberate callers and bypass that on purpose.
     """
 
-    #: Per-batch parallelism (B5 thread count) the stages request.
+    #: Per-batch parallelism (B5 thread count) the stages request for work
+    #: that only calls the LLM endpoint (authoring, review, curation, exam).
     workers: int = 1
+    #: Parallelism of benchmark rollouts (K1 dispatch of real executions);
+    #: ``None`` follows ``workers``. A rollout holds a sandbox on the
+    #: benchmark host for minutes, so its limit is the host's, not the
+    #: endpoint's.
+    rollout_workers: Optional[int] = None
     #: Per-unit random startup jitter (seconds) K1 applies before dispatch.
     k1_stagger: float = 0.0
     #: Whether NEW infra holes are accepted (the accepted set is durable
     #: per run and every later call honours it with or without the flag).
     allow_infra_shortfall: bool = False
+
+    @property
+    def rollout(self) -> int:
+        """The rollout parallelism in effect."""
+        return self.workers if self.rollout_workers is None \
+            else self.rollout_workers
 
 
 @dataclass(frozen=True)

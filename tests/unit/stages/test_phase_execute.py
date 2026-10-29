@@ -387,6 +387,42 @@ def test_baseline_runs_both_arms_and_writes_the_report(monkeypatch,
     assert len(plugin.calls) == calls_before
 
 
+def _record_rollout_workers(monkeypatch):
+    seen = []
+
+    def spy(real):
+        def wrapper(**kwargs):
+            seen.append(kwargs.get("workers"))
+            return real(**kwargs)
+        return wrapper
+
+    monkeypatch.setattr(phase_execute, "batch_execute",
+                        spy(phase_execute.batch_execute))
+    return seen
+
+
+def test_rollouts_are_dispatched_with_the_rollout_limit(monkeypatch,
+                                                        tmp_path):
+    _install_plugin(monkeypatch, PhasePlugin())
+    seen = _record_rollout_workers(monkeypatch)
+    ctx = make_ctx(tmp_path, make_config(), workers=128, rollout_workers=64)
+
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
+
+    assert seen and set(seen) == {64}
+
+
+def test_rollouts_follow_workers_when_no_rollout_limit_is_set(monkeypatch,
+                                                              tmp_path):
+    _install_plugin(monkeypatch, PhasePlugin())
+    seen = _record_rollout_workers(monkeypatch)
+    ctx = make_ctx(tmp_path, make_config(), workers=8)
+
+    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
+
+    assert seen and set(seen) == {8}
+
+
 def test_baseline_leaves_the_bank_unchanged_r4(monkeypatch, tmp_path):
     # R4's byte invariant holds for every phase that makes no bank calls.
     # (The live role's exception is the frozen verdicts-ledger protocol's
