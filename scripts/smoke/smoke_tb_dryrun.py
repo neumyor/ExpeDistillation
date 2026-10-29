@@ -1,4 +1,4 @@
-"""TB smoke step 2: DRY_RUN submission against the real runner on node29.
+"""TB smoke step 2: DRY_RUN submission against the real runner on the benchmark host.
 
 Validates the submission contract end to end without touching any sandbox:
 the exact environment the plugin would put in front of the tb21 runner
@@ -9,7 +9,7 @@ lines, and exit 0 -- no E2B sandbox, no model call, no trial directory.
 
 Also performs the one-time remote setup the plugin expects: create the
 root and its ``env.sh`` (venv + credential wiring, mirroring the campaign's
-``~/niuyiming/SkillExpand-tbeval/env.sh``); the plugin's submit sources it
+``the campaign launcher's env.sh``); the plugin's submit sources it
 before every launch.
 
 Usage:
@@ -41,14 +41,14 @@ from expedistill.infra.reliability import ConfigError  # noqa: E402
 
 #: One-time remote setup: the plugin's submit sources <root>/env.sh before
 #: launching the runner. Mirrors the campaign's env.sh for the parts the
-#: bundle does not default correctly on node29: the Harbor venv lives in
+#: bundle does not default correctly on the benchmark host: the Harbor venv lives in
 #: ~/agentbrew-tb21 (not <scripts>/.venv) and OPENAI_API_KEY is derived from
 #: TBENCH_LLM_KEY (the runner checks the former, secrets files export the
 #: latter). TBENCH_TENCENT_ENV_FILE points at nothing so the runner does not
 #: also source the bundle's secrets.env (same credentials, campaign setup).
 ROOT_ENV_SH = """\
 # Sourced by the expedistill TB plugin before each runner launch.
-# Mirrors ~/niuyiming/SkillExpand-tbeval/env.sh (the tb21 campaign launcher).
+# Mirrors the campaign launcher's env.sh (the tb21 campaign launcher).
 set -a
 . "$HOME/agentbrew-tb21/.env"
 set +a
@@ -59,7 +59,7 @@ export HARBOR_BIN="$HOME/agentbrew-tb21/.venv/bin/harbor"
 export PYTHONDONTWRITEBYTECODE=1
 """
 
-RUNNER_DEFAULT = "/data2/niuyiming/scripts/run_tencent_tb21_smoke_niuyiming.sh"
+RUNNER_DEFAULT = ""
 
 
 def _ssh_stdin(link: RemoteLink, remote_path: str, content: str) -> None:
@@ -127,6 +127,8 @@ def main() -> int:
 
     link = RemoteLink()
     runner = os.environ.get("EXPEDISTILL_TB_RUNNER", RUNNER_DEFAULT)
+    if not runner:
+        raise SystemExit("EXPEDISTILL_TB_RUNNER is unset (see .env.example)")
     root = _resolve_root(link)
     _setup_remote(link, root)
 

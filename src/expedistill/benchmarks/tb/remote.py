@@ -1,4 +1,4 @@
-"""Thin ssh/scp transport for the TerminalBench remote link (node29).
+"""Thin ssh/scp transport for the TerminalBench remote link (the benchmark host).
 
 One helper per operation, no business logic: the plugin composes these into
 submit/poll/fetch; tests monkeypatch or fake this class, never ssh for real.
@@ -9,8 +9,8 @@ Configuration comes from the environment (see ``.env.example``):
   or ``local`` when the driver itself runs on the benchmark host: commands
   then run in a local ``bash`` and ``put``/``get`` copy files, with no ssh.
 - ``EXPEDISTILL_TB_KEY``: path to the ssh private key (not used by ``local``).
-- ``EXPEDISTILL_TB_ROOT``: remote work root, under ``~/niuyiming/`` or
-  ``/data2/niuyiming/`` (outer AGENTS.md section 9).
+- ``EXPEDISTILL_TB_ROOT``: remote work root, under the prefixes named by
+  ``EXPEDISTILL_TB_ALLOWED_ROOTS`` when that is set.
 
 Key material is never logged, echoed in error messages, or written anywhere:
 ssh timeouts are re-raised without the subprocess argv (which contains the

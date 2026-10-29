@@ -1,6 +1,6 @@
 """TerminalBench plugin (layer 3): one remote Harbor rollout per ``run()``.
 
-TB is the remote benchmark: execution happens on node29 via Harbor + the
+TB is the remote benchmark: execution happens on the benchmark host via Harbor + the
 Tencent sandbox (README 1.3, TB runner row). This plugin never runs Harbor
 itself and never steps interactively; it submits one trial, waits for the
 verifier, and rebuilds the stepwise trajectory from the trial directory.
@@ -118,8 +118,8 @@ Token accounting: Harbor's ``final_metrics`` totals are recorded through the
 B7 UsageRecorder (one line per rollout, run_id as request_id); missing
 totals are recorded as null, never 0 (AGENTS.md section 6 rule 5).
 
-Remote work happens only under ``EXPEDISTILL_TB_ROOT`` (validated to sit
-under ``~/niuyiming/`` or ``/data2/niuyiming/``); local scratch only under
+Remote work happens only under ``EXPEDISTILL_TB_ROOT`` (validated against
+``EXPEDISTILL_TB_ALLOWED_ROOTS`` when set); local scratch only under
 the caller's ``workdir``.
 """
 
@@ -203,10 +203,12 @@ task description.
     )
 )
 
-#: The tb21 runner script on the remote host (outer scripts/tb21, mirrored at
-#: /data2/niuyiming/scripts/). Override with EXPEDISTILL_TB_RUNNER.
-DEFAULT_RUNNER = "/data2/niuyiming/scripts/run_tencent_tb21_smoke_niuyiming.sh"
+#: The runner script on the benchmark host. There is no default: where it
+#: lives is a property of the host, so EXPEDISTILL_TB_RUNNER must name it.
 RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
+
+#: Optional ``:``-separated absolute prefixes the remote root must sit under.
+ALLOWED_ROOTS_ENV = "EXPEDISTILL_TB_ALLOWED_ROOTS"
 
 # --------------------------------------------------------------------------
 # B2: the skill-folder guidance and the folder unit's task prompt
@@ -552,7 +554,7 @@ _FOLDER_CACHE_LOCK = threading.Lock()
 #: submit returned" at once, and the next unit is admitted only when an
 #: earlier one's upload COMPLETES -- never by a timer alone. A
 #: transport-shape guard (the 2026-10-18 storm was 84 units x 141
-#: per-file scp connections and node29's sshd MaxStartups dropped them):
+#: per-file scp connections and the benchmark host's sshd MaxStartups dropped them):
 #: it changes when units start, never what they measure. The fresh-unit
 #: probe, upload and submit all sit inside it; resumed units' result
 #: probes do too. Polls run outside it (one ssh per poll period).
@@ -925,7 +927,7 @@ class TBPlugin(BenchmarkPlugin):
             f"(runner log tail: {meta.get('runner_log_tail', '')})")
 
     def _failure_diagnostics(self, link: RemoteLink) -> str:
-        """Best-effort node29 load snapshot for a failed unit.
+        """Best-effort the benchmark host load snapshot for a failed unit.
 
         One extra ssh on the failure path. A failed probe is reported as
         such and never masks the original infrastructure error; the
@@ -936,14 +938,14 @@ class TBPlugin(BenchmarkPlugin):
             out, err, rc = link.run(
                 "cat /proc/loadavg; who 2>/dev/null | wc -l", timeout=10)
         except Exception as exc:  # the transport is already failing
-            return f"node29 probe failed: {type(exc).__name__}: {exc}"
+            return f"bench-host probe failed: {type(exc).__name__}: {exc}"
         if rc != 0:
             detail = " ".join(err.split())[-200:] or "no stderr"
-            return f"node29 probe rc={rc}: {detail}"
+            return f"bench-host probe rc={rc}: {detail}"
         lines = [line.strip() for line in out.splitlines() if line.strip()]
         if len(lines) < 2:
-            return f"node29 probe output={out.strip()!r}"
-        return f"node29 loadavg={lines[0]}; users={lines[-1]}"
+            return f"bench-host probe output={out.strip()!r}"
+        return f"bench-host loadavg={lines[0]}; users={lines[-1]}"
 
     # ------------------------------------------------------------------
     # Submission
@@ -1017,26 +1019,34 @@ class TBPlugin(BenchmarkPlugin):
 
     def _remote_root(self, link: RemoteLink) -> str:
         """Resolve ``~`` in the configured root and enforce the allowed
-        prefixes (outer AGENTS.md section 9). One extra ssh round trip per
-        plugin instance: the validation needs $HOME either way."""
+        prefixes. One extra ssh round trip per plugin instance: the
+        validation needs $HOME either way.
+
+        ``EXPEDISTILL_TB_ALLOWED_ROOTS`` is a ``:``-separated list of
+        absolute prefixes (``~`` allowed) the root must sit under; unset
+        means no restriction. A shared benchmark host sets it so a typo in
+        ``EXPEDISTILL_TB_ROOT`` cannot write into someone else's tree."""
         if self._root is not None:
             return self._root
         out, err, rc = link.run('printf %s "$HOME"', timeout=POLL_TIMEOUT_SECONDS)
         if rc != 0 or not out.strip():
             raise InfrastructureError(
                 f"cannot resolve $HOME on {link.host} (rc={rc})")
-        home = out.strip()
+        home = out.strip().rstrip("/")
         root = link.root
         if root.startswith("~"):
             root = home + root[1:]
         root = root.rstrip("/") or "/"
-        home_root = home.rstrip("/") + "/niuyiming"
-        if not (root == home_root or root.startswith(home_root + "/")
-                or root == "/data2/niuyiming"
-                or root.startswith("/data2/niuyiming/")):
+        allowed = [part.strip() for part in
+                   os.environ.get(ALLOWED_ROOTS_ENV, "").split(":")
+                   if part.strip()]
+        prefixes = [(home + part[1:] if part.startswith("~") else part)
+                    .rstrip("/") for part in allowed]
+        if prefixes and not any(root == prefix or root.startswith(prefix + "/")
+                                for prefix in prefixes):
             raise ConfigError(
-                f"{ENV_ROOT} ({root}) must live under ~/niuyiming/ or "
-                "/data2/niuyiming/ (outer AGENTS.md section 9)")
+                f"{ENV_ROOT} ({root}) must live under one of "
+                f"{ALLOWED_ROOTS_ENV}: {', '.join(prefixes)}")
         self._root = root
         return root
 
@@ -1148,7 +1158,7 @@ class TBPlugin(BenchmarkPlugin):
         -r`` from the cache). ``cp`` copies bytes, so the sandbox's
         ``/opt/openclaw-skills/<task>/`` contents are byte-identical to
         the per-file scp path this replaces -- the 2026-10-18 storm
-        (84 units x 141 files, one ssh connection each, node29's sshd
+        (84 units x 141 files, one ssh connection each, the benchmark host's sshd
         MaxStartups dropped them by the dozen) is a transport-shape
         problem, not a measurement change.
 
@@ -1438,7 +1448,11 @@ class TBPlugin(BenchmarkPlugin):
                          max_input_tokens)
         exports = " ".join(f"{key}={_q(value)}" for key, value in env.items())
         runner_script = (self._runner_script
-                         or os.environ.get(RUNNER_ENV, DEFAULT_RUNNER))
+                         or os.environ.get(RUNNER_ENV, ""))
+        if not runner_script:
+            raise ConfigError(
+                f"{RUNNER_ENV} is unset: name the runner script on the "
+                "benchmark host (see .env.example)")
         script = (
             f"cd {_q(root)} && mkdir -p {_q(root + '/logs')} {_q(env['JOBS_DIR'])}; "
             f"if [ -f {_q(root + '/env.sh')} ]; then . {_q(root + '/env.sh')}; fi; "

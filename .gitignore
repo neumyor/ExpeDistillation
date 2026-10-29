@@ -20,3 +20,6 @@ dist/
 # 系统
 .DS_Store
 /.worktrees/
+
+# Local work log: it names hosts, paths and accounts, so it is never published.
+log.md

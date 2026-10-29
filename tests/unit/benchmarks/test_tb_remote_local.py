@@ -30,15 +30,15 @@ def test_local_mode_needs_no_key(link):
 def test_an_empty_host_is_still_a_config_error(monkeypatch):
     monkeypatch.setenv(ENV_HOST, "")
     monkeypatch.delenv(ENV_KEY, raising=False)
-    monkeypatch.setenv(ENV_ROOT, "/data2/niuyiming/x")
+    monkeypatch.setenv(ENV_ROOT, "/srv/work/x")
     with pytest.raises(ConfigError, match=ENV_HOST):
         RemoteLink()
 
 
 def test_a_remote_host_still_requires_the_key(monkeypatch):
-    monkeypatch.setenv(ENV_HOST, "user@node29")
+    monkeypatch.setenv(ENV_HOST, "user@bench-host")
     monkeypatch.delenv(ENV_KEY, raising=False)
-    monkeypatch.setenv(ENV_ROOT, "/data2/niuyiming/x")
+    monkeypatch.setenv(ENV_ROOT, "/srv/work/x")
     with pytest.raises(ConfigError, match=ENV_KEY):
         RemoteLink()
 
@@ -115,3 +115,22 @@ def test_a_detached_command_survives_its_launcher(link, tmp_path):
             break
         time.sleep(0.1)
     assert marker.exists()
+
+
+def test_the_plugin_needs_a_runner_script_named_by_the_environment(
+        monkeypatch, tmp_path):
+    from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink
+
+    from expedistill.benchmarks.base import Task
+    from expedistill.benchmarks.tb.plugin import RUNNER_ENV, TBPlugin
+    from expedistill.llm.call import ModelHandle
+
+    monkeypatch.delenv(RUNNER_ENV, raising=False)
+    plugin = TBPlugin(link=JobsRemoteLink(), poll_seconds=0.0,
+                      deadline_seconds=5.0)
+    task = Task(task_id="tb:t", instruction="t",
+                meta={"task_name": "t", "attempt_token": "a00"})
+
+    with pytest.raises(ConfigError, match=RUNNER_ENV):
+        plugin.run(task, ModelHandle(name="m", role="executor_weak",
+                                     client=None), "", tmp_path)

@@ -245,7 +245,7 @@ class OpenAICompatClient:
         """One chat call, streamed on the wire and fully assembled on return.
 
         Streaming is the default transport because the campaign gateway
-        (llm-center.modelbest.co) kills NON-streaming chat requests at
+        (the LLM gateway) kills NON-streaming chat requests at
         ~300.3s server-side (measured 2026-10-12: APIConnectionError at
         300.2-300.4s on every attempt, runs/tb21_full_20261011_2242/
         llm_requests dumps 2946-2953), while a reasoning-effort-max call

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate expedistill's TB data modules against the real campaign archive.
 
-Runs four checks on data sampled from node29's /data2/niuyiming (see
+Runs four checks on data sampled from the benchmark host's campaign archive (see
 scripts/analysis/tb_archive_sample.py for how the sample was fetched):
 
 V1 trajectory reconstruction: expedistill.benchmarks.tb.trajectory.reconstruct

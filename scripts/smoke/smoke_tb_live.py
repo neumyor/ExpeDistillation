@@ -1,4 +1,4 @@
-"""TB smoke step 3: single-task LIVE rollout on node29 through the plugin.
+"""TB smoke step 3: single-task LIVE rollout on the benchmark host through the plugin.
 
 Path: direct ``TBPlugin.run()`` calls (E1's per-unit entry point), one task,
 one attempt, weak model qwen3.6-flash-distill. Four phases, each timed:

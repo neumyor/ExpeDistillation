@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# Deploy the current checkout to node29, where the driver runs next to Harbor.
+# Deploy the current checkout to the benchmark host, where the driver runs next to Harbor.
 #
 # Usage:
-#   scripts/remote/deploy_node29.sh            # deploy HEAD (must be clean)
-#   scripts/remote/deploy_node29.sh --force    # deploy a dirty tree; the code
+#   scripts/remote/deploy_bench_host.sh            # deploy HEAD (must be clean)
+#   scripts/remote/deploy_bench_host.sh --force    # deploy a dirty tree; the code
 #                                              # directory is named <commit>-dirty
 #
-# Input : .env (EXPEDISTILL_TB_HOST / EXPEDISTILL_TB_KEY of this machine).
-# Output: /data2/niuyiming/expedistill_code/<commit>/  holding src/, configs/,
+# Input : .env (EXPEDISTILL_TB_HOST / EXPEDISTILL_TB_KEY of this machine) and
+#         EXPEDISTILL_DEPLOY_BASE, the absolute directory on the benchmark host
+#         that holds one code directory per commit.
+# Output: $EXPEDISTILL_DEPLOY_BASE/<commit>/  holding src/, configs/,
 #         scripts/, pyproject.toml, README.md, a venv, and DEPLOYED_FROM.
 #         It prints the remote directory on the last line.
 #
 # One directory per commit and none is ever overwritten: a formal run stays on
 # the checkout it was started from (AGENTS.md section 6). GitHub is not
-# reachable from node29, so the files are pushed with rsync. The remote
-# secrets file is not touched here; see scripts/remote/README.md.
+# reachable from the benchmark host in some deployments, so the files are
+# pushed with rsync. The remote secrets file is not touched here; see
+# scripts/remote/README.md.
 
 set -euo pipefail
 
@@ -23,6 +26,7 @@ cd "$ROOT"
 [[ -f .env ]] && { set -a; . ./.env; set +a; }
 : "${EXPEDISTILL_TB_HOST:?EXPEDISTILL_TB_HOST is not set (.env)}"
 : "${EXPEDISTILL_TB_KEY:?EXPEDISTILL_TB_KEY is not set (.env)}"
+: "${EXPEDISTILL_DEPLOY_BASE:?EXPEDISTILL_DEPLOY_BASE is not set (.env)}"
 
 COMMIT="$(git rev-parse --short=12 HEAD)"
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
@@ -33,7 +37,7 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     COMMIT="${COMMIT}-dirty"
 fi
 
-REMOTE_BASE="/data2/niuyiming/expedistill_code"
+REMOTE_BASE="${EXPEDISTILL_DEPLOY_BASE%/}"
 REMOTE_DIR="$REMOTE_BASE/$COMMIT"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=10
      -o ServerAliveCountMax=3 -i "$EXPEDISTILL_TB_KEY")

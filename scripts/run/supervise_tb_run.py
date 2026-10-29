@@ -154,7 +154,7 @@ def main() -> int:
         for _ in range(240):  # up to 20 hours
             if link_up():
                 return True
-            log("node29 unreachable; waiting 5 min")
+            log("benchmark host unreachable; waiting 5 min")
             time.sleep(300)
         return False
 

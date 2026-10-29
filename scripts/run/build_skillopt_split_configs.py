@@ -70,8 +70,7 @@ from typing import Any, Dict, List
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: SkillOpt split manifests (outer workspace checkout); overridable.
-DEFAULT_SKILL_OPT_DATA = Path(
-    "/Users/yimingniu/Code/SkillEvolvePaperList/repos/pulled/SkillOpt/data")
+DEFAULT_SKILL_OPT_DATA = (REPO_ROOT / ".." / ".." / "pulled" / "SkillOpt" / "data").resolve()
 
 SPLIT_DIRS = {
     "alfworld": "alfworld_path_split",

@@ -17,7 +17,7 @@ from pathlib import Path
 from expedistill.infra.reliability import InfrastructureError
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "tb"
-ROOT = "/data2/niuyiming/expedistill"
+ROOT = "/srv/work/expedistill"
 JOBS = f"{ROOT}/jobs"
 
 _RUN_ID_IN_JOBS_RE = re.compile(r"/jobs/([A-Za-z0-9._-]+)/")
@@ -163,8 +163,8 @@ class JobsRemoteLink(RemoteShellSim):
     """
 
     def __init__(self, files=None, alive=(), on_submit=None,
-                 home="/home/node29"):
-        self.host = "user@node29"
+                 home="/home/bench"):
+        self.host = "user@bench-host"
         self.key_path = "/tmp/fake-key"
         self.root = ROOT
         self.home = home

@@ -52,8 +52,7 @@ from typing import Any, Dict, List
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SKILLOPT_DATA = Path(
-    "/Users/yimingniu/Code/SkillEvolvePaperList/repos/pulled/SkillOpt/data")
+DEFAULT_SKILLOPT_DATA = (REPO_ROOT / ".." / ".." / "pulled" / "SkillOpt" / "data").resolve()
 
 SPLIT_DIRS = {
     "searchqa": "searchqa_id_split",

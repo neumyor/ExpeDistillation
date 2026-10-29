@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sample TerminalBench campaign trials from the node29 archive into tmp/.
+"""Sample TerminalBench campaign trials from the benchmark-host archive into tmp/.
 
 Read-only: streams one ``ssh ... tar czf -`` per trial directory (whole trial
 for archive trials; for out-of-archive trials only result.json + the verifier
@@ -9,7 +9,7 @@ local target dir.
 Usage:
     python3 scripts/analysis/tb_archive_sample.py <manifest-root> <target-dir>
 Input:  <manifest-root>/trials.txt -- one remote trial dir per line, either
-        absolute (/data2/...) or relative to /data2/niuyiming/e1_final_archive/.
+        absolute or relative to EXPEDISTILL_TB_ARCHIVE_ROOT.
         A trailing ``files=TAB``-joined list restricts a trial to given files.
 Output: extracted trial trees under <target-dir>.
 
@@ -27,7 +27,7 @@ HOST = os.environ.get("EXPEDISTILL_TB_HOST", "")
 KEY = os.environ.get("EXPEDISTILL_TB_KEY", "")
 if KEY.startswith("~"):
     KEY = os.path.expanduser(KEY)
-ARCHIVE_BASE = "/data2/niuyiming/e1_final_archive"
+ARCHIVE_BASE = os.environ.get("EXPEDISTILL_TB_ARCHIVE_ROOT", "")
 SSH = ["ssh", "-S", "none", "-o", "BatchMode=yes", "-i", KEY, HOST]
 
 

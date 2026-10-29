@@ -38,7 +38,7 @@ from tests.unit.benchmarks.tb_fake_remote import (
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "tb"
 
-ROOT = "/data2/niuyiming/expedistill"
+ROOT = "/srv/work/expedistill"
 TRIAL = f"{ROOT}/jobs/ed_train-fasttext_tok/train-fasttext__AbCdEf1"
 
 HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",
@@ -57,9 +57,9 @@ class FakeRemoteLink(RemoteShellSim):
     simulator (tb_fake_remote.RemoteShellSim) answers the folder-cache
     transport commands against a real directory/file model."""
 
-    def __init__(self, polls=None, remote_files=None, home="/home/node29",
+    def __init__(self, polls=None, remote_files=None, home="/home/bench",
                  probe="ABSENT\n"):
-        self.host = "user@node29"
+        self.host = "user@bench-host"
         self.key_path = "/tmp/fake-key"
         self.root = ROOT
         self.home = home
@@ -134,12 +134,12 @@ def _make_plugin(link, usage_recorder=None):
 # ---------------------------------------------------------------------------
 
 def test_remote_link_reads_env_and_reports_missing_vars(monkeypatch):
-    monkeypatch.setenv(ENV_HOST, "user@node29")
+    monkeypatch.setenv(ENV_HOST, "user@bench-host")
     monkeypatch.setenv(ENV_KEY, "/keys/id_tb")
-    monkeypatch.setenv(ENV_ROOT, "/data2/niuyiming/expedistill")
+    monkeypatch.setenv(ENV_ROOT, "/srv/work/expedistill")
     link = RemoteLink()
-    assert link.host == "user@node29"
-    assert link.root == "/data2/niuyiming/expedistill"
+    assert link.host == "user@bench-host"
+    assert link.root == "/srv/work/expedistill"
 
 
 def test_remote_link_missing_env_is_config_error(monkeypatch):
@@ -147,7 +147,7 @@ def test_remote_link_missing_env_is_config_error(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(ConfigError, match=r"\.env\.example"):
         RemoteLink()
-    monkeypatch.setenv(ENV_HOST, "user@node29")
+    monkeypatch.setenv(ENV_HOST, "user@bench-host")
     with pytest.raises(ConfigError, match=ENV_KEY):
         RemoteLink()
     monkeypatch.setenv(ENV_KEY, "/keys/id_tb")
@@ -377,13 +377,13 @@ def test_runner_env_is_the_submission_contract(monkeypatch):
     from expedistill.benchmarks.tb.plugin import _FORWARDED_KNOBS, runner_env
     for knob in _FORWARDED_KNOBS:
         monkeypatch.delenv(knob, raising=False)
-    env = runner_env("ed_x_a00", "/data2/niuyiming/expedistill/jobs",
-                     "/data2/niuyiming/expedistill/retry_archives",
+    env = runner_env("ed_x_a00", "/srv/work/expedistill/jobs",
+                     "/srv/work/expedistill/retry_archives",
                      "git-leak-recovery", "qwen3.6-flash-distill", "bare", None)
     assert env == {
         "RUN_ID": "ed_x_a00",
-        "JOBS_DIR": "/data2/niuyiming/expedistill/jobs",
-        "RETRY_ARCHIVE_ROOT": "/data2/niuyiming/expedistill/retry_archives",
+        "JOBS_DIR": "/srv/work/expedistill/jobs",
+        "RETRY_ARCHIVE_ROOT": "/srv/work/expedistill/retry_archives",
         "TBENCH_RUN_MODE": "selected",
         "TBENCH_TASK_NAMES": "git-leak-recovery",
         "TBENCH_EVAL_MODE": "bare",
@@ -394,9 +394,9 @@ def test_runner_env_is_the_submission_contract(monkeypatch):
         "MODEL_NAME": "qwen3.6-flash-distill",
     }
     env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "skills",
-                     "/data2/niuyiming/expedistill/skills/ed_x_a00")
+                     "/srv/work/expedistill/skills/ed_x_a00")
     assert env["TBENCH_SKILL_ROOT"] == (
-        "/data2/niuyiming/expedistill/skills/ed_x_a00")
+        "/srv/work/expedistill/skills/ed_x_a00")
     env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "bare", None,
                      max_input_tokens=262144)
     assert env["TBENCH_MAX_INPUT_TOKENS"] == "262144"
@@ -655,13 +655,13 @@ def test_run_non_object_result_json_is_infra_error(tmp_path):
 def test_run_transport_failure_propagates(tmp_path):
     class BrokenLink(FakeRemoteLink):
         def run(self, cmd, timeout=None):
-            raise InfrastructureError("ssh to user@node29 timed out")
+            raise InfrastructureError("ssh to user@bench-host timed out")
 
     with pytest.raises(InfrastructureError, match="timed out"):
         _make_plugin(BrokenLink()).run(TASK, HANDLE, "", tmp_path / "work")
 
 
-def test_run_transport_failure_carries_node29_load(tmp_path):
+def test_run_transport_failure_carries_host_load(tmp_path):
     class BrokenThenProbe(FakeRemoteLink):
         def __init__(self):
             super().__init__()
@@ -671,11 +671,11 @@ def test_run_transport_failure_carries_node29_load(tmp_path):
             self.calls += 1
             if self.calls == 1:
                 raise InfrastructureError(
-                    "ssh to user@node29 timed out after 60s")
+                    "ssh to user@bench-host timed out after 60s")
             assert "loadavg" in cmd
             return "272.10 255.00 240.00 3/5256 12345\n12\n", "", 0
 
-    with pytest.raises(InfrastructureError, match="node29 loadavg=272.10"):
+    with pytest.raises(InfrastructureError, match="bench-host loadavg=272.10"):
         _make_plugin(BrokenThenProbe()).run(
             TASK, HANDLE, "", tmp_path / "work")
 
@@ -683,9 +683,9 @@ def test_run_transport_failure_carries_node29_load(tmp_path):
 def test_run_transport_failure_reports_a_failed_load_probe(tmp_path):
     class AlwaysBroken(FakeRemoteLink):
         def run(self, cmd, timeout=None):
-            raise InfrastructureError("ssh to user@node29 timed out")
+            raise InfrastructureError("ssh to user@bench-host timed out")
 
-    with pytest.raises(InfrastructureError, match="node29 probe failed"):
+    with pytest.raises(InfrastructureError, match="bench-host probe failed"):
         _make_plugin(AlwaysBroken()).run(TASK, HANDLE, "", tmp_path / "work")
 
 
@@ -1156,7 +1156,7 @@ def test_live_remote_smoke(tmp_path):
              TBENCH_N_ATTEMPTS=1 TBENCH_N_CONCURRENT=1 \\
              TBENCH_MAX_TRIAL_RETRIES=0 MODEL_NAME=<model> \\
              nohup setsid bash \\
-             /data2/niuyiming/scripts/run_tencent_tb21_smoke_niuyiming.sh \\
+             /srv/work/scripts/run_tb21_runner.sh \\
              > logs/ed_smoke_manual.log 2>&1 & echo $!'
 
     and the audit afterwards checks logs/ed_smoke_manual.log plus the trial's

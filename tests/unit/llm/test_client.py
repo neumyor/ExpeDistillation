@@ -174,7 +174,7 @@ def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
 
 def test_complete_uses_streaming_transport(monkeypatch, stub_sdk):
     # Regression for the 2026-10-12 incident: the campaign gateway
-    # (llm-center.modelbest.co) kills NON-streaming chat requests at ~300.3s
+    # (llm.example.com) kills NON-streaming chat requests at ~300.3s
     # server-side (APIConnectionError at 300.2-300.4s, runs/
     # tb21_full_20261011_2242/llm_requests dumps 2946-2953), while a
     # reasoning-effort-max call that thinks for the full 32,768-token budget

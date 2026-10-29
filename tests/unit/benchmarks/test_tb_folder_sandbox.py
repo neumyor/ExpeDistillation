@@ -33,7 +33,7 @@ from tests.unit.benchmarks.test_tb_plugin import (
     _make_plugin,
 )
 
-ROOT = "/data2/niuyiming/expedistill"
+ROOT = "/srv/work/expedistill"
 TRIAL = f"{ROOT}/jobs/ed_train-fasttext_tok/train-fasttext__AbCdEf1"
 
 HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",

@@ -4,7 +4,7 @@ archive.
 
 The TB21 full campaign does not need live rollouts for its baseline: the
 tb21 bare-rollout campaign already produced, per task and arm, five ranked
-valid trials on node29 (/data2/niuyiming/e1_final_archive/{qwen,dpsk}/<task>/).
+valid trials on the benchmark host (EXPEDISTILL_TB_ARCHIVE_ROOT/{qwen,dpsk}/<task>/).
 The pre-registered seeding rule maps archive rank 1..3 to attempt 0..2 of
 each arm (strong = dpsk / deepseek-v4-flash-0731--ali, weak = qwen / qwen3.6-flash-
 distill), so a run configured with n_attempts 3/3 gets its whole baseline
@@ -43,7 +43,7 @@ Status mapping (campaign rewards are binary, fixed from the audit): reward
 (failed by the model's own doing: tmux keystroke errors, AgentTimeout) ->
 failure. Any other missing-reward case aborts the seeding.
 
-The remote is READ-ONLY: this script only ever reads from node29 (a tar
+The remote is READ-ONLY: this script only ever reads from the benchmark host (a tar
 stream and two ls/python probes); it never writes or uploads anything there.
 
 Usage (from the repo root; .env is loaded automatically if present):
@@ -54,7 +54,7 @@ Usage (from the repo root; .env is loaded automatically if present):
         [--cache-dir tmp/tb_seed_cache]
 
 Inputs : configs/experiments/<cfg>.yaml, configs/seed/manifest_{qwen,dpsk}.tsv,
-         configs/seed/audit_20261011.json, node29 e1_final_archive (read-only).
+         configs/seed/audit_20261011.json, the benchmark host's campaign archive (read-only).
 Output : the frozen run dir with all baseline trajectories stored (+ stdout
          summary). Exit 0 on success; a non-zero exit leaves a resumable
          partial seeding.
@@ -85,8 +85,9 @@ from expedistill.core.ids import make_task_id, make_trajectory_id  # noqa: E402
 from expedistill.core.models import Step, Trajectory  # noqa: E402
 from expedistill.infra.store import Store  # noqa: E402
 
-#: The campaign archive on node29 (read-only for this script).
-ARCHIVE_ROOT = "/data2/niuyiming/e1_final_archive"
+#: The campaign archive on the benchmark host (read-only for this script);
+#: set EXPEDISTILL_TB_ARCHIVE_ROOT.
+ARCHIVE_ROOT = os.environ.get("EXPEDISTILL_TB_ARCHIVE_ROOT", "")
 
 #: Pipeline role -> (archive arm dir, campaign model name, manifest file).
 #: The pre-registered rule of this seeder: strong arm = the dpsk archive,
@@ -325,6 +326,8 @@ def fetch_timings(link: RemoteLink, trials: list) -> dict:
 
 
 def main() -> int:
+    if not ARCHIVE_ROOT:
+        raise SystemExit("EXPEDISTILL_TB_ARCHIVE_ROOT is unset (see .env.example)")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-dir", required=True, type=Path,
                         help="run directory (frozen by stage 0 here)")

@@ -2,18 +2,18 @@
 一句话：TB（TerminalBench）远程链路适配的九项决定与已接受边界——环境接线、判卷契约对齐、时限、重试分工、用量记账口径、容量指引与强模型输出预算。
 对应 log.md 条目：2026-10-11 15:07（用 TB2.1 真实 rollout 归档验证数据链路四模块）与 2026-10-11 15:30（TB 远程链路适配收口：交接对齐与两级冒烟）。
 
-来源：TB2.1 裸 rollout campaign 的交接材料 `docs/tb_rollout_handover_20261011.md`（下称"交接材料"）与外层 `scripts/tb21/` 参考实现。本文把适配过程中做出的、会影响后续所有 TB run 的决定收拢到一处，每项按背景 / 决定 / 理由写。run id 命名空间与远程续跑的决定单独立档（`tb_run_namespace_20261011.md`），不在这里重复。
+来源：TB2.1 裸 rollout campaign 的交接材料（内部部署说明，不在仓库内；下称"交接材料"）与外层 `scripts/tb21/` 参考实现。本文把适配过程中做出的、会影响后续所有 TB run 的决定收拢到一处，每项按背景 / 决定 / 理由写。run id 命名空间与远程续跑的决定单独立档（`tb_run_namespace_20261011.md`），不在这里重复。
 
 ---
 
 ## 1. 远程环境接线走 `<root>/env.sh`，不改远程代码包
 
-**背景**。runner（外层 `scripts/tb21/run_tencent_tb21_smoke_niuyiming.sh`）默认
+**背景**。runner（外层 `scripts/tb21/` 下的 runner 脚本）默认
 `TBENCH_VENV_DIR=${SCRIPT_DIR}/.venv`（脚本第 23 行），即期望 venv 在代码包目录
-`/data2/niuyiming/scripts/.venv` 里；node29 上实际不存在这个 venv——campaign 用的
+代码包目录下的 `.venv` 里；基准主机 上实际不存在这个 venv——campaign 用的
 Harbor venv 在 `~/agentbrew-tb21/.venv`。另外 runner 检查的凭据变量名是
 `OPENAI_API_KEY`，而两处 secrets 文件导出的是 `TBENCH_LLM_KEY`。交接材料
-§1.2/§3.5 只写了"远程交互 shell 用 `~/niuyiming/SkillExpand-tbeval/env.sh`"，
+§1.2/§3.5 只写了"远程交互 shell 用 campaign 的交互 shell 环境文件"，
 没说我们这条无人值守提交链路怎么接。
 
 **决定**。远程 root 下放一份一次性写好的 `<root>/env.sh`（由
@@ -25,9 +25,9 @@ source `~/agentbrew-tb21/.env`（密钥）；`OPENAI_API_KEY` 由 `TBENCH_LLM_KE
 里的 secrets.env，避免同一凭据两处来源）；`PYTHON_BIN`/`HARBOR_BIN` 指向
 `~/agentbrew-tb21/.venv`。
 
-**理由**。不动 `/data2/niuyiming/scripts/` 这个 md5 对齐的部署副本——它是外层
+**理由**。不动 远程代码包目录 这个 md5 对齐的部署副本——它是外层
 campaign 的权威产物，改它等于让我们的适配和 campaign 之间产生漂移。env.sh 放在
-我们自己的 root（`/data2/niuyiming/expedistill/`）里，随 run root 走，谁也读得
+我们自己的 root（我们自己的工作根）里，随 run root 走，谁也读得
 到改动来源；`_submit` 无条件 source（文件不存在时 `if [ -f ]` 静默跳过），所以
 新 root 只要做一次 DRY_RUN 冒烟就完成接线。
 

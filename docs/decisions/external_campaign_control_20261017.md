@@ -7,7 +7,7 @@ folder 复用补上执行名叶子。
 ## 背景
 
 TB 正式实验（tb21_split_live_run_20261015_0045）的旧世界裁决（用户
-2026-10-16）：终测的裸跑对照臂**不再重跑**，对照读 node29 AgentBrew
+2026-10-16）：终测的裸跑对照臂**不再重跑**，对照读 基准主机 AgentBrew
 campaign 的既有成绩（同一字节级 harness、同一任务集），run 自己的摘要记
 `control_source: external_campaign`、control/delta 置空，对比数字由外部对照
 报告持有。旧实现里这不是一个机制，而是一个环境变量开关（EXPEDISTILL_

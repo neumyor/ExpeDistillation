@@ -35,7 +35,7 @@ P03 首轮轨迹后确认：
 - 源码：外层 `scripts/tb21/vendor/tb21-tencent-skill/python/tencent_sandbox_terminus.py`
   的 `TencentSkillTerminus2.__init__` 默认值；
 - 测试：同目录 `test_tencent_adapters.py` 增加对新步骤文案的断言；
-- 远端：`/data2/niuyiming/scripts/vendor/tb21-tencent-skill/python/tencent_sandbox_terminus.py`，
+- 远端：基准主机上 vendor 目录下的 `tencent_sandbox_terminus.py`，
   已备份为 `...bak_20261023_skill_read_suffix`，上传后 sha256 与本地一致。
 
 ## 影响与回滚

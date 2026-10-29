@@ -65,7 +65,7 @@ _DOC_HEADER = """日期：{date}
 
 计算脚本：`scripts/analysis/tb21_f3_baseline.py`（本文件由它生成，重跑可复现）。
 输入：`configs/seed/manifest_qwen.tsv`、`configs/seed/manifest_dpsk.tsv`（89 题 × 5 rank，
-来自 node29 `/data2/niuyiming/e1_final_archive/` 的收官归档 manifest 本地副本）与
+来自基准主机上 `EXPEDISTILL_TB_ARCHIVE_ROOT` 的 的收官归档 manifest 本地副本）与
 `configs/seed/audit_20261011.json`（campaign 审计）。
 """
 

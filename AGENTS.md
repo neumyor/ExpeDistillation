@@ -13,7 +13,7 @@
 ExpeDistillation/
   AGENTS.md          本文件：目录、规范
   README.md          系统设计（唯一的设计正本，改设计先改这里）
-  log.md             工作日志：每个阶段的工作记录（见第二节）
+  log.md             工作日志：每个阶段的工作记录（见第二节；只在本地，不进 git）
   pyproject.toml     包定义、依赖、pytest / ruff 配置
   .gitignore
   .env.example       需要的环境变量清单（只有变量名和说明，不含值）
@@ -29,6 +29,9 @@ ExpeDistillation/
 根目录下只允许出现上面这些条目。新增顶层目录或文件要先改本节。
 
 ## 二、工作日志 log.md
+
+log.md 只留在本地，已列入 `.gitignore`，不进 git、不发布：它记录主机、路径、
+账号等部署细节。需要对外留痕的结论写进 `docs/`（决策、报告），不依赖 log.md。
 
 **每完成一个阶段的工作就在 log.md 末尾追加一条**，按时间顺序排列，旧的在上、
 新的在下，已写的条目不改（写错了另追加一条更正，注明更正哪一条）。
@@ -342,11 +345,12 @@ scripts/
               convert_v3_configs.py：一次性 schema v3→v5 配置转换（写新文件名；
                                   显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5→v6）
               launch_tb21_live_run.py：正式实验的 detached 启动器
-  remote/     node29 上运行实验：deploy_node29.sh（rsync 部署一个提交一个目录）、
-              start_run_node29.sh（在 node29 上起/续跑 run）、README.md（运维手册）；
-              driver 与 Harbor 同机，run 目录、分析、审计都留在 node29
+  remote/     在基准主机上运行实验：deploy_bench_host.sh（rsync 部署，一个提交一个目录）、
+              start_run_bench_host.sh（在基准主机上起/续跑 run）、README.md（运维手册）；
+              driver 与 Harbor 同机，run 目录、分析、审计都留在基准主机
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
-  audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节
+  audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节；
+              scan_private.py：提交前扫描已跟踪文件里的私有部署信息
 ```
 
 规定：
@@ -361,9 +365,10 @@ scripts/
    **不用 `pgrep -f`** 判活；从新的 shell 确认任务还活着；
 5. TB 远程链路以外层 `scripts/tb21/` 为参考实现，`scripts/remote/` 调 Harbor
    的方式（镜像、重试名单、超时参数）与其保持一致，有差异要在脚本开头注明；
-6. 正式实验在 node29 上运行：`EXPEDISTILL_TB_HOST=local`，driver 与 Harbor 同机，
-   不再经 ssh/scp。run 目录放 `/data2/niuyiming/expedistill_runs/`，代码放
-   `/data2/niuyiming/expedistill_code/<commit>/`，结果不拉回本机，分析也在 node29 上做。
+6. 正式实验在基准主机上运行：`EXPEDISTILL_TB_HOST=local`，driver 与 Harbor 同机，
+   不再经 ssh/scp。代码按提交放在 `<deploy-base>/<commit>/`，run 目录放在
+   `<runs-dir>/`，结果不拉回本机，分析也在基准主机上做；具体路径只写在被
+   gitignore 的 `.env` 和基准主机上的密钥文件里，不写进仓库。
 
 ## 六、配置与产物
 
@@ -390,7 +395,7 @@ configs/
 ### runs/
 
 1. 本地 run 目录放 `runs/<实验名>_<YYYYMMDD_HHMM>/`，不进 git；远程 run 放
-   `/data2/niuyiming/expedistill/runs/` 下，同样的命名。**正式 run 固定在
+   `<runs-dir>/` 下，同样的命名。**正式 run 固定在
    它启动时的 checkout 上续跑**（多方法方案 §6，R6）：每个正式 run 一条
    维护分支（命名惯例 `run/<run 目录名>`，热修 cherry-pick 到它上面）+
    独立 venv（editable `.pth` 只指向该 venv 自己的 src）——schema 升版等
@@ -727,8 +732,8 @@ def upgrade_v4_config(config: dict) -> dict:
    TB 远程工作区）通过环境变量传入，代码里不写死绝对路径；
 2. ALFWorld 插件运行在 `benchmark/alfworld-eval` 的 venv 下，需要
    `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` 三个环境变量；
-3. 远程（node29）只在 `~/niuyiming/` 与 `/data2/niuyiming/` 下工作；他人目录
-   只读，不碰他人的进程和沙箱；不起 docker；
+3. 远程基准主机上只在分配给自己的目录下工作（可用 `EXPEDISTILL_TB_ALLOWED_ROOTS`
+   强制）；他人目录只读，不碰他人的进程和沙箱；不起 docker；
 4. 密钥只加载进进程环境，不得打印，不得写进仓库、配置、日志、manifest。
 
 ## 十、迁移规范
@@ -772,8 +777,12 @@ def upgrade_v4_config(config: dict) -> dict:
 1. **提交前需用户同意，推送需用户明确要求**；
 2. 提交说明用英文、祈使句，第一行写清改了什么；一个提交只做一件事；
 3. 进 git 的：`src/`、`tests/`、`scripts/`、`configs/`、`docs/`、README、
-   AGENTS.md、log.md、`pyproject.toml`、`.env.example`。不进 git 的：`runs/`、
+   AGENTS.md、`pyproject.toml`、`.env.example`。不进 git 的：`log.md`、`runs/`、
    `tmp/`、`.env`、虚拟环境、缓存（见 `.gitignore`）；
-4. 每次提交前检查：测试全绿、分层检查通过、log.md 已追加本阶段条目、
+   仓库内的文档、代码、测试、配置不得出现真实的主机名、地址、账号、个人目录和
+   服务端点，一律用占位符或环境变量；
+4. 每次提交前检查：测试全绿、分层检查通过、本地 log.md 已追加本阶段条目、
+   `python scripts/audit/scan_private.py` 无命中（模式见脚本说明，部署专属的名字放在
+   被 gitignore 的 `tmp/private_patterns.txt`）、
    相关文档已同步（README / AGENTS.md / docs）；
 5. 改设计的顺序：README → `docs/decisions/`（如有取舍）→ 代码 → log.md。
