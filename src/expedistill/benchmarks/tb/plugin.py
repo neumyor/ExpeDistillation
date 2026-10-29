@@ -338,12 +338,20 @@ _MODEL_EXCEPTIONS = frozenset({
     "ContextLengthExceededError",
     "OutputLengthExceededError",
 })
-#: The campaign's tmux rule (audit_trials.py classify_exception), also
-#: classify_result-only: the exception must BE a RuntimeError whose message
-#: shows a broken tmux/send-keys -- an infra exception that merely mentions
-#: tmux stayed infra.
+#: The campaign's tmux rule (audit_trials.py classify_exception): the
+#: exception must BE a RuntimeError whose message shows a broken
+#: tmux/send-keys -- an infra exception that merely mentions tmux stayed
+#: infra. The archive lens keeps the whole class model-side; the live
+#: path additionally retries a capability error (`_TMUX_CAPABILITY_RE`),
+#: where the harness passed a flag the image's tmux does not know.
 _TMUX_ERROR_RE = re.compile(r"tmux|send.{0,20}keys", re.IGNORECASE)
 _TMUX_ERROR_TYPE = "RuntimeError"
+#: A tmux failure the harness itself caused (it passed a flag the image's
+#: tmux does not know), not a session the model broke: the trial never had
+#: a fair run, so K1 may retry it. Session loss stays model-side.
+_TMUX_CAPABILITY_RE = re.compile(
+    r"unknown flag|invalid option|unrecognized option|not supported",
+    re.IGNORECASE)
 
 #: The pseudo-zero EVIDENCE, still a live fact on the execution path: every
 #: TB2.1 verifier is pytest, so whether the verifier log shows pytest
@@ -405,7 +413,10 @@ def retryable_unscored(facts: Dict[str, Any]) -> bool:
 
     Keep the model predicates in sync with ``classify_result`` below:
     that function is frozen for the archive validator and must reproduce
-    the historical campaign, so it cannot call this live policy.
+    the historical campaign, so it cannot call this live policy. The one
+    deliberate divergence is the tmux capability branch: the archive lens
+    keeps every tmux RuntimeError model-side, while the live path retries
+    a harness capability error that never gave the model a fair run.
     """
     if (facts.get("reward") is not None
             and facts.get("verifier_ran") is True):
@@ -416,7 +427,9 @@ def retryable_unscored(facts: Dict[str, Any]) -> bool:
         return False
     if (exception_type == _TMUX_ERROR_TYPE
             and _TMUX_ERROR_RE.search(message)):
-        return False
+        # A harness capability error never gave the model a fair run;
+        # session loss after the model broke tmux stays model-side.
+        return bool(_TMUX_CAPABILITY_RE.search(message))
     return True
 
 

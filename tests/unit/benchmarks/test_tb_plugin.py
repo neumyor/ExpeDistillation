@@ -277,6 +277,25 @@ def test_retryable_unscored_includes_pseudo_zero():
                           "exception_type": "RuntimeError",
                           "exception_message": "tmux: send keys failed"}},
                      None)) is False
+    # A harness capability error (an unsupported send-keys flag) never gave
+    # the model a fair run: infra, so K1 retries under a fresh token.
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "RuntimeError",
+                          "exception_message": (
+                              "failed to send non-blocking keys: command "
+                              "send-keys: unknown flag -e")}},
+                     None)) is True
+    # Session loss after the model broke tmux stays model-side.
+    assert retryable_unscored(
+        result_facts({"verifier_result": None,
+                      "exception_info": {
+                          "exception_type": "RuntimeError",
+                          "exception_message": (
+                              "failed to send non-blocking keys: "
+                              "no server running on /tmp/tmux-0/default")}},
+                     None)) is False
 
 
 # ---------------------------------------------------------------------------
