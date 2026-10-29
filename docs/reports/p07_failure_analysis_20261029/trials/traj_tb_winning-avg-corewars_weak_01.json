@@ -1,0 +1,33 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:winning-avg-corewars/weak/01",
+  "task_id": "tb:winning-avg-corewars",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "模型用脚本搜索 warrior,但测试脚本会把 /app/my_warrior.red 反复覆盖成候选,最后一次写入的 Bomber2 对五个对手全是 0;它随后继续探索并超时,判分时提交的文件对 stone 只有 5% 胜率、五项全败。",
+    "blocker_step": 175,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 175, "quote": "root@fb1af5a5:/app# python3 /tmp/test_working.py\n=== Bomber1 ===\n  stone: 0\n  vampire: 0\n  paper: 0\n  snake: 0\n  g2-clear: 0"},
+      {"step": 183, "quote": "=== vs stone ===\nResults: 30 19 1\n=== vs vampire ===\nResults: 48 0 2"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:build-pmars/strong/00/seg01/skill"],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "打开的是“修复解包/挂载失败”卡,与 Redcode 设计或胜率优化无关;模型没有可用于策略设计的技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "最终提交的是搜索脚本最后写入的全败 warrior(5% vs stone),模型既没保住最佳候选也没在提交前复核,并在两小时后超时;技能库无相关策略。"
+  }
+}

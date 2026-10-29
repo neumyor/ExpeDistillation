@@ -1,0 +1,33 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:winning-avg-corewars/weak/00",
+  "task_id": "tb:winning-avg-corewars",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "模型做出一个能打过 vampire/paper/snake/g2-clear 的 Redcode warrior,但对 stone.red 只有 66% 胜率(要求 75%);它自己换顺序测到 25/75 后仍标记完成,最终超时,判分在 stone.red 一项失败。",
+    "blocker_step": 155,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 155, "quote": "root@91d4ecf5:/app# pmars -b -r 100 -f my_warrior.red warriors/stone.red 2>&1\nRave by Stefan Strack scores 199\nStone by mzvince (Everything2) scores 100\nResults: 66 33 1"},
+      {"step": 155, "quote": "Stone by mzvince (Everything2) scores 75\nRave by Stefan Strack scores 225\nResults: 25 75 0"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": ["bank/merge/0003", "traj/tb:build-pmars/strong/00/seg01/skill"],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "打开的是“规划交付物”和“修复解包/挂载”两张卡,都不涉及 Redcode 策略或 pmars 胜率调优;判分要求的是 warrior 设计本身,技能库里没有对应知识。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "实测胜率 66%<75%,且模型在自己看到 25/75 的反向对局后仍提交;没有任何交付/待定技能覆盖 corewars 策略,瓶颈是模型的设计与验证判断。"
+  }
+}

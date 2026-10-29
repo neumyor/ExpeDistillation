@@ -1,0 +1,62 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:chess-best-move/weak/01",
+  "task_id": "tb:chess-best-move",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "格子占用检测是对的（第 11 步 e2 判为白子），但棋子种类靠轮廓/宽度启发式猜，第 14 步把 e2 记成皇后（Rank 2: .p..Qpp.），据此固定了错误 FEN …/1P2QPP1/…，后续 Stockfish 分析全在错局面上进行，最后写入 e2a6；判分期望同时含 e2e4 与 g2g4（assert ['e2a6'] == ['e2e4','g2g4']）。",
+    "blocker_step": 14,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 11,
+        "quote": "e2: color=white n=684 bbox=(42, 45)"
+      },
+      {
+        "step": 14,
+        "quote": "# Rank 2: .p..Qpp. (b2=P, e2=Q, f2=P, g2=P)"
+      },
+      {
+        "step": 66,
+        "quote": "echo 'e2a6' > /app/move.txt"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg04/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg04-skill/SKILL.md",
+        "why_relevant": "提交前必须验证，失败/未验证不得 mark_task_complete；模型写了一条未经任何交叉验证的走法就提交。"
+      },
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "任务以写文件收尾时应先核对中间产物（这里是识别出的局面）再生成并回读最终输出、跑验收检查；模型直接信任启发式分类结果。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "traj/tb:bn-fit-modify/strong/00/seg03/skill",
+        "why_relevant": "要求按 prompt 建立“所有必需输出”的清单再验证；prompt 说有多条获胜走法要逐行全部写出，模型只写了一条。该技能 pending、未交付。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000",
+      "traj/tb:extract-moves-from-video/strong/00/seg01/skill"
+    ],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "第 0 步打开的是远程资产恢复卡（无关），第 1 步打开 OCR 调参卡；该卡第 7 步要求“不要凭第一个可用样本宣布成功、要逐个核对所有期望输出”，模型既没核对棋子种类，也没检查“多条获胜走法”这一要求。"
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "medium",
+    "rationale": "核心是模型对棋子的视觉分类错误且不做任何一致性校验（model_capability），而交付的 26 张卡里没有一张讲如何从渲染棋盘图恢复局面（missing_skill）；已有的“提交前验证/输出完整性”卡也没被打开。"
+  }
+}

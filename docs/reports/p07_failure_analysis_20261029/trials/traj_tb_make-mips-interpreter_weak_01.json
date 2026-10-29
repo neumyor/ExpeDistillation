@@ -1,0 +1,50 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:make-mips-interpreter/weak/01",
+  "task_id": "tb:make-mips-interpreter",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "vm.js reaches a single PC and loops forever with a wrapped-around stack pointer (sp=0x-40100058 at pc=0x43a254 for 100M ticks), so Doom never initialises and no frame is saved; the grader's `node /app/vm.js` times out waiting for /tmp/frame.bmp. The 2 h budget went into repeatedly regenerating vm.js and later chasing qemu-mipsel/gdb instead of fixing the 32-bit arithmetic that corrupts SP.",
+    "blocker_step": 265,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 265, "quote": "[VM] tk=70000000 pc=0x43a254 sp=0x-40100058 heap=0x1000000\n[VM] tk=100000000 pc=0x43a254 sp=0x-40100058 heap=0x1000000\n[VM] Done ticks=100000000"},
+      {"step": 256, "quote": "[VM] Entry=0x400110\n[VM] Starting...\n[VM] PC range: 0xc7a248 tk=26\n[VM] Done ticks=26"},
+      {"step": 285, "quote": "cat > /app/vm.js << 'ENDOFVM'\n'use strict';\nvar MEM_SIZE=0x10000000;"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:build-cython-ext/strong/00/seg02/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-build-cython-ext-strong-00-seg02-skill/SKILL.md",
+        "why_relevant": "Requires stating the first failing line and fixing it before rerunning; the reproducible symptom here (one PC, negative SP) was visible at step 265 and never treated as the error to fix, only rewritten around."
+      },
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "Card for repeated failures/hangs: bound commands, print loop progress, verify output before declaring success; the model printed progress but never used the stuck PC to isolate the bad instruction."
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "Pending closed-plan card; if the acceptance artifact (/tmp/frame.bmp produced from a fresh `node /app/vm.js`) had been fixed up front, the 315 step exploration would have been anchored to one check."
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:build-cython-ext/strong/00/seg00/skill"],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "Only the input-inspection card was opened, at step 0. The failure-repair and bounded-debug cards were never opened; the model's own diagnostics found the stuck PC and negative SP but it responded by regenerating the file again (e.g., steps 250, 255, 285, 305)."
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "The emulator was close enough to run but repeatedly executed a single stuck instruction with a 32-bit-wrapped stack pointer, and the model preferred whole-file regeneration over isolating that one bug until the 7200 s timeout; no available skill covers MIPS emulation."
+  }
+}

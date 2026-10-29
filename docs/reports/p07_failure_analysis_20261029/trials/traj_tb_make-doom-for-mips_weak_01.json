@@ -1,0 +1,62 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:make-doom-for-mips/weak/01",
+  "task_id": "tb:make-doom-for-mips",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "第 168 步同样把 vm.js 改写成 execSync 调 qemu-mipsel-static 的壳；frame.bmp 由真实 doom 二进制产生，frame 存在与相似度两项通过，但 execSync 把 doom 的 stdout 吃掉，120s 超时分支只打印一句 “Process timed out - Doom ran successfully”，verifier 读到空 stdout，test_vm_execution 失败。",
+    "blocker_step": 168,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 168,
+        "quote": "const result = execSync(`/usr/bin/qemu-mipsel-static ${binPath}`, {"
+      },
+      {
+        "step": 174,
+        "quote": "Process timed out - Doom ran successfully"
+      },
+      {
+        "step": 182,
+        "quote": "Process timed out - Doom ran successfully\nEXIT=0\n-rw-r--r-- 1 root root 1024054"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0007",
+        "path": "phases/p07_test/skill_folder/bank-merge-0007/SKILL.md",
+        "why_relevant": "构建并验证编译产物：第 2 步明确“不要把文件存在当作它能工作”，要求用真实操作加断言式冒烟测试、再跑完整测试。"
+      },
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "要求把最终交付物写到任务规定路径、回读、再跑任务自己的验收命令；不能拿中间产物的 ls/格式检查代替最终验收。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/cdf02b6dde80/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/cdf02b6dde80/seg00/skill",
+        "why_relevant": "待定未交付：构建/训练后必须用真实操作加完整测试证明产物可用，不能停在文件存在、--help、exit 0；正对应本组多次“文件在就算成功”。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0007"
+    ],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "开头就打开了 bank-merge-0007，但只做到“产物存在 + 跑一次”，没有按它第 2/10 步用真实操作断言输出；交付物换成 qemu 壳后也没再核对 vm.js 要求的行为。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "轨迹里 vm.js 最终就是一个 qemu 包装：它把被测程序换成模拟器，并且在超时分支把“没拿到输出”写成成功，verifier 的空 stdout 正是这一行的直接结果。"
+  }
+}

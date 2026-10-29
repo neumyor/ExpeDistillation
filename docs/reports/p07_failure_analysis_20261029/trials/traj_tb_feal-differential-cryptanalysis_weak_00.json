@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:feal-differential-cryptanalysis/weak/00",
+  "task_id": "tb:feal-differential-cryptanalysis",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "13 条命令全部花在重写 FEAL 的 f/g 函数和追踪加密上，始终没有写出 /app/attack.py；最后一步 cat 该文件报 No such file，rollout 在 7200 秒超时结束。",
+    "blocker_step": 12,
+    "blocker_type": "timeout",
+    "evidence_quotes": [
+      {
+        "step": 12,
+        "quote": "cat: /app/attack.py: No such file or directory root@94cbfe04:/app#"
+      },
+      {
+        "step": 6,
+        "quote": "cat > /app/check_f.py << 'PYEOF' def g_function(a, b, x): temp = (a + b + x) & 0xFF return ((temp << 2) | (temp >> 6)) &…"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 bank/merge/0000（远程资产恢复），与差分密码分析无关；交付的 26 条技能里没有针对密码分析或'只经 encrypt_fn 观察'的卡片，因此没有可触发的相关技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "medium",
+    "rationale": "同一模型的另两次尝试都产出了 attack.py（39/72 步），本次 14 个回合、约 41 万输出 token、单次请求最长约 600 秒却只执行 13 条命令且交付物缺失，是模型自身的产出与进度问题，超时是结果而非外部故障。"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:sam-cell-seg/weak/01",
+  "task_id": "tb:sam-cell-seg",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "Eight of nine structural checks pass; test_no_polyline_overlaps fails because two output polygons intersect (27.25 px^2 of a 4366.5 px^2 polygon, above the 1e-3 threshold). The model had already seen that its own demo run collapsed 48 input cells to a single whole-image mask (step 66/69) and still marked the task complete.",
+    "blocker_step": 69,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {"step": 66, "quote": "Processing 48 masks...\nPhase 1 done: 44 valid masks\nPhase 2 done: 1 masks after NMS\nSaved 1 refined masks to /app/demo_output.csv"},
+      {"step": 69, "quote": "Shape: (1, 11)\nColumns: ['Unnamed: 0', 'raw_classification', 'main_classification', 'super_classification', 'type', 'xmin', 'ymin', 'xmax', 'ymax', 'coords_x', 'coords_y']"},
+      {"step": 69, "quote": "First row:\n  xmin: 0\n  xmax: 373\n  ymin: 0\n  ymax: 354\n  coords_x: 0,0,2,2,0,0,373,373"},
+      {"step": 70, "quote": "=== Final script check ===\nSyntax OK\n335 /app/convert_masks.py"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "Step 9-11 of the card say to read the deliverable back and verify substance (row count, one mask per cell) and to compare against every deliverable sentence, including 'no overlap between masks and each cell has only one contiguous mask'."
+      },
+      {
+        "skill_id": "traj/tb:build-cython-ext/strong/00/seg02/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-build-cython-ext-strong-00-seg02-skill/SKILL.md",
+        "why_relevant": "The card's rule 'never mark complete with a failing suite' maps directly onto a demo output of 1 mask for 48 cells."
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "Pending card requiring a closed plan naming every final deliverable and proof with the exact acceptance command; would have forced the row-count and overlap checks the demo output already falsified."
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["bank/merge/0003", "bank/merge/0000"],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "bank/merge/0003 was the first card it opened, and its verification steps were not applied: the model read back only shape/columns/types, never the input-vs-output row count, never polygon intersection. It then submitted a run whose own log said '1 masks' for 48 cells."
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "The script runs and passes eight structural tests; the only failure is a geometric property the prompt states explicitly and the model could have measured locally, and its own demo output was already visibly wrong (1 mask for 48 cells) when it submitted."
+  }
+}

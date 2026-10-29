@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:overfull-hbox/weak/00",
+  "task_id": "tb:overfull-hbox",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "它成功消除了所有 overfull hbox 并通过编译，但替换的词不是 synonyms.txt 的键（unusually→atypical、consequence→outcomes），判分器逐 token 比对时在第一个非法替换处失败。",
+    "blocker_step": 17,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 17,
+        "quote": "('unusually','atypical'), ('preoccupation','focus'), ('unmistakable','clear'), ('suggested','proposed'), ('vulnerable','exposed')] for old,new in pairs: count = text.count(old) if count > 0:…"
+      },
+      {
+        "step": 20,
+        "quote": "('consequence','outcomes'), ] for old,new in pairs: count = text.count(old) if count > 0: …"
+      },
+      {
+        "step": 23,
+        "quote": "grep -c 'Overfull' 0 root@70ea578f:/app#"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:build-cython-ext/strong/00/seg02/skill"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 build-cython-ext seg02（修复本地失败检查），它确实帮上了编译/overfull 部分，但没有覆盖'只能替换 synonyms.txt 列出的词'这一约束；交付集中没有做'原文件 vs 新文件逐 token 只允许白名单替换'比对的技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "verbs.txt 里只有 unusual 没有 unusually、没有任何 consequence 家族，而模型按语义近似选了 atypical/outcomes 且从未用 w in synonyms 校验，属于模型没照约束执行。"
+  }
+}

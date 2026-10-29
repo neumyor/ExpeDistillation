@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:model-extraction-relu-logits/weak/00",
+  "task_id": "tb:model-extraction-relu-logits",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "模型把 /app/forward.py 里的 20x10 当成了 A1 的真实形状，整条轨迹反复产出“20 行、每行单位范数”的矩阵；题面明说 A1 形状未知，判分侧会重写 forward.py 换成 30x10 的新网络并要求 30 行都能匹配，第 19 步保存的 (20,10) 矩阵提交后只匹配到 10 行。",
+    "blocker_step": 20,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 0,
+        "quote": "A1 = np.random.randn(20, 10) * 0.1  # Weight matrix from input to hidden layer"
+      },
+      {
+        "step": 18,
+        "quote": "Shape: (20, 10)\nMin/Max: -0.6920/0.6907\nRow norms: [1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1. 1.]"
+      },
+      {
+        "step": 19,
+        "quote": "  Row 19: [-0.0250, +0.0332, -0.0844, +0.5184, +0.5988, -0.3273, +0.4533, +0.1779, +0.1398, +0.0089]\nSaved to /app/stolen_A1.npy"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0001"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "第 1 步只打开了 bank/merge/0001（“给数值数据拟合模型并写产物”），它的触发条件是已有观测数据文件，而本题是黑盒查询抽取，正文的拟合/回读流程全程没被用上；之后全部在自写脚本里迭代，再没看过技能目录。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "题面明确说形状未知，模型仍按 forward.py 里读到的 20 行硬编码切片（stolen_rows[:20]），最终矩阵只有 20 行，判分要 30 行——是理解与执行错误，不是判分器苛刻。"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:circuit-fibsqrt/weak/01",
+  "task_id": "tb:circuit-fibsqrt",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "The generated gates.txt never implements even a single gate: its own probes at step 98 show OR(b0,b1), XOR, AND, NOT and COPY all returning bit 0, and ./sim 1/4/9/16 all print 0; the grader's table prints 1 for every N. The agent kept regenerating the whole netlist generator instead of fixing the signal-indexing convention, and the 7200 s budget expired while it was still debugging the primitives.",
+    "blocker_step": 98,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {"step": 98, "quote": "Test OR(b0,b1) with N=3: got bit0=0, expected 1\nTest XOR(b0,b1) with N=3: got bit0=0, expected 0\nTest AND(b0,b1) with N=3: got bit0=0, expected 1\nTest ~b0 with N=1: got bit0=0, expected 0"},
+      {"step": 94, "quote": "root@c20868ac:/app# ./sim 1 && echo '---' && ./sim 4 && echo '---' && ./sim 9 && echo '---' && ./sim 16\n0\n---\n0\n---\n0\n---\n0"},
+      {"step": 84, "quote": "SQRT done, wires=13872\nTotal wires: 13872\nWritten 13936 lines"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:llm-inference-batching-scheduler/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-llm-inference-batching-scheduler-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "Card for 'a reference evaluator prints named metrics and you must produce an output file': iterate candidate outputs against the official checker until it passes, and write the artifact only when the checker passes. /app/sim is exactly that evaluator here."
+      },
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "Requires verifying the output file with wc/diff before declaring success; the model never checked its gates.txt against the examples in the prompt (sim 208 == 377) before continuing."
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "Pending closed-plan card would have fixed the acceptance command (/app/sim 208 -> 377) as the gate before any full-netlist work."
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["bank/merge/0000"],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "Only the remote-asset-recovery card was opened, which is irrelevant - sim.c and gcc were already present. The evaluator-iteration and verify-before-success cards were never opened; the model did run ./sim intermittently but never treated the prompt's example (208 -> 377) as a blocking gate."
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "The task provides a local oracle (sim.c + two worked examples) yet the delivered file fails on the simplest primitives, which the model saw and could not diagnose before the 2 h timeout; no delivered skill covers gate-netlist construction."
+  }
+}

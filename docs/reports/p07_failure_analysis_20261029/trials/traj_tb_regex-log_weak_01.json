@@ -1,0 +1,43 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:regex-log/weak/01",
+  "task_id": "tb:regex-log",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "第 10 步写出的正则只给 IP 加了字母边界的负向断言，日期前缺少 (?<![A-Za-z0-9])，于是 “Backup abc2021-08-20 from 203.0.113.5 completed” 被误匹配，多出 2021-08-20，唯一用例失败；它自己的测试样本里已经放了 “192.168.1.1 abc2023-05-01def”，却没有去核对这一行。",
+    "blocker_step": 10,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 10,
+        "quote": "r').*?(' + date_str + r')(?![A-Za-z0-9])(?!.*' + date_str + r')' +"
+      },
+      {
+        "step": 11,
+        "quote": "192.168.1.100 2024-02-29 2024-03-15 end\n192.168.1.1 abc2023-05-01def\n192.168.1.1 2023-05-01 xyz"
+      },
+      {
+        "step": 12,
+        "quote": "cat /app/regex.txt\n^(?=.*(?<![A-Za-z0-9])"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [],
+    "first_open_step": null,
+    "effective": "not_applicable",
+    "detail": "只读了 catalog.md 与文件夹说明，没有打开任何技能；交付库里也没有正则/文本模式类技能（0009 是 HTML 清洗器），无法覆盖这个卡点。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "失败只有一个多余匹配，原因就是日期前少一个边界断言；模型的自测集合里已有完全同形的反例却没检查结果，属于实现与自查的疏漏，不是知识缺失。"
+  }
+}

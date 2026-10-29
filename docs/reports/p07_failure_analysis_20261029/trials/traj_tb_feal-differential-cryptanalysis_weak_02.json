@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:feal-differential-cryptanalysis/weak/02",
+  "task_id": "tb:feal-differential-cryptanalysis",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "最终 attack.py 枚举 65536 个 key[5] 候选，判定方式是写入 feal.key[5] 后调用 encrypt_fn；判分器的 encrypt_fn 是独立的 feal_in_c.encrypt，任何候选都'匹配'，函数于是返回第一个候选 0。",
+    "blocker_step": 69,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 70,
+        "quote": "for k5c in S: feal.key[5] = k5c if encrypt_fn(pt1) == ct1: if encrypt_fn(pt2) == ct2: feal.key[:6] = orig_keys return k5c feal.key[:6] = orig_keys raise RuntimeError(\"Failed to recover key[5…"
+      },
+      {
+        "step": 69,
+        "quote": "feal.key[5] = k5c if encrypt_fn(pt1) == ct1: if encrypt_fn(pt2) == ct2: feal.key[:6] = orig_keys return k5c feal.key[:6] = orig_keys raise RuntimeErro…"
+      },
+      {
+        "step": 67,
+        "quote": "Match: True Time: 0.394s SUCCESS root@572d904f:/app#"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "只打开过 bank/merge/0000（远程资产恢复），与本题无关；交付技能集中没有针对黑盒 encrypt_fn 契约或候选枚举验证的卡片。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "同一段代码在本地 feal.encrypt 上 20 次全 PASS、在判分器的 feal_in_c.encrypt 上恒返回 0，原因是它靠改写模块全局 key 来判定候选，而不是只观察 encrypt_fn 的输入输出。"
+  }
+}

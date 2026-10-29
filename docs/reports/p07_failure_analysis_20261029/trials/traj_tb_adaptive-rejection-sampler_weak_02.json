@@ -1,0 +1,71 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:adaptive-rejection-sampler/weak/02",
+  "task_id": "tb:adaptive-rejection-sampler",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "第 168 步自己的 test() 已经打印 NORMAL_KS: FAIL、EXP_MEAN/EXP_SD/EXP_KS: FAIL；第 169 步只改了一处初始支撑点分布，第 170 步只 head 了样本文件（第一行就是 '\"x\"' 表头）就 mark complete。verifier 里 ars.R 对 dnorm 报“LOGCONC FAILURE at init”、np.loadtxt 被 '\"x\"' 表头卡死，2 项判负。",
+    "blocker_step": 168,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {
+        "step": 168,
+        "quote": "[3] NORMAL_KS: FAIL p=0.0000"
+      },
+      {
+        "step": 168,
+        "quote": "mean=0.742081 sd=0.499030\n  [5] EXP_MEAN: FAIL mean=0.742081\n  [6] EXP_SD: FAIL sd=0.499030"
+      },
+      {
+        "step": 170,
+        "quote": "\"x\"\n-0.48836927870406\n0.20373395988029\n0.501937609394894"
+      },
+      {
+        "step": 171,
+        "quote": "mark_task_complete({})"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:build-cython-ext/strong/00/seg02/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-build-cython-ext-strong-00-seg02-skill/SKILL.md",
+        "why_relevant": "要求把每次失败的检查修到全绿再提交；第 8 步明确“每个产物必须在规定路径存在，缺了就补上再 mark complete”，第 7 步要求“测试不过不得提交”。"
+      },
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg04/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg04-skill/SKILL.md",
+        "why_relevant": "第 3/4 步：文件在上次验证后改过就必须重跑验证命令；没跑过的验证不得调用 mark_task_complete。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/cdf02b6dde80/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/cdf02b6dde80/seg00/skill",
+        "why_relevant": "待定未交付：构建/训练后必须用真实操作加完整测试证明产物可用，不能停在文件存在、--help、exit 0；正对应本组多次“文件在就算成功”。"
+      },
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/7ebf1db42112/seg00/skill",
+        "why_relevant": "待定未交付：动手前把每个最终交付物的路径与验收命令写死，完成前逐条证明；可避免 ARS/01 把成果留在 ars_new.R。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0003"
+    ],
+    "first_open_step": 4,
+    "effective": "no_not_opened",
+    "detail": "只打开了 bank-merge-0003；最对口的 build-cython-ext seg02（不绿不提交）与 filter-js seg04（改过文件就重跑验证）都没打开，模型在明知失败的情况下提交。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "自己写的测试套件在同一屏上给出 4 个 FAIL，随后没有任何一步显示它们通过就 mark complete；样本文件还带 CSV 表头，说明它只看了前 5 行长相、没按数字格式验证。"
+  }
+}

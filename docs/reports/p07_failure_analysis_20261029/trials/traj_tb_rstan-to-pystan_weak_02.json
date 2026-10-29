@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:rstan-to-pystan/weak/02",
+  "task_id": "tb:rstan-to-pystan",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "最终 rho = [0.580034, 0.885611, 1.504432]，alpha/sigma/beta 全过，rho[0] 与 rho[2] 也过；只有 rho[1] 比下界 0.886 低 0.00039，判负。与 01 是同一模式：实现正确、被 1 个 MC 标准误的抽样噪声挤出了容差带。",
+    "blocker_step": 59,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {
+        "step": 53,
+        "quote": "rho_est = np.mean(rho_samps, axis=1)  # mean over samples, keep dims"
+      },
+      {
+        "step": 59,
+        "quote": "Posterior means:\nalpha: 1.086875\nsigma: 0.134060\nrho:   [np.float64(0.580034), np.float64(0.885611), np.float64(1.504432)]"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0001"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 bank-merge-0001（拟合数值模型、写出并校验工件），流程照做了，但卡片不涉及抽样次数与判分容差。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "medium",
+    "rationale": "5/6 个判据通过、唯一失败项差分 3.9e-4，且与 01 落在不同分量上，说明不是模型系统性偏差而是采样噪声；判分区间下界贴住参考均值，等于要求有限抽样不往低侧抖。"
+  }
+}

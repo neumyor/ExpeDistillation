@@ -1,0 +1,62 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:rstan-to-pystan/weak/00",
+  "task_id": "tb:rstan-to-pystan",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "第 100~101 步在仍打开的 'WRITE' heredoc 里又嵌了一层 'python3 << EOF' heredoc；此后终端只回显 “lines.a”，C-c/pwd/reset/EOF 连发 100 多步都没有任何响应，到第 209 步结束也没恢复，四个 *_est.csv 一个都没写出，判分直接报 5 个文件不存在。",
+    "blocker_step": 101,
+    "blocker_type": "environment",
+    "evidence_quotes": [
+      {
+        "step": 101,
+        "quote": "python3 << 'EOF'\nlines = []\nlines.append('import json')"
+      },
+      {
+        "step": 118,
+        "quote": "New Terminal Output:\n\nlines.a\n"
+      },
+      {
+        "step": 173,
+        "quote": "echo PROMPT_CHECK"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "专门处理“命令不返回提示符、同一错误反复出现”：Ctrl-C 后用 timeout 重跑、最小化复现、停止前必须看到 exit:0。"
+      },
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "要求把最终交付物写到任务规定路径、回读、再跑任务自己的验收命令；不能拿中间产物的 ls/格式检查代替最终验收。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/e20a68bdd559/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/e20a68bdd559/seg00/skill",
+        "why_relevant": "待定未交付：命令不返回时先捕获输出、判断是长任务还是卡死，再决定是否中断；对应本组终端卡死后的处理。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0003"
+    ],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "打开的是 bank-merge-0003（写最终交付并验收），但没有任何一步处理“命令不返回提示符”；seg01 的 Ctrl-C/timeout/复现流程没被触发，模型只是一遍遍往死终端里敲字。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "medium",
+    "rationale": "第 102 步以后轨迹里的 observation 恒为 'lines.a'，第 118 步连发 C-c/C-d/pwd 也只有这一行回显，属于终端通道失效；诱发它的是第 101 步的嵌套 heredoc（模型失误）。"
+  }
+}

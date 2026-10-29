@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:sanitize-git-repo/weak/02",
+  "task_id": "tb:sanitize-git-repo",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "第 11 步开始对 109 个提交跑 git filter-branch，清理脚本只按已知 4 个字面量替换，没覆盖第三个文件里第二个 HF token；此后 48 分钟（2880 s）全部耗在等重写上，最后第 125 步提交。判分既有 token 未清、又有基准 commit 被重写而找不到。",
+    "blocker_step": 11,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 2,
+        "quote": "- echo 'export AWS_ACCESS_KEY_ID=AKIA1234567890123456' >> ~/.bashrc\n    - echo 'export AWS_SECRET_ACCESS_KEY=D4w8z9wKN1aVeT3BpQj6kIuN7wH8X0M9KfV5OqzF' >> ~/.bashrc"
+      },
+      {
+        "step": 11,
+        "quote": "FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter '/tmp/cleanup.sh' --tag-name-filter cat -- --all\nRewrite c7ed275... (2/109) ... remaining 1123 predicted"
+      },
+      {
+        "step": 123,
+        "quote": "=== Working tree check ===\nExit: 1\n=== History check ===\nHistory check complete"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "只开了 bank/merge/0000（远端资产恢复），与本任务无关；它给自己写的自检只 grep 已知 4 个字面量，因此“Working tree check Exit: 1”被读成了通过。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "把 48 分钟预算全押在一次全历史重写上，清理范围仍只有已知字面量，第三个文件从未被读到；自检口径也只覆盖自己已知的密钥，属于方法与验收都自设。"
+  }
+}

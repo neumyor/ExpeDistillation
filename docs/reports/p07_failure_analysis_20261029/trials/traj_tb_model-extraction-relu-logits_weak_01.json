@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:model-extraction-relu-logits/weak/01",
+  "task_id": "tb:model-extraction-relu-logits",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "155 步里反复重写脚本、被 numpy 形状错误反复打回；最后一次（第 154 步）把 steal.py 整个换掉后只做了 py_compile，没再运行就结束了会话。判分重跑该脚本在 line 22 抛 AttributeError: 'float' object has no attribute 'item'，留下的 stolen_A1.npy 是上一次运行的 130 行方向向量，30 个真行一行都不匹配。",
+    "blocker_step": 154,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 153,
+        "quote": "[129] [-0.39468127 -0.00097981 -0.57528974 -0.30604531  0.30676288 -0.42217349\n  0.31834621  0.18534369 -0.10748649 -0.00445598]\nSaved to /app/stolen_A1.npy"
+      },
+      {
+        "step": 154,
+        "quote": "Written steal.py OK\nroot@4b2a233d:/app# python3 -c \"import py_compile; ...\" \nSYNTAX OK"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0001"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "与 00 相同，只开了 bank/merge/0001（数值拟合），与黑盒抽取无关；其“先确认产物 schema、写回并回读校验”的步骤也没被执行。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "最后的交付脚本从没运行过，判分重跑即崩；即使不崩，它抽取的是梯度聚类的 130 个方向而非 30 行权重——执行与算法两侧都没有收敛。"
+  }
+}

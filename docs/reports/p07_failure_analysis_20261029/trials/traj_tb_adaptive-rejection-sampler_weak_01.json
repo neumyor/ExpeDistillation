@@ -1,0 +1,68 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:adaptive-rejection-sampler/weak/01",
+  "task_id": "tb:adaptive-rejection-sampler",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "第 283 步在 /app/ars.R 上跑 n=1000 挂死 60s，第 287 步 C-c 后放弃，第 288 步改在新文件 /app/ars_new.R 里重写并一路只验证 ars_new.R，直到第 332 步结束都没把它拷回 /app/ars.R；verifier source 的仍是旧 ars.R，于是 dnorm 报“Log-density does not appear concave”、没有 test()、normal_samples.txt 的 std 只有 0.025，3 项判负。",
+    "blocker_step": 288,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 283,
+        "quote": "R --no-save -e 'source(\"ars.R\"); set.seed(42); s <- ars(function(x) dnorm(x,0,1,log=T), c(-5,5), n=1000)"
+      },
+      {
+        "step": 288,
+        "quote": "cat > /app/ars_new.R << 'EOF'\n# =============================================================================\n# Adaptive Rejection Sampler (ARS)"
+      },
+      {
+        "step": 331,
+        "quote": "R --no-save -e 'source(\"ars_new.R\"); set.seed(42); s<-ars(function(x) dnorm(x,0,1,log=T),c(-5,5),n=500)"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "要求把最终交付物写到任务规定路径、回读、再跑任务自己的验收命令；不能拿中间产物的 ls/格式检查代替最终验收。"
+      },
+      {
+        "skill_id": "traj/tb:build-cython-ext/strong/00/seg02/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-build-cython-ext-strong-00-seg02-skill/SKILL.md",
+        "why_relevant": "要求把每次失败的检查修到全绿再提交；第 8 步明确“每个产物必须在规定路径存在，缺了就补上再 mark complete”，第 7 步要求“测试不过不得提交”。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/7ebf1db42112/seg00/skill",
+        "why_relevant": "待定未交付：动手前把每个最终交付物的路径与验收命令写死，完成前逐条证明；可避免 ARS/01 把成果留在 ars_new.R。"
+      },
+      {
+        "skill_id": "req/cdf02b6dde80/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/cdf02b6dde80/seg00/skill",
+        "why_relevant": "待定未交付：构建/训练后必须用真实操作加完整测试证明产物可用，不能停在文件存在、--help、exit 0；正对应本组多次“文件在就算成功”。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0003",
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "bank-merge-0003 在第 0 步就打开，其第 8/9 步明确要求“最终交付物写到任务规定路径并回读”，模型却把后半程全部投在 ars_new.R 上，最后直接 mark complete。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "交付路径 /app/ars.R 从第 277 步以后再没更新，所有修复都留在 ars_new.R；三项失败全部指向旧 ars.R 的行为，是可复核的提交错误而非难度问题。"
+  }
+}

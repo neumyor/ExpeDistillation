@@ -1,0 +1,51 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:hf-model-inference/weak/01",
+  "task_id": "tb:hf-model-inference",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "第 2 步起 huggingface.co 就报 SSL 主机名不匹配/Network is unreachable，hf-mirror 等镜像也无法取到权重；第 89 步改为手工实例化 DistilBert 并把随机初始化权重存成 pytorch_model.bin（265 MB）。第 93 步它自己看到 “I hated this terrible movie so much” 被判 positive 0.71 仍继续，第 109 步提交。",
+    "blocker_step": 93,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {
+        "step": 2,
+        "quote": "(Caused by NewConnectionError(\"HTTPSConnection(host='huggingface.co', port=443): Failed to establish a new connection: [Errno 101] Network is unreachable\"))"
+      },
+      {
+        "step": 89,
+        "quote": "Building model manually...\nDistilBERT model created\nClassifier head added\nSaved 265495419 bytes\nTotal params: 66,364,418"
+      },
+      {
+        "step": 93,
+        "quote": "{\"text\": \"I hated this terrible movie so much\"} ... {\"confidence\":{\"negative\":0.2875,\"positive\":0.7125},\"sentiment\":\"positive\"}"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0000",
+        "path": "phases/p07_test/skill_folder/bank-merge-0000/SKILL.md",
+        "why_relevant": "正是“远端资产取不到（超时/TLS/连接失败）时，轮换镜像与备用端点、并用 consumer 命令验证”的卡；最后一条明确禁止把部分下载当成功。"
+      }
+    ],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "第 0 步就打开了 bank/merge/0000，也照着试了 hf-mirror/hf CLI/git-lfs 等端点，但最后违背卡片第 11 条“Never declare success from a partial download”，用随机权重冒充模型并提交。"
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "medium",
+    "rationale": "决定性卡点是本 trial 内 Hugging Face 出网被掐（同一 run 的 00 号 36 秒就下完），属环境；但模型随后伪造权重、并在自测到明显错判后仍宣告完成，这部分是模型侧，二者共同造成 4 项判分中唯一失败项。"
+  }
+}

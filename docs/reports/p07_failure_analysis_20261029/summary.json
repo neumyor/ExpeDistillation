@@ -1,0 +1,951 @@
+{
+ "schema": "p07-failure-summary-v1",
+ "run": "runs/tb21_p02p06_exam_small20_20261028_2053_p02fork",
+ "trials": 64,
+ "raw_categories": {
+  "model_capability": 44,
+  "mixed": 9,
+  "environment": 11
+ },
+ "normalized_causes": {
+  "model_capability": 44,
+  "mixed": 9,
+  "harness_verifier": 4,
+  "sandbox_mixed": 2,
+  "benchmark_tolerance": 3,
+  "model_induced_wedge": 1,
+  "image": 1
+ },
+ "actionable_buckets": {
+  "unvalidated_lesson": 27,
+  "no_skill": 21,
+  "environment": 7,
+  "skill_content": 2,
+  "model_execution": 4,
+  "benchmark_tolerance": 3
+ },
+ "delivered_skill_use": {
+  "opened_but_model_ignored": 10,
+  "no_not_opened": 17,
+  "not_applicable": 3,
+  "no_content": 2
+ },
+ "scenarios": {
+  "as_graded": {
+   "avg_at_3": 0.448718,
+   "pass_at_3": 0.589744
+  },
+  "qemu_false_negatives_counted": {
+   "avg_at_3": 0.465812,
+   "pass_at_3": 0.615385
+  },
+  "plus_tolerance_cases": {
+   "avg_at_3": 0.482906,
+   "pass_at_3": 0.666667
+  }
+ },
+ "trials_detail": [
+  {
+   "trial_id": "traj/tb:adaptive-rejection-sampler/weak/01",
+   "task_id": "tb:adaptive-rejection-sampler",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill",
+    "req/cdf02b6dde80/seg00/skill"
+   ],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:adaptive-rejection-sampler/weak/02",
+   "task_id": "tb:adaptive-rejection-sampler",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/cdf02b6dde80/seg00/skill",
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:chess-best-move/weak/00",
+   "task_id": "tb:chess-best-move",
+   "attempt_index": 0,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/e20a68bdd559/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:chess-best-move/weak/01",
+   "task_id": "tb:chess-best-move",
+   "attempt_index": 1,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "traj/tb:bn-fit-modify/strong/00/seg03/skill"
+   ],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:chess-best-move/weak/02",
+   "task_id": "tb:chess-best-move",
+   "attempt_index": 2,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "traj/tb:bn-fit-modify/strong/00/seg03/skill"
+   ],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:circuit-fibsqrt/weak/01",
+   "task_id": "tb:circuit-fibsqrt",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:circuit-fibsqrt/weak/02",
+   "task_id": "tb:circuit-fibsqrt",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:crack-7z-hash/weak/01",
+   "task_id": "tb:crack-7z-hash",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "req/e20a68bdd559/seg00/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:feal-differential-cryptanalysis/weak/00",
+   "task_id": "tb:feal-differential-cryptanalysis",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:feal-differential-cryptanalysis/weak/01",
+   "task_id": "tb:feal-differential-cryptanalysis",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:feal-differential-cryptanalysis/weak/02",
+   "task_id": "tb:feal-differential-cryptanalysis",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:feal-linear-cryptanalysis/weak/00",
+   "task_id": "tb:feal-linear-cryptanalysis",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:feal-linear-cryptanalysis/weak/01",
+   "task_id": "tb:feal-linear-cryptanalysis",
+   "attempt_index": 1,
+   "raw_category": "environment",
+   "normalized_cause": "harness_verifier",
+   "confidence": "high",
+   "environment_kind": "harness_verifier",
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "unknown",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:fix-ocaml-gc/weak/00",
+   "task_id": "tb:fix-ocaml-gc",
+   "attempt_index": 0,
+   "raw_category": "environment",
+   "normalized_cause": "harness_verifier",
+   "confidence": "high",
+   "environment_kind": "harness_verifier",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:fix-ocaml-gc/weak/01",
+   "task_id": "tb:fix-ocaml-gc",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "no_content",
+   "actionable_bucket": "skill_content"
+  },
+  {
+   "trial_id": "traj/tb:git-multibranch/weak/00",
+   "task_id": "tb:git-multibranch",
+   "attempt_index": 0,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:git-multibranch/weak/01",
+   "task_id": "tb:git-multibranch",
+   "attempt_index": 1,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:gpt2-codegolf/weak/00",
+   "task_id": "tb:gpt2-codegolf",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill",
+    "traj/tb:path-tracing/strong/00/seg01/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:gpt2-codegolf/weak/01",
+   "task_id": "tb:gpt2-codegolf",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "traj/tb:path-tracing/strong/00/seg01/skill",
+    "req/cdf02b6dde80/seg00/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:gpt2-codegolf/weak/02",
+   "task_id": "tb:gpt2-codegolf",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:hf-model-inference/weak/01",
+   "task_id": "tb:hf-model-inference",
+   "attempt_index": 1,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "model_execution"
+  },
+  {
+   "trial_id": "traj/tb:hf-model-inference/weak/02",
+   "task_id": "tb:hf-model-inference",
+   "attempt_index": 2,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "model_execution"
+  },
+  {
+   "trial_id": "traj/tb:kv-store-grpc/weak/01",
+   "task_id": "tb:kv-store-grpc",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "model_execution"
+  },
+  {
+   "trial_id": "traj/tb:kv-store-grpc/weak/02",
+   "task_id": "tb:kv-store-grpc",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "model_execution"
+  },
+  {
+   "trial_id": "traj/tb:large-scale-text-editing/weak/02",
+   "task_id": "tb:large-scale-text-editing",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:make-doom-for-mips/weak/00",
+   "task_id": "tb:make-doom-for-mips",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/cdf02b6dde80/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:make-doom-for-mips/weak/01",
+   "task_id": "tb:make-doom-for-mips",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/cdf02b6dde80/seg00/skill"
+   ],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:make-doom-for-mips/weak/02",
+   "task_id": "tb:make-doom-for-mips",
+   "attempt_index": 2,
+   "raw_category": "environment",
+   "normalized_cause": "sandbox_mixed",
+   "confidence": "medium",
+   "environment_kind": "sandbox_mixed",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/cdf02b6dde80/seg00/skill",
+    "req/e20a68bdd559/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:make-mips-interpreter/weak/00",
+   "task_id": "tb:make-mips-interpreter",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:make-mips-interpreter/weak/01",
+   "task_id": "tb:make-mips-interpreter",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:make-mips-interpreter/weak/02",
+   "task_id": "tb:make-mips-interpreter",
+   "attempt_index": 2,
+   "raw_category": "environment",
+   "normalized_cause": "sandbox_mixed",
+   "confidence": "high",
+   "environment_kind": "sandbox_mixed",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/e20a68bdd559/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:model-extraction-relu-logits/weak/00",
+   "task_id": "tb:model-extraction-relu-logits",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:model-extraction-relu-logits/weak/01",
+   "task_id": "tb:model-extraction-relu-logits",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:model-extraction-relu-logits/weak/02",
+   "task_id": "tb:model-extraction-relu-logits",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:mteb-retrieve/weak/00",
+   "task_id": "tb:mteb-retrieve",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:mteb-retrieve/weak/01",
+   "task_id": "tb:mteb-retrieve",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:mteb-retrieve/weak/02",
+   "task_id": "tb:mteb-retrieve",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:overfull-hbox/weak/00",
+   "task_id": "tb:overfull-hbox",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:overfull-hbox/weak/01",
+   "task_id": "tb:overfull-hbox",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "req/a20befa537b9/seg00/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:overfull-hbox/weak/02",
+   "task_id": "tb:overfull-hbox",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "req/a20befa537b9/seg00/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:password-recovery/weak/01",
+   "task_id": "tb:password-recovery",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [
+    "req/e20a68bdd559/seg00/skill"
+   ],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:portfolio-optimization/weak/00",
+   "task_id": "tb:portfolio-optimization",
+   "attempt_index": 0,
+   "raw_category": "environment",
+   "normalized_cause": "benchmark_tolerance",
+   "confidence": "medium",
+   "environment_kind": "benchmark_tolerance",
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "benchmark_tolerance"
+  },
+  {
+   "trial_id": "traj/tb:qemu-alpine-ssh/weak/00",
+   "task_id": "tb:qemu-alpine-ssh",
+   "attempt_index": 0,
+   "raw_category": "environment",
+   "normalized_cause": "harness_verifier",
+   "confidence": "high",
+   "environment_kind": "harness_verifier",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:qemu-alpine-ssh/weak/01",
+   "task_id": "tb:qemu-alpine-ssh",
+   "attempt_index": 1,
+   "raw_category": "environment",
+   "normalized_cause": "harness_verifier",
+   "confidence": "high",
+   "environment_kind": "harness_verifier",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:qemu-alpine-ssh/weak/02",
+   "task_id": "tb:qemu-alpine-ssh",
+   "attempt_index": 2,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [],
+   "skill_effective": "no_content",
+   "actionable_bucket": "skill_content"
+  },
+  {
+   "trial_id": "traj/tb:regex-log/weak/01",
+   "task_id": "tb:regex-log",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:rstan-to-pystan/weak/00",
+   "task_id": "tb:rstan-to-pystan",
+   "attempt_index": 0,
+   "raw_category": "environment",
+   "normalized_cause": "model_induced_wedge",
+   "confidence": "medium",
+   "environment_kind": "model_induced_wedge",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/e20a68bdd559/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:rstan-to-pystan/weak/01",
+   "task_id": "tb:rstan-to-pystan",
+   "attempt_index": 1,
+   "raw_category": "environment",
+   "normalized_cause": "benchmark_tolerance",
+   "confidence": "medium",
+   "environment_kind": "benchmark_tolerance",
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "benchmark_tolerance"
+  },
+  {
+   "trial_id": "traj/tb:rstan-to-pystan/weak/02",
+   "task_id": "tb:rstan-to-pystan",
+   "attempt_index": 2,
+   "raw_category": "environment",
+   "normalized_cause": "benchmark_tolerance",
+   "confidence": "medium",
+   "environment_kind": "benchmark_tolerance",
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "benchmark_tolerance"
+  },
+  {
+   "trial_id": "traj/tb:sam-cell-seg/weak/00",
+   "task_id": "tb:sam-cell-seg",
+   "attempt_index": 0,
+   "raw_category": "mixed",
+   "normalized_cause": "mixed",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/cdf02b6dde80/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:sam-cell-seg/weak/01",
+   "task_id": "tb:sam-cell-seg",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:sam-cell-seg/weak/02",
+   "task_id": "tb:sam-cell-seg",
+   "attempt_index": 2,
+   "raw_category": "environment",
+   "normalized_cause": "image",
+   "confidence": "medium",
+   "environment_kind": "image",
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/e20a68bdd559/seg00/skill",
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "environment"
+  },
+  {
+   "trial_id": "traj/tb:sanitize-git-repo/weak/00",
+   "task_id": "tb:sanitize-git-repo",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:sanitize-git-repo/weak/01",
+   "task_id": "tb:sanitize-git-repo",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "opened_but_model_ignored",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:sanitize-git-repo/weak/02",
+   "task_id": "tb:sanitize-git-repo",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:torch-pipeline-parallelism/weak/00",
+   "task_id": "tb:torch-pipeline-parallelism",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:torch-pipeline-parallelism/weak/01",
+   "task_id": "tb:torch-pipeline-parallelism",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "medium",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:torch-pipeline-parallelism/weak/02",
+   "task_id": "tb:torch-pipeline-parallelism",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": true,
+   "pending_skill_ids": [
+    "req/7ebf1db42112/seg00/skill"
+   ],
+   "skill_effective": "no_not_opened",
+   "actionable_bucket": "unvalidated_lesson"
+  },
+  {
+   "trial_id": "traj/tb:video-processing/weak/00",
+   "task_id": "tb:video-processing",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:video-processing/weak/01",
+   "task_id": "tb:video-processing",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:video-processing/weak/02",
+   "task_id": "tb:video-processing",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:winning-avg-corewars/weak/00",
+   "task_id": "tb:winning-avg-corewars",
+   "attempt_index": 0,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:winning-avg-corewars/weak/01",
+   "task_id": "tb:winning-avg-corewars",
+   "attempt_index": 1,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  },
+  {
+   "trial_id": "traj/tb:winning-avg-corewars/weak/02",
+   "task_id": "tb:winning-avg-corewars",
+   "attempt_index": 2,
+   "raw_category": "model_capability",
+   "normalized_cause": "model_capability",
+   "confidence": "high",
+   "environment_kind": null,
+   "has_delivered_relevant": false,
+   "pending_skill_ids": [],
+   "skill_effective": "not_applicable",
+   "actionable_bucket": "no_skill"
+  }
+ ],
+ "notes": [
+  "unvalidated_lesson (renamed from delivery_gap): only pending, never-checked skills match; a counterfactual, not a failure cause. 20 of these 27 also had a relevant delivered skill (15 never opened, 5 opened but not followed).",
+  "The last learn phase's keep decisions did reach P07; only its new writes stayed pending. trial_level now follows checks_left (docs/decisions/trial_level_last_check_20261029.md)."
+ ]
+}

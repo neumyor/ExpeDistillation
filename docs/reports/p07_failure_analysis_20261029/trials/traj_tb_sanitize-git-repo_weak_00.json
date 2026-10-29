@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:sanitize-git-repo/weak/00",
+  "task_id": "tb:sanitize-git-repo",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "第 8 步的 hf_ 正则已经把 exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json 列为命中文件（该文件的大 JSON 单行里含第二个 HF token hf_ocfFIJsV...），但输出被截断、模型没再检查这个文件；第 9-10 步只改了 ray_processing 两个文件，第 11 步 git diff --stat 显示只动 2 个文件后就提交。",
+    "blocker_step": 11,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 8,
+        "quote": "./exp_data/datasets/tokenized/rw_v2_fasttext_openhermes_vs_rw_v2_bigram_0.1_arcade100k.json:18:    \"dcnlp_diff\": \"diff --git a/eval/eval_openlm_ckpt.py ..."
+      },
+      {
+        "step": 11,
+        "quote": " ray_processing/process.py       | 4 ++--\n ray_processing/ray_cluster.yaml | 8 ++++----\n 2 files changed, 6 insertions(+), 6 deletions(-)"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "只开了 bank/merge/0000（远端资产恢复：缓存/镜像/备用端点），与“在仓库里找齐所有密钥”无关；目录里没有密钥扫描类技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "grep 已经把第三个污染文件点名，模型既没打开它也没做“还有没有别的密钥”的枚举，就按 2 个文件提交；判分剩下一个文件未清（只差这一个 HF token）。"
+  }
+}

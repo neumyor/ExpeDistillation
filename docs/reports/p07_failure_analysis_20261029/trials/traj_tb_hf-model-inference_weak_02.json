@@ -1,0 +1,51 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:hf-model-inference/weak/02",
+  "task_id": "tb:hf-model-inference",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "同样取不到权重（hf-mirror 可达但 huggingface.co Network is unreachable）；第 61 步“Building model... Model built with 66,955,010 parameters”手工造了一个随机权重模型。第 66 步自测 “This was a terrible and boring experience.” 返回 positive 0.546815，它看到后第 68 步仍提交。",
+    "blocker_step": 66,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {
+        "step": 60,
+        "quote": "Max retries exceeded with url: /distilbert-base-uncased/resolve/main/config.json (Caused by NewConnectionError(... [Errno 101] Network is unreachable\"))"
+      },
+      {
+        "step": 61,
+        "quote": "Building model...\nModel built with 66,955,010 parameters\npytorch_model.bin saved\nAll model files created successfully!"
+      },
+      {
+        "step": 66,
+        "quote": "{\"text\": \"This was a terrible and boring experience.\"} ... {\"confidence\": {\"negative\": 0.453185, \"positive\": 0.546815}, \"sentiment\": \"positive\"}"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0000",
+        "path": "phases/p07_test/skill_folder/bank-merge-0000/SKILL.md",
+        "why_relevant": "“远端资产取不到时轮换镜像/备用端点并验证”，同时要求不能以部分下载或占位产物宣告成功——正对本题的下载失败。"
+      }
+    ],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "第 0 步打开并照它试了多个端点；但最后的处理违背卡片要求：自造随机权重、不验证预测质量、把明显错判的服务当作完成。"
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "high",
+    "rationale": "环境侧 HF 出网不可达是起点；但第 66 步它已亲眼看到反例被误判为 positive 仍提交，属于明知未达成就宣告完成，判分失败的直接原因是这个伪造模型。"
+  }
+}

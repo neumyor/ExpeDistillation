@@ -1,0 +1,96 @@
+[
+ {
+  "chunk": 1,
+  "trials": [
+   "traj/tb:chess-best-move/weak/00",
+   "traj/tb:chess-best-move/weak/01",
+   "traj/tb:chess-best-move/weak/02",
+   "traj/tb:mteb-retrieve/weak/00",
+   "traj/tb:mteb-retrieve/weak/01",
+   "traj/tb:mteb-retrieve/weak/02",
+   "traj/tb:torch-pipeline-parallelism/weak/00",
+   "traj/tb:torch-pipeline-parallelism/weak/01",
+   "traj/tb:torch-pipeline-parallelism/weak/02",
+   "traj/tb:kv-store-grpc/weak/01",
+   "traj/tb:kv-store-grpc/weak/02"
+  ]
+ },
+ {
+  "chunk": 2,
+  "trials": [
+   "traj/tb:feal-differential-cryptanalysis/weak/00",
+   "traj/tb:feal-differential-cryptanalysis/weak/01",
+   "traj/tb:feal-differential-cryptanalysis/weak/02",
+   "traj/tb:overfull-hbox/weak/00",
+   "traj/tb:overfull-hbox/weak/01",
+   "traj/tb:overfull-hbox/weak/02",
+   "traj/tb:video-processing/weak/00",
+   "traj/tb:video-processing/weak/01",
+   "traj/tb:video-processing/weak/02",
+   "traj/tb:crack-7z-hash/weak/01",
+   "traj/tb:password-recovery/weak/01"
+  ]
+ },
+ {
+  "chunk": 3,
+  "trials": [
+   "traj/tb:gpt2-codegolf/weak/00",
+   "traj/tb:gpt2-codegolf/weak/01",
+   "traj/tb:gpt2-codegolf/weak/02",
+   "traj/tb:qemu-alpine-ssh/weak/00",
+   "traj/tb:qemu-alpine-ssh/weak/01",
+   "traj/tb:qemu-alpine-ssh/weak/02",
+   "traj/tb:winning-avg-corewars/weak/00",
+   "traj/tb:winning-avg-corewars/weak/01",
+   "traj/tb:winning-avg-corewars/weak/02",
+   "traj/tb:large-scale-text-editing/weak/02",
+   "traj/tb:portfolio-optimization/weak/00"
+  ]
+ },
+ {
+  "chunk": 4,
+  "trials": [
+   "traj/tb:make-doom-for-mips/weak/00",
+   "traj/tb:make-doom-for-mips/weak/01",
+   "traj/tb:make-doom-for-mips/weak/02",
+   "traj/tb:rstan-to-pystan/weak/00",
+   "traj/tb:rstan-to-pystan/weak/01",
+   "traj/tb:rstan-to-pystan/weak/02",
+   "traj/tb:adaptive-rejection-sampler/weak/01",
+   "traj/tb:adaptive-rejection-sampler/weak/02",
+   "traj/tb:fix-ocaml-gc/weak/00",
+   "traj/tb:fix-ocaml-gc/weak/01",
+   "traj/tb:regex-log/weak/01"
+  ]
+ },
+ {
+  "chunk": 5,
+  "trials": [
+   "traj/tb:make-mips-interpreter/weak/00",
+   "traj/tb:make-mips-interpreter/weak/01",
+   "traj/tb:make-mips-interpreter/weak/02",
+   "traj/tb:sam-cell-seg/weak/00",
+   "traj/tb:sam-cell-seg/weak/01",
+   "traj/tb:sam-cell-seg/weak/02",
+   "traj/tb:circuit-fibsqrt/weak/01",
+   "traj/tb:circuit-fibsqrt/weak/02",
+   "traj/tb:git-multibranch/weak/00",
+   "traj/tb:git-multibranch/weak/01"
+  ]
+ },
+ {
+  "chunk": 6,
+  "trials": [
+   "traj/tb:model-extraction-relu-logits/weak/00",
+   "traj/tb:model-extraction-relu-logits/weak/01",
+   "traj/tb:model-extraction-relu-logits/weak/02",
+   "traj/tb:sanitize-git-repo/weak/00",
+   "traj/tb:sanitize-git-repo/weak/01",
+   "traj/tb:sanitize-git-repo/weak/02",
+   "traj/tb:feal-linear-cryptanalysis/weak/00",
+   "traj/tb:feal-linear-cryptanalysis/weak/01",
+   "traj/tb:hf-model-inference/weak/01",
+   "traj/tb:hf-model-inference/weak/02"
+  ]
+ }
+]

@@ -1,0 +1,62 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:make-doom-for-mips/weak/00",
+  "task_id": "tb:make-doom-for-mips",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "前 300 步都在读 doomgeneric 源码和现有 vm.js，没有做出可用的 MIPS 解释器；第 314 步直接把 /app/vm.js 换成 spawnSync 调 qemu-mipsel 的壳，qemu 一跑就段错误，留下的 /tmp/frame.bmp 只有 512054 字节、PIL 读头时报 Unsupported BMP header type (640)，stdout 也没有 DOOM 初始化文本，test_vm_execution 与 frame 相似度两项判负。",
+    "blocker_step": 314,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 314,
+        "quote": "cat > /app/vm.js << 'JSEOF'\nconst fs = require('fs');\nconst { spawnSync } = require('child_process');"
+      },
+      {
+        "step": 316,
+        "quote": "qemu: uncaught target signal 11 (Segmentation fault) - core dumped\nFrame file: /tmp/frame.bmp size: 512054 bytes"
+      },
+      {
+        "step": 322,
+        "quote": "SUCCESS: Frame file size=512054 bytes valid BMP"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0007",
+        "path": "phases/p07_test/skill_folder/bank-merge-0007/SKILL.md",
+        "why_relevant": "构建并验证编译产物：第 2 步明确“不要把文件存在当作它能工作”，要求用真实操作加断言式冒烟测试、再跑完整测试。"
+      },
+      {
+        "skill_id": "bank/merge/0006",
+        "path": "phases/p07_test/skill_folder/bank-merge-0006/SKILL.md",
+        "why_relevant": "构建/安装排错卡：按编译错误补依赖、关可选特性，直到产物可用并通过任务验收。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/cdf02b6dde80/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/cdf02b6dde80/seg00/skill",
+        "why_relevant": "待定未交付：构建/训练后必须用真实操作加完整测试证明产物可用，不能停在文件存在、--help、exit 0；正对应本组多次“文件在就算成功”。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0006"
+    ],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "只打开了 bank-merge-0006（构建排错），没有打开 0007/0003 中“用任务自己的验收命令断言输出”的步骤；收尾只检查了 BMP 的 BM 魔数，就把 qemu 段错误后的残帧当成成功。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "它主动用 qemu 壳替代了要交付的解释器，随后又用“文件存在 + BM 魔数”自证成功；verifier 的 Unsupported BMP header type (640) 与空 stdout 直接对应这两处，和技能无关。"
+  }
+}

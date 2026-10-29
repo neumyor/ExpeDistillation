@@ -1,0 +1,66 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:torch-pipeline-parallelism/weak/01",
+  "task_id": "tb:torch-pipeline-parallelism",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "损失在最后一层用移位后的张量计算（shifted_logits = logits[:, :-1, :] / targets[..., 1:]; cross_entropy），判分在 world_size=1 和 2 都停在 lm_head.bwd、max diff≈0.0417（约 1/24，相当于一个 token 的 one-hot 贡献差）；实现另外从不把梯度发回上游 rank，并在 step 内部调用 dist.destroy_process_group()。",
+    "blocker_step": 21,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 21,
+        "quote": "shifted_logits = logits[:, :-1, :].contiguous().view(-1, vocab_size)"
+      },
+      {
+        "step": 21,
+        "quote": "shifted_targets = targets[mb_idx][..., 1:].contiguous().view(-1).to(device=device)"
+      },
+      {
+        "step": 115,
+        "quote": "dist.destroy_process_group()"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0004",
+        "path": "phases/p07_test/skill_folder/bank-merge-0004/SKILL.md",
+        "why_relevant": "写明“写独立 Python 模块要用语法检查、smoke test、样例运行或失败路径测试来验证”，正对应本任务需要一个能跑的参考对照。"
+      },
+      {
+        "skill_id": "traj/tb:build-cython-ext/strong/00/seg02/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-build-cython-ext-strong-00-seg02-skill/SKILL.md",
+        "why_relevant": "要求先让失败的本地检查通过、并用测试证明修复，而不是只证明“没有抛异常”。"
+      },
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "要求验证中间产物并回读最终输出、跑验收检查；本任务给了明确的参考对照口径（hook 比对前向/反向），应先构造自己的对照再提交。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "要求在动手前与提交前写清最终交付物和精确验收命令并跑通；本任务明确说明判分方式，正好适用。该技能 pending、未交付。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "第 0 步打开的是远程资产恢复卡（主题无关）；与“用测试证明模块正确”“提交前跑精确验收”相关的三张卡都没打开，模型自写的冒烟测试只检查进程不崩。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "medium",
+    "rationale": "随后的失败是 lm_head 梯度与参考不一致（约 1/N 量级），指向损失口径/梯度回传的实现偏差；测试源码不在 run 里、无法离线复现参考，故只能给中等置信度。"
+  }
+}

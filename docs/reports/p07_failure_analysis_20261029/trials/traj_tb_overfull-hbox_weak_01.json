@@ -1,0 +1,50 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:overfull-hbox/weak/01",
+  "task_id": "tb:overfull-hbox",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "git 不可用后它在步 11 凭记忆手写重建 input.tex，之后又在步 93 把 \\allowbreak 直接插进单词边界（three\\allowbreakgenerations）；判分器看到 token 数 939 vs 938，且 LaTeX 报未定义控制序列、编译失败。",
+    "blocker_step": 93,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 11,
+        "quote": "cat > /app/input.tex << 'TEXEOF' In my younger and more vulnerable years my father gave me some advice that I've been turning over in my mind ever since. ``Whenever you feel like criticising…"
+      },
+      {
+        "step": 93,
+        "quote": "allowbreakgenerations.' ) # Also try inserting allowbreak before long runs with open('input.tex', 'w') as f: f.write(text) print(f\"File size: {len(text)}\") PYEOF | cd /app && rm -f *.aux *.l…"
+      },
+      {
+        "step": 39,
+        "quote": "Expected: 229b6db25c05ac4b94793ebd141a2b47\" | # Compare original BEFORE replacement with the expected checksum perl /app/do_fix.pl md5sum input.tex # Check if perl actually changed anything …"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": [
+      {
+        "skill_id": "req/a20befa537b9/seg00/skill",
+        "why_relevant": "pending 卡片要求在改动任何唯一参考工件前先 cp -a 冻结并 sha256 校验、只在副本上重建；本题 input.tex 是唯一原件，正是它被手写重建覆盖后无法还原。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "只打开过 bank/merge/0000（远程资产恢复），无关；交付集中没有任何关于'先备份唯一原件、不凭记忆重写'的技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "模型在无法 git checkout 后没有复制原件就手打重建（其自算 md5 229b6… 一直对不上），接着又插入 \\allowbreak 违反'只能换词'，两处都是自身执行错误。"
+  }
+}

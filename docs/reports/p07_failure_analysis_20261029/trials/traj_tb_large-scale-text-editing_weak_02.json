@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:large-scale-text-editing/weak/02",
+  "task_id": "tb:large-scale-text-editing",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "宏脚本把 100 万行 input.csv 完整改成 expected.csv(步骤 49 FULL_MATCH),5 项判分里 4 项通过;唯一失败是格式检查:任务只允许精确的 `:wq` 或 `:x`,而脚本最后一行写成了 `:wq!`,has_exit 判定为 False。",
+    "blocker_step": 50,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 50, "quote": ":%normal! @b\n:%normal! @c\n:wq!\nroot@e5f5dbea:/app# wc -c /app/apply_macros.vim\n213 /app/apply_macros.vim"},
+      {"step": 49, "quote": "root@e5f5dbea:/app# diff /app/input.csv /app/expected.csv && echo FULL_MATCH\nFULL_MATCH"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "它要求在提交前枚举交付物并跑“任务特定验收检查”;本任务的验收包含允许命令清单(必须精确 :wq 或 :x),按该卡逐条核对即可发现 :wq! 不合规。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl",
+        "why_relevant": "它要求把每个交付物的精确格式/内容约束写成清单再验证,正好覆盖“只允许 :wq 或 :x”这类字面要求;仍是 pending,未交付。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:build-cython-ext/strong/00/seg00/skill"],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "只打开了“先盘点输入”卡;真正相关的 bank-merge/0003(提交前跑任务特定验收)从未打开,模型只验证了内容 diff,没有核对允许命令清单。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "转换结果完全正确,唯一失败是模型把任务明确规定的 `:wq`/`:x` 写成 `:wq!` 且未做格式自查;相关验收技能存在于库中但未被触发。"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:make-doom-for-mips/weak/02",
+  "task_id": "tb:make-doom-for-mips",
+  "attempt_index": 2,
+  "correctness": null,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "没有任何交付物：第 112 步起 bash 停在未闭合引号的续行（提示符变成 '>'），C-c/C-d/pwd 都没能恢复；第 120 步 harness 抛出 “failed to send non-blocking keys: no server running on /tmp/tmux-0/default”，trial 在写作与判分之前中断，correctness 为 null，verifier_result 也是 null（不是超时、也不是“执行了但没判分”）。",
+    "blocker_step": 120,
+    "blocker_type": "environment",
+    "evidence_quotes": [
+      {
+        "step": 116,
+        "quote": "bash: unexpected EOF while looking for matching `''"
+      },
+      {
+        "step": 118,
+        "quote": "> C-c\n> C-c\n> C-d\n> pwd\n>"
+      },
+      {
+        "step": 120,
+        "quote": "> )'\n>\n> C-c"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "专门处理“命令不返回提示符、同一错误反复出现”：Ctrl-C 后用 timeout 重跑、最小化复现、停止前必须看到 exit:0。"
+      },
+      {
+        "skill_id": "bank/merge/0007",
+        "path": "phases/p07_test/skill_folder/bank-merge-0007/SKILL.md",
+        "why_relevant": "构建并验证编译产物：第 2 步明确“不要把文件存在当作它能工作”，要求用真实操作加断言式冒烟测试、再跑完整测试。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/cdf02b6dde80/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/cdf02b6dde80/seg00/skill",
+        "why_relevant": "待定未交付：构建/训练后必须用真实操作加完整测试证明产物可用，不能停在文件存在、--help、exit 0；正对应本组多次“文件在就算成功”。"
+      },
+      {
+        "skill_id": "req/e20a68bdd559/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl#req/e20a68bdd559/seg00/skill",
+        "why_relevant": "待定未交付：命令不返回时先捕获输出、判断是长任务还是卡死，再决定是否中断；对应本组终端卡死后的处理。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0006"
+    ],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "只打开了 bank-merge-0006；处理“提示符不回来/命令反复失败”的 seg01 卡没打开，也没有在任何一步停下来先恢复 shell。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "medium",
+    "rationale": "终止原因是 harness 自己的 tmux 会话消失（沙箱异常），trial 根本没进入判分；但模型此前已把自己困在引号续行里 8 步，恢复能力不足是叠加因素。"
+  }
+}

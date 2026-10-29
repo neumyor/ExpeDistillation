@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:mteb-retrieve/weak/02",
+  "task_id": "tb:mteb-retrieve",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "用 SentenceTransformer 直接加载 bge-small-zh-v1.5 并按普通余弦排序，从未调用任务明确要求的 mteb 来完成编码，因此 mteb 的中文检索 query 指令（bge_models.py 里的 model_prompts_zh）没有生效；排序结果是 MTEB 第 7、HumanEval 第 5，于是 result.txt 写入 HumanEval 行，判分要求 MTEB 行（assert 'HumanEval: B...' == 'MTEB: Massiv...'）。",
+    "blocker_step": 34,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 34,
+        "quote": "model = SentenceTransformer(\"/tmp/bge-model/\")"
+      },
+      {
+        "step": 34,
+        "quote": "#5: 0.546180 -> HumanEval: Benchmarking Python code generation via functional examples"
+      },
+      {
+        "step": 34,
+        "quote": "#7: 0.527138 -> MTEB: Massive Text Embedding Benchmark"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 bank/merge/0000（远程资产恢复），它确实对应本 trial 前段的 HuggingFace 下载失败并最终帮助拿到模型，但对“用哪个编码 API、要不要加 query 指令”完全沉默，因此对真正的卡点不适用。注：本 trial 没有读 bge_models.py，但任务原文已写明必须用 mteb 编码。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "medium",
+    "rationale": "“必须用已安装的 mteb 加载并编码”是任务原文的硬要求，模型却换成 SentenceTransformer 且未加 query 指令，排序因此与参考口径不同（MTEB 落到第 7）；参考实现无法离线复跑，故置信度中等。"
+  }
+}

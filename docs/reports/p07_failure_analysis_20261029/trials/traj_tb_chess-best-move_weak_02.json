@@ -1,0 +1,61 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:chess-best-move/weak/02",
+  "task_id": "tb:chess-best-move",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "同题前两次：逐格像素检测能定位棋子，但种类靠猜测，第 59 步锁定的“最可能局面” FEN 中 e2 仍是皇后（…/4Q3/R1N1K2N），在错局面上评估候选走法后第 65 步写入 e2e5；判分为 assert ['e2e5'] == ['e2e4','g2g4']。中途还因交互式启动 Stockfish 反复挂起（第 48–63 步）。",
+    "blocker_step": 59,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 59,
+        "quote": "fen = \"r1nb4/1p3pp1/r1q1p3/3k1bb1/8/R1B5/4Q3/R1N1K2N w KQkq - 0 1\""
+      },
+      {
+        "step": 65,
+        "quote": "echo 'e2e5' > /app/move.txt"
+      },
+      {
+        "step": 65,
+        "quote": "e2e5"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg04/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg04-skill/SKILL.md",
+        "why_relevant": "要求提交前完成验证；模型没有把识别出的 FEN 与图像再做一次独立核对就提交。"
+      },
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "要求给可能挂起的命令加 timeout 并在无提示符时先 Ctrl-C 再重跑；模型多次用交互式 Stockfish 卡住终端。"
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "traj/tb:bn-fit-modify/strong/00/seg03/skill",
+        "why_relevant": "按 prompt 建立“全部必需输出”清单（多条获胜走法要全部写出）；模型只写了一条。pending、未交付。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:extract-moves-from-video/strong/00/seg01/skill"
+    ],
+    "first_open_step": 1,
+    "effective": "opened_but_model_ignored",
+    "detail": "只打开了 OCR 调参卡（第 1 步），其“逐个核对所有期望输出、不要凭第一个可用结果宣布成功”的要求没有落实；循环恢复卡和提交前验证卡都没打开，Stockfish 交互式挂起后靠 Ctrl-C 硬退。"
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "medium",
+    "rationale": "与 /01 同因：局面识别（尤其棋子种类）错误且无交叉校验（model_capability），而库里没有读棋盘的技能（missing_skill）；“写全所有获胜走法”这一要求对应的卡还在 pending。"
+  }
+}

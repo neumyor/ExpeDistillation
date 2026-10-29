@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:video-processing/weak/02",
+  "task_id": "tb:video-processing",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "阈值/质心流水线在示例视频给出 takeoff 52 / landing 72（期望 50–54 / 62–64），在测试视频给出 takeoff 2；它只用 print 与'看起来合理'自检，没有可比对的真值就提交了。",
+    "blocker_step": 40,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 40,
+        "quote": "Takeoff frame: 52 Landing frame: 72 Output written to /app/o…"
+      },
+      {
+        "step": 31,
+        "quote": "check if takeoff should be 52 instead of 53 import cv2 import numpy as np vc = cv2.VideoCapture('/app/example_video.mp4') total_frames = int(vc.get(cv2.CAP_PROP_FRAME_COUNT)) frames_bgr = []…"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:extract-moves-from-video/strong/00/seg01/skill"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 extract-moves-from-video seg01（OCR），无关；交付集中没有视频运动分析技能，也没有可参考的验收方式。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "同一份代码在测试视频上把 takeoff 判到第 2 帧、在示例上 landing 晚 8 帧，说明检测逻辑对帧号/阈值敏感且从未被校验，属于模型自身的方法与验证不足。"
+  }
+}

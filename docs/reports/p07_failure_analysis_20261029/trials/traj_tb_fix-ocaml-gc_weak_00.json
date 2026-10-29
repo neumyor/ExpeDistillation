@@ -1,0 +1,52 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:fix-ocaml-gc/weak/00",
+  "task_id": "tb:fix-ocaml-gc",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "agent 侧其实跑通了：第 79-81 步完成构建，第 82 步 make -C testsuite one DIR=tests/basic 逐条 passed 后提交。失败在判分侧：verifier 为复原 testsuite 执行 git clone ocaml-original 时网络中断（curl 92 HTTP/2 ... CANCEL），cp ocaml-original/testsuite 找不到目录，make 报 “testsuite: No such file or directory”，tests.txt 从未生成，判分只看到空文件。",
+    "blocker_step": 82,
+    "blocker_type": "environment",
+    "evidence_quotes": [
+      {
+        "step": 82,
+        "quote": "testing 'divint.ml' => passed"
+      },
+      {
+        "step": 83,
+        "quote": "Are you sure you want to mark the task as complete? This will trigger your solution to be graded"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0006",
+        "path": "phases/p07_test/skill_folder/bank-merge-0006/SKILL.md",
+        "why_relevant": "构建/安装排错卡：按编译错误补依赖、关可选特性，直到产物可用并通过任务验收。"
+      },
+      {
+        "skill_id": "bank/merge/0007",
+        "path": "phases/p07_test/skill_folder/bank-merge-0007/SKILL.md",
+        "why_relevant": "构建并验证编译产物：第 2 步明确“不要把文件存在当作它能工作”，要求用真实操作加断言式冒烟测试、再跑完整测试。"
+      }
+    ],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0006"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开并按 0006 的构建排错流程推进（补依赖、修共享堆、重建），agent 侧测试全过；失败与技能内容无关。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "high",
+    "rationale": "判分脚本的第一步 git clone 就因 HTTP/2 中断失败，testsuite 目录因此不存在，随后所有 make 都因目录缺失而失败——与 agent 的改动无关，trial 根本没被真正测到。"
+  }
+}

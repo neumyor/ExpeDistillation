@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:git-multibranch/weak/00",
+  "task_id": "tb:git-multibranch",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "The SSH+Nginx deploy itself worked (both branch pages served over https at step 4/9), but the agent also installed passwordless key auth for root on the git account; the verifier's expect-based clone then authenticated by key, never printed a 'password:' prompt, died with 'spawn id exp4 not open', and the push/deploy half of the test never ran.",
+    "blocker_step": 7,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 5, "quote": "ssh-keygen -t rsa -f /tmp/test_key -N '' -q && cat /tmp/test_key.pub >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && cp /tmp/test_key ~/.ssh/id_rsa"},
+      {"step": 7, "quote": "mkdir -p /home/git/.ssh && cp /tmp/test_key.pub /home/git/.ssh/authorized_keys && chown -R git:git /home/git/.ssh"},
+      {"step": 4, "quote": "root@36b376e9:/tmp/testrepo# curl -sk https://localhost:8443/index.html\nmain branch content"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "Generic acceptance-check card: its steps 10-11 require running the task's own test procedure and comparing every deliverable sentence before marking complete. The prompt's test procedure is 'clone, push both branches, curl both endpoints', which would have exposed that a fresh clone never asks for the password."
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "Pending card on writing a closed plan and proving completion with the exact acceptance command; it would have forced the model to reproduce the grader's password-only clone instead of its own key-based clone."
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["bank/merge/0000"],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "It opened bank/merge/0000 (remote-asset recovery), which is irrelevant to a git/SSH setup task. bank/merge/0003, the only card that speaks about running the task's final acceptance check, was never opened. The agent did self-test clone/push/curl, but always via the key it installed, so its own check could not reveal the problem."
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "medium",
+    "rationale": "The trigger is the model's unsanctioned key-auth setup left in place (execution), but the failure only manifests because the grader's expect script assumes the clone will prompt for a password; the sibling attempt 02, which typed the password and installed no key, passed."
+  }
+}

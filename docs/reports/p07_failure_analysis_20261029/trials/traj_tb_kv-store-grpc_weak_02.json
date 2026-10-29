@@ -1,0 +1,56 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:kv-store-grpc/weak/02",
+  "task_id": "tb:kv-store-grpc",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "proto 里把 SetValRequest 的第二个字段写成 int val = 2，而任务原文要求 key (string) + value (int)；server 和模型自写的客户端都用 val，所以自测通过，但判分客户端按 value= 构造请求时直接报 Protocol message SetValRequest has no \"value\" field（test_grpc_protocol_handshake / test_grpc_server_functionality 两项失败）。",
+    "blocker_step": 2,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 2,
+        "quote": "message SetValRequest {\n  string key = 1;\n  int val = 2;\n}"
+      },
+      {
+        "step": 5,
+        "quote": "kv_store_pb2.SetValRequest(key='test', val=42)"
+      },
+      {
+        "step": 5,
+        "quote": "SetVal response: 42"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0006",
+        "path": "phases/p07_test/skill_folder/bank-merge-0006/SKILL.md",
+        "why_relevant": "第 8–9 步要求按“文档化的接口”验证并重新阅读任务的必需交付物、跑精确验收命令；本 trial 的失败正是没有按文档字段名核对。"
+      },
+      {
+        "skill_id": "bank/merge/0007",
+        "path": "phases/p07_test/skill_folder/bank-merge-0007/SKILL.md",
+        "why_relevant": "第 2 步要求“从实际项目而不是假设”列出产物与期望结果，第 10 步要求 smoke test 断言期望值；模型用自己写的客户端断言自己，无法发现字段名偏差。"
+      }
+    ],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0007"
+    ],
+    "first_open_step": 0,
+    "effective": "opened_but_model_ignored",
+    "detail": "打开的是 0007（构建并验证产物），它第 10/13–14 步要求做会断言期望结果的 smoke test 并逐个核对产物；模型的 smoke test 用自己错 proto 的 val=42 请求，输出 'SetVal response: 42' 被当成通过。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "任务原文逐字给了字段名 value，模型按响应字段的习惯写成 val，并用同一个错 proto 生成的客户端自证通过——这是可自检却被漏掉的规范错读，与技能内容无关；同一 task 的 00 号尝试通过，说明是随机性的规范遵循失败。"
+  }
+}

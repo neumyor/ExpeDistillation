@@ -1,0 +1,35 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:feal-linear-cryptanalysis/weak/01",
+  "task_id": "tb:feal-linear-cryptanalysis",
+  "attempt_index": 1,
+  "correctness": null,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "correctness=null 不是超时也不是无判分：只跑了 4 步（读技能、ls/cat 输入、gcc 编译 feal.c 与 decrypt.c）后 harness 直接抛 RuntimeError：failed to send non-blocking keys: command send-keys: unknown flag -e；agent_result 只有 5 个 episode，verifier_result 为 null，判分器从未运行。",
+    "blocker_step": 3,
+    "blocker_type": "environment",
+    "evidence_quotes": [
+      {
+        "step": 3,
+        "quote": "root@86a4cc32:/app# gcc -O2 -o feal_test /app/feal.c\nroot@86a4cc32:/app# gcc -O2 -o decrypt_test /app/decrypt.c\nroot@86a4cc32:/app#"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [],
+    "first_open_step": null,
+    "effective": "unknown",
+    "detail": "只开了“先盘点输入”的通用卡（第 0 步），还没来得及使用任何技能，trial 就在第 4 个 episode 被 harness 中止。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "high",
+    "rationale": "容器内 tmux 不支持 send-keys -e，terminus 在发键时直接抛异常终止 trial，verifier 未启动；这不是模型或技能的问题，不应计入能力统计。"
+  }
+}

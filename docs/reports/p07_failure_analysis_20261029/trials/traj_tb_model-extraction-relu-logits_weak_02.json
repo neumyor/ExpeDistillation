@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:model-extraction-relu-logits/weak/02",
+  "task_id": "tb:model-extraction-relu-logits",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "第 4 步其实已经抽到 (30, 10)、梯度重建误差 0.000000；但它认为 A1 应该是 20 行（脚本里直接打印 “WARNING: Expected 20 rows but got 30”），随后一路把候选压成 20 行。最终提交 (20,10)、自检 “>=0.90: 15/20”，且最后一版脚本还在尝试 from forward import A1（判分侧重写后的 forward.py 没有 A1，重跑直接 ImportError）。",
+    "blocker_step": 92,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 4,
+        "quote": "Recovered A1 with shape (30, 10)\nRow norms: [...]\nWARNING: Expected 20 rows but got 30\nSaved stolen A1 ((30, 10)) to /app/stolen_A1.npy"
+      },
+      {
+        "step": 86,
+        "quote": "Min cos: 0.781295, all>0.95: False\n>=0.90: 15/20\nSaved ((20, 10)) to /app/stolen_A1.npy"
+      },
+      {
+        "step": 92,
+        "quote": "Final verification\nShape: (20, 10), dtype: float64, all finite: True"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0001"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "同样只开了 bank/merge/0001，且未采用其中任何一条（无 schema 恢复、无回读验收）；技能选择与任务不匹配。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "它自己抽出的 30 行结果与“未知形状”的题面一致，却因先验（forward.py 写死 20）主动丢弃，最终交付 20 行并在自检显示 15/20 时仍提交。"
+  }
+}

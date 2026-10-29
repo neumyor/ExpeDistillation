@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:video-processing/weak/01",
+  "task_id": "tb:video-processing",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "它把 takeoff 定义为'检测到运动的首帧'（runner_start），于是示例视频和测试视频都报 33（期望 50–54 / 219–223），landing 78 也偏；17 步就提交，从未用可见的起跳过程校验输出。",
+    "blocker_step": 14,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 10,
+        "quote": "Takeoff = first frame after motion begins where bottom drops # significantly below the ground baseline # First detect where the runner enters the scene runner_start = None for i in range(1, …"
+      },
+      {
+        "step": 14,
+        "quote": "Takeoff frame: 33 Landing frame: 78 Output written to /app/o…"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:extract-moves-from-video/strong/00/seg01/skill"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 extract-moves-from-video seg01（OCR），与运动估计无关；没有交付技能覆盖视频起跳/落地检测，也没有技能提示'提交前用可视证据核对检测结果'。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "两个视频都返回同一个 33，正是'运动员进入画面即算起跳'这一概念错误；它在 17 步内就用占位式输出提交，没有做任何真值对照。"
+  }
+}

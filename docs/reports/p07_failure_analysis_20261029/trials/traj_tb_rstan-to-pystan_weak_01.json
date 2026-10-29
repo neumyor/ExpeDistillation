@@ -1,0 +1,41 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:rstan-to-pystan/weak/01",
+  "task_id": "tb:rstan-to-pystan",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "实现是对的：四个 csv 都写出、alpha/sigma/beta 三项全过；只有 rho[2] 的后验均值 1.48944 比期望下界 1.49 低 0.00056（4 条链各 500 抽样，约 1 个 MC 标准误），落在 [1.49,1.51] 之外，唯一失败项。",
+    "blocker_step": 52,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {
+        "step": 51,
+        "quote": "Chain 1 done. Samples: alpha=(1, 500), rho=(3, 500)"
+      },
+      {
+        "step": 52,
+        "quote": "Posterior means:\nalpha: 1.086451\nsigma: 0.134300\nrho:  [0.58496998 0.88665817 1.48944156]"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "只打开了 bank-merge-0000（远端资产恢复），与后验估计无关；交付技能库里没有任何一条涉及 MCMC 收敛/数值容差。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "medium",
+    "rationale": "rho[0]、rho[1] 与 beta 全部落在区间内，只有 rho[2] 差分 5.6e-4，量级就是 2000 次抽样的蒙特卡洛误差；判分下界几乎正好等于参考均值，有限抽样必然有约一半概率掉到下界外。"
+  }
+}

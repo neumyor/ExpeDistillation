@@ -1,0 +1,33 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:winning-avg-corewars/weak/02",
+  "task_id": "tb:winning-avg-corewars",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "模型迭代出对 paper/vampire/g2-clear 都过线的 warrior,但对 stone 只有 68%(要求 75)、对 snake 只有 3%;它在步骤 130 看到这两个不达标的结果后仍标记完成,判分在 stone 与 snake 两项失败。",
+    "blocker_step": 130,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 130, "quote": "stone:\nResults: 68 32 0\npaper:\nResults: 92 0 8\nvampire:\nResults: 77 23 0"},
+      {"step": 130, "quote": "snake:\nResults: 3 85 12\ng2-clear:\nResults: 41 52 7"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": ["bank/merge/0000"],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "只打开了“恢复远端资产”卡,与 Redcode 策略无关;模型随后靠试错改 warrior,没有可用技能指导如何兼顾 stone 与 snake。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "自测已显示 stone 68%、snake 3% 均低于阈值,模型仍提交;这是策略设计与提交前验证的不足,不是技能内容问题。"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:portfolio-optimization/weak/00",
+  "task_id": "tb:portfolio-optimization",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "C 扩展实现正确:全部正确性断言通过,6000/8000 两个规模的加速比也达标;只有 N=5000 时实测 1.12x,略低于 1.2x 门槛。模型自己的 benchmark.py 在同一环境报 1.4x 且 ALL TESTS PASSED,说明失败处在阈值边缘的计时波动而非实现错误。",
+    "blocker_step": 7,
+    "blocker_type": "verification",
+    "evidence_quotes": [
+      {"step": 7, "quote": "Correctness test PASSED\nC optimized time: 5678.9 ms\nSpeedup: 1.4x\nPerformance requirement met! (1.4x >= 1.2x)\nALL TESTS PASSED!"},
+      {"step": 6, "quote": "Correctness test PASSED\nC optimized time: 2005.4 ms\nSpeedup: 1.4x\nPerformance requirement met! (1.4x >= 1.2x)"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:build-cython-ext/strong/00/seg00/skill"],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "只打开了“先盘点输入”卡;它不涉及性能门槛或计时方法,本 trial 的失败来自判分计时的边缘差异,与技能内容无关。"
+  },
+  "verdict": {
+    "category": "environment",
+    "confidence": "medium",
+    "rationale": "正确性在 1e-10 内全部通过、6000/8000 规模也过线,只有 N=5000 的 1.12x 对 1.2x 差一点,且模型本地测得 1.4x,更像判分环境计时波动而非实现错误。"
+  }
+}

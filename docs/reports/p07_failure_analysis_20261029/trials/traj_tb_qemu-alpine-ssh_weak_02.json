@@ -1,0 +1,39 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:qemu-alpine-ssh/weak/02",
+  "task_id": "tb:qemu-alpine-ssh",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "虚拟机已启动、串口 5555 可达,但模型一直用 QEMU 已废弃的 `-redir tcp:2222::22` 做端口转发,从未改用 `-net user,hostfwd=tcp::2222-:22`;到 AgentTimeoutError 时 netstat 仍显示 2222 PORT_DOWN,判分的 sshpass ssh 返回 255。",
+    "blocker_step": 309,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 303, "quote": "-cdrom /app/alpine.iso -drive file=/app/newdisk.qcow2,if=virtio,format=qcow2 -serial telnet:127.0.0.1:5555,server,nowait -nographic -redir tcp:2222::22"},
+      {"step": 309, "quote": "root@a0080554:/app# netstat -tlnp | grep 2222 && echo PORT_UP || echo PORT_DOWN\nPORT_DOWN"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:qemu-startup/strong/00/seg00/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-qemu-startup-strong-00-seg00-skill/SKILL.md",
+        "why_relevant": "它教启动 QEMU 并用串口 TCP 端口确认 guest 可达,本 trial 的启动部分照它做成了;但它的内容只到串口 console,没有 SSH/端口转发部分。"
+      }
+    ],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:qemu-startup/strong/00/seg00/skill"],
+    "first_open_step": 0,
+    "effective": "no_content",
+    "detail": "技能被打开并帮助启动了虚拟机,但通篇没有 SSH 服务或 hostfwd 转发的内容,无法覆盖“localhost:2222 登录”这一验收点;模型因此自己乱试了废弃的 -redir。"
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "medium",
+    "rationale": "直接原因是模型使用 QEMU 已移除的 -redir 且两小时内未尝试 hostfwd;同时唯一相关的交付技能只讲串口 console、不含 SSH 端口转发,技能内容覆盖不足也放大了失败。"
+  }
+}

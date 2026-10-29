@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:feal-linear-cryptanalysis/weak/00",
+  "task_id": "tb:feal-linear-cryptanalysis",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "171 步里先用 C 穷举/哈希表密钥恢复失败（只打印到 Searching K3... 卡住），随后在第 29 步把一个 python heredoc 连同自己的推理散文一起当 keystrokes 发送，终端从此卡在未结束的输入上；第 30-170 步反复重发 PYEND/空行都无输出，直到预算耗尽，/app/plaintexts.txt 从未生成。",
+    "blocker_step": 29,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 27,
+        "quote": "Searching K3...\n"
+      },
+      {
+        "step": 29,
+        "quote": "But R2 = c_lo here, and R_before3 = c_lo. Let me stop hand-waving.\n  Simple fact: from encrypting pair 0 with known K0, unknown K1,K2,K3,"
+      },
+      {
+        "step": 170,
+        "quote": "New Terminal Output:\n\n           But R2 = c_lo here, and R_before3 = c_lo. Let me"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:build-cython-ext/strong/00/seg00/skill"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "只开了“先盘点输入”的通用卡（还开了两次），与线性密码分析无关；库中没有密码分析类技能。之后 160 步全在自写 C/Python 解法里打转。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "任务本身可解（另一次尝试在公开解答口径下走通），这里失败在算法尝试不收敛，最后又把推理文本写进 heredoc 把终端锁死，交付文件根本不存在。"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:gpt2-codegolf/weak/01",
+  "task_id": "tb:gpt2-codegolf",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "模型最终写出了 3514 字节、能编译的 gpt2.c,但运行输出是重复的乱码 \"ptaptap...\";权重偏移或 BPE 解码明显不对,模型在最后十几步反复检查 wte 偏移仍未修正,两小时后超时,判分报 Wrong output。",
+    "blocker_step": 250,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 250, "quote": "root@d4755cf3:/app# timeout 30 /app/a.out gpt2-124M.ckpt vocab.bpe \"h\" 2>&1; echo RC:$?\nptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaRC:0"},
+      {"step": 259, "quote": "root@d4755cf3:/app# timeout 30 /app/a.out gpt2-124M.ckpt vocab.bpe \"hello\" 2>&1; echo RC:$?\nptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaptaRC:0"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": [
+      {
+        "skill_id": "traj/tb:path-tracing/strong/00/seg01/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl",
+        "why_relevant": "它教先静态盘点未知序列化模型、按字节解析结构与常量,再搭最小候选;正是本任务读 TF .ckpt 权重布局所需。仍是 pending,未交付。"
+      },
+      {
+        "skill_id": "req/cdf02b6dde80/seg00/skill",
+        "path": "phases/p06_learn_trial/skill_bank.jsonl",
+        "why_relevant": "它要求编译产物出现后必须用真实输入跑一次并把结果写进成功契约;模型虽然跑了,但没有可对照的期望输出,该技能也仍是 pending。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:build-cython-ext/strong/00/seg00/skill"],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "只打开了“先盘点输入”卡,它帮助模型看文件却不告诉它 .ckpt 的浮点顺序、层偏移和 BPE 合并规则;真正需要的逆向与实现知识交付库里没有。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "程序能编译运行但输出恒为重复乱码,说明权重/分词实现错误且模型在超时前没定位到;判分明确报 Wrong output,交付库无相关技能。"
+  }
+}

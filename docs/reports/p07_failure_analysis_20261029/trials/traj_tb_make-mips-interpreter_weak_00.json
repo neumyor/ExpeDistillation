@@ -1,0 +1,50 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:make-mips-interpreter/weak/00",
+  "task_id": "tb:make-mips-interpreter",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "The vm.js interpreter runs but starts the guest in a corrupt state (garbage SP, wild PC, and a 1 GB BSS segment parsed from the ELF); after 20-50M instructions it reports frames=0, never writes /tmp/frame.bmp, and the grader times out. Over 304 steps / 2 h the agent rewrote the interpreter from scratch repeatedly, then pivoted to a C interpreter, qemu-mipsel, and a patched Doom binary without ever fixing the initial CPU state.",
+    "blocker_step": 134,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 134, "quote": "SEG[3] va=0x466520 fsz=60288 msz=1074049648\nDG_ScreenBuffer is null, will monitor during exec\nStep 20000000 PC=0x4ad74 SP=48\nDone: 50000000 steps, frames=0"},
+      {"step": 231, "quote": "Step 2040000000 PC=0x0017F978 SP=0x00000048\nStep 2050000000 PC=0x003A5084 SP=0x00000048"},
+      {"step": 265, "quote": "rm -f /app/vm.js /tmp/gen_vm.py\npython3 << 'PYEND'"}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "traj/tb:build-cython-ext/strong/00/seg02/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-build-cython-ext-strong-00-seg02-skill/SKILL.md",
+        "why_relevant": "Card for a command that fails or repeats: fix the first concrete error, rerun, and do not rewrite; here the first concrete error was SP=48 at entry, which was never investigated before each full rewrite."
+      },
+      {
+        "skill_id": "traj/tb:filter-js-from-html/strong/00/seg01/skill",
+        "path": "phases/p07_test/skill_folder/traj-tb-filter-js-from-html-strong-00-seg01-skill/SKILL.md",
+        "why_relevant": "Card for debug loops and repeated errors: bound the command, isolate the failing token/line, verify output before success - the model instead oscillated between whole-file rewrites for two hours."
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "Pending closed-plan card; a plan naming /tmp/frame.bmp as the single acceptance artifact would have forced incremental verification instead of 300+ exploratory steps."
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["traj/tb:db-wal-recovery/weak/00/seg02/skill"],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "The only card opened (three times: steps 0, 96, 261) is about reconnoitering unknown executables; it was followed at the start but says nothing about emulator state or convergence. The fix-repeated-failure and bounded-debug cards were never opened."
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "The deliverable could be built but the model never got the emulated CPU into a valid entry state and never converged, spending 2 h cycling among reimplementations until the 7200 s agent timeout; no skill in the delivered set addresses MIPS emulation."
+  }
+}

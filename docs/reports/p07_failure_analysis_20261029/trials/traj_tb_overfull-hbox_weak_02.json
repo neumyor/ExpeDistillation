@@ -1,0 +1,50 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:overfull-hbox/weak/02",
+  "task_id": "tb:overfull-hbox",
+  "attempt_index": 2,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "它在步 9 用 heredoc 手打重写 input.tex，粘进了无关文本（a young man at the office s）并把 ``had.'' 打成 ``had.'''；判分器发现某个 token 的尾部标点从 ,'' 变成 ,，判定越权修改。",
+    "blocker_step": 9,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 9,
+        "quote": "g> ``Whenever you feel like criticising any one,'' he told me, ``just remember that all the people in this world haven't had the advantages that you've had.''' a young man at the office s> >…"
+      },
+      {
+        "step": 9,
+        "quote": "you've had.''' He didn't say any more, but we've always been unusually communicative in a reserved way, and I understood that he meant a great deal more than that. In consequence, I'm inclin…"
+      },
+      {
+        "step": 25,
+        "quote": "s/always/been/g' \\ -e 's/unusually/markedly/g' \\ -e 's/commu…"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": [
+      {
+        "skill_id": "req/a20befa537b9/seg00/skill",
+        "why_relevant": "pending 卡片要求改动唯一参考工件前先冻结副本、在副本上工作；若 input.tex 有备份，步 9 的损坏重写和后续数十步的反复恢复都不会发生。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "只打开过 bank/merge/0000（远程资产恢复），无关；交付集中没有约束'不得重写原文、只做白名单替换'的技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "损坏来自模型自己手打的 heredoc（可见混入的粘贴行与多出的引号），之后又用非同义词（always→been、opinions→views）迭代，判分器只报出第一个标点不一致。"
+  }
+}

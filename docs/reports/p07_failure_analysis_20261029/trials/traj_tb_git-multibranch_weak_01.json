@@ -1,0 +1,45 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:git-multibranch/weak/01",
+  "task_id": "tb:git-multibranch",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "Same failure mode as attempt 00: after password auth initially refused its pushes, the agent generated root's SSH key and appended it to /home/git/.ssh/authorized_keys; the verifier's expect clone then logged in silently by key, no 'password:' prompt appeared, the expect script aborted with 'spawn id exp4 not open', and no push/deploy happened.",
+    "blocker_step": 12,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {"step": 11, "quote": "# Generate SSH keys for root user and add to git user's authorized_keys\nssh-keygen -t rsa -f /root/.ssh/id_rsa -N '' -q 2>&1\ncat /root/.ssh/id_rsa.pub >> /home/git/.ssh/authorized_keys"},
+      {"step": 12, "quote": "root@a7522953:/tmp/test-workspace/workspace# ssh -o StrictHostKeyChecking=no git@localhost echo \"SSH works\" 2>&1\nSSH works"},
+      {"step": 20, "quote": "Cloning into '/tmp/test-path'...\nremote: Enumerating objects: 7, done."}
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": true,
+    "candidates": [
+      {
+        "skill_id": "bank/merge/0003",
+        "path": "phases/p07_test/skill_folder/bank-merge-0003/SKILL.md",
+        "why_relevant": "Its acceptance-check steps (run the provided task test exactly as given, compare the deliverable against every sentence of the prompt) apply: the prompt says the server accepts password authentication and is tested by cloning, so a fresh clone with the password prompt unmodified should have been the final check."
+      }
+    ],
+    "pending_relevant": [
+      {
+        "skill_id": "req/7ebf1db42112/seg00/skill",
+        "why_relevant": "Pending closed-plan/acceptance-command card; would have kept the final state matching the documented password-only test path."
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": ["bank/merge/0000"],
+    "first_open_step": 0,
+    "effective": "no_not_opened",
+    "detail": "Only bank/merge/0000 (remote-asset recovery) was opened, which has nothing to do with git hosting. It did verify password auth still worked with sshpass (step 19), but never removed the key it had installed, so its check passed while the grader's password-prompt-only flow broke."
+  },
+  "verdict": {
+    "category": "mixed",
+    "confidence": "medium",
+    "rationale": "The model left installed key auth that short-circuits the grader's expect-password clone, but the grader itself only handles a password prompt; attempt 02 with password-only auth passed the same test."
+  }
+}

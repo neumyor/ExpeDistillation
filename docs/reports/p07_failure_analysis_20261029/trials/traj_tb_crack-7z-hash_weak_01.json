@@ -1,0 +1,51 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:crack-7z-hash/weak/01",
+  "task_id": "tb:crack-7z-hash",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": false,
+  "failure": {
+    "summary": "john 以 524288 次迭代、约 17 p/s 跑 password.lst 时（正确的 honeybear 就在该表里，同题 00 次尝试用同一条命令约 3 分钟解出），它在步 18 约 120 秒就 Ctrl-C 打断，此后一直用 60 秒的猜测/规则/暴力运行直到 7200 秒超时，solution.txt 从未写出。",
+    "blocker_step": 18,
+    "blocker_type": "execution",
+    "evidence_quotes": [
+      {
+        "step": 15,
+        "quote": "Loaded 1 password hash (7z, 7-Zip archive encryption [SHA256 256/256 AVX2 8x AES]) Cost 1 (iteration count) is 524288 for all loaded hashes Cost 2 (padding size) is 3 for all loaded hashes C…"
+      },
+      {
+        "step": 22,
+        "quote": "0 password hashes cracked, 1 left root@3759a4db:/app#"
+      },
+      {
+        "step": 18,
+        "quote": "echo 'open' && 7z x /app/secrets.7z -o/app/ -popen < /dev/null"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": [
+      {
+        "skill_id": "req/e20a68bdd559/seg00/skill",
+        "why_relevant": "pending 卡片明确要求：命令没返回时先等 30–60 秒、用 ps 观察 TIME 是否增长再决定是否打断；若交付，它会阻止步 18 的提前 Ctrl-C 并让 password.lst 跑完。"
+      }
+    ]
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:build-pmars/strong/00/seg01/skill",
+      "bank/merge/0003"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "打开的是 build-pmars seg01（解压失败恢复）和 bank-merge-0003（计划/验收），都与'让慢速爆破跑完'无关；交付集中唯一涉及长命令的 filter-js seg01 反而教'命令挂起就 Ctrl-C'，在这里会强化错误做法。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "同一条 john 命令在 00 次尝试里跑完即命中，而本次在约 120 秒时被打断、之后再没有让任何完整词表跑完，属于模型对长时间运行作业的耐心/判断失误。"
+  }
+}

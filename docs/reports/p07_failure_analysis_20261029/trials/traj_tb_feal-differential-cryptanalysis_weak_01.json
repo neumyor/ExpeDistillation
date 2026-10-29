@@ -1,0 +1,46 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:feal-differential-cryptanalysis/weak/01",
+  "task_id": "tb:feal-differential-cryptanalysis",
+  "attempt_index": 1,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "它先写的差分攻击在步 15 报 No survivors found，随后把 attack.py 换成'改 feal.key[5] 再调 encrypt_fn'的框架：本地自测 10/10 PASS，但判分器传入的是独立的 C 实现 feal_in_c.encrypt，候选值改不动它，函数返回第一个候选 0。",
+    "blocker_step": 35,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 34,
+        "quote": "Modify key[5], encrypt test vector, compare with oracle. # If they match, the modified key gives same encryption, # meaning our guess is correct. # Get oracle ciphertexts H_vals = [0x1234567…"
+      },
+      {
+        "step": 36,
+        "quote": "Run 1: PASS recovered=0x562F7968 actual=0x562F7968 Tested 0/65536 Tested 10000/65536 Run 2: PASS recovered=0x6A6D510E actual=0x6A6D510E Tested 0/65536 Tested 10000/65536 Tested 20000/65536 R…"
+      },
+      {
+        "step": 15,
+        "quote": "No survivors found! Recovered key[5]: 0x00000000 Actual key[5]: 0xA51497FA Match: False root@88e2d878:/app#"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "bank/merge/0000",
+      "traj/tb:db-wal-recovery/weak/00/seg02/skill"
+    ],
+    "first_open_step": 1,
+    "effective": "not_applicable",
+    "detail": "打开的两条技能（远程资产恢复、陌生可执行文件侦察）都不涉及差分攻击的正确性校验；交付集里没有教'把测试跑在判分器真正使用的 oracle 上'的技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "attack() 依赖自己 import 的 feal 模块全局 key 而不是只通过 encrypt_fn 观察，本地 10/10 PASS 与判分器返回 0 的对比说明它把验证做在了错误的 oracle 上。"
+  }
+}

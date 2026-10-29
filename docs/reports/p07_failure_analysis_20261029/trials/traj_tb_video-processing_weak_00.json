@@ -1,0 +1,42 @@
+{
+  "schema": "p07-trial-failure-analysis-v1",
+  "trial_id": "traj/tb:video-processing/weak/00",
+  "task_id": "tb:video-processing",
+  "attempt_index": 0,
+  "correctness": false,
+  "task_failed_overall": true,
+  "failure": {
+    "summary": "背景差分 + 质心-Y 启发式在示例视频给出 takeoff 50（区间内）但 landing 58（期望 62–64），在测试视频给出 landing 227（期望 231–234）：落地点稳定早 4 帧，方法把质心开始下降当成落地。",
+    "blocker_step": 42,
+    "blocker_type": "reasoning",
+    "evidence_quotes": [
+      {
+        "step": 42,
+        "quote": "jump_takeoff_frame_number = 50 jump_land_frame_number = 58 root@f3795593:/app# python3 -c …"
+      },
+      {
+        "step": 41,
+        "quote": "comy_series = [] for f in range(seg_start, seg_end + 1): px = next(v for ff, v in motion_list if ff == f) if px >= motio…"
+      }
+    ]
+  },
+  "skill_bank": {
+    "has_relevant_skill": false,
+    "candidates": [],
+    "pending_relevant": null
+  },
+  "skill_use": {
+    "opened_skills": [
+      "traj/tb:extract-moves-from-video/strong/00/seg01/skill",
+      "bank/merge/0003"
+    ],
+    "first_open_step": 0,
+    "effective": "not_applicable",
+    "detail": "打开的是 extract-moves-from-video seg01（OCR 参数调优）和 bank-merge-0003（计划/验收），都不涉及视频运动估计；交付集中没有 CV 起跳/落地检测技能。"
+  },
+  "verdict": {
+    "category": "model_capability",
+    "confidence": "high",
+    "rationale": "同样的管线在两个视频上都把落地判早 4 帧，说明阈值/质心定义本身不对，而不是环境或判分问题（takeoff 已在区间内证明量纲和帧号正确）。"
+  }
+}
