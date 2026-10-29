@@ -1625,3 +1625,21 @@ layering、`git diff --check` 通过。未提交、未推送，未读写正在�
 一段话摘要：按用户要求验证两处修复（最后一次检查不写作；TB 执行 prompt 的终端卫生与阈值余量）在目标 task 上的效果。新配置 `tb21_p02p06_exam_small20_fixprobe_20261029.yaml` 只把 test 缩到 4 个 task（rstan-to-pystan、make-mips-interpreter、portfolio-optimization、feal-linear-cryptanalysis），train 20 与 reserved 30 不变，其余方法与模型参数完全复制；任务表因此是 54 个 task。新 run `runs/tb21_fixprobe_20261029_1140/` 由 `tmp/fork_after_p05.py` 从 `tb21_p02p06_exam_small20_20261028_2053_p02fork` 拷贝 P01–P05 产物，不拷 P06/P07、账本、manifest、usage 与 work。第一次分叉时整份 store 被复制，带进了源 run 的 P06 产物（v3 改写、10 条需求技能、合并库），导致 P06 的 keep/delete 作用在错误版本上；改为从 P04 的库工件（50 条，v1/v2）重建 skill store 后重做。零调用门通过（`--until-phase 4` 后 usage 文件不存在），P06 用 `--until-phase 5` 重跑：任务清单为 20 keep + 14 delete，delete 全部 `retry_exhausted`，无 revise；回执 20 accepted + 14 discarded；新需求 10 条全部 `deferred_no_later_check`，没有 REWRITE 或 REQUIREMENT_SKILL 调用。整理阶段 GROUP 曾漏掉一张技能卡导致 `ModelOutputError`，按 CLI 提示续跑后完成，库 `bank:ff838f1c1a5e` 共 32 条、全部 accepted（20 原始 + 9 需求 + 3 合并），不再有 pending。**已知瑕疵**：续跑时聚合被重新调用，`task_list.jsonl`/摘要里的动作计数（15 keep + 19 delete）来自第二次聚合，而实际落地与库来自第一次（20 accepted + 14 discarded）；以 `outcomes.jsonl` 和库为准，这个“续跑重聚合但不重落地”的不一致需要单独修。随后以 32 worker 启动 P07（`--until-phase 6`，12 个单元，pid 65084）。旧 run 的对照：feal-linear 3 次中 1 次成功、make-mips-interpreter 0/3、portfolio 2/3、rstan 0/3。
 
 工件：`configs/experiments/tb21_p02p06_exam_small20_fixprobe_20261029.yaml`、`tmp/fork_after_p05.py`（一次性脚本，不进 git）、run `runs/tb21_fixprobe_20261029_1140/`、`log.md`
+
+## 2026-10-29 13:47 — 修正 exam 场景的来源答卷定位
+
+一段话摘要：审计 P03/P05 发现所有场景都取自 baseline 的 attempt 02，而技能锚点来自 attempt 00/01（0/37 命中），并有 3 道 P03 题、1 道 P05 题因切点超过 attempt 02 步数被 clamp 到末尾。根因是 P02 两条写作路径只把 `unit_id` 写进 `skill_origins.jsonl`，而同一 task+role 的三个 attempt 共用同一个 unit_id，`_source_sheet` 按 unit 匹配后取 `matches[-1]`（排序最后一张 = attempt 02）。修法是让解析以技能自己的锚点为准：`_source_sheet(ctx, skill, source_ref)` 依次用精确 `sheet_id`、`Skill.subtask_id` 解析出的轨迹（匹配答卷的 `execution.artifacts.trajectory_id`）、唯一命中的 `unit_id`；unit 多命中或未知 sheet_id 直接报错，不再静默取最后一张。写入侧未改（锚点随技能对象流转，v2 保留 subtask_id，需求技能带 sheet_id）。新增 `tests/unit/stages/test_exam_source_sheet.py` 四个用例（锚点优先、sheet_id 优先、无锚点多命中报 CodeBugError、未知 sheet_id 报 ModelOutputError）。用新解析器在 2053 的既有工件上重放：P03 37/37、P05 34/34 全部命中锚点轨迹，越界 clamp 为 0。全量 2397 passed、2 skipped、4 deselected；ruff E9/F、layering、`git diff --check` 通过。已完成的 run 题面不会自动变，P03/P05 判分与 P04/P06 归因受污染，须新建 run 重跑 P03–P07。本次改动未提交。
+
+工件：`src/expedistill/stages/phase_execute/exam.py`、`tests/unit/stages/test_exam_source_sheet.py`、`docs/decisions/exam_scene_source_sheet_20261029.md`、`README.md`、`log.md`
+
+## 2026-10-29 13:49 — 停止修复探针并收尾
+
+一段话摘要：按用户要求停止当前所有 run。唯一的驱动是探针 run 的 pid 65084，已 SIGTERM 停止；清理了该 run 在 node29 上的全部远程 runner（记录的 12 个 pid 清理后剩余 0，复查本 run 目录下也没有残留）。探针停止时的状态：P01–P05 复用、P06 完整（库 `bank:ff838f1c1a5e`，32 条全部 accepted、0 pending）、P07 只完成 7/12 个 trial 且全部成功——rstan-to-pystan 3/3（旧 0/3）、portfolio-optimization 3/3（旧 2/3）、feal-linear-cryptanalysis 1/1（旧 1/3，另 2 个未完成）、make-mips-interpreter 0 个落盘、3 个未完成（旧 0/3）；P07 没有 phase summary，这 7 个结果只能看方向，不能进结果表。P06 还有一个已知瑕疵：第一次聚合落地 20 keep + 14 delete，整理阶段 GROUP 漏卡失败后续跑重聚合，`task_list.jsonl`/摘要变成了 15 keep + 19 delete，但实际落地与库仍是第一次的 20 accepted + 14 discarded；以 `outcomes.jsonl` 与 `skill_bank.jsonl` 为准。停止说明写在 run 目录的 `STOPPED.md`。监控 cron 已取消；后台看门狗已随会话结束。未提交的改动仍在工作区。
+
+工件：`runs/tb21_fixprobe_20261029_1140/STOPPED.md`、run 目录的 `console.log`/`driver.pids`、`log.md`
+
+## 2026-10-29 14:00 — 作废旧报告、给归因汇总加范围限制、提交 vendor 后缀
+
+一段话摘要：按用户要求先把 `docs/reports/tb21_exam_review_small20_20261029.md` 标成 SUPERSEDED：该 run 的 P03/P05 场景取自 baseline attempt 02，而 37 个技能锚点全在 attempt 00/01（0/37 命中），所以 P03/P05 判分、P04/P06 归因和终测数字都不能作为结果引用，需在新 run 上重跑 P03–P07。接着在 `docs/reports/p07_failure_analysis_20261029/synthesis.md` 加“范围限制”：64 条对 P07 轨迹本身的判读仍成立，但分析的技能库来自被污染的决策链，交付/使用结论需在新 run 复核。最后在嵌套仓库 `scripts/tb21` 提交 `cb02142`，只包含 `vendor/tb21-tencent-skill/python/tencent_sandbox_terminus.py`：它同时记录了已经部署在 node29 的编号版读取提示，以及新增的终端卫生与判分余量两节；后缀 1421 字符、sha256 `0c0e5ec0…b788f27`。该仓库其余未提交改动（README、runner 脚本、adapters 测试、含密钥的 `launch_dpsk.json`）原样保留，没有暂存。已发出的 zip 仍是更正前的 synthesis，需要时可重打。
+
+工件：`docs/reports/tb21_exam_review_small20_20261029.md`、`docs/reports/p07_failure_analysis_20261029/synthesis.md`、嵌套仓库 commit `cb02142`、`log.md`
