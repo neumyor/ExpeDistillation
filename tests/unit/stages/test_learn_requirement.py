@@ -59,3 +59,19 @@ def test_writes_one_skill_and_skips_a_replayed_requirement(tmp_path):
         run_dir / "phases" / "p04_learn"
         / learn_requirement.OUTCOMES_NAME)
     assert [row["outcome"] for row in outcomes] == ["added"]
+
+
+def test_deferred_requirements_are_recorded_once_and_never_written(tmp_path):
+    phase_dir = tmp_path / "phases" / "p06_learn"
+    phase_dir.mkdir(parents=True)
+
+    first = learn_requirement.record_deferred(
+        phase_dir, "p06:learn", [_requirement()])
+    replay = learn_requirement.record_deferred(
+        phase_dir, "p06:learn", [_requirement()])
+
+    assert (first, replay) == (1, 0)
+    rows = read_jsonl(phase_dir / learn_requirement.OUTCOMES_NAME)
+    assert [row["outcome"] for row in rows] == [
+        learn_requirement.DEFERRED_OUTCOME]
+    assert rows[0]["skill_id"] is None

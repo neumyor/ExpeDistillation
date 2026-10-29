@@ -854,7 +854,8 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
                                  的完成信号）
     trial_findings.jsonl         trial_level：逐失败 trial 的自由文本诊断
     new_skill_requirements.jsonl trial_level：聚合后的跨 task 新 skill 需求
-    requirement_outcomes.jsonl   trial_level：新需求的逐条写作回执
+    requirement_outcomes.jsonl   trial_level：新需求的逐条回执（added；最后
+                                 一个 learn 相位记 deferred_no_later_check）
     model_profile.json           trial_level：累积的弱模型画像（初始为空）
     trigger_families.jsonl       cluster_by_trigger：每个 subtask 的五个
                                  trigger 族之一及理由
@@ -1082,7 +1083,11 @@ curation 的合并产物不考。考题的场景从技能版本的 `skill_origin
 trial 并发分析，聚合 agent 产出 per-skill 动作和跨 task 的新 skill 需求，profile
 agent 累积弱模型画像。exam 相位的 `trial_level` 按纸面答卷分析（裁判判词 +
 期望行为），每个技能的动作、改写证据和下一次考题的切点都只取自它自己的考题
-（见 `src/expedistill/methods/review/README.md`）。
+（见 `src/expedistill/methods/review/README.md`）。`trial_level` 同样遵守 4.2
+动作表的“后面没有检查”这一列：`checks_left == 0` 时 revise 转为
+delete（`retry_exhausted`），新需求只记 `deferred_no_later_check`、不写作，
+因为没有后续执行相位能测它们，而终测只交付 accepted 集
+（`docs/decisions/trial_level_last_check_20261029.md`）。
 
 **多版本行合并（仅 exam 路径）**：作答仓共享，一条技能可能带好几行报告行
 （不同版本各一行，结论可能互相冲突）。合并规则：**最高版本的那行算数**，

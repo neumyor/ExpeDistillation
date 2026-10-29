@@ -73,6 +73,17 @@ ReviewResult
 
 画像工件初始为空，写在 `phases/pNN_learn/model_profile.json`，下一学习相位继续读取。
 
+**最后一次检查**：`trial_level` 与其他策略一样遵守 4.2 动作表的
+`checks_left` 列。`checks_left == 0`（这个 learn 之后没有 exam / live）时：
+
+- 聚合把 revise 改成 delete，原因 `retry_exhausted`，不收集改写证据；
+- 新需求照常写进 `new_skill_requirements.jsonl`，但 `stages/learn_requirement`
+  只记 `deferred_no_later_check`，不调用写作；
+- keep 不变。
+
+原因是终测只交付 accepted 集，没有后续检查时写出的技能会永远停在 pending。
+见 `docs/decisions/trial_level_last_check_20261029.md`。
+
 `TRIAL_FAILURE_ANALYSIS` 看到的是整条失败 trial（每步 observation 按 benchmark
 的 `view_rules` 截断，不是按窗口切分）和 `all_skills` 里的整个库。
 它的 `available_skills` 是**交付**清单，不是实际 `cat` 清单；实际读取事实由

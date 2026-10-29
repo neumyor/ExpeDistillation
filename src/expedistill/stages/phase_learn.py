@@ -211,13 +211,19 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             skip_targets=skip_targets, weak_profile=author_profile,
             source_phase_label=context.source_phase_label)
     if result.new_skill_requirements:
-        requirement_failed = learn_requirement.execute_requirements(
-            ctx, phase, result.new_skill_requirements,
-            weak_profile=(author_profile
-                          if author_profile is not None
-                          else config.effective_weak_profile()),
-            source_phase_label=context.source_phase_label)
-        infra_failed |= requirement_failed
+        if checks_left == 0:
+            # The last learn phase writes nothing a later phase could test;
+            # the requirement ledger records why, and the bank stays clean.
+            learn_requirement.record_deferred(
+                phase_dir, phase.label, result.new_skill_requirements)
+        else:
+            requirement_failed = learn_requirement.execute_requirements(
+                ctx, phase, result.new_skill_requirements,
+                weak_profile=(author_profile
+                              if author_profile is not None
+                              else config.effective_weak_profile()),
+                source_phase_label=context.source_phase_label)
+            infra_failed |= requirement_failed
     infra_failed |= result.failed_targets
 
     summary = _summary(phase, effective, superseded, phase_dir,
@@ -227,6 +233,9 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         summary["trial_findings"] = len(result.trial_findings)
         summary["new_skill_requirements"] = len(
             result.new_skill_requirements)
+        if checks_left == 0 and result.new_skill_requirements:
+            summary["new_skill_requirements_deferred"] = len(
+                result.new_skill_requirements)
         summary["profile_updated"] = result.profile_update is not None
     if infra_failed:
         summary["infra_failed"] = sorted(infra_failed)

@@ -3,6 +3,7 @@
 import hashlib
 from typing import Any, Dict, List, Sequence, Tuple
 
+from expedistill.composites import decision
 from expedistill.composites.evidence_package import EvidencePackage
 from expedistill.composites.skill_attempt_evidence import SkillAttemptEvidence
 from expedistill.core.answer_sheet import PhaseReport
@@ -109,6 +110,11 @@ def aggregate_findings(
                 raise ModelOutputError(
                     "TRIAL_REQUIREMENT_AGGREGATION: keep for a skill that "
                     f"was not measured: {skill_id!r}")
+        if action == "revise" and context.checks_left == 0:
+            # The frozen action table's last-check row: no later execution
+            # phase could test a rewrite, so it is not written at all.
+            action = "delete"
+            reason = decision.RETRY_EXHAUSTED
         evidence = None
         if action == "revise":
             if exam_units is not None:

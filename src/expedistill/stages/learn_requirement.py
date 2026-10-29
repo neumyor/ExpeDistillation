@@ -15,9 +15,46 @@ from expedistill.infra.store import append_jsonl, read_jsonl
 from expedistill.methods.author.requirement import write_requirement
 from expedistill.methods.review.contracts import NewSkillRequirement
 
-__all__ = ["OUTCOMES_NAME", "execute_requirements"]
+__all__ = ["DEFERRED_OUTCOME", "OUTCOMES_NAME", "execute_requirements",
+           "record_deferred"]
 
 OUTCOMES_NAME = "requirement_outcomes.jsonl"
+
+#: Terminal outcome for a requirement the last learn phase must not write:
+#: no later execution phase exists to test the skill it would produce.
+DEFERRED_OUTCOME = "deferred_no_later_check"
+
+
+def record_deferred(phase_dir, phase_label: str,
+                    requirements: Sequence[NewSkillRequirement]) -> int:
+    """Record requirements this phase deliberately does not write.
+
+    The frozen action table writes nothing on the last check (no later
+    execution phase could test a rewrite). The requirements stay in
+    ``new_skill_requirements.jsonl`` and get one terminal outcome row each,
+    so the ledger says why no skill exists instead of leaving them looking
+    merely unwritten. Returns how many rows were appended; a resumed phase
+    skips ids that already have a terminal row.
+    """
+    path = phase_dir / OUTCOMES_NAME
+    done = ({row.get("requirement_id") for row in read_jsonl(path)}
+            if path.exists() else set())
+    written = 0
+    for requirement in requirements:
+        if requirement.requirement_id in done:
+            continue
+        append_jsonl(path, {
+            "schema": "requirement-outcome-v1",
+            "phase_label": phase_label,
+            "requirement_id": requirement.requirement_id,
+            "skill_id": None,
+            "outcome": DEFERRED_OUTCOME,
+            "version": None,
+            "reason": "no later check: a rewrite could not be tested",
+        })
+        done.add(requirement.requirement_id)
+        written += 1
+    return written
 
 
 def execute_requirements(

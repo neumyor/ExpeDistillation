@@ -613,3 +613,55 @@ def test_exam_review_skips_a_failed_bare_control_answer():
         handle=make_fake_handle("author", []))
 
     assert findings == [] and not failed and not model_errors
+
+
+def test_last_check_turns_revise_into_delete():
+    """With no later check a rewrite could not be tested: delete, no evidence."""
+    report = PhaseReport(
+        phase_kind="live", learning_usable=True, sheets=[],
+        units=[_unit_for("unit-a", SKILL)])
+    finding = TrialFinding(
+        sheet_id="sheet-1", unit_id="unit-a", task_ref=TASK,
+        reason="the skill misses the recovery step",
+        skill_ids=[SKILL.skill_id], step_start=0, step_end=1)
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [{
+            "skill_id": SKILL.skill_id, "action": "revise",
+            "reason": "add the recovery step"}],
+        "new_skill_requirements": [],
+    })])
+    context = dataclasses.replace(_context(), checks_left=0)
+
+    items, requirements = aggregation.aggregate_findings(
+        findings=[finding], bank=[SKILL], current=report,
+        context=context, handle=handle)
+
+    assert requirements == []
+    assert [item.row.action for item in items] == ["delete"]
+    assert items[0].row.reason == "retry_exhausted"
+    assert items[0].evidence is None
+
+
+def test_last_check_leaves_keep_rows_unchanged():
+    """Only revise changes on the last check; keep rows pass through."""
+    report = PhaseReport(
+        phase_kind="live", learning_usable=True, sheets=[],
+        units=[_unit_for("unit-a", SKILL)])
+    finding = TrialFinding(
+        sheet_id="sheet-1", unit_id="unit-a", task_ref=TASK,
+        reason="the model did not run the command",
+        skill_ids=[SKILL.skill_id], step_start=0, step_end=1)
+    handle = make_fake_handle("author", [json_script({
+        "skill_actions": [{
+            "skill_id": SKILL.skill_id, "action": "keep",
+            "reason": "the card is correct"}],
+        "new_skill_requirements": [],
+    })])
+    context = dataclasses.replace(_context(), checks_left=0)
+
+    items, _ = aggregation.aggregate_findings(
+        findings=[finding], bank=[SKILL], current=report,
+        context=context, handle=handle)
+
+    assert [item.row.action for item in items] == ["keep"]
+    assert items[0].row.reason == "the card is correct"

@@ -141,7 +141,7 @@ def test_trial_review_lands_a_requirement_skill(tmp_path, monkeypatch):
         }),
     ])
     config = _Config()
-    config.sequence = ["baseline", "live", "learn", "test"]
+    config.sequence = ["baseline", "live", "learn", "live", "test"]
     config.phases = _phases()
     ctx = StageContext(
         run_dir=run_dir, store=store, config=config, usage=None,
@@ -160,3 +160,54 @@ def test_trial_review_lands_a_requirement_skill(tmp_path, monkeypatch):
     assert store.ids("skills")
     profile = run_dir / "phases" / "p03_learn" / "model_profile.json"
     assert "recovery" in profile.read_text()
+
+
+def test_last_learn_defers_requirements_without_writing(tmp_path,
+                                                        monkeypatch):
+    """No later check: requirements are recorded as deferred, never written."""
+    run_dir, store, sheet = _seed_live(tmp_path)
+    monkeypatch.setattr(
+        trial.attribution, "task_instruction_for",
+        lambda benchmark, task: "do the task")
+    handle = make_fake_handle("author", [
+        json_script({
+            "reason": "no skill covers the recovery procedure",
+            "profile_note": "the model does not plan a recovery",
+            "skills": [],
+            "new_skill_note": "needs a recovery procedure",
+        }),
+        json_script({"profile_text": "the model needs explicit recovery steps"}),
+        json_script({
+            "skill_actions": [],
+            "new_skill_requirements": [{
+                "title": "recover a stuck service",
+                "description": "teach the recovery procedure",
+                "trigger": "When a command fails,",
+                "source_sheet_ids": [sheet.sheet_id],
+            }],
+        }),
+    ])
+    config = _Config()
+    config.sequence = ["baseline", "live", "learn", "test"]
+    config.phases = _phases()
+    ctx = StageContext(
+        run_dir=run_dir, store=store, config=config, usage=None,
+        handles={"author": handle, "segmenter": handle},
+        workdir_root=tmp_path / "work",
+        run_settings=RunSettings(workers=2))
+    phase = PhaseInstance(
+        index=2, name="learn", label="p03:learn",
+        spec=config.phases["learn"], task_ids=())
+    skills_before = set(store.ids("skills"))
+
+    result = phase_learn.run(ctx, phase)
+
+    assert result.summary["checks_left"] == 0
+    assert result.summary["new_skill_requirements"] == 1
+    assert result.summary["new_skill_requirements_deferred"] == 1
+    assert set(store.ids("skills")) == skills_before
+    outcomes = [json.loads(line) for line in (
+        run_dir / "phases" / "p03_learn" / "requirement_outcomes.jsonl"
+    ).read_text().splitlines() if line.strip()]
+    assert [row["outcome"] for row in outcomes] == ["deferred_no_later_check"]
+    assert outcomes[0]["skill_id"] is None
