@@ -44,6 +44,7 @@ from expedistill.core.config import PHASE_ROLE_EXAM, ExecutePhaseSpec, PhaseInst
 from expedistill.core.models import Exam, Skill, Subtask, Trajectory
 from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
+    CodeBugError,
     ConfigError,
     InfrastructureError,
     ModelOutputError,
@@ -127,8 +128,38 @@ def _fallback_origin(ctx: StageContext, skill: Skill) -> Optional[Dict[str, Any]
     return None
 
 
-def _source_sheet(ctx: StageContext, source_ref: Dict[str, Any]):
-    """The source phase's AnswerSheet named by one origin pointer."""
+def _anchor_trajectory(skill: Skill) -> Optional[str]:
+    """The trajectory a skill's anchor subtask ran, or None.
+
+    ``Skill.subtask_id`` is the skill's own anchor (the cluster's smallest
+    member, or the segment in the classic path), so its trajectory is the
+    one piece of provenance that is unique even when a task's attempts
+    share a unit id. Requirement skills carry a synthetic ``req/...``
+    subtask that is not a trajectory; they return None and fall back to
+    the origin's exact sheet id.
+    """
+    subtask_id = getattr(skill, "subtask_id", None)
+    if not isinstance(subtask_id, str):
+        return None
+    try:
+        trajectory_id, _segment = ids.parse_subtask_id(subtask_id)
+        ids.parse_trajectory_id(trajectory_id)
+    except (TypeError, ValueError):
+        return None
+    return trajectory_id
+
+
+def _source_sheet(ctx: StageContext, skill: Skill,
+                  source_ref: Dict[str, Any]):
+    """The source phase's AnswerSheet named by one origin pointer.
+
+    Precedence: the origin's exact sheet id; the skill's anchor
+    trajectory; then a unit id, but only when it names exactly one sheet.
+    Unit ids are shared by a task's attempts (``phase:benchmark:task:role:
+    sha``), so a multi-match unit is an error -- silently taking the last
+    attempt is how P03 once reconstructed every scene from attempt 02
+    instead of the trajectory the skill came from.
+    """
     phase_label = source_ref.get("phase_label")
     if not isinstance(phase_label, str) or not phase_label:
         raise ModelOutputError("skill origin has no source phase label")
@@ -139,19 +170,41 @@ def _source_sheet(ctx: StageContext, source_ref: Dict[str, Any]):
         raise ModelOutputError(
             f"source phase {phase_label!r} has no trial-level report")
     sheet_id = source_ref.get("sheet_id")
+    if isinstance(sheet_id, str) and sheet_id:
+        exact = [sheet for sheet in report.sheets
+                 if sheet.sheet_id == sheet_id]
+        if not exact:
+            raise ModelOutputError(
+                f"source phase {phase_label!r} has no answer sheet "
+                f"{sheet_id!r}")
+        return exact[0]
+    trajectory_id = _anchor_trajectory(skill)
+    if trajectory_id is not None:
+        anchored = [
+            sheet for sheet in report.sheets
+            if (sheet.execution.artifacts or {}).get("trajectory_id")
+            == trajectory_id]
+        if len(anchored) == 1:
+            return anchored[0]
+        if len(anchored) > 1:
+            raise CodeBugError(
+                f"source phase {phase_label!r} has {len(anchored)} sheets "
+                f"for trajectory {trajectory_id!r}; the origin must name "
+                "one sheet")
     unit_id = source_ref.get("unit_id")
-    matches = [
-        sheet for sheet in report.sheets
-        if (isinstance(sheet_id, str) and sheet.sheet_id == sheet_id)
-        or (not isinstance(sheet_id, str)
-            and isinstance(unit_id, str)
-            and sheet.coverage.unit_id == unit_id)
-    ]
-    if not matches:
-        raise ModelOutputError(
-            f"source phase {phase_label!r} has no sheet/unit named by "
-            f"{source_ref!r}")
-    return matches[-1]
+    if isinstance(unit_id, str) and unit_id:
+        same_unit = [sheet for sheet in report.sheets
+                     if sheet.coverage.unit_id == unit_id]
+        if len(same_unit) == 1:
+            return same_unit[0]
+        if len(same_unit) > 1:
+            raise CodeBugError(
+                f"source phase {phase_label!r} has {len(same_unit)} sheets "
+                f"under unit {unit_id!r} and the skill names no anchor "
+                "trajectory; the origin must name a sheet")
+    raise ModelOutputError(
+        f"source phase {phase_label!r} has no sheet named by "
+        f"{source_ref!r}")
 
 
 def _scene_inputs(ctx: StageContext, skill: Skill,
@@ -162,7 +215,7 @@ def _scene_inputs(ctx: StageContext, skill: Skill,
         raise ModelOutputError(
             f"skill {skill.skill_id!r} version {skill.version} has no "
             "source_ref")
-    sheet = _source_sheet(ctx, source_ref)
+    sheet = _source_sheet(ctx, skill, source_ref)
     execution = sheet.execution
     if execution is None:
         raise ModelOutputError(

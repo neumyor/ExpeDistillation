@@ -957,6 +957,12 @@ curation 的合并产物不考。考题的场景从技能版本的 `skill_origin
 缺失时 exam 记 `exam_generation_failed`；旧 / 装配 run 没有来源行时，驱动
 按技能锚点 subtask 和已存轨迹回退找来源 sheet，仍找不到才失败。
 
+来源答卷的定位按优先级：origin 的 `sheet_id` → 技能锚点 `subtask_id` 对应的
+轨迹（匹配答卷的 `execution.artifacts.trajectory_id`）→ `unit_id`。最后一条只在
+没有前两者时使用，且必须唯一命中；同一个 task+role 的三个 attempt 共用一个
+`unit_id`，多命中直接报错，不再取最后一张
+（`docs/decisions/exam_scene_source_sheet_20261029.md`）。
+
 ### 5.4 实战验收相位（live）
 
 - 验收单元 = 一个训练任务的**组** = 该任务的全部待定成员，弱模型真实执行
