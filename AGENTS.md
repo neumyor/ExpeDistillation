@@ -201,9 +201,12 @@ src/expedistill/
                           artifacts.skill_folder 提取可用技能、读取/未读、结果
     verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
-    trace.py              来源指针的三个函数：trace_at（唯一构造 TraceRef，拒绝
-                          考试答卷与越界步号）、resolve（唯一还原来源上下文）、
-                          scene_of（考试回到真实场景）；render_context 渲染给 prompt
+    trace.py              来源指针的函数：trace_at（唯一构造 TraceRef，拒绝
+                          考试答卷与越界步号）、resolve（唯一还原来源上下文，
+                          出题用完整前缀）、scene_of（考试回到真实场景）、
+                          render_scenes（写作者读到的真实步骤：前缀限
+                          WRITER_BEFORE_STEPS 步，同一次执行的多个窗口合并
+                          后只渲染一次）
     provenance.py         每个技能版本一条 Provenance 的账本：record_version（唯一
                           写入口，技能与来源一起落盘）、find_provenance、
                           check_provenance（learn 相位末与 exam 开考前的边界检查）

@@ -1,6 +1,6 @@
 """Exact provenance: build, read and follow a ``TraceRef``.
 
-Three functions are the whole interface:
+Five functions are the whole interface:
 
 * :func:`trace_at` -- the only constructor. It takes an **execution**
   ``AnswerSheet`` object and a step, checks ``0 <= step < len(steps)``, and
@@ -17,6 +17,10 @@ Three functions are the whole interface:
   exam's own ``scene``.
 * :func:`trace_of_trajectory` -- the P02 helper: the pointer at a step of
   a stored trajectory, found through the sheet's own trajectory id.
+* :func:`render_scenes` -- the text a skill writer reads. It renders at most
+  ``WRITER_BEFORE_STEPS`` steps before each cut and ``after_steps`` from it,
+  and merges the windows of every pointer on one execution, so a step is
+  never sent twice when several cuts on one trajectory land in one prompt.
 
 A sheet is an *exam answer* when its ``task_ref`` is an exam id (the sheet
 was made by ``execution_from_attempt``); every other kind of execution is a
@@ -24,7 +28,7 @@ legal scene source.
 """
 
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites.phase_bank import phase_bank_dir
@@ -38,9 +42,10 @@ from expedistill.infra.store import object_filename, read_json
 
 __all__ = [
     "DEFAULT_AFTER_STEPS",
+    "WRITER_BEFORE_STEPS",
     "is_exam_answer",
     "load_sheet",
-    "render_context",
+    "render_scenes",
     "resolve",
     "scene_of",
     "trace_at",
@@ -51,6 +56,10 @@ __all__ = [
 #: How many steps after the cut a resolved context renders (the window the
 #: exam scene writer has always been shown).
 DEFAULT_AFTER_STEPS = 30
+
+#: How many steps before the cut a skill writer reads. The exam scene writer
+#: is not bound by it (see ``resolve``).
+WRITER_BEFORE_STEPS = 15
 
 
 def is_exam_answer(sheet: AnswerSheet) -> bool:
@@ -125,19 +134,9 @@ def load_sheet(run_dir: Union[str, Path], ref: TraceRef) -> AnswerSheet:
     return AnswerSheet.from_dict(read_json(path))
 
 
-def resolve(run_dir: Union[str, Path], ref: TraceRef, *,
-            instruction_for: Optional[Callable[[str], str]] = None,
-            view_rules: Any = None,
-            after_steps: int = DEFAULT_AFTER_STEPS) -> TraceContext:
-    """The text a prompt may read about ``ref``.
-
-    ``before`` is the rendered prefix ``steps[:ref.step]`` and ``after`` the
-    next ``after_steps`` steps; both keep the original step numbers.
-    ``instruction_for`` maps the execution's ``task_ref`` to the benchmark's
-    task prompt (the stage layer owns that lookup; this layer cannot import
-    it); when it is absent, or raises, the sheet's recorded initial prompt
-    is used.
-    """
+def _real_execution(run_dir: Union[str, Path], ref: TraceRef):
+    """The execution a ``TraceRef`` names and its steps; every reader of a
+    scene goes through this one lookup and its checks."""
     sheet = load_sheet(run_dir, ref)
     execution = sheet.execution
     if execution is None:
@@ -152,21 +151,48 @@ def resolve(run_dir: Union[str, Path], ref: TraceRef, *,
         raise ModelOutputError(
             f"TraceRef step {ref.step} is outside sheet {ref.sheet_id!r}'s "
             f"{len(steps)} step(s)")
+    return execution, steps
+
+
+def _instruction(execution: Any,
+                 instruction_for: Optional[Callable[[str], str]]) -> str:
     instruction = ""
     if instruction_for is not None:
         try:
             instruction = instruction_for(execution.task_ref)
         except Exception:
             instruction = ""
-    if not instruction:
-        instruction = str((execution.metrics or {}).get("initial_prompt")
-                          or "")
+    return instruction or str(
+        (execution.metrics or {}).get("initial_prompt") or "")
+
+
+def resolve(run_dir: Union[str, Path], ref: TraceRef, *,
+            instruction_for: Optional[Callable[[str], str]] = None,
+            view_rules: Any = None,
+            after_steps: int = DEFAULT_AFTER_STEPS,
+            before_steps: Optional[int] = None) -> TraceContext:
+    """The text a prompt may read about ``ref``.
+
+    ``before`` is the rendered prefix ``steps[:ref.step]`` and ``after`` the
+    next ``after_steps`` steps; both keep the original step numbers.
+    ``before_steps`` keeps only the last that many prefix steps (``None`` =
+    the whole prefix). The exam scene writer passes nothing, so an exam is
+    always cut from the full prefix; a skill writer passes a bound.
+    ``instruction_for`` maps the execution's ``task_ref`` to the benchmark's
+    task prompt (the stage layer owns that lookup; this layer cannot import
+    it); when it is absent, or raises, the sheet's recorded initial prompt
+    is used.
+    """
+    execution, steps = _real_execution(run_dir, ref)
+    instruction = _instruction(execution, instruction_for)
     end = ref.step + max(0, after_steps)
+    first = 0 if before_steps is None else max(0, ref.step - before_steps)
     return TraceContext(
         ref=ref,
         task_ref=execution.task_ref,
         task_instruction=instruction,
-        before=render_steps_view(steps[:ref.step], view_rules),
+        before=render_steps_view(steps[first:ref.step], view_rules,
+                                 start_index=first),
         after=render_steps_view(steps[ref.step:end], view_rules,
                                 start_index=ref.step),
         outcome=execution.raw_correctness)
@@ -203,21 +229,67 @@ def trace_of_trajectory(run_dir: Union[str, Path], phase_label: str,
     return trace_at(matches[0], step)
 
 
-def render_context(context: TraceContext) -> str:
-    """One prompt block for a resolved location (what the writer reads).
+def render_scenes(run_dir: Union[str, Path], refs: Sequence[TraceRef], *,
+                  instruction_for: Optional[Callable[[str], str]] = None,
+                  view_rules: Any = None,
+                  after_steps: int = DEFAULT_AFTER_STEPS,
+                  before_steps: int = WRITER_BEFORE_STEPS) -> str:
+    """The prompt text a skill writer reads about one or more locations.
 
-    The same ``before`` / ``after`` text the exam scene writer is given,
-    so a rewrite and the next exam are built from the same steps.
+    Locations on the same execution are rendered once: their windows
+    (``before_steps`` before each cut, ``after_steps`` from it) are merged
+    so a step never appears twice, and the task and its outcome are stated
+    once per execution. Overlapping or adjacent windows read as one run of
+    steps; a gap between windows is marked with the steps it skips.
     """
-    parts = []
-    if context.task_instruction:
-        parts.append(f"TASK:\n{context.task_instruction}")
-    if context.before:
-        parts.append(f"STEPS BEFORE THE CUT (step {context.ref.step}):\n"
-                     f"{context.before}")
-    if context.after:
-        parts.append(f"STEPS FROM THE CUT:\n{context.after}")
-    if context.outcome is not None:
-        parts.append("The execution this comes from "
-                     + ("succeeded." if context.outcome else "failed."))
-    return "\n\n".join(parts)
+    by_sheet: Dict[str, List[TraceRef]] = {}
+    for ref in refs:
+        by_sheet.setdefault(ref.sheet_id, []).append(ref)
+    blocks = []
+    for sheet_refs in by_sheet.values():
+        execution, steps = _real_execution(run_dir, sheet_refs[0])
+        wanted = set()
+        for ref in sheet_refs:
+            _real_execution(run_dir, ref)
+            wanted.update(range(max(0, ref.step - before_steps),
+                                min(len(steps), ref.step + after_steps)))
+        parts = []
+        instruction = _instruction(execution, instruction_for)
+        if instruction:
+            parts.append(f"TASK:\n{instruction}")
+        cuts = ", ".join(str(ref.step) for ref in sorted(
+            sheet_refs, key=lambda item: item.step))
+        parts.append(f"STEPS (the skill applies at step {cuts}):")
+        previous = None
+        for first, last in _runs(sorted(wanted)):
+            if previous is not None:
+                parts.append(
+                    f"[steps {previous + 1}-{first - 1} are not shown]")
+            parts.append(render_steps_view(
+                steps[first:last + 1], view_rules, start_index=first))
+            previous = last
+        if execution.raw_correctness is not None:
+            parts.append("The execution this comes from "
+                         + ("succeeded." if execution.raw_correctness
+                            else "failed."))
+        blocks.append("\n\n".join(parts))
+    if len(blocks) == 1:
+        return blocks[0]
+    return "\n\n".join(
+        f"[execution {index}]\n{block}"
+        for index, block in enumerate(blocks, start=1))
+
+
+def _runs(indexes: Sequence[int]):
+    """Contiguous ``(first, last)`` runs of a sorted index list."""
+    first = last = None
+    for index in indexes:
+        if first is None:
+            first = last = index
+        elif index == last + 1:
+            last = index
+        else:
+            yield first, last
+            first = last = index
+    if first is not None:
+        yield first, last

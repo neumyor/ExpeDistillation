@@ -10,8 +10,7 @@ from typing import Any, List, Optional, Sequence, Set, Tuple
 from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.benchmarks.registry import get_plugin
-from expedistill.composites import trace
-from expedistill.composites.trace import render_context, scene_of
+from expedistill.composites.trace import render_scenes, scene_of
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Exam, Skill
@@ -143,11 +142,11 @@ def _source_context_of(ctx: Any, current_rows: Optional[List[UnitSummary]],
     """
     summary = _report_row_of(current_rows, row.basis_unit)
     exam = ctx.store.load("exams", summary.task_ref, Exam)
-    return render_context(trace.resolve(
-        ctx.run_dir, scene_of(exam),
+    return render_scenes(
+        ctx.run_dir, [scene_of(exam)],
         instruction_for=lambda task: attribution.task_instruction_for(
             ctx.config.benchmark, task),
-        view_rules=get_plugin(ctx.config.benchmark).view_rules))
+        view_rules=get_plugin(ctx.config.benchmark).view_rules)
 
 
 def _always_revise(package: Any) -> str:

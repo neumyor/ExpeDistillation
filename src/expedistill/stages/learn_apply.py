@@ -14,9 +14,9 @@ writes.
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.benchmarks.registry import get_plugin
-from expedistill.composites import decision, trace
+from expedistill.composites import decision
 from expedistill.composites.phase_bank import phase_bank_dir
-from expedistill.composites.trace import render_context
+from expedistill.composites.trace import render_scenes
 from expedistill.core.answer_sheet import UnitSummary
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
@@ -187,11 +187,11 @@ def _context_renderer(ctx: Any):
     plugin = get_plugin(ctx.config.benchmark)
 
     def render(ref):
-        return render_context(trace.resolve(
-            ctx.run_dir, ref,
+        return render_scenes(
+            ctx.run_dir, [ref],
             instruction_for=lambda task: attribution.task_instruction_for(
                 ctx.config.benchmark, task),
-            view_rules=plugin.view_rules))
+            view_rules=plugin.view_rules)
 
     return render
 

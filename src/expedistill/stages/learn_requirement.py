@@ -90,17 +90,12 @@ def _scenes_of(ctx: Any, requirement: NewSkillRequirement) -> List[TraceRef]:
 
 
 def _render_scenes(ctx: Any, scenes: List[TraceRef]) -> str:
-    """The real steps around each scene, one block per source."""
-    plugin = get_plugin(ctx.config.benchmark)
-    blocks = []
-    for index, ref in enumerate(scenes, start=1):
-        blocks.append(f"[evidence {index}]\n" + trace.render_context(
-            trace.resolve(
-                ctx.run_dir, ref,
-                instruction_for=lambda task: attribution.task_instruction_for(
-                    ctx.config.benchmark, task),
-                view_rules=plugin.view_rules)))
-    return "\n\n".join(blocks)
+    """The real steps around every source, each execution shown once."""
+    return trace.render_scenes(
+        ctx.run_dir, scenes,
+        instruction_for=lambda task: attribution.task_instruction_for(
+            ctx.config.benchmark, task),
+        view_rules=get_plugin(ctx.config.benchmark).view_rules)
 
 
 def _load_source_sheet(ctx: Any, requirement: NewSkillRequirement,

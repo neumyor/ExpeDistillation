@@ -31,7 +31,7 @@ LIVE = baseline_sheet("tb:t1", "weak", 0, n_steps=8)
 EXAM_ID = "traj/tb:t1/strong/00/seg00/skill/v01/exam"
 
 
-def _requirement(sheet_id, *, steps=None):
+def _requirement(sheet_id, *, steps=None, sheet_ids=None):
     subtask = Subtask(
         subtask_id="traj/tb:t1/weak/00/seg00", task_id="tb:t1",
         trajectory_id="traj/tb:t1/weak/00", source="weak",
@@ -50,7 +50,7 @@ def _requirement(sheet_id, *, steps=None):
                 "subtask": subtask, "steps_view": "steps",
                 "mode": "diagnose", "segment_position": "window",
             }]),
-        source_sheet_ids=[sheet_id],
+        source_sheet_ids=sheet_ids or [sheet_id],
         source_phase_label="p01:baseline" if steps is None else "p03:exam",
         source_steps=steps or {sheet_id: 3})
 
@@ -142,6 +142,27 @@ def test_a_requirement_from_a_paper_exam_answer_uses_the_exams_real_scene(
     prompt = handle.client.calls[0]["user"]
     assert "weak0-a4" in prompt and "weak0-a5" in prompt
     assert "select" not in prompt.split("FAILURE EVIDENCE:")[1]
+
+
+def test_sources_on_one_execution_are_shown_once(tmp_path):
+    """Two exam cuts on the same attempt must not repeat its steps."""
+    handle = make_fake_handle("author", [_reply()])
+    ctx = _ctx(tmp_path, handle)
+    other = baseline_sheet("tb:t1", "weak", 1, n_steps=8)
+    write_baseline_sheets(ctx.run_dir, [LIVE, other])
+    requirement = _requirement(
+        LIVE.sheet_id, sheet_ids=[LIVE.sheet_id, other.sheet_id])
+    requirement.source_steps = {LIVE.sheet_id: 2, other.sheet_id: 6}
+    # A second cut on LIVE, as two skills cut from one trajectory produce.
+    scenes = learn_requirement._scenes_of(ctx, requirement) + [
+        TraceRef("p01:baseline", LIVE.sheet_id, 4)]
+
+    text = learn_requirement._render_scenes(ctx, scenes)
+
+    assert text.count("action: weak0-a3") == 1
+    assert text.count("action: weak1-a6") == 1
+    assert "[execution 1]" in text and "[execution 2]" in text
+    assert "the skill applies at step 2, 4" in text
 
 
 def test_a_requirement_that_names_no_source_phase_is_a_code_bug(tmp_path):

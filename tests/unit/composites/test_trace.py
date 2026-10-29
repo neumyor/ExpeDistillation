@@ -107,6 +107,79 @@ def test_resolve_returns_the_text_around_the_exact_attempt(run_dir):
     assert context.task_ref == "tb:t1"
 
 
+def test_resolve_before_steps_keeps_only_the_last_prefix_steps(run_dir):
+    ref = trace.trace_at(_sheet(1, 9), 6)
+
+    bounded = trace.resolve(run_dir, ref, before_steps=2)
+    whole = trace.resolve(run_dir, ref)
+
+    assert "a1-3" not in bounded.before
+    assert "step 4" in bounded.before and "step 5" in bounded.before
+    assert "a1-4" in bounded.before and "a1-5" in bounded.before
+    assert "a1-0" in whole.before
+    assert bounded.after == whole.after
+
+
+def test_resolve_before_steps_larger_than_the_prefix_keeps_all_of_it(run_dir):
+    ref = trace.trace_at(_sheet(1, 9), 2)
+
+    assert trace.resolve(run_dir, ref, before_steps=15).before == \
+        trace.resolve(run_dir, ref).before
+
+
+def test_render_scenes_shows_a_step_once_when_cuts_overlap(run_dir):
+    sheet = _sheet(1, 9)
+    refs = [trace.trace_at(sheet, 2), trace.trace_at(sheet, 4)]
+
+    text = trace.render_scenes(run_dir, refs, before_steps=2, after_steps=3)
+
+    # Cuts 2 and 4 cover steps 0-4 and 2-6: one run 0-6, each step once.
+    assert text.count("action: a1-3") == 1
+    assert text.count("action: a1-0") == 1 and text.count("action: a1-6") == 1
+    assert "a1-7" not in text
+    assert "the skill applies at step 2, 4" in text
+    assert "are not shown" not in text
+    assert text.count("failed.") == 1
+
+
+def test_render_scenes_marks_the_steps_a_gap_skips(run_dir):
+    sheet = _sheet(1, 9)
+    refs = [trace.trace_at(sheet, 0), trace.trace_at(sheet, 8)]
+
+    text = trace.render_scenes(run_dir, refs, before_steps=0, after_steps=2)
+
+    assert "action: a1-0" in text and "action: a1-1" in text
+    assert "action: a1-8" in text
+    assert "action: a1-4" not in text
+    assert "[steps 2-7 are not shown]" in text
+
+
+def test_render_scenes_keeps_separate_executions_apart(run_dir):
+    refs = [trace.trace_at(_sheet(0, 5), 1), trace.trace_at(_sheet(1, 9), 1)]
+
+    text = trace.render_scenes(run_dir, refs, before_steps=1, after_steps=1)
+
+    assert "[execution 1]" in text and "[execution 2]" in text
+    assert text.count("action: a0-1") == 1 and text.count("action: a1-1") == 1
+    assert "succeeded." in text and "failed." in text
+
+
+def test_render_scenes_of_one_location_has_no_execution_label(run_dir):
+    text = trace.render_scenes(
+        run_dir, [trace.trace_at(_sheet(0, 5), 1)], after_steps=2)
+
+    assert "[execution" not in text
+    assert text.startswith("STEPS (the skill applies at step 1)")
+
+
+def test_render_scenes_refuses_an_exam_answer_and_a_missing_sheet(run_dir):
+    exam_ref = TraceRef("p03:exam", _exam_answer_sheet().sheet_id, 0)
+    with pytest.raises(CodeBugError):
+        trace.render_scenes(run_dir, [exam_ref])
+    with pytest.raises(ModelOutputError):
+        trace.render_scenes(run_dir, [TraceRef("p01:baseline", "nope", 0)])
+
+
 def test_resolve_uses_the_injected_instruction_lookup(run_dir):
     ref = trace.trace_at(_sheet(0, 5), 1)
 
