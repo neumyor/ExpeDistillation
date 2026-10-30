@@ -1,0 +1,13 @@
+{"task": "openssl-selfsigned-cert", "coverage": "none", "matched_skill": null, "why": "17 条技能里没有 TLS/证书类内容；通用交付门 bank/merge/0004 不提供 openssl 证书创建与校验能力。"}
+{"task": "overfull-hbox", "coverage": "marginal", "matched_skill": "bank/merge/0001", "why": "0001 的'候选 + 量化 evaluator + 单因子变体 + 晋升'循环可用于 overfull 搜索，但不含 LaTeX/同义词约束，且三 trial 都未读它。"}
+{"task": "password-recovery", "coverage": "marginal", "matched_skill": "traj/tb:path-tracing/strong/00/seg00/skill", "why": "seg00 教对未知本地文件做特征化与二进制检查，与从 .dat 中找 PASSWORD 部分相关，但没有磁盘取证/已删除文件恢复步骤。"}
+{"task": "portfolio-optimization", "coverage": "clear_match", "matched_skill": "bank/merge/0001", "why": "0001 就是'基线 + 变体 + 评估器 + 精确性 + 晋升冠军'的优化循环，与 C 扩展加速并满足 1.2x 的任务直接对应。"}
+{"task": "pypi-server", "coverage": "clear_match", "matched_skill": "bank/merge/0006", "why": "0006 的 probe-first 获取/构建/安装/功能验证流程覆盖 vectorops 构建与 pypiserver 安装，a02 正是照它做的。"}
+{"task": "qemu-alpine-ssh", "coverage": "marginal", "matched_skill": "bank/merge/0004", "why": "0004 第 20 步要求 service/boot image 用 nohup 分离启动并轮询 endpoint，与 qemu 生命周期相关；但没有 qemu/Alpine/sshd 配置内容。"}
+{"task": "regex-log", "coverage": "none", "matched_skill": null, "why": "没有正则/日志解析技能；bank/merge/0004 只是通用交付门，不提供 regex 构造能力。"}
+{"task": "rstan-to-pystan", "coverage": "marginal", "matched_skill": "bank/merge/0002", "why": "0002 同属贝叶斯模型/数值表，但其 When to use 要求 model+modified model/合成样本，Do not use 排除非线性/单一参数集，不覆盖 R→PyStan/Stan 代码转换。"}
+{"task": "sam-cell-seg", "coverage": "marginal", "matched_skill": "traj/tb:cancel-async-tasks/strong/00/seg00/skill", "why": "seg00 是'从零写并验证独立 Python 模块'，对应 convert_masks.py 的交付形式，但不含 MobileSAM/mask 轮廓算法。"}
+{"task": "sanitize-git-repo", "coverage": "clear_match", "matched_skill": "traj/tb:filter-js-from-html/strong/00/seg02/skill", "why": "seg02 教原地 sanitizer 的字节保持重写、raw backup 与逐规则 marker 验证，与本任务清洗仓库并保持其他文件不变直接相关。"}
+{"task": "torch-pipeline-parallelism", "coverage": "none", "matched_skill": null, "why": "没有 pipeline parallel/分布式训练技能；bank/merge/0005 是 async 取消调试，不相关。"}
+{"task": "video-processing", "coverage": "marginal", "matched_skill": "bank/merge/0000", "why": "0000 处理视频帧序列，但目标是 ffmpeg+tesseract OCR 抽取有序文本，与 cv2 运动/起跳帧检测只共享'视频帧'层面。"}
+{"task": "winning-avg-corewars", "coverage": "clear_match", "matched_skill": "bank/merge/0001", "why": "0001 的候选程序 + pmars 评估器 + 阈值/变体/晋升循环与 CoreWars 调优直接对应，a00/a01/a02 都读了它。"}
