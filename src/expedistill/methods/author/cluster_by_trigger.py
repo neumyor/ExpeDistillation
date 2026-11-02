@@ -33,11 +33,14 @@ from expedistill.infra.parallel import run_parallel
 from expedistill.infra.reliability import InfrastructureError, ModelOutputError
 from expedistill.llm.call import call_model
 from expedistill.methods.author import ClusterAuthoringParams
+from expedistill.prompts.learning_context import (
+    TRIGGER_FAMILY_KEYS,
+    slots_for,
+)
 from expedistill.prompts.profile import profile_section
 
 __all__ = [
     "TRIGGER_FAMILIES",
-    "TRIGGER_PHRASES",
     "build_card",
     "classify_trigger",
     "cluster_family",
@@ -45,35 +48,10 @@ __all__ = [
     "write_cluster_skill",
 ]
 
-#: The five families, in the prompt's exact vocabulary. The values are
-#: the canonical family keys; nothing outside this table is accepted.
-TRIGGER_FAMILIES: Mapping[str, str] = {
-    "at_task_start":
-        "the reader has just received the task and is reading its "
-        "description, inputs and initial files",
-    "after_first_environment_check":
-        "the reader has run its first ls / which / import / network probe "
-        "and knows what is installed and reachable",
-    "when_command_fails":
-        "a command errored, hung, or the same action keeps repeating "
-        "without progress",
-    "before_submitting":
-        "the work looks done and the reader is about to run the final "
-        "verifier and submit",
-    "at_any_step":
-        "a basic rule that applies at every step and fits none of the "
-        "four moments above",
-}
-
-#: The opening sentence each family's skill must use.
-TRIGGER_PHRASES: Mapping[str, str] = {
-    "at_task_start": "At task start,",
-    "after_first_environment_check":
-        "After the first environment check,",
-    "when_command_fails": "When a command fails, hangs, or repeats,",
-    "before_submitting": "Before submitting,",
-    "at_any_step": "At any step,",
-}
+#: The five canonical family keys; nothing outside this table is accepted.
+#: Each family's meaning and the opening sentence of its skills are the
+#: benchmark's ``meaning_<key>`` / ``phrase_<key>`` learning-context slots.
+TRIGGER_FAMILIES = TRIGGER_FAMILY_KEYS
 
 _ELIDED = "\n[... steps elided to fit the cluster card budget ...]"
 
@@ -248,7 +226,8 @@ def _cluster_chunk(family: str, experiences: Sequence[Mapping[str, Any]],
         build_card(item, params.max_chars_per_card) for item in experiences)
     variables = {
         "family": family,
-        "family_definition": TRIGGER_FAMILIES[family],
+        "family_definition": slots_for(
+            handle.prompt_defaults)[f"meaning_{family}"],
         "cards": cards,
     }
     last_error: Any = None
@@ -330,17 +309,18 @@ def write_cluster_skill(
         members.append(experience)
     cards = "\n\n".join(
         build_card(item, params.max_chars_per_card) for item in members)
+    phrase = slots_for(handle.prompt_defaults)[f"phrase_{family}"]
     parsed = call_model(
         handle, "CLUSTER_SKILL",
         {
             "family": family,
-            "family_trigger": TRIGGER_PHRASES[family],
+            "family_trigger": phrase,
             "theme": cluster["theme"],
             "reason": cluster["reason"],
             "cards": cards,
             "profile_section": profile_section(
                 "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-                weak_profile),
+                weak_profile, handle.prompt_defaults.get("agent_kind")),
         },
         output_json=True, usage=usage, run_dir=run_dir)
     if not isinstance(parsed, dict):
@@ -348,7 +328,6 @@ def write_cluster_skill(
             "CLUSTER_SKILL: expected a JSON object, got "
             f"{type(parsed).__name__}")
     validate_skill_sections("distill", parsed)
-    phrase = TRIGGER_PHRASES[family]
     if not str(parsed["when_to_use"]).lstrip().startswith(phrase):
         raise ModelOutputError(
             f"CLUSTER_SKILL: when_to_use must start with the family "

@@ -20,7 +20,7 @@ __all__ = ["CLUSTER_SKILL", "CLUSTER_SUBTASKS", "CLUSTER_TRIGGER_FAMILY"]
 CLUSTER_TRIGGER_FAMILY = register(
     PromptSpec(
         name="CLUSTER_TRIGGER_FAMILY",
-        template="""You classify ONE segment of a terminal-agent trajectory into the trigger
+        template="""You classify ONE segment of a {agent_kind}-agent trajectory into the trigger
 timing at which a reusable skill distilled from it should be opened.
 
 SEGMENT LABEL: {label}
@@ -33,16 +33,7 @@ STEPS:
 
 Choose exactly ONE family key from this closed list:
 
-- "at_task_start": the reader has just received a new task and is reading
-  the task description, inputs and initial files.
-- "after_first_environment_check": the reader has run its first ls, which,
-  import or network probe and now knows what is installed and reachable.
-- "when_command_fails": a command produced an error, hung, or the same
-  action keeps repeating without progress.
-- "before_submitting": the work looks done and the reader is about to run
-  the final verifier and submit.
-- "at_any_step": a basic rule that applies at every step and fits none of
-  the four moments above.
+{family_menu}
 
 Use the segment position only as a hint: an early segment often belongs to
 the first two families, and the last segment often belongs to
@@ -64,8 +55,8 @@ CLUSTER_SUBTASKS = register(
     PromptSpec(
         name="CLUSTER_SUBTASKS",
         template="""You group subtasks of ONE trigger-timing family by the problem they
-handle. The reader of the resulting skills is a weaker terminal agent on
-Terminal Bench V2.1. Group subtasks that call for the same reusable
+handle. The reader of the resulting skills is a weaker {agent_kind} agent on
+{benchmark_name}. Group subtasks that call for the same reusable
 capability, even when their task names, files and tools differ.
 
 FAMILY: {family}
@@ -99,8 +90,8 @@ Output ONLY JSON with exactly this shape:
 CLUSTER_SKILL = register(
     PromptSpec(
         name="CLUSTER_SKILL",
-        template="""You are writing ONE reusable capability card for a weaker terminal agent
-on Terminal Bench V2.1. The card will be injected into a DIFFERENT TB21
+        template="""You are writing ONE reusable capability card for a weaker {agent_kind} agent
+on {benchmark_name}. The card will be injected into a DIFFERENT {task_tag}
 task from the same capability family, not the tasks below.
 
 TRIGGER FAMILY: {family}
@@ -120,7 +111,7 @@ explicit guard.
 Write ONE skill that generalizes across all source subtasks:
 
 - when_to_use: begin with the OPENING PHRASE exactly, then name the
-  observable signs (file types, input structure, error text, tools,
+  observable signs ({observable_signs}, tools,
   required output) and the preconditions. Do not use task names.
 - steps: 5 to 9 decision nodes. Each node is one decision, not a script:
   "When <observable condition>, do <general action>; verify <pass signal>;

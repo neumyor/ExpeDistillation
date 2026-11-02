@@ -8,6 +8,7 @@ and the two convenience ids.
 
 import hashlib
 import json
+import urllib.parse
 
 from expedistill.composites import unit_ids
 from expedistill.core.models import Step, Trajectory
@@ -96,6 +97,29 @@ def test_make_gap_sheet_id_encodes_the_unit_and_attempt():
     assert unit_ids.make_gap_sheet_id("unit-1", 0) == "gap:unit-1:0"
     assert unit_ids.make_gap_sheet_id("unit-1", 3) == "gap:unit-1:3"
     assert unit_ids.make_gap_sheet_id("unit-1", None) == "gap:unit-1:None"
+
+
+def test_a_long_gap_sheet_id_still_fits_a_filename():
+    exam_id = ("traj/alfworld:json_2.1.1/train/"
+               "pick_and_place_simple-ToiletPaper-None-ToiletPaperHanger-415/"
+               "trial_T20190908_050443_333939/game.tw-pddl/strong/00/"
+               "seg01/skill/v01/exam")
+    unit = unit_ids.make_unit_id(
+        phase_label="p03:exam", benchmark="alfworld", task_ref=exam_id,
+        role="weak", skills_injected=None)
+    gap = unit_ids.make_gap_sheet_id(unit, 0)
+
+    name = urllib.parse.quote(gap, safe="") + ".json"
+    assert len(name.encode()) + 14 <= 255  # the atomic-write temp suffix
+    # Same pair, same id; a different attempt is a different id.
+    assert unit_ids.make_gap_sheet_id(unit, 0) == gap
+    assert unit_ids.make_gap_sheet_id(unit, 1) != gap
+    # Two long units that share a head do not collide.
+    other = unit_ids.make_unit_id(
+        phase_label="p03:exam", benchmark="alfworld",
+        task_ref=exam_id.replace("seg01", "seg02"),
+        role="weak", skills_injected=None)
+    assert unit_ids.make_gap_sheet_id(other, 0) != gap
 
 
 def test_unit_id_for_trajectory_reads_task_role_and_injection():

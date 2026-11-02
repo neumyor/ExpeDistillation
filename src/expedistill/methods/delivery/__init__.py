@@ -18,7 +18,14 @@ __all__ = ["ExamFolderParams", "FolderParams", "GroupByTaskParams",
 
 @dataclass(frozen=True)
 class WholeBankParams:
-    """No parameters: the whole bank, one fixed injection."""
+    """The whole bank, one fixed injection.
+
+    ``verbatim`` keeps every skill's text exactly as stored (no bullet, no
+    newline collapsing); the default renders the library layout D9 pins.
+    Set it for skill documents imported from other methods.
+    """
+
+    verbatim: bool = False
 
 
 @dataclass(frozen=True)

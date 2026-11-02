@@ -8,6 +8,11 @@ import pytest
 
 from expedistill.benchmarks.base import BaseEnv, Task, ViewRules
 from expedistill.benchmarks.react_loop import render_history, run_react
+from expedistill.benchmarks.skill_folder import (
+    MAX_READS,
+    SkillFolder,
+    read_limit_message,
+)
 from expedistill.infra.reliability import (
     ConfigError,
     InfrastructureError,
@@ -16,6 +21,11 @@ from expedistill.infra.reliability import (
 )
 from expedistill.llm import make_fake_handle
 from expedistill.prompts import PROMPTS, PromptSpec
+from tests.helpers.skill_folder import (
+    CARD_BODY,
+    folder_task_meta,
+    write_skill_folder,
+)
 
 # The toy task prompt mirrors the contract local plugins' templates follow:
 # {instruction}, {skills_block} (may render empty) and {history}.
@@ -391,3 +401,132 @@ def test_unknown_prompt_name_propagates():
             task_prompt_name="NO_SUCH_PROMPT",
             max_steps=1,
         )
+
+
+# ---------------------------------------------------------------------------
+# Progressive skill disclosure: the loop serves ReadSkill itself
+# ---------------------------------------------------------------------------
+
+def _skill_folder(tmp_path, names=("alpha", "beta")):
+    manifest, _, locations = write_skill_folder(tmp_path / "folder", names)
+    task = Task(task_id="t-1", instruction="solve the puzzle",
+                meta=folder_task_meta(manifest, tmp_path / "folder"))
+    return SkillFolder.from_task(task), locations
+
+
+class _RecordingEnv(_ToyEnv):
+    def __init__(self, **kwargs):
+        self.actions = []
+        super().__init__(**kwargs)
+
+    def step(self, action):
+        self.actions.append(action)
+        return super().step(action)
+
+
+def test_a_read_is_served_by_the_loop_and_costs_no_environment_step(
+        tmp_path):
+    folder, locations = _skill_folder(tmp_path)
+    env = _RecordingEnv()
+    outcome, _ = _run(
+        env, [f"ReadSkill[{locations[0]}]", "look", "finish"],
+        max_steps=2, skill_folder=folder)
+    # Two environment steps fit the two-step budget although three
+    # actions were taken; the read sits in the stored steps in order.
+    assert outcome.correctness is True
+    assert env.actions == ["look", "finish"]
+    assert [step["action"] for step in outcome.steps] == [
+        f"ReadSkill[{locations[0]}]", "look", "finish"]
+    assert CARD_BODY in outcome.steps[0]["observation"]
+    assert outcome.meta == {"termination": "terminated", "steps_used": 2,
+                            "skill_list_shown": True, "skill_reads": 1}
+
+
+def test_the_card_text_reaches_the_next_prompt_untruncated(tmp_path):
+    folder, locations = _skill_folder(tmp_path)
+
+    class _VerboseEnv(_ToyEnv):
+        def step(self, action):
+            return "x" * 500 if action == "look" else super().step(action)
+
+    rules = ViewRules(max_obs_chars=100, head_keep=10, tail_keep=10)
+    outcome, handle = _run(
+        _VerboseEnv(), [f"ReadSkill[{locations[0]}]", "look", "finish"],
+        view_rules=rules, skill_folder=folder)
+    last_user = handle.client.calls[2]["user"]
+    assert CARD_BODY in last_user
+    # An ordinary observation in the same history is still truncated.
+    assert "characters truncated" in last_user
+    assert "x" * 500 not in last_user
+    # The stored read keeps the whole file either way.
+    assert CARD_BODY in outcome.steps[0]["observation"]
+
+
+def test_reads_past_the_cap_are_refused_and_cost_a_step(tmp_path):
+    folder, locations = _skill_folder(tmp_path)
+    read = f"ReadSkill[{locations[0]}]"
+    env = _RecordingEnv()
+    outcome, _ = _run(
+        env, [read] * (MAX_READS + 1) + ["finish"], max_steps=5,
+        skill_folder=folder)
+    served = outcome.steps[:MAX_READS]
+    assert all(CARD_BODY in step["observation"] for step in served)
+    refused = outcome.steps[MAX_READS]
+    assert refused["observation"] == read_limit_message()
+    # The refusal consumed one step of the budget; the environment never
+    # saw it.
+    assert env.actions == ["finish"]
+    assert outcome.meta["steps_used"] == 2
+    assert outcome.meta["skill_reads"] == MAX_READS
+
+
+def test_a_model_that_only_keeps_reading_runs_out_of_budget(tmp_path):
+    folder, locations = _skill_folder(tmp_path)
+    read = f"ReadSkill[{locations[0]}]"
+    env = _RecordingEnv()
+    outcome, _ = _run(env, [read] * (MAX_READS + 3), max_steps=3,
+                      skill_folder=folder)
+    assert outcome.correctness is False
+    assert outcome.meta["termination"] == "step_budget"
+    assert outcome.meta["steps_used"] == 3
+    assert env.actions == []
+
+
+def test_an_unknown_location_is_answered_and_counts_as_a_read(tmp_path):
+    folder, locations = _skill_folder(tmp_path)
+    env = _RecordingEnv()
+    outcome, handle = _run(
+        env, ["ReadSkill[nowhere/SKILL.md]", "finish"], skill_folder=folder)
+    assert "Unknown skill location" in outcome.steps[0]["observation"]
+    assert outcome.meta["skill_reads"] == 1
+    assert env.actions == ["finish"]
+    assert "Unknown skill location" in handle.client.calls[1]["user"]
+
+
+def test_a_read_action_without_a_folder_goes_to_the_environment(tmp_path):
+    env = _RecordingEnv()
+    outcome, _ = _run(env, ["ReadSkill[a/SKILL.md]", "finish"])
+    assert env.actions == ["ReadSkill[a/SKILL.md]", "finish"]
+    assert outcome.meta == {"termination": "terminated", "steps_used": 2}
+
+
+def test_a_model_output_error_still_records_the_folder_facts(tmp_path):
+    folder, locations = _skill_folder(tmp_path)
+    outcome, _ = _run(
+        _ToyEnv(),
+        [f"ReadSkill[{locations[0]}]", ModelOutputError("no content")],
+        skill_folder=folder)
+    assert outcome.correctness is None
+    assert outcome.meta["termination"] == "model_output_error"
+    assert outcome.meta["skill_list_shown"] is True
+    assert outcome.meta["skill_reads"] == 1
+    assert outcome.meta["steps_used"] == 0
+
+
+def test_render_history_leaves_verbatim_steps_whole():
+    steps = [{"action": "a", "observation": "x" * 300},
+             {"action": "b", "observation": "y" * 300}]
+    rules = ViewRules(max_obs_chars=100, head_keep=10, tail_keep=10)
+    text = render_history(steps, rules, verbatim={0})
+    assert "x" * 300 in text
+    assert "y" * 300 not in text

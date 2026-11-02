@@ -35,6 +35,7 @@ __all__ = [
     "_redispatch_limit",
     "_resolve_delivery",
     "_resolve_verdict_rule",
+    "_test_role",
 ]
 
 _ROLE_OF_ARM = {"executor_strong": "strong", "executor_weak": "weak"}
@@ -101,6 +102,17 @@ def _execution_params(spec: ExecutePhaseSpec) -> Any:
             "the real execution carries arms but only a baseline phase "
             "is two-armed; every other execute phase runs the weak model")
     return params
+
+
+def _test_role(params: Any) -> str:
+    """The model role (``"strong"`` / ``"weak"``) a test phase runs.
+
+    Only the folder execution can name its executor; every other
+    execution runs the weak model, as the test phase always did."""
+    executor = (params.executor
+                if isinstance(params, RealFolderExecutionParams)
+                else "executor_weak")
+    return _ROLE_OF_ARM[executor]
 
 
 def _resolve_verdict_rule(spec: ExecutePhaseSpec, benchmark: str) -> str:

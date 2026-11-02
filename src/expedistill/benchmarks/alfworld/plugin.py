@@ -20,12 +20,20 @@ incoming id (and from instruction text) before anything else sees it. Only a
 trailing ``___<digits>`` is stripped, so SearchQA-style legitimate blanks such
 as "____ Jesus" are unaffected.
 
-Adapted from the old SkillExpand adapter (ExpeToSkill-merged
-src/skillexpand/benchmarks/alfworld.py): the success semantics ("won" from the
-engine, surfaced as "Task is SOLVED."), the command-format explanation in the
-task prompt (reused from the old ALFWorld execution contract nearly verbatim)
-and the step budget (50, the engine's own episode budget in the eval repo's
-textworld.yaml) all come from there.
+Execution runs under the outer eval repo's unified protocol
+(``benchmarks/alfworld/protocol.py``): the same system message, the same
+step templates (no history at step 1, the last two interactions afterwards),
+the engine's admissible action list, ``<think>...</think><action>...</action>``
+replies, one correction request for an invalid reply, temperature 0,
+``max_tokens`` 4096 and the engine's own 50-step budget. The earlier local
+prompt repeated the room description every step and accepted free-form
+commands; it measured a materially easier protocol and its numbers are not
+comparable with the unified runner's.
+
+Progressive skill disclosure is kept: a folder unit shows the card list
+(``<available_skills>``) in the prompt's skill slot and the model opens a
+card with ``<action>ReadSkill[<location>]</action>``, which the loop answers
+without touching the environment or spending a game step.
 """
 
 import json
@@ -41,75 +49,37 @@ from expedistill.benchmarks.alfworld.env import (
     ALFWorldEnv,
     resolve_gamefile,
 )
+from expedistill.benchmarks.alfworld.learning import ALFWORLD_CONTEXT
+from expedistill.benchmarks.alfworld.protocol import (
+    CORRECTION_PROMPT_NAME,
+    FOLDER_PROMPT_NAME,
+    FOLDER_PROMPT_NO_HISTORY_NAME,
+    PROMPT_NAME,
+    PROMPT_NO_HISTORY_NAME,
+    SYSTEM_PROMPT_NAME,
+    protocol_handle,
+    run_unified,
+)
 from expedistill.benchmarks.base import (
     BenchmarkPlugin,
     RunOutcome,
     Task,
     ViewRules,
 )
-from expedistill.benchmarks.react_loop import run_react
+from expedistill.benchmarks.skill_folder import SkillFolder
 from expedistill.infra.reliability import ConfigError
-from expedistill.prompts import PromptSpec, register
 
 __all__ = [
     "DEFAULT_MAX_STEPS",
     "MAX_STEPS_ENV",
-    "TASK_PROMPT_NAME",
-    "TASK_PROMPT_TEMPLATE",
     "ALFWorldPlugin",
     "clean_task_id",
     "enumerate_gamefiles",
 ]
 
-#: B2 name of this plugin's task execution prompt.
-TASK_PROMPT_NAME = "ALFWORLD_TASK_PROMPT"
-
-#: The task prompt: EXACTLY the three shared variables {instruction},
-#: {skills_block} (renders empty for bare runs -- bare and skills runs share
-#: this one template) and {history}. The command-format section is the old
-#: repo's ALFWorld execution contract, kept nearly verbatim: it is measured
-#: knowledge about this engine, not style.
-TASK_PROMPT_TEMPLATE = """\
-You act in the ALFWorld text household simulator and must complete a household task.
-Use exact object/receptacle IDs from actual observations and admissible commands.
-Commands: go to <receptacle>; open/close <receptacle>; examine <object/receptacle>;
-take <object> from <receptacle>; move <held object> to <receptacle>; inventory;
-use <lamp>; clean <held object> with <sinkbasin>; heat <held object> with <microwave>;
-cool <held object> with <fridge>. Use > action or > think: reasoning syntax.
-This TextWorld setup uses move ... to ... for placement, not put ... in/on ... .
-Admissible commands describe the CURRENT state; use them rather than inventing syntax.
-Check possession: this setup allows one carried object. Place an irrelevant held
-object before taking another; deliver two-object goals one object at a time.
-Never substitute pot for pan, bowl for plate, or an imagined object for an observed ID.
-An open empty container is empty: do not invent hidden contents or repeatedly examine it.
-There is no camera-orientation command or abstract verify-goal action. A failed action
-can reflect location, possession or prerequisites, not necessarily a syntax problem.
-For lamp goals hold the requested object and use the lamp. Only environment won feedback
-confirms completion; thoughts or apparent placement do not establish success.
-Every new trial resets inventory, object placement, open/closed and processed state.
-Prior observed locations are task-local leads to recheck, not universal facts.
-Remember checked empty locations within a trial; try unvisited locations and reserve
-steps for taking, processing and delivery. Consecutive identical actions terminate
-the episode, even for look/examine. The step budget is limited; act efficiently.
-
-Your task:
-{instruction}
-{skills_block}
-Interaction so far:
-{history}
-
-Reply with your next command only, on a single line (e.g. "go to fridge 1")."""
-
-register(PromptSpec(
-    name=TASK_PROMPT_NAME,
-    template=TASK_PROMPT_TEMPLATE,
-    description="E1: ALFWorld stepwise task execution prompt (shared by bare "
-                "and skills runs; the skills block renders empty when absent).",
-))
-
 #: The loop budget for one episode. 50 matches the engine's own episode budget
 #: (dagger/rl training max_nb_steps_per_episode in the eval repo's
-#: textworld.yaml), so the loop and the engine never disagree.
+#: textworld.yaml) and the unified runner's, so all three agree.
 DEFAULT_MAX_STEPS = 50
 MAX_STEPS_ENV = "EXPEDISTILL_ALFWORLD_MAX_STEPS"
 
@@ -182,8 +152,23 @@ class ALFWorldPlugin(BenchmarkPlugin):
     variables; every variable is resolved when a task is loaded or a run
     starts, and a missing one is a ConfigError. ``run`` builds an
     ``ALFWorldEnv`` (the subprocess bridge to the eval repo's venv) and
-    delegates to the shared react loop.
+    delegates to the unified-protocol loop.
     """
+
+    #: Skill-folder capability: progressive disclosure through the shared
+    #: folder contract (``benchmarks/skill_folder.py``).
+    skill_folder_prompt_name = FOLDER_PROMPT_NAME
+    learning_context = ALFWORLD_CONTEXT
+    #: The protocol's other frozen prompt names: the step-1 variant of each
+    #: template, the system message and the one-shot correction request.
+    #: Stage 0 freezes these too, so a protocol edit cannot slip past a
+    #: resume.
+    protocol_prompt_names = (
+        SYSTEM_PROMPT_NAME,
+        PROMPT_NO_HISTORY_NAME,
+        FOLDER_PROMPT_NO_HISTORY_NAME,
+        CORRECTION_PROMPT_NAME,
+    )
 
     @property
     def name(self) -> str:
@@ -191,7 +176,7 @@ class ALFWorldPlugin(BenchmarkPlugin):
 
     @property
     def task_prompt_name(self) -> str:
-        return TASK_PROMPT_NAME
+        return PROMPT_NAME
 
     @property
     def view_rules(self) -> ViewRules:
@@ -267,29 +252,16 @@ class ALFWorldPlugin(BenchmarkPlugin):
     ) -> RunOutcome:
         env = ALFWorldEnv(task.task_id)
         try:
-            # An InfrastructureError from reset (hung adapter, dead
-            # subprocess) propagates: K1 retries the unit (R2b contract).
-            initial_observation = env.reset()
-            # ALFWorld's task line names no receptacles; the room description
-            # from reset is the rest of the instruction, exactly as the old
-            # ReAct fewshots and the outer eval repo's own runner present it.
-            # run_react's reset below is a no-op (fresh episode, no steps),
-            # so this costs one subprocess per episode, not two.
-            instruction = str(task.instruction).rstrip()
-            if initial_observation:
-                instruction = f"{instruction}\n\n{initial_observation}"
-            effective = Task(task_id=task.task_id, instruction=instruction,
-                             meta=dict(task.meta))
-            return run_react(
-                effective,
+            # A folder unit shows only the card list; the delivery's catalog
+            # text in ``skills_block`` is the TB fallback and is not used.
+            folder = SkillFolder.from_task(task)
+            return run_unified(
+                task,
                 env,
-                handle,
-                task_prompt_name=self.task_prompt_name,
+                protocol_handle(handle),
+                skill_folder=folder,
                 skills_block=skills_block,
                 max_steps=self.max_steps(),
-                # No run_dir: request dumps follow the handle's run_dir (K1
-                # attaches <run>), not the per-unit workdir (README section 2).
-                view_rules=self.view_rules,
             )
         finally:
             env.close()

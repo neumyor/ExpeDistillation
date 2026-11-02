@@ -7,7 +7,8 @@ This is the one place that answers three questions:
 * which trajectory steps form the context around each use?
 
 Read detection is the folder contract: only a ``cat`` of the skill's
-``SKILL.md`` counts. Group/whole-bank deliveries have no per-skill read
+``SKILL.md`` counts, and so does the local benchmarks' equivalent, a
+``ReadSkill[<location>]`` action (``benchmarks/skill_folder.py``). Group/whole-bank deliveries have no per-skill read
 event; an injected skill is treated as used for that attempt (the
 decision's definition).
 
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, List, Mapping, Optional, Sequence
 
+from expedistill.benchmarks.skill_folder import canonical_location, read_target
 from expedistill.infra.reliability import CodeBugError
 
 __all__ = [
@@ -66,6 +68,12 @@ class SkillUse:
     invocations: List[Invocation] = field(default_factory=list)
     injected: bool = False
     delivery: str = ""
+
+
+def _as_cat_line(line: str) -> str:
+    """A ``ReadSkill[x]`` action as the equivalent ``cat`` line."""
+    target = read_target(line)
+    return line if target is None else f"cat {canonical_location(target)}"
 
 
 def _name_token_in(line: str, filename: str) -> bool:
@@ -165,12 +173,13 @@ def skill_read_events(trajectory: Any,
     seen = set()
     for step_index, step in enumerate(trajectory.steps):
         for line in step.action.split("\n"):
-            if not _CAT_RE.search(line):
+            cat_line = _as_cat_line(line)
+            if not _CAT_RE.search(cat_line):
                 continue
             for filename in order:
                 if first_only and filename in seen:
                     continue
-                if not _path_matches(line, filename):
+                if not _path_matches(cat_line, filename):
                     continue
                 seen.add(filename)
                 events.append({

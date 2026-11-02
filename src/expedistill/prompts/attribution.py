@@ -18,7 +18,7 @@ __all__ = ["SKILL_ATTEMPT_ATTRIBUTION", "SKILL_ATTEMPT_REVISION"]
 SKILL_ATTEMPT_ATTRIBUTION = register(
     PromptSpec(
         name="SKILL_ATTEMPT_ATTRIBUTION",
-        template="""You are attributing ONE window of ONE real attempt of a terminal task
+        template="""You are attributing ONE window of ONE real attempt of a {agent_kind} task
 to the skills that were active in that window.
 
 TASK INSTRUCTION (what the weak model saw):
@@ -66,7 +66,7 @@ Output ONLY JSON with exactly this field:
 SKILL_ATTEMPT_REVISION = register(
     PromptSpec(
         name="SKILL_ATTEMPT_REVISION",
-        template="""A skill was active in real attempts of a terminal task. Rewrite it using
+        template="""A skill was active in real attempts of a {agent_kind} task. Rewrite it using
 the per-window evidence below. The evidence may contain several attempts,
 and several windows per attempt; reconcile them yourself.
 

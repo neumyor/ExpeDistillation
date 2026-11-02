@@ -13,8 +13,11 @@
 #
 # A run name that already exists is RESUMED; omit it to start a new run named
 # <config stem>_<YYYYMMDD_HHMM>. Reads $EXPEDISTILL_ENV_FILE (default
-# ~/.config/expedistill/expedistill.env; secrets, mode 600, never in git). The driver is a new session with a pidfile; its
-# liveness is the pidfile, never pgrep -f.
+# ~/.config/expedistill/expedistill.env; secrets, mode 600, never in git),
+# then $RUN_DIR/run.env if it exists: the settings that belong to ONE run
+# (e.g. TBENCH_REASONING_EFFORT for a strong-model run), so every resume
+# of that run starts with the same environment. The driver is a new session
+# with a pidfile; its liveness is the pidfile, never pgrep -f.
 #
 # Prints: run_dir, pidfile, console log, and the command that resumes it.
 
@@ -54,6 +57,7 @@ WORKERS="${WORKERS:-64}"
 ROLLOUT=()
 [[ -n "${ROLLOUT_WORKERS:-}" ]] && ROLLOUT=(--rollout-workers "$ROLLOUT_WORKERS")
 mkdir -p "$RUN_DIR"
+[[ -f "$RUN_DIR/run.env" ]] && { set -a; . "$RUN_DIR/run.env"; set +a; }
 
 PYTHON="$CODE/.venv/bin/python"
 echo "run_dir: $RUN_DIR"

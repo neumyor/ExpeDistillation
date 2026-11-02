@@ -29,10 +29,11 @@ import os
 import signal
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
+from expedistill.prompts.learning_context import GENERIC, LearningContext
 
 __all__ = [
     "ENV_TIMEOUT_ENV",
@@ -333,18 +334,36 @@ class BenchmarkPlugin(abc.ABC):
     #: Skill-folder capability (the ``real_folder`` execution,
     #: skill-folder M3): the B2 name of the prompt a skill-folder
     #: unit's task runs under, or None (the default) when this plugin
-    #: does not support skill folders at all -- currently only the tb
-    #: plugin declares it. A skill-folder unit reaches the plugin with
+    #: does not support skill folders at all. A skill-folder unit reaches
+    #: the plugin with
     #: the folder delivery's manifest on ``task.meta["skill_folder"]``
     #: (and the materialized folder's path on
     #: ``task.meta["skill_folder_dir"]``); the plugin must bring that
     #: folder into its run environment and point the agent at it
     #: THROUGH this prompt (a guidance section), never by injecting
-    #: the catalog text. Declared as the prompt NAME rather than a
+    #: the catalog text. The local ReAct plugins serve the folder through
+    #: ``benchmarks/skill_folder.py``; the tb plugin uploads it to the
+    #: sandbox. Declared as the prompt NAME rather than a
     #: bare bool so the capability and its prompt freeze together in
     #: one attribute (stage 0 digests the named prompt into the
     #: manifest and refuses an unregistered name) and cannot drift.
     skill_folder_prompt_name: Optional[str] = None
+
+    #: Additional B2 prompt names a plugin's runner uses besides
+    #: ``task_prompt_name`` and ``skill_folder_prompt_name`` (e.g. a
+    #: protocol's step-1 template, system message and correction request).
+    #: Stage 0 freezes their digests too: a runner whose prompt text changed
+    #: without a manifest difference could otherwise resume across two
+    #: protocols. Empty by default.
+    protocol_prompt_names: Tuple[str, ...] = ()
+
+    #: The benchmark's vocabulary for the learning-side prompts (what the
+    #: agent is called, the capability families, the final action, ...;
+    #: prompts/learning_context.py). The pipeline wires it into every model
+    #: handle, so a plugin that declares nothing writes with GENERIC
+    #: wording. It is part of the experiment identity: stage 0 freezes its
+    #: digest.
+    learning_context: LearningContext = GENERIC
 
     def aux_success(self, traj: Trajectory) -> Optional[bool]:
         """Auxiliary success of one trajectory.

@@ -6,43 +6,20 @@ that mirrors the real one's contract shape (dict with em/f1/sub_em), and env
 interactions replay the recorded fixture transcript."""
 
 import json
-import types
 from pathlib import Path
 
 import pytest
 
 from expedistill.benchmarks.searchqa import env as searchqa_env
 from expedistill.infra.reliability import ConfigError
+from tests.helpers.searchqa_stub import install_eval_repo_stub
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "searchqa"
 
 
 @pytest.fixture
 def stub_eval_repo(monkeypatch):
-    """Install a stub eval repo through the seam tests are meant to patch.
-
-    The stub evaluator implements case-insensitive exact match; the recorded
-    transcript fixture was produced under the same semantics.
-    """
-    evaluator = types.ModuleType("searchqa_stub.evaluator")
-
-    def evaluate(prediction, gold_answers):
-        correct = prediction.strip().lower() in {
-            str(gold).strip().lower() for gold in gold_answers}
-        score = 1.0 if correct else 0.0
-        return {
-            "em": score,
-            "f1": score,
-            "sub_em": score,
-            "predicted_answer": prediction,
-            "gold_answers": list(gold_answers),
-        }
-
-    evaluator.evaluate = evaluate
-    package = types.ModuleType("searchqa_stub")
-    package.evaluator = evaluator
-    monkeypatch.setattr(searchqa_env, "import_eval_repo", lambda: package)
-    return package
+    return install_eval_repo_stub(monkeypatch)
 
 
 def _fixture_items():

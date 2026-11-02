@@ -24,14 +24,17 @@ from expedistill.prompts.registry import (
 
 # Importing the modules registers their prompts in PROMPTS.
 from expedistill.prompts import (  # noqa: F401
+    adherence,
     audit,
     attribution,
     author,
     cluster_author,
     curate,
     exam,
+    learning_context,
     llm,
     profile,
+    revision_scope,
     segment,
     trial_review,
 )

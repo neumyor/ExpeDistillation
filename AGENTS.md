@@ -93,6 +93,9 @@ src/expedistill/
     models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
     trace.py              值对象 TraceRef / Provenance / TraceContext（只做形状校验）
     ids.py                确定性 ID 规则
+    skill_sections.py     技能文本的三节（[When to use] / [Steps] / [Do not use
+                          when]）切分与拼接：触发条件 = summary + [When to use]，
+                          正文 = 其余两节；`revise_scope` 的纯文本基础
     config.py             实验配置结构（schema v7：sequence + phases + review 槽位 + use_weak_profile 开关）、模型角色表
     config_upgrade.py     v2→v3→v4→v5→v6 升级纯函数（config.py 重新导出）
     contracts.py          交付与决策的冻结交接形状（执行单元行及其列表别名 /
@@ -121,6 +124,10 @@ src/expedistill/
     exam.py               EXAM_SCENE 复原考场、EXAM_TRIGGER 选技能、
                           EXAM_PLAN 写计划、EXAM_JUDGE 判卷
     curate.py             G7 找相似、G8 合并、G9 分组
+    learning_context.py   学习提示词的 benchmark 词汇槽：LearningContext、GENERIC；
+                          call_model 按 GENERIC、句柄默认值、调用方变量三层填充
+    revision_scope.py     REWRITE 的改写范围提示（REVISION_SCOPE_BODY / _TRIGGER）
+    adherence.py          技能适用性与遵循度两个裁判 prompt（论文的使用分析）
     attribution.py        G11 attempt 修订、G12 attempt 归因（v3 起进
                           __init__ 的 import 清单——全量冻结，manifest 冻结全部
                           已注册方法 prompt 的 digest）
@@ -135,7 +142,13 @@ src/expedistill/
                           可选能力声明 skill_folder_prompt_name（技能文件夹
                           执行 real_folder，M3；None=不支持）
     react_loop.py         本地 benchmark 共用的逐步 ReAct 执行循环
+    skill_folder.py       本地 benchmark 的渐进式技能披露：<available_skills>
+                          目录与 ReadSkill[<位置>] 读取（循环自己响应，
+                          评测环境收不到）
     aux.py                辅助指标的插件接线（声明与打分器包装）
+    learning.py           （tb/、alfworld/、searchqa/ 各一份）该 benchmark 的学习
+                          提示词词汇：智能体是谁、能力族、最终动作、五个触发
+                          时机短语；插件用 `learning_context` 声明，写进 manifest
     registry.py           按名字取插件
     tb/                   TB runner（远程 Harbor）+ 任务加载 + 截断规则 + 执行 prompt
     searchqa/             适配外层 benchmark/searchqa-eval/
@@ -151,6 +164,7 @@ src/expedistill/
     author.py             G2 写 skill、G6 改写 skill
     exam.py               EXAM_TRIGGER / EXAM_PLAN 作答、EXAM_JUDGE 判卷
     audit.py              D8 泄题审计
+    adherence.py          技能适用性判定与遵循度判定（按轨迹，模型积木）
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
     retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
     attribution.py        G11 attempt 修订、G12 attempt 归因（live_run 验收的模型积木；
@@ -182,6 +196,10 @@ src/expedistill/
                           装配、逐 trial 判分、answer_sheets/JSON+Markdown 导出
     coverage.py           expected trial vs stored trial 的 coverage 记录
                           （present / missing / terminal + cause）；不判分、不聚合
+    paired_stats.py       配对统计的纯函数：按任务自助法的置信区间、胜负平、
+                          McNemar 精确检验、单臂噪声底；只用标准库
+    trigger_metrics.py    技能使用的预登记指标：触发召回、误触发、遵循度、
+                          按适用/打开分层的成功率；考试重答的召回与通过率
     unit_summary.py       AnswerSheet + UnitSpec → UnitSummary 的纯聚合函数
                           （summarize_unit / summarize_phase / task_metrics）
     phase_report.py       相位报告 envelope：读取 unit_specs/answer_sheets/
@@ -278,8 +296,23 @@ src/expedistill/
     assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run；
                           上移到本层是为了复用 stage0 的 build_manifest（组合层
                           不得 import 阶段层）
+    fork_run.py            分叉工具（不占 K 号）：把已完结 run 的前 K 个相位拷进新
+                          run，新配置从第 K+1 个相位接着跑（`fork-run` 子命令）
+    import_bank.py         把外部方法的产物（markdown / 技能文件夹 / notes）写成
+                          测试专用 run 的已接受技能库（`import-bank` 子命令）
+    analysis_common.py     只读分析的共用约束：输出目录不得在被读的 run 里，
+                          首次设置写进 analysis_config.json，续跑设置不同即拒绝
+    judge_skills.py        只读：判定测试/实战相位每个 trial 的技能使用——适用、
+                          打开、遵循（`judge-skills` 子命令）
+    exam_replay.py         只读：用另一个答题模型在同一技能库、同一批考题上重答
+                          （`exam-replay` 子命令）
+    paper_tables.py        只读：按配对统计量比较已完结的 run，生成论文表格
+                          （`paper-tables` 子命令）
   cli.py                  第 8 层：命令行入口（唯一的方法入口）+ 相位循环
-                          （run_experiment 逐个派发 sequence 条目）
+                          （run_experiment 逐个派发 sequence 条目）；子命令
+                          run / summary / assemble-reuse / fork-run /
+                          import-bank / judge-skills / exam-replay /
+                          paper-tables
 ```
 
 积木编号与文件的对应以 README 第三节为准；新增积木时两处同时更新。
@@ -345,10 +378,15 @@ scripts/
               convert_v3_configs.py：一次性 schema v3→v5 配置转换（写新文件名；
                                   显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5→v6）
               launch_tb21_live_run.py：正式实验的 detached 启动器
-  remote/     在基准主机上运行实验：deploy_bench_host.sh（rsync 部署，一个提交一个目录）、
+              build_paper_configs.py：按论文实验矩阵生成全部配置
+                                  （`configs/experiments/*_paper_*.yaml`，
+                                  `--check` 校验与磁盘一致，`--print-index` 打印
+                                  各臂与参照臂的差异）
+  remote/     在基准主机上运行实验：deploy_bench_host.sh（rsync 部署，一个提交一个目录；未提交的改动加 `--force`，目录名带时间戳、永不覆盖）、
               start_run_bench_host.sh（在基准主机上起/续跑 run）、README.md（运维手册）；
               driver 与 Harbor 同机，run 目录、分析、审计都留在基准主机
   analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
+              paper_tables.py：`paper-tables` 子命令的薄入口
   audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节；
               scan_private.py：提交前扫描已跟踪文件里的私有部署信息
 ```
@@ -428,7 +466,7 @@ configs/
    Trajectory 的 ID、角色等簿记字段由 E1 组装）、`view_rules`（截断规则）、
    `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹的插件
    再声明 `skill_folder_prompt_name`（指向 folder 模式执行 prompt 的注册名，
-   digest 进 manifest；目前只有 tb 声明，folder / folder_by_task 相位落到
+   digest 进 manifest；tb、searchqa、alfworld 都已声明，folder / folder_by_task 相位落到
    不声明的插件时，test / live 相位驱动在派发前响亮拒绝，E1 的逐单元守卫
    保留作第二道）；
 2. 在 `benchmarks/registry.py` 登记名字；

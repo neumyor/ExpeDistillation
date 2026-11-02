@@ -1,5 +1,7 @@
-"""Template-level tests: the 11 method prompts are registered, each template's
-placeholders are exactly its documented variables, and every template renders.
+"""Template-level tests: the method prompts are registered, each template's
+placeholders are exactly its documented caller variables plus the learning-
+context slots it uses (prompts/learning_context.py), and every template
+renders.
 
 Protocol v2 (decision section 3.11) also pins the structure contract from
 both sides: the two G2 templates carry the JSON field names only (the
@@ -13,8 +15,9 @@ import string
 from expedistill.core.models import SKILL_MARKERS
 from expedistill.blocks.author import SKILL_SECTION_FIELDS
 from expedistill.prompts import PROMPTS, get
+from expedistill.prompts.learning_context import GENERIC, TRIGGER_FAMILY_KEYS
 
-# name -> (owning block, documented variables)
+# name -> (owning block, documented caller variables)
 EXPECTED = {
     "SEGMENT": ("G1", {"trajectory_view", "K"}),
     "SKILL_DISTILL": (
@@ -30,7 +33,7 @@ EXPECTED = {
     "REWRITE": (
         "G6",
         {"skill_text", "question_text", "source_context", "weak_answer",
-         "error_description", "profile_section"},
+         "error_description", "scope_section", "profile_section"},
     ),
     "EXAM_SCENE": (
         "G3",
@@ -65,6 +68,66 @@ EXPECTED = {
         {"family", "family_trigger", "theme", "reason", "cards",
          "profile_section"},
     ),
+    "SKILL_ATTEMPT_ATTRIBUTION": (
+        "P04/P06",
+        {"task_instruction", "attempt", "outcome", "window_kind",
+         "step_start", "step_end", "trajectory_window", "skills_listing",
+         "profile_section"},
+    ),
+    "SKILL_ATTEMPT_REVISION": (
+        "P04/P06",
+        {"skill_text", "attempt_evidence", "profile_section"},
+    ),
+    "TRIAL_FAILURE_ANALYSIS": (
+        "Trial review",
+        {"task_instruction", "trial_steps", "available_skills",
+         "all_skills"},
+    ),
+    "TRIAL_EXAM_ANALYSIS": (
+        "Trial review",
+        {"scene_text", "expected_behavior", "judge_reason", "exam_skill_id",
+         "exam_skill_content", "skill_catalog", "opened_skills", "plan"},
+    ),
+    "TRIAL_REQUIREMENT_AGGREGATION": (
+        "Trial review",
+        {"findings", "skills", "measured_skills"},
+    ),
+    "PROFILE_UPDATE": ("Trial review", {"old_profile", "profile_notes"}),
+    "REQUIREMENT_SKILL": (
+        "Trial review",
+        {"label", "description", "segment_position", "steps_view",
+         "profile_section"},
+    ),
+}
+
+#: name -> the learning-context slots the template uses, in addition to its
+#: caller variables. A prompt that is not listed uses no slot.
+EXPECTED_SLOTS = {
+    "SEGMENT": {"benchmark_name", "setup_steps", "segment_label_examples"},
+    "SKILL_DISTILL": {
+        "agent_kind", "benchmark_name", "task_tag", "capability_example",
+        "observable_signs", "capability_section", "discipline_examples",
+        "executable_rules", "timing_menu", "phrase_at_task_start",
+        "phrase_after_first_environment_check", "phrase_before_submitting"},
+    "SKILL_DIAGNOSE": {
+        "agent_kind", "benchmark_name", "task_tag", "observable_signs",
+        "capability_section", "discipline_examples", "executable_rules",
+        "timing_menu", "phrase_at_task_start",
+        "phrase_after_first_environment_check", "phrase_before_submitting",
+        "phrase_when_command_fails"},
+    "REWRITE": {"skill_description"},
+    "EXAM_SCENE": {"action_noun"},
+    "GROUP": {"group_examples"},
+    "CLUSTER_TRIGGER_FAMILY": {"agent_kind", "family_menu"},
+    "CLUSTER_SUBTASKS": {"agent_kind", "benchmark_name"},
+    "CLUSTER_SKILL": {
+        "agent_kind", "benchmark_name", "task_tag", "observable_signs"},
+    "SKILL_ATTEMPT_ATTRIBUTION": {"agent_kind"},
+    "SKILL_ATTEMPT_REVISION": {"agent_kind"},
+    "TRIAL_FAILURE_ANALYSIS": {"agent_kind", "benchmark_name"},
+    "TRIAL_EXAM_ANALYSIS": {"agent_kind", "benchmark_name", "action_noun"},
+    "PROFILE_UPDATE": {"agent_kind"},
+    "REQUIREMENT_SKILL": {"agent_kind", "benchmark_name"},
 }
 
 ALL_MARKERS = set(SKILL_MARKERS)
@@ -107,27 +170,49 @@ def test_descriptions_are_one_line_and_name_the_owning_block():
         assert block in description, f"{name}: description must name block {block}"
 
 
+def _render_generic(name):
+    """The template filled with GENERIC's slots and dummy caller variables."""
+    variables = EXPECTED[name][1]
+    return get(name).format(
+        **GENERIC.variables(), **{var: DUMMY for var in variables})
+
+
 def test_placeholders_are_exactly_the_documented_variables():
     for name, (_, variables) in EXPECTED.items():
-        assert _placeholders(get(name)) == variables, name
+        expected = variables | EXPECTED_SLOTS.get(name, set())
+        assert _placeholders(get(name)) == expected, name
+
+
+def test_every_documented_slot_is_defined_by_generic():
+    # A slot a template uses but GENERIC lacks would be a KeyError for any
+    # plugin that declares no context of its own.
+    for name, slots in EXPECTED_SLOTS.items():
+        assert slots <= set(GENERIC.slots), name
 
 
 def test_format_with_dummy_values_succeeds():
     # format() itself is the check: a stray unescaped brace raises ValueError,
     # an undocumented placeholder raises KeyError.
-    for name, (_, variables) in EXPECTED.items():
-        rendered = get(name).format(**{var: DUMMY for var in variables})
-        assert rendered.strip()
+    for name in EXPECTED:
+        assert _render_generic(name).strip()
 
 
 def test_profile_section_off_is_neutral():
-    from expedistill.prompts.profile import (
-        NO_WEAK_PROFILE_SECTION,
-        profile_section,
-    )
-    assert profile_section("HEADER", "") == NO_WEAK_PROFILE_SECTION
-    assert profile_section("HEADER", None) == NO_WEAK_PROFILE_SECTION
+    from expedistill.prompts.profile import profile_section
+    neutral = profile_section("HEADER", "")
+    assert profile_section("HEADER", None) == neutral
+    assert profile_section("HEADER", "  ") == neutral
+    assert GENERIC.slots["agent_kind"] in neutral
     assert profile_section("HEADER", "a profile") == "HEADER\na profile"
+
+
+def test_neutral_profile_section_names_the_benchmarks_agent_kind():
+    from expedistill.prompts.profile import profile_section
+    assert "generally capable household agent" in profile_section(
+        "HEADER", "", "household")
+    # A profile text never carries the kind.
+    assert profile_section("HEADER", "a profile", "household") == (
+        "HEADER\na profile")
 
 
 def test_templates_are_nonempty():
@@ -201,22 +286,15 @@ def test_g2_json_contract_fields_match_validate_skill_sections():
             SKILL_SECTION_FIELDS) | {SKILL_SUMMARY_FIELD}, name
 
 
-#: The five trigger-timing phrases (docs/decisions/
-#: p02_trigger_timing_and_length_20261023.md): each G2 card's when_to_use
-#: opens with exactly one of them, so the prompts must spell all five.
-TIMING_PHRASES = (
-    '"At task start,"',
-    '"After the first environment check,"',
-    '"When a command fails, hangs, or repeats,"',
-    '"Before submitting,"',
-    '"At any step,"',
-)
-
-
 def test_g2_templates_name_the_five_timing_phrases_and_the_length_rule():
+    # The five trigger-timing phrases (docs/decisions/
+    # p02_trigger_timing_and_length_20261023.md): each G2 card's when_to_use
+    # opens with exactly one of them, so the rendered prompts must spell all
+    # five (the phrases are learning-context slots).
     for name in ("SKILL_DISTILL", "SKILL_DIAGNOSE"):
-        text = _normalized(get(name))
-        for phrase in TIMING_PHRASES:
+        text = _normalized(_render_generic(name))
+        for key in TRIGGER_FAMILY_KEYS:
+            phrase = f'"{GENERIC.slots[f"phrase_{key}"]}"'
             assert phrase in text, (name, phrase)
         assert ("Use this only when none of the four moments above fits."
                 in text), name

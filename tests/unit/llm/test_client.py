@@ -267,6 +267,27 @@ def test_complete_mid_stream_failure_maps_to_infrastructure(
         client.complete("model-a", "s", "u")
 
 
+def test_complete_mid_stream_base_api_error_is_infrastructure(
+        monkeypatch, stub_sdk):
+    # The gateway's 503 "Too many requests" arrives from the stream iterator
+    # as the SDK's base APIError (no HTTP status object on it), not as
+    # APIStatusError. It is still the endpoint's failure and must reach the
+    # retry budget instead of stopping the batch as a code bug.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    request = httpx.Request("POST", "http://endpoint/v1/chat/completions")
+
+    def failing_stream():
+        yield _chunk(delta_content="partial")
+        raise openai.APIError("upstream 503: too many requests", request,
+                              body=None)
+
+    stub_sdk(response=failing_stream())
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(InfrastructureError, match="stream error"):
+        client.complete("model-a", "s", "u")
+
+
 def test_complete_roundtrip_with_usage(monkeypatch, stub_sdk):
     monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
     monkeypatch.setenv(API_KEY_ENV, "k")

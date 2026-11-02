@@ -9,6 +9,7 @@ names one execution of that slot.
 
 import hashlib
 import json
+import urllib.parse
 from typing import Any
 
 __all__ = [
@@ -46,8 +47,21 @@ def make_unit_id(*, phase_label: str, benchmark: str, task_ref: str,
 
 
 def make_gap_sheet_id(unit_id: str, attempt_index: Any) -> str:
-    """The synthetic id of a missing/terminal trial's answer-sheet envelope."""
-    return f"gap:{unit_id}:{attempt_index}"
+    """The synthetic id of a missing/terminal trial's answer-sheet envelope.
+
+    The id is also the envelope's file name (percent-encoded), so it has to
+    fit the filesystem's 255-byte component limit. An exam unit id embeds
+    the exam id, which embeds the benchmark's task id; ALFWorld's game paths
+    push the encoded name past that limit. Short ids keep the readable form;
+    a long one keeps a short head plus a digest of the full pair, so the id
+    stays deterministic and unique (nothing parses the format).
+    """
+    candidate = f"gap:{unit_id}:{attempt_index}"
+    encoded = urllib.parse.quote(candidate, safe="").encode("utf-8")
+    if len(encoded) + len(".json") + 14 <= 255:  # + the atomic temp suffix
+        return candidate
+    digest = hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:16]
+    return f"gap:{unit_id[:48]}:{attempt_index}:{digest}"
 
 
 def phase_label_of_unit_id(unit_id: str) -> str:

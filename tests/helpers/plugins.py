@@ -39,8 +39,13 @@ def _reload_or_import(module_name: str):
 
 
 def reload_plugin(name: str) -> None:
-    """Re-execute the benchmark's plugin module and package against the
-    current registries (their import side effects run again).
+    """Re-execute the benchmark's modules and package against the current
+    registries (their import side effects run again).
+
+    A plugin may register its prompts in a submodule other than
+    ``plugin.py`` (the ALFWorld unified protocol lives in ``protocol.py``),
+    so every loaded submodule of the package is reloaded. Deeper modules
+    first: the plugin module reads their constants while it is re-executed.
 
     Importing the plugin submodule also imports its parent package, and
     the package's ``__init__`` registers the plugin. Reload the package
@@ -49,11 +54,17 @@ def reload_plugin(name: str) -> None:
     """
     for prompt in benchmark_prompt_names(name):
         PROMPTS.pop(prompt, None)
-    _reload_or_import(f"expedistill.benchmarks.{name}.plugin")
+    prefix = f"expedistill.benchmarks.{name}"
+    submodules = sorted(
+        (module for module in sys.modules
+         if module.startswith(prefix + ".")),
+        key=lambda module: module.count("."), reverse=True)
+    for module in submodules:
+        _reload_or_import(module)
     try:
         get_plugin(name)
     except ConfigError:
-        _reload_or_import(f"expedistill.benchmarks.{name}")
+        _reload_or_import(prefix)
 
 
 def ensure_plugin(name: str) -> BenchmarkPlugin:

@@ -8,7 +8,7 @@ produce the derived JSON + Markdown artifacts and the coverage JSONL.
 """
 
 from expedistill.composites import answer_sheets
-from expedistill.composites.unit_ids import make_gap_sheet_id
+from expedistill.composites.unit_ids import make_gap_sheet_id, make_unit_id
 from expedistill.core.answer_sheet import CoverageRecord
 from expedistill.core.ids import (
     make_attempt_id,
@@ -58,13 +58,31 @@ def _attempt(**overrides):
     return Attempt(**base)
 
 
+def test_the_sheet_filename_fits_a_long_alfworld_game_path():
+    task = ("alfworld:json_2.1.1/valid_unseen/"
+            "look_at_obj_in_light-AlarmClock-None-DeskLamp-308/"
+            "trial_T20190908_222917_366542/game.tw-pddl")
+    trajectory = _trajectory(
+        trajectory_id=make_trajectory_id(task, "weak", 0), task_id=task,
+        benchmark="alfworld")
+    unit = make_unit_id(phase_label="p01:baseline", benchmark="alfworld",
+                        task_ref=task, role="weak", skills_injected=None)
+    record = answer_sheets.execution_from_trajectory(
+        trajectory, unit_id=unit, phase_label="p01:baseline")
+
+    # Filename = percent-encoded sheet id + ".json" + the atomic-write temp
+    # suffix; the filesystem limit is 255 bytes per name.
+    name = object_filename(record.sheet_id)
+    assert len(name.encode()) + len(".json") + 10 <= 255
+
+
 def test_execution_from_trajectory_reads_every_trial_fact():
     trajectory = _trajectory()
     record = answer_sheets.execution_from_trajectory(
         trajectory, unit_id="unit-1", phase_label="p03:live",
         arm="with_bank", aux_success=True)
 
-    assert record.sheet_id == f"unit-1::{trajectory.trajectory_id}"
+    assert record.sheet_id == f"unit-1::att{trajectory.attempt_index:02d}"
     assert record.unit_id == "unit-1"
     assert record.phase_label == "p03:live"
     assert record.task_ref == TASK
@@ -130,7 +148,7 @@ def test_execution_from_external_marks_a_positive_reward_as_correct():
     record = answer_sheets.execution_from_external(
         task_ref=TASK, unit_id="unit-3", phase_label="p06:test",
         reward=1.0, sample_index=2, source="campaign.csv",
-        sha256="deadbeef")
+        sha256="deadbeef", role="weak")
 
     assert record.sheet_id == "external:unit-3:2"
     assert record.unit_id == "unit-3"
@@ -154,7 +172,7 @@ def test_execution_from_external_marks_a_zero_reward_as_incorrect():
     record = answer_sheets.execution_from_external(
         task_ref=TASK, unit_id="unit-3", phase_label="p06:test",
         reward=0.0, sample_index=0, source="campaign.csv",
-        sha256="deadbeef")
+        sha256="deadbeef", role="weak")
     assert record.raw_correctness is False
     assert record.rewards == [0.0]
 
@@ -165,7 +183,7 @@ def _sheets_for_assembly():
     external_record = answer_sheets.execution_from_external(
         task_ref="tb:task-2", unit_id="unit-2", phase_label="p06:test",
         reward=1.0, sample_index=0, source="campaign.csv",
-        sha256="deadbeef")
+        sha256="deadbeef", role="weak")
     coverage = [
         CoverageRecord(unit_id="unit-1", attempt_index=0, present=True,
                        status="present"),
@@ -253,7 +271,7 @@ def test_grade_answer_sheets_routes_an_external_reward_through_its_rule():
     record = answer_sheets.execution_from_external(
         task_ref=TASK, unit_id="unit-3", phase_label="p06:test",
         reward=0.0, sample_index=0, source="campaign.csv",
-        sha256="deadbeef")
+        sha256="deadbeef", role="weak")
     sheets = answer_sheets.assemble_answer_sheets(
         [record], [], phase_label="p06:test")
     graded = answer_sheets.grade_answer_sheets(sheets, "external_reward")

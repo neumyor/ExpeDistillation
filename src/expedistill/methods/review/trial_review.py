@@ -51,7 +51,9 @@ def run_trial_review(
     except InfrastructureError:
         updated_profile = context.weak_profile
         failed.add("profile")
-    if not findings:
+    if not findings and (failed or model_errors):
+        # Every failed trial's analysis broke: nothing is decided yet (a
+        # resume retries the analyses), so no skill is kept by default.
         return ReviewResult(
             trial_findings=[],
             profile_update=updated_profile,

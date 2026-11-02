@@ -52,7 +52,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from expedistill.core.ids import make_task_id
 from expedistill.infra.reliability import ConfigError
@@ -116,10 +116,15 @@ def load_external_control(
     id (``make_task_id(benchmark, task_id)``), the same key
     ``compute_task_metrics`` uses, so the arms' task sets compare
     directly. The second return value is ``{prefixed id: [rewards the
-    control consumed]}`` (the first ``n_attempts`` per task), for the
-    summary's audit record. Raises ConfigError on any of the identity
-    failures in the module docstring; touches no store and executes
-    nothing.
+    control consumed]}``, for the summary's audit record.
+
+    The aligned depth is ``n_attempts`` (the run's sampling depth) unless
+    the file itself declares ``"aligned_attempts": "all"`` -- the pooled
+    control built from several completed runs uses every archived trial
+    per task (its per-task rate is then the pooled mean, and the number of
+    consumed trials may differ by one when a source run had an invalid
+    trial). Raises ConfigError on any of the identity failures in the
+    module docstring; touches no store and executes nothing.
     """
     if n_attempts < 1:
         raise ConfigError(
@@ -141,6 +146,17 @@ def load_external_control(
             f"the external campaign score file {file_path} has no "
             "'tasks' mapping; the control reads the AgentBrew campaign "
             "summary shape (tasks -> '<model>:<task>' -> {n, rewards})")
+    aligned_mode = data.get("aligned_attempts", n_attempts)
+    if aligned_mode == "all":
+        aligned_cap: Optional[int] = None
+    elif (isinstance(aligned_mode, int) and not isinstance(aligned_mode, bool)
+          and aligned_mode >= 1):
+        aligned_cap = aligned_mode
+    else:
+        raise ConfigError(
+            f"the external campaign score file {file_path} declares "
+            f"aligned_attempts={aligned_mode!r}; use a positive integer "
+            "or \"all\"")
     metrics: Dict[str, Dict[str, int]] = {}
     rewards_used: Dict[str, List[float]] = {}
     missing: List[str] = []
@@ -151,14 +167,19 @@ def load_external_control(
             missing.append(raw_id)
             continue
         rewards = entry.get("rewards")
-        if not isinstance(rewards, list) or len(rewards) < n_attempts:
+        if not isinstance(rewards, list) or not rewards:
             raise ConfigError(
                 f"the external campaign score file {file_path} archives "
                 f"{len(rewards) if isinstance(rewards, list) else 'no'} "
-                f"attempt(s) for {model_key}:{raw_id}, fewer than the "
-                f"aligned depth {n_attempts}; the control cannot be "
-                "aligned to this run's sampling depth")
-        aligned = rewards[:n_attempts]
+                f"attempt(s) for {model_key}:{raw_id}; the control needs "
+                "at least one")
+        if aligned_cap is not None and len(rewards) < aligned_cap:
+            raise ConfigError(
+                f"the external campaign score file {file_path} archives "
+                f"{len(rewards)} attempt(s) for {model_key}:{raw_id}, "
+                f"fewer than the aligned depth {aligned_cap}; the control "
+                "cannot be aligned to this run's sampling depth")
+        aligned = rewards if aligned_cap is None else rewards[:aligned_cap]
         for reward in aligned:
             if reward not in (0, 1, 0.0, 1.0) or isinstance(reward, bool):
                 raise ConfigError(
@@ -169,8 +190,8 @@ def load_external_control(
         prefixed = make_task_id(benchmark, raw_id)
         success = sum(1 for reward in aligned if reward in (1, 1.0))
         metrics[prefixed] = {
-            "attempts": n_attempts,
-            "valid": n_attempts,
+            "attempts": len(aligned),
+            "valid": len(aligned),
             "success": success,
             "infra": 0,
         }

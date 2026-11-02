@@ -20,8 +20,8 @@ from expedistill.methods.review import attribution
 from expedistill.methods.review.contracts import NewSkillRequirement
 from expedistill.stages import learn_ledger as ledger
 
-__all__ = ["DEFERRED_OUTCOME", "OUTCOMES_NAME", "execute_requirements",
-           "record_deferred"]
+__all__ = ["DEFERRED_OUTCOME", "DISABLED_OUTCOME", "OUTCOMES_NAME",
+           "execute_requirements", "record_deferred"]
 
 OUTCOMES_NAME = "requirement_outcomes.jsonl"
 
@@ -29,9 +29,16 @@ OUTCOMES_NAME = "requirement_outcomes.jsonl"
 #: no later execution phase exists to test the skill it would produce.
 DEFERRED_OUTCOME = "deferred_no_later_check"
 
+#: Terminal outcome for a requirement a phase configured with
+#: ``new_skills: false`` records but does not write.
+DISABLED_OUTCOME = "not_written_new_skills_off"
+
 
 def record_deferred(phase_dir, phase_label: str,
-                    requirements: Sequence[NewSkillRequirement]) -> int:
+                    requirements: Sequence[NewSkillRequirement], *,
+                    outcome: str = DEFERRED_OUTCOME,
+                    reason: str = "no later check: a rewrite could not be "
+                                  "tested") -> int:
     """Record requirements this phase deliberately does not write.
 
     The frozen action table writes nothing on the last check (no later
@@ -53,9 +60,9 @@ def record_deferred(phase_dir, phase_label: str,
             "phase_label": phase_label,
             "requirement_id": requirement.requirement_id,
             "skill_id": None,
-            "outcome": DEFERRED_OUTCOME,
+            "outcome": outcome,
             "version": None,
-            "reason": "no later check: a rewrite could not be tested",
+            "reason": reason,
         })
         done.add(requirement.requirement_id)
         written += 1

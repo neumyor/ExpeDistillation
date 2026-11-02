@@ -59,32 +59,91 @@ def test_prompts_register_only_in_their_two_homes():
         f"{offenders}")
 
 
-def test_each_benchmark_registers_at_most_its_declared_prompts():
-    for package in sorted((ROOT / "benchmarks").iterdir()):
-        if not package.is_dir():
+def _module_constants(tree):
+    """Module-level ``NAME = "literal"`` assignments in one file."""
+    values = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            values[node.targets[0].id] = node.value.value
+    return values
+
+
+def _prompt_spec_name(call, constants):
+    """The ``name`` of one PromptSpec(...) call, or None when unresolved."""
+    spec = next((keyword.value for keyword in call.keywords
+                 if keyword.arg == "name"), None)
+    if isinstance(spec, ast.Constant) and isinstance(spec.value, str):
+        return spec.value
+    if isinstance(spec, ast.Name):
+        return constants.get(spec.id)
+    return None
+
+
+def _registered_names(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    constants = _module_constants(tree)
+    # Some plugins name a PromptSpec at module level and register the
+    # variable (searchqa); others call register(PromptSpec(...)) inline.
+    specs = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "PromptSpec"):
+            name = _prompt_spec_name(node.value, constants)
+            if name is not None:
+                specs[node.targets[0].id] = name
+    names = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "register"):
             continue
-        count = 0
-        declares_folder = False
+        argument = node.args[0] if node.args else None
+        name = None
+        if isinstance(argument, ast.Call):
+            name = _prompt_spec_name(argument, constants)
+        elif isinstance(argument, ast.Name):
+            name = specs.get(argument.id)
+        if name is None:
+            name = next((keyword.value.value for keyword in node.keywords
+                         if keyword.arg == "name"
+                         and isinstance(keyword.value, ast.Constant)), None)
+        if name is None:
+            raise AssertionError(
+                f"{path}: cannot resolve the registered prompt name")
+        names.add(name)
+    return names
+
+
+def test_each_benchmark_registers_only_prompts_its_plugin_declares():
+    """Every prompt a benchmark registers must be in its frozen set.
+
+    A plugin declares the prompts it runs under: ``task_prompt_name``, the
+    optional ``skill_folder_prompt_name`` and ``protocol_prompt_names``.
+    Stage 0 freezes exactly those. A registration outside the declared set
+    would either miss the freeze or leak a benchmark-private prompt into
+    every manifest of that benchmark.
+    """
+    from tests.helpers.plugins import ensure_plugin
+
+    for package in sorted((ROOT / "benchmarks").iterdir()):
+        if not package.is_dir() or not (package / "__init__.py").exists():
+            continue
+        plugin = ensure_plugin(package.name)
+        declared = {plugin.task_prompt_name}
+        if plugin.skill_folder_prompt_name is not None:
+            declared.add(plugin.skill_folder_prompt_name)
+        declared.update(plugin.protocol_prompt_names)
+        registered = set()
         for path in package.glob("*.py"):
-            source = path.read_text(encoding="utf-8")
-            tree = ast.parse(source)
-            if "skill_folder_prompt_name" in source:
-                declares_folder = True
-            for node in ast.walk(tree):
-                if (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id == "register"):
-                    count += 1
-        # One benchmark = one task prompt; the extra registrations a
-        # plugin may carry are the skill-folder capability's prompt
-        # (skill_folder_prompt_name, skill-folder M3) and its inline-
-        # catalog companion (the same name + "_INLINE", which stage 0
-        # freezes by that convention when it is registered) -- both
-        # freeze with the task prompt, so they neither miss the freeze
-        # nor leak. Anything else would.
-        cap = 3 if declares_folder else 1
-        assert count <= cap, (
-            f"benchmark package {package.name} registers {count} prompts; "
-            "one benchmark = one task prompt plus at most the declared "
-            "skill-folder prompt (extra registrations would either miss "
-            "the freeze or leak benchmark-private prompts)")
+            registered |= _registered_names(path)
+        assert registered <= declared, (
+            f"benchmark package {package.name} registers undeclared "
+            f"prompt(s) {sorted(registered - declared)}; declare them on "
+            "the plugin (task/folder/protocol names) so stage 0 freezes "
+            "them")

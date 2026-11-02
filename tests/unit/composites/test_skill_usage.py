@@ -137,3 +137,74 @@ def test_usage_rows_are_built_from_answer_sheets():
     assert rows[0]["task_id"] == TASK_ID
     assert rows[0]["read_skill_ids"] == [first["skill_id"]]
     assert rows[0]["delivery_status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# the local benchmarks: stored steps start at the model's first reply, so
+# the plugin states the delivery in the run's metrics
+# ---------------------------------------------------------------------------
+
+def _local_trajectory(actions, *, list_shown):
+    meta = {"skill_list_shown": True, "skill_reads": 0} if list_shown else {}
+    return Trajectory(
+        trajectory_id=make_trajectory_id(TASK_ID, "weak", 0),
+        task_id=TASK_ID, benchmark=BENCHMARK, model_role="weak",
+        model_name="weak-model", attempt_index=0,
+        steps=[Step(action=action, observation="") for action in actions],
+        correctness=False, meta=meta)
+
+
+def test_a_local_run_that_read_nothing_is_a_delivered_but_never_read():
+    manifest = _manifest()
+    trajectory = _local_trajectory(["Search[a]", "Finish[b]"],
+                                   list_shown=True)
+    row = build_usage_rows(task_id=TASK_ID, round_=0,
+                           executions=[_execution(trajectory)],
+                           folder=manifest)[0]
+    assert row["delivery_status"] == "ok"
+    assert row["available_list_present"] is True
+    assert row["read_skill_ids"] == []
+    assert row["unread_skill_ids"] == [
+        entry["skill_id"] for entry in manifest["files"]]
+
+    from expedistill.composites.skill_use import skill_used_in_attempt
+    use = skill_used_in_attempt(
+        skill_id=manifest["files"][0]["skill_id"], attempt=0,
+        delivery="folder_by_task", usage_row=row)
+    assert use.used is False
+    assert use.reason == "skill_never_read"
+
+
+def test_a_local_run_that_read_a_card_records_the_read():
+    manifest = _manifest()
+    first = manifest["files"][0]
+    trajectory = _local_trajectory(
+        [f"ReadSkill[{first['filename']}]", "Finish[b]"], list_shown=True)
+    row = build_usage_rows(task_id=TASK_ID, round_=0,
+                           executions=[_execution(trajectory)],
+                           folder=manifest)[0]
+    assert row["delivery_status"] == "ok"
+    assert row["read_skill_ids"] == [first["skill_id"]]
+    assert row["first_read_step"] == 0
+
+
+def test_a_run_without_the_plugin_statement_stays_unverified():
+    manifest = _manifest()
+    trajectory = _local_trajectory(["Search[a]"], list_shown=False)
+    row = build_usage_rows(task_id=TASK_ID, round_=0,
+                           executions=[_execution(trajectory)],
+                           folder=manifest)[0]
+    assert row["delivery_status"] == "unverified"
+
+
+def test_a_local_run_has_no_initial_prompt_step_to_skip():
+    manifest = _manifest()
+    local = _local_trajectory(["Search[a]", "Finish[b]"], list_shown=True)
+    stored_prompt = _local_trajectory(["TASK prompt", "echo hi\n"],
+                                      list_shown=False)
+    rows = [build_usage_rows(task_id=TASK_ID, round_=0,
+                             executions=[_execution(trajectory)],
+                             folder=manifest)[0]
+            for trajectory in (local, stored_prompt)]
+    assert rows[0]["first_agent_step"] == 0
+    assert rows[1]["first_agent_step"] == 1

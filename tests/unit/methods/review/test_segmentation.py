@@ -137,17 +137,18 @@ def _baseline_spec():
                    "arms": ["executor_strong", "executor_weak"]})
 
 
-def _learn_spec(write_lessons=False):
+def _learn_spec(write_lessons=False, **review):
     return LearnPhaseSpec(
         review={"name": "review", "K": 5,
-                "write_lessons": write_lessons},
+                "write_lessons": write_lessons, **review},
         author={"name": "distill_diagnose"},
         curate={"name": "none", "token_budget": BIG})
 
 
-def _exam_sequence(write_lessons=False):
+def _exam_sequence(write_lessons=False, **review):
     sequence = ["baseline", "learn", "exam", "learn", "test"]
-    phases = {"baseline": _baseline_spec(), "learn": _learn_spec(write_lessons),
+    phases = {"baseline": _baseline_spec(),
+              "learn": _learn_spec(write_lessons, **review),
               "exam": ExecutePhaseSpec(
                   role="exam", tasks="train",
                   delivery={"name": "per_skill"},
@@ -174,17 +175,19 @@ def _phase(sequence, phases, index):
                          spec=phases[name], task_ids=())
 
 
-def _seed_d_phase(store, *, strong=True, weak_attempts=2, strong_attempts=1):
+def _seed_d_phase(store, *, strong=True, weak_attempts=2, strong_attempts=1,
+                  n_steps=1):
     """The baseline phase's on-disk state: the strong arm all-success, the weak
     arm failing every attempt (the baseline gap that authorizes add)."""
     trajectories = []
     if strong:
         for attempt in range(strong_attempts):
-            trajectory = _trajectory("strong", attempt)
+            trajectory = _trajectory("strong", attempt, n_steps=n_steps)
             store.save(trajectory, "trajectories")
             trajectories.append(trajectory)
     for attempt in range(weak_attempts):
-        trajectory = _trajectory("weak", attempt, correctness=False)
+        trajectory = _trajectory("weak", attempt, correctness=False,
+                                 n_steps=n_steps)
         store.save(trajectory, "trajectories")
         trajectories.append(trajectory)
     specs = [
@@ -585,3 +588,70 @@ def test_write_lessons_still_obeys_the_segment_rule(tmp_path):
         ids.make_trajectory_id(TASK_ID, "strong", 0), 0)
     assert [row["skill_id"] for row in _outcomes(ctx.run_dir, "p02:learn")] \
         == [ids.make_skill_id(strong)]
+
+
+# ---------------------------------------------------------------------------
+# K = 1: the whole trajectory is the learning unit
+# ---------------------------------------------------------------------------
+
+def test_k1_rejects_a_split_and_keeps_the_whole_trajectory_as_one_unit(
+        tmp_path):
+    sequence, phases = _exam_sequence(K=1)
+    two_segments = [_cut(0, 3), _cut(3, 6)]
+    handles = {"author": make_fake_handle("author", [_distill_script()]),
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter", [
+                   json_script(two_segments), json_script([_cut(0, 6)])])}
+    ctx = _make_ctx(tmp_path, sequence, phases, handles)
+    _seed_d_phase(ctx.store, n_steps=6)
+
+    result = phase_learn.run(ctx, _phase(sequence, phases, 1))
+
+    # D7 refused the two-segment answer (more than K=1); the retry's
+    # single segment covers the whole trajectory.
+    assert len(handles["segmenter"].client.calls) == 2
+    subtask_id = ids.make_subtask_id(
+        ids.make_trajectory_id(TASK_ID, "strong", 0), 0)
+    subtask = ctx.store.load("subtasks", subtask_id, Subtask)
+    assert subtask.step_range == (0, 6)
+    assert ctx.store.ids("subtasks") == [subtask_id]
+    # One skill for the whole trajectory, its exam scene at the task start.
+    skill_id = ids.make_skill_id(subtask_id)
+    assert [row["outcome"] for row in _outcomes(ctx.run_dir, "p02:learn")] \
+        == ["added"]
+    provenance = [row for row in read_jsonl(
+        phase_bank_dir(ctx.run_dir, "p02:learn") / "provenance.jsonl")
+        if row["skill_id"] == skill_id]
+    assert [row["scene"]["step"] for row in provenance] == [0]
+    assert result.summary["task_list"] == {"add": 1, "superseded_rows": 0}
+
+
+# ---------------------------------------------------------------------------
+# accept_new: the add path's skills enter the library without a check
+# ---------------------------------------------------------------------------
+
+def _added_skill(tmp_path, **review):
+    sequence, phases = _exam_sequence(**review)
+    handles = {"author": make_fake_handle("author", [_distill_script()]),
+               "rewriter": make_fake_handle("rewriter", []),
+               "segmenter": make_fake_handle("segmenter",
+                                             [json_script([_cut()])])}
+    ctx = _make_ctx(tmp_path, sequence, phases, handles)
+    _seed_d_phase(ctx.store)
+    phase_learn.run(ctx, _phase(sequence, phases, 1))
+    skill_id = ids.make_skill_id(ids.make_subtask_id(
+        ids.make_trajectory_id(TASK_ID, "strong", 0), 0))
+    return ctx, ctx.store.load("skills", skill_id, Skill)
+
+
+def test_accept_new_lands_the_added_skill_as_accepted(tmp_path):
+    ctx, skill = _added_skill(tmp_path, accept_new=True)
+    assert skill.status == "accepted"
+    assert [(row["skill_id"], row["status"]) for row in
+            load_phase_bank(ctx.run_dir, "p02:learn")] \
+        == [(skill.skill_id, "accepted")]
+
+
+def test_the_default_leaves_the_added_skill_pending(tmp_path):
+    _, skill = _added_skill(tmp_path)
+    assert skill.status == "pending"

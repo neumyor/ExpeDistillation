@@ -250,14 +250,14 @@ def phase_label(index: int, name: str) -> str:
 class ExternalControlSpec:
     """The frozen score-file identity of an ``external_campaign``
     control: where the campaign's per-task scores live and which of its
-    models this run's weak executor is.
+    models this run's test executor is.
 
     ``path`` is resolved against the config file's directory at load
     time (the ``tasks``-path rule) and frozen absolute, so a resume from
     another cwd reads the same file. ``sha256`` pins the exact bytes
     (the control's numbers must not drift with a re-exported campaign
-    file), and ``model_key`` names the campaign's prefix for this run's
-    ``executor_weak`` (the archive covers several models; the wrong
+    file), and ``model_key`` names the campaign's prefix for the model the
+    test phase runs (the archive covers several models; the wrong
     prefix would compare the bank arm against a different model's
     numbers). The score-file format and the task-alignment checks are
     the loader's (composites/external_control.py), not core's.

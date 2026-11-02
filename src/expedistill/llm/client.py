@@ -378,6 +378,7 @@ class OpenAICompatClient:
             import json as _json
             from openai import (
                 APIConnectionError,
+                APIError,
                 APIResponseValidationError,
                 APIStatusError,
             )
@@ -415,6 +416,17 @@ class OpenAICompatClient:
                 raise InfrastructureError(
                     f"LLM endpoint unreachable for model {model}: "
                     f"type={type(exc).__name__}"
+                ) from exc
+            # A streaming response can fail with the base APIError (a 503
+            # "Too many requests" from the gateway does this): the SDK raises
+            # it from the stream iterator without an HTTP status object, so
+            # it misses APIStatusError above. It is the endpoint's failure,
+            # not a code bug -- send it through the retry budget.
+            if isinstance(exc, APIError):
+                status = getattr(exc, "status_code", None)
+                raise InfrastructureError(
+                    f"LLM endpoint stream error for model {model}: "
+                    f"status={status} type={type(exc).__name__}"
                 ) from exc
             raise
 

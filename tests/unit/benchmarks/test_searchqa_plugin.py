@@ -4,10 +4,8 @@ file / unknown ids), and full run_react roundtrips through the plugin with
 a scripted fake handle. No network, no eval repo: the eval seam is stubbed."""
 
 import importlib
-import json
 import os
 import string
-import types
 from pathlib import Path
 
 import pytest
@@ -27,6 +25,16 @@ from expedistill.benchmarks.searchqa.plugin import (
 from expedistill.infra.reliability import ConfigError
 from expedistill.llm import make_fake_handle
 from expedistill.prompts import PROMPTS
+from tests.helpers.searchqa_stub import (
+    fixture_items,
+    install_eval_repo_stub,
+    write_eval_dir,
+)
+from tests.helpers.skill_folder import (
+    CARD_BODY,
+    folder_task_meta,
+    write_skill_folder,
+)
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "searchqa"
 
@@ -37,44 +45,11 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "searchqa"
 
 @pytest.fixture
 def stub_eval_repo(monkeypatch):
-    """Stub the seam with the same evaluator contract the env tests use."""
-    evaluator = types.ModuleType("searchqa_stub.evaluator")
-
-    def evaluate(prediction, gold_answers):
-        correct = prediction.strip().lower() in {
-            str(gold).strip().lower() for gold in gold_answers}
-        score = 1.0 if correct else 0.0
-        return {
-            "em": score,
-            "f1": score,
-            "sub_em": score,
-            "predicted_answer": prediction,
-            "gold_answers": list(gold_answers),
-        }
-
-    evaluator.evaluate = evaluate
-    data = types.ModuleType("searchqa_stub.data")
-    data.load_items = lambda path: json.loads(
-        Path(path).read_text(encoding="utf-8"))
-    package = types.ModuleType("searchqa_stub")
-    package.evaluator = evaluator
-    package.data = data
-    monkeypatch.setattr(searchqa_env, "import_eval_repo", lambda: package)
-    return package
+    return install_eval_repo_stub(monkeypatch)
 
 
-def _fixture_items():
-    return json.loads((FIXTURES / "items.json").read_text(encoding="utf-8"))
-
-
-def _make_eval_dir(tmp_path, split_items):
-    """Lay out a fake materialized eval repo: data/searchqa_split/<split>/."""
-    for split, items in split_items.items():
-        split_dir = tmp_path / "data" / "searchqa_split" / split
-        split_dir.mkdir(parents=True)
-        (split_dir / "items.json").write_text(
-            json.dumps(items, ensure_ascii=False), encoding="utf-8")
-    return tmp_path
+_fixture_items = fixture_items
+_make_eval_dir = write_eval_dir
 
 
 def _task_for(item):
@@ -426,3 +401,102 @@ def test_aux_success_missing_meta_where_a_score_must_exist_is_a_bug():
         plugin.aux_success(_aux_traj(True, {"termination": "terminated"}))
     with pytest.raises(CodeBugError, match="searchqa"):
         plugin.aux_success(_aux_traj(False, {"termination": "terminated"}))
+
+
+# ----------------------------------------------------------------------
+# skill-folder execution (progressive disclosure)
+# ----------------------------------------------------------------------
+
+def _folder_task(tmp_path, names=("alpha", "beta")):
+    manifest, _, locations = write_skill_folder(tmp_path / "folder", names)
+    task = _task_for(_fixture_items()[0])
+    task.meta.update(folder_task_meta(manifest, tmp_path / "folder"))
+    return task, locations
+
+
+def test_the_plugin_declares_the_folder_capability():
+    assert SearchQAPlugin().skill_folder_prompt_name \
+        == "SEARCHQA_TASK_PROMPT_FOLDER"
+    assert "SEARCHQA_TASK_PROMPT_FOLDER" in PROMPTS
+
+
+def test_the_folder_prompt_is_the_plain_prompt_plus_the_read_rule():
+    plain = PROMPTS["SEARCHQA_TASK_PROMPT"].template
+    folder = PROMPTS["SEARCHQA_TASK_PROMPT_FOLDER"].template
+    assert "ReadSkill" not in plain
+    assert "ReadSkill[<location>]" in folder
+    # Removing the inserted lines gives the plain prompt back, so the two
+    # arms differ only by the skill-reading text.
+    kept = [line for line in folder.splitlines()
+            if "ReadSkill" not in line and "Skill cards" not in line]
+    assert [line for line in kept if line] \
+        == [line for line in plain.splitlines() if line]
+    assert {name for _, name, _, _ in string.Formatter().parse(folder)
+            if name} == {"skills_block", "instruction", "history"}
+
+
+def test_a_folder_unit_shows_the_card_list_and_hides_the_card_text(
+        stub_eval_repo, tmp_path):
+    task, locations = _folder_task(tmp_path)
+    handle = make_fake_handle(role="test", script=[
+        "Search[red cent]", "Finish[red cent]"])
+    SearchQAPlugin().run(task, handle, skills_block="CATALOG FALLBACK",
+                         workdir=tmp_path)
+    first_user = handle.client.calls[0]["user"]
+    assert "<available_skills>" in first_user
+    for location in locations:
+        assert f"<location>{location}</location>" in first_user
+    assert "ReadSkill[<location>]" in first_user
+    # Progressive disclosure: no card body; the TB catalog fallback unused.
+    assert CARD_BODY not in first_user
+    assert "CATALOG FALLBACK" not in first_user
+
+
+def test_opening_a_card_adds_its_text_to_the_next_prompt(
+        stub_eval_repo, tmp_path):
+    task, locations = _folder_task(tmp_path)
+    handle = make_fake_handle(role="test", script=[
+        f"ReadSkill[{locations[0]}]", "Search[red cent]",
+        "Finish[red cent]"])
+    outcome = SearchQAPlugin().run(task, handle, skills_block="",
+                                   workdir=tmp_path)
+    assert outcome.correctness is True
+    second_user = handle.client.calls[1]["user"]
+    assert CARD_BODY in second_user
+    assert f"action: ReadSkill[{locations[0]}]" in second_user
+    assert outcome.meta["skill_reads"] == 1
+    assert outcome.meta["skill_list_shown"] is True
+    # The read did not use one of the six search steps.
+    assert outcome.meta["steps_used"] == 2
+
+
+def test_the_environment_never_sees_the_read_action(
+        stub_eval_repo, tmp_path):
+    task, locations = _folder_task(tmp_path)
+    handle = make_fake_handle(role="test", script=[
+        f"ReadSkill[{locations[0]}]", "Finish[red cent]"])
+    outcome = SearchQAPlugin().run(task, handle, skills_block="",
+                                   workdir=tmp_path)
+    # A read the env had seen would have been an invalid action.
+    assert searchqa_env.INVALID_ACTION_MESSAGE not in [
+        step["observation"] for step in outcome.steps]
+    assert outcome.correctness is True
+
+
+def test_a_unit_without_a_folder_keeps_the_plain_prompt(
+        stub_eval_repo, tmp_path):
+    task = _task_for(_fixture_items()[0])
+    handle = make_fake_handle(role="test", script=["Finish[red cent]"])
+    outcome = SearchQAPlugin().run(task, handle, skills_block="",
+                                   workdir=tmp_path)
+    assert "ReadSkill" not in handle.client.calls[0]["user"]
+    assert "skill_reads" not in outcome.meta
+
+
+def test_an_empty_folder_manifest_runs_as_a_plain_unit(
+        stub_eval_repo, tmp_path):
+    task = _task_for(_fixture_items()[0])
+    task.meta["skill_folder"] = {"files": []}
+    handle = make_fake_handle(role="test", script=["Finish[red cent]"])
+    SearchQAPlugin().run(task, handle, skills_block="", workdir=tmp_path)
+    assert "ReadSkill" not in handle.client.calls[0]["user"]

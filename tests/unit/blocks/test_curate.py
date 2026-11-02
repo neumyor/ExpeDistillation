@@ -14,6 +14,7 @@ from expedistill.blocks.curate import assign_groups, find_similar, merge_skills
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError, ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
+from expedistill.prompts.learning_context import GENERIC
 from expedistill.prompts.registry import get as get_prompt
 
 
@@ -288,7 +289,8 @@ def test_assign_groups_wiring_and_result():
     result = assign_groups(SKILLS, handle)
 
     assert len(handle.client.calls) == 1
-    expected = get_prompt("GROUP").format(skills_listing=LISTING)
+    expected = get_prompt("GROUP").format(
+        **GENERIC.variables(), skills_listing=LISTING)
     assert handle.client.calls[0]["user"] == expected
     assert result == mapping
 
@@ -304,6 +306,7 @@ def test_assign_groups_summary_input_lists_summaries():
     result = assign_groups(skills, handle, grouping_input="summary")
 
     expected = get_prompt("GROUP").format(
+        **GENERIC.variables(),
         skills_listing="- s0: check the log\n- s1: restart safely")
     assert handle.client.calls[0]["user"] == expected
     assert result == {"s0": "a", "s1": "a"}

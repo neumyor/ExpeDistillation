@@ -53,8 +53,12 @@ def execution_from_trajectory(
     return ExecutionRecord(
         # A test phase runs the with-bank and control arms over the same
         # task/attempt trajectory ids; the unit id (which carries the arm's
-        # injection shape) keeps the two answer sheets distinct.
-        sheet_id=f"{unit_id}::{trajectory.trajectory_id}",
+        # injection shape) keeps the two answer sheets distinct. The suffix
+        # is the sample index rather than the trajectory id (which the
+        # artifacts carry in full): ALFWorld task ids are long game paths,
+        # and a sheet id that repeated one would percent-encode past the
+        # 255-byte filename limit.
+        sheet_id=f"{unit_id}::att{trajectory.attempt_index:02d}",
         unit_id=unit_id,
         phase_label=phase_label,
         task_ref=trajectory.task_id,
@@ -121,22 +125,23 @@ def execution_from_attempt(
 
 def execution_from_external(
         *, task_ref: str, unit_id: str, phase_label: str, reward: float,
-        sample_index: int, source: str, sha256: str,
+        sample_index: int, source: str, sha256: str, role: str,
         arm: str = "control") -> ExecutionRecord:
     """One external-campaign reward as an explicit external trial.
 
     There is no local trajectory or verifier evidence; ``source`` and
     ``sha256`` are mandatory so the provenance cannot be mistaken for a
-    local run.
+    local run. ``role`` is the model role whose campaign column the reward
+    comes from (the phase's executor).
     """
     return ExecutionRecord(
         sheet_id=f"external:{unit_id}:{sample_index}",
         unit_id=unit_id,
         phase_label=phase_label,
         task_ref=task_ref,
-        role="weak",
+        role=role,
         arm=arm,
-        model_role="weak",
+        model_role=role,
         model_name="external_campaign",
         sample_index=sample_index,
         rewards=[reward],

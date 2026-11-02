@@ -81,6 +81,18 @@ def _available_names(record: Any) -> Optional[List[str]]:
     return [name.strip() for name in _NAME_RE.findall(match.group(1))]
 
 
+def _list_shown(record: Any) -> bool:
+    """Whether the plugin itself recorded that it showed the card list.
+
+    The local benchmarks' stored steps start at the model's first reply, so
+    the list is not in them; their plugin states the delivery in the run's
+    metrics instead.
+    """
+    metrics = getattr(record, "metrics", None)
+    return isinstance(metrics, Mapping) and bool(
+        metrics.get("skill_list_shown"))
+
+
 def _delivery_status(folder: Mapping[str, Any],
                      available: Optional[List[str]],
                      read_ids: List[str]) -> str:
@@ -99,10 +111,15 @@ def _delivery_status(folder: Mapping[str, Any],
 
 
 def _first_agent_step(record: Any) -> Optional[int]:
-    """The first step after the initial prompt that carries an action."""
+    """The first step after the initial prompt that carries an action.
+
+    TB's stored steps start with the initial prompt; a local benchmark's
+    start at the model's first reply (``_list_shown``), so none is skipped.
+    """
     steps = _steps(record)
+    skipped = 0 if _list_shown(record) else 1
     for index, step in enumerate(steps):
-        if index == 0:
+        if index < skipped:
             continue
         if step.action.strip():
             return index
@@ -123,6 +140,8 @@ def build_usage_rows(*, task_id: str, round_: int,
     expected_ids = [entry["skill_id"] for entry in folder.get("files") or []]
     for record in records:
         available = _available_names(record)
+        if available is None and _list_shown(record):
+            available = _expected_names(folder)
         events = skill_read_events(record, folder)
         read_ids = [event["skill_id"] for event in events]
         read_set = set(read_ids)

@@ -677,3 +677,59 @@ def test_last_check_leaves_keep_rows_unchanged():
 
     assert [item.row.action for item in items] == ["keep"]
     assert items[0].row.reason == "the card is correct"
+
+
+def test_exam_phase_with_no_failed_trial_keeps_every_measured_skill():
+    """Every exam passed: no analysis runs, yet each measured skill still
+    gets its keep row (a pending skill is accepted, not left to rot)."""
+    sheet_a = _exam_sheet(SKILL, "exam-a", verdict="success")
+    sheet_b = _exam_sheet(OTHER, "exam-b", verdict="success")
+    report = PhaseReport(
+        phase_kind="exam", learning_usable=True, sheets=[sheet_a, sheet_b],
+        units=[_exam_unit("exam-a", SKILL), _exam_unit("exam-b", OTHER)])
+    handle = make_fake_handle("author", [])
+
+    result = trial_review.run_trial_review(
+        current=report, bank=[SKILL, OTHER], context=_exam_context(),
+        handles={"author": handle})
+
+    assert handle.client.calls == []
+    assert [(item.row.target_id, item.row.action, item.row.basis_unit)
+            for item in result.items] == [
+        (SKILL.skill_id, "keep", "exam-a"),
+        (OTHER.skill_id, "keep", "exam-b")]
+    assert result.trial_findings == [] and result.new_skill_requirements == []
+    assert not result.failed_targets and not result.model_errors
+
+
+def test_live_phase_with_no_failed_trial_keeps_the_measured_skill():
+    sheet = _sheet(correct=True)
+    report = PhaseReport(phase_kind="live", learning_usable=True,
+                         sheets=[sheet], units=[_unit(sheet)])
+    handle = make_fake_handle("author", [])
+
+    result = trial_review.run_trial_review(
+        current=report, bank=[SKILL], context=_context(),
+        handles={"author": handle})
+
+    assert handle.client.calls == []
+    assert [(item.row.target_id, item.row.action)
+            for item in result.items] == [(SKILL.skill_id, "keep")]
+
+
+def test_unanalyzable_failed_trials_decide_nothing_yet():
+    """A failed trial whose analysis broke leaves no finding, but the phase
+    must not keep its skill by default: the resume retries the analysis."""
+    sheet = _exam_sheet(SKILL, "exam-a")
+    report = PhaseReport(phase_kind="exam", learning_usable=True,
+                         sheets=[sheet], units=[_exam_unit("exam-a", SKILL)])
+    handle = make_fake_handle("author", [json_script({
+        "reason": "unclear", "exam_skill_issue": " ", "profile_note": "",
+        "skills": [], "new_skill_note": ""})])
+
+    result = trial_review.run_trial_review(
+        current=report, bank=[SKILL, OTHER], context=_exam_context(),
+        handles={"author": handle})
+
+    assert result.items == []
+    assert result.model_errors == {sheet.sheet_id}

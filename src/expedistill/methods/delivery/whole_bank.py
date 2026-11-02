@@ -15,7 +15,7 @@ before the artifacts existed, so that is what gets injected whole.
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the curated skill bank (Skill objects or bank rows, whatever
 ``inject.bank_reference`` accepts), ``tasks`` the phase's tasks in any
-form carrying a task identity, and ``params`` the empty WholeBankParams.
+form carrying a task identity, and ``params`` the WholeBankParams (``verbatim``, default off).
 One row per task, every row the same fixed (bank digest, D9 block)
 pair.
 """
@@ -35,7 +35,7 @@ def resolve(bank: Sequence[Any], tasks: Any,
     """One row per task: the whole accepted bank, one fixed injection."""
     accepted = units.accepted_bank(bank)
     injected = bank_reference(accepted)
-    block = format_skills_block(accepted)
+    block = format_skills_block(accepted, verbatim=params.verbatim)
     return [units.make_row(units.task_ref(task), injected, block)
             for task in tasks]
 

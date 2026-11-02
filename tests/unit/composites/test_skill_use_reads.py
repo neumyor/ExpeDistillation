@@ -165,3 +165,42 @@ def test_a_duplicate_file_name_is_a_loud_bug():
         {"skill_id": _SKILL_B, "version": 3, "filename": _FILE_A}]}
     with pytest.raises(CodeBugError, match="twice"):
         skill_files_read(_trajectory(), manifest)
+
+
+# ---------------------------------------------------------------------------
+# the local benchmarks' read action
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("action", [
+    f"ReadSkill[{_FILE_A}]",
+    f"> ReadSkill[{_FILE_A}]",
+    "ReadSkill[traj-tb-t1-strong-00-seg00-skill]",
+    f"ReadSkill['{_FILE_A}']",
+    f"ReadSkill[./{_FILE_A}]",
+])
+def test_a_readskill_action_counts_as_a_read(action):
+    assert skill_files_read(_trajectory(action), _MANIFEST) == [_SKILL_A]
+
+
+def test_a_readskill_of_an_unlisted_card_is_not_a_read():
+    trajectory = _trajectory("ReadSkill[other-skill/SKILL.md]",
+                             "Search[a]", "look")
+    assert skill_files_read(trajectory, _MANIFEST) == []
+
+
+def test_readskill_and_cat_reads_share_one_first_read_order():
+    trajectory = _trajectory(
+        f"ReadSkill[{_FILE_B}]",
+        _cat(f"/opt/openclaw-skills/t1/{_FILE_A}"),
+        f"ReadSkill[{_FILE_B}]")
+    assert skill_files_read(trajectory, _MANIFEST) == [_SKILL_B, _SKILL_A]
+
+
+def test_every_readskill_event_keeps_its_step_and_original_command():
+    from expedistill.composites.skill_use import all_skill_read_events
+    trajectory = _trajectory(
+        f"ReadSkill[{_FILE_A}]", "look", f"> ReadSkill[{_FILE_A}]")
+    events = all_skill_read_events(trajectory, _MANIFEST)
+    assert [(event["step_index"], event["command"]) for event in events] \
+        == [(0, f"ReadSkill[{_FILE_A}]"), (2, f"> ReadSkill[{_FILE_A}]")]
+    assert {event["skill_id"] for event in events} == {_SKILL_A}

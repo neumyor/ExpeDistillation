@@ -87,7 +87,7 @@ def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
                 exam.reference_answer,
                 skill_catalog,
                 selected,
-                "",
+                attempt.selection_reason,
                 attempt.weak_answer,
                 judge_handle,
                 usage=usage,
@@ -102,13 +102,17 @@ def judge_with_persistent_budget(store: Store, exam: Exam, attempt: Attempt,
 
 
 def _selected_skill_text(attempt: Attempt) -> str:
-    """The skill-read turn recorded in the attempt, for the judge prompt.
+    """What the answerer opened, for the judge prompt: the files it read
+    and their text.
 
-    The first step is the selection turn; the second is the plan.  A
-    comment-only first step is the bare control (or the regression
-    fallback), so it contributes no selected-skill text.
+    The first step is the selection turn (its action lists the files, its
+    observation holds their bodies); the second is the plan. A comment-only
+    action (the bare control, a fixed regression body) names no file, so
+    only the body, if there is one, is shown.
     """
     if not attempt.steps:
         return ""
-    action = attempt.steps[0].action
-    return action if action and not action.startswith("#") else ""
+    step = attempt.steps[0]
+    files = step.action if step.action and not step.action.startswith("#") \
+        else ""
+    return "\n\n".join(part for part in (files, step.observation) if part)

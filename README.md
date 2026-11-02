@@ -180,8 +180,8 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 |---|---|
 | `role` | 相位角色，显式声明，加载期核对与字段一致。执行相位四选一：`baseline` / `exam` / `live` / `test`；学习相位恒为 `learn` |
 | `tasks` | 跑冻结的哪个列表：`train` 或 `test`（`test` 角色与 `test` 列表是同一件事，两者必须同时成立） |
-| `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank` / `retrieval` / `group_by_task` / `folder_by_task` / `folder` / `exam_folder`（live 的逐任务文件夹交付，只用 `real` 执行，流程见 5.4）/ `folder`（test 的技能文件夹交付，与 `real_folder` 执行一对一配对，流程见 5.5）；说明见 `src/expedistill/methods/delivery/README.md` |
-| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（泛化考试：选技能 + 写计划，不跑真实环境）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 没有参数，`exam` 带 `max_skill_reads` / `bare_control` / `leak_audit`；说明见 `src/expedistill/methods/execution/README.md` |
+| `delivery` | 交付方法（一个带 `name` 的映射）：`none` / `whole_bank`（可选 `verbatim: true`，技能文本逐字节原样注入，用于其他方法产出的技能文档）/ `retrieval` / `group_by_task` / `folder_by_task` / `folder` / `exam_folder`（live 的逐任务文件夹交付，只用 `real` 执行，流程见 5.4）/ `folder`（test 的技能文件夹交付，与 `real_folder` 执行一对一配对，流程见 5.5）；说明见 `src/expedistill/methods/delivery/README.md` |
+| `execution` | 执行方法：`real`（真实 benchmark 执行）/ `real_folder`（真实执行，技能以文件夹送进执行环境，与 `folder` 交付一对一配对）/ `exam`（泛化考试：选技能 + 写计划，不跑真实环境）；`real` 带参数（`arms`、`n_attempts`、`max_injection_tokens`），`real_folder` 只带 `executor`（`executor_weak` 默认 / `executor_strong`，决定 test 相位由哪个模型做题），`exam` 带 `max_skill_reads` / `bare_control` / `leak_audit`；说明见 `src/expedistill/methods/execution/README.md` |
 | `compare` | 对照来源（可选）：`against` 指向更早的相位名、`fresh_bare`（相位内现场跑一条裸臂）或 `external_campaign`（对照读外部 campaign 的冻结成绩文件，零执行，只有 test 角色相位可用，且必须带 `external` 块钉住文件身份：`path`（相对路径相对配置文件所在目录解析，冻结为绝对路径）+ `sha256`（成绩文件字节的校验和，防漂移）+ `model_key`（campaign 汇总里对应本 run 弱模型的前缀））；对照口径 = 每任务取前 `n_attempts_weak` 次采样的奖励均值（与旧外部对照报告的"前 3 次"对齐列同口径），`rule` 指定比较规则名 |
 | `acceptance` | 验收判分规则名（可选；缺省用 benchmark 的默认绑定，TB 是 `tb_scorer`） |
 
@@ -190,7 +190,7 @@ reward + raw correctness）、coverage（这张 trial 该不该有、有没有�
 | 字段 | 说明 |
 |---|---|
 | `role` | 恒为 `learn` |
-| `review` | 审查方法：把决策和找证据合成一个入口。参数 `decision: task_level|skill_level|trial_level`（P04/P06 的策略，默认 `task_level`；`trial_level` 逐 trial 分析）、`unread_in_won_group: delete|keep`（未读但组赢时的策略）、`before_steps` / `after_steps`（归因窗口，默认 10 / 10）、`K` / `retry_limit` / `write_lessons`（P02 add 的切段预算）；说明见 `src/expedistill/methods/review/README.md` |
+| `review` | 审查方法：把决策和找证据合成一个入口。参数 `decision: task_level|skill_level|trial_level`（P04/P06 的策略，默认 `task_level`；`trial_level` 逐 trial 分析）、`unread_in_won_group: delete|keep`（未读但组赢时的策略）、`before_steps` / `after_steps`（归因窗口，默认 10 / 10）、`K` / `retry_limit` / `write_lessons`（P02 add 的切段预算）、`revise_scope` / `new_skills` / `accept_new`（消融开关，见 2.7）；说明见 `src/expedistill/methods/review/README.md` |
 | `author` | 写作方法：`distill_diagnose`（默认，无参数，逐 task 逐段写）或 `cluster_by_trigger`（跨 add-authorized task 的 subtask：先分五个 trigger 族，再族内聚类，最后每类写一条 skill；参数 `max_cards_per_prompt` / `max_chars_per_card` / `min_cluster_size` / `classify_retry_limit` / `cluster_retry_limit` / `skill_retry_limit`）；说明见 `src/expedistill/methods/author/README.md` |
 | `curate` | 整理方法：`agentbrew`（带 `merge_check` / `token_budget` / `rounds` / `drop_low_value` / `similarity_input` / `grouping_input`）或 `none`（带 `token_budget`）；`merge_check` 默认 `none`（2026-10-19 起，原为 `exam`），`drop_low_value` 默认 `false`（开启后 G7 标出的低价值技能在合并前丢弃，原因 `low_value`），`similarity_input` 默认 `full`（`summary` 时 G7 只看编号 + 摘要，缺摘要直接报错），`grouping_input` 默认 `full`（`summary` 时 G9 只看编号 + 摘要，缺摘要直接报错；与 `similarity_input` 独立），见 `docs/decisions/curation_generalize_20261019.md` 与 `docs/decisions/curation_grouping_input_20261020.md`；参数说明见 `src/expedistill/methods/curation/README.md`；`token_budget` 是防注入块超上下文的安全阀，取正整数，或 `null` = 无护栏（2026-10-16 用户裁决：token 上限退出预登记参数集，v4 世界的正式拼法） |
 
@@ -378,10 +378,24 @@ v5 → v6 的身份变化：学习相位的 `evidence` / `attribution` / `decisi
 36 × 2 × 2 = **144 种**。test 相位对照来源还有第三种：`external_campaign`
 （对照读外部 campaign 冻结成绩文件，零执行，见 5.5；另两种是相位复用
 与 `fresh_bare`），只影响对照臂的取数方式，不新增方法族。folder
-交付目前只有 tb 的插件声明支持（插件
-能力位 `skill_folder_prompt_name`，见 5.5 与 3.6），searchqa / alfworld
-配 folder 的配置能通过加载，test 相位派发前被相位级能力检查拒绝——与
-技能库空不空无关，逐单元的 E1 守卫保留作第二道。
+交付由插件用能力位 `skill_folder_prompt_name` 声明支持（见 5.5 与 3.6），
+tb、searchqa、alfworld 三个插件都已声明。配 folder 的配置落到未声明的插件时，
+test 相位派发前被相位级能力检查拒绝——与技能库空不空无关，逐单元的 E1
+守卫保留作第二道。
+
+### 2.7 学习相位的消融开关
+
+`review` 槽位有三个开关，缺省值复现原方法，所以旧配置不变：
+
+| 开关 | 取值 | 作用 |
+|---|---|---|
+| `revise_scope` | `both`（缺省）/ `body` / `trigger` | 限制考试路径的改写能改技能的哪一部分。**触发条件** = `summary` + `[When to use]`，是读者在技能目录里先看到的那一行；**正文** = `[Steps]` + `[Do not use when]`，是读者打开卡片后才看到的。`body` 保持触发条件逐字节不变，`trigger` 保持正文逐字节不变。提示词里会告知改写模型它的范围（`REVISION_SCOPE_BODY` / `REVISION_SCOPE_TRIGGER`），模型输出再按分节拼接，范围之外的部分一律取自当前版本。实战路径不支持，配置了会报错 |
+| `new_skills` | `true`（缺省）/ `false` | `trial_level` 聚合出的跨任务新技能需求是否写成新技能。关掉时需求照常记录，回执为 `not_written_new_skills_off` |
+| `accept_new` | `false`（缺省）/ `true` | P02 add 写出的技能直接成为已接受成员，不经过检验。没有后续执行相位的序列用它让技能能进入终测 |
+
+改写新技能的需求（`trial_level` 的新增）不受 `revise_scope` 约束：新技能没有"当前版本"可冻结。
+
+`K: 1` 让切段每条轨迹只出一段，整条轨迹成为学习单元：写作、考试切点（任务起点）和审阅都以整条轨迹为单位。
 
 ---
 
@@ -400,7 +414,10 @@ v5 → v6 的身份变化：学习相位的 `evidence` / `attribution` / `decisi
    角色表里取），积木内部不写死"强模型"或"弱模型"。
 3. **跟 benchmark 有关的东西打包成一个 benchmark 插件**：执行 runner、
    任务加载、轨迹视图的截断规则、执行任务 prompt 四样，放在同一个插件目录
-   里，通过插件注册表按名字取用。其余积木只处理统一格式的对象，对
+   里，通过插件注册表按名字取用。写作、改写、审阅用的学习提示词也带 benchmark
+   的词汇（智能体是谁、能力族、最终动作、五个触发时机短语），插件用
+   `learning_context` 声明，经模型句柄的 `prompt_defaults` 填进提示词的词汇槽，
+   整份词汇写进 manifest。其余积木只处理统一格式的对象，对
    benchmark 无感知。加一个 benchmark = 加一个插件目录。
 4. **所有模型调用走同一个基础件**（B1 调用模型），统一处理输出格式错误的
    重试、用量记账和请求原文落盘。唯一例外是 E1 里执行 agent 的模型调用：
@@ -492,7 +509,7 @@ E1 内部的 runner：
 |---|---|---|
 | TB runner | TerminalBench | 委托 Harbor + 腾讯沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地一步一步执行到结束（外层 `benchmark/searchqa-eval/`） |
-| ALFWorld runner | ALFWorld | 本地一步一步执行到结束（外层 `benchmark/alfworld-eval/`，须用其 venv 并加载 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC`） |
+| ALFWorld runner | ALFWorld | 本地一步一步执行到结束，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0 / 4096 输出 / 50 步）；须用外层 venv 并加载 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
 
 两套本地 runner 的每局步数上限用环境变量配：SearchQA 是
 `EXPEDISTILL_SEARCHQA_MAX_STEPS`（默认 6），ALFWorld 是
@@ -572,6 +589,7 @@ E1 内部的 runner：
 | — | 空洞记录 | 已接受基础设施空洞（什么叫空洞见 5.9）的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
 | — | 考卷状态读取 | 从存量记录读出考题的已判作答与裸答 | `composites/acceptance_skill_status.py` |
 | — | 装配工具 | 从源 run 按 train 溯源装配新 run（`assemble-reuse` 子命令；读旧版本源 manifest 时经 `core/config_upgrade.py` 的升级纯函数做身份核对） | `stages/assemble_reuse.py` |
+| — | 分叉工具 | 把已完结 run 的前 K 个相位（相位目录和运行级对象库）拷进新 run，让新配置从第 K+1 个相位接着跑（`fork-run` 子命令；前缀之后源 run 还有 learn 相位时，技能库按前缀最后一个 learn 的库产物重建） | `stages/fork_run.py` |
 
 组合积木负责落盘和续跑：每一步的产物按确定 ID 存进 B3，再次运行时已完成的
 单元直接读盘跳过。功能积木本身不读写磁盘。总要求：**在任何一处崩溃后续跑，
@@ -645,11 +663,14 @@ E1 内部的 runner：
 | 选技能 / 写计划 | EXAM_TRIGGER / EXAM_PLAN | answerer（exam 相位、整理的回归考试） |
 | 判卷 | EXAM_JUDGE | judge（exam 相位、整理的回归考试） |
 | 改写 skill | G6 | rewriter（学习相位 revise，exam 证据路径） |
+| 改写范围提示 `REVISION_SCOPE_BODY` / `REVISION_SCOPE_TRIGGER` | G6 的 `{scope_section}` 槽位 | rewriter（`revise_scope` 不是 `both` 时） |
+| SKILL_APPLICABILITY_JUDGE / SKILL_ADHERENCE_JUDGE | `judge-skills`（3.8） | judge（分析工具，不属于相位） |
 | 找相似、冲突与低价值 | G7 | curator（最末学习相位） |
 | 合并 skill | G8 | curator（最末学习相位） |
 | 分组 | G9 | curator（最末学习相位） |
 | 执行任务（每个 benchmark 一份） | E1 的 runner | executor_strong / executor_weak（各执行相位） |
-| 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak（test 相位 real_folder） |
+| 执行任务·技能文件夹（`TB_SKILL_FOLDER_GUIDANCE` 作为任务级 `SKILL.md`；每个技能是 `<skill>/SKILL.md`，由 Terminus 自己发现） | E1 的 TB runner（folder 单元） | executor_weak / executor_strong（test 相位 real_folder，由 `executor` 选） |
+| 执行任务·技能文件夹（本地 benchmark：`SEARCHQA_TASK_PROMPT_FOLDER`、`ALFWORLD_TASK_PROMPT_FOLDER`，基础提示词加读取动作与使用规则；`{skills_block}` 放 `<available_skills>` 目录。SearchQA 的读取动作是整行 `ReadSkill[<位置>]`，ALFWorld 走统一协议，读取动作嵌在 `<action>…</action>` 里） | E1 的本地 runner（folder 单元） | executor_weak / executor_strong（test 相位 real_folder、live 相位 folder_by_task） |
 | SKILL_ATTEMPT_ATTRIBUTION | G12 | author（学习相位 revise，每窗口一次） |
 | SKILL_ATTEMPT_REVISION | G11 | rewriter（学习相位 revise，逐 skill 整条重写） |
 | TRIAL_FAILURE_ANALYSIS | trial_level review（live 相位） | author（逐失败 trial 并发） |
@@ -661,10 +682,13 @@ E1 内部的 runner：
 **全部方法 prompt 全量冻结**：`prompts/__init__.py` 的 import 清单登记
 每个方法 prompt，**每个 run 的 manifest 都冻结全部已注册方法 prompt 的
 digest**（外加本 benchmark 的任务 prompt；插件声明了技能文件夹能力时，
-能力位指向的 folder prompt 一并冻结，名字未注册是配置错误）。两条静态
-测试守住冻结面：
+能力位指向的 folder prompt 一并冻结；插件用 `protocol_prompt_names`
+声明执行协议还会用到的其他 prompt——例如 ALFWorld 的 step-1 模板、系统
+消息与纠错请求——这些也逐一冻结。声明了名字却没注册是配置错误）。两条
+静态测试守住冻结面：
 `prompts/*.py` 每个模块必须进 import 清单；prompt 注册只允许出现在
-`prompts/` 与 `benchmarks/<名字>/`。改一个字的 prompt 文本即视为新实验，
+`prompts/` 与 `benchmarks/<名字>/`，且每个 benchmark 注册的每个名字都必须
+在插件的上述声明里（否则冻结面会漏）。改一个字的 prompt 文本即视为新实验，
 必须新建 run 目录。
 
 ### 3.7 代码目录
@@ -673,6 +697,32 @@ digest**（外加本 benchmark 的任务 prompt；插件声明了技能文件夹
 基础件在 `core/`、`llm/`、`prompts/`、`infra/`、`inject/`；benchmark 插件
 在 `benchmarks/`；功能积木在 `blocks/`；组合积木在 `composites/`；
 方法驱动与参数契约在 `methods/`；相位流程在 `stages/`。
+
+### 3.8 论文分析工具
+
+这些工具读已完结的 run，结果写到 run 之外的目录，从不写被读的 run。输出目录的首次设置
+写进 `analysis_config.json`，续跑时设置不同即拒绝（两个答题模型的行混进一个文件，是没有人
+跑过的结果）。
+
+| 工具 | 回答什么 | 模型调用 |
+|---|---|---|
+| `import-bank`（`stages/import_bank.py`） | 其他方法产出的技能（markdown 文档、`<名字>/SKILL.md` 文件夹、notes 行）怎样在本仓库的 test 相位下评测：写成测试专用 run 的已接受技能库，技能编号 `import/<来源>/<键>`，无轨迹来源 | 无 |
+| `judge-skills`（`stages/judge_skills.py`，`blocks/adherence.py`，`composites/trigger_metrics.py`） | 一个 test 或 live 相位里，技能目录展示后：该适用的卡有没有被打开（触发召回）、不适用的卡有没有被打开（误触发）、打开之后步骤有没有被执行（遵循度）。适用性与遵循度由裁判模型对照轨迹判定 | 每个 trial 一次适用性判定，每张被打开的卡一次遵循度判定 |
+| `exam-replay`（`stages/exam_replay.py`） | 同一批考题、同一个技能库，换一个答题模型：召回、误触发、计划通过率。写入全新的对象仓，不读不写源 run 的作答 | 每道考题一次选技能、一次写计划、一次判卷 |
+| `paper-tables`（`stages/paper_tables.py`，`composites/paired_stats.py`） | 已完结的 run 之间的配对比较：按任务自助法的置信区间、胜负平、McNemar 精确检验、单臂噪声底；表格的行列顺序跟随 spec，不按结果排序 | 无 |
+
+预登记指标（看结果前固定，不选择口径）：触发召回 = 打开且适用的（trial, 卡）对 / 适用的对；
+误触发率 = 打开且不适用的对 / 打开的对（两者都在 (trial, 卡) 对上汇总，不按 trial 平均）；
+遵循度 = 被打开的卡的步骤得分均值（followed 记 1、partial 记 0.5、skipped 记 0，
+not_reached 不计）；成功率按"适用且打开 / 适用未打开 / 无适用卡"分层报告。
+`paper-tables` 的主指标是条件口径的 avg@N，保守口径与 pass@N 同时写进 JSON；无效、缺失、
+空洞和未判分的 trial 不当作 0，列在 `meta["unscored"]`。
+
+实验配置由 `scripts/run/build_paper_configs.py` 按实验矩阵生成（`configs/experiments/*_paper_*.yaml`），
+各臂与参照臂的差异由 `--print-index` 打印，测试断言每个消融臂只改变预期的键。
+设计与取舍见 `docs/decisions/paper_experiments_code_20261030.md`、`ablation_switches_20261030.md`、
+`skill_use_analysis_20261030.md`、`paper_statistics_20261030.md`、`external_baselines_20261030.md`、
+`learning_context_20261030.md`。
 
 ---
 
@@ -729,7 +779,7 @@ Provenance（技能版本的来源，值对象，每个版本一条）
 Attempt（作答记录）
   attempt_id, exam_id, skill_id + skill_version(都为 null = 裸答),
   purpose(bare / acceptance / regression), weak_answer,
-  steps(选技能与计划的作答轮次),
+  steps(选技能与计划的作答轮次), selection_reason(作答者打开这些技能的理由；裸答为空),
   judge_verdict(null = 已作答、尚未判卷), judge_reason, retry_round
 ```
 
@@ -773,7 +823,7 @@ R2b 之后，"这次运行结果如何"由三样东西分开表达：
 
 ```
 <run>/
-  manifest.json                  冻结的输入与协议
+  manifest.json                  冻结的输入与协议（含 benchmark 的学习词汇 `learning_context`）
   ASSEMBLED_FROM.md              装配溯源（仅装配产出的 run 有）
   run.lock                       run 目录排他锁（B7），记持有者 pid
   pipeline_log.jsonl             逐步完成的摘要账本（key 恒为 "stage"，
@@ -1060,14 +1110,36 @@ curation 的合并产物不考（整理阶段的合并回归考试复用各源�
   库指纹与相位库不符是代码 bug 停机）。支持技能文件夹的插件把目录送进
   执行环境（TB：目录随既有 skills 上传链进沙箱 `/opt/openclaw-skills/`；
   上传缓存递归打包，缓存键是清单列出的每个文件的字节摘要）。插件用能力位
-  `skill_folder_prompt_name` 声明支持（目前只有 tb 声明，默认指向
-  `TB_TASK_PROMPT_FOLDER`）；实际上传的任务级 `SKILL.md` 是
+  `skill_folder_prompt_name` 声明支持（tb 指向 `TB_TASK_PROMPT_FOLDER`，
+  searchqa 与 alfworld 的声明见下一段）；tb 实际上传的任务级 `SKILL.md` 是
   `TB_SKILL_FOLDER_GUIDANCE`，它指向 `<available_skills>` 和挂载路径。
+  **本地 benchmark（searchqa、alfworld）的渐进式披露**：这两个插件没有 shell
+  也没有 Harbor，`benchmarks/skill_folder.py` 让本地执行循环提供同一份
+  契约，评测环境本身（外层 `benchmark/alfworld-eval`、`benchmark/searchqa-eval`）
+  完全不改。提示词里只有 `<available_skills>` 目录（名称、描述、位置，XML
+  形状与 Terminus 一致，内容读自物化文件的 YAML 头）；模型回复读取动作时，
+  循环自己返回整份 `SKILL.md`，评测环境收不到这个动作，读取也不占环境步数。
+  每次尝试最多打开 3 张卡（提示词里写明，属于协议常量）；超出的请求被拒绝
+  且占一步，位置写错得到报错观察并占一次读取额度，所以只读不做的回复序列
+  最终会耗尽预算。位置可写完整的 `<目录>/SKILL.md`，也可只写目录名。
+  searchqa 走共用 ReAct 循环，读取动作是整行的 `ReadSkill[<位置>]`；alfworld
+  走统一协议循环（见 3.5 的 E1），读取动作必须是协议格式
+  `<think>…</think><action>ReadSkill[<位置>]</action>`，循环在把动作交给环境
+  之前拦下它。folder 提示词（`SEARCHQA_TASK_PROMPT_FOLDER`、
+  `ALFWORLD_TASK_PROMPT_FOLDER`）由基础提示词派生，只多出读取动作和一段
+  使用规则：卡片可选，描述与当前情境匹配才打开，任何一步都可打开；不含
+  "必须至少读一张"这类强制读取的措辞。每条轨迹的
+  `meta` 带 `skill_list_shown` 与 `skill_reads`；`skill_use` 把
+  `ReadSkill[...]` 与 `cat` 同等看待，读取集、归因窗口和 trial 级审阅因此对
+  本地与 TB 使用同一套逻辑；`skill_usage` 据 `skill_list_shown` 把零读取的
+  尝试判为"已交付、未读"，而 TB 因为存储的步骤不含初始提示，零读取仍是
+  "未验证"。
   folder 相位落到不支持的插件，test 相位驱动在派发前就报配置错误停机——
   与技能库空不空无关，逐单元的 E1 守卫保留作第二道。空已接受集不物化、
   单元裸跑（空注入是空串：不渲染一个只剩表头的空目录文件）。
-  `real_folder` 执行没有自己的执行参数，test 相位的采样深度沿用全局
-  `n_attempts_weak`，与旧 test 相位行为一致；执行过程零拦截零预算，模型
+  `real_folder` 执行只有一个参数 `executor`（默认 `executor_weak`，与旧 test 相位
+  行为一致），test 相位的采样深度沿用该执行者的全局次数（`n_attempts_weak` 或
+  `n_attempts_strong`），单元、轨迹和外部对照记录的角色也随它；执行过程零拦截零预算，模型
   实际读了哪些技能文件，记录在轨迹的 cat 命令里，事后由纯函数解析
   （`composites/skill_use.py`：匹配完整相对路径 `<skill>/SKILL.md`，
   或同一行里同时出现唯一的技能目录名和 `SKILL.md`，首读序去重，只读轨迹
@@ -1407,6 +1479,11 @@ ruff check src tests scripts
 expedistill run --config <配置文件> --run-dir <run 目录> [运行设置]
 expedistill summary --run-dir <run 目录>
 expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置> --run-dir <新 run 目录> [--level bank|baseline]
+expedistill fork-run --source-run <源 run 目录> --config <新配置> --run-dir <新 run 目录> --through pNN
+expedistill import-bank --source <路径> --source-format markdown_file|skill_folder|notes_jsonl --run-dir <新 run 目录> --origin <方法名>
+expedistill judge-skills --run-dir <run 目录> --out-dir <输出目录> --phase pNN:<名> [--arm with_bank] [--bank-phase 标签] [--judge-model 模型]
+expedistill exam-replay --run-dir <run 目录> --out-dir <输出目录> --answerer-model <模型> [--judge-model 模型] [--bank-phase 标签] [--max-skill-reads N]
+expedistill paper-tables --spec <JSON> [--out-md 路径] [--out-json 路径] [--n-boot 10000] [--seed 0] [--metric avg_at_n|avg_at_n_conservative|pass_at_n]
 ```
 
 - `run` 每完成一个相位打印一行摘要；同一条命令重跑即续跑；
@@ -1420,6 +1497,20 @@ expedistill assemble-reuse --source-run <源 run 目录> --config <复用配置>
   技能仓当前状态；test 相位全新执行，设计如此；v3 源的生成失败行不拷贝，
   新 run 的首个学习相位会真实重试它们——有模型调用，逐项披露见
   ASSEMBLED_FROM）、`baseline`（只拷摸底轨迹，其余按当前协议全新执行）。
+- `import-bank`、`judge-skills`、`exam-replay`、`paper-tables` 的用途见 3.8。前三者
+  的 `--run-dir` / `--out-dir` 约束一致：输出目录不能在被读的 run 里。`judge-skills` 与
+  `exam-replay` 缺省用被读 run 冻结的 judge 模型，并带着该 run 冻结的 token 预算、
+  模型参数和 benchmark 词汇构造句柄；`paper-tables` 的数值错误退出码为 2。
+- `fork-run` 把已完结、空闲的源 run 的前 K 个相位（`--through p05` 是 p01 到 p05）
+  连同运行级对象库拷进新 run 目录，零模型调用；新配置必须以同样的 K 个相位开头、
+  定义相同，其余影响这些相位的键也要一致，后面的相位、test 划分和任务清单可以不同。
+  被拷贝的 learn 相位还必须在两条序列里处于同一侧：是否还有后续检查（决定末次决策
+  行为）、是否序列最后一个 learn（决定是否整理）。前缀之后源 run 若还有 learn 相位，
+  运行级技能库已被它改写，工具按前缀最后一个 learn 的库产物重建技能库（核对库产物与
+  旁边记录的 `bank_reference` 一致，其余技能必须能证明是前缀成员的后续合并产物，否则
+  拒绝）；前缀之后若有会写共享对象库的 execute 相位则拒绝。新 run 首次启动时自己冻结
+  manifest，被拷贝的相位走普通续跑路径通过，前缀之后的第一个相位全新执行；前缀的用量
+  留在源 run。拷贝了什么、没拷什么写在新 run 根目录的 `FORKED_FROM.md`。
 
 ### 运行设置（只影响"怎么跑"，不进配置、不进 manifest）
 

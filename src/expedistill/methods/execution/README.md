@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `real` | 在 benchmark 里真做题 | baseline（摸底）、live（实战验收）、test（最终测试） | 见下 |
 | `exam` | 现场复原场景，弱模型选技能并写计划（判卷、泄题检查归验收） | exam（泛化考试），只能用它 | `max_skill_reads` / `bare_control` / `leak_audit` |
-| `real_folder` | 和 `real` 一样真做题，但技能以文件夹形式放进运行环境 | test（最终测试），必须配 `folder` 交付 | 无 |
+| `real_folder` | 和 `real` 一样真做题，但技能以文件夹形式放进运行环境 | test（最终测试），必须配 `folder` 交付 | `executor` |
 
 阶段和方法的搭配在读配置时检查，配错直接报错。
 
@@ -44,5 +44,22 @@ execution:
 | `arms` | 谁来做。只有 baseline 相位写，且必须是这一个值；其他阶段只跑弱模型，不能写 | `[executor_strong, executor_weak]` | 不写 |
 
 baseline 相位强、弱模型各做几次，看全局的 `n_attempts_strong` / `n_attempts_weak`。
+
+## `real_folder`：技能文件夹做题
+
+```yaml
+execution:
+  name: real_folder
+  executor: executor_weak
+```
+
+| 参数 | 含义 | 可选项 | 默认 |
+|---|---|---|---|
+| `executor` | 谁来做 test 阶段的题。采样次数取这个模型的全局次数（`n_attempts_weak` 或 `n_attempts_strong`） | `executor_weak`、`executor_strong` | `executor_weak` |
+
+选 `executor_strong` 时，`compare.external.model_key` 要指向强模型在 campaign 里的那一列
+（例如 `dpsk`），否则对照用的是另一个模型的成绩。强模型在 Harbor 里的推理强度由进程环境变量
+`TBENCH_REASONING_EFFORT` 决定，不由本配置决定：要和 campaign 的强模型对照一致，就在启动这个
+run 的进程里设置它，不要写进共用的密钥文件（那会同时改变弱模型的请求）。
 
 模块边界见 `docs/decisions/execute_learn_module_boundaries_20261016.md`。

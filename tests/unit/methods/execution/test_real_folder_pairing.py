@@ -5,11 +5,11 @@ Three surfaces, one rule (the alignment ruling: the folder delivery and
 the real_folder execution are ONE play, pinned to the test phase):
 
 * the registry resolves ``real_folder`` to
-  ``RealFolderExecutionParams`` (an empty params class, like the exam
-  execution's -- the M6 review removed ``n_attempts`` and
-  ``max_injection_tokens``, which no legal phase ever consumed: folder
-  is pinned to the test role and the test phase samples at the global
-  ``n_attempts_weak`` depth exactly as it always did);
+  ``RealFolderExecutionParams`` (one field, ``executor``: weak by
+  default, or the strong model -- the M6 review removed ``n_attempts``
+  and ``max_injection_tokens``, which no legal phase ever consumed:
+  folder is pinned to the test role and the test phase samples at the
+  executor's global depth);
 * ``parse_phases`` accepts the folder/real_folder pair on a test-role
   phase and refuses every mismatch: folder under the plain ``real``,
   ``real_folder`` over another delivery, either name on a non-test
@@ -55,10 +55,15 @@ def test_real_folder_resolves_its_params():
             resolve_params("execution", {"name": "real_folder", key: 1})
 
 
-def test_real_folder_params_are_empty_like_the_exams():
-    # No fields at all: a test phase samples at the global n_attempts_weak
-    # and nothing about the folder run is budgeted at execution time.
-    assert not RealFolderExecutionParams.__dataclass_fields__
+def test_real_folder_params_carry_only_the_executor():
+    # One field: which model role runs the phase. A test phase samples at
+    # that executor's global depth and nothing about the folder run is
+    # budgeted at execution time.
+    assert list(RealFolderExecutionParams.__dataclass_fields__) == ["executor"]
+    assert RealFolderExecutionParams().executor == "executor_weak"
+    assert resolve_params(
+        "execution", {"name": "real_folder", "executor": "executor_strong"}
+    ) == RealFolderExecutionParams(executor="executor_strong")
     # The three execution params classes stay distinct types.
     assert RealFolderExecutionParams() != RealExecutionParams()
     assert not isinstance(RealFolderExecutionParams(),

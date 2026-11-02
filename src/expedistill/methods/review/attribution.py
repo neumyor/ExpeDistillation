@@ -21,7 +21,10 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 from expedistill.blocks.attribution import attribute_attempts
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites import skill_usage
-from expedistill.composites.trace import trace_of_execution
+from expedistill.composites.trace import (
+    instruction_with_initial,
+    trace_of_execution,
+)
 from expedistill.composites.skill_attempt_evidence import (
     SkillAttemptEvidence,
     WindowEvidence,
@@ -293,7 +296,8 @@ def _attribute_window(
         start_index=step_start)
     meta = execution.metrics if isinstance(execution.metrics, dict) else {}
     initial_prompt = meta.get("initial_prompt")
-    instruction = _task_description(initial_prompt, task_instruction)
+    instruction = instruction_with_initial(
+        meta, _task_description(initial_prompt, task_instruction))
     outcome = (usage_row or {}).get("outcome") or _outcome(execution)
     success = {"success": True, "failure": False}.get(outcome)
     judged = attribute_attempts(

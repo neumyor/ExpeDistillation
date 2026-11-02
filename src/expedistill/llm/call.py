@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from expedistill import prompts
+from expedistill.prompts import learning_context
 from expedistill.infra.reliability import (
     ConfigError,
     InfrastructureError,
@@ -121,6 +122,10 @@ class ModelHandle:
     # client for every call of this handle; per-model, wired by the pipeline
     # from the config's ``model_options``. Empty means: send nothing extra.
     extra_body: Dict[str, Any] = field(default_factory=dict)
+    # Vocabulary slots for the learning prompts (prompts/learning_context.py),
+    # wired by the pipeline from the benchmark plugin's learning context.
+    # Slots a template does not use are ignored; empty means GENERIC only.
+    prompt_defaults: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Validated here so dataclasses.replace() re-checks as well.
@@ -500,7 +505,9 @@ def call_model(
     """Call one model with one named prompt; return text or parsed JSON.
 
     ``variables`` are str.format fields of the prompt template; a KeyError is
-    a caller bug and propagates. With ``output_json=True`` the response is
+    a caller bug and propagates. Vocabulary slots of the learning prompts
+    (prompts/learning_context.py) fill from GENERIC and the handle's
+    ``prompt_defaults`` when the caller does not pass them. With ``output_json=True`` the response is
     parsed with ``extract_json`` and, on failure, re-asked up to
     ``max_format_retries`` times with ``REPAIR_INSTRUCTION`` appended to the
     conversation; exhaustion raises ModelOutputError. Failure means either
@@ -552,7 +559,10 @@ def call_model(
     like any other.
     """
     template = prompts.get(prompt_name)
-    user_text = template.format(**variables)
+    user_text = template.format(**{
+        **learning_context.GENERIC.variables(),
+        **handle.prompt_defaults,
+        **variables})
     system = DEFAULT_SYSTEM if system_override is None else system_override
     if usage is None:
         usage = handle.usage

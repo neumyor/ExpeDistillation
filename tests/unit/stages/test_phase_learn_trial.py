@@ -53,7 +53,7 @@ class _Config:
         return ""
 
 
-def _phases():
+def _phases(**review):
     baseline = ExecutePhaseSpec(
         role="baseline", tasks="train", delivery={"name": "none"},
         execution={"name": "real",
@@ -63,7 +63,7 @@ def _phases():
         execution={"name": "real", "n_attempts": 1},
         compare=CompareSpec(against="fresh_bare", rule="strict_rate_gain"))
     learn = LearnPhaseSpec(
-        review={"name": "review", "decision": "trial_level"},
+        review={"name": "review", "decision": "trial_level", **review},
         author={"name": "distill_diagnose"},
         curate={"name": "none", "token_budget": 1000})
     test = ExecutePhaseSpec(
@@ -211,3 +211,97 @@ def test_last_learn_defers_requirements_without_writing(tmp_path,
     ).read_text().splitlines() if line.strip()]
     assert [row["outcome"] for row in outcomes] == ["deferred_no_later_check"]
     assert outcomes[0]["skill_id"] is None
+
+
+def _trial_ctx(tmp_path, run_dir, store, sheet, monkeypatch, *, review,
+               sequence, replies):
+    monkeypatch.setattr(
+        trial.attribution, "task_instruction_for",
+        lambda benchmark, task: "do the task")
+    handle = make_fake_handle("author", replies)
+    config = _Config()
+    config.sequence = sequence
+    config.phases = _phases(**review)
+    ctx = StageContext(
+        run_dir=run_dir, store=store, config=config, usage=None,
+        handles={"author": handle, "segmenter": handle},
+        workdir_root=tmp_path / "work",
+        run_settings=RunSettings(workers=2))
+    phase = PhaseInstance(
+        index=2, name="learn", label="p03:learn",
+        spec=config.phases["learn"], task_ids=())
+    return ctx, phase
+
+
+def _requirement_replies(sheet):
+    return [
+        json_script({
+            "reason": "no skill covers the recovery procedure",
+            "profile_note": "the model does not plan a recovery",
+            "skills": [], "new_skill_note": "needs a recovery procedure"}),
+        json_script({"profile_text": "the model needs recovery steps"}),
+        json_script({
+            "skill_actions": [],
+            "new_skill_requirements": [{
+                "title": "recover a stuck service",
+                "description": "teach the recovery procedure",
+                "trigger": "When a command fails,",
+                "source_sheet_ids": [sheet.sheet_id]}]}),
+    ]
+
+
+def test_new_skills_off_records_requirements_without_writing(
+        tmp_path, monkeypatch):
+    """A later check exists, so only the switch keeps the library closed."""
+    run_dir, store, sheet = _seed_live(tmp_path)
+    ctx, phase = _trial_ctx(
+        tmp_path, run_dir, store, sheet, monkeypatch,
+        review={"new_skills": False},
+        sequence=["baseline", "live", "learn", "live", "test"],
+        replies=_requirement_replies(sheet))
+    skills_before = set(store.ids("skills"))
+
+    result = phase_learn.run(ctx, phase)
+
+    assert result.summary["checks_left"] == 1
+    assert result.summary["new_skill_requirements"] == 1
+    assert result.summary["new_skill_requirements_deferred"] == 1
+    assert set(store.ids("skills")) == skills_before
+    outcomes = [json.loads(line) for line in (
+        run_dir / "phases" / "p03_learn" / "requirement_outcomes.jsonl"
+    ).read_text().splitlines() if line.strip()]
+    assert [row["outcome"] for row in outcomes] \
+        == ["not_written_new_skills_off"]
+
+
+def test_new_skills_default_still_writes_the_requirement(
+        tmp_path, monkeypatch):
+    run_dir, store, sheet = _seed_live(tmp_path)
+    ctx, phase = _trial_ctx(
+        tmp_path, run_dir, store, sheet, monkeypatch, review={},
+        sequence=["baseline", "live", "learn", "live", "test"],
+        replies=_requirement_replies(sheet) + [json_script({
+            "summary": "recover a stopped service",
+            "when_to_use": "When a command fails, check the service state.",
+            "steps": ["check", "restart", "verify"],
+            "not_applicable_when": "the service is already running"})])
+
+    result = phase_learn.run(ctx, phase)
+
+    assert "new_skill_requirements_deferred" not in result.summary
+    assert len(store.ids("skills")) == 2
+
+
+def test_a_scope_restricted_live_phase_is_refused(tmp_path, monkeypatch):
+    """revise_scope restricts exam rewrites only; a live phase would
+    silently ignore it, so it is a configuration error."""
+    from expedistill.infra.reliability import ConfigError
+    run_dir, store, sheet = _seed_live(tmp_path)
+    ctx, phase = _trial_ctx(
+        tmp_path, run_dir, store, sheet, monkeypatch,
+        review={"revise_scope": "body"},
+        sequence=["baseline", "live", "learn", "live", "test"],
+        replies=[])
+
+    with pytest.raises(ConfigError, match="revise_scope"):
+        phase_learn.run(ctx, phase)

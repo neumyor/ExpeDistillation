@@ -86,7 +86,11 @@ from expedistill.core.config import (
 )
 from expedistill.core.answer_sheet import PhaseReport
 from expedistill.core.models import Skill
-from expedistill.infra.reliability import CodeBugError, InfrastructureError
+from expedistill.infra.reliability import (
+    CodeBugError,
+    ConfigError,
+    InfrastructureError,
+)
 from expedistill.infra.store import (
     read_json, read_jsonl, write_json, write_jsonl)
 from expedistill.methods import resolve_params
@@ -143,6 +147,12 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             ctx, current_round)
 
     review_params = resolve_params("review", phase.spec.review)
+    if review_params.revise_scope != "both" \
+            and current_kind == PHASE_ROLE_LIVE:
+        raise ConfigError(
+            f"{phase.label}: revise_scope {review_params.revise_scope!r} "
+            "restricts exam revisions only; the live revision path does not "
+            "support it")
     trial_mode = review_params.decision == "trial_level"
     if trial_mode and current_kind not in (PHASE_ROLE_LIVE, PHASE_ROLE_EXAM):
         raise CodeBugError(
@@ -204,11 +214,15 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         infra_failed = learn_add.execute_add_rows(
             ctx, phase, result.items, skip_targets=skip_targets,
             source_phase_label=context.source_phase_label)
+        if review_params.accept_new and not infra_failed:
+            learn_ledger.accept_written(ctx.store, phase, phase_dir)
     elif current_kind == PHASE_ROLE_EXAM:
         infra_failed = learn_exam.execute_exam_rows(
             ctx, phase, result.items, current.units, superseded,
             skip_targets=skip_targets,
-            source_phase_label=context.source_phase_label)
+            source_phase_label=context.source_phase_label,
+            revise_scope=review_params.revise_scope,
+            weak_profile=author_profile)
     else:
         infra_failed = learn_apply.execute_decision_rows(
             ctx, phase, result.items, current.units,
@@ -220,6 +234,11 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
             # the requirement ledger records why, and the bank stays clean.
             learn_requirement.record_deferred(
                 phase_dir, phase.label, result.new_skill_requirements)
+        elif not review_params.new_skills:
+            learn_requirement.record_deferred(
+                phase_dir, phase.label, result.new_skill_requirements,
+                outcome=learn_requirement.DISABLED_OUTCOME,
+                reason="new_skills is off for this phase")
         else:
             requirement_failed = learn_requirement.execute_requirements(
                 ctx, phase, result.new_skill_requirements,
@@ -237,7 +256,8 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
         summary["trial_findings"] = len(result.trial_findings)
         summary["new_skill_requirements"] = len(
             result.new_skill_requirements)
-        if checks_left == 0 and result.new_skill_requirements:
+        if ((checks_left == 0 or not review_params.new_skills)
+                and result.new_skill_requirements):
             summary["new_skill_requirements_deferred"] = len(
                 result.new_skill_requirements)
         summary["profile_updated"] = result.profile_update is not None

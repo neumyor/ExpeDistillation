@@ -27,16 +27,34 @@ from expedistill.benchmarks.alfworld.env import (
 from expedistill.benchmarks.alfworld.plugin import (
     DEFAULT_MAX_STEPS,
     MAX_STEPS_ENV,
-    TASK_PROMPT_NAME,
-    TASK_PROMPT_TEMPLATE,
     clean_task_id,
     enumerate_gamefiles,
+)
+from expedistill.benchmarks.alfworld.protocol import (
+    CORRECTION_PROMPT_NAME,
+    FOLDER_PROMPT_NAME,
+    FOLDER_PROMPT_NO_HISTORY_NAME,
+    MAX_OUTPUT_TOKENS,
+    PROMPT_NAME,
+    PROMPT_NO_HISTORY_NAME,
+    SYSTEM_PROMPT,
+    SYSTEM_PROMPT_NAME,
+    TEMPERATURE,
+    extract_task_description,
+    format_admissible_actions,
+    project_action,
 )
 import expedistill.benchmarks.alfworld.env as env_module
 from expedistill.benchmarks.registry import get_plugin, plugin_names, register_plugin
 from expedistill.infra.reliability import ConfigError
 from expedistill.prompts import get as get_prompt
 from expedistill.llm import make_fake_handle
+from expedistill.prompts import PROMPTS
+from tests.helpers.skill_folder import (
+    CARD_BODY,
+    folder_task_meta,
+    write_skill_folder,
+)
 
 #: The same fake adapter the env tests use (see test_alfworld_env.py).
 FAKE_ADAPTER_SOURCE = '''\
@@ -47,12 +65,16 @@ def emit(tag, payload):
     sys.stdout.write(tag + " " + json.dumps(payload) + "\\n")
     sys.stdout.flush()
 
+ADMISSIBLE = ["go to fridge 1", "look", "win"]
+
 def obs(text, won=False, done=False, reason=None):
-    return {"text": text, "won": won, "done": done, "reason": reason}
+    return {"text": text, "admissible": ADMISSIBLE,
+            "won": won, "done": done, "reason": reason}
 
 BUDGET = 3
 emit("H", {"budget": BUDGET})
-emit("O", obs("You are in the middle of a room. You see a fridge 1."))
+emit("O", obs("You are in the middle of a room. You see a fridge 1.\\n\\n"
+              "Your task is to: put a clean mug on the desk"))
 steps = 0
 while True:
     line = sys.stdin.readline()
@@ -115,6 +137,9 @@ def eval_env(tmp_path, data_root, monkeypatch):
     config = tmp_path / "textworld.yaml"
     config.write_text("dummy: true\n", encoding="utf-8")
     monkeypatch.setenv("ALFWORLD_CONFIG", str(config))
+    # The unified protocol refuses a loop budget that disagrees with the
+    # engine's; the fake adapter's engine budget is 3.
+    monkeypatch.setenv(MAX_STEPS_ENV, "3")
     monkeypatch.setattr(env_module, "ADAPTER_SOURCE", FAKE_ADAPTER_SOURCE)
     return data_root
 
@@ -144,7 +169,7 @@ def test_import_succeeds_without_alfworld_environment():
 
 def test_plugin_identity(plugin):
     assert plugin.name == "alfworld"
-    assert plugin.task_prompt_name == "ALFWORLD_TASK_PROMPT"
+    assert plugin.task_prompt_name == PROMPT_NAME
     assert get_plugin("alfworld") is plugin
 
 
@@ -169,29 +194,63 @@ def test_max_steps_env_var(monkeypatch, plugin):
 # Task prompt (B2 contract)
 # ---------------------------------------------------------------------------
 
-def test_task_prompt_has_exactly_the_three_variables():
-    fields = [fname for _, fname, _, _ in string.Formatter().parse(TASK_PROMPT_TEMPLATE)
-              if fname]
-    assert fields == ["instruction", "skills_block", "history"]
-
-
-def test_task_prompt_registered_in_b2():
-    assert get_prompt(TASK_PROMPT_NAME) == TASK_PROMPT_TEMPLATE
+def test_task_prompt_is_the_unified_protocol():
+    # Exactly the variables the unified runner's templates use: the
+    # no-history step and the later steps.
+    no_history = [name for _, name, _, _ in string.Formatter().parse(
+        get_prompt(PROMPT_NO_HISTORY_NAME)) if name]
+    assert no_history == ["current_observation", "skill_block",
+                          "admissible_actions"]
+    history = [name for _, name, _, _ in string.Formatter().parse(
+        get_prompt(PROMPT_NAME)) if name]
+    assert history == ["task_description", "skill_block", "step_count",
+                       "history_length", "action_history", "current_step",
+                       "current_observation", "admissible_actions"]
+    # The action protocol and the system message are the unified ones.
+    template = get_prompt(PROMPT_NAME)
+    assert "<think>brief reason</think><action>one admissible action</action>" \
+        in template
+    assert "Do not output anything after </action>." in template
+    assert get_prompt(SYSTEM_PROMPT_NAME) == \
+        "You are an expert agent operating in the ALFRED Embodied Environment."
+    assert SYSTEM_PROMPT == get_prompt(SYSTEM_PROMPT_NAME)
+    assert TEMPERATURE == 0.0 and MAX_OUTPUT_TOKENS == 4096
 
 
 def test_task_prompt_renders_bare_and_with_skills():
-    bare = TASK_PROMPT_TEMPLATE.format(
-        instruction="put a clean mug on the desk", skills_block="", history="")
+    template = get_prompt(PROMPT_NAME)
+    variables = dict(
+        task_description="put a clean mug on the desk", step_count="1",
+        history_length="1", action_history="[Observation 1: 'o', Action 1: 'a']",
+        current_step="2", current_observation="you see a fridge 1",
+        admissible_actions=format_admissible_actions(
+            ["go to fridge 1", "look"]))
+    bare = template.format(skill_block="", **variables)
     skills = "SKILL: open the fridge before searching it."
-    with_skills = TASK_PROMPT_TEMPLATE.format(
-        instruction="put a clean mug on the desk",
-        skills_block=skills, history="")
-    # Bare and skills runs share the template; the only difference is the block.
-    assert "SKILL: open the fridge" in with_skills
-    assert with_skills.replace(skills, "") == bare
-    # The household command format from the old adapter's contract is present.
-    assert "go to <receptacle>" in bare
-    assert "move <held object> to <receptacle>" in bare
+    with_skills = template.format(skill_block=f"\n{skills}\n\n", **variables)
+    assert skills in with_skills
+    assert with_skills.replace(f"\n{skills}\n\n", "") == bare
+
+
+def test_project_action_matches_the_unified_parser():
+    assert project_action("<think>go</think><action>look</action>") == \
+        ("look", True)
+    assert project_action("<think>go</think><action>Look</action>") == \
+        ("look", True)
+    assert project_action("<action>look</action>") == ("look", False)
+    assert project_action("<think>想</think><action>look</action>")[1] is False
+    assert project_action("") == ("look", False)
+
+
+def test_extract_task_description_splits_the_room_description():
+    initial = "You are in a room.\n\nYour task is to: put a mug on a desk"
+    assert extract_task_description(initial) == "put a mug on a desk"
+    assert extract_task_description("no task line") == "no task line"
+
+
+def test_format_admissible_actions_drops_help():
+    assert format_admissible_actions(["go to fridge 1", "help", "look"]) == \
+        "'go to fridge 1'\n 'look'"
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +301,8 @@ def test_tasks_loaded_on_one_root_run_on_a_moved_root(plugin, eval_env, tmp_path
     [task] = plugin.load_tasks([GAME_REL])
     moved = eval_env.rename(tmp_path / "moved-data")
     monkeypatch.setenv(DATA_ENV, str(moved))
-    handle = make_fake_handle(role="executor", script=["look", "win"])
+    handle = make_fake_handle(
+        role="executor", script=[reply("look"), reply("win")])
     outcome = plugin.run(task, handle, "", tmp_path / "work")
     assert outcome.correctness is True
 
@@ -291,20 +351,99 @@ def test_enumerate_gamefiles_requires_data_subdir(tmp_path):
 # run(): full roundtrip against the fake adapter
 # ---------------------------------------------------------------------------
 
+def reply(action):
+    """One valid unified-protocol response for ``action``."""
+    return f"<think>next step</think><action>{action}</action>"
+
+
 def test_run_success_roundtrip(plugin, eval_env, tmp_path):
-    handle = make_fake_handle(role="executor", script=["look", "win"])
+    handle = make_fake_handle(role="executor", script=[
+        reply("look"), reply("go to fridge 1"), reply("win")])
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, "", tmp_path)
 
     assert outcome.correctness is True
     assert outcome.meta["termination"] == "terminated"
-    assert [step["action"] for step in outcome.steps] == ["look", "win"]
+    assert [step["action"] for step in outcome.steps] == [
+        "look", "go to fridge 1", "win"]
     assert outcome.steps[-1]["observation"] == "Task is SOLVED."
-    # The first prompt carries the instruction AND the room description the
-    # env reported at reset (ALFWorld's task line alone names no receptacles).
-    user = handle.client.calls[0]["user"]
+    # The first prompt is the unified no-history template: the initial
+    # observation carries the task line and the room description, and the
+    # engine's admissible commands are listed.
+    first = handle.client.calls[0]
+    assert first["system"] == SYSTEM_PROMPT
+    user = first["user"]
     assert "put a clean mug on the desk" in user
     assert "You are in the middle of a room" in user
+    assert "Your admissible actions of the current situation are: " \
+           "['go to fridge 1'\n 'look'\n 'win']." in user
+    # Step 2 is the history template: the task line is repeated and the last
+    # interaction is shown.
+    second = handle.client.calls[1]["user"]
+    assert "Your task is to: put a clean mug on the desk" in second
+    assert "[Observation 1: '" in second
+    assert "Action 1: 'look'" in second
+    assert "You are now at step 2" in second
+    # By step 3 the last TWO interactions are shown; the room description
+    # appears once, inside the history bracket, and is not repeated in the
+    # current-observation slot (the old local prompt repeated it every step).
+    third = handle.client.calls[2]["user"]
+    assert "You are now at step 3" in third
+    assert third.count("You are in the middle of a room") == 1
+    current = third.split("your current observation is: ", 1)[1]
+    assert "You are in the middle of a room" not in current
+    # The room description travels with the execution record too, so the
+    # skill writer, exam scene and judge rebuild the scene the run saw.
+    assert "You are in the middle of a room" in \
+        outcome.meta["initial_observation"]
+
+
+def test_run_uses_the_unified_generation_settings(plugin, eval_env, tmp_path):
+    handle = make_fake_handle(role="executor", script=[reply("win")])
+    task = plugin.load_tasks([GAME_REL])[0]
+    plugin.run(task, handle, "", tmp_path)
+    call = handle.client.calls[0]
+    assert call["temperature"] == TEMPERATURE == 0.0
+    assert call["max_tokens"] == MAX_OUTPUT_TOKENS == 4096
+
+
+def test_an_invalid_reply_gets_one_correction(plugin, eval_env, tmp_path):
+    # Free-form reply (the old prompt's shape) is invalid under the unified
+    # protocol; the loop asks once with the unified diagnostics and uses the
+    # corrected action.
+    handle = make_fake_handle(
+        role="executor", script=["look", reply("win")])
+    task = plugin.load_tasks([GAME_REL])[0]
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert outcome.correctness is True
+    assert outcome.meta["invalid_actions"] == 1
+    assert outcome.meta["corrections"] == 1
+    correction = handle.client.calls[1]["user"]
+    assert "VALIDATION FAILED" in correction
+    assert "missing opening <think> tag" in correction
+    assert "Do not output anything before <think>" in correction
+
+
+def test_a_still_invalid_correction_executes_look(plugin, eval_env, tmp_path):
+    handle = make_fake_handle(role="executor", script=[
+        "free form", "still free form", reply("win")])
+    task = plugin.load_tasks([GAME_REL])[0]
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert outcome.meta["invalid_actions"] == 1
+    assert outcome.steps[0]["action"] == "look"
+    assert outcome.correctness is True
+
+
+def test_an_action_outside_the_admissible_list_is_invalid(plugin, eval_env,
+                                                          tmp_path):
+    handle = make_fake_handle(role="executor", script=[
+        reply("go to fridge 2"), reply("win")])
+    task = plugin.load_tasks([GAME_REL])[0]
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert outcome.meta["invalid_actions"] == 1
+    assert "is not in the admissible action list" in \
+        handle.client.calls[1]["user"]
+    assert outcome.steps[0]["action"] == "win"
 
 
 def test_run_dumps_requests_under_the_handle_run_dir(plugin, eval_env, tmp_path):
@@ -313,8 +452,9 @@ def test_run_dumps_requests_under_the_handle_run_dir(plugin, eval_env, tmp_path)
     run_dir = tmp_path / "run"
     workdir = tmp_path / "work" / "unit-0"
     workdir.mkdir(parents=True)
-    handle = make_fake_handle(role="executor", script=["look", "win"],
-                              run_dir=run_dir)
+    handle = make_fake_handle(
+        role="executor", script=[reply("look"), reply("win")],
+        run_dir=run_dir)
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, "", workdir)
 
@@ -324,7 +464,8 @@ def test_run_dumps_requests_under_the_handle_run_dir(plugin, eval_env, tmp_path)
 
 
 def test_run_budget_exhaustion_is_failure(plugin, eval_env, tmp_path):
-    handle = make_fake_handle(role="executor", script=["a", "b", "c"])
+    handle = make_fake_handle(role="executor", script=[
+        reply("look"), reply("go to fridge 1"), reply("look")])
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, "", tmp_path)
 
@@ -335,7 +476,7 @@ def test_run_budget_exhaustion_is_failure(plugin, eval_env, tmp_path):
 
 def test_run_skills_block_reaches_the_prompt(plugin, eval_env, tmp_path):
     skills = "SKILL: check the fridge first, cold items live there."
-    handle = make_fake_handle(role="executor", script=["win"])
+    handle = make_fake_handle(role="executor", script=[reply("win")])
     task = plugin.load_tasks([GAME_REL])[0]
     outcome = plugin.run(task, handle, skills, tmp_path)
     assert outcome.correctness is True
@@ -397,3 +538,113 @@ def test_live_real_adapter_one_task(plugin, tmp_path):
         assert isinstance(followup, str)
     finally:
         env.close()
+
+
+# ---------------------------------------------------------------------------
+# skill-folder execution (progressive disclosure)
+# ---------------------------------------------------------------------------
+
+def _folder_task(plugin, tmp_path, names=("alpha", "beta")):
+    manifest, _, locations = write_skill_folder(tmp_path / "folder", names)
+    task = plugin.load_tasks([GAME_REL])[0]
+    task.meta.update(folder_task_meta(manifest, tmp_path / "folder"))
+    return task, locations
+
+
+def test_the_plugin_declares_the_folder_capability(plugin):
+    assert plugin.skill_folder_prompt_name == FOLDER_PROMPT_NAME
+    assert FOLDER_PROMPT_NAME in PROMPTS
+    assert FOLDER_PROMPT_NO_HISTORY_NAME in PROMPTS
+    # The protocol's other prompts freeze with the task prompt.
+    assert set(plugin.protocol_prompt_names) == {
+        SYSTEM_PROMPT_NAME, PROMPT_NO_HISTORY_NAME,
+        FOLDER_PROMPT_NO_HISTORY_NAME, CORRECTION_PROMPT_NAME}
+
+
+def test_the_folder_prompts_are_the_plain_prompts_plus_the_read_rule():
+    for plain_name, folder_name in (
+            (PROMPT_NO_HISTORY_NAME, FOLDER_PROMPT_NO_HISTORY_NAME),
+            (PROMPT_NAME, FOLDER_PROMPT_NAME)):
+        plain = PROMPTS[plain_name].template
+        folder = PROMPTS[folder_name].template
+        assert "ReadSkill" not in plain
+        assert "ReadSkill[<location>]" in folder
+        # Deleting the inserted paragraph gives the plain prompt back, so the
+        # two arms differ only by the skill-reading text.
+        anchor = "Do not output anything after </action>.\n"
+        head, tail = plain.split(anchor, 1)
+        rest = folder[len(head + anchor):]
+        if tail:
+            assert rest.endswith(tail)
+            insertion = rest[:-len(tail)]
+        else:
+            insertion = rest
+        assert "Skill cards are optional." in insertion
+        assert folder.replace(insertion, "", 1) == plain
+        assert {name for _, name, _, _ in string.Formatter().parse(folder)
+                if name} == {name for _, name, _, _ in string.Formatter().parse(
+                    plain) if name}
+
+
+def test_a_folder_unit_shows_the_card_list_and_hides_the_card_text(
+        plugin, eval_env, tmp_path):
+    task, locations = _folder_task(plugin, tmp_path)
+    handle = make_fake_handle(role="executor", script=[reply("win")])
+    plugin.run(task, handle, "CATALOG FALLBACK", tmp_path)
+    first_user = handle.client.calls[0]["user"]
+    assert "<available_skills>" in first_user
+    for location in locations:
+        assert f"<location>{location}</location>" in first_user
+    assert "ReadSkill[<location>]" in first_user
+    assert CARD_BODY not in first_user
+    assert "CATALOG FALLBACK" not in first_user
+
+
+def test_opening_a_card_costs_no_game_step(plugin, eval_env, tmp_path):
+    # The fake adapter allows 3 game steps; two reads plus two commands
+    # fit only because a read never reaches the game. The unified parser
+    # lowercases the action, so the read arrives as readskill[...]; the
+    # folder path keeps its case.
+    task, locations = _folder_task(plugin, tmp_path)
+    handle = make_fake_handle(role="executor", script=[
+        reply(f"ReadSkill[{locations[0]}]"),
+        reply(f"ReadSkill[{locations[1]}]"),
+        reply("look"), reply("win")])
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert outcome.correctness is True
+    assert [step["action"] for step in outcome.steps] == [
+        f"ReadSkill[{locations[0]}]", f"ReadSkill[{locations[1]}]",
+        "look", "win"]
+    assert outcome.meta["skill_reads"] == 2
+    assert outcome.meta["skill_list_shown"] is True
+    assert outcome.meta["steps_used"] == 2
+    # After two reads the last two interactions are (initial, read 1) and
+    # (card alpha, read 2), and the current observation is card beta.
+    third_user = handle.client.calls[2]["user"]
+    assert CARD_BODY in third_user
+    assert "(card alpha)" in third_user and "(card beta)" in third_user
+    assert "ReadSkill[<location>]" in third_user
+
+
+def test_a_read_past_the_cap_costs_a_game_step(plugin, eval_env, tmp_path):
+    task, locations = _folder_task(
+        plugin, tmp_path, names=("a", "b", "c", "d"))
+    handle = make_fake_handle(role="executor", script=[
+        reply(f"ReadSkill[{location}]") for location in locations[:4]
+    ] + [reply("win")])
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert outcome.meta["skill_reads"] == 3
+    refusal = outcome.steps[3]
+    assert "Skill read limit reached" in refusal["observation"]
+    # Three reads cost no game step; the refused fourth does, and so does the
+    # winning command.
+    assert outcome.meta["steps_used"] == 2
+
+
+def test_a_unit_without_a_folder_keeps_the_plain_prompt(
+        plugin, eval_env, tmp_path):
+    task = plugin.load_tasks([GAME_REL])[0]
+    handle = make_fake_handle(role="executor", script=[reply("win")])
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert "ReadSkill" not in handle.client.calls[0]["user"]
+    assert "skill_reads" not in outcome.meta

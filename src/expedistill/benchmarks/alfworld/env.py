@@ -17,8 +17,11 @@ message per line; payloads are JSON, so observations never break framing):
 
   H <json>   handshake once the game loaded: ``{"budget": <int step budget>}``
   O <json>   one observation, self-describing (exactly one per action, plus
-             one for the initial state): ``{"text": <str>, "won": <bool>,
-             "done": <bool>, "reason": "won"|"budget"|"done"|null}``
+             one for the initial state): ``{"text": <str>, "admissible":
+             [<str>...], "won": <bool>, "done": <bool>,
+             "reason": "won"|"budget"|"done"|null}``. ``admissible`` is the
+             engine's own command list for that state, which the unified
+             protocol's prompt shows and validates against.
   X <json>   fatal child error: ``{"error": <str>}``; the child exits non-zero
 
   parent -> child: one action per line (already extracted and normalized by
@@ -38,10 +41,15 @@ and the context manager guarantee the same.
 Adapted from the old SkillExpand adapter (ExpeToSkill-merged
 src/skillexpand/benchmarks/alfworld.py): the ``put ... in/on`` action
 normalization, the repeated-action episode termination, the "Task is SOLVED."
-success observation, the "You arrive at loc ..." observation stripping and
-the think-only replies consuming a step with an "OK." observation all come
-from there; the old in-process engine access is replaced by the subprocess
-protocol above.
+success observation and the think-only replies consuming a step with an
+"OK." observation all come from there; the old in-process engine access is
+replaced by the subprocess protocol above. Those free-form reply rules
+belong to the old prompt and are used only through ``step``; the unified
+protocol sends validated commands through ``step_verbatim``.
+
+Observations are the engine's raw text: an earlier version stripped the
+engine's "You arrive at loc ..." echo, but the unified runner does not,
+and the unified runner is the paper's comparison protocol.
 """
 
 import json
@@ -150,16 +158,9 @@ def emit(tag, payload):
     _PROTOCOL.flush()
 
 
-def observation_message(text, won=False, done=False, reason=None):
-    return {"text": text, "won": bool(won), "done": bool(done), "reason": reason}
-
-
-def process_observation(text):
-    # ExpeL/ReAct convention kept from the old adapter: the engine's
-    # "You arrive at loc <pddl id>. " location echo is noise for the agent.
-    if text.startswith("You arrive at loc "):
-        text = text[text.find(". ") + 2:]
-    return text
+def observation_message(text, admissible=(), won=False, done=False, reason=None):
+    return {"text": text, "admissible": list(admissible),
+            "won": bool(won), "done": bool(done), "reason": reason}
 
 
 def main():
@@ -182,7 +183,8 @@ def main():
     try:
         observation = env.reset()
         emit("H", {"budget": int(env.step_budget)})
-        emit("O", observation_message(process_observation(observation.text)))
+        emit("O", observation_message(
+            observation.text, observation.admissible_commands))
         steps = 0
         while True:
             line = sys.stdin.readline()
@@ -194,19 +196,24 @@ def main():
             steps += 1
             result = env.step(action)
             if result.won:
-                emit("O", observation_message(TASK_SOLVED, won=True, done=True,
-                                              reason="won"))
+                emit("O", observation_message(
+                    TASK_SOLVED, result.observation.admissible_commands,
+                    won=True, done=True, reason="won"))
                 break
             if steps >= env.step_budget:
-                emit("O", observation_message(process_observation(
-                    result.observation.text), done=True, reason="budget"))
+                emit("O", observation_message(
+                    result.observation.text,
+                    result.observation.admissible_commands,
+                    done=True, reason="budget"))
                 break
             if result.done:
-                emit("O", observation_message(process_observation(
-                    result.observation.text), done=True, reason="done"))
+                emit("O", observation_message(
+                    result.observation.text,
+                    result.observation.admissible_commands,
+                    done=True, reason="done"))
                 break
-            emit("O", observation_message(process_observation(
-                result.observation.text)))
+            emit("O", observation_message(
+                result.observation.text, result.observation.admissible_commands))
     finally:
         env.close()
 
@@ -250,9 +257,20 @@ def parse_adapter_line(line: str) -> Tuple[str, object]:
         for flag in ("won", "done"):
             if flag in payload and not isinstance(payload[flag], bool):
                 raise ValueError(f"O payload flag {flag!r} must be a boolean")
+        if "admissible" in payload:
+            commands = payload["admissible"]
+            if not isinstance(commands, list) or not all(
+                    isinstance(command, str) for command in commands):
+                raise ValueError(
+                    "O payload 'admissible' must be a list of strings")
     if tag == "X" and not isinstance(payload.get("error"), str):
         raise ValueError("X payload must carry a string 'error'")
     return tag, payload
+
+
+def _admissible(payload: dict) -> Tuple[str, ...]:
+    """The admissible-command list of one O payload (empty when absent)."""
+    return tuple(payload.get("admissible") or ())
 
 
 def extract_action(raw: object) -> Tuple[str, bool]:
@@ -356,6 +374,10 @@ class ALFWorldEnv(BaseEnv):
         self.max_steps: Optional[int] = None
         self._last_action: Optional[str] = None
         self._initial_observation: Optional[str] = None
+        #: The engine's admissible commands for the current observation, as
+        #: the unified protocol's prompt lists them. Empty for adapters that
+        #: predate the ``admissible`` field.
+        self.admissible_commands: Tuple[str, ...] = ()
 
         self._proc: Optional[subprocess.Popen] = None
         self._messages: Optional[Queue] = None
@@ -442,6 +464,7 @@ class ALFWorldEnv(BaseEnv):
         self.max_steps = budget
         initial = self._expect("O", "initial observation")
         self._initial_observation = initial["text"]
+        self.admissible_commands = _admissible(initial)
         self.terminated = False
         self.truncated = False
         self.termination_reason = None
@@ -477,6 +500,22 @@ class ALFWorldEnv(BaseEnv):
                 f"{observation}\n(The action {command!r} was repeated; "
                 "the episode is terminated.)")
         return observation
+
+    def step_verbatim(self, command: str) -> str:
+        """Send one already-validated command exactly as given.
+
+        The unified protocol lowers, validates against the engine's own
+        admissible list and sends the result verbatim; the old ``step``
+        normalizes free-form replies (``put X in Y``, ``> command``,
+        think-only replies, repeated-action termination), which would fork
+        the protocol. The unified runner has none of those rules.
+        """
+        if self._proc is None:
+            raise CodeBugError(
+                "ALFWorldEnv.step_verbatim called with no live adapter: "
+                "call reset() first")
+        self.curr_step += 1
+        return self._exchange(command)
 
     def success_fn(self) -> bool:
         return self._won
@@ -515,6 +554,7 @@ class ALFWorldEnv(BaseEnv):
         return payload["text"]
 
     def _apply_observation(self, payload: dict) -> None:
+        self.admissible_commands = _admissible(payload)
         self._won = self._won or bool(payload.get("won"))
         if not payload.get("done") and not payload.get("won"):
             return

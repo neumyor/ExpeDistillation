@@ -355,6 +355,10 @@ class Attempt(_Record):
     skill-directory reads and the plan the weak model produced. It was an
     optional addition that needs no schema bump: an old record without it
     loads with an empty list (AGENTS.md "修改数据对象" rule 2).
+
+    ``selection_reason`` is the answerer's own stated reason for opening the
+    skills it opened (empty for a bare answer, and for records written before
+    the field existed); the judge reads it next to the plan.
     """
 
     attempt_id: str
@@ -364,6 +368,7 @@ class Attempt(_Record):
     purpose: str = "bare"
     weak_answer: str = ""
     steps: List[Step] = field(default_factory=list)
+    selection_reason: str = ""
     #: None until judged; True/False after G5.
     judge_verdict: Optional[bool] = None
     judge_reason: str = ""

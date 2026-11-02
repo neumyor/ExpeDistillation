@@ -13,6 +13,7 @@ from expedistill.blocks.exam import choose_skills, judge, write_plan, write_scen
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts import PromptNotFoundError, get as get_prompt
+from expedistill.prompts.learning_context import GENERIC
 
 SCENE = "The service rejects the login and prints E401. You have shell access."
 CATALOG = "- rotate-credential: rotate a rejected credential before restarting"
@@ -45,6 +46,7 @@ def test_write_scene_wiring_and_fields():
                         "written after a failure", handle)
 
     assert handle.client.calls[0]["user"] == get_prompt("EXAM_SCENE").format(
+        **GENERIC.variables(),
         task_instruction="do the task",
         prior_steps="step 0",
         future_steps="step 1",

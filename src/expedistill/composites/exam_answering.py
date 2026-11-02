@@ -197,6 +197,7 @@ def answer_exam(
         purpose=purpose,
         weak_answer=plan,
         steps=[read_step, Step(action=plan, observation="")],
+        selection_reason=selection_reason,
         judge_verdict=None,
         retry_round=retry_round,
     )

@@ -5,8 +5,8 @@ the plugin cannot run a folder unit; the name doubles as the folder
 prompt's B2 registration, so the capability and its prompt freeze
 together). Pinned here:
 
-* the real plugins: tb declares it (and the name it names is really
-  registered), searchqa and alfworld inherit the None default;
+* the real plugins: tb, searchqa and alfworld declare it (and the name
+  each names is really registered);
 * E1's guard: a folder unit (the delivery's manifest on the task)
   reaching a plugin without the capability is a loud ConfigError
   naming the benchmark, never a silent plain-injection run;
@@ -58,13 +58,15 @@ def test_tb_declares_the_capability_and_its_prompt_is_registered():
     assert plugin.skill_folder_prompt_name in PROMPTS
 
 
-def test_searchqa_and_alfworld_do_not_declare_it():
-    # One line each of their execution logic is untouched: they inherit
-    # the None default and never see a folder unit through the config
-    # path (the pairing checks keep folder on the test phase; E1's guard
-    # holds the boundary for direct callers).
-    assert ensure_plugin("searchqa").skill_folder_prompt_name is None
-    assert ensure_plugin("alfworld").skill_folder_prompt_name is None
+@pytest.mark.parametrize("benchmark, prompt_name", [
+    ("searchqa", "SEARCHQA_TASK_PROMPT_FOLDER"),
+    ("alfworld", "ALFWORLD_TASK_PROMPT_FOLDER"),
+])
+def test_the_local_plugins_declare_it_and_their_prompt_is_registered(
+        benchmark, prompt_name):
+    plugin = ensure_plugin(benchmark)
+    assert plugin.skill_folder_prompt_name == prompt_name
+    assert prompt_name in PROMPTS
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +212,22 @@ def test_stage0_refuses_an_unregistered_folder_prompt_name(
         _prompt_digests("tb")
 
 
-def test_a_plugin_without_the_capability_freezes_no_extra_prompt():
-    # searchqa's frozen surface is exactly the method prompts plus its
-    # own task prompt -- the capability adds nothing when absent.
-    ensure_plugin("searchqa")
-    digests = _prompt_digests("searchqa")
+@pytest.mark.parametrize("benchmark, prompt_name", [
+    ("searchqa", "SEARCHQA_TASK_PROMPT_FOLDER"),
+    ("alfworld", "ALFWORLD_TASK_PROMPT_FOLDER"),
+])
+def test_the_local_plugins_freeze_their_folder_prompt_digest(
+        benchmark, prompt_name):
+    ensure_plugin(benchmark)
+    digests = _prompt_digests(benchmark)
+    assert digests[prompt_name] == digest(prompt_name)
     assert "TB_TASK_PROMPT_FOLDER" not in digests
+
+
+def test_a_plugin_without_the_capability_freezes_no_extra_prompt(
+        monkeypatch):
+    plugin = ensure_plugin("searchqa")
+    monkeypatch.setattr(
+        type(plugin), "skill_folder_prompt_name", None, raising=False)
+    digests = _prompt_digests("searchqa")
+    assert "SEARCHQA_TASK_PROMPT_FOLDER" not in digests

@@ -11,6 +11,7 @@ contract on a small fixture file in the real campaign shape.
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -65,6 +66,49 @@ def test_loads_the_aligned_slice_as_metrics(tmp_path):
         "attempts": 3, "valid": 3, "success": 2, "infra": 0}
     assert metrics[make_task_id(BENCHMARK, "t2")]["success"] == 0
     assert rewards[make_task_id(BENCHMARK, "t1")] == [1.0, 0.0, 1.0]
+
+
+def _pooled_file(tmp_path, rewards_by_task):
+    path, _ = _write_scores(tmp_path, _campaign_rows(rewards_by_task),
+                            name="pooled.json")
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload["aligned_attempts"] = "all"
+    Path(path).write_text(json.dumps(payload), encoding="utf-8")
+    sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return path, sha
+
+
+def test_all_aligned_attempts_uses_every_archived_trial(tmp_path):
+    path, sha = _pooled_file(tmp_path, {
+        "t1": [1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1],
+        "t2": [0, 1, 0],
+        "t3": [1],
+    })
+
+    metrics, rewards = external_control.load_external_control(
+        path=path, sha256=sha, model_key=MODEL_KEY, benchmark=BENCHMARK,
+        tasks=[_Task(t) for t in TASKS], n_attempts=3)
+
+    # A pooled archive keeps every source trial per task (11-12 here),
+    # not the run's own 3-attempt depth.
+    assert metrics[make_task_id(BENCHMARK, "t1")] == {
+        "attempts": 12, "valid": 12, "success": 7, "infra": 0}
+    assert metrics[make_task_id(BENCHMARK, "t2")]["attempts"] == 3
+    assert metrics[make_task_id(BENCHMARK, "t3")]["attempts"] == 1
+    assert len(rewards[make_task_id(BENCHMARK, "t1")]) == 12
+
+
+def test_an_unknown_aligned_attempts_mode_is_refused(tmp_path):
+    path, _ = _write_scores(tmp_path, _campaign_rows({"t1": [1, 0, 1]}))
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    payload["aligned_attempts"] = "some"
+    Path(path).write_text(json.dumps(payload), encoding="utf-8")
+    sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    with pytest.raises(ConfigError, match="aligned_attempts"):
+        external_control.load_external_control(
+            path=path, sha256=sha, model_key=MODEL_KEY,
+            benchmark=BENCHMARK, tasks=[_Task("t1")], n_attempts=3)
 
 
 def test_missing_file_refused(tmp_path):

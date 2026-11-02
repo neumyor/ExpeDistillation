@@ -41,8 +41,11 @@ def emit(tag, payload):
     sys.stdout.write(tag + " " + json.dumps(payload) + "\\n")
     sys.stdout.flush()
 
+ADMISSIBLE = ["go to fridge 1", "look", "win"]
+
 def obs(text, won=False, done=False, reason=None):
-    return {"text": text, "won": won, "done": done, "reason": reason}
+    return {"text": text, "admissible": ADMISSIBLE,
+            "won": won, "done": done, "reason": reason}
 
 BUDGET = 3
 emit("H", {"budget": BUDGET})
@@ -252,6 +255,32 @@ def test_step_roundtrip_and_success(tmp_path):
         assert env.is_terminated()
         assert env.success_fn()
         assert env.curr_step == 2
+    finally:
+        env.close()
+
+
+def test_admissible_commands_are_tracked_with_each_observation(tmp_path):
+    env = make_env(tmp_path)
+    try:
+        env.reset()
+        assert env.admissible_commands == ("go to fridge 1", "look", "win")
+        env.step("look")
+        assert env.admissible_commands == ("go to fridge 1", "look", "win")
+    finally:
+        env.close()
+
+
+def test_step_verbatim_sends_the_command_unchanged(tmp_path):
+    # The unified protocol normalizes nothing: no put/in, no think handling,
+    # no repeated-action termination. The command reaches the adapter as is.
+    env = make_env(tmp_path)
+    try:
+        env.reset()
+        assert env.step_verbatim("look") == "you did: look"
+        assert env.step_verbatim("look") == "you did: look"
+        assert not env.is_terminated()
+        assert env.step_verbatim("take apple 1 from fridge 1") == \
+            "you did: take apple 1 from fridge 1"
     finally:
         env.close()
 

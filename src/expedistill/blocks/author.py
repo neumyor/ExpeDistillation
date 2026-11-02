@@ -55,14 +55,20 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
+from expedistill import prompts
 from expedistill.core.ids import make_skill_id
+from expedistill.core.skill_sections import (
+    BODY_MARKERS,
+    TRIGGER_MARKERS,
+    splice_sections,
+)
 from expedistill.prompts.profile import profile_section
 from expedistill.core.models import (
     SKILL_MARKERS,
     Skill,
     Subtask,
 )
-from expedistill.infra.reliability import ModelOutputError
+from expedistill.infra.reliability import CodeBugError, ModelOutputError
 from expedistill.llm.call import ModelHandle, call_model
 
 __all__ = [
@@ -70,9 +76,11 @@ __all__ = [
     "NO_SEGMENT_POSITION",
     "SKILL_SECTION_FIELDS",
     "SKILL_SUMMARY_FIELD",
+    "enforce_scope",
     "has_skill_sections",
     "render_skill_content",
     "rewrite_skill",
+    "scope_notice",
     "validate_skill_sections",
     "write_skill",
 ]
@@ -354,7 +362,7 @@ def write_skill(
         "segment_position": segment_position.strip() or NO_SEGMENT_POSITION,
         "profile_section": profile_section(
             "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-            weak_profile),
+            weak_profile, handle.prompt_defaults.get("agent_kind")),
     }
     if mode == "diagnose":
         variables["context_summary"] = subtask.context_summary
@@ -391,6 +399,46 @@ def write_skill(
     )
 
 
+_SCOPE_NOTICES = {"body": "REVISION_SCOPE_BODY",
+                  "trigger": "REVISION_SCOPE_TRIGGER"}
+
+
+def scope_notice(scope: str, summary: str) -> str:
+    """The rewriter's notice for REWRITE's ``{scope_section}`` slot."""
+    if scope == "both":
+        return ""
+    if scope not in _SCOPE_NOTICES:
+        raise CodeBugError(f"unknown revise scope {scope!r}")
+    return prompts.get(_SCOPE_NOTICES[scope]).format(
+        skill_summary=summary or "(none)")
+
+
+def enforce_scope(scope: str, old_content: str, old_summary: str,
+                  new_content: str, new_summary: str) -> Tuple[str, str]:
+    """``(content, summary)`` with everything outside ``scope`` restored.
+
+    ``body`` keeps the old ``[When to use]`` and summary and takes the new
+    ``[Steps]`` and ``[Do not use when]``; ``trigger`` takes the new
+    ``[When to use]`` and summary and keeps the old ``[Steps]`` and
+    ``[Do not use when]``; ``both`` returns the new version untouched. The
+    splice makes the ablation hold whatever the model returned.
+    """
+    if scope == "both":
+        return new_content, new_summary
+    if scope not in _SCOPE_NOTICES:
+        raise CodeBugError(f"unknown revise scope {scope!r}")
+    if not has_skill_sections(old_content):
+        raise CodeBugError(
+            f"a {scope}-scoped rewrite needs a three-section skill; the "
+            "current version lacks one")
+    take_new = BODY_MARKERS if scope == "body" else TRIGGER_MARKERS
+    try:
+        content = splice_sections(old_content, new_content, take_new)
+    except ValueError as exc:
+        raise ModelOutputError(f"REWRITE: {exc}") from exc
+    return content, old_summary if scope == "body" else new_summary
+
+
 def rewrite_skill(
     skill: Skill,
     question_text: str,
@@ -400,10 +448,17 @@ def rewrite_skill(
     handle: ModelHandle,
     *,
     source_context: str,
+    scope: str = "both",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, str]:
     """Rewrite a failed skill (G6); returns the new version's fields.
+
+    ``scope`` restricts what the rewrite may change (``body``: only
+    ``[Steps]`` and ``[Do not use when]``; ``trigger``: only the summary and
+    ``[When to use]``; ``both``: no restriction). The rewriter is told, and
+    the returned fields are spliced so that nothing outside the scope
+    differs from ``skill`` (blocks/revision_scope.py).
 
     ``source_context`` is the rendered real trajectory the exam was cut
     from; the rewriter reads it next to the paper answer.
@@ -431,9 +486,10 @@ def rewrite_skill(
         "source_context": source_context,
         "weak_answer": weak_answer,
         "error_description": error_description,
+        "scope_section": scope_notice(scope, skill.summary),
         "profile_section": profile_section(
             "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-            weak_profile),
+            weak_profile, handle.prompt_defaults.get("agent_kind")),
     }
     parsed = call_model(
         handle, "REWRITE", variables,
@@ -464,6 +520,8 @@ def rewrite_skill(
             f"REWRITE: field 'rewrite_reason' must be a string, "
             f"got {rewrite_reason!r}")
     summary = _validate_summary("REWRITE", parsed.get(SKILL_SUMMARY_FIELD))
+    new_text, summary = enforce_scope(
+        scope, skill.content, skill.summary, new_text, summary)
 
     return {
         "content": new_text,

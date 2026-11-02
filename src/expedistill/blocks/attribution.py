@@ -189,7 +189,7 @@ def attribute_attempts(
         "skills_listing": _skills_listing(skills),
         "profile_section": profile_section(
             "THE MODEL THAT EXECUTED THE TASK (weak model profile):",
-            weak_profile),
+            weak_profile, handle.prompt_defaults.get("agent_kind")),
     }
     aliases = dict(skill_aliases or {})
     last_error: Optional[ModelOutputError] = None
@@ -220,7 +220,7 @@ def revise_from_attempts(
             "attempt_evidence": attempt_evidence,
             "profile_section": profile_section(
                 "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-                weak_profile),
+                weak_profile, handle.prompt_defaults.get("agent_kind")),
         },
         output_json=True, usage=usage, run_dir=run_dir)
     if not isinstance(parsed, dict):

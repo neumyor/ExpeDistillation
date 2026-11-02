@@ -7,7 +7,7 @@ __all__ = ["SEGMENT"]
 SEGMENT = register(
     PromptSpec(
         name="SEGMENT",
-        template="""You are given the view of one agent trajectory from Terminal Bench V2.1.
+        template="""You are given the view of one agent trajectory from {benchmark_name}.
 Split it into capability-coherent sub-procedures.
 
 TRAJECTORY:
@@ -29,8 +29,8 @@ Rules:
   the start index of the next; end indices are exclusive). Every step must
   belong to exactly one segment.
 - Use at most {K} segments, and every segment must contain at least one step.
-- Merge adjacent steps that belong to the same capability. Environment
-  setup, one-off commands, and task-specific data wrangling should be folded
+- Merge adjacent steps that belong to the same capability. {setup_steps}
+  should be folded
   into the nearest capability segment, not given their own segment; their
   steps still belong to a segment (so coverage stays complete), but the
   segment's label and description name the capability, not the setup.
@@ -41,8 +41,7 @@ Rules:
   level of its observable trigger and general goal, so the step content and
   the segment description stay separate.
 - "label" is a short capability phrase, not a task-specific phrase (for
-  example "build and verify a source project", "recover a key from known
-  pairs").
+  example {segment_label_examples}).
 - "description" is one or two sentences that name the observable trigger and
   the general goal.
 - "success" says whether that segment's own goal was achieved by the end of

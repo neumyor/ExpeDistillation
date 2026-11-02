@@ -75,7 +75,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 1. RESOLVE PARAMETERS AND VERIFY CAPABILITY
     # ========================================================================
-    resolve._execution_params(spec)
+    role = resolve._test_role(resolve._execution_params(spec))
     _require_folder_capability(spec, ctx.config.benchmark)
 
     delivery, delivery_params = resolve._resolve_delivery(spec)
@@ -84,7 +84,8 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
 
     tasks = engine._task_objects(ctx, list(phase.task_ids))
     tasks_by_ref = engine._prefixed_task_map(ctx, [task.task_id for task in tasks])
-    n_attempts = ctx.config.n_attempts_weak
+    n_attempts = (ctx.config.n_attempts_strong if role == "strong"
+                  else ctx.config.n_attempts_weak)
 
     expected = {ids.make_task_id(benchmark, task.task_id): n_attempts
                 for task in tasks}
@@ -144,7 +145,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
 
         for task_id in sorted(expected):
             for attempt in range(n_attempts):
-                trajectory_id = ids.make_trajectory_id(task_id, "weak", attempt)
+                trajectory_id = ids.make_trajectory_id(task_id, role, attempt)
 
                 if trajectory_id in stage1_holes:
                     control_accepted.add(trajectory_id)
@@ -183,7 +184,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     folder_dir = _materialize_folder(ctx, phase, bank, rows)
 
     plans = engine._plan_units(rows, tasks_by_ref, phase_label=phase.label,
-                               benchmark=benchmark, role="weak",
+                               benchmark=benchmark, role=role,
                                n_attempts=n_attempts,
                                skill_folder_dir=folder_dir)
 
@@ -222,7 +223,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
         bare_rows = bare_delivery.resolve(None, tasks, bare_params)
         bare_plans = engine._plan_units(bare_rows, tasks_by_ref,
                                         phase_label=phase.label,
-                                        benchmark=benchmark, role="weak",
+                                        benchmark=benchmark, role=role,
                                         n_attempts=n_attempts)
 
         engine._dispatch_arm(ctx, phase, plans=bare_plans, store=control_store,
@@ -234,9 +235,9 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 5. HANDLE MISSING UNITS
     # ========================================================================
-    missing = {"with_bank": _missing_units(expected, with_bank),
+    missing = {"with_bank": _missing_units(expected, with_bank, role),
                "control": ([] if external_metrics is not None
-                          else _missing_units(expected, control))}
+                          else _missing_units(expected, control, role))}
 
     accepted_now = {"with_bank": with_bank_accepted,
                     "control": control_accepted}
@@ -262,13 +263,13 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     with_bank_specs = [
         UnitSpec(unit_id=plan.unit.unit_id, phase_label=phase.label,
-                 task_ref=plan.unit.task_ref, role="weak", arm="with_bank",
+                 task_ref=plan.unit.task_ref, role=role, arm="with_bank",
                  expected_attempts=n_attempts,
                  injected_skills=plan.unit.skills_injected)
         for plan in plans]
     control_specs = _control_specs(phase_label=phase.label,
                                    benchmark=benchmark, expected=expected,
-                                   n_attempts=n_attempts)
+                                   n_attempts=n_attempts, role=role)
     all_specs = with_bank_specs + control_specs
 
     executions = _with_bank_executions(
@@ -284,7 +285,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
                 task_ref=task_id, unit_id=control_unit_by_task[task_id],
                 phase_label=phase.label, reward=reward,
                 sample_index=index, source=external_pinned.path,
-                sha256=external_pinned.sha256, arm="control")
+                sha256=external_pinned.sha256, arm="control", role=role)
             for task_id in sorted(external_rewards)
             for index, reward in enumerate(external_rewards[task_id])]
     else:
@@ -396,15 +397,15 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
 # ============================================================================
 
 def _control_specs(*, phase_label: str, benchmark: str,
-                   expected: Dict[str, int],
-                   n_attempts: int) -> List[UnitSpec]:
+                   expected: Dict[str, int], n_attempts: int,
+                   role: str) -> List[UnitSpec]:
     """One bare (no injection) control unit spec per test task."""
     return [
         UnitSpec(
             unit_id=unit_ids.make_unit_id(
                 phase_label=phase_label, benchmark=benchmark,
-                task_ref=task_id, role="weak", skills_injected=None),
-            phase_label=phase_label, task_ref=task_id, role="weak",
+                task_ref=task_id, role=role, skills_injected=None),
+            phase_label=phase_label, task_ref=task_id, role=role,
             arm="control", expected_attempts=n_attempts,
             injected_skills=None)
         for task_id in sorted(expected)]
@@ -503,12 +504,12 @@ def _folder_read_sets(rows: List[ExecutionUnitRow],
             for traj in with_bank}
 
 
-def _missing_units(expected: Dict[str, int],
-                  trajectories: List[Trajectory]) -> List[str]:
+def _missing_units(expected: Dict[str, int], trajectories: List[Trajectory],
+                   role: str) -> List[str]:
     """Expected unit IDs with no trajectory."""
     stored = {traj.trajectory_id for traj in trajectories}
-    return [ids.make_trajectory_id(task_id, "weak", attempt)
+    return [ids.make_trajectory_id(task_id, role, attempt)
             for task_id in sorted(expected)
             for attempt in range(expected[task_id])
-            if ids.make_trajectory_id(task_id, "weak", attempt)
+            if ids.make_trajectory_id(task_id, role, attempt)
             not in stored]

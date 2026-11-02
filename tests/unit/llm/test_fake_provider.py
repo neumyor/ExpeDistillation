@@ -22,6 +22,7 @@ from expedistill.llm.fake_provider import (
 )
 from expedistill.llm.providers import PROVIDERS, default_client
 from expedistill.prompts import get as get_prompt
+from expedistill.prompts.learning_context import GENERIC
 
 QUESTION = "What is the capital of the test country?"
 ANSWER = "Testville"
@@ -99,7 +100,8 @@ def test_segment_covers_the_whole_view(client):
     view = ("task: searchqa:t1 (final status: success)\n\n"
             "step 0\naction: Finish[x]\nobservation: Answer is CORRECT.\n\n"
             "step 1\naction: Search[q]\nobservation: a passage")
-    user = get_prompt("SEGMENT").format(trajectory_view=view, K="5")
+    user = get_prompt("SEGMENT").format(
+        **GENERIC.variables(), trajectory_view=view, K="5")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert len(parsed) == 1
     assert parsed[0]["start"] == 0 and parsed[0]["end"] == 2
@@ -110,13 +112,15 @@ def test_segment_covers_the_whole_view(client):
 def test_segment_reads_a_failure_view(client):
     view = ("task: searchqa:t1 (final status: failure)\n\n"
             "step 0\naction: Finish[x]\nobservation: Answer is INCORRECT.")
-    user = get_prompt("SEGMENT").format(trajectory_view=view, K="5")
+    user = get_prompt("SEGMENT").format(
+        **GENERIC.variables(), trajectory_view=view, K="5")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert parsed[0]["end"] == 1 and parsed[0]["success"] is False
 
 
 def test_distill_returns_the_protocol_v2_contract(client):
     user = get_prompt("SKILL_DISTILL").format(
+        **GENERIC.variables(),
         label="l", description="d", steps_view="s", segment_position="p",
         profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
@@ -127,6 +131,7 @@ def test_distill_returns_the_protocol_v2_contract(client):
 
 def test_diagnose_returns_the_protocol_v2_contract(client):
     user = get_prompt("SKILL_DIAGNOSE").format(
+        **GENERIC.variables(),
         label="l", description="d", context_summary="c", steps_view="s",
         segment_position="p", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
@@ -138,6 +143,7 @@ def test_attempt_revision_appends_the_marker_and_keeps_the_skill(client):
     original = ("[When to use] always\n[Steps] do it\n"
                 "[Do not use when] never")
     user = get_prompt("SKILL_ATTEMPT_REVISION").format(
+        **GENERIC.variables(),
         skill_text=original, attempt_evidence="e", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert parsed["skill_text"] == (
@@ -152,8 +158,9 @@ def test_rewrite_appends_the_marker(client):
     original = ("[When to use] always\n[Steps] do it\n"
                 "[Do not use when] never")
     user = get_prompt("REWRITE").format(
+        **GENERIC.variables(),
         skill_text=original, question_text="q", source_context="ctx", weak_answer="a",
-        error_description="e", profile_section="w")
+        error_description="e", scope_section="", profile_section="w")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert REVISION_MARKER in parsed["skill_text"]
     assert parsed["skill_text"].startswith("[When to use]")
@@ -188,7 +195,8 @@ def test_merge_keeps_the_first_sources_markers(client):
 
 def test_group_covers_every_listed_skill(client):
     listing = "- s1: content one\n- s2: content two"
-    user = get_prompt("GROUP").format(skills_listing=listing)
+    user = get_prompt("GROUP").format(
+        **GENERIC.variables(), skills_listing=listing)
     parsed = extract_json(client.complete("fake-strong", "s", user))
     assert set(parsed["groups"]) == {"s1", "s2"}
 

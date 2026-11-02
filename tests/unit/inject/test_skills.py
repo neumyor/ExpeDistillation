@@ -229,3 +229,41 @@ def test_skill_ref_format():
     assert skill_ref(make_skill("s1", "a")) == "s1@v1"
     assert skill_ref(make_skill("s1", "a", version=7)) == "s1@v7"
     assert skill_ref({"skill_id": "s1", "content": "a"}) == "s1@v1"
+
+
+# ---------------------------------------------------------------------------
+# verbatim: skill documents from other methods reach the model intact
+# ---------------------------------------------------------------------------
+
+_DOCUMENT = "# Playbook\n\n## Step 1\n- check the fridge\n- open it\n\n## Step 2\nclose it"
+
+
+def test_verbatim_keeps_the_document_layout_byte_for_byte():
+    block = format_skills_block(
+        [{"skill_id": "doc", "content": _DOCUMENT}], verbatim=True)
+    assert block == "## Skill rules\n\n" + _DOCUMENT
+
+
+def test_the_default_still_flattens_the_same_document():
+    block = format_skills_block([{"skill_id": "doc", "content": _DOCUMENT}])
+    assert "\n\n" not in block.split("\n", 1)[1]
+    assert block.splitlines()[1].startswith("- # Playbook ## Step 1")
+
+
+def test_verbatim_separates_several_skills_by_one_blank_line():
+    block = format_skills_block(
+        [{"skill_id": "a", "content": "first\nline"},
+         {"skill_id": "b", "content": "second"}], verbatim=True)
+    assert block == "## Skill rules\n\nfirst\nline\n\nsecond"
+
+
+def test_verbatim_ignores_groups():
+    block = format_skills_block(
+        [{"skill_id": "a", "content": "x", "group": "g"}],
+        groups={"a": "other"}, verbatim=True)
+    assert "###" not in block
+
+
+def test_an_empty_list_is_empty_in_both_modes():
+    assert format_skills_block([], verbatim=True) == ""
+    assert format_skills_block([]) == ""

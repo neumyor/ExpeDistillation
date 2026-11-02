@@ -30,7 +30,8 @@ from expedistill.core.models import (
 )
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
-from expedistill.prompts.profile import NO_WEAK_PROFILE_SECTION, profile_section
+from expedistill.prompts.learning_context import GENERIC
+from expedistill.prompts.profile import profile_section
 from expedistill.prompts.registry import get as get_prompt
 from expedistill.blocks.author import (
     NO_SEGMENT_POSITION,
@@ -183,6 +184,7 @@ def test_write_skill_distill_wiring_and_fields():
     # subtask fields (v2: no success variable, no context_summary).
     assert len(handle.client.calls) == 1
     expected = get_prompt("SKILL_DISTILL").format(
+        **GENERIC.variables(),
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
@@ -216,13 +218,15 @@ def test_write_skill_without_profile_sends_the_neutral_section():
 
     user = handle.client.calls[0]["user"]
     expected = get_prompt("SKILL_DISTILL").format(
+        **GENERIC.variables(),
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
         segment_position=NO_SEGMENT_POSITION,
-        profile_section=NO_WEAK_PROFILE_SECTION,
+        profile_section=profile_section("", ""),
     )
     assert user == expected
+    assert GENERIC.slots["agent_kind"] in profile_section("", "")
     assert WEAK_PROFILE not in user
 
 
@@ -267,6 +271,7 @@ def test_write_skill_diagnose_wiring_and_fields():
 
     assert len(handle.client.calls) == 1
     expected = get_prompt("SKILL_DIAGNOSE").format(
+        **GENERIC.variables(),
         label=subtask.label,
         description=subtask.description,
         steps_view=STEPS_VIEW,
@@ -721,11 +726,13 @@ def test_rewrite_skill_wiring_and_result():
 
     assert len(handle.client.calls) == 1
     expected = get_prompt("REWRITE").format(
+        **GENERIC.variables(),
         skill_text=skill.content,
         source_context="the real steps",
         question_text="What should you do when X?",
         weak_answer="I would do X.",
         error_description="The answer skips the verification step.",
+        scope_section="",
         profile_section=_profile_section(),
     )
     assert handle.client.calls[0]["user"] == expected
@@ -834,3 +841,98 @@ def test_rewrite_skill_empty_skill_text_raises():
     with pytest.raises(ModelOutputError, match="skill_text"):
         rewrite_skill(skill, "q", "a", "err", WEAK_PROFILE, handle,
                       source_context="the real steps")
+
+
+# ---------------------------------------------------------------------------
+# rewrite scope: the trigger and the body can be frozen separately
+# ---------------------------------------------------------------------------
+
+_SCOPED_OLD = "\n".join([
+    "[When to use] At task start, when the input is a CSV.",
+    "[Steps]",
+    "1. old step",
+    "[Do not use when] The input is not tabular.",
+])
+_SCOPED_NEW = "\n".join([
+    "[When to use] After the first check, when a header is present.",
+    "[Steps]",
+    "1. new step",
+    "[Do not use when] There is no header.",
+])
+
+
+def _scoped_skill():
+    return Skill(skill_id="s", content=_SCOPED_OLD, summary="old summary",
+                 subtask_id="t", source_subtasks=["t"])
+
+
+def _scoped_rewrite(scope):
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "wrong_trigger",
+        "skill_text": _SCOPED_NEW,
+        "rewrite_reason": "r",
+        "summary": "new summary",
+    }))
+    result = rewrite_skill(
+        _scoped_skill(), question_text="q", weak_answer="a",
+        error_description="e", weak_profile="", handle=handle,
+        source_context="ctx", scope=scope)
+    return result, handle.client.calls[0]["user"]
+
+
+def test_scope_both_takes_the_model_output_whole():
+    result, user = _scoped_rewrite("both")
+    assert result["content"] == _SCOPED_NEW
+    assert result["summary"] == "new summary"
+    assert "SCOPE OF THIS REWRITE" not in user
+
+
+def test_scope_body_restores_the_old_trigger_and_summary():
+    result, user = _scoped_rewrite("body")
+    assert result["content"] == "\n".join([
+        "[When to use] At task start, when the input is a CSV.",
+        "[Steps]", "1. new step",
+        "[Do not use when] There is no header."])
+    assert result["summary"] == "old summary"
+    assert "the body only" in user
+
+
+def test_scope_trigger_restores_the_old_body_and_shows_the_summary():
+    result, user = _scoped_rewrite("trigger")
+    assert result["content"] == "\n".join([
+        "[When to use] After the first check, when a header is present.",
+        "[Steps]", "1. old step",
+        "[Do not use when] The input is not tabular."])
+    assert result["summary"] == "new summary"
+    assert "the trigger only" in user
+    assert "CURRENT SUMMARY: old summary" in user
+
+
+def test_a_scoped_rewrite_of_an_unsectioned_skill_is_a_code_bug():
+    from expedistill.infra.reliability import CodeBugError
+    plain = Skill(skill_id="s", content="Do X.", summary="s",
+                  subtask_id="t", source_subtasks=["t"])
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "other", "skill_text": "Do Y.",
+        "rewrite_reason": "r", "summary": "s2"}))
+    with pytest.raises(CodeBugError, match="three-section"):
+        rewrite_skill(plain, question_text="q", weak_answer="a",
+                      error_description="e", weak_profile="", handle=handle,
+                      source_context="ctx", scope="body")
+
+
+def test_a_scoped_rewrite_whose_output_lacks_a_section_is_a_model_error():
+    handle = make_fake_handle(script=json_script({
+        "failure_category": "other",
+        "skill_text": "[When to use] x\n[Steps]\n1. y",
+        "rewrite_reason": "r", "summary": "s2"}))
+    with pytest.raises(ModelOutputError):
+        rewrite_skill(_scoped_skill(), question_text="q", weak_answer="a",
+                      error_description="e", weak_profile="", handle=handle,
+                      source_context="ctx", scope="body")
+
+
+def test_an_unknown_scope_is_a_code_bug():
+    from expedistill.infra.reliability import CodeBugError
+    with pytest.raises(CodeBugError, match="unknown revise scope"):
+        _scoped_rewrite("steps")

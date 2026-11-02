@@ -109,9 +109,12 @@ class ExamExecutionParams:
                 f"{self.max_skill_reads!r}")
 
 
+EXECUTOR_ROLES = ("executor_weak", "executor_strong")
+
+
 @dataclass(frozen=True)
 class RealFolderExecutionParams:
-    """A folder benchmark execution: no parameters, like the exam one.
+    """A folder benchmark execution: one parameter, the executor.
 
     The ``real_folder`` execution (the skill-folder play, M3): the
     benchmark runs for real like ``real``, but the phase's ``folder``
@@ -119,11 +122,26 @@ class RealFolderExecutionParams:
     catalog, and the prompt carries only the folder guidance. The
     load-time checklist pins the pairing (folder delivery <->
     real_folder execution, test role only), and the phase is a test phase:
-    it samples at the global ``n_attempts_weak`` depth -- the same depth
-    the bare control arm runs, the same rule the old test phase ran under
-    ``real`` -- and nothing about the folder run is budgeted at execution
-    time (which skill files the agent reads is M4's post-hoc trajectory
-    parse, never a run-time interception). The class is therefore empty
-    on purpose: a config key here fails loudly at the params builder's
-    unknown-key check (the M6 review removed ``n_attempts`` and
-    ``max_injection_tokens``, which no legal phase ever consumed)."""
+    it samples at the executor's global depth (``n_attempts_weak`` or
+    ``n_attempts_strong``) -- the same depth the bare control arm runs,
+    the same rule the old test phase ran under ``real`` -- and nothing
+    about the folder run is budgeted at execution time (which skill files
+    the agent reads is M4's post-hoc trajectory parse, never a run-time
+    interception). A key other than ``executor`` fails loudly at the
+    params builder's unknown-key check (the M6 review removed
+    ``n_attempts`` and ``max_injection_tokens``, which no legal phase ever
+    consumed).
+
+    * ``executor`` -- the model role that runs the phase: ``executor_weak``
+      (the default, every earlier test phase) or ``executor_strong`` (the
+      same bank handed to the strong model; pair it with a control pinned
+      to that model's campaign column).
+    """
+
+    executor: str = "executor_weak"
+
+    def __post_init__(self) -> None:
+        if self.executor not in EXECUTOR_ROLES:
+            raise ConfigError(
+                f"execution.real_folder executor must be one of "
+                f"{list(EXECUTOR_ROLES)}, got {self.executor!r}")

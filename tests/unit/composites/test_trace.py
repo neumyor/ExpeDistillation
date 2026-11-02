@@ -189,6 +189,28 @@ def test_resolve_uses_the_injected_instruction_lookup(run_dir):
     assert context.task_instruction == "do tb:t1"
 
 
+def test_resolve_appends_the_initial_observation_the_executor_saw(tmp_path):
+    sheet = _sheet(0, 3)
+    sheet.execution.metrics["initial_observation"] = "You are in a kitchen."
+    dest = tmp_path / "phases" / "p01_baseline"
+    answer_sheets.write_answer_sheets(
+        [sheet], dest / "answer_sheets", render_markdown=False)
+    ref = trace.trace_at(sheet, 1)
+
+    context = trace.resolve(tmp_path, ref,
+                            instruction_for=lambda task: "do the task")
+
+    assert context.task_instruction == "do the task\n\nYou are in a kitchen."
+
+
+def test_instruction_with_initial_is_idempotent():
+    assert trace.instruction_with_initial({}, "do it") == "do it"
+    assert trace.instruction_with_initial(
+        {"initial_observation": "room"}, "do it") == "do it\n\nroom"
+    assert trace.instruction_with_initial(
+        {"initial_observation": "room"}, "do it\n\nroom") == "do it\n\nroom"
+
+
 def test_resolve_survives_a_failing_instruction_lookup(run_dir):
     ref = trace.trace_at(_sheet(0, 5), 1)
 

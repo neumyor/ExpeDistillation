@@ -250,6 +250,14 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
                 "registered -- the folder prompt is part of the frozen "
                 "protocol, so the plugin and its registration disagree")
         names.add(folder_prompt)
+    for extra in plugin.protocol_prompt_names:
+        if extra not in prompts.PROMPTS:
+            raise ConfigError(
+                f"benchmark {benchmark!r} declares protocol_prompt_names "
+                f"entry {extra!r} but no prompt of that name is registered "
+                "-- the runner's other prompts are part of the frozen "
+                "protocol, so the plugin and its registration disagree")
+        names.add(extra)
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
@@ -277,6 +285,10 @@ def build_manifest(config: Any, tasks: Sequence[Any], *,
                   "reserved": list(reserved_ids)},
         "config": frozen_config.to_dict(),
         "prompt_digests": prompt_digests,
+        # The benchmark's vocabulary for the learning prompts is protocol
+        # like the prompt text itself: one changed word is a new experiment.
+        "learning_context": get_plugin(
+            config.benchmark).learning_context.to_dict(),
         "rules": config.rules,
         "model_roles": config.models,
         "tasks_digest": tasks_digest(tasks),

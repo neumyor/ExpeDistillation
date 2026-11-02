@@ -99,6 +99,8 @@ def _group_of(skill: _SkillRecord,
 def format_skills_block(
     skills: Sequence[Union[Skill, Mapping[str, Any]]],
     groups: Optional[Mapping[str, Optional[str]]] = None,
+    *,
+    verbatim: bool = False,
 ) -> str:
     """Render skills as the rule text block inserted into a prompt (D9).
 
@@ -120,12 +122,20 @@ def format_skills_block(
     skill's own ``group`` (curation assigns groups this way); absent entries
     keep the skill's own group, and a ``None`` value un-groups the skill.
 
+    ``verbatim=True`` renders each skill's content exactly as stored, after
+    the header and separated by one blank line, with no bullets, no grouping
+    and no newline collapsing. It exists for skill documents written by
+    other methods (a structured markdown file must reach the model with its
+    headings and lists intact); the default layout is unchanged.
+
     Accepts Skill objects and dicts (``skill_id``, ``version``, ``content``,
     ``group``) interchangeably.
     """
     records = [_normalize(skill) for skill in skills]
     if not records:
         return ""
+    if verbatim:
+        return "\n\n".join([BLOCK_HEADER] + [r["content"] for r in records])
 
     grouped: Dict[str, List[_SkillRecord]] = {}
     ungrouped: List[_SkillRecord] = []

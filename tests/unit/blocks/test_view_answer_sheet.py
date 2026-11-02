@@ -67,7 +67,7 @@ def test_trajectory_sheet_renders_headers_and_the_numbered_steps():
     text = render_answer_sheet(_sheet(execution, grading=grading))
 
     assert text.startswith(
-        f"# Answer sheet `unit-1::{trajectory.trajectory_id}`")
+        f"# Answer sheet `unit-1::att{trajectory.attempt_index:02d}`")
     assert "- phase: `p03:live`" in text
     assert "- unit: `unit-1`" in text
     assert "- attempt: `0`" in text
@@ -141,7 +141,7 @@ def test_external_sheet_renders_the_reward_table_and_provenance():
     execution = execution_from_external(
         task_ref=TASK, unit_id="unit-3", phase_label="p06:test",
         reward=1.0, sample_index=0, source="campaign.csv",
-        sha256="deadbeef")
+        sha256="deadbeef", role="weak")
     grading = GradingRecord(
         verdict="success", basis="external_reward: campaign reward",
         rule_name="external_reward")

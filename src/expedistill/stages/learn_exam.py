@@ -36,7 +36,9 @@ def execute_exam_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
                       current_rows: Optional[List[UnitSummary]],
                       superseded: Sequence[str], *,
                       skip_targets: Sequence[str] = (),
-                      source_phase_label: str = "") -> Set[str]:
+                      source_phase_label: str = "",
+                      revise_scope: str = "both",
+                      weak_profile: Optional[str] = None) -> Set[str]:
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     recorder = UnitFailureRecorder(ctx.run_dir)
     rows = [item.row for item in items]
@@ -48,7 +50,8 @@ def execute_exam_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
         if item.row.target_id in skipped:
             return item.row.target_id, None
         try:
-            _execute_row(ctx, phase, item, current_rows, phase_dir)
+            _execute_row(ctx, phase, item, current_rows, phase_dir,
+                         revise_scope, weak_profile)
             return item.row.target_id, None
         except InfrastructureError as exc:
             recorder.record(item.row.target_id, phase.label, exc, exc)
@@ -68,7 +71,8 @@ def execute_exam_rows(ctx: Any, phase: Any, items: Sequence[ReviewItem],
 
 def _execute_row(ctx: Any, phase: Any, item: ReviewItem,
                  current_rows: Optional[List[UnitSummary]],
-                 phase_dir) -> None:
+                 phase_dir, revise_scope: str,
+                 weak_profile: Optional[str]) -> None:
     row = item.row
     if row.target_kind != "skill":
         raise CodeBugError(
@@ -79,7 +83,8 @@ def _execute_row(ctx: Any, phase: Any, item: ReviewItem,
     elif row.action == decision.DELETE:
         ledger.land_delete(ctx.store, phase, row, phase_dir)
     elif row.action == decision.REVISE:
-        _land_revise(ctx, phase, item, current_rows, phase_dir)
+        _land_revise(ctx, phase, item, current_rows, phase_dir,
+                     revise_scope, weak_profile)
     else:
         raise CodeBugError(
             f"the exam task list carries action {row.action!r} on target "
@@ -88,7 +93,8 @@ def _execute_row(ctx: Any, phase: Any, item: ReviewItem,
 
 def _land_revise(ctx: Any, phase: Any, item: ReviewItem,
                  current_rows: Optional[List[UnitSummary]],
-                 phase_dir) -> None:
+                 phase_dir, revise_scope: str,
+                 weak_profile: Optional[str] = None) -> None:
     store: Store = ctx.store
     row = item.row
     skill = store.load("skills", row.target_id, Skill)
@@ -124,8 +130,10 @@ def _land_revise(ctx: Any, phase: Any, item: ReviewItem,
     outcomes = author.revise_group(
         task_row=row, packages=[package],
         rewriter_handle=ctx.handle("rewriter"),
-        weak_profile=ctx.config.effective_weak_profile(),
-        decide=_always_revise, usage=ctx.usage, run_dir=ctx.run_dir)
+        weak_profile=(weak_profile if weak_profile is not None
+                      else ctx.config.effective_weak_profile()),
+        decide=_always_revise, scope=revise_scope,
+        usage=ctx.usage, run_dir=ctx.run_dir)
     if not outcomes:
         return
     _land_revision(ctx, phase, row, package, outcomes[0], phase_dir,

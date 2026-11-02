@@ -169,3 +169,32 @@ def test_group_by_task_refuses_a_task_without_a_group(tmp_path):
     with pytest.raises(CodeBugError, match="no pending skill group"):
         delivery.resolve(pending_groups(store),
                          [make_task_id(BENCHMARK, "t1")], params)
+
+
+# ---------------------------------------------------------------------------
+# whole_bank verbatim
+# ---------------------------------------------------------------------------
+
+def test_whole_bank_verbatim_injects_the_stored_text_as_is():
+    from expedistill.methods.delivery import WholeBankParams, whole_bank
+    from tests.helpers.skills import make_skill
+    document = "# Rules\n\n- one\n- two"
+    skill = make_skill("traj/tb:t1/strong/00/seg00", document,
+                       status="accepted")
+    plain = whole_bank.resolve([skill], ["t1"], WholeBankParams())
+    verbatim = whole_bank.resolve(
+        [skill], ["t1"], WholeBankParams(verbatim=True))
+    assert verbatim[0].skills_block == "## Skill rules\n\n" + document
+    assert plain[0].skills_block != verbatim[0].skills_block
+    # The recorded bank identity does not depend on how the text is shown.
+    assert plain[0].skills_injected == verbatim[0].skills_injected
+
+
+def test_whole_bank_verbatim_must_be_a_bool():
+    import pytest
+    from expedistill.core.config import ConfigError
+    from expedistill.methods import resolve_params
+    with pytest.raises(ConfigError, match="verbatim"):
+        resolve_params("delivery", {"name": "whole_bank", "verbatim": "yes"})
+    assert resolve_params(
+        "delivery", {"name": "whole_bank", "verbatim": True}).verbatim is True

@@ -29,6 +29,7 @@ from expedistill.infra.store import (
 
 __all__ = [
     "ACTABLE_STATUSES",
+    "accept_written",
     "OUTCOMES_NAME",
     "REVISIONS_NAME",
     "TASK_LIST_NAME",
@@ -225,6 +226,29 @@ def land_delete(store: Store, phase: Any, row: TaskListRow,
     discard_skill(store, skill, row.reason)
     append_outcome(phase, row, skill.skill_id, "discarded",
                    skill.version, phase_dir)
+
+
+def accept_written(store: Store, phase: Any, phase_dir) -> int:
+    """Accept every pending skill this phase's add path wrote.
+
+    For a phase configured with ``accept_new``: the skills enter the library
+    without a check. Read off the phase's provenance ledger (both add
+    paths record each new version there), idempotent on a replay, and
+    returns how many skills it flipped.
+    """
+    path = phase_dir / _provenance.PROVENANCE_NAME
+    if not path.exists():
+        return 0
+    flipped = 0
+    for row in read_jsonl(path):
+        if row.get("phase_label") != phase.label or row.get("cause") != "add":
+            continue
+        skill = store.load("skills", row["skill_id"], Skill)
+        if skill.status == "pending":
+            skill.status = "accepted"
+            store.save(skill, "skills")
+            flipped += 1
+    return flipped
 
 
 def land_keep_or_delete(store: Store, phase: Any, row: TaskListRow,

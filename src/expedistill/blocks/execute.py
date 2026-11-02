@@ -96,16 +96,13 @@ def run_one(
     # phase-level check); this per-unit guard stays as the second
     # layer, so a folder unit can never slip through any future path. A
     # configuration error, not a code bug: the config chose the folder
-    # play for a benchmark whose plugin never declared it (as of this
-    # writing only the 'tb' plugin does).
+    # play for a benchmark whose plugin never declared it.
     if task.meta.get("skill_folder") is not None \
             and plugin.skill_folder_prompt_name is None:
         raise ConfigError(
             f"benchmark {benchmark!r} does not support skill folders (the "
             "real_folder execution): its plugin declares no "
-            "skill_folder_prompt_name, and a skill-folder unit needs one "
-            "(as of this writing only the 'tb' plugin supports skill "
-            "folders)")
+            "skill_folder_prompt_name, and a skill-folder unit needs one")
     outcome = plugin.run(task, handle, skills_block, workdir)
     if not isinstance(outcome, RunOutcome):
         raise CodeBugError(

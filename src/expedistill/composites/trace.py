@@ -43,6 +43,7 @@ from expedistill.infra.store import object_filename, read_json
 __all__ = [
     "DEFAULT_AFTER_STEPS",
     "WRITER_BEFORE_STEPS",
+    "instruction_with_initial",
     "is_exam_answer",
     "load_sheet",
     "render_scenes",
@@ -154,6 +155,23 @@ def _real_execution(run_dir: Union[str, Path], ref: TraceRef):
     return execution, steps
 
 
+def instruction_with_initial(metadata: Any, instruction: str) -> str:
+    """The task instruction plus the env's reset observation, if recorded.
+
+    Local benchmarks fold the reset observation into the executor's
+    instruction (ALFWorld's room description is the only input listing the
+    receptacles). The task table holds only the raw task line, so every
+    reader rebuilding a scene from an execution must take the observation
+    from the execution record itself; without it the scene starts without
+    the rooms the real run saw.
+    """
+    metrics = metadata if isinstance(metadata, dict) else {}
+    initial = str(metrics.get("initial_observation") or "")
+    if initial and initial not in instruction:
+        return f"{instruction}\n\n{initial}" if instruction else initial
+    return instruction
+
+
 def _instruction(execution: Any,
                  instruction_for: Optional[Callable[[str], str]]) -> str:
     instruction = ""
@@ -162,8 +180,9 @@ def _instruction(execution: Any,
             instruction = instruction_for(execution.task_ref)
         except Exception:
             instruction = ""
-    return instruction or str(
-        (execution.metrics or {}).get("initial_prompt") or "")
+    metrics = execution.metrics or {}
+    instruction = instruction or str(metrics.get("initial_prompt") or "")
+    return instruction_with_initial(metrics, instruction)
 
 
 def resolve(run_dir: Union[str, Path], ref: TraceRef, *,

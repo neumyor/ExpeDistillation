@@ -52,7 +52,7 @@ Write three fields, all in natural language:
   never include the action or the observations that come after it.
 - expected_behavior: what a reader who understands the situation should do
   next, and what it should verify. Say the behavior generally; it is the
-  grading standard for a plan, not this trajectory's command lines.
+  grading standard for a plan, not this trajectory's {action_noun} lines.
 - reference_answer: the best answer to the scene: the right action, in what
   order, and why. This is a grading reference and is never shown to the
   examined reader.

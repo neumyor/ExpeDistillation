@@ -34,6 +34,7 @@ from expedistill.infra.store import Store, read_json
 from expedistill.infra.usage import UsageRecorder
 from expedistill.prompts import PromptSpec
 from expedistill.blocks.tasks import tasks_digest
+from expedistill.prompts.learning_context import GENERIC
 from expedistill.stages import stage0_freeze
 from expedistill.stages.context import StageContext
 
@@ -627,8 +628,11 @@ def test_real_searchqa_plugin_freezes_its_task_prompt_digest(
     frozen = manifest["prompt_digests"]
     assert frozen["SEARCHQA_TASK_PROMPT"] == prompts.digest(
         "SEARCHQA_TASK_PROMPT")
+    assert frozen["SEARCHQA_TASK_PROMPT_FOLDER"] == prompts.digest(
+        "SEARCHQA_TASK_PROMPT_FOLDER")
     assert set(frozen) == (set(prompts.METHOD_PROMPT_NAMES)
-                           | {"SEARCHQA_TASK_PROMPT"})
+                           | {"SEARCHQA_TASK_PROMPT",
+                              "SEARCHQA_TASK_PROMPT_FOLDER"})
     # The plugin's declared auxiliary metric is frozen by name.
     assert manifest["aux_metric"] == "sub_em"
 
@@ -649,10 +653,17 @@ def test_real_alfworld_plugin_freezes_its_task_prompt_digest(
     stage0_freeze.run(ctx)
     manifest = load_manifest(ctx.run_dir)
     frozen = manifest["prompt_digests"]
-    assert frozen["ALFWORLD_TASK_PROMPT"] == prompts.digest(
-        "ALFWORLD_TASK_PROMPT")
-    assert set(frozen) == (set(prompts.METHOD_PROMPT_NAMES)
-                           | {"ALFWORLD_TASK_PROMPT"})
+    protocol = {
+        "ALFWORLD_TASK_PROMPT",
+        "ALFWORLD_TASK_PROMPT_FOLDER",
+        "ALFWORLD_TASK_PROMPT_SYSTEM",
+        "ALFWORLD_TASK_PROMPT_NO_HISTORY",
+        "ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER",
+        "ALFWORLD_TASK_PROMPT_CORRECTION",
+    }
+    for name in protocol:
+        assert frozen[name] == prompts.digest(name)
+    assert set(frozen) == set(prompts.METHOD_PROMPT_NAMES) | protocol
     assert manifest["aux_metric"] is None
 
 
@@ -731,6 +742,10 @@ FROZEN_PROMPT_NAMES = frozenset({
     "TRIAL_REQUIREMENT_AGGREGATION",
     "PROFILE_UPDATE",
     "REQUIREMENT_SKILL",
+    "REVISION_SCOPE_BODY",
+    "REVISION_SCOPE_TRIGGER",
+    "SKILL_ADHERENCE_JUDGE",
+    "SKILL_APPLICABILITY_JUDGE",
 })
 
 
@@ -783,8 +798,10 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
     # The manifest's exact top-level key set is part of the frozen
     # protocol: an added or dropped key changes every resume comparison.
     assert set(manifest) == {
-        "benchmark", "mode", "split", "config", "prompt_digests", "rules",
-        "model_roles", "tasks_digest", "aux_metric"}
+        "benchmark", "mode", "split", "config", "prompt_digests",
+        "learning_context", "rules", "model_roles", "tasks_digest",
+        "aux_metric"}
+    assert manifest["learning_context"] == GENERIC.to_dict()
     assert manifest["benchmark"] == config.benchmark
     assert manifest["mode"] == config.mode
     # Split shapes are contract, not captured data (ruling 7): full mode

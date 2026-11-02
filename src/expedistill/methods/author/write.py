@@ -97,6 +97,7 @@ def _revise_once(
     weak_profile: str,
     handle: ModelHandle,
     *,
+    scope: str = "both",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Optional[dict]:
@@ -123,7 +124,7 @@ def _revise_once(
         result = rewrite_skill(
             skill, exam_question, weak_answer, judge_reason,
             weak_profile, handle, source_context=source_context,
-            usage=usage, run_dir=run_dir)
+            scope=scope, usage=usage, run_dir=run_dir)
         return {"content": result["content"],
                 "failure_category": result["failure_category"],
                 "revision_reason": result["rewrite_reason"],
@@ -140,6 +141,7 @@ def _revise_with_budget(
     handle: ModelHandle,
     attempts: int,
     *,
+    scope: str = "both",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> RevisionOutcome:
@@ -147,7 +149,7 @@ def _revise_with_budget(
     for _ in range(attempts):
         try:
             result = _revise_once(package, weak_profile, handle,
-                                  usage=usage, run_dir=run_dir)
+                                  scope=scope, usage=usage, run_dir=run_dir)
         except InfrastructureError:
             # Not a budget item: the work is valid, the service was
             # not. The caller records it and the skill stays as is.
@@ -181,6 +183,7 @@ def revise_group(
     weak_profile: str,
     decide: Optional[Callable[[Any], str]] = None,
     revision_attempts: int = _REVISION_ATTEMPTS,
+    scope: str = "both",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     params: Any = None,
@@ -193,7 +196,8 @@ def revise_group(
     packages (each with its ``old_skill``). Every package is revised
     (``decide`` defaults to always-revise; the exam path passes its own);
     outcomes come back in package order for the task-list applier:
-    nothing is written to disk here. A revision's new version fields are
+    nothing is written to disk here. ``scope`` (``both`` / ``body`` /
+    ``trigger``) restricts what a rewrite may change. A revision's new version fields are
     the caller's to persist (version bump plus rewrite_history entry). ``params`` is the registry's
     ``AuthoringParams`` (empty); it is accepted so the phase driver can
     call every group-author method through one signature.
@@ -228,7 +232,7 @@ def revise_group(
         else:
             outcomes.append(_revise_with_budget(
                 package, weak_profile, rewriter_handle, revision_attempts,
-                usage=usage, run_dir=run_dir))
+                scope=scope, usage=usage, run_dir=run_dir))
     return outcomes
 
 

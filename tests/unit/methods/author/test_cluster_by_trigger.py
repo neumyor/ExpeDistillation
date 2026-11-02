@@ -7,10 +7,20 @@ from expedistill.core.ids import (
     make_task_id,
     make_trajectory_id,
 )
+from expedistill.benchmarks.alfworld.learning import ALFWORLD_CONTEXT
+from expedistill.benchmarks.tb.learning import TB_CONTEXT
 from expedistill.core.models import Subtask
 from expedistill.infra.reliability import ModelOutputError
+from expedistill.llm.call import ModelHandle
 from expedistill.methods.author import ClusterAuthoringParams
 from expedistill.methods.author import cluster_by_trigger as cluster
+
+
+def _handle(context=TB_CONTEXT) -> ModelHandle:
+    # call_model is monkeypatched in these tests; the handle only carries the
+    # learning-context slots the driver reads.
+    return ModelHandle(name="m", role="author", client=None,
+                       prompt_defaults=context.variables())
 
 
 def _subtask(segment: int, *, source: str = "strong",
@@ -99,7 +109,7 @@ def test_cluster_family_builds_deterministic_cluster_ids(monkeypatch):
     experiences = [_experience(i) for i in range(3)]
     monkeypatch.setattr(cluster, "call_model", fake_call)
     clusters = cluster.cluster_family(
-        "when_command_fails", experiences, handle=object(),
+        "when_command_fails", experiences, handle=_handle(),
         params=ClusterAuthoringParams(max_cards_per_prompt=3))
     assert [c["cluster_id"] for c in clusters] == sorted(
         [c["cluster_id"] for c in clusters])
@@ -119,7 +129,7 @@ def test_cluster_family_falls_back_to_singletons_on_invalid_partition(
              "reason": "partial"}]})
     experiences = [_experience(i) for i in range(2)]
     clusters = cluster.cluster_family(
-        "when_command_fails", experiences, handle=object(),
+        "when_command_fails", experiences, handle=_handle(),
         params=ClusterAuthoringParams(
             max_cards_per_prompt=10, cluster_retry_limit=1))
     assert len(clusters) == 2
@@ -143,7 +153,7 @@ def test_write_cluster_skill_uses_the_smallest_subtask_as_anchor(
     by_id = {experience["subtask"].subtask_id: experience
              for experience in experiences}
     skill = cluster.write_cluster_skill(
-        cluster_row, by_id, weak_profile="", handle=object(),
+        cluster_row, by_id, weak_profile="", handle=_handle(),
         params=ClusterAuthoringParams())
     assert skill.subtask_id == min(cluster_row["subtask_ids"])
     assert skill.skill_id == f"{skill.subtask_id}/skill"
@@ -169,5 +179,44 @@ def test_write_cluster_skill_requires_the_family_opening_phrase(monkeypatch):
         cluster.write_cluster_skill(
             cluster_row,
             {experience["subtask"].subtask_id: experience},
-            weak_profile="", handle=object(),
+            weak_profile="", handle=_handle(),
+            params=ClusterAuthoringParams())
+
+
+def test_the_family_phrase_and_meaning_come_from_the_learning_context(
+        monkeypatch):
+    # The opening phrase a skill must start with, and the meaning shown to
+    # the clustering call, are the benchmark's slots, not constants.
+    seen = {}
+
+    def fake_call(handle, name, variables, **kwargs):
+        seen[name] = variables
+        if name == "CLUSTER_SKILL":
+            return _sections(
+                when="When an action is rejected or repeats, look again")
+        return {"clusters": [{
+            "theme": "t", "reason": "r",
+            "subtask_ids": [experience["subtask"].subtask_id]}]}
+
+    experience = _experience(0)
+    monkeypatch.setattr(cluster, "call_model", fake_call)
+    handle = _handle(ALFWORLD_CONTEXT)
+    cluster.cluster_family(
+        "when_command_fails", [experience], handle=handle,
+        params=ClusterAuthoringParams())
+    assert seen["CLUSTER_SUBTASKS"]["family_definition"] == (
+        ALFWORLD_CONTEXT.slots["meaning_when_command_fails"])
+    cluster_row = {
+        "family": "when_command_fails", "theme": "t", "reason": "r",
+        "subtask_ids": [experience["subtask"].subtask_id]}
+    by_id = {experience["subtask"].subtask_id: experience}
+    cluster.write_cluster_skill(
+        cluster_row, by_id, weak_profile="", handle=handle,
+        params=ClusterAuthoringParams())
+    assert seen["CLUSTER_SKILL"]["family_trigger"] == (
+        "When an action is rejected or repeats,")
+    # The same text under the TB phrase is refused.
+    with pytest.raises(ModelOutputError, match="must start with"):
+        cluster.write_cluster_skill(
+            cluster_row, by_id, weak_profile="", handle=_handle(),
             params=ClusterAuthoringParams())

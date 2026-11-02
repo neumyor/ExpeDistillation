@@ -37,6 +37,13 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.react_loop import run_react
+from expedistill.benchmarks.searchqa.learning import SEARCHQA_CONTEXT
+from expedistill.benchmarks.skill_folder import (
+    MAX_READS,
+    READ_ACTION,
+    SkillFolder,
+    derive_folder_template,
+)
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError
 from expedistill.prompts import PromptSpec, register
@@ -45,7 +52,8 @@ from expedistill.prompts import PromptSpec, register
 # so tests can monkeypatch the seam in one place and both files see it.
 from expedistill.benchmarks.searchqa import env as _env
 
-__all__ = ["SEARCHQA_MAX_STEPS", "MAX_STEPS_ENV", "SearchQAPlugin"]
+__all__ = ["SEARCHQA_MAX_STEPS", "MAX_STEPS_ENV", "SEARCHQA_TASK_PROMPT",
+           "SEARCHQA_TASK_PROMPT_FOLDER", "SearchQAPlugin"]
 
 #: Episode budget for one task run; the old QAEnv used the same default.
 SEARCHQA_MAX_STEPS = _env.DEFAULT_MAX_STEPS
@@ -53,32 +61,34 @@ SEARCHQA_MAX_STEPS = _env.DEFAULT_MAX_STEPS
 #: Env var overriding the episode step budget (read at call time).
 MAX_STEPS_ENV = "EXPEDISTILL_SEARCHQA_MAX_STEPS"
 
+_TASK_TEMPLATE = (
+    "You are answering a trivia question with a stepwise search "
+    "environment.\n"
+    "\n"
+    "{skills_block}"
+    "## Question\n"
+    "{instruction}\n"
+    "\n"
+    "## Actions\n"
+    "Every reply must be exactly one action, in one of these formats:\n"
+    "- Search[<query>]: search the passage collection for <query>; the "
+    "observation is the passage that best matches the query.\n"
+    "- Finish[<answer>]: submit <answer> as your final answer and end "
+    "the episode.\n"
+    "\n"
+    "Search with the question's key terms to gather evidence, then reply "
+    "with Finish[<answer>]. Keep the final answer concise: typically a "
+    "few words or a short phrase.\n"
+    "\n"
+    "## Transcript so far\n"
+    "{history}\n"
+    "\n"
+    "Reply with exactly one action."
+)
+
 SEARCHQA_TASK_PROMPT = PromptSpec(
     name="SEARCHQA_TASK_PROMPT",
-    template=(
-        "You are answering a trivia question with a stepwise search "
-        "environment.\n"
-        "\n"
-        "{skills_block}"
-        "## Question\n"
-        "{instruction}\n"
-        "\n"
-        "## Actions\n"
-        "Every reply must be exactly one action, in one of these formats:\n"
-        "- Search[<query>]: search the passage collection for <query>; the "
-        "observation is the passage that best matches the query.\n"
-        "- Finish[<answer>]: submit <answer> as your final answer and end "
-        "the episode.\n"
-        "\n"
-        "Search with the question's key terms to gather evidence, then reply "
-        "with Finish[<answer>]. Keep the final answer concise: typically a "
-        "few words or a short phrase.\n"
-        "\n"
-        "## Transcript so far\n"
-        "{history}\n"
-        "\n"
-        "Reply with exactly one action."
-    ),
+    template=_TASK_TEMPLATE,
     description=(
         "E1 SearchQA runner: stepwise search-environment execution prompt "
         "(actions Search[<query>] / Finish[<answer>]); variables "
@@ -87,6 +97,37 @@ SEARCHQA_TASK_PROMPT = PromptSpec(
 )
 
 register(SEARCHQA_TASK_PROMPT)
+
+#: The skill-folder variant: the plain prompt plus one action and the rule
+#: for using it. The card list rides the same ``{skills_block}`` slot.
+_FOLDER_ANCHOR = (
+    "- Finish[<answer>]: submit <answer> as your final answer and end "
+    "the episode.\n"
+)
+_FOLDER_INSERTION = (
+    f"- {READ_ACTION}[<location>]: open one skill card from "
+    "<available_skills>; the observation is the card's full text. "
+    f"Opening a card does not use a search step, and you can open at most "
+    f"{MAX_READS} cards.\n"
+    "\n"
+    "Skill cards are optional. Open a card only when its description "
+    "matches what you need next; if no description matches, open none. "
+    "You may open a card at any step.\n"
+)
+
+SEARCHQA_TASK_PROMPT_FOLDER = PromptSpec(
+    name="SEARCHQA_TASK_PROMPT_FOLDER",
+    template=derive_folder_template(
+        _TASK_TEMPLATE, _FOLDER_ANCHOR, _FOLDER_INSERTION),
+    description=(
+        "E1 SearchQA runner: the skill-folder execution prompt, the plain "
+        "task prompt plus the ReadSkill[<location>] action; {skills_block} "
+        "carries the <available_skills> card list, the card text appears "
+        "only when the model opens it."
+    ),
+)
+
+register(SEARCHQA_TASK_PROMPT_FOLDER)
 
 
 class SearchQAPlugin(BenchmarkPlugin):
@@ -98,6 +139,11 @@ class SearchQAPlugin(BenchmarkPlugin):
     #: the strict-EM primary scores 0. Reported always beside the primary,
     #: never chosen between after seeing results.
     aux_metric_name = "sub_em"
+
+    #: Skill-folder capability: progressive disclosure through the shared
+    #: ReAct loop (``benchmarks/skill_folder.py``).
+    skill_folder_prompt_name = "SEARCHQA_TASK_PROMPT_FOLDER"
+    learning_context = SEARCHQA_CONTEXT
 
     @property
     def name(self) -> str:
@@ -215,17 +261,27 @@ class SearchQAPlugin(BenchmarkPlugin):
             context=task.meta.get("context", ""),
             max_steps=max_steps,
         )
+        # A folder unit shows only the card list; the delivery's catalog
+        # text in ``skills_block`` is the TB fallback and is not used.
+        folder = SkillFolder.from_task(task)
+        if folder is not None:
+            prompt_name = self.skill_folder_prompt_name
+            skills_block = ("## Skills\n"
+                            + folder.available_skills_block() + "\n\n")
+        else:
+            prompt_name = self.task_prompt_name
         outcome = run_react(
             task,
             episode_env,
             handle,
-            task_prompt_name=self.task_prompt_name,
+            task_prompt_name=prompt_name,
             skills_block=skills_block,
             max_steps=max_steps,
             usage=usage,
             # No run_dir: request dumps follow the handle's run_dir (K1
             # attaches <run>), not the per-unit workdir (README section 2).
             view_rules=self.view_rules,
+            skill_folder=folder,
         )
         if episode_env.eval_result is not None:
             outcome.meta["searchqa"] = dict(episode_env.eval_result)

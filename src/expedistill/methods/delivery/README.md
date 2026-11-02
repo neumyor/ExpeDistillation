@@ -13,7 +13,7 @@
 | `exam_folder` | 全库技能目录（accepted + pending）；模型自己选择要打开的技能 | exam（泛化考试） | `description_mode` |
 | `group_by_task` | 这道题名下还待验收的整包技能（整块注入） | live（实战验收） | 无 |
 | `folder_by_task` | 这道题名下还待验收的整包技能（逐技能目录，模型按需读取） | live（实战验收） | 见下 |
-| `whole_bank` | 技能库里所有已接受的技能 | test（最终测试） | 无 |
+| `whole_bank` | 技能库里所有已接受的技能 | test（最终测试） | `verbatim`（缺省 `false`） |
 | `retrieval` | 按题目文字检索出的几条技能 | test（最终测试） | 见下 |
 | `folder` | 只注入技能目录，技能正文放成文件夹里的文件，模型按需自己去读 | test（最终测试） | 见下 |
 
@@ -104,3 +104,15 @@ agent 自己扫描 `<task>/<skill>/SKILL.md`，解析 YAML 头，把技能名、
 本布局的决策见 `docs/decisions/folder_agent_skills_layout_20261022.md`，
 live 渐进式披露与 usage 修订见
 `docs/decisions/usage_aware_live_folder_20261022.md`。
+
+## `whole_bank`：整库注入
+
+```yaml
+delivery:
+  name: whole_bank
+  verbatim: false       # 缺省
+```
+
+缺省把每条技能压成一行、前面加 `- `，这是本方法技能库的固定版式。`verbatim: true` 让每条技能的
+文本逐字节原样进入提示词（标题和换行都保留），条目之间空一行；用于其他方法产出的技能文档
+（例如 SkillOpt 的一份结构化 markdown），否则压成一行会削弱它们。

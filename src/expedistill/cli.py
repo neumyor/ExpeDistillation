@@ -1,7 +1,7 @@
 """Layer 8: the command-line entry point (the only method entry, AGENTS.md 5)
 and, since R9 deleted stages/pipeline.py, the sequence loop itself.
 
-Three subcommands:
+Four subcommands:
 
 * ``run`` -- one experiment run: load the config, take the run directory,
   freeze, then run the config's phase SEQUENCE in order -- one
@@ -57,6 +57,13 @@ Three subcommands:
   model calls; its expected failures (ConfigError, a locked run
   directory, an identity mismatch) exit 1 with a clear message, the same
   contract as ``run``.
+* ``fork-run`` -- copy the first phases of a finished run (their phase
+  directories and the run-level stores) into a fresh run directory, so a
+  new config that starts with the same phases can extend or branch the
+  run without redoing them. The skill store is rebuilt from the prefix's
+  last learn artifact when a later learn phase of the source rewrote it.
+  No model calls; prints one JSON line, and its expected failures exit 1
+  like ``assemble-reuse``.
 """
 
 import argparse
@@ -69,11 +76,18 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.stages.assemble_reuse import LEVELS, assemble_reuse
+from expedistill.stages.exam_replay import replay as replay_exams
+from expedistill.stages.fork_run import fork_run
+from expedistill.stages.import_bank import SOURCE_FORMATS, import_external_bank
+from expedistill.stages.judge_skills import judge_phase
+from expedistill.stages.paper_tables import run as run_paper_tables
 from expedistill.infra.manifest import FrozenProtocolChanged, load_or_none
 from expedistill.core.config import (
     FREEZE_LABEL,
     ExecutePhaseSpec,
+    ExperimentConfig,
     PhaseInstance,
     ROLE_DEFAULTS,
     load_config,
@@ -87,7 +101,8 @@ from expedistill.infra.reliability import (
     ProviderRefusalError,
 )
 from expedistill.infra.runlock import RunLock, RunLockedError
-from expedistill.infra.store import Store, append_jsonl, read_jsonl
+from expedistill.infra.manifest import MANIFEST_NAME
+from expedistill.infra.store import Store, append_jsonl, read_json, read_jsonl
 from expedistill.infra.usage import UsageRecorder, UsageStats
 from expedistill.llm.call import make_handle
 from expedistill.llm import providers
@@ -208,6 +223,8 @@ def _build_handles(
     builder = make_client or partial(_default_client,
                                      timeout_sec=llm_timeout_sec)
     clients: Dict[str, Any] = {}
+    prompt_defaults = resolve_plugin(
+        cfg.benchmark).learning_context.variables()
 
     def client_for(model_name: str) -> Any:
         if model_name not in clients:
@@ -239,6 +256,7 @@ def _build_handles(
             max_input_tokens=cfg.max_input_tokens_for(role),
             infra_retries=infra_retries,
             infra_backoff_seconds=infra_backoff_seconds,
+            prompt_defaults=dict(prompt_defaults),
         )
 
     return {role: handle_for(role) for role in ROLE_DEFAULTS}
@@ -600,6 +618,106 @@ def _cmd_assemble_reuse(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_fork_run(args: argparse.Namespace) -> int:
+    summary = fork_run(
+        source_run=args.source_run,
+        config_path=args.config,
+        run_dir=args.run_dir,
+        through=args.through,
+    )
+    print("fork-run: " + json.dumps(
+        summary, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _cmd_import_bank(args: argparse.Namespace) -> int:
+    summary = import_external_bank(
+        args.source, args.source_format, args.run_dir, origin=args.origin)
+    print("import-bank: " + json.dumps(
+        {key: value for key, value in summary.items() if key != "skill_ids"},
+        ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _frozen_config(run_dir: Path) -> ExperimentConfig:
+    """The config a finished run froze into its manifest."""
+    path = run_dir / MANIFEST_NAME
+    if not path.is_file():
+        raise ConfigError(
+            f"{run_dir} has no {MANIFEST_NAME}; only a run frozen by "
+            "stage 0 can be analysed")
+    return ExperimentConfig.from_dict(read_json(path)["config"])
+
+
+def _analysis_handle(cfg: ExperimentConfig, args: argparse.Namespace,
+                     role: str, model_name: str, out_dir: Path) -> Any:
+    """A handle for an analysis call: the run's own budgets and model
+    options for ``role``, the benchmark's learning vocabulary, and the
+    analysis output directory as its request log and usage ledger."""
+    return make_handle(
+        role, model_name, _default_client(model_name, args.llm_timeout),
+        extra_body=dict(cfg.model_options.get(model_name, {})),
+        max_tokens=cfg.max_output_tokens_for(role),
+        max_input_tokens=cfg.max_input_tokens_for(role),
+        infra_retries=args.llm_infra_retries,
+        infra_backoff_seconds=args.llm_infra_backoff,
+        prompt_defaults=resolve_plugin(
+            cfg.benchmark).learning_context.variables(),
+        usage=UsageRecorder(usage_path(out_dir)), run_dir=out_dir)
+
+
+def _cmd_judge_skills(args: argparse.Namespace) -> int:
+    cfg = _frozen_config(args.run_dir)
+    model = args.judge_model or cfg.models["judge"]
+    handle = _analysis_handle(cfg, args, "judge", model, args.out_dir)
+    summary = judge_phase(
+        args.run_dir, args.phase, args.out_dir, handle,
+        arm=args.arm, workers=args.workers,
+        bank_phase_label=args.bank_phase)
+    print("judge-skills: " + json.dumps(summary, ensure_ascii=False,
+                                        sort_keys=True))
+    return 0
+
+
+def _source_exam_reads(cfg: ExperimentConfig) -> int:
+    """The skill-read cap of the source run's exam phase (3 when none)."""
+    for name in cfg.sequence:
+        spec = cfg.phases[name]
+        if getattr(spec, "role", None) == "exam":
+            return int(spec.execution.get("max_skill_reads", 3))
+    return 3
+
+
+def _cmd_exam_replay(args: argparse.Namespace) -> int:
+    cfg = _frozen_config(args.run_dir)
+    judge_model = args.judge_model or cfg.models["judge"]
+    answerer = _analysis_handle(
+        cfg, args, "answerer", args.answerer_model, args.out_dir)
+    judge = _analysis_handle(cfg, args, "judge", judge_model, args.out_dir)
+    summary = replay_exams(
+        args.run_dir, args.out_dir, answerer, judge,
+        bank_phase_label=args.bank_phase,
+        max_skill_reads=(args.max_skill_reads
+                         if args.max_skill_reads is not None
+                         else _source_exam_reads(cfg)),
+        workers=args.workers)
+    print("exam-replay: " + json.dumps(summary, ensure_ascii=False,
+                                       sort_keys=True))
+    return 0
+
+
+def _cmd_paper_tables(args: argparse.Namespace) -> int:
+    try:
+        text = run_paper_tables(
+            args.spec, out_md=args.out_md, out_json=args.out_json,
+            n_boot=args.n_boot, seed=args.seed, metric=args.metric)
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(text)
+    return 0
+
+
 def _expected_labels(run_dir: Path) -> Optional[List[str]]:
     """The completeness checklist: the manifest's frozen sequence as pNN
     labels (``p00:freeze`` first). ``None`` when the run has no readable
@@ -757,6 +875,96 @@ def build_parser() -> argparse.ArgumentParser:
                                "stage-1 infra shortfall) and stages 2-6 "
                                "run fresh under the current protocol")
     assemble.set_defaults(func=_cmd_assemble_reuse)
+
+    fork = sub.add_parser(
+        "fork-run",
+        help="copy the first phases of a finished run into a fresh run "
+             "directory (zero model calls)")
+    fork.add_argument("--source-run", required=True, type=Path,
+                      help="the finished, idle source run directory")
+    fork.add_argument("--config", required=True, type=Path,
+                      help="the NEW run's config YAML; it must start with "
+                           "the same phases as the source and agree with it "
+                           "on everything that acts on them")
+    fork.add_argument("--run-dir", required=True, type=Path,
+                      help="fresh run directory (created; the new run "
+                           "freezes its manifest on its first start)")
+    fork.add_argument("--through", required=True, metavar="pNN",
+                      help="the last phase to copy, as its label head, "
+                           "e.g. p05 copies p01 through p05")
+    fork.set_defaults(func=_cmd_fork_run)
+
+    importer = sub.add_parser(
+        "import-bank",
+        help="write an external method's skills into a fresh run directory "
+             "as its accepted bank, for a test-only run (zero model calls)")
+    importer.add_argument("--source", required=True, type=Path,
+                          help="the baseline's artifact (a file or a "
+                               "directory, by --source-format)")
+    importer.add_argument("--source-format", required=True,
+                          choices=SOURCE_FORMATS,
+                          help="how the artifact maps to skills")
+    importer.add_argument("--run-dir", required=True, type=Path,
+                          help="fresh run directory (created; must hold no "
+                               "manifest, bank or skills)")
+    importer.add_argument("--origin", required=True,
+                          help="the method's name; it prefixes every "
+                               "imported skill id")
+    importer.set_defaults(func=_cmd_import_bank)
+
+    def _analysis_arguments(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--run-dir", required=True, type=Path,
+                             help="the finished run to read (never written)")
+        command.add_argument("--out-dir", required=True, type=Path,
+                             help="where the analysis writes (outside the run)")
+        command.add_argument("--bank-phase", default=None, metavar="LABEL",
+                             help="the phase whose bank artifact the skills "
+                                  "come from (default: the stage's choice)")
+        command.add_argument("--workers", type=int, default=1,
+                             help="parallel model calls (default 1)")
+        command.add_argument("--llm-infra-retries", type=int, default=3)
+        command.add_argument("--llm-infra-backoff", type=float, default=5.0)
+        command.add_argument("--llm-timeout", type=float, default=300)
+
+    judging = sub.add_parser(
+        "judge-skills",
+        help="judge how a finished test or live phase used its delivered "
+             "skills: trigger recall, misfire and adherence")
+    _analysis_arguments(judging)
+    judging.add_argument("--phase", required=True, metavar="LABEL",
+                         help="the phase to judge, e.g. p07:test")
+    judging.add_argument("--arm", default="with_bank",
+                         help="the arm to judge (default with_bank)")
+    judging.add_argument("--judge-model", default=None,
+                         help="default: the run's frozen judge model")
+    judging.set_defaults(func=_cmd_judge_skills)
+
+    replaying = sub.add_parser(
+        "exam-replay",
+        help="re-answer a finished run's exams with another answering "
+             "model against the same skill bank")
+    _analysis_arguments(replaying)
+    replaying.add_argument("--answerer-model", required=True)
+    replaying.add_argument("--judge-model", default=None,
+                           help="default: the run's frozen judge model")
+    replaying.add_argument("--max-skill-reads", type=int, default=None,
+                           help="default: the source exam phase's value")
+    replaying.set_defaults(func=_cmd_exam_replay)
+
+    tables = sub.add_parser(
+        "paper-tables",
+        help="compare finished runs with paired statistics and write the "
+             "paper's tables (reads runs, never writes them)")
+    tables.add_argument("--spec", required=True, type=Path,
+                        help="JSON spec naming the runs behind each table")
+    tables.add_argument("--out-md", type=Path, default=None)
+    tables.add_argument("--out-json", type=Path, default=None)
+    tables.add_argument("--n-boot", type=int, default=10000)
+    tables.add_argument("--seed", type=int, default=0)
+    tables.add_argument(
+        "--metric", default="avg_at_n",
+        choices=("avg_at_n", "avg_at_n_conservative", "pass_at_n"))
+    tables.set_defaults(func=_cmd_paper_tables)
 
     summary = sub.add_parser(
         "summary", help="print a run's stage summaries and usage totals")

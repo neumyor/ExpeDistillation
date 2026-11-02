@@ -53,9 +53,15 @@ The loop is benchmark-agnostic and testable with FakeClient + a toy BaseEnv.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Collection, Dict, List, Optional, Union
 
 from expedistill.benchmarks.base import BaseEnv, RunOutcome, Task, ViewRules
+from expedistill.benchmarks.skill_folder import (
+    MAX_READS,
+    SkillFolder,
+    read_limit_message,
+    read_target,
+)
 from expedistill.infra.reliability import (
     ConfigError,
     ModelOutputError,
@@ -66,19 +72,22 @@ __all__ = ["run_react", "render_history"]
 
 
 def render_history(steps: List[Dict[str, str]],
-                   view_rules: Optional[ViewRules] = None) -> str:
+                   view_rules: Optional[ViewRules] = None,
+                   *, verbatim: Collection[int] = ()) -> str:
     """Render accumulated steps as the template's ``{history}`` variable.
 
     Format per step: ``action: <action>\\nobservation: <observation>``,
     steps joined by newlines; an empty history renders as ``""`` (the first
     model call sees a template with no history section). With ``view_rules``,
     observations in the HISTORY are truncated for the prompt only -- the
-    caller's ``steps`` are never modified here.
+    caller's ``steps`` are never modified here. Steps whose index is in
+    ``verbatim`` (opened skill cards) are never truncated: a clipped card
+    would teach a different rule.
     """
     parts: List[str] = []
-    for step in steps:
+    for index, step in enumerate(steps):
         observation = step["observation"]
-        if view_rules is not None:
+        if view_rules is not None and index not in verbatim:
             observation = view_rules.truncate(observation)
         parts.append(f"action: {step['action']}\nobservation: {observation}")
     return "\n".join(parts)
@@ -96,6 +105,7 @@ def run_react(
     run_dir: Optional[Union[str, Path]] = None,
     system_override: Optional[str] = None,
     view_rules: Optional[ViewRules] = None,
+    skill_folder: Optional[SkillFolder] = None,
 ) -> RunOutcome:
     """Run one stepwise ReAct episode on ``env``; return a uniform RunOutcome.
 
@@ -118,6 +128,15 @@ def run_react(
 
     ``max_steps`` is the loop's own budget (K1 config); the env may also
     truncate earlier through its own ``max_steps``.
+
+    With a ``skill_folder`` the loop also serves ``ReadSkill[<location>]``
+    replies itself: the card's text is the step's observation, the
+    environment never sees the action, and the read costs no step of the
+    budget (``meta["steps_used"]`` counts environment steps only). A read
+    past ``MAX_READS`` is refused and does cost a step. The stored steps
+    keep every read as a step of its own, so the trajectory shows when each
+    card was opened. ``meta["skill_list_shown"]`` and ``meta["skill_reads"]``
+    record that the card list was delivered and how many reads were served.
     """
     if not isinstance(env, BaseEnv):
         raise TypeError(
@@ -126,13 +145,23 @@ def run_react(
         raise ConfigError(f"max_steps must be an int >= 1, got {max_steps!r}")
 
     steps: List[Dict[str, str]] = []
+    card_steps = set()
+    env_steps = 0
+    reads = 0
+
+    def _meta(termination: str, **extra: Any) -> Dict[str, Any]:
+        meta = {"termination": termination, "steps_used": env_steps, **extra}
+        if skill_folder is not None:
+            meta["skill_list_shown"] = True
+            meta["skill_reads"] = reads
+        return meta
 
     env.reset()
 
     termination = "step_budget"
-    while len(steps) < max_steps and not env.is_terminated() \
+    while env_steps < max_steps and not env.is_terminated() \
             and not env.is_truncated():
-        history = render_history(steps, view_rules)
+        history = render_history(steps, view_rules, verbatim=card_steps)
         try:
             reply = call_model(
                 handle,
@@ -148,12 +177,25 @@ def run_react(
             return RunOutcome(
                 steps=steps,
                 correctness=None,
-                meta={"termination": "model_output_error",
-                      "steps_used": len(steps),
-                      "error": f"{type(exc).__name__}: {exc}"},
+                meta=_meta("model_output_error",
+                           error=f"{type(exc).__name__}: {exc}"),
             )
         action = str(reply).strip()
+        target = read_target(action) if skill_folder is not None else None
+        if target is not None and reads < MAX_READS:
+            reads += 1
+            observation, found = skill_folder.read(target)
+            if found:
+                card_steps.add(len(steps))
+            steps.append({"action": action, "observation": observation})
+            continue
+        if target is not None:
+            env_steps += 1
+            steps.append({"action": action,
+                          "observation": read_limit_message()})
+            continue
         observation = env.step(action)
+        env_steps += 1
         steps.append({"action": action, "observation": str(observation)})
         if env.is_terminated():
             termination = "terminated"
@@ -171,5 +213,5 @@ def run_react(
     return RunOutcome(
         steps=steps,
         correctness=correctness,
-        meta={"termination": termination, "steps_used": len(steps)},
+        meta=_meta(termination),
     )

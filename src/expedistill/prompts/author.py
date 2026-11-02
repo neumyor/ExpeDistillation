@@ -30,8 +30,8 @@ __all__ = ["SKILL_DISTILL", "SKILL_DIAGNOSE", "REWRITE"]
 SKILL_DISTILL = register(
     PromptSpec(
         name="SKILL_DISTILL",
-        template="""You are writing ONE reusable capability card for a weaker terminal agent on
-Terminal Bench V2.1. The card will be injected into a DIFFERENT TB21 task
+        template="""You are writing ONE reusable capability card for a weaker {agent_kind} agent on
+{benchmark_name}. The card will be injected into a DIFFERENT {task_tag} task
 from the same capability family, not the task below. The subtask SUCCEEDED:
 the card is the procedure the weak model should follow when it faces the
 same kind of subtask. A card that only works on this task is a failure.
@@ -55,11 +55,11 @@ Pass 1 - abstract the capability.
 Treat the steps as ONE instance of a reusable capability. Decide, for
 yourself:
 - capability: a short verb-and-object phrase that names the general skill
-  (for example "recover a key from known plaintext-ciphertext pairs"). Do
+  (for example {capability_example}). Do
   not use this task's name, file names, or specific tool names in this
   phrase.
-- observable_trigger: the concrete signs a new TB21 task shows when this
-  capability applies: file types, input structure, error text, available
+- observable_trigger: the concrete signs a new {task_tag} task shows when this
+  capability applies: {observable_signs}, available
   tools, required output. Tool names are allowed here.
 - invariants: the steps that remain correct when the task's file names,
   constants, and tools change.
@@ -70,20 +70,7 @@ yourself:
 - failure_guard: the weak reader's most likely failure here, taken from the
   profile.
 
-If the segment fits none of the TB21 capability families below, use
-"general terminal procedure" and write only the meta-rules you can support.
-
-TB21 capability families:
-- source build, install and verification
-- runtime crash, hang and resource diagnosis
-- environment and dependency setup
-- numerical and scientific computation with result validation
-- cryptographic analysis and security forensics
-- sequence, primer and bioinformatics work
-- distributed PyTorch and parallel execution
-- data, text and large-file processing
-- terminal interaction and recovery
-- final verification and submission
+{capability_section}
 
 Pass 2 - write the decision procedure.
 Write 5 to 9 decision nodes. A node is one decision, not a script:
@@ -92,24 +79,13 @@ it fails, <fallback>.
 Use only the invariants. For each variant, add a short condition inside the
 node ("if the task uses X, ...; otherwise ..."). Every action step must be
 grounded in an observed action or observation from the steps view; omit a
-step rather than invent it. Do not add separate TB21 discipline nodes;
+step rather than invent it. Do not add separate {task_tag} discipline nodes;
 instead weave the discipline into the verify and fallback parts of nodes:
-check before acting, read the error before retrying, run the verifier before
-calling mark_task_complete.
+{discipline_examples}
 
 Pass 3 - make it executable for the weak model.
 - one action per node, imperative voice, no self-numbering;
-- every task-specific value is a <placeholder> in angle brackets: file
-  names, paths, commands, flags, API names, constants, error strings,
-  entities;
-- a command may appear only in a general form that works after substituting
-  the placeholders;
-- scripts used as tools: write only the invocation pattern, the inputs, and
-  the expected output—never include the script body, even if the trajectory
-  showed it in full;
-- code as the deliverable (when the task is to write a program or module):
-  describe the structure the code must satisfy and how to verify it with
-  the task's tests—do not include the implementation;
+{executable_rules}
 - no code block longer than three lines;
 - keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full
   nodes do not fit in 2,500 characters, prefer fewer well-written nodes
@@ -123,31 +99,17 @@ teaches and WHEN to open it.
 
 First choose the ONE moment in a new task when the reader should open
 this card, and start when_to_use with its phrase, copied exactly:
-  "At task start,"
-      the reader has just received the task and is reading the task
-      description and the given files;
-  "After the first environment check,"
-      the reader has run its first ls, which, import or network probe and
-      now knows what is installed and what is reachable;
-  "When a command fails, hangs, or repeats,"
-      a command gave an error, got stuck, or the same action keeps
-      repeating without progress;
-  "Before submitting,"
-      the work looks done and the reader is about to run the final check
-      and submit;
-  "At any step,"
-      a basic rule that holds at every step. Use this only when none of
-      the four moments above fits.
+{timing_menu}
 SEGMENT POSITION is a hint, not a rule: an early segment often belongs
-"At task start," or "After the first environment check,"; the last
-segment often belongs "Before submitting,".
+"{phrase_at_task_start}" or "{phrase_after_first_environment_check}"; the last
+segment often belongs "{phrase_before_submitting}".
 
 Then write:
 - summary: one sentence, a verb and an object, saying what the card
   teaches. Do not put the trigger in the summary. No task or
   subtask names.
 - when_to_use: the timing phrase, then the signs the reader can see at
-  that moment (file types, input structure, error text, available tools,
+  that moment ({observable_signs}, available tools,
   required output), and the preconditions. One or two sentences.
 - not_applicable_when: the signs that this card is wrong for the task.
   Keep these out of when_to_use.
@@ -190,9 +152,9 @@ wrong>",
 SKILL_DIAGNOSE = register(
     PromptSpec(
         name="SKILL_DIAGNOSE",
-        template="""You are writing ONE reusable capability card for a weaker terminal agent on
-Terminal Bench V2.1, from a subtask where it went wrong. The card will be
-injected into a DIFFERENT TB21 task from the same capability family. Teach
+        template="""You are writing ONE reusable capability card for a weaker {agent_kind} agent on
+{benchmark_name}, from a subtask where it went wrong. The card will be
+injected into a DIFFERENT {task_tag} task from the same capability family. Teach
 the reader to recognize a general failure pattern and follow a corrective
 procedure; do not write a fix for this task.
 
@@ -225,8 +187,8 @@ Decide, for yourself:
 - capability: a short verb-and-object phrase that names the general skill.
   Do not use this task's name, file names, or specific tool names in this
   phrase.
-- observable_trigger: the signs a new TB21 task shows when this pattern can
-  occur (file types, input structure, error text, tool state, required
+- observable_trigger: the signs a new {task_tag} task shows when this pattern can
+  occur ({observable_signs}, tool state, required
   output). Tool names are allowed here.
 - invariants: the corrective steps that hold across tasks.
 - variants: the choices that differ across tasks. Name a variant type you
@@ -239,20 +201,7 @@ Decide, for yourself:
   error message before retrying). Do not invent multi-step procedures that
   are not grounded in the steps view or the failure pattern.
 
-If the segment fits none of the TB21 capability families below, use
-"general terminal procedure" and write only the meta-rules you can support.
-
-TB21 capability families:
-- source build, install and verification
-- runtime crash, hang and resource diagnosis
-- environment and dependency setup
-- numerical and scientific computation with result validation
-- cryptographic analysis and security forensics
-- sequence, primer and bioinformatics work
-- distributed PyTorch and parallel execution
-- data, text and large-file processing
-- terminal interaction and recovery
-- final verification and submission
+{capability_section}
 
 Pass 3 - write the corrective decision procedure.
 Write 5 to 9 decision nodes. A node is one decision, not a script:
@@ -266,23 +215,12 @@ For nodes where the trajectory only shows what went wrong and not what is
 correct: write one node that detects the failure sign and one node that
 names the corrective action from the profile or the failure pattern—do not
 invent a multi-step procedure beyond what the evidence supports.
-Do not add separate TB21 discipline nodes; instead weave the discipline into
-the verify and fallback parts of nodes: check before acting, read the error
-before retrying, run the verifier before calling mark_task_complete.
+Do not add separate {task_tag} discipline nodes; instead weave the discipline into
+the verify and fallback parts of nodes: {discipline_examples}
 
 Make it executable for the weak model:
 - one action per node, imperative voice, no self-numbering;
-- every task-specific value is a <placeholder> in angle brackets: file
-  names, paths, commands, flags, API names, constants, error strings,
-  entities;
-- a command may appear only in a general form that works after substituting
-  the placeholders;
-- scripts used as tools: write only the invocation pattern, the inputs, and
-  the expected output—never include the script body, even if the trajectory
-  showed it in full;
-- code as the deliverable (when the task is to write a program or module):
-  describe the structure the code must satisfy and how to verify it with
-  the task's tests—do not include the implementation;
+{executable_rules}
 - no code block longer than three lines;
 - keep the whole card between 1,500 and 2,500 characters; if 5 to 9 full
   nodes do not fit in 2,500 characters, prefer fewer well-written nodes
@@ -296,32 +234,18 @@ teaches and WHEN to open it.
 
 First choose the ONE moment in a new task when the reader should open
 this card, and start when_to_use with its phrase, copied exactly:
-  "At task start,"
-      the reader has just received the task and is reading the task
-      description and the given files;
-  "After the first environment check,"
-      the reader has run its first ls, which, import or network probe and
-      now knows what is installed and what is reachable;
-  "When a command fails, hangs, or repeats,"
-      a command gave an error, got stuck, or the same action keeps
-      repeating without progress;
-  "Before submitting,"
-      the work looks done and the reader is about to run the final check
-      and submit;
-  "At any step,"
-      a basic rule that holds at every step. Use this only when none of
-      the four moments above fits.
+{timing_menu}
 SEGMENT POSITION is a hint, not a rule: a failed segment often belongs
-"When a command fails, hangs, or repeats,"; an early segment often
-belongs "At task start," or "After the first environment check,"; the
-last segment often belongs "Before submitting,".
+"{phrase_when_command_fails}"; an early segment often
+belongs "{phrase_at_task_start}" or "{phrase_after_first_environment_check}"; the
+last segment often belongs "{phrase_before_submitting}".
 
 Then write:
 - summary: one sentence, a verb and an object, saying what the card
   teaches and the failure pattern it prevents. Do not put the trigger in
   the summary. No task or subtask names.
 - when_to_use: the timing phrase, then the signs the reader can see at
-  that moment (file types, input structure, error text, available tools,
+  that moment ({observable_signs}, available tools,
   required output), and the failing behavior to recognize. One or two
   sentences.
 - not_applicable_when: the signs that this card is wrong for the task.
@@ -365,8 +289,8 @@ REWRITE = register(
     PromptSpec(
         name="REWRITE",
         template="""A skill written for a weak model failed its acceptance exam. Rewrite it
-only if the failure reveals a general defect. This is a Terminal Bench V2.1
-skill; the card will be used on other tasks, so task-specific details must
+only if the failure reveals a general defect. This is {skill_description};
+the card will be used on other tasks, so task-specific details must
 not enter it.
 
 SKILL (current version):
@@ -387,7 +311,7 @@ WHAT WAS WRONG WITH THE ANSWER:
 
 {profile_section}
 
-No reference answer is available to you, and you must not invent or guess
+{scope_section}No reference answer is available to you, and you must not invent or guess
 one.
 
 Work in three steps:

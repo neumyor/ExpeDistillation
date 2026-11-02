@@ -36,16 +36,23 @@ def aggregate_findings(
     usage: Any = None,
     run_dir: Any = None,
 ) -> Tuple[List[ReviewItem], List[NewSkillRequirement]]:
-    """One agent call turns all findings into the phase's final review."""
+    """One agent call turns all findings into the phase's final review.
+
+    A phase with no finding at all (every trial passed) makes no call: the
+    review is the default keep of every measured skill, so a skill that
+    passed its check is still decided (and a pending one accepted).
+    """
     measured = _measured_skills(current)
-    parsed = call_model(
-        handle, "TRIAL_REQUIREMENT_AGGREGATION",
-        {
-            "findings": _findings_text(findings),
-            "skills": _skill_cards(bank),
-            "measured_skills": _measured_text(measured),
-        },
-        output_json=True, usage=usage, run_dir=run_dir)
+    parsed: Any = {}
+    if findings:
+        parsed = call_model(
+            handle, "TRIAL_REQUIREMENT_AGGREGATION",
+            {
+                "findings": _findings_text(findings),
+                "skills": _skill_cards(bank),
+                "measured_skills": _measured_text(measured),
+            },
+            output_json=True, usage=usage, run_dir=run_dir)
     if not isinstance(parsed, dict):
         raise ModelOutputError(
             "TRIAL_REQUIREMENT_AGGREGATION: expected a JSON object, got "

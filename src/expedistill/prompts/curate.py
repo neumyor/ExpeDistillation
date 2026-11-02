@@ -111,8 +111,8 @@ SKILLS:
 {skills_listing}
 
 Group by WHAT KIND of ability the skill teaches, not by where it came from. Use
-short, consistent group names (two to four words, for example "file inspection"
-or "error recovery"), and reuse the same name for skills of the same capability.
+short, consistent group names (two to four words, for example {group_examples}),
+and reuse the same name for skills of the same capability.
 Every skill id in the listing must appear exactly once.
 
 Output ONLY JSON with exactly these fields:

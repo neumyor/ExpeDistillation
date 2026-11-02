@@ -60,6 +60,10 @@ EXPEDISTILL_TB_ALLOWED_ROOTS=<可选：":" 分隔的绝对前缀>
 scripts/remote/deploy_bench_host.sh          # 部署已提交的 HEAD；有未提交改动时要加 --force
 ```
 
+`--force` 部署未提交的工作区，目录名是 `<提交>-dirty-<时间戳>`，每次都是新目录、不覆盖
+任何已有目录（正在跑的 run 的代码不会被改动）；`DEPLOYED_FROM` 里记录了当时的
+`git status` 和 `git diff HEAD` 的 sha256，之后据此对上提交的内容。
+
 脚本用 `rsync` 推送代码（不要求基准主机能访问代码托管服务），在远端建 venv 并
 `pip install -e .`，最后一行输出是远端的代码目录。
 
@@ -75,8 +79,35 @@ RUNS_DIR=<runs-dir> WORKERS=128 ROLLOUT_WORKERS=64 scripts/remote/start_run_benc
   exam 单元），`ROLLOUT_WORKERS` 管基准主机上的真实 rollout，不设则等于 `WORKERS`。
   两者都不得低于 32；
 - driver 是独立会话并写 pidfile，ssh 断开不影响它；
+- 只属于某一个 run 的环境设置写在 `<runs-dir>/<run 名>/run.env`（启动脚本在密钥文件之后读它，
+  每次续跑都带上），不要写进共用的密钥文件。例如强模型 run 要在 Harbor 里和 campaign 的
+  强模型对照一样发 `reasoning_effort`：`TBENCH_REASONING_EFFORT=max`；弱模型不发，所以这个
+  变量不能放进共用文件；
 - 续跑必须使用同一个代码目录和同一个 run 名：TB 的远程 run id 含 run 目录的真实
   路径，换路径等于新 run。
+
+## 在已完结 run 的基础上接着跑（fork-run）
+
+要把一个已完结 run 的前几个相位接着用（多加一轮学习、或把同一个库交给另一个模型做 test），
+不重跑这些相位：
+
+```bash
+cd <deploy-base>/<commit>
+.venv/bin/expedistill fork-run --source-run <runs-dir>/<源 run> \
+    --config configs/experiments/<新配置>.yaml --run-dir <runs-dir>/<新 run 名> --through p05
+RUNS_DIR=<runs-dir> WORKERS=128 ROLLOUT_WORKERS=64 scripts/remote/start_run_bench_host.sh <新配置> <新 run 名>
+```
+
+- 新配置必须以同样的前 K 个相位开头、定义相同，其余影响这些相位的键也要一致；不一致、
+  源 run 还在跑或前缀未完成，都会在拷贝之前报错。具体规则见 README 的命令行一节；
+- 新 run 的 manifest 在它自己第一次启动时按新配置冻结；`FORKED_FROM.md` 记录拷了什么、
+  没拷什么。前缀的用量账本留在源 run；
+- 先用 `--until-phase <前缀最后一个相位的 0 起下标>` 配一个必然失败的 LLM 端点（例如
+  `EXPEDISTILL_LLM_ENDPOINT` 指向本机一个没人监听的端口）空跑一遍前缀：被拷贝的相位应当
+  零模型调用地通过，用量账本为空，`tasks_digest` 与源 run 的 manifest 一致；通过后再去掉
+  `--until-phase` 正式续跑；
+- 同一台基准主机上同时跑两个 run 时，两个 run 共用网关的按请求 ID 限流和 Harbor：并发要
+  分开估，不要两个都开满。
 
 ## 查看与分析（都在基准主机上）
 

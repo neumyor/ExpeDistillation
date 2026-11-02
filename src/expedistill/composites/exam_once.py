@@ -148,9 +148,11 @@ def exam_once(
                 max_skill_reads=max_skill_reads, usage=usage,
                 run_dir=run_dir)
 
+        catalog = str((skill_folder or {}).get("catalog_text") or "")
         verdict, error_description = verdicts.grade_attempt(
             store=store, exam=exam, attempt=attempt,
-            judge_handle=judge_handle, usage=usage, run_dir=run_dir)
+            judge_handle=judge_handle, usage=usage, run_dir=run_dir,
+            skill_catalog=catalog)
         attempt.judge_verdict = verdict
         attempt.judge_reason = error_description
         store.save(attempt, "attempts")

@@ -28,8 +28,8 @@ __all__ = [
 TRIAL_FAILURE_ANALYSIS = register(
     PromptSpec(
         name="TRIAL_FAILURE_ANALYSIS",
-        template="""You analyze ONE failed trial of a weaker terminal agent on Terminal Bench
-V2.1. The trial is selected only because its acceptance verdict is failure.
+        template="""You analyze ONE failed trial of a weaker {agent_kind} agent on {benchmark_name}.
+The trial is selected only because its acceptance verdict is failure.
 Your job is diagnosis, not action selection.
 
 TASK INSTRUCTION:
@@ -49,7 +49,7 @@ and write the answer in ordinary prose. Do not force the cause into a fixed
 category. Distinguish, when the evidence supports it:
 
 - the model read a relevant, correct skill and still failed because of its
-  own terminal behavior, planning, speed, or comprehension limits;
+  own {agent_kind} behavior, planning, speed, or comprehension limits;
 - a relevant skill existed but the model never opened or applied it;
 - the model opened a skill but the skill's trigger, steps, or guard was
   wrong or incomplete;
@@ -89,14 +89,14 @@ Output ONLY JSON:
 TRIAL_EXAM_ANALYSIS = register(
     PromptSpec(
         name="TRIAL_EXAM_ANALYSIS",
-        template="""You analyze ONE failed paper exam of a weaker terminal agent on Terminal
-Bench V2.1. Your job is diagnosis, not action selection.
+        template="""You analyze ONE failed paper exam of a weaker {agent_kind} agent on {benchmark_name}.
+Your job is diagnosis, not action selection.
 
 How the exam works: the scene below was cut from a real task at one point in
 time. The examined model saw only the scene and the skill catalog, chose up to
 a few skills to open, read them, and wrote a plan for what to do from this
-point. Nothing was executed. A plan in prose with no command output is the
-required answer format, so never give "the model did not execute commands"
+point. Nothing was executed. A plan in prose with no {action_noun} output is the
+required answer format, so never give "the model did not execute {action_noun}s"
 or "the trial stopped after a plan" as a cause. A judge compared the plan with
 the expected behavior and marked it failed for the reason given below.
 
@@ -220,7 +220,7 @@ Output ONLY JSON:
 PROFILE_UPDATE = register(
     PromptSpec(
         name="PROFILE_UPDATE",
-        template="""You maintain the accumulated profile of a weaker terminal-agent model.
+        template="""You maintain the accumulated profile of a weaker {agent_kind}-agent model.
 The profile describes the model as a student: what it reliably understands,
 where it repeatedly fails, and what kind of teaching it needs. It is not a
 task list and it must not contain task-specific answers.
@@ -250,8 +250,8 @@ Output ONLY JSON:
 REQUIREMENT_SKILL = register(
     PromptSpec(
         name="REQUIREMENT_SKILL",
-        template="""You write ONE reusable three-section skill for a weaker terminal agent on
-Terminal Bench V2.1. The skill answers a capability gap found across several
+        template="""You write ONE reusable three-section skill for a weaker {agent_kind} agent on
+{benchmark_name}. The skill answers a capability gap found across several
 failed trials. It will be injected into a DIFFERENT task from the same
 capability family, not the task that produced the evidence.
 

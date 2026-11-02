@@ -139,6 +139,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, NoReturn, Optional, Sequence, Tuple
 
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
+from expedistill.benchmarks.tb.learning import TB_CONTEXT
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
 from expedistill.benchmarks.tb.trajectory import (
     reconstruct_skip_counts,
@@ -709,6 +710,7 @@ class TBPlugin(BenchmarkPlugin):
     # materialized folder into the sandbox through the skills-mode
     # directory (the module docstring's submission design).
     skill_folder_prompt_name = "TB_TASK_PROMPT_FOLDER"
+    learning_context = TB_CONTEXT
 
     def __init__(self,
                  *,

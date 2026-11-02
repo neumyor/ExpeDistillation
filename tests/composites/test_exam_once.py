@@ -139,3 +139,96 @@ def test_serial_counts_only_this_exam(tmp_path):
         store=store, exam=make_exam(), answerer_handle=answerer,
         judge_handle=judge, skill_folder=None, purpose="bare")
     assert attempt.attempt_id == f"{EXAM_ID}/att00"
+
+
+# ---------------------------------------------------------------------------
+# What the judge is shown: the library the answerer chose from, the files it
+# opened with their text, and the reason it gave
+# ---------------------------------------------------------------------------
+
+def _judge_prompt(client):
+    """The user text of the third call (selection, plan, then the judge)."""
+    return client.calls[2]["user"]
+
+
+def test_the_judge_sees_the_catalog_the_opened_text_and_the_reason(tmp_path):
+    store = _store_with_skill(tmp_path)
+    client, answerer, judge = make_handles([
+        json_script({"skills": [DIRNAME],
+                     "reason": "the connection is refused"}),
+        json_script({"plan": "restart then verify"}),
+        json_script({"verdict": "success", "reason": ""}),
+    ])
+    attempt = exam_once(
+        store=store, exam=make_exam(), answerer_handle=answerer,
+        judge_handle=judge, skill_folder=make_folder(),
+        purpose="acceptance", skill_id=SKILL_ID, skill_version=1)
+
+    prompt = _judge_prompt(client)
+    catalog = make_folder()["catalog_text"]
+    assert f"SKILL CATALOG (the library the model chose from):\n{catalog}" \
+        in prompt
+    # The files it read and what they say, not only a path.
+    assert f"cat {FILENAME}\n\nrestart then verify" in prompt
+    assert "WHY IT OPENED THEM:\nthe connection is refused" in prompt
+    assert attempt.selection_reason == "the connection is refused"
+
+
+def test_the_reason_survives_a_crash_between_answer_and_judge(tmp_path):
+    store = _store_with_skill(tmp_path)
+    client, answerer, judge = make_handles([
+        json_script({"skills": [DIRNAME], "reason": "stored reason"}),
+        json_script({"plan": "restart then verify"}),
+        RuntimeError("the process died while judging"),
+        json_script({"verdict": "success", "reason": ""}),
+    ])
+    with pytest.raises(RuntimeError):
+        exam_once(
+            store=store, exam=make_exam(), answerer_handle=answerer,
+            judge_handle=judge, skill_folder=make_folder(),
+            purpose="acceptance", skill_id=SKILL_ID, skill_version=1)
+    # The resumed call judges the STORED answer; the reason is read back
+    # from the attempt, not from a model that is no longer asked.
+    exam_once(
+        store=store, exam=make_exam(), answerer_handle=answerer,
+        judge_handle=judge, skill_folder=make_folder(),
+        purpose="acceptance", skill_id=SKILL_ID, skill_version=1)
+    assert "WHY IT OPENED THEM:\nstored reason" in client.calls[-1]["user"]
+
+
+def test_a_bare_judge_has_no_catalog_and_no_opened_skills(tmp_path):
+    store = _store_with_skill(tmp_path)
+    client, answerer, judge = make_handles([
+        json_script({"plan": "restart the service"}),
+        json_script({"verdict": "success", "reason": ""}),
+    ])
+    exam_once(
+        store=store, exam=make_exam(), answerer_handle=answerer,
+        judge_handle=judge, skill_folder=None, skills_block=None,
+        purpose="bare")
+    prompt = client.calls[1]["user"]
+    assert "SKILL CATALOG (the library the model chose from):\n\n" in prompt
+    assert "SKILLS THE MODEL OPENED:\n\n" in prompt
+    assert "WHY IT OPENED THEM:\n\n" in prompt
+
+
+def test_a_fixed_regression_body_reaches_the_judge_without_a_file_list(
+        tmp_path):
+    store = _store_with_skill(tmp_path)
+    client, answerer, judge = make_handles([
+        json_script({"plan": "restart then verify"}),
+        json_script({"verdict": "success", "reason": ""}),
+    ])
+    exam_once(
+        store=store, exam=make_exam(), answerer_handle=answerer,
+        judge_handle=judge, skill_folder=None,
+        skills_block="the merged skill body",
+        purpose="regression", skill_id=SKILL_ID, skill_version=1)
+    prompt = client.calls[1]["user"]
+    assert "SKILLS THE MODEL OPENED:\nthe merged skill body\n" in prompt
+    assert "# fixed skill body" not in prompt
+
+
+def test_an_attempt_stored_before_the_field_existed_loads_with_no_reason():
+    row = {"attempt_id": "x/att00", "exam_id": "x", "weak_answer": "p"}
+    assert Attempt.from_dict(row).selection_reason == ""
