@@ -18,17 +18,28 @@ unified protocol:
   contain no CJK. An invalid reply gets exactly one correction request with
   the same diagnostics the unified runner uses; a still-invalid reply
   executes ``look``;
-* temperature 0, ``max_tokens`` 4096, seed 0, at most 50 environment steps
-  (the engine's own budget).
+* temperature 0, seed 0, at most 50 environment steps (the engine's own
+  budget). The output cap is 65536 (the config-level budget): at the
+  unified runner's 4096 the reasoning teacher truncated on 19.3% of its
+  baseline replies. A client-side generation cap does not change the
+  prompt protocol.
 
 Progressive skill disclosure stays: the catalog rides the ``{skill_block}``
 slot, and ``<action>ReadSkill[<location>]</action>`` is answered by this
 loop (never by the environment) under the folder prompt, at most
-``MAX_READS`` cards per attempt. A read costs no environment step and is
-recorded as an interaction in the history, so the next prompt's
-``current_observation`` is the card text and the step after that sees it as
-one of the last two interactions. Bare arms never see the folder prompt and
-are byte-identical to the unified runner's prompts.
+``MAX_READS`` DISTINCT cards per attempt. A read costs no environment step
+and is NOT an interaction of the unified protocol: it does not enter the
+two-step history and does not replace the current observation. Opening a
+card that turns out to be useless therefore costs the reader none of its
+two memory slots. Every opened card stays in the prompt under "Opened skill
+cards": the unified two-step memory would evict it after one action, and the
+measured failure mode was a model re-reading the same card 20-100 times
+until the step budget was gone. A "Last skill read" line tells the reader
+what its last read returned; re-consulting an opened card is answered there
+with a pointer to the block (no new distinct-card slot).
+``REPEAT_READ_FREE`` read turns are free, after which each costs one step so
+a pathological loop still terminates. Bare arms never see the folder prompt
+and are byte-identical to the unified runner's prompts.
 
 The templates are copies of ``alfworld_eval.unified.prompts``; the parsing
 and diagnostics mirror ``alfworld_eval.unified.runner``. Both files carry
@@ -36,6 +47,7 @@ their own byte-exact constants because the two projects are separate
 repositories; a test pins the shared text so drift is caught.
 """
 
+import os
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -43,6 +55,7 @@ from expedistill.benchmarks.base import BaseEnv, RunOutcome, Task
 from expedistill.benchmarks.skill_folder import (
     MAX_READS,
     SkillFolder,
+    canonical_location,
     read_limit_message,
     read_target,
 )
@@ -55,6 +68,7 @@ __all__ = [
     "FOLDER_PROMPT_NAME",
     "FOLDER_PROMPT_NO_HISTORY_NAME",
     "MAX_OUTPUT_TOKENS",
+    "MAX_OUTPUT_TOKENS_ENV",
     "PROMPT_NAME",
     "PROMPT_NO_HISTORY_NAME",
     "SYSTEM_PROMPT",
@@ -78,10 +92,27 @@ FOLDER_PROMPT_NO_HISTORY_NAME = "ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER"
 FOLDER_PROMPT_NAME = "ALFWORLD_TASK_PROMPT_FOLDER"
 CORRECTION_PROMPT_NAME = "ALFWORLD_TASK_PROMPT_CORRECTION"
 
-#: The generation settings of the unified runner (OpenAIChatAgent defaults).
+#: The generation settings of the unified runner, except the output budget:
+#: the paper's runs use the config-level 65536 so a reasoning teacher is not
+#: cut off mid-thought (measured on exp3 K=5: 19.3% of D's baseline replies
+#: hit 4096 and needed a correction). The templates are still the unified
+#: ones; a client cap of 65536 is a generation setting, not a prompt change.
 TEMPERATURE = 0.0
-MAX_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS = 65536
+#: Diagnostic override; a run at another budget is not comparable with the
+#: 65536 runs and must be reported separately.
+MAX_OUTPUT_TOKENS_ENV = "EXPEDISTILL_ALFWORLD_MAX_OUTPUT_TOKENS"
 SEED = 0
+
+#: Re-reads of an already-opened card are served again for free, up to this
+#: many per episode. Measured failure mode (exp3 K=5, 2026-11-02): after the
+#: third distinct card the old rule answered every read with a refusal and
+#: charged a game step, and 63% of trials looped on the SAME card until the
+#: 50-step budget was gone (34-48 reads). The card text is what the model is
+#: asking for; withholding it turned a re-consultation into an episode loss.
+#: The budget bounds a pathological loop without letting it drain the game
+#: budget: past it each read costs one step, so the episode still terminates.
+REPEAT_READ_FREE = 10
 
 #: Where the initial observation states the task; the unified runner splits
 #: it off so later steps can repeat the task without the room description.
@@ -115,9 +146,12 @@ _READ_RULE = (
     "Skill cards are optional. When the context lists <available_skills>, "
     "you may open one card by replying\n"
     "<think>brief reason</think><action>ReadSkill[<location>]</action> with a "
-    "location from that list. The next observation is the card's full text.\n"
-    "Opening a card is not a game command and does not use a game step; open "
-    f"at most {MAX_READS} cards per episode.\n"
+    "location from that list. The card's full text then appears under "
+    "'Opened skill cards' in your next prompt and stays there until the "
+    "episode ends.\n"
+    "Opening a card is not a game command: it does not use a game step and "
+    "does not take one of the two interaction slots of your history. Open at "
+    f"most {MAX_READS} cards per episode.\n"
     "Open a card only when its description matches the current situation; if "
     "none matches, open none.\n"
 )
@@ -272,18 +306,38 @@ def _correction_variables(original_prompt: str, model_response: str,
 
 
 def protocol_handle(handle: ModelHandle) -> ModelHandle:
-    """The handle's protocol slice: temperature 0, 4096 output, seed 0.
+    """The handle's protocol slice: temperature 0, output budget, seed 0.
 
     Built per episode (dataclasses.replace) so the run's accounting and
     request dumps stay on the same handle. The config's model options are
     kept; its generation knobs are not (the config owns budgets for the
     method's own calls, the ALFWorld protocol owns the ones it measures).
+
+    The output budget defaults to 65536 (the config-level budget; at the
+    unified runner's 4096 the reasoning teacher truncated 19.3% of its
+    baseline replies). ``EXPEDISTILL_ALFWORLD_MAX_OUTPUT_TOKENS`` overrides
+    it for a diagnostic arm; a run at another budget is NOT comparable with
+    the 65536 runs and must be reported separately.
     """
     from dataclasses import replace
     extra = dict(handle.extra_body)
     extra.setdefault("seed", SEED)
     return replace(handle, temperature=TEMPERATURE,
-                   max_tokens=MAX_OUTPUT_TOKENS, extra_body=extra)
+                   max_tokens=_output_budget(), extra_body=extra)
+
+
+def _output_budget() -> int:
+    raw = os.environ.get(MAX_OUTPUT_TOKENS_ENV, "")
+    if not str(raw).strip():
+        return MAX_OUTPUT_TOKENS
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ConfigError(
+            f"{MAX_OUTPUT_TOKENS_ENV} must be an integer, got {raw!r}") from None
+    if value < 1:
+        raise ConfigError(f"{MAX_OUTPUT_TOKENS_ENV} must be >= 1, got {value}")
+    return value
 
 
 def run_unified(
@@ -323,9 +377,6 @@ def run_unified(
                         else PROMPT_NO_HISTORY_NAME)
     plain_history = (FOLDER_PROMPT_NAME if skill_folder is not None
                      else PROMPT_NAME)
-    block = _skill_block(
-        skills_block if skill_folder is None
-        else "Available skills:\n" + skill_folder.available_skills_block() + "\n")
     system = _system_prompt()
 
     steps: List[Dict[str, str]] = []
@@ -333,6 +384,10 @@ def run_unified(
     observation = initial_observation
     env_steps = 0
     reads = 0
+    free_repeats = 0
+    opened: Dict[str, str] = {}
+    refused: set = set()
+    last_read_notice = ""
     invalid_actions = 0
     corrections = 0
     termination = "step_budget"
@@ -341,10 +396,29 @@ def run_unified(
             and not env.is_truncated():
         commands = tuple(getattr(env, "admissible_commands", ()) or ())
         recent = history[-2:]
+        if skill_folder is None:
+            folder_block = skills_block
+        else:
+            folder_block = ""
+            folder_block += ("Available skills:\n"
+                             + skill_folder.available_skills_block() + "\n")
+            if opened:
+                # A real agent framework keeps the cat output in the
+                # conversation; the unified two-step memory would evict the
+                # card after one action and the model re-reads it forever.
+                # Keep every opened card in the prompt until the episode ends.
+                folder_block += ("\nOpened skill cards (already in your "
+                                 "context):\n"
+                                 + "\n\n".join(opened.values()) + "\n")
+            if last_read_notice:
+                # Reads are not protocol interactions, so their result has no
+                # history slot; this line is what tells the reader the read
+                # was answered. Cleared after the next game action.
+                folder_block += f"\nLast skill read: {last_read_notice}\n"
         variables = {
             "current_observation": observation,
             "admissible_actions": format_admissible_actions(commands),
-            "skill_block": block,
+            "skill_block": _skill_block(folder_block),
         }
         prompt_name = plain_no_history
         if recent:
@@ -380,19 +454,60 @@ def run_unified(
                   and diagnostic["format_valid"] else None)
 
         if target is not None:
-            # A read is answered here, never by the environment, and costs
-            # no game step.
-            if reads < MAX_READS:
-                reads += 1
-                card_text, _found = skill_folder.read(target)
-                steps.append({"action": f"ReadSkill[{target}]",
-                              "observation": card_text})
-                history.append((observation, f"ReadSkill[{target}]"))
-                observation = card_text
-                continue
-            env_steps += 1
+            # A read is answered here, never by the environment, and it is
+            # NOT an interaction of the unified protocol: it does not enter
+            # the two-step history and does not replace the current
+            # observation. The card text lives in the persistent "Opened
+            # skill cards" block, so opening a useless card costs the reader
+            # none of its two memory slots. The cap is on DISTINCT cards; an
+            # opened card stays in the skill block, so asking for it again is
+            # answered with a pointer, not a re-read. A read is free for
+            # REPEAT_READ_FREE turns, then costs a game step so a model that
+            # loops still terminates instead of burning the budget
+            # invisibly.
+            location = canonical_location(target)
+            charged = False
+            if location in opened:
+                notice = (f"ReadSkill[{target}]: that card is already open "
+                          "above under 'Opened skill cards'; use that text.")
+                delivered = notice
+                charged = free_repeats >= REPEAT_READ_FREE
+                free_repeats += 1
+            elif location in refused:
+                notice = read_limit_message()
+                delivered = notice
+                charged = free_repeats >= REPEAT_READ_FREE
+                free_repeats += 1
+            elif reads < MAX_READS:
+                card_text, found = skill_folder.read(target)
+                if found:
+                    reads += 1
+                    opened[location] = card_text
+                    notice = (f"ReadSkill[{target}]: the card is now under "
+                              "'Opened skill cards'.")
+                    # The step record keeps the delivered card (what the
+                    # answer sheet and the review evidence need to see); the
+                    # prompt line above only says where it went.
+                    delivered = card_text
+                else:
+                    # A location that names no card is not a card: it does
+                    # not use a distinct-card slot, and it is charged like a
+                    # repeat after the free allowance so a typo loop ends.
+                    notice = card_text
+                    delivered = notice
+                    charged = free_repeats >= REPEAT_READ_FREE
+                    free_repeats += 1
+            else:
+                refused.add(location)
+                notice = read_limit_message()
+                delivered = notice
+                charged = free_repeats >= REPEAT_READ_FREE
+                free_repeats += 1
+            if charged:
+                env_steps += 1
             steps.append({"action": f"ReadSkill[{target}]",
-                          "observation": read_limit_message()})
+                          "observation": delivered})
+            last_read_notice = notice
             continue
 
         if diagnostic["valid"]:
@@ -420,6 +535,7 @@ def run_unified(
         steps.append({"action": action, "observation": result})
         history.append((observation_before, action))
         observation = result
+        last_read_notice = ""
         if env.is_terminated():
             termination = "terminated"
             break

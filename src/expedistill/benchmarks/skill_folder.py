@@ -12,9 +12,12 @@ gives their ReAct loop the same contract:
 - a card's text appears only when the model replies with
   ``ReadSkill[<location>]``. The loop answers that action itself, so the
   evaluation environment never sees it;
-- reading is capped at :data:`MAX_READS` cards per attempt and costs no
-  environment step. A read past the cap gets a refusal and does cost a
-  step, so a model that keeps asking cannot stall the episode.
+- reading is capped at :data:`MAX_READS` DISTINCT cards per attempt and
+  costs no environment step. A loop of repeat or refused reads is free for
+  a fixed allowance, after which each read costs one step, so a model that
+  keeps asking cannot stall the episode. The ALFWorld loop also keeps reads
+  out of the unified protocol's two-step history and holds every opened card
+  in a persistent prompt block.
 
 The folder itself is the delivery's work: the manifest arrives on
 ``task.meta["skill_folder"]`` and the materialized directory on

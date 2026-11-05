@@ -35,6 +35,7 @@ from expedistill.benchmarks.alfworld.protocol import (
     FOLDER_PROMPT_NAME,
     FOLDER_PROMPT_NO_HISTORY_NAME,
     MAX_OUTPUT_TOKENS,
+    MAX_OUTPUT_TOKENS_ENV,
     PROMPT_NAME,
     PROMPT_NO_HISTORY_NAME,
     SYSTEM_PROMPT,
@@ -214,7 +215,7 @@ def test_task_prompt_is_the_unified_protocol():
     assert get_prompt(SYSTEM_PROMPT_NAME) == \
         "You are an expert agent operating in the ALFRED Embodied Environment."
     assert SYSTEM_PROMPT == get_prompt(SYSTEM_PROMPT_NAME)
-    assert TEMPERATURE == 0.0 and MAX_OUTPUT_TOKENS == 4096
+    assert TEMPERATURE == 0.0 and MAX_OUTPUT_TOKENS == 65536
 
 
 def test_task_prompt_renders_bare_and_with_skills():
@@ -404,7 +405,21 @@ def test_run_uses_the_unified_generation_settings(plugin, eval_env, tmp_path):
     plugin.run(task, handle, "", tmp_path)
     call = handle.client.calls[0]
     assert call["temperature"] == TEMPERATURE == 0.0
-    assert call["max_tokens"] == MAX_OUTPUT_TOKENS == 4096
+    assert call["max_tokens"] == MAX_OUTPUT_TOKENS == 65536
+
+
+def test_the_output_budget_can_be_overridden_for_a_diagnostic(
+        plugin, eval_env, tmp_path, monkeypatch):
+    monkeypatch.setenv(MAX_OUTPUT_TOKENS_ENV, "8192")
+    handle = make_fake_handle(role="executor", script=[reply("win")])
+    task = plugin.load_tasks([GAME_REL])[0]
+    plugin.run(task, handle, "", tmp_path)
+    assert handle.client.calls[0]["max_tokens"] == 8192
+    monkeypatch.setenv(MAX_OUTPUT_TOKENS_ENV, "zero")
+    with pytest.raises(ConfigError, match=MAX_OUTPUT_TOKENS_ENV):
+        plugin.run(task, make_fake_handle(role="executor",
+                                          script=[reply("win")]),
+                   "", tmp_path)
 
 
 def test_an_invalid_reply_gets_one_correction(plugin, eval_env, tmp_path):
@@ -618,15 +633,43 @@ def test_opening_a_card_costs_no_game_step(plugin, eval_env, tmp_path):
     assert outcome.meta["skill_reads"] == 2
     assert outcome.meta["skill_list_shown"] is True
     assert outcome.meta["steps_used"] == 2
-    # After two reads the last two interactions are (initial, read 1) and
-    # (card alpha, read 2), and the current observation is card beta.
+    # The step record keeps the delivered card, so the answer sheet and the
+    # review evidence can see what the attempt actually read.
+    assert CARD_BODY in outcome.steps[0]["observation"]
+    assert CARD_BODY in outcome.steps[1]["observation"]
+    # Reads take no history slot, so the prompt after two reads is still the
+    # step-1 template and both cards live in the opened block.
     third_user = handle.client.calls[2]["user"]
+    assert "Prior to this step" not in third_user
     assert CARD_BODY in third_user
     assert "(card alpha)" in third_user and "(card beta)" in third_user
     assert "ReadSkill[<location>]" in third_user
 
 
-def test_a_read_past_the_cap_costs_a_game_step(plugin, eval_env, tmp_path):
+def test_a_read_does_not_take_one_of_the_two_history_slots(
+        plugin, eval_env, tmp_path):
+    # The unified protocol's memory is the last two (observation, action)
+    # pairs. A read is answered by the loop, not by the environment, so it
+    # must not consume one of those slots: the first game action's history
+    # holds that action only, and the prompt before it is still step 1.
+    task, locations = _folder_task(plugin, tmp_path)
+    handle = make_fake_handle(role="executor", script=[
+        reply(f"ReadSkill[{locations[0]}]"), reply("look"), reply("win")])
+    outcome = plugin.run(task, handle, "", tmp_path)
+    after_read = handle.client.calls[1]["user"]
+    assert "Prior to this step" not in after_read
+    assert "Opened skill cards" in after_read
+    assert CARD_BODY in after_read
+    after_look = handle.client.calls[2]["user"]
+    assert "Prior to this step, you have already taken 1 step(s)" in after_look
+    assert "the most recent 1 observations" in after_look
+    assert "Action 1: 'look'" in after_look
+    assert "Action 2:" not in after_look
+    assert outcome.meta["steps_used"] == 2
+
+
+def test_a_read_past_the_cap_is_refused_without_costing_a_step(
+        plugin, eval_env, tmp_path):
     task, locations = _folder_task(
         plugin, tmp_path, names=("a", "b", "c", "d"))
     handle = make_fake_handle(role="executor", script=[
@@ -636,9 +679,38 @@ def test_a_read_past_the_cap_costs_a_game_step(plugin, eval_env, tmp_path):
     assert outcome.meta["skill_reads"] == 3
     refusal = outcome.steps[3]
     assert "Skill read limit reached" in refusal["observation"]
-    # Three reads cost no game step; the refused fourth does, and so does the
-    # winning command.
-    assert outcome.meta["steps_used"] == 2
+    # The cap is on distinct cards; the refused fourth is a protocol reply,
+    # not a game action, so only the winning command costs a step.
+    assert outcome.meta["steps_used"] == 1
+
+
+def test_an_opened_card_stays_in_the_prompt_and_reopening_is_free(
+        plugin, eval_env, tmp_path):
+    # The exp3 read-loop failure mode: after opening a card the model asks
+    # for the SAME card again. The text stays in the prompt under "Opened
+    # skill cards", the repeat is answered with a pointer (not a cap
+    # refusal), and it spends neither a game step nor a distinct-card slot.
+    task, locations = _folder_task(plugin, tmp_path, names=("a", "b"))
+    handle = make_fake_handle(role="executor", script=[
+        reply(f"ReadSkill[{locations[0]}]"),
+        reply(f"ReadSkill[{locations[0]}]"),
+        reply(f"ReadSkill[{locations[0]}]"),
+        reply("win")])
+    outcome = plugin.run(task, handle, "", tmp_path)
+    assert outcome.meta["skill_reads"] == 1
+    assert "Skill read limit reached" not in outcome.steps[1]["observation"]
+    assert "already open" in outcome.steps[1]["observation"]
+    second_user = handle.client.calls[1]["user"]
+    assert "Opened skill cards" in second_user
+    assert CARD_BODY in second_user
+    # The read result is not in the history, so a "Last skill read" status
+    # line is what tells the model its read was answered.
+    assert "Last skill read:" in second_user
+    third_user = handle.client.calls[2]["user"]
+    assert CARD_BODY in third_user
+    assert "Last skill read:" in third_user
+    assert "already open" in third_user
+    assert outcome.meta["steps_used"] == 1
 
 
 def test_a_unit_without_a_folder_keeps_the_plain_prompt(
