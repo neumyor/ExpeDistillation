@@ -131,16 +131,27 @@ src/expedistill/
     attribution.py        G11 attempt 修订、G12 attempt 归因（v3 起进
                           __init__ 的 import 清单——全量冻结，manifest 冻结全部
                           已注册方法 prompt 的 digest）
+    profile.py            弱模型画像段的构造：`PROFILE_ROLES` 登记各写作 prompt
+                          的读者标题行（技能读者 / 合并后技能读者 / 任务执行者），
+                          积木只传角色名，不写标题文本
   inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
+    skills.py             技能块渲染与 token 估计
+    skill_text.py         技能文本字段（目录行与 SKILL.md 的 description）的
+                          共用推导：folder 交付（第 6 层）与物化（第 5 层）都要用，
+                          放在两者之下
   llm/                    第 2 层：B1 调用模型
     client.py             底层客户端（OpenAI 兼容接口）+ 请求 ID 别名池（同一模型的多个网关 ID 轮转）
     providers.py          provider 注册表（纯数据表：名字 → builder；环境变量选择）
     call.py               call_model：取 prompt → 请求 → 解析 → 格式错误重试 → 记账落盘
     fake.py               测试用假模型（按脚本返回固定内容）
+    fake_provider.py      注册进 providers 表的 `fake` provider：按计划文件返回，
+                          让整条相位序列在真实 benchmark 插件上零网络运行（smoke）
   benchmarks/             第 3 层：benchmark 插件
     base.py               插件接口：load_tasks / run / view_rules / task_prompt；
-                          可选能力声明 skill_folder_prompt_name（技能文件夹
-                          执行 real_folder，M3；None=不支持）
+                          `verdict_rule` 声明该 benchmark 默认的逐 run 判分规则
+                          （默认 `scorer`，TB 为 `tb_scorer`）；可选能力声明
+                          skill_folder_prompt_name（技能文件夹执行
+                          real_folder，M3；None=不支持）
     react_loop.py         本地 benchmark 共用的逐步 ReAct 执行循环
     skill_folder.py       本地 benchmark 的渐进式技能披露：<available_skills>
                           目录与 ReadSkill[<位置>] 读取（循环自己响应，
@@ -150,9 +161,15 @@ src/expedistill/
                           提示词词汇：智能体是谁、能力族、最终动作、五个触发
                           时机短语；插件用 `learning_context` 声明，写进 manifest
     registry.py           按名字取插件
-    tb/                   TB runner（远程 Harbor）+ 任务加载 + 截断规则 + 执行 prompt
-    searchqa/             适配外层 benchmark/searchqa-eval/
-    alfworld/             适配外层 benchmark/alfworld-eval/
+    tb/                   TB runner（远程 Harbor）+ 任务加载 + 截断规则 + 执行 prompt：
+                          plugin.py 插件；remote.py 远程主机与 Harbor 调用；
+                          trajectory.py 从 Harbor 的 trajectory.json 重建逐步轨迹
+    searchqa/             适配外层 benchmark/searchqa-eval/：plugin.py 插件；
+                          env.py 评测环境与判分器的加载
+    alfworld/             适配外层 benchmark/alfworld-eval/：plugin.py 插件；
+                          env.py 环境封装；protocol.py 与外层统一 runner 一致的
+                          执行协议（系统消息、第一步模板、历史窗口、动作解析、
+                          技能目录与全局 playbook 的拼接）
   blocks/                 第 4 层：功能积木，一个文件一组相关积木
     execute.py            E1：按 benchmark 取插件执行
     tasks.py              D1 任务加载、D2 划分
@@ -220,7 +237,9 @@ src/expedistill/
     skill_usage.py        live folder 轮次的逐尝试使用事实：从 trial 级
                           AnswerSheet 的 ExecutionRecord.steps +
                           artifacts.skill_folder 提取可用技能、读取/未读、结果
-    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet
+    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet；
+                          `default_verdict_rule` 读插件的 `verdict_rule`，
+                          exam 伪 benchmark 固定为 exam_judge
     phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
     trace.py              来源指针的函数：trace_at（唯一构造 TraceRef，拒绝
                           考试答卷与越界步号）、resolve（唯一还原来源上下文，
@@ -231,7 +250,7 @@ src/expedistill/
     provenance.py         每个技能版本一条 Provenance 的账本：record_version（唯一
                           写入口，技能与来源一起落盘）、find_provenance、
                           check_provenance（learn 相位末与 exam 开考前的边界检查）
-    skill_folder.py       folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
+    skill_materialize.py  folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
                           （带 YAML 头）并写 catalog.md 兜底；test 相位派发前
                           物化一次全部单元共享，live 的 `folder_by_task` 按
@@ -258,7 +277,7 @@ src/expedistill/
                           `contracts.py`（ReviewContext / ReviewItem /
                           ReviewResult / TrialFinding / NewSkillRequirement）+
                           README.md
-    author/               author 族：AuthoringParams + write 驱动（P02 写新 skill）
+    author/               author 族：AuthoringParams + write.py 驱动（P02 写新 skill）
                           + cluster_by_trigger.py（P02 跨 task 的 trigger 族
                           聚类写作，ClusterAuthoringParams）
                           + revise.py（P04/P06 每 skill 一次写作，读
@@ -269,16 +288,20 @@ src/expedistill/
                           预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
                           成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
     delivery/             注入驱动 whole_bank.py、retrieval.py、exam_folder.py、
-                          group_by_task.py、none.py、folder.py（test 技能文件夹
-                          交付）、folder_by_task.py（live 逐任务技能文件夹）+
+                          group_by_task.py、none.py、folder_delivery.py（test
+                          技能文件夹交付，配置名 `folder`；可带全局 playbook）、
+                          folder_by_task.py（live 逐任务技能文件夹）+ units.py
+                          （各驱动共用的执行单元行构造）+
                           各自的 Params + README.md（模块说明与参数表）
   stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
     stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
     phase_execute/        执行相位驱动包（R9/R8）：__init__ 分发入口 run()；
-                          phase_disk 相位目录/早相位/库产物/复用连接；resolve
-                          配置映射到驱动与参数；engine 派发→判分→重派引擎；
-                          baseline / exam / live / final_test 四种 role 各一
-                          个模块（baseline 摸底 / exam 泛化考试 / live 实战验收 / test 终测）
+                          phase_disk.py 相位目录（`execute_phase_dir`）/早相位/
+                          库产物/复用连接；resolve.py 配置映射到驱动与参数
+                          （含读取 `playbook_file`）；engine.py 派发→判分→重派
+                          引擎；baseline.py / exam.py / live.py / final_test.py
+                          四种 role 各一个模块（`run_baseline` 摸底 / `run_exam`
+                          泛化考试 / `run_live` 实战验收 / `run_test` 终测）
     phase_learn.py        learn 相位驱动（R9）：按 P02/P04/P06/exam 分流
     learn_add.py          P02 add 路径：切段、证据、写新 skill、回执；
                           author.name=cluster_by_trigger 时转交
@@ -298,6 +321,9 @@ src/expedistill/
                           不得 import 阶段层）
     fork_run.py            分叉工具（不占 K 号）：把已完结 run 的前 K 个相位拷进新
                           run，新配置从第 K+1 个相位接着跑（`fork-run` 子命令）
+    remerge_bank.py        用新的 MERGE prompt 或读者画像重跑已完结 run 最后一个
+                          learn 相位的合并步骤，结果写成测试专用 run 的已接受库
+                          （`remerge-bank` 子命令）
     import_bank.py         把外部方法的产物（markdown / 技能文件夹 / notes）写成
                           测试专用 run 的已接受技能库（`import-bank` 子命令）
     analysis_common.py     只读分析的共用约束：输出目录不得在被读的 run 里，
@@ -308,11 +334,14 @@ src/expedistill/
                           （`exam-replay` 子命令）
     paper_tables.py        只读：按配对统计量比较已完结的 run，生成论文表格
                           （`paper-tables` 子命令）
+    segmentation_metrics.py 只读：分段消融的机制指标——测试成绩、初始/最终库大小、
+                          技能 anchor 不在任务开始的比例、任务中途打开率
+                          （`segmentation-metrics` 子命令）
   cli.py                  第 8 层：命令行入口（唯一的方法入口）+ 相位循环
                           （run_experiment 逐个派发 sequence 条目）；子命令
                           run / summary / assemble-reuse / fork-run /
                           import-bank / judge-skills / exam-replay /
-                          paper-tables
+                          paper-tables / segmentation-metrics / remerge-bank
 ```
 
 积木编号与文件的对应以 README 第三节为准；新增积木时两处同时更新。
@@ -336,7 +365,8 @@ src/expedistill/
 2. **同层之间**：第 1 层的三个目录互不依赖；`blocks/` 下的文件互不 import——
    两块积木要接在一起，就在 `composites/` 里接；`benchmarks/` 下的各插件互不依赖。
 3. **跟 benchmark 有关的代码只能在 `benchmarks/<名字>/` 里**。`blocks/` 及以上
-   不得出现 `if benchmark == "tb"` 之类的分支，需要的差异做成插件接口的一项。
+   不得出现 `if benchmark == "tb"` 之类的分支，也不得出现按 benchmark 名字
+   索引的表，需要的差异做成插件接口的一项（例如 `verdict_rule`）。
 4. `src/` 不得 import `scripts/` 下的任何东西。
 
 ### 积木规范
@@ -349,7 +379,8 @@ src/expedistill/
    `stages/` 负责。唯一例外是 `benchmarks/` 插件的 runner（执行本身就要碰
    环境和远程目录），它产生的文件必须放在调用方传入的目录里。
 4. **模型调用只走 `llm.call.call_model`**：积木里不直接 import 客户端、不拼 HTTP
-   请求、不写 prompt 字符串，prompt 一律按名字从 `prompts/` 取。
+   请求、不写 prompt 字符串（包括拼进 prompt 的标题行），prompt 一律按名字从
+   `prompts/` 取；弱模型画像段的标题行由 `prompts/profile.py` 按角色名提供。
 5. **ID 由程序生成**：按 `core/ids.py` 的规则，子对象 ID = 父对象 ID + 序号。
    模型输出里的任何编号都不能当 ID 用。
 6. **模型输出要校验**：调模型的积木声明输出格式，`call_model` 负责解析和格式
@@ -420,6 +451,8 @@ configs/
                  schema_version 7（v1/v2/v3/v4/v5/v6 文件是冻结的历史记录，转换走
                  scripts/run/convert_v3_configs.py，结果写新文件名）
   profiles/      弱模型画像（一个弱模型一份文本）
+  playbooks/     常驻全局 playbook（交付层文本，folder / exam_folder 交付的
+                 `playbook_file` 指向这里；默认不启用）
   seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，
                  字节级拷贝 + sha256 由实验配置钉住；本仓库不修改它，
                  campaign 侧重导出后按新 sha256 换新文件名）

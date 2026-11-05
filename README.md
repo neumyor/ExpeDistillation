@@ -509,7 +509,7 @@ E1 内部的 runner：
 |---|---|---|
 | TB runner | TerminalBench | 委托 Harbor + 腾讯沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地一步一步执行到结束（外层 `benchmark/searchqa-eval/`） |
-| ALFWorld runner | ALFWorld | 本地一步一步执行到结束，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0 / 4096 输出 / 50 步）；须用外层 venv 并加载 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
+| ALFWorld runner | ALFWorld | 本地一步一步执行到结束，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0 / 65536 输出 / 50 步（4096 下推理教师有 19.3% 的 baseline 回复被截断））；须用外层 venv 并加载 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
 
 两套本地 runner 的每局步数上限用环境变量配：SearchQA 是
 `EXPEDISTILL_SEARCHQA_MAX_STEPS`（默认 6），ALFWorld 是
@@ -564,7 +564,7 @@ E1 内部的 runner：
 | G11 | live 修订 | （skill 现文本, 本次 skill 的所有 attempt 窗口证据, 弱模型画像, rewriter 模型）→ 保节结构的新正文 + 修订理由 + 新摘要。多个窗口冲突时由写作模型自己综合 |
 | G12 | attempt 归因 | （任务 instruction, 本次 attempt 的 success/failure, 一段轨迹窗口, 窗口内所有目标 skill 的内容, 弱模型画像, author 模型）→ 每条 skill 的触发上下文 / 触发后行为 / 可改进点，不带动作；同一窗口的多条 skill 合并一次调用 |
 
-"弱模型画像"是配置里的一段文字，换弱模型时只换这段配置。`use_weak_profile` 默认关闭：画像文本留在配置里，但写作、改写、live 归因和 live 修订的提示词收到的是中性段落；只有显式打开时才把画像正文送进提示词。
+"弱模型画像"是配置里的一段文字，换弱模型时只换这段配置。`use_weak_profile` 默认关闭：画像文本留在配置里，但写作、改写、live 归因和 live 修订的提示词收到的是中性段落；只有显式打开时才把画像正文送进提示词。画像正文之后由 `prompts/profile.py` 统一追加一条绑定行：画像里陈述的一切（能力边界或执行期上下文）都是对所写节点的约束。ALFWorld 的配置因此启用 `configs/profiles/alfworld_unified_memory_20261103.md`，把统一协议下学生的上下文（当前观察 + 最近两对交互 + 已打开卡段落）写进写作侧（2026-11-03）。
 
 ### 3.4 组合积木
 
@@ -577,14 +577,14 @@ E1 内部的 runner：
 | K5 | 库整理 | G7 →（可选）丢弃低价值 → G8 →（可选）K3 回归考试 → G9 → D10，合并与丢弃日志先写后改、续跑按日志重放 | `composites/curation.py` |
 | K6 | live 判定账本 | 轮判定（judge_round，append-once、首判为准、续跑重算逐字节核对）、组终态提交（finalize_group）、基线与轮仓读取、注入审计行 | `composites/live_verdicts.py`、`live_measurement.py` |
 | — | trial 级 AnswerSheet | `ExecutionRecord`（轨迹/答卷/外部 reward + raw facts）、`CoverageRecord`（present/missing/terminal + cause）、`GradingRecord`（verdict/basis/rule）组成的 trial 级 envelope；JSON 是源，Markdown 是派生视图 | `core/answer_sheet.py`、`composites/answer_sheets.py`、`blocks/view.py::render_answer_sheet` |
-| — | 验收判定核 | 只对一张 AnswerSheet 判 success / failure / invalid；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`、`external_reward`） | `composites/verdicts.py` |
+| — | 验收判定核 | 只对一张 AnswerSheet 判 success / failure / invalid；具名判分规则注册表（`scorer`、`exam_judge`、`tb_scorer`、`external_reward`）；各 benchmark 的默认规则由插件属性 `verdict_rule` 声明（默认 `scorer`，TB 为 `tb_scorer`），exam 固定 `exam_judge` | `composites/verdicts.py`、`benchmarks/base.py` |
 | — | coverage | expected trial vs stored trial：present / missing / terminal + cause（accepted hole、leak、injection overflow、exam generation failed、control perfect、zero execution）；不判分、不聚合 | `composites/coverage.py` |
 | — | unit 汇总 | `summarize_unit` / `summarize_phase` / `task_metrics`：由 AnswerSheet + UnitSpec 纯函数算出 UnitSummary；决策/审计/test 共用 | `composites/unit_summary.py` |
 | — | 相位报告 envelope | 读取 `unit_specs.jsonl` + `answer_sheets/` + `coverage.jsonl`，现算 UnitSummary；不是持久 report card | `composites/phase_report.py` |
 | — | unit/sheet 身份 | `make_unit_id` / `canonical_skills` / gap sheet id | `composites/unit_ids.py` |
 | — | 审查 | `methods/review`：`decide_task_list`（P02 baseline-gap / exam）、`strategies`（P04/P06 的 `task_level` / `skill_level` 与 exam 多版本合并）、归因窗口、P02 切段与 add 证据、exam 证据 | `methods/review/`；动作表、cause 词表、`final_test_delta` 仍在 `composites/decision.py` |
 | — | 相位库 | 相位目录布局、相位技能库工件的读取侧 | `composites/phase_bank.py` |
-| — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_folder.py` |
+| — | 技能文件夹物化 | `materialize_skill_folder(清单, bank, 目录)`：按清单的库指纹核对相位库、从库里读每条技能的正文，把文件夹（每技能一个 `<skill>/SKILL.md`，带 YAML 头，另加 catalog.md 兜底）幂等写进目标目录（内容不变不重写，永不删除别的文件）；test 相位派发前物化一次，全部单元共享 | `composites/skill_materialize.py` |
 | — | 技能状态提交 | `discard_skill`（丢弃的唯一入口）与候选扫描 | `composites/skill_status.py` |
 | — | 空洞记录 | 已接受基础设施空洞（什么叫空洞见 5.9）的读取与写入（摸底相位与各臂共用） | `composites/shortfall.py` |
 | — | 考卷状态读取 | 从存量记录读出考题的已判作答与裸答 | `composites/acceptance_skill_status.py` |
@@ -710,6 +710,7 @@ digest**（外加本 benchmark 的任务 prompt；插件声明了技能文件夹
 | `judge-skills`（`stages/judge_skills.py`，`blocks/adherence.py`，`composites/trigger_metrics.py`） | 一个 test 或 live 相位里，技能目录展示后：该适用的卡有没有被打开（触发召回）、不适用的卡有没有被打开（误触发）、打开之后步骤有没有被执行（遵循度）。适用性与遵循度由裁判模型对照轨迹判定 | 每个 trial 一次适用性判定，每张被打开的卡一次遵循度判定 |
 | `exam-replay`（`stages/exam_replay.py`） | 同一批考题、同一个技能库，换一个答题模型：召回、误触发、计划通过率。写入全新的对象仓，不读不写源 run 的作答 | 每道考题一次选技能、一次写计划、一次判卷 |
 | `paper-tables`（`stages/paper_tables.py`，`composites/paired_stats.py`） | 已完结的 run 之间的配对比较：按任务自助法的置信区间、胜负平、McNemar 精确检验、单臂噪声底；表格的行列顺序跟随 spec，不按结果排序 | 无 |
+| `segmentation-metrics`（`stages/segmentation_metrics.py`） | 分段消融（K=1 对 K=5）的机制指标：测试 avg@3 / pass@3、初始与最终技能库大小、技能的构造 anchor 不在任务开始的比例（`source_subtasks` → Subtask 的 `step_range`，merge 取来源最早起点）、任务中途打开率（第一个环境动作之后的 `ReadSkill` 读取所占 trial 比例）。全部是程序事实，不调裁判 | 无 |
 
 预登记指标（看结果前固定，不选择口径）：触发召回 = 打开且适用的（trial, 卡）对 / 适用的对；
 误触发率 = 打开且不适用的对 / 打开的对（两者都在 (trial, 卡) 对上汇总，不按 trial 平均）；
@@ -1097,7 +1098,10 @@ curation 的合并产物不考（整理阶段的合并回归考试复用各源�
   正文（正文的唯一来源是相位技能库，渐进读取是这个玩法的核心）。
   `FolderParams.description_mode` 控制 YAML 头里 `description` 的拼法：
   `summary` 只放摘要，`when_to_use` 只放触发条件，
-  `summary_then_when_to_use`（默认）两者都放。第一轮任务提示词由
+  `summary_then_when_to_use`（默认）两者都放。可选的 `playbook_file`
+  （配 `playbook_sha256`）把一份全局 playbook 读进交付清单，在每一步的
+  卡片列表前常驻渲染；文件内容变化会被哈希拒绝。默认不传时清单与提示词
+  逐字节不变（2026-11-04 P0）。第一轮任务提示词由
   Harbor/Terminus 自己拼；远端部署的 `Terminus2._build_skills_section`
   会扫描 `skills_dir` 下深度 2 的 `SKILL.md`，解析 YAML 头，把技能名、
   描述和完整路径生成 `<available_skills>` 放进首轮提示词。因此
@@ -1118,10 +1122,20 @@ curation 的合并产物不考（整理阶段的合并回归考试复用各源�
   契约，评测环境本身（外层 `benchmark/alfworld-eval`、`benchmark/searchqa-eval`）
   完全不改。提示词里只有 `<available_skills>` 目录（名称、描述、位置，XML
   形状与 Terminus 一致，内容读自物化文件的 YAML 头）；模型回复读取动作时，
-  循环自己返回整份 `SKILL.md`，评测环境收不到这个动作，读取也不占环境步数。
-  每次尝试最多打开 3 张卡（提示词里写明，属于协议常量）；超出的请求被拒绝
-  且占一步，位置写错得到报错观察并占一次读取额度，所以只读不做的回复序列
-  最终会耗尽预算。位置可写完整的 `<目录>/SKILL.md`，也可只写目录名。
+  循环自己返回整份 `SKILL.md`，评测环境收不到这个动作，读取也不占环境步数，
+  并且**不占统一协议的两个记忆槽位**：读卡不写进最近两步历史、也不替换当前
+  观察，只记入 `steps` 供答卷与使用分析（2026-11-03；旧实现会把真实环境历史
+  挤掉，打开一张没用的卡代价过大）。每次尝试最多打开 3 张**不同的**卡（提示词里
+  写明，属于协议常量）；超过上限的新卡请求得到拒绝，位置写错得到报错且不消耗
+  卡片额度，两者都按重复读取计费。**已打开的卡会一直留在提示词的
+  “Opened skill cards” 段落里直到该次尝试结束**（真实 agent 框架的 `cat` 输出
+  本来就在对话历史里；统一协议的 2 步记忆会在一个动作后把卡挤掉，实测模型因此
+  反复重读同一张卡 20–100 次、耗尽步数预算），读卡结果另由一行
+  “Last skill read” 报告。重读已打开的卡只提示指向该段落，不占新的读取额度；
+  前 10 次读取交互不占环境步数，之后每次占一步，保证病态循环仍会终止
+  （2026-11-02 的两次 K=5 run 分别被拒绝重读和卡片被挤出上下文烧掉了
+  63% / 65% 的 trial，见 `docs/reports/experiment3_plan_20261102.md`）。位置可写
+  完整的 `<目录>/SKILL.md`，也可只写目录名。
   searchqa 走共用 ReAct 循环，读取动作是整行的 `ReadSkill[<位置>]`；alfworld
   走统一协议循环（见 3.5 的 E1），读取动作必须是协议格式
   `<think>…</think><action>ReadSkill[<位置>]</action>`，循环在把动作交给环境
@@ -1221,6 +1235,9 @@ delete（`retry_exhausted`），新需求只记 `deferred_no_later_check`、不�
 - **add**：把该任务的强模型成功段提炼成新的待定技能；review 的
   `write_lessons` 开着（默认）时，弱模型失败段也用诊断写法写成技能，
   结构与提炼产物相同（一段一技能，`make_skill_id(subtask_id)` 编号）。
+  写作模式跟**段自己的判定**走（distill = 该段达成，diagnose = 该段失败），
+  所以覆盖规则 `segment_select: all` 收进来的失败强段 / 成功弱段也不会
+  与模式矛盾。
 
 **切段在相位世界里的位置**（关键设计，2026-10-16 Wave 3-S）：
 **切段发生在学习相位内部、add 行执行的时候**。流程世界没有独立的切段
@@ -1228,7 +1245,10 @@ delete（`retry_exhausted`），新需求只记 `deferred_no_later_check`、不�
 （`methods/review/segmentation.py`），它从 **run 级轨迹仓**（正是摸底
 相位两臂的裸跑轨迹）按 `trajectory_select` 具名规则逐任务挑轨迹、
 **切其中的强角色轨迹，`write_lessons` 开着时连弱角色轨迹一起切**
-（关掉时弱臂段落没有消费者，弱臂的钱不花），逐条交给
+（关掉时弱臂段落没有消费者，弱臂的钱不花）。两个材料规则都按实验切换：
+默认是 `strong1_weak1` + `strong_success_weak_failed`；覆盖消融（2026-11-04）
+用 `trajectory_select: all` + `segment_select: all`，让授权任务的每条轨迹、
+每个段都进入写作，任务门槛仍是 `any_weak_failed`。逐条交给
 K2（确定 ID、逐单元落盘、按存量跳过、D7 校验、重切预算、耗尽审计全部
 沿用 K2 的既有机制）。参数（`K`、`retry_limit`、`write_lessons`）来自学习相位的 `review`
 槽位。0 步轨迹在规则之前排除并写一次性的 "empty trajectory" 审计行。
@@ -1484,6 +1504,7 @@ expedistill import-bank --source <路径> --source-format markdown_file|skill_fo
 expedistill judge-skills --run-dir <run 目录> --out-dir <输出目录> --phase pNN:<名> [--arm with_bank] [--bank-phase 标签] [--judge-model 模型]
 expedistill exam-replay --run-dir <run 目录> --out-dir <输出目录> --answerer-model <模型> [--judge-model 模型] [--bank-phase 标签] [--max-skill-reads N]
 expedistill paper-tables --spec <JSON> [--out-md 路径] [--out-json 路径] [--n-boot 10000] [--seed 0] [--metric avg_at_n|avg_at_n_conservative|pass_at_n]
+expedistill segmentation-metrics --arm LABEL=RUN_DIR [--arm LABEL=RUN_DIR ...] [--out-md 路径] [--out-json 路径]
 ```
 
 - `run` 每完成一个相位打印一行摘要；同一条命令重跑即续跑；
@@ -1497,10 +1518,12 @@ expedistill paper-tables --spec <JSON> [--out-md 路径] [--out-json 路径] [--
   技能仓当前状态；test 相位全新执行，设计如此；v3 源的生成失败行不拷贝，
   新 run 的首个学习相位会真实重试它们——有模型调用，逐项披露见
   ASSEMBLED_FROM）、`baseline`（只拷摸底轨迹，其余按当前协议全新执行）。
-- `import-bank`、`judge-skills`、`exam-replay`、`paper-tables` 的用途见 3.8。前三者
-  的 `--run-dir` / `--out-dir` 约束一致：输出目录不能在被读的 run 里。`judge-skills` 与
+- `import-bank`、`judge-skills`、`exam-replay`、`paper-tables`、`segmentation-metrics`
+  的用途见 3.8。前四者的 `--run-dir` / `--out-dir` 约束一致：输出目录不能在被读的
+  run 里（`segmentation-metrics` 对每个 `--arm` 的 run 同样拒绝）。`judge-skills` 与
   `exam-replay` 缺省用被读 run 冻结的 judge 模型，并带着该 run 冻结的 token 预算、
-  模型参数和 benchmark 词汇构造句柄；`paper-tables` 的数值错误退出码为 2。
+  模型参数和 benchmark 词汇构造句柄；`paper-tables` 与 `segmentation-metrics` 的
+  数值错误退出码为 2。
 - `fork-run` 把已完结、空闲的源 run 的前 K 个相位（`--through p05` 是 p01 到 p05）
   连同运行级对象库拷进新 run 目录，零模型调用；新配置必须以同样的 K 个相位开头、
   定义相同，其余影响这些相位的键也要一致，后面的相位、test 划分和任务清单可以不同。

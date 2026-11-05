@@ -60,9 +60,9 @@ folder 交付改成 Agent Skills 目录布局：
 ## 实现位置
 
 - `inject/skill_text.py`：三种描述拼法、`[When to use]` 提取、1024 字符上限。
-- `methods/delivery/folder.py`：技能目录名、`<name>/SKILL.md` 路径、manifest、
+- `methods/delivery/folder_delivery.py`：技能目录名、`<name>/SKILL.md` 路径、manifest、
   catalog 兜底。
-- `composites/skill_folder.py`：逐文件写盘时生成 YAML 头；校验路径只能是
+- `composites/skill_materialize.py`：逐文件写盘时生成 YAML 头；校验路径只能是
   `<safe-name>/SKILL.md`；目录名只允许小写字母、数字、连字符。
 - `benchmarks/tb/plugin.py`：任务级 `SKILL.md` 只放使用说明；上传缓存改成递归，
   只打包 manifest 列出的文件；续跑摘要加入 folder 内容摘要。
@@ -82,4 +82,4 @@ folder 交付改成 Agent Skills 目录布局：
 - Harbor 每条 trial 会对每个 `SKILL.md` 执行一次 `cat` 来解析头部；60 个技能
   就是 60 次沙箱命令，启动阶段会多几秒。
 - YAML 头解析失败时 Terminus 会静默跳过该技能。materialize 后用
-  `tests/unit/composites/test_skill_folder.py` 的同款检查逐个解析，防止静默缺项。
+  `tests/unit/composites/test_skill_materialize.py` 的同款检查逐个解析，防止静默缺项。

@@ -127,7 +127,7 @@ ALFWorld 的命令词出现在 `TASK_PROMPT_TEMPLATE`，SearchQA 的 `Search[<qu
   input, output and invocation"：泛指任务特有的细节，三个基准都成立，不影响技能形状。
 - `methods/review/attribution.py::_task_description`：解析 TB 的 Terminus 首条消息（"Task Description:" 等标记），
   不是发给模型的措辞；其他基准没有这个字段，直接回退到任务指令。
-- `methods/delivery/folder.py` 的技能文件夹引导（"cat only the skill file ..."）：发给执行者，不属于学习提示词。
+- `methods/delivery/folder_delivery.py` 的技能文件夹引导（"cat only the skill file ..."）：发给执行者，不属于学习提示词。
 
 ## 测试
 

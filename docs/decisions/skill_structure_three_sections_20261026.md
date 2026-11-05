@@ -15,7 +15,7 @@
 - `prompts/author.py`：G2 两个模式的输出 JSON 删除 `verify` 字段；Pass 5 删除“verify field”检查项并重排编号；G6 REWRITE 只要求保留三个 bracket section，删除 verify 检查项。
 - `prompts/attribution.py`：G11 修订 prompt 只要求保留三个 bracket section。
 - `prompts/curate.py`：G8 合并 prompt 只要求三个 bracket section。
-- `composites/curation.py`、`composites/skill_folder.py`、`methods/author/revise.py` 等消费方随 `has_skill_sections` / `SKILL_MARKERS` 自动改为三段；错误文案改为“three bracket sections”。
+- `composites/curation.py`、`composites/skill_materialize.py`、`methods/author/revise.py` 等消费方随 `has_skill_sections` / `SKILL_MARKERS` 自动改为三段；错误文案改为“three bracket sections”。
 - 测试：所有 skill 结构 fixture、fake model 响应、渲染/校验/改写/合并断言删除 `[Verify]`；`test_models` 的 marker 钉死改为三元组。
 - golden：prompt 与 fake 响应改变，四个组合重新生成，调用数 34/18/13/24，崩溃续跑等价门全过。
 - 文档：README、`methods/author/README.md`、`methods/delivery/README.md` 改为三段；新增本文件。

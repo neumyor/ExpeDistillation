@@ -54,7 +54,7 @@ folder 交付里，弱模型只凭 `<available_skills>` 的一行描述决定打
      由 add 路径的证据采集器从存储算出，经 `write_new` 传给 `write_skill`；
    - `At any step,` 只在其余四类都不合适时使用，防止滥用；
    - 段位置和来源只作提示、不作规则：早段常是任务开始，末段常是提交前，失败段常是失败恢复。
-4. **catalog 不截断**：`methods/delivery/folder.py` 删除 200 字符截断与 ` [truncated]`
+4. **catalog 不截断**：`methods/delivery/folder_delivery.py` 删除 200 字符截断与 ` [truncated]`
    标记，catalog 行完整保留描述。`description_text` 的 1,024 字符上限是 Agent Skills
    格式的硬上限，保留；按第 2 条的预算它不会触发。
 
@@ -62,7 +62,7 @@ folder 交付里，弱模型只凭 `<available_skills>` 的一行描述决定打
 
 改：`prompts/author.py` 的 SKILL_DISTILL / SKILL_DIAGNOSE、`blocks/author.py`
 （`write_skill` 的 `segment_position` 参数）、`methods/evidence/add_path.py`
-（算段位置）、`methods/author/write.py`（透传）、`methods/delivery/folder.py`（去截断）。
+（算段位置）、`methods/author/write.py`（透传）、`methods/delivery/folder_delivery.py`（去截断）。
 
 暂不改（用户裁定先专注 P02）：P04/P06 的 `LIVE_SKILL_RETRIGGER`、
 `LIVE_SKILL_REVISION`、P06 的 `MERGE`。在它们同步之前，被 retrigger / revise / merge
