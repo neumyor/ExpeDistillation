@@ -48,11 +48,12 @@ from expedistill.core.answer_sheet import ExecutionRecord, GradingRecord
 from expedistill.core.registry import make_registry
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
+from expedistill.benchmarks.registry import resolve_plugin
+
 # Same layer (5).
 from expedistill.composites import exam_grading
 
 __all__ = [
-    "BENCHMARK_VERDICT_RULES",
     "CAUSE_ALL_HOLES",
     "CAUSE_EXAM_GENERATION_FAILED",
     "CAUSE_INJECTION_OVERFLOW",
@@ -69,6 +70,7 @@ __all__ = [
     "STATUS_NOT_RUN_CONTROL_PERFECT",
     "STATUS_NOT_TESTABLE",
     "UNIT_STATUSES",
+    "EXAM_VERDICT_RULE",
     "default_verdict_rule",
     "get_verdict_rule",
     "grade_attempt",
@@ -241,29 +243,17 @@ def _tb_scorer_rule(facts: Mapping[str, Any]) -> Tuple[str, str]:
     return RUN_FAILURE, "tb_scorer: the benchmark's own scorer"
 
 
-#: The default named rule per benchmark (R1: the verdict rules are named
-#: per benchmark; C11 lets the config name one explicitly, this table is
-#: the default binding). Every benchmark with a scorer scores through
-#: the scorer rule; TB's binding consumes its plugin's provenance
-#: facts (``tb_scorer``); the exam benchmark (questions generated on
-#: the fly) is judged by the model judge.
-BENCHMARK_VERDICT_RULES = {
-    "tb": "tb_scorer",
-    "searchqa": "scorer",
-    "alfworld": "scorer",
-    "exam": "exam_judge",
-}
+#: The exam pseudo-benchmark (questions generated on the fly) is judged by
+#: the model judge; every real benchmark names its rule on its plugin
+#: (``BenchmarkPlugin.verdict_rule``).
+EXAM_VERDICT_RULE = "exam_judge"
 
 
 def default_verdict_rule(benchmark: str) -> str:
     """The default verdict-rule name of ``benchmark``."""
-    try:
-        return BENCHMARK_VERDICT_RULES[benchmark]
-    except KeyError:
-        known = ", ".join(sorted(BENCHMARK_VERDICT_RULES))
-        raise ConfigError(
-            f"no default verdict rule for benchmark {benchmark!r}; "
-            f"known: {known}") from None
+    if benchmark == "exam":
+        return EXAM_VERDICT_RULE
+    return resolve_plugin(benchmark).verdict_rule
 
 
 def grade_sheet(execution: ExecutionRecord,

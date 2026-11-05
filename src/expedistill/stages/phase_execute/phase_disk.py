@@ -31,6 +31,7 @@ __all__ = [
     "REUSE_INDEX_NAME",
     "SUMMARY_NAME",
     "UNITS_NAME",
+    "execute_phase_dir",
     "_earlier_pass_unit_ids",
     "_earlier_pass_units",
     "_write_carried_units",
@@ -51,7 +52,7 @@ GENERATION_FAILURES_NAME = "generation_failures.jsonl"
 _PHASE_DIR_RE = re.compile(r"p([0-9]+)_(.+)")
 
 
-def _phase_dir(ctx: StageContext, phase: PhaseInstance,
+def execute_phase_dir(ctx: StageContext, phase: PhaseInstance,
                arm: str = "") -> Path:
     """The phase's directory (phase_bank's validated label mapping)."""
     directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
@@ -60,7 +61,7 @@ def _phase_dir(ctx: StageContext, phase: PhaseInstance,
 
 def _arm_dir(ctx: StageContext, phase: PhaseInstance, arm: str) -> Path:
     """An arm's directory (store + ledgers), created on first use."""
-    directory = _phase_dir(ctx, phase, arm)
+    directory = execute_phase_dir(ctx, phase, arm)
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
@@ -149,7 +150,7 @@ def _write_units(ctx: StageContext, phase: PhaseInstance,
     rewrite never grows a second copy of a row). Atomic -- temp file +
     rename (B3's pattern), so a crash mid-write leaves the previous file
     intact instead of a truncated one."""
-    write_jsonl(_phase_dir(ctx, phase) / UNITS_NAME,
+    write_jsonl(execute_phase_dir(ctx, phase) / UNITS_NAME,
                 [asdict(unit) for unit in units])
 
 
@@ -163,7 +164,7 @@ def _write_reuse_index(ctx: StageContext, phase: PhaseInstance,
     without re-reading the trial sheets.  Acceptance itself only produces
     trial-level answer sheets.
     """
-    write_jsonl(_phase_dir(ctx, phase) / REUSE_INDEX_NAME,
+    write_jsonl(execute_phase_dir(ctx, phase) / REUSE_INDEX_NAME,
                 [{"unit_id": unit_id, "status": status, "cause": cause}
                  for unit_id, status, cause in rows])
 
@@ -192,7 +193,7 @@ def _write_carried_units(ctx: StageContext, phase: PhaseInstance,
         carried.append(replace(
             summary, unit_id=new_id, phase_label=phase.label,
             sheet_ids=[], artifacts=artifacts))
-    phase_dir = _phase_dir(ctx, phase)
+    phase_dir = execute_phase_dir(ctx, phase)
     if carried:
         phase_report.write_carried_units(carried, phase_dir)
     else:
@@ -235,7 +236,7 @@ def _earlier_pass_units(ctx: StageContext, phase: PhaseInstance
     phase's unit list is every unit ANY of its passes resolved, and the
     resume lands on the uninterrupted run's bytes.
     """
-    path = _phase_dir(ctx, phase) / UNITS_NAME
+    path = execute_phase_dir(ctx, phase) / UNITS_NAME
     if not path.exists():
         return []
     return [ExecutionUnitRow(**row) for row in read_jsonl(path)]

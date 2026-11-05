@@ -14,6 +14,7 @@ from expedistill.composites import decision
 from expedistill.composites import verdicts
 from expedistill.core.answer_sheet import ExecutionRecord
 from expedistill.infra.reliability import CodeBugError, ConfigError
+from tests.helpers.plugins import reload_plugin
 
 
 # ---------------------------------------------------------------------------
@@ -118,11 +119,13 @@ def test_rules_are_named_per_benchmark():
     # tb binds tb_scorer since W2-A (wiring list rule 3: the rule that
     # consumes the plugin's verifier_ran / exception_type facts); the
     # other scored benchmarks keep the plain scorer rule.
+    for benchmark in ("tb", "searchqa", "alfworld"):
+        reload_plugin(benchmark)
     assert verdicts.default_verdict_rule("tb") == "tb_scorer"
     for benchmark in ("searchqa", "alfworld"):
         assert verdicts.default_verdict_rule(benchmark) == "scorer"
     assert verdicts.default_verdict_rule("exam") == "exam_judge"
-    with pytest.raises(ConfigError, match="no default verdict rule"):
+    with pytest.raises(ConfigError, match="no_such_benchmark"):
         verdicts.default_verdict_rule("no_such_benchmark")
 
 

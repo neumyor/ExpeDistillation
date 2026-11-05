@@ -13,7 +13,7 @@ twin and differs from it in exactly two ways:
   ever written. The exam execution reads a skill's body from the phase
   bank when the model asks to open it (bounded by
   ``execution.exam.max_skill_reads``); the folder play's materializer
-  (``composites.skill_folder``) is deliberately not involved.
+  (``composites.skill_materialize``) is deliberately not involved.
 
 The manifest therefore stays the same lightweight name mapping
 ``folder.skill_folder_manifest`` builds: no skill content travels with
@@ -36,7 +36,7 @@ from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import Skill
 from expedistill.inject import bank_reference
 from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
-from expedistill.methods.delivery import folder, units
+from expedistill.methods.delivery import folder_delivery as folder, units
 
 __all__ = ["ExamFolderParams", "resolve"]
 

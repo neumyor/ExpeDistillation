@@ -21,7 +21,7 @@ from expedistill.methods.review.contracts import (
     ReviewItem,
     TrialFinding,
 )
-from expedistill.methods.review.trial import _skill_cards
+from expedistill.methods.review.trial import skill_cards
 
 __all__ = ["aggregate_findings", "requirement_id_for"]
 
@@ -49,7 +49,7 @@ def aggregate_findings(
             handle, "TRIAL_REQUIREMENT_AGGREGATION",
             {
                 "findings": _findings_text(findings),
-                "skills": _skill_cards(bank),
+                "skills": skill_cards(bank),
                 "measured_skills": _measured_text(measured),
             },
             output_json=True, usage=usage, run_dir=run_dir)

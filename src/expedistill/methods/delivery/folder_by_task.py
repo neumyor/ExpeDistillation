@@ -5,7 +5,7 @@ driver keeps that unit boundary and changes only the delivery shape:
 each group becomes its own Agent Skills folder, so the model sees the
 per-skill descriptions and reads only the skills it needs.  The folder
 manifest stays a name mapping; the bodies are read from the group by
-``composites.skill_folder`` exactly as the test phase's folder does.
+``composites.skill_materialize`` exactly as the test phase's folder does.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the pending-group mapping ``{prefixed task id: [Skill, ...]}``, ``tasks``
@@ -22,7 +22,7 @@ from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
 from expedistill.methods.delivery import FolderParams
 from expedistill.methods.delivery import units
-from expedistill.methods.delivery.folder import skill_folder_manifest
+from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 
 __all__ = ["resolve"]
 

@@ -171,12 +171,12 @@ from expedistill.stages.phase_execute.phase_disk import (
     REDISPATCH_NAME,
     SUMMARY_NAME,
     UNITS_NAME,
-    _phase_dir,
+    execute_phase_dir,
 )
-from expedistill.stages.phase_execute.baseline import _run_baseline
-from expedistill.stages.phase_execute.exam import _run_exam
-from expedistill.stages.phase_execute.final_test import _run_test
-from expedistill.stages.phase_execute.live import _run_live
+from expedistill.stages.phase_execute.baseline import run_baseline
+from expedistill.stages.phase_execute.exam import run_exam
+from expedistill.stages.phase_execute.final_test import run_test
+from expedistill.stages.phase_execute.live import run_live
 
 __all__ = [
     "GENERATION_FAILURES_NAME",
@@ -253,7 +253,7 @@ def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
             f"phase_execute cannot run phase {phase.label!r} of kind "
             f"{getattr(spec, 'kind', None)!r}: the learn-phase driver "
             "(stages/phase_learn.py) owns learn phases")
-    directory = _phase_dir(ctx, phase)
+    directory = execute_phase_dir(ctx, phase)
     finished = _finished_summary(directory, spec.role)
     if finished is not None:
         return PhaseResult(label=phase.label, summary=finished)
@@ -269,13 +269,13 @@ def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
     # does not judge), so an unknown name fails inside its role, at the
     # one derivation point.
     if spec.role == PHASE_ROLE_BASELINE:
-        summary = _run_baseline(ctx, phase, spec)
+        summary = run_baseline(ctx, phase, spec)
     elif spec.role == PHASE_ROLE_EXAM:
-        summary = _run_exam(ctx, phase, spec)
+        summary = run_exam(ctx, phase, spec)
     elif spec.role == PHASE_ROLE_LIVE:
-        summary = _run_live(ctx, phase, spec)
+        summary = run_live(ctx, phase, spec)
     elif spec.role == PHASE_ROLE_TEST:
-        summary = _run_test(ctx, phase, spec)
+        summary = run_test(ctx, phase, spec)
     else:  # parse_phases freezes the role set; a stranger is a bug
         raise CodeBugError(f"unknown execute role {spec.role!r}")
     return PhaseResult(label=phase.label, summary=summary)

@@ -59,12 +59,9 @@ class RoleRecordingPlugin(FolderPlugin):
 @pytest.fixture(autouse=True)
 def _clean():
     _reset_registry()
-    from expedistill.composites import verdicts
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     yield
     sys.modules.pop(f"expedistill.benchmarks.{_FAKE}", None)
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
 
 
 def _phase(*, executor=None, compare):

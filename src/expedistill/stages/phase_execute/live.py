@@ -41,7 +41,7 @@ from expedistill.composites import (
 )
 from expedistill.composites import live_measurement as lm
 from expedistill.composites import live_verdicts as lv
-from expedistill.composites.skill_folder import materialize_skill_folder
+from expedistill.composites.skill_materialize import materialize_skill_folder
 from expedistill.composites.unit_ids import unit_id_for_trajectory
 from expedistill.core import ids, vocabulary
 from expedistill.core.answer_sheet import UnitSpec
@@ -56,10 +56,10 @@ from expedistill.stages.phase_execute import engine, phase_disk, resolve
 # K1 seam: dispatch goes through package attribute
 import expedistill.stages.phase_execute as _package
 
-__all__ = ["_run_live"]
+__all__ = ["run_live"]
 
 
-def _run_live(ctx: StageContext, phase: PhaseInstance,
+def run_live(ctx: StageContext, phase: PhaseInstance,
               spec: ExecutePhaseSpec) -> Dict[str, Any]:
     """Execute live phase: measure one round over pending groups.
 
@@ -375,7 +375,7 @@ def _run_live(ctx: StageContext, phase: PhaseInstance,
         sheets, specs, phase_kind=PHASE_ROLE_LIVE,
         learning_usable=True, summary=summary)
 
-    phase_dir = phase_disk._phase_dir(ctx, phase)
+    phase_dir = phase_disk.execute_phase_dir(ctx, phase)
     answer_sheets.write_answer_sheets(
         report.sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
     answer_sheets.write_coverage(
@@ -435,7 +435,7 @@ def _materialize_task_folders(ctx: StageContext, phase: PhaseInstance,
             raise CodeBugError(
                 f"folder row {row.unit_id!r} names task {row.task_ref!r} "
                 "with no pending group to materialize")
-        target = (phase_disk._phase_dir(ctx, phase) / "skill_folder"
+        target = (phase_disk.execute_phase_dir(ctx, phase) / "skill_folder"
                   / ids.raw_task_id(row.task_ref, benchmark))
         out[row.task_ref] = str(materialize_skill_folder(
             manifest, members, target))

@@ -43,7 +43,7 @@ import expedistill.stages.phase_execute as _package
 
 from expedistill.stages.phase_execute.phase_disk import (
     REDISPATCH_NAME,
-    _phase_dir,
+    execute_phase_dir,
 )
 
 __all__ = [
@@ -292,7 +292,7 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     stored trajectories and the unaccepted hole ids.  Coverage and unit
     summaries are derived later by the pure functions.
     """
-    state_path = _phase_dir(ctx, phase, arm) / REDISPATCH_NAME
+    state_path = execute_phase_dir(ctx, phase, arm) / REDISPATCH_NAME
     state = _redispatch_state(state_path)
     open_budget = [plan for plan in plans
                    if state.get(plan.unit.unit_id,

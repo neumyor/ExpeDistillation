@@ -320,6 +320,12 @@ class BenchmarkPlugin(abc.ABC):
     def task_prompt_name(self) -> str:
         """B2 registry name of this benchmark's task execution prompt."""
 
+    #: Name of the per-run verdict rule (``composites/verdicts.py``) that
+    #: grades this benchmark's runs by default. Every scored benchmark uses
+    #: the plain ``scorer`` rule; a plugin whose runner reports extra facts
+    #: (TB's verifier evidence) names the rule that consumes them.
+    verdict_rule: str = "scorer"
+
     #: Name of the auxiliary metric this plugin pre-registers (e.g.
     #: ``"sub_em"``), or None (the default) when the benchmark has none.
     #: Stage 0 freezes this name into the manifest as ``aux_metric`` -- the

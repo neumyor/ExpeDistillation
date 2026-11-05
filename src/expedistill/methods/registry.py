@@ -88,7 +88,7 @@ _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     # (core.config's load-time checklist holds that boundary and the
     # pairing with the real_folder execution below).
     ("delivery", "folder"):
-        _Entry("expedistill.methods.delivery.folder",
+        _Entry("expedistill.methods.delivery.folder_delivery",
                "expedistill.methods.delivery", "FolderParams"),
     # The live phase's progressive-disclosure delivery: one folder per
     # pending task group, reusing the folder params and materializer.

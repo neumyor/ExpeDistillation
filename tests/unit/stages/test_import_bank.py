@@ -16,7 +16,7 @@ from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import LOCK_NAME
 from expedistill.infra.store import Store, read_jsonl
-from expedistill.methods.delivery.folder import skill_dirname
+from expedistill.methods.delivery.folder_delivery import skill_dirname
 from expedistill.stages.import_bank import (
     BANK_ORIGIN_NAME,
     SKILL_ID_NAMESPACE,

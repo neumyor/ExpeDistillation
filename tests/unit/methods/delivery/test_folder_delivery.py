@@ -5,7 +5,7 @@ Milestone map (the 2026-10-17 alignment ruling): M1 added the Skill
 ``summary`` field; M2 delivers the ``folder`` method -- a pure
 ``resolve`` that renders the catalog text and the folder manifest into
 the unit rows (the composite-layer materialization lives in
-composites/skill_folder.py and has its own test file). The M3 pairing
+composites/skill_materialize.py and has its own test file). The M3 pairing
 (real_folder execution, plugin capability bits) is not in the table
 yet; here the folder play ends at the unit row.
 """
@@ -31,8 +31,8 @@ from expedistill.core.models import Skill
 from expedistill.inject import bank_reference
 from expedistill.methods import resolve_fixed, resolve_params
 from expedistill.methods.delivery import FolderParams, WholeBankParams
-from expedistill.methods.delivery import folder as folder_driver
-from expedistill.methods.delivery.folder import (
+from expedistill.methods.delivery import folder_delivery as folder_driver
+from expedistill.methods.delivery.folder_delivery import (
     CATALOG_FILENAME,
     render_catalog,
     skill_dirname,

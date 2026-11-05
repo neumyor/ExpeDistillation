@@ -56,7 +56,7 @@ from expedistill.methods.review import attribution
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
 
-__all__ = ["_run_exam"]
+__all__ = ["run_exam"]
 
 _CAUSE_BY_OUTCOME = {
     "control_perfect": vocabulary.CAUSE_WEAK_ALREADY_KNOWS,
@@ -139,7 +139,7 @@ def _folder_of(plan: engine._Plan) -> Optional[Dict[str, Any]]:
     return manifest if isinstance(manifest, dict) else None
 
 
-def _run_exam(ctx: StageContext, phase: PhaseInstance,
+def run_exam(ctx: StageContext, phase: PhaseInstance,
               spec: ExecutePhaseSpec) -> Dict[str, Any]:
     """Run the generalization exam phase."""
     params = resolve._execution_params(spec)
@@ -188,7 +188,7 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     plugin = resolve_plugin(ctx.config.benchmark)
     recorder = UnitFailureRecorder(ctx.run_dir)
     failures_path = (
-        phase_disk._phase_dir(ctx, phase)
+        phase_disk.execute_phase_dir(ctx, phase)
         / phase_disk.GENERATION_FAILURES_NAME)
     terminal_generation = {
         row["exam_id"] for row in read_jsonl(failures_path)
@@ -367,7 +367,7 @@ def _run_exam(ctx: StageContext, phase: PhaseInstance,
     report = phase_report.build_phase_report(
         sheets, specs, phase_kind=PHASE_ROLE_EXAM,
         learning_usable=True, summary=summary)
-    phase_dir = phase_disk._phase_dir(ctx, phase)
+    phase_dir = phase_disk.execute_phase_dir(ctx, phase)
     answer_sheets.write_answer_sheets(
         report.sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
     answer_sheets.write_coverage(

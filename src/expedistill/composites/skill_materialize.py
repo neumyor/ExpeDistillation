@@ -1,6 +1,6 @@
 """Materialize a folder unit's manifest into a real directory (M2).
 
-The folder DELIVERY (``methods/delivery/folder.py``) is a pure function:
+The folder DELIVERY (``methods/delivery/folder_delivery.py``) is a pure function:
 it resolves the catalog text and the per-skill file LIST into the unit
 row's ``aux["skill_folder"]``, and touching the file system belongs
 here (layer 5 owns disk IO). This module writes that folder out: one
@@ -190,7 +190,7 @@ def materialize_skill_folder(folder: Mapping[str, Any],
     directory.
 
     ``folder`` is the delivery's manifest (``aux["skill_folder"]``,
-    shape frozen in methods/delivery/folder.py); ``bank`` is the phase
+    shape frozen in methods/delivery/folder_delivery.py); ``bank`` is the phase
     bank it resolves against. The manifest's ``bank_fingerprint`` must
     equal ``bank_reference(bank)`` -- a bank that moved under the
     manifest is a CodeBugError (the manifest names its version; a

@@ -27,6 +27,7 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import ConfigError, _reset_registry, register_plugin
+from tests.helpers.plugins import reload_plugin
 from expedistill.composites import (
     answer_sheets as _answer_sheets,
     phase_bank,
@@ -60,7 +61,7 @@ from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import json_script, make_fake_handle
-from expedistill.methods.delivery import folder as skill_folder
+from expedistill.methods.delivery import folder_delivery as skill_folder
 from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages import phase_execute
 from expedistill.stages.context import RunSettings, StageContext
@@ -162,11 +163,9 @@ def clean_registry():
     _reset_registry()
     # The fake benchmark scores through the plain scorer rule (a real
     # benchmark's default binding is the config's frozen table).
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     yield
     sys.modules.pop(_MODULE, None)
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
 
 
 def make_config(**overrides):
@@ -1252,4 +1251,5 @@ def test_tb_scorer_rule_consumes_the_verifier_facts():
     assert rule({"correctness": False, "metrics": {}})[0] == \
         verdicts.RUN_FAILURE
     # TB's default binding is the named rule.
+    reload_plugin("tb")
     assert verdicts.default_verdict_rule("tb") == "tb_scorer"

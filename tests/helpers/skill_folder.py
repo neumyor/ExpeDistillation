@@ -7,9 +7,9 @@ use, so the folder a plugin test reads is byte-for-byte what a run reads.
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
 
-from expedistill.composites.skill_folder import materialize_skill_folder
+from expedistill.composites.skill_materialize import materialize_skill_folder
 from expedistill.core.models import Skill
-from expedistill.methods.delivery.folder import skill_folder_manifest
+from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 from tests.helpers.skills import make_skill
 
 __all__ = ["CARD_BODY", "folder_task_meta", "write_skill_folder"]

@@ -2,7 +2,7 @@
 to the with-bank units' tasks, refuse on an incapable plugin.
 
 The test phase is the only phase a folder unit can reach (the load-time
-pairing holds it there), so ``_run_test`` is the one driver that
+pairing holds it there), so ``run_test`` is the one driver that
 materializes: the folder delivery's rows share ONE phase-level manifest,
 ONE ``materialize_skill_folder`` call under the phase directory serves
 every unit (idempotent across resumes), and ``_plan_units`` attaches
@@ -32,7 +32,7 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import _reset_registry
-from expedistill.composites import phase_bank, verdicts
+from expedistill.composites import phase_bank
 from expedistill.core.config import (
     CompareSpec,
     ExecutePhaseSpec,
@@ -128,11 +128,9 @@ def _install_plugin(monkeypatch, plugin):
 @pytest.fixture(autouse=True)
 def _clean():
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     yield
     sys.modules.pop(_MODULE, None)
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
 
 
 def _config():

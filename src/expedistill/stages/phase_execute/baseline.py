@@ -32,10 +32,10 @@ from expedistill.infra.store import write_json
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
 
-__all__ = ["_run_baseline"]
+__all__ = ["run_baseline"]
 
 
-def _run_baseline(ctx: StageContext, phase: PhaseInstance,
+def run_baseline(ctx: StageContext, phase: PhaseInstance,
                   spec: ExecutePhaseSpec) -> Dict[str, Any]:
     """Execute baseline: both bare arms, then derive trial/unit views."""
     # ========================================================================
@@ -135,7 +135,7 @@ def _run_baseline(ctx: StageContext, phase: PhaseInstance,
         sheets, specs, phase_kind=PHASE_ROLE_BASELINE,
         learning_usable=True, summary=summary)
 
-    phase_dir = phase_disk._phase_dir(ctx, phase)
+    phase_dir = phase_disk.execute_phase_dir(ctx, phase)
     answer_sheets.write_answer_sheets(
         report.sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
     answer_sheets.write_coverage(

@@ -23,10 +23,10 @@ import pytest
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.benchmarks.tb.plugin import TB_SKILL_FOLDER_GUIDANCE
-from expedistill.composites.skill_folder import materialize_skill_folder
+from expedistill.composites.skill_materialize import materialize_skill_folder
 from expedistill.core.models import Skill
 from expedistill.llm.call import ModelHandle
-from expedistill.methods.delivery.folder import skill_folder_manifest
+from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 from tests.unit.benchmarks.test_tb_plugin import (
     FakeRemoteLink,
     _completed_trial_files,

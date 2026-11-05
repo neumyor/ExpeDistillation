@@ -34,7 +34,7 @@ from expedistill.composites.phase_report import (
     write_unit_specs,
 )
 from expedistill.composites.unit_ids import make_unit_id
-from expedistill.methods.delivery.folder import skill_folder_manifest
+from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 from expedistill.methods.review import strategies
 from expedistill.methods.review.contracts import ReviewItem
 from expedistill.core import ids

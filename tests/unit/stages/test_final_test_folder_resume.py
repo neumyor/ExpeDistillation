@@ -31,7 +31,7 @@ from expedistill.stages.context import RunSettings, StageContext
 from expedistill.stages.phase_execute.phase_disk import (
     SUMMARY_NAME,
     _arm_dir,
-    _phase_dir,
+    execute_phase_dir,
 )
 from tests.unit.stages.test_final_test_folder_wiring import (
     _FAKE,
@@ -50,12 +50,9 @@ _MODULE = f"expedistill.benchmarks.{_FAKE}"
 @pytest.fixture(autouse=True)
 def _clean():
     _reset_registry()
-    from expedistill.composites import verdicts
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     yield
     sys.modules.pop(_MODULE, None)
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
 
 
 def _ctx_at(root):
@@ -84,7 +81,7 @@ def test_a_folder_c_phase_resumed_mid_run_lands_on_the_one_shot_summary(
     ctx_once = _ctx_at(tmp_path / "one_shot")
     _write_bank(ctx_once, skills)
     phase_execute.run(ctx_once, phase)
-    summary_once = (_phase_dir(ctx_once, phase) / SUMMARY_NAME).read_bytes()
+    summary_once = (execute_phase_dir(ctx_once, phase) / SUMMARY_NAME).read_bytes()
 
     # The interrupted run: the crash happened after ONE with-bank unit
     # and ONE control unit stored (1 of 3 in each arm). Copy exactly
@@ -116,6 +113,6 @@ def test_a_folder_c_phase_resumed_mid_run_lands_on_the_one_shot_summary(
     # And the whole summary -- read sets included -- is byte-identical
     # to the one-shot run's (the fresh units are deterministic, and the
     # pre-stored t1 trajectories are the one-shot run's own).
-    summary_half = (_phase_dir(ctx_half, phase)
+    summary_half = (execute_phase_dir(ctx_half, phase)
                     / SUMMARY_NAME).read_bytes()
     assert summary_half == summary_once

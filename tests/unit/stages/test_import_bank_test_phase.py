@@ -30,13 +30,12 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
-from expedistill.composites import verdicts
 from expedistill.core.models import Skill
 from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.inject import bank_reference, format_skills_block
 from expedistill.llm.fake import FakeClient
-from expedistill.methods.delivery.folder import (
+from expedistill.methods.delivery.folder_delivery import (
     CATALOG_FILENAME,
     skill_filename,
 )
@@ -112,12 +111,10 @@ def plugin(monkeypatch):
             return None
 
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     sys.modules.pop(_MODULE, None)
     monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
     yield instance
     sys.modules.pop(_MODULE, None)
-    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
     _reset_registry()
 
 

@@ -43,8 +43,8 @@ from expedistill.methods.author import ClusterAuthoringParams
 from expedistill.methods.author import cluster_by_trigger as cluster
 from expedistill.methods.author.requirement import write_requirement
 from expedistill.composites.exam_answering import _aliases
-from expedistill.composites.skill_folder import materialize_skill_folder
-from expedistill.methods.delivery.folder import (
+from expedistill.composites.skill_materialize import materialize_skill_folder
+from expedistill.methods.delivery.folder_delivery import (
     render_catalog,
     skill_folder_manifest,
 )

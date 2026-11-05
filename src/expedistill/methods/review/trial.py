@@ -13,7 +13,7 @@ written for.
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.benchmarks.registry import get_plugin
-from expedistill.blocks.attribution import _canonical_skill_id
+from expedistill.blocks.attribution import canonical_skill_id
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites.skill_use import skill_files_read
 from expedistill.composites.trace import scene_of
@@ -29,7 +29,7 @@ from expedistill.llm.call import call_model
 from expedistill.methods.review import attribution, trial_evidence
 from expedistill.methods.review.contracts import ReviewContext, TrialFinding
 
-__all__ = ["analyze_trials", "is_failed_trial"]
+__all__ = ["analyze_trials", "is_failed_trial", "skill_cards"]
 
 
 def is_failed_trial(sheet: AnswerSheet) -> bool:
@@ -131,7 +131,7 @@ def _analyze_one(
                     context.benchmark, execution.task_ref),
                 "trial_steps": render_steps_view(steps, view_rules),
                 "available_skills": _skill_ids(available),
-                "all_skills": _skill_cards(bank),
+                "all_skills": skill_cards(bank),
             },
             output_json=True, usage=usage, run_dir=run_dir)
     if not isinstance(parsed, dict):
@@ -167,7 +167,7 @@ def _analyze_one(
         raw_skill_id = entry.get("skill_id")
         if raw_skill_id == "":
             continue
-        skill_id = _canonical_skill_id(raw_skill_id, known, aliases)
+        skill_id = canonical_skill_id(raw_skill_id, known, aliases)
         if skill_id is None:
             raise ModelOutputError(
                 f"{prompt}: unknown skill_id "
@@ -288,7 +288,7 @@ def _skill_ids(ids: Sequence[str]) -> str:
     return "\n".join(f"- {skill_id}" for skill_id in ids) or "(none)"
 
 
-def _skill_cards(bank: Sequence[Skill]) -> str:
+def skill_cards(bank: Sequence[Skill]) -> str:
     return "\n\n".join(
         f"SKILL_ID: {skill.skill_id}\nVERSION: {skill.version}\n"
         f"SUMMARY: {skill.summary}\nCONTENT:\n{skill.content}"

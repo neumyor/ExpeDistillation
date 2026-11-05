@@ -124,7 +124,7 @@ def test_exam_folder_catalog_covers_the_full_bank():
     # block is the same layer-1 catalog the folder delivery renders, and
     # the injected digest is the FULL bank's (never the accepted subset).
     from expedistill.inject import bank_reference
-    from expedistill.methods.delivery.folder import render_catalog
+    from expedistill.methods.delivery.folder_delivery import render_catalog
 
     accepted = make_group_skill(make_task_id(BENCHMARK, "t1"))
     accepted.status = "accepted"

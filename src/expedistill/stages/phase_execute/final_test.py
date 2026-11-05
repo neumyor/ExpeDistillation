@@ -10,7 +10,7 @@ Orchestration:
 
 Components used:
     - composites.external_control: load external campaign scores
-    - composites.skill_folder: materialize folder for folder delivery
+    - composites.skill_materialize: materialize folder for folder delivery
     - composites.skill_use: parse which skills were read
     - composites.answer_sheets: trial-level execution/coverage/grading views
     - composites.coverage: expected-vs-stored coverage per arm
@@ -40,7 +40,7 @@ from expedistill.composites import coverage as coverage_io
 from expedistill.composites import decision, shortfall, verdicts
 from expedistill.composites import external_control
 from expedistill.composites import phase_report, unit_ids, unit_summary
-from expedistill.composites.skill_folder import materialize_skill_folder
+from expedistill.composites.skill_materialize import materialize_skill_folder
 from expedistill.composites.skill_use import skill_files_read
 from expedistill.core import ids
 from expedistill.core.answer_sheet import AnswerSheet, ExecutionRecord, UnitSpec
@@ -62,10 +62,10 @@ from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
 
-__all__ = ["_run_test"]
+__all__ = ["run_test"]
 
 
-def _run_test(ctx: StageContext, phase: PhaseInstance,
+def run_test(ctx: StageContext, phase: PhaseInstance,
               spec: ExecutePhaseSpec) -> Dict[str, Any]:
     """Execute test phase: with-bank vs control over test set.
 
@@ -123,7 +123,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
                 model_key=pinned.model_key, benchmark=benchmark,
                 tasks=tasks, n_attempts=n_attempts)
 
-        phase_directory = phase_disk._phase_dir(ctx, phase)
+        phase_directory = phase_disk.execute_phase_dir(ctx, phase)
         phase_directory.mkdir(parents=True, exist_ok=True)
 
         with open(pinned.path, "rb") as source:
@@ -316,7 +316,7 @@ def _run_test(ctx: StageContext, phase: PhaseInstance,
     sheet_io.grade_answer_sheets(local_sheets, local_rule)
     sheet_io.grade_answer_sheets(external_sheets, "external_reward")
 
-    phase_directory = phase_disk._phase_dir(ctx, phase)
+    phase_directory = phase_disk.execute_phase_dir(ctx, phase)
     sheet_io.write_answer_sheets(
         sheets, phase_directory / phase_report.ANSWER_SHEETS_DIR)
     sheet_io.write_coverage(
@@ -484,7 +484,7 @@ def _materialize_folder(ctx: StageContext, phase: PhaseInstance,
         return None
 
     directory = materialize_skill_folder(
-        manifest, bank, phase_disk._phase_dir(ctx, phase) / "skill_folder")
+        manifest, bank, phase_disk.execute_phase_dir(ctx, phase) / "skill_folder")
 
     return str(directory)
 

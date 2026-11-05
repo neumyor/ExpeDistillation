@@ -47,7 +47,7 @@ from expedistill.core.trace import TraceRef
 from expedistill.benchmarks.base import BenchmarkPlugin, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.cli import run_experiment
-from expedistill.composites import phase_bank, phase_report, verdicts
+from expedistill.composites import phase_bank, phase_report
 from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.composites.skill_status import stage3_candidates
 from expedistill.core import ids
@@ -125,11 +125,9 @@ def clean_registry():
     _reset_registry()
     # The resume test drives the real baseline phase, which judges stored runs
     # under the benchmark's default verdict rule (the w2a pattern).
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(_FAKE, "scorer")
     yield
     sys.modules.pop(_MODULE, None)
     _reset_registry()
-    verdicts.BENCHMARK_VERDICT_RULES.pop(_FAKE, None)
 
 
 def install_plugin():

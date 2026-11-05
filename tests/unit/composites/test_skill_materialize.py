@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from expedistill.composites import skill_use
-from expedistill.composites.skill_folder import materialize_skill_folder
+from expedistill.composites.skill_materialize import materialize_skill_folder
 from expedistill.core.ids import (
     make_subtask_id,
     make_task_id,
@@ -27,7 +27,7 @@ from expedistill.core.ids import (
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import CodeBugError
 from expedistill.methods.delivery import FolderParams
-from expedistill.methods.delivery import folder as folder_driver
+from expedistill.methods.delivery import folder_delivery as folder_driver
 from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
@@ -258,7 +258,7 @@ def test_the_skill_directory_rule_is_one_contract(tmp_path):
     # RESTATES the rule (the layer rule forbids the import). This mirror
     # test binds the two spellings: relaxing either one fails here, at
     # test time, instead of as a mid-run CodeBugError.
-    from expedistill.composites.skill_folder import _SKILL_DIR_RE
+    from expedistill.composites.skill_materialize import _SKILL_DIR_RE
     for skill_id in ("bank/merge/0001", "tb:t1/a00/seg00/skill",
                      "Mixed Case/ID", "plain"):
         directory = folder_driver.skill_filename(skill_id).split("/", 1)[0]

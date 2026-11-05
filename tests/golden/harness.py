@@ -179,7 +179,6 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
     reader judge through the benchmark's default named rule), the same
     runtime seam the unit suites use. Usable under pytest and standalone."""
     from expedistill.benchmarks.registry import _reset_registry, register_plugin
-    from expedistill.composites import verdicts
     from expedistill.prompts import PROMPTS, PromptSpec
 
     class Loader(importlib.abc.Loader):
@@ -203,7 +202,6 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
         name="FAKE_TASK",
         template="Solve the task: {instruction}\n{skills_block}\n{history}",
         description="golden-matrix stub task prompt")
-    verdicts.BENCHMARK_VERDICT_RULES.setdefault(FAKE_BENCH, "scorer")
     try:
         yield plugin
     finally:
@@ -213,7 +211,6 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
             PROMPTS.pop("FAKE_TASK", None)
         else:
             PROMPTS["FAKE_TASK"] = previous_prompt
-        verdicts.BENCHMARK_VERDICT_RULES.pop(FAKE_BENCH, None)
         _reset_registry()
 
 

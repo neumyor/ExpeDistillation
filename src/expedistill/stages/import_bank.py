@@ -64,7 +64,7 @@ from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
 from expedistill.infra.store import KIND_DIRS, Store, write_jsonl
 from expedistill.inject.skill_text import one_line
-from expedistill.methods.delivery.folder import skill_dirname
+from expedistill.methods.delivery.folder_delivery import skill_dirname
 
 __all__ = [
     "BANK_ORIGIN_NAME",

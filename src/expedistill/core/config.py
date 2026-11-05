@@ -99,7 +99,8 @@ ROLE_DEFAULTS: Dict[str, str] = {
 #: won or lost against the real one depending on merge order -- and the rest
 #: are not provider knobs: ``model``/``messages``/``stream`` ARE the request,
 #: and ``temperature`` belongs to the client, not the experiment identity.
-#: model_options only forwards per-model sampling knobs (reasoning_effort).
+#: model_options forwards per-model sampling knobs (reasoning_effort) and
+#: the generic client's cache knobs (cache_mode / cache_prefix_tokens).
 MODEL_OPTIONS_RESERVED_KEYS = ("max_tokens", "temperature", "model",
                                "messages", "stream")
 
@@ -295,7 +296,7 @@ class ExecutePhaseSpec:
     freezes). ``tasks`` picks the frozen train/test id list; ``compare``
     is optional; ``acceptance`` names the verdict rule (C11) and
     ``None`` is the benchmark's default (composites.verdicts.
-    BENCHMARK_VERDICT_RULES).
+    default_verdict_rule).
     """
 
     role: str

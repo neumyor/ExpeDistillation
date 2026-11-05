@@ -710,6 +710,7 @@ class TBPlugin(BenchmarkPlugin):
     # materialized folder into the sandbox through the skills-mode
     # directory (the module docstring's submission design).
     skill_folder_prompt_name = "TB_TASK_PROMPT_FOLDER"
+    verdict_rule = "tb_scorer"
     learning_context = TB_CONTEXT
 
     def __init__(self,

@@ -21,8 +21,8 @@ from expedistill.inject import bank_reference
 from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
 from expedistill.methods.delivery import ExamFolderParams, FolderParams
 from expedistill.methods.delivery import exam_folder as exam_folder_driver
-from expedistill.methods.delivery import folder as folder_driver
-from expedistill.methods.delivery.folder import (
+from expedistill.methods.delivery import folder_delivery as folder_driver
+from expedistill.methods.delivery.folder_delivery import (
     render_catalog,
     skill_filename,
     skill_folder_manifest,

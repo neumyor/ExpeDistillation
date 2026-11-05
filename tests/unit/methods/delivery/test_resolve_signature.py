@@ -144,7 +144,7 @@ def test_exam_folder_resolves_exam_refs():
     # identifiers (<subtask_id>/exam); delivery resolves the identifier
     # opaquely and renders the whole-bank catalog (R5, the
     # generalization-exam ruling).
-    from expedistill.methods.delivery.folder import render_catalog
+    from expedistill.methods.delivery.folder_delivery import render_catalog
 
     skill = _skill(make_task_id(BENCHMARK, "t1"))
     exam = make_exam_id(skill.skill_id, skill.version)

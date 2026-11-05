@@ -13,7 +13,7 @@ from expedistill.core.ids import (
 )
 from expedistill.composites.answer_sheets import execution_from_trajectory
 from expedistill.core.models import Skill, Step, Trajectory
-from expedistill.methods.delivery.folder import skill_folder_manifest
+from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 
 BENCHMARK = "tb"
 TASK_ID = make_task_id(BENCHMARK, "t1")

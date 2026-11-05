@@ -33,7 +33,7 @@ from expedistill.core.trace import TraceRef
 from expedistill.infra.store import Store, write_json, write_jsonl
 from expedistill.inject import bank_reference
 from expedistill.llm.fake import json_script
-from expedistill.methods.delivery.folder import (
+from expedistill.methods.delivery.folder_delivery import (
     skill_filename,
     skill_folder_manifest,
 )

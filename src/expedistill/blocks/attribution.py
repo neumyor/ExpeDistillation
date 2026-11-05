@@ -20,6 +20,7 @@ from expedistill.prompts.profile import profile_section
 __all__ = [
     "SKILL_SUMMARY_FIELD",
     "attribute_attempts",
+    "canonical_skill_id",
     "revise_from_attempts",
 ]
 
@@ -47,7 +48,7 @@ def _skills_listing(skills: List[Any]) -> str:
         f"skill_id: {skill.skill_id}\n{skill.content}" for skill in skills)
 
 
-def _canonical_skill_id(
+def canonical_skill_id(
     value: Any,
     expected: Mapping[str, Any],
     aliases: Mapping[str, str],
@@ -103,7 +104,7 @@ def _parse_attribution(
             raise ModelOutputError(
                 "SKILL_ATTEMPT_ATTRIBUTION: every skills entry must be "
                 f"an object, got {entry!r}")
-        skill_id = _canonical_skill_id(
+        skill_id = canonical_skill_id(
             entry.get("skill_id"), expected, aliases)
         if skill_id is None:
             # The task prompt lists every skill of the task; the model

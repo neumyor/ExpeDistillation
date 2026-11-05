@@ -13,7 +13,7 @@ is a fallback, not the primary directory.
 This module is the delivery side and stays a PURE FUNCTION (zero disk):
 ``resolve`` renders the catalog text and the folder's manifest, and
 materializing them into a real directory is the composite layer's job
-(:mod:`expedistill.composites.skill_folder`, called by the M3 execution
+(:mod:`expedistill.composites.skill_materialize`, called by the M3 execution
 path).
 
 The manifest rides the unit rows' ``aux["skill_folder"]`` and stays
