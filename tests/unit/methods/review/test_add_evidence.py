@@ -85,6 +85,44 @@ def test_collects_the_kept_strong_segments_as_source_experiences(tmp_path):
     assert package.old_skill is None
 
 
+def test_all_rule_keeps_every_segment_and_follows_its_verdict(tmp_path):
+    # The coverage switch (2026-11-04): no segment is dropped by role or
+    # verdict, and the write mode follows the segment's own success flag
+    # (a failed strong segment is diagnosis material, not distill).
+    store, kept, dropped = seeded_store(tmp_path)
+
+    package = collect_add_evidence(task_row=add_row(), store=store,
+                                   rule_name="all")
+
+    assert [e["subtask"].subtask_id for e in package.source_experiences] \
+        == [kept.subtask_id, dropped.subtask_id]
+    assert [e["mode"] for e in package.source_experiences] \
+        == ["distill", "diagnose"]
+
+
+def test_all_rule_maps_a_successful_weak_segment_to_distill(tmp_path):
+    store = Store(tmp_path / "run")
+    trajectory = Trajectory(
+        trajectory_id=make_trajectory_id(TASK_ID, "weak", 0),
+        task_id=TASK_ID, benchmark=BENCHMARK, model_role="weak",
+        model_name="weak-model", attempt_index=0,
+        steps=[Step(action="do weak 0", observation="obs weak 0")],
+        correctness=True,
+    )
+    store.save(trajectory, "trajectories")
+    subtask = Subtask(
+        subtask_id=make_subtask_id(trajectory.trajectory_id, 0),
+        task_id=TASK_ID, trajectory_id=trajectory.trajectory_id,
+        source="weak", trajectory_success=True, segment_index=0,
+        step_range=(0, 1), label="l", description="d", success=True)
+    store.save(subtask, "subtasks")
+
+    package = collect_add_evidence(task_row=add_row(), store=store,
+                                   rule_name="all", write_lessons=True)
+
+    assert [e["mode"] for e in package.source_experiences] == ["distill"]
+
+
 def test_each_experience_carries_its_place_in_the_trajectory(tmp_path):
     # The position counts the trajectory's whole cut (two segments here),
     # not only the segments the rule kept, and uses original step numbers.

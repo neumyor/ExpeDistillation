@@ -183,6 +183,22 @@ def _strong_success_weak_failed(subtask: Subtask) -> bool:
     return subtask.success is False
 
 
+@SEGMENT_SELECT.register("all")
+def _all_segments(subtask: Subtask) -> bool:
+    """Coverage rule: keep every segment, whatever its role or verdict.
+
+    The coverage ablation's material switch (2026-11-04): with
+    ``trajectory_select: all`` it feeds the writer every segment of every
+    trajectory instead of only strong successes and weak failures. The
+    writer's mode follows the segment's own verdict (``collect_add_evidence``
+    picks distill for a succeeded segment, diagnose for a failed one), so a
+    kept segment never contradicts its mode. The default stays
+    ``strong_success_weak_failed``; this rule is chosen per experiment
+    through ``rules.segment_select``.
+    """
+    return True
+
+
 @TRAJECTORY_SELECT.register("all")
 def _all(trajectories: Sequence[Trajectory]) -> List[Trajectory]:
     """Stage-2 default: segment every trajectory of the task.

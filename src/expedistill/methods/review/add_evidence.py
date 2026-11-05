@@ -79,8 +79,11 @@ def collect_add_evidence(
     the default segment_select rule keeps strong successes and weak
     failures). Each source experience carries the subtask, its rendered
     steps view and the write mode the author uses -- ``distill`` for a
-    strong segment, ``diagnose`` for a weak one; both write the same
-    three-section skill. Each experience also carries its
+    segment whose own goal was reached, ``diagnose`` for one that failed;
+    under the default rule that is exactly strong->distill and
+    weak->diagnose, and the coverage rule ``all`` keeps the pairing
+    correct for every segment. Both modes write the same three-section
+    skill. Each experience also carries its
     ``segment_position`` text (the author's trigger-timing hint). The
     package's segments pin the subtask ids and step ranges so the
     author's output stays traceable to its evidence.
@@ -112,7 +115,7 @@ def collect_add_evidence(
         source_experiences.append({
             "subtask": sub,
             "steps_view": steps_view,
-            "mode": "distill" if sub.source == "strong" else "diagnose",
+            "mode": "distill" if sub.success else "diagnose",
             "segment_position": segment_position(
                 sub, per_trajectory[sub.trajectory_id],
                 len(trajectory.steps)),

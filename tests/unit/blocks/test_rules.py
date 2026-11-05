@@ -108,6 +108,15 @@ def test_segment_select_strong_success_weak_failed_four_quadrants():
     assert rule(_subtask("weak", True)) is False
 
 
+def test_segment_select_all_keeps_every_quadrant():
+    # The coverage switch (2026-11-04): role and segment verdict select
+    # nothing; every segment of every trajectory is material.
+    rule = get_segment_select("all")
+    for source in ("strong", "weak"):
+        for success in (True, False):
+            assert rule(_subtask(source, success)) is True
+
+
 def test_trajectory_select_all_returns_the_whole_task():
     # The per-task contract: one call sees every stored trajectory of ONE
     # task (both roles mixed) and returns the sublist to segment.
@@ -330,10 +339,15 @@ def test_registering_a_new_name_is_the_extension_path():
     assert get_task_select("all_valid_failed")(_metrics(2, 1), 2) is False
 
 
-def test_registries_are_module_level_and_disjoint_namespaces():
+def test_registries_are_module_level_and_separate_namespaces():
+    # The three registries are separate namespaces, not one shared table:
+    # "all" means "no material filtering" in the two material registries
+    # (2026-11-04 coverage switch), while the task gate deliberately has
+    # no "all" -- the library targets the weak model's failures.
     assert "all_valid_failed" in TASK_SELECT
     assert "all" in TRAJECTORY_SELECT
-    assert "all" not in TASK_SELECT and "all" not in SEGMENT_SELECT
+    assert "all" in SEGMENT_SELECT
+    assert "all" not in TASK_SELECT
 
 
 def test_block_exports_expose_rule_api():
