@@ -204,6 +204,18 @@ def test_the_manifest_carries_the_accepted_files_and_the_bank_fingerprint():
         for skill in accepted]
 
 
+def test_the_manifest_and_rows_carry_the_global_playbook():
+    # 2026-11-04 P0: the delivery switch rides the manifest; the empty
+    # default keeps the pre-playbook prompt identical.
+    bank, _ = _bank()
+    assert "playbook_text" not in skill_folder_manifest(bank)
+    manifest = skill_folder_manifest(bank, playbook_text="GLOBAL PLAYBOOK")
+    assert manifest["playbook_text"] == "GLOBAL PLAYBOOK"
+    rows = folder_driver.resolve(
+        bank, _tasks("t1"), FolderParams(playbook="GLOBAL PLAYBOOK"))
+    assert rows[0].aux["skill_folder"]["playbook_text"] == "GLOBAL PLAYBOOK"
+
+
 def test_the_rows_mirror_whole_banks_accepted_bookkeeping():
     bank, accepted = _bank()
     tasks = _tasks("t1", "t2")

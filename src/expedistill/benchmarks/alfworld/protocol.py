@@ -400,6 +400,13 @@ def run_unified(
             folder_block = skills_block
         else:
             folder_block = ""
+            if skill_folder.playbook_text:
+                # The delivery's global playbook is always visible, above
+                # the card list: the P0 switch (2026-11-04). Empty keeps
+                # the pre-playbook prompt byte-identical.
+                folder_block += ("Global playbook:\n"
+                                 + skill_folder.playbook_text.strip()
+                                 + "\n\n")
             folder_block += ("Available skills:\n"
                              + skill_folder.available_skills_block() + "\n")
             if opened:

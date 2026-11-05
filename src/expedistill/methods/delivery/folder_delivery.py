@@ -189,7 +189,8 @@ def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],
 
 def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
                           description_mode: str = DEFAULT_DESCRIPTION_MODE,
-                          accepted_only: bool = True) -> Dict[str, Any]:
+                          accepted_only: bool = True,
+                          playbook_text: str = "") -> Dict[str, Any]:
     """The folder manifest a folder unit carries (M3's materialization
     input)::
 
@@ -236,7 +237,7 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
             "version": _field(record, "version", 1),
             "filename": filename,
         })
-    return {
+    manifest = {
         "bank_fingerprint": bank_reference(bank),
         "catalog_filename": CATALOG_FILENAME,
         "catalog_text": (render_catalog(accepted, description_mode)
@@ -244,6 +245,13 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
         "description_mode": description_mode,
         "files": files,
     }
+    if playbook_text:
+        # The global playbook rides the manifest, not the catalog: the
+        # folder reader renders it above the card list on every step.
+        # Omitted when empty so the pre-playbook manifest stays
+        # byte-identical (golden snapshots and frozen runs).
+        manifest["playbook_text"] = playbook_text
+    return manifest
 
 
 def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
@@ -263,7 +271,8 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
     materializer and the catalog use the same composition rule.
     """
     accepted = units.accepted_bank(bank)
-    manifest = skill_folder_manifest(bank, params.description_mode)
+    manifest = skill_folder_manifest(bank, params.description_mode,
+                                     playbook_text=params.playbook)
     injected = bank_reference(accepted)
     block = manifest["catalog_text"]
     return [units.make_row(units.task_ref(task), injected, block,

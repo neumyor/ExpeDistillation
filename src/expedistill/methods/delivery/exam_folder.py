@@ -34,6 +34,7 @@ from typing import Any, Union
 
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import Skill
+from expedistill.infra.reliability import ConfigError
 from expedistill.inject import bank_reference
 from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
 from expedistill.methods.delivery import folder_delivery as folder, units
@@ -55,9 +56,21 @@ class ExamFolderParams:
     """
 
     description_mode: str = DEFAULT_DESCRIPTION_MODE
+    #: The same global playbook the test folder renders; empty keeps the
+    #: pre-playbook exam prompt byte-identical. The ``playbook_file`` /
+    #: ``playbook_sha256`` keys are consumed by the phase resolver and
+    #: kept here so stage 0's params check accepts the raw config.
+    playbook: str = ""
+    playbook_file: str = ""
+    playbook_sha256: str = ""
 
     def __post_init__(self) -> None:
         folder.validate_description_mode(self.description_mode)
+        for name in ("playbook", "playbook_file", "playbook_sha256"):
+            if not isinstance(getattr(self, name), str):
+                raise ConfigError(
+                    f"methods.delivery.exam_folder {name} must be a string, "
+                    f"got {type(getattr(self, name)).__name__}")
 
 
 def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
@@ -76,9 +89,13 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
     catalog the folder delivery uses.
     """
     manifest = folder.skill_folder_manifest(
-        bank, params.description_mode, accepted_only=False)
+        bank, params.description_mode, accepted_only=False,
+        playbook_text=params.playbook)
     injected = bank_reference(bank)
     block = manifest["catalog_text"]
+    if params.playbook:
+        block = params.playbook.strip() + "\n\n" + block
+        manifest = {**manifest, "catalog_text": block}
     return [units.make_row(units.task_ref(task), injected, block,
                            {"skill_folder": manifest})
             for task in tasks]

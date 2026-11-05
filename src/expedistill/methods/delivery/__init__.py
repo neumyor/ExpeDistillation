@@ -46,12 +46,27 @@ class FolderParams:
     """
 
     description_mode: str = DEFAULT_DESCRIPTION_MODE
+    #: A global playbook rendered at the top of every skill block (the
+    #: 2026-11-04 P0 switch). Empty keeps the pre-playbook prompt
+    #: byte-identical; the phase resolver fills it from ``playbook_file``.
+    playbook: str = ""
+    #: The config keys the phase resolver consumes: the repo-relative
+    #: playbook file and its frozen sha256. They stay in the params so
+    #: the load-time params check (stage 0) sees no unknown key; the
+    #: drivers read only ``playbook``.
+    playbook_file: str = ""
+    playbook_sha256: str = ""
 
     def __post_init__(self) -> None:
         if self.description_mode not in DESCRIPTION_MODES:
             raise ConfigError(
                 "methods.delivery.folder description_mode must be one of "
                 f"{DESCRIPTION_MODES}, got {self.description_mode!r}")
+        for name in ("playbook", "playbook_file", "playbook_sha256"):
+            if not isinstance(getattr(self, name), str):
+                raise ConfigError(
+                    f"methods.delivery.folder {name} must be a string, got "
+                    f"{type(getattr(self, name)).__name__}")
 
 
 @dataclass(frozen=True)

@@ -143,11 +143,13 @@ def _check_location(location: Any) -> str:
 class SkillFolder:
     """One folder unit's card list and reader."""
 
-    def __init__(self, folder_dir: Path, cards: List[SkillCard]):
+    def __init__(self, folder_dir: Path, cards: List[SkillCard],
+                 playbook_text: str = ""):
         self._dir = folder_dir
         self._cards = sorted(cards, key=lambda card: card.location)
         self._by_location: Dict[str, SkillCard] = {
             card.location: card for card in self._cards}
+        self._playbook_text = playbook_text
 
     @classmethod
     def from_task(cls, task: Task) -> Optional["SkillFolder"]:
@@ -181,11 +183,17 @@ class SkillFolder:
                 entry.get("filename") if isinstance(entry, Mapping) else None)
             cards.append(_parse_card(
                 location, (root / location).read_text(encoding="utf-8")))
-        return cls(root, cards)
+        playbook_text = str(manifest.get("playbook_text") or "")
+        return cls(root, cards, playbook_text)
 
     @property
     def cards(self) -> Tuple[SkillCard, ...]:
         return tuple(self._cards)
+
+    @property
+    def playbook_text(self) -> str:
+        """The delivery's global playbook, rendered above the card list."""
+        return self._playbook_text
 
     def available_skills_block(self) -> str:
         """The ``<available_skills>`` list, shaped like Terminus's."""

@@ -29,6 +29,19 @@ def _folder(tmp_path, names=("alpha", "beta")):
     return SkillFolder.from_task(task), locations, manifest
 
 
+def test_the_folder_exposes_the_global_playbook(tmp_path):
+    # 2026-11-04 P0: the manifest's playbook is available to the prompt
+    # builder above the card list; the default is empty.
+    manifest, _, _ = write_skill_folder(tmp_path / "folder", ("alpha",))
+    task = Task(task_id="t1", instruction="q",
+                meta=folder_task_meta(manifest, tmp_path / "folder"))
+    assert SkillFolder.from_task(task).playbook_text == ""
+    with_playbook = {**manifest, "playbook_text": "GLOBAL PLAYBOOK"}
+    task = Task(task_id="t1", instruction="q",
+                meta=folder_task_meta(with_playbook, tmp_path / "folder"))
+    assert SkillFolder.from_task(task).playbook_text == "GLOBAL PLAYBOOK"
+
+
 # ---------------------------------------------------------------------------
 # the read-action grammar
 # ---------------------------------------------------------------------------

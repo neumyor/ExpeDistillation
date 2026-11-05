@@ -88,6 +88,18 @@ def test_the_catalog_text_is_the_folder_catalogs():
     assert manifest["catalog_text"] == render_catalog(bank)
     assert manifest["catalog_text"] == \
         skill_folder_manifest(bank, accepted_only=False)["catalog_text"]
+
+
+def test_the_playbook_leads_the_exam_catalog():
+    # 2026-11-04 P0: the exam prompt's block starts with the global
+    # playbook; the empty default leaves the catalog byte-identical.
+    bank = _bank()
+    rows = exam_folder_driver.resolve(
+        bank, _exams(bank[0]), ExamFolderParams(playbook="GLOBAL PLAYBOOK"))
+    manifest = rows[0].aux["skill_folder"]
+    assert manifest["playbook_text"] == "GLOBAL PLAYBOOK"
+    assert manifest["catalog_text"].startswith("GLOBAL PLAYBOOK\n\n")
+    assert rows[0].skills_block.startswith("GLOBAL PLAYBOOK\n\n")
     # ...and a bank with nothing pending renders exactly the block the
     # folder delivery renders for the same skills.
     accepted = bank[:2]

@@ -7,6 +7,8 @@ anything), so an unknown name fails inside the role that consumes it,
 before any of its work.
 """
 
+import hashlib
+from pathlib import Path
 from typing import Tuple, Any
 
 from expedistill.composites import decision, verdicts
@@ -56,8 +58,37 @@ _ALLOWED_EXECUTION_PARAMS = {
 def _resolve_delivery(spec: ExecutePhaseSpec) -> Tuple[Any, Any]:
     """(driver module, params) for the phase's delivery mapping: the
     registry's delivery family over the phase's OWN raw mapping (v4 --
-    the ``name`` key plus that method's parameters)."""
-    return method_registry.resolve("delivery", spec.delivery)
+    the ``name`` key plus that method's parameters).
+
+    ``playbook_file`` is a delivery-level switch (2026-11-04 P0): the
+    file is read here, its sha256 checked against the config's frozen
+    ``playbook_sha256``, and its text passed inline as ``playbook``. The
+    file path is repo-relative (the run scripts start in the repo root);
+    an absolute path also works. No playbook key means the delivery is
+    byte-identical to the pre-playbook behaviour.
+    """
+    delivery = dict(spec.delivery)
+    playbook_file = delivery.get("playbook_file", "")
+    playbook_sha = delivery.get("playbook_sha256", "")
+    if playbook_file:
+        path = Path(str(playbook_file))
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ConfigError(
+                f"delivery playbook_file {playbook_file!r} cannot be read "
+                f"({exc}); run from the repository root or use an "
+                "absolute path") from exc
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if playbook_sha and digest != playbook_sha:
+            raise ConfigError(
+                f"delivery playbook_file {playbook_file!r} has sha256 "
+                f"{digest}, but the config froze {playbook_sha}; the file "
+                "changed after the config was generated")
+        delivery["playbook"] = text
+    return method_registry.resolve("delivery", delivery)
 
 
 def _execution_params(spec: ExecutePhaseSpec) -> Any:
