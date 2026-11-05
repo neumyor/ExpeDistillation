@@ -1,0 +1,192 @@
+benchmark: alfworld
+mode: split
+models:
+  answerer: qwen3.6-flash-distill
+  auditor: deepseek-v4-flash-0731-tencent
+  author: deepseek-v4-flash-0731-tencent
+  curator: deepseek-v4-flash-0731-tencent
+  examiner: deepseek-v4-flash-0731-tencent
+  executor_strong: deepseek-v4-flash-0731-tencent
+  executor_weak: qwen3.6-flash-distill
+  judge: deepseek-v4-flash-0731-tencent
+  rewriter: deepseek-v4-flash-0731-tencent
+  segmenter: deepseek-v4-flash-0731-tencent
+weak_profile: "# ALFWorld unified protocol: the reader's execution context\n\nThe\
+  \ reader executes one ALFWorld task under the benchmark's unified\nprotocol. At\
+  \ every decision step its entire context is exactly:\n\n1. the current observation\
+  \ (the environment text it received just now);\n2. the last two (observation, action)\
+  \ pairs, verbatim -- anything older has\n   left the context;\n3. the \"Opened skill\
+  \ cards\" block: the full text of every skill card the\n   reader opened in this\
+  \ episode, kept verbatim until the episode ends.\n\nOpening a card does not take\
+  \ one of those two interaction slots. It is not\na game action: the card text simply\
+  \ appears in the opened-cards block.\n\nThe reader does NOT see: the initial room\
+  \ description after the second\naction, any interaction older than the last two,\
+  \ any skill card it has not\nopened, a separate copy of the task instruction, or\
+  \ a plan it wrote in an\nearlier step.\n\n## What every written procedure must respect\n\
+  \n- Every node in [Steps] must be executable from those three sources alone at\n\
+  \  the moment it fires.\n- Never refer to an earlier step by position (\"the object\
+  \ you saw two steps\n  ago\", \"as established above\", \"the location from your\
+  \ first look\"): that\n  interaction is gone.\n- Never assume the reader still remembers\
+  \ the initial room listing or the\n  full instruction. A node that needs a fact\
+  \ must say how to re-observe it\n  in that same node: look, open the receptacle,\
+  \ check the inventory.\n- A fact stated in this card stays available while the card\
+  \ is open, so a\n  card may carry a short list of object names, locations or inventory\
+  \ it\n  wants the reader to keep using. It must still say how to obtain a fact\n\
+  \  that is neither in the card nor in the current observation.\n- Prefer one self-contained\
+  \ action per node over a long ordered plan whose\n  later nodes depend on state\
+  \ the reader can no longer see.\n- The reader can run at most one environment action\
+  \ per step; a procedure\n  that needs several observations must say what to check\
+  \ at each one.\n\nThe reader is also a weaker model: short sentences, one action\
+  \ per node,\nexplicit order, concrete observable conditions.\n\n## Length and memory\
+  \ discipline when combining cards\n\n- Keep every card short. Aim for 1,500 to 2,500\
+  \ characters. A merged card\n  that is longer than its sources is almost certainly\
+  \ repeating them.\n- When several cards teach the same situation, keep the shared\
+  \ procedure\n  and drop the repeated advice. Do not paste whole sections together.\n\
+  - Never write a step that needs a fact from an earlier step, or a list the\n  reader\
+  \ was asked to maintain. The reader has nowhere to keep it: each\n  node must re-observe\
+  \ what it needs and must stand on its own.\n- Prefer a few complete nodes over many\
+  \ truncated ones. If the advice does\n  not fit, drop the least important advice\
+  \ rather than compressing every\n  sentence.\n\n## Shortening may not remove search\
+  \ coverage\n\nLength is a target, coverage is a requirement. When a card says where\
+  \ or\nhow to look for something, that text stays, even if the card grows past\n\
+  the target:\n\n- Keep every search and fallback step a source card states: which\
+  \ places\n  to check, how to check a closed container, when to move to another piece\n\
+  \  of furniture or room, and what to do when the first attempt fails.\n- Keep every\
+  \ category of location the sources name. Do not narrow \"surface,\n  container,\
+  \ or place\" to \"receptacle or surface\": an object can be on a\n  bed, a sofa,\
+  \ a shelf, or any other named furniture. A card that searches\n  only the current\
+  \ observation's containers is a defect.\n- Keep every action command the sources\
+  \ use (open, examine, go to, take,\n  use, move) and the exact command shape. A\
+  \ paraphrase such as \"look at the\n  receptacles\" is not an executable command;\
+  \ write \"go to X, open X,\n  examine X\".\n- Shorten by removing repeated wording\
+  \ and redundant explanations, never by\n  deleting a step, a location category,\
+  \ or an action.\n"
+use_weak_profile: true
+n_attempts_strong: 3
+n_attempts_weak: 3
+split:
+  train: []
+  test: &id001
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Book-None-DeskLamp-308/trial_T20190908_020029_636862/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Book-None-DeskLamp-308/trial_T20190908_020048_814402/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Book-None-DeskLamp-308/trial_T20190908_144951_587345/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133919_856963/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133935_066606/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Bowl-None-DeskLamp-308/trial_T20190907_133953_562557/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_161733_213242/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Mug-None-DeskLamp-308/trial_T20190908_201444_037645/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220545_153480/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-Pencil-None-DeskLamp-308/trial_T20190908_220656_510400/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_and_place_simple-PepperShaker-None-Drawer-10/trial_T20190906_184021_215264/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191429_743650/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Cabinet-10/trial_T20190906_191445_723170/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_and_place_simple-SaltShaker-None-Drawer-10/trial_T20190909_021728_339782/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_and_place_simple-Vase-None-Safe-219/trial_T20190908_205204_244321/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_and_place_simple-Watch-None-Safe-219/trial_T20190907_074643_810052/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Bowl-None-Cabinet-10/trial_T20190909_061232_368489/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-Cabinet-424/trial_T20190908_022321_380927/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-Cabinet-424/trial_T20190908_022436_073995/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-CounterTop-424/trial_T20190908_100632_546757/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Cloth-None-CounterTop-424/trial_T20190908_114340_674467/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Egg-None-Microwave-10/trial_T20190909_120632_691361/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Knife-None-CounterTop-10/trial_T20190909_110347_624008/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Knife-None-CounterTop-10/trial_T20190909_110445_675754/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Knife-None-CounterTop-10/trial_T20190909_110531_148235/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_032434_013084/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_032518_891433/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-Cabinet-424/trial_T20190908_215019_162873/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074045_109439/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-SoapBar-None-CounterTop-424/trial_T20190907_074124_966890/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080730_211959/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_clean_then_place_in_recep-Spatula-None-Drawer-10/trial_T20190907_080800_275989/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091747_866951/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091811_414150/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Bread-None-CounterTop-10/trial_T20190908_091835_825830/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_123133_763972/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Lettuce-None-CounterTop-10/trial_T20190909_174840_771703/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114545_244903/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Pan-None-CounterTop-10/trial_T20190908_114656_768805/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_cool_then_place_in_recep-Tomato-None-Microwave-10/trial_T20190909_102608_318800/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-Fridge-10/trial_T20190906_182259_116320/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Apple-None-GarbageCan-10/trial_T20190908_145356_918528/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083346_800823/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083429_887065/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Cup-None-Cabinet-10/trial_T20190907_083507_594820/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113432_673307/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Egg-None-GarbageCan-10/trial_T20190908_113523_123938/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-Cabinet-10/trial_T20190909_021200_669381/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Mug-None-CoffeeMachine-10/trial_T20190907_171933_349922/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_heat_then_place_in_recep-Tomato-None-GarbageCan-10/trial_T20190908_225359_617900/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-CD-None-Safe-308/trial_T20190907_050942_897916/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-CD-None-Safe-308/trial_T20190907_051056_585414/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-KeyChain-None-Safe-219/trial_T20190909_011803_423115/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-KeyChain-None-Safe-219/trial_T20190909_012027_782483/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-PepperShaker-None-Drawer-10/trial_T20190912_221016_460197/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-Cabinet-424/trial_T20190909_081720_491733/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-SoapBar-None-GarbageCan-424/trial_T20190909_064309_357168/game.tw-pddl
+  - json_2.1.1/valid_unseen/pick_two_obj_and_place-ToiletPaper-None-Cabinet-424/trial_T20190906_202926_527010/game.tw-pddl
+tasks: *id001
+sequence:
+- test
+phases:
+  test:
+    role: test
+    tasks: test
+    delivery:
+      description_mode: summary_then_when_to_use
+      name: folder
+    execution:
+      name: real_folder
+    compare:
+      against: external_campaign
+      rule: null
+      external:
+        path: ../seed/alfworld_bare_q_20261102.json
+        sha256: df45c9b744d27db3f48116a8f69a1f6dba68aa9f340f9c1e14f3ab67cb4990c5
+        model_key: qwen3.6-flash-distill
+    acceptance: null
+    kind: execute
+invalid_redispatch_limit: 1
+rules:
+  task_select: any_weak_failed
+  segment_select: strong_success_weak_failed
+  trajectory_select: strong1_weak1
+prompts_digests: {}
+model_options:
+  deepseek-v4-flash-0731-tencent:
+    reasoning_effort: max
+token_budgets:
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    answerer:
+      max_output_tokens: 65536
+      max_input_tokens: 262144
+    auditor:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    author:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    curator:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    examiner:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    executor_strong:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    executor_weak:
+      max_output_tokens: 65536
+      max_input_tokens: 262144
+    judge:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    rewriter:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+    segmenter:
+      max_output_tokens: 65536
+      max_input_tokens: 524288
+schema_version: 7

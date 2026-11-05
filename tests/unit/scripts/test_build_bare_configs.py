@@ -36,13 +36,13 @@ def generated():
 
 def test_the_three_bare_arms_are_alfworld_only(generated):
     assert sorted(generated) == sorted(
-        f"alfworld_split_paper_v2_{stem}.yaml" for stem in STEMS)
+        f"alfworld_split_paper_v3_{stem}.yaml" for stem in STEMS)
 
 
 @pytest.mark.parametrize("student", ["q", "d", "x"])
 def test_a_bare_arm_is_one_bare_run_with_a_zero_execution_control(
         student, generated):
-    config = generated[f"alfworld_split_paper_v2_e1_bare_{student}.yaml"].config
+    config = generated[f"alfworld_split_paper_v3_e1_bare_{student}.yaml"].config
     assert config["sequence"] == ["test"]
     assert len(config["split"]["test"]) == 134
     assert (config["n_attempts_strong"], config["n_attempts_weak"]) == (3, 3)
@@ -60,7 +60,7 @@ def test_the_checked_in_bare_configs_match(tmp_path):
     assert BUILDER.main(["--out-dir", str(tmp_path)] + [
         "--stems", ",".join(STEMS)]) == 0
     for student in "qdx":
-        name = f"alfworld_split_paper_v2_e1_bare_{student}.yaml"
+        name = f"alfworld_split_paper_v3_e1_bare_{student}.yaml"
         assert (tmp_path / name).read_bytes() == \
             (CONFIG_DIR / name).read_bytes()
         yaml.safe_load((tmp_path / name).read_text())

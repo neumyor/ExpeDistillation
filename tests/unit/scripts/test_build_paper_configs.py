@@ -54,7 +54,7 @@ TEST_ONLY_PHASES = ["phases.baseline", "phases.exam", "phases.learn",
 
 def _name(bench, stem):
     if bench == "alfworld":
-        return f"alfworld_split_paper_v2_{stem}.yaml"
+        return f"alfworld_split_paper_v3_{stem}.yaml"
     return f"{bench}_split_paper_{stem}.yaml"
 
 
@@ -103,11 +103,11 @@ def test_the_matrix_has_the_expected_files():
     by_prefix = {}
     for name in NAMES:
         bench, _, rest = name.partition("_split_paper_")
-        rest = rest.removeprefix("v2_")
+        rest = rest.removeprefix("v3_")
         by_prefix.setdefault(rest.split("_")[0], []).append((bench, name))
     assert {key: len(value) for key, value in by_prefix.items()} == {
-        "e1": 43, "e2": 13, "e3": 3, "e4": 18}
-    assert len(NAMES) == 77
+        "e1": 43, "e2": 13, "e3": 6, "e4": 18, "e5": 9, "e6": 3}
+    assert len(NAMES) == 92
     # TB bare is the external campaign control, so only the local
     # benchmarks get a bare config.
     assert _name("tb21", "e1_bare") not in NAMES
@@ -122,14 +122,40 @@ def test_the_matrix_has_the_expected_files():
         assert _name(bench, "e2_x2q") not in NAMES
 
 
+def test_explicit_cache_models_are_a_per_model_option(files):
+    # 2026-11-04: the generic client reads cache_mode from model_options;
+    # the generator must be able to opt a model in without touching any
+    # other model's options.
+    base = files[_name("alfworld", "e1_ours")]
+    assert "cache_mode" not in base["model_options"].get(
+        BUILDER.DEFAULT_Q_MODEL, {})
+    generated = BUILDER.generate(
+        CONFIG_DIR, BUILDER._parse_d_models([]), BUILDER.DEFAULT_Q_MODEL,
+        stems=["e1_ours"],
+        explicit_cache_models=[BUILDER.DEFAULT_Q_MODEL],
+        cache_prefix_tokens=1500)
+    cfg = generated[_name("alfworld", "e1_ours")].config
+    assert cfg["model_options"][BUILDER.DEFAULT_Q_MODEL] == {
+        "cache_mode": "explicit", "cache_prefix_tokens": 1500}
+    assert cfg["model_options"][BUILDER.DEFAULT_D_MODELS["alfworld"]] == {
+        "reasoning_effort": "max"}
+
+
 @pytest.mark.parametrize("name", NAMES)
 def test_every_config_loads_and_resolves_its_methods(name):
     config = load_config(str(CONFIG_DIR / name))
     # Stage 0's own resolution: every family of every phase, the
     # trial_level input-budget check and the external control file.
     _resolve_phase_methods(config)
-    assert config.use_weak_profile is False
-    assert config.weak_profile == ""
+    # The ALFWorld arms hand the writer the reader's execution context
+    # (2026-11-03); the other benchmarks pass no profile.
+    if name.startswith("alfworld_"):
+        assert config.use_weak_profile is True
+        assert "unified protocol" in config.weak_profile
+        assert "Opened skill cards" in config.weak_profile
+    else:
+        assert config.use_weak_profile is False
+        assert config.weak_profile == ""
     assert config.mode == "split"
     assert (config.n_attempts_strong, config.n_attempts_weak) == (3, 3)
     assert config.sequence[-1] == "test"
@@ -180,7 +206,10 @@ def test_split_and_global_keys_are_identical_across_arms(bench, files):
         assert "tasks" not in ours
     for name, cfg in mine.items():
         changed = {path.split(".")[0] for path in _diff(cfg, ours)}
-        assert changed <= {"sequence", "phases", "models", "token_budgets"}, \
+        # The coverage arms (e5, 2026-11-04) are the one arm family that
+        # also overrides the material rules; everything else stays global.
+        assert changed <= {"sequence", "phases", "models", "token_budgets",
+                           "rules"}, \
             f"{name} changes a global key: {sorted(changed)}"
 
 
@@ -389,6 +418,45 @@ def test_k1_changes_only_the_add_phase_segment_count(bench, files):
     assert _diff(k1, ours) == ["phases.learn_add.review.K"]
     assert k1["phases"]["learn_add"]["review"]["K"] == 1
     assert ours["phases"]["learn_add"]["review"]["K"] == 5
+
+
+@pytest.mark.parametrize("bench", BENCHMARKS)
+@pytest.mark.parametrize("k", (5, 3, 1))
+def test_coverage_arm_switches_only_the_material_rules(bench, k, files):
+    # 2026-11-04: the coverage ablation keeps the task gate
+    # (any_weak_failed) and changes only which trajectories and segments
+    # reach the writer; K is the same knob as e3.
+    ours = files[_name(bench, "e1_ours")]
+    cov = files[_name(bench, f"e5_allcover_k{k}")]
+    expected = ["rules.segment_select", "rules.trajectory_select"]
+    if k != 5:
+        expected.append("phases.learn_add.review.K")
+    assert _diff(cov, ours) == sorted(expected)
+    assert cov["rules"] == {
+        **ours["rules"],
+        "segment_select": "all",
+        "trajectory_select": "all",
+    }
+    assert cov["rules"]["task_select"] == "any_weak_failed"
+    assert cov["phases"]["learn_add"]["review"]["K"] == k
+
+
+def test_playbook_arm_adds_only_the_delivery_playbook(files):
+    # 2026-11-04 P0: the reference method plus the global playbook on the
+    # folder/exam_folder deliveries. Rules and K stay the reference's.
+    ours = files[_name("alfworld", "e1_ours")]
+    p0 = files[_name("alfworld", "e6_playbook_k5")]
+    assert _diff(p0, ours) == sorted([
+        "phases.exam.delivery.playbook_file",
+        "phases.exam.delivery.playbook_sha256",
+        "phases.test.delivery.playbook_file",
+        "phases.test.delivery.playbook_sha256",
+    ])
+    for phase in ("exam", "test"):
+        delivery = p0["phases"][phase]["delivery"]
+        assert delivery["playbook_file"] == BUILDER.PLAYBOOK_FILE
+        assert len(delivery["playbook_sha256"]) == 64
+    assert p0["rules"] == ours["rules"]
 
 
 @pytest.mark.parametrize("bench", BENCHMARKS)

@@ -33,9 +33,11 @@ with different parameters (AGENTS section 6): change the script, then give
 the new arm a new name.
 
 Common to every config: schema 7, mode split, D = deepseek-v4-flash, Q =
-qwen3.6-flash-distill, 3 attempts per arm, ``use_weak_profile: false`` and no
-profile, one token-budget block on every benchmark (author and rewriter
-input budget 524288 when D fills them, as trial_level requires). The input
+qwen3.6-flash-distill, 3 attempts per arm, one token-budget block on every
+benchmark (author and rewriter input budget 524288 when D fills them, as
+trial_level requires). ALFWorld enables ``use_weak_profile`` with the
+deployment-constraint profile (the reader's two-interaction memory); the
+other benchmarks keep it off and pass no profile. The input
 budget follows the MODEL, not the role: 524288 for D and 262144 for Q, so a
 teacher Q is never declared a context it does not have. The reference method
 (``e1_ours``) is the sequence baseline, learn_add, exam, learn, exam,
@@ -64,15 +66,17 @@ names the reference of every row and computes the difference)
                             fresh_bare control's and the phase stops with a
                             duplicate-unit-id error. TB bare is the external
                             campaign control, so no TB file.
-    e1  bare_q/bare_d/bare_x  ALFWorld only: one bare run per student model
+    e1  bare_q/bare_d       ALFWorld only: one bare run per student model
                             (empty bank, whole_bank), the run that freezes
                             that model's control file. Every with-bank
                             ALFWorld arm reads its test control from its
                             student's frozen file (external_campaign), so a
                             model is bare-run ONCE and every comparison
-                            reuses it. Generate these three first; the other
-                            arms refuse to generate until their controls
-                            exist.
+                            reuses it. Generate these first; the other arms
+                            refuse to generate until their controls exist.
+    e1  bare_x              the same config shape for X; the user stopped
+                            after bare D (2026-11-02), so it is not run and
+                            no control file is built for it
     e2  d2d d2q q2q q2d     teacher -> student. The teacher fills
                             executor_strong, author, segmenter, curator,
                             rewriter; the student fills executor_weak and
@@ -84,6 +88,7 @@ names the reference of every row and computes the difference)
     e2  x2q                 ALFWorld only: teacher X (qwen3.8-27b) ->
                             student Q; same recipe as the four cells above
     e3  k1                  learn_add review K = 1 (K = 5 is e1_ours)
+    e3  k3                  learn_add review K = 3 (2026-11-04 user request)
     e4  a0                  no evolution: baseline, learn_add, test;
                             learn_add accept_new true, curate none
     e4  a3_joint            scope ablation, joint arm: new_skills false in
@@ -101,9 +106,12 @@ names the reference of every row and computes the difference)
                             trigger; learn_final (P08, last learn phase, no
                             rewrite left) stays both
 
-Every ALFWorld config is named ``alfworld_split_paper_v2_*``: the 2026-11-02
-unified-protocol alignment invalidated the earlier ALFWorld runs, and the
-old ``alfworld_split_paper_*`` files stay frozen as that record. Every
+Every ALFWorld config is named ``alfworld_split_paper_v3_*``. v2 was the
+2026-11-02 unified-protocol alignment; v3 (2026-11-03) adds the
+deployment-constraint profile and the read policy that keeps card reads out
+of the unified protocol's two-step history. The older
+``alfworld_split_paper_*`` and ``..._v2_*`` files stay frozen as the record
+of their protocol. Every
 with-bank ALFWorld arm's control is the frozen bare file of its student
 model (``BARE_CONTROL_FILES``), built from the ``e1_bare_q/d/x`` runs and
 pinned by sha256: each model is bare-run once and every comparison reuses
@@ -116,6 +124,7 @@ fresh trigger written from weak-model failure evidence, so "trigger frozen"
 
 import argparse
 import copy
+import hashlib
 import sys
 from dataclasses import dataclass
 from functools import partial
@@ -171,15 +180,32 @@ POOLED_CONTROL = {
 #: reuses that measurement instead of re-running a fresh control per arm.
 #: The files are built by scripts/run/build_bare_control.py after the bare
 #: runs finish; the sha256 is read from disk at generation time and pinned.
+#:
+#: X has no file: the user stopped after the D bare run (2026-11-02), so the
+#: bare-X arm remains available as a config but is not run, and no with-bank
+#: arm has X as its student.
 SEED_DIR = REPO_ROOT / "configs" / "seed"
 BARE_CONTROL_FILES = {
     "q": "alfworld_bare_q_20261102.json",
-    "d": "alfworld_bare_d_20261102.json",
-    "x": "alfworld_bare_x_20261102.json",
+    # D re-ran at the 65536 output budget (2026-11-03); the earlier 4096
+    # file stays on disk as the record but no arm pins it.
+    "d": "alfworld_bare_d_20261103.json",
 }
 
 BASELINES = ("skillopt", "evoskill", "trace2skill", "gepa", "expel",
              "agentbrew")
+
+#: The ALFWorld deployment profile handed to every authoring/rewriting
+#: prompt (2026-11-03): the reader's context under the unified protocol
+#: (current observation + last two interactions + opened cards), so a
+#: written node cannot depend on state the reader no longer has. Relative
+#: to the config file's directory (configs/experiments).
+ALFWORLD_PROFILE_FILE = "../profiles/alfworld_unified_memory_20261103.md"
+
+#: The P0 global playbook (2026-11-04): a repo-relative path the phase
+#: resolver reads and renders above the skill card list on every step.
+#: The config freezes its sha256 so a post-freeze edit is refused.
+PLAYBOOK_FILE = "configs/playbooks/alfworld_global_20261104.md"
 
 FILE_GLOB = "*_split_paper_*.yaml"
 HEADER = ("# Generated by scripts/run/build_paper_configs.py -- edit the "
@@ -381,6 +407,14 @@ class Arm:
     test: str = "folder"
     #: The stem ``--print-index`` diffs this arm against.
     reference: str = "e1_ours"
+    #: Per-arm overrides of the named rules (the coverage ablation sets
+    #: ``segment_select`` / ``trajectory_select``; every other arm keeps
+    #: the reference RULES below).
+    rules: Tuple[Tuple[str, str], ...] = ()
+    #: A repo-relative global-playbook file; when set, every folder and
+    #: exam_folder delivery in the run renders it above the card list
+    #: (the 2026-11-04 P0 switch). None keeps the reference behaviour.
+    playbook: Optional[str] = None
 
 
 def arms() -> List[Arm]:
@@ -419,6 +453,30 @@ def arms() -> List[Arm]:
         benchmarks=("alfworld",)))
     out.append(Arm("e3_k1", "e3", "learn_add review K=1",
                    partial(full_method, k=1)))
+    out.append(Arm("e3_k3", "e3", "learn_add review K=3",
+                   partial(full_method, k=3)))
+    # P0 (2026-11-04): the reference method plus the always-visible global
+    # playbook (task recipes, pick-two bookkeeping, search-loop recovery).
+    # The playbook rides the folder and exam_folder deliveries, so the
+    # external bare control (no folder) is untouched.
+    for k in (5, 3, 1):
+        out.append(Arm(
+            f"e6_playbook_k{k}", "e6",
+            f"reference + global playbook, K={k}",
+            partial(full_method, k=k),
+            benchmarks=("alfworld",),
+            playbook=PLAYBOOK_FILE))
+    # Coverage ablation (2026-11-04): the task gate stays ``any_weak_failed``
+    # -- the library still targets failures -- but every trajectory and every
+    # segment of the authorized tasks reaches the writer. Both switches are
+    # named rules, so the reference arms keep their behaviour byte-identical.
+    for k in (5, 3, 1):
+        out.append(Arm(
+            f"e5_allcover_k{k}", "e5",
+            f"coverage: all trajectories + all segments, K={k}",
+            partial(full_method, k=k),
+            rules=(("segment_select", "all"),
+                   ("trajectory_select", "all"))))
     out.append(Arm("e4_a0", "e4",
                    "A0: baseline, learn_add (accept_new, no curation), test",
                    no_evolution))
@@ -561,9 +619,20 @@ def _test_compare(source: Source, bench: str, arm: Arm, d_model: str,
 
 
 def build_config(source: Source, bench: str, arm: Arm, d_model: str,
-                 q_model: str, x_model: str) -> Dict[str, Any]:
+                 q_model: str, x_model: str,
+                 explicit_cache_models: Sequence[str] = (),
+                 cache_prefix_tokens: Optional[int] = None) -> Dict[str, Any]:
     compare = _test_compare(source, bench, arm, d_model, q_model, x_model)
     sequence, phases = arm.recipe(_final_test_phase(arm.test, compare))
+    if arm.playbook:
+        text = (REPO_ROOT / arm.playbook).read_text(encoding="utf-8")
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        for spec in phases.values():
+            delivery = spec.get("delivery")
+            if isinstance(delivery, dict) and delivery.get("name") in (
+                    "folder", "exam_folder"):
+                delivery["playbook_file"] = arm.playbook
+                delivery["playbook_sha256"] = digest
     unused = set(phases) - set(sequence)
     undefined = set(sequence) - set(phases)
     if unused or undefined:
@@ -571,16 +640,23 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
             f"{arm.stem}: sequence and phase definitions disagree "
             f"(unused {sorted(unused)}, undefined {sorted(undefined)})")
     models = _models(arm.teacher, arm.student, d_model, q_model, x_model)
+    model_options: Dict[str, Dict[str, Any]] = {
+        d_model: {"reasoning_effort": "max"}}
+    for model_name in explicit_cache_models:
+        options = model_options.setdefault(model_name, {})
+        options["cache_mode"] = "explicit"
+        if cache_prefix_tokens is not None:
+            options["cache_prefix_tokens"] = cache_prefix_tokens
     config: Dict[str, Any] = {
         "benchmark": BENCHMARK_NAMES[bench],
         "invalid_redispatch_limit": 1,
         "mode": "split",
-        "model_options": {d_model: {"reasoning_effort": "max"}},
+        "model_options": model_options,
         "models": models,
         "n_attempts_strong": 3,
         "n_attempts_weak": 3,
         "phases": {name: phases[name] for name in dict.fromkeys(sequence)},
-        "rules": dict(RULES),
+        "rules": {**RULES, **dict(arm.rules)},
         "schema_version": 7,
         "sequence": sequence,
         "split": copy.deepcopy(source.split),
@@ -589,25 +665,34 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
         config["tasks"] = list(source.tasks)
     config["token_budgets"] = _token_budgets(models, d_model, q_model,
                                              x_model)
-    config["use_weak_profile"] = False
+    # The reader's execution context is a fact the writer must know
+    # (2026-11-03); ALFWorld is the benchmark whose unified protocol has the
+    # two-interaction memory. Other benchmarks keep the switch off.
+    config["use_weak_profile"] = bench == "alfworld"
+    if bench == "alfworld":
+        config["weak_profile_file"] = ALFWORLD_PROFILE_FILE
     return config
 
 
 def file_name(bench: str, arm: Arm) -> str:
-    # The ALFWorld configs carry a v2 marker: the 2026-11-02 protocol
-    # alignment changed execution, invalidated every earlier ALFWorld run,
-    # and AGENTS section 6 forbids rewriting a config that a formal run
-    # already started. The old ``alfworld_split_paper_*.yaml`` files stay
-    # frozen as the record of the earlier protocol.
+    # The ALFWorld configs carry a protocol-generation marker. v2 was the
+    # 2026-11-02 unified-protocol alignment; v3 adds the deployment-constraint
+    # profile and the read policy that keeps card reads out of the two-step
+    # history (2026-11-03). AGENTS section 6 forbids rewriting a config that a
+    # formal run already started, so the earlier files stay frozen as the
+    # record of their protocol.
     if bench == "alfworld":
-        return f"alfworld_split_paper_v2_{arm.stem}.yaml"
+        return f"alfworld_split_paper_v3_{arm.stem}.yaml"
     return f"{bench}_split_paper_{arm.stem}.yaml"
 
 
 def generate(source_dir: Path, d_models: Dict[str, str],
              q_model: str,
              x_model: str = DEFAULT_X_MODEL,
-             stems: Optional[Sequence[str]] = None) -> Dict[str, Generated]:
+             stems: Optional[Sequence[str]] = None,
+             explicit_cache_models: Sequence[str] = (),
+             cache_prefix_tokens: Optional[int] = None
+             ) -> Dict[str, Generated]:
     """Configs keyed by file name, in matrix order.
 
     ``stems`` restricts generation to the named arms (the bare arms are
@@ -626,7 +711,9 @@ def generate(source_dir: Path, d_models: Dict[str, str],
             out[file_name(bench, arm)] = Generated(
                 arm, bench,
                 build_config(sources[bench], bench, arm, d_models[bench],
-                             q_model, x_model))
+                             q_model, x_model,
+                             explicit_cache_models=explicit_cache_models,
+                             cache_prefix_tokens=cache_prefix_tokens))
     return out
 
 
@@ -663,11 +750,12 @@ def diff_paths(a: Any, b: Any, prefix: str = "",
 def _in_generated_family(name: str) -> bool:
     """Whether a config file belongs to the CURRENT generation family.
 
-    ``alfworld_split_paper_*.yaml`` without ``_v2_`` is the frozen record of
-    the pre-unified-protocol runs; it is never regenerated and never stale.
+    ``alfworld_split_paper_*.yaml`` without ``_v3_`` is the frozen record of
+    an earlier protocol generation (pre-unified, or unified v2); it is never
+    regenerated and never stale.
     """
     return name.startswith(("tb21_split_paper_", "searchqa_split_paper_",
-                            "alfworld_split_paper_v2_"))
+                            "alfworld_split_paper_v3_"))
 
 
 def check(out_dir: Path, rendered: Dict[str, str]) -> List[str]:
@@ -733,6 +821,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="gateway id of D for one benchmark")
     parser.add_argument("--q-model", default=DEFAULT_Q_MODEL)
     parser.add_argument("--x-model", default=DEFAULT_X_MODEL)
+    parser.add_argument("--explicit-cache-model", action="append", default=[],
+                        metavar="ID",
+                        help="model id that gets the generic client's "
+                             "explicit cache markers (cache_mode: explicit); "
+                             "repeatable. Default: implicit cache for every "
+                             "model. Combine with --stems so a new campaign "
+                             "does not rewrite frozen configs")
+    parser.add_argument("--cache-prefix-tokens", type=int, default=None,
+                        help="marked stable-prefix budget for the explicit "
+                             "cache models (client default: 1200)")
     parser.add_argument("--stems", default="",
                         help="comma-separated arm stems to generate (default: "
                              "all); the bare ALFWorld arms are generated "
@@ -748,7 +846,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         generated = generate(Path(args.source_dir),
                              _parse_d_models(args.d_model), args.q_model,
-                             args.x_model, stems=stems or None)
+                             args.x_model, stems=stems or None,
+                             explicit_cache_models=args.explicit_cache_model,
+                             cache_prefix_tokens=args.cache_prefix_tokens)
     except (OSError, KeyError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
