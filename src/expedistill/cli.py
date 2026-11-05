@@ -80,6 +80,7 @@ from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.stages.assemble_reuse import LEVELS, assemble_reuse
 from expedistill.stages.exam_replay import replay as replay_exams
 from expedistill.stages.fork_run import fork_run
+from expedistill.stages.remerge_bank import remerge_bank
 from expedistill.stages.import_bank import SOURCE_FORMATS, import_external_bank
 from expedistill.stages.judge_skills import judge_phase
 from expedistill.stages.paper_tables import run as run_paper_tables
@@ -639,6 +640,30 @@ def _cmd_import_bank(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_remerge_bank(args: argparse.Namespace) -> int:
+    """Re-run the source run's recorded merges into a test-only bank."""
+    config_path = Path(args.config)
+    try:
+        cfg = load_config(str(config_path))
+    except (ValueError, OSError) as exc:
+        raise ConfigError(f"invalid config {config_path}: {exc}") from exc
+    handles = _build_handles(
+        cfg, config_path, None,
+        infra_retries=args.llm_infra_retries,
+        infra_backoff_seconds=args.llm_infra_backoff,
+        llm_timeout_sec=args.llm_timeout)
+    usage = UsageRecorder(usage_path(args.run_dir))
+    summary = remerge_bank(
+        source_run=args.source_run,
+        run_dir=args.run_dir,
+        weak_profile=cfg.effective_weak_profile(),
+        curator_handle=handles["curator"],
+        usage=usage)
+    print("remerge-bank: " + json.dumps(summary, ensure_ascii=False,
+                                       sort_keys=True))
+    return 0
+
+
 def _frozen_config(run_dir: Path) -> ExperimentConfig:
     """The config a finished run froze into its manifest."""
     path = run_dir / MANIFEST_NAME
@@ -911,6 +936,26 @@ def build_parser() -> argparse.ArgumentParser:
                           help="the method's name; it prefixes every "
                                "imported skill id")
     importer.set_defaults(func=_cmd_import_bank)
+
+    remerge = sub.add_parser(
+        "remerge-bank",
+        help="re-run a finished run's recorded MERGE groups with the "
+             "current prompt and reader profile, writing the result as a "
+             "test-only run's accepted bank")
+    remerge.add_argument("--source-run", required=True, type=Path,
+                         help="the finished run whose last learn phase holds "
+                              "curation_log.json and skill_bank.jsonl")
+    remerge.add_argument("--config", required=True,
+                         help="the config of the new test-only run (its "
+                              "curator model and weak profile drive the "
+                              "re-merge)")
+    remerge.add_argument("--run-dir", required=True, type=Path,
+                         help="fresh run directory (created; the first "
+                              "`run` invocation freezes its manifest)")
+    remerge.add_argument("--llm-infra-retries", type=int, default=3)
+    remerge.add_argument("--llm-infra-backoff", type=float, default=5.0)
+    remerge.add_argument("--llm-timeout", type=float, default=300)
+    remerge.set_defaults(func=_cmd_remerge_bank)
 
     def _analysis_arguments(command: argparse.ArgumentParser) -> None:
         command.add_argument("--run-dir", required=True, type=Path,
