@@ -324,6 +324,84 @@ def test_complete_sends_expected_payload(monkeypatch, stub_sdk):
     assert kwargs["top_p"] == 0.9
 
 
+def test_explicit_cache_marks_the_stable_prefix(monkeypatch, stub_sdk):
+    # 2026-11-04: the generic client splits the user message at the
+    # configured token budget and marks the first block. 1200 tokens at the
+    # repo's 4-chars/token estimate = 4800 characters.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    user = "A" * 10_000
+    client.complete("qwen", "sys", user,
+                    extra={"cache_mode": "explicit",
+                           "cache_prefix_tokens": 1200})
+    kwargs = StubSDKClient.last.create_kwargs
+    content = kwargs["messages"][-1]["content"]
+    assert isinstance(content, list) and len(content) == 2
+    assert content[0]["text"] == user[:4800]
+    assert content[0]["cache_control"] == {"type": "ephemeral"}
+    assert content[1] == {"type": "text", "text": user[4800:]}
+    assert content[0]["text"] + content[1]["text"] == user
+    assert "cache_mode" not in kwargs
+    assert "cache_prefix_tokens" not in kwargs
+
+
+def test_explicit_cache_marks_a_short_prompt_whole(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    client.complete("qwen", "sys", "short prompt",
+                    extra={"cache_mode": "explicit"})
+    content = StubSDKClient.last.create_kwargs["messages"][-1]["content"]
+    assert content == [{"type": "text", "text": "short prompt",
+                        "cache_control": {"type": "ephemeral"}}]
+
+
+def test_implicit_cache_keeps_string_content(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    client.complete("qwen", "sys", "user text",
+                    extra={"cache_mode": "implicit"})
+    assert StubSDKClient.last.create_kwargs["messages"][-1]["content"] == \
+        "user text"
+
+
+def test_cache_options_do_not_mutate_the_handle_options(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    extra = {"cache_mode": "explicit", "cache_prefix_tokens": 1200}
+    client.complete("qwen", "sys", "user text", extra=extra)
+    assert extra == {"cache_mode": "explicit", "cache_prefix_tokens": 1200}
+
+
+def test_unknown_cache_mode_is_a_config_error(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ConfigError, match="cache_mode"):
+        client.complete("qwen", "s", "u", extra={"cache_mode": "weird"})
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "1200"])
+def test_invalid_cache_prefix_tokens_is_a_config_error(
+        monkeypatch, stub_sdk, bad):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    stub_sdk(response=chat_response("ok"))
+    client = OpenAICompatClient.from_env()
+    with pytest.raises(ConfigError, match="cache_prefix_tokens"):
+        client.complete("qwen", "s", "u",
+                        extra={"cache_mode": "explicit",
+                               "cache_prefix_tokens": bad})
+
+
 def test_complete_merges_string_valued_extra(monkeypatch, stub_sdk):
     # model_options entries (e.g. reasoning_effort) are merged into the
     # top-level payload, exactly like the numeric case above.

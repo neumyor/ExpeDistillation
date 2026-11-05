@@ -121,6 +121,10 @@ class ModelHandle:
     # Extra chat-call parameters (e.g. reasoning_effort) forwarded to the
     # client for every call of this handle; per-model, wired by the pipeline
     # from the config's ``model_options``. Empty means: send nothing extra.
+    # The generic client also reads two cache knobs from here and does NOT
+    # send them on the wire: ``cache_mode`` ("implicit", the default, or
+    # "explicit" for Qwen/DashScope-style cache_control markers) and
+    # ``cache_prefix_tokens`` (the marked stable-prefix budget).
     extra_body: Dict[str, Any] = field(default_factory=dict)
     # Vocabulary slots for the learning prompts (prompts/learning_context.py),
     # wired by the pipeline from the benchmark plugin's learning context.

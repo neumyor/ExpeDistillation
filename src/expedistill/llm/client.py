@@ -60,6 +60,44 @@ _REFUSAL_FINISH_REASONS = frozenset({"content_filter"})
 #: wrong" (SkillExpand runtime/models/llm.py TRANSIENT_HTTP_STATUSES).
 TRANSIENT_HTTP_STATUSES = frozenset({408, 409, 429})
 
+#: Per-model explicit prompt-cache knobs, carried inside ``model_options``:
+#: ``cache_mode: explicit`` turns on Qwen/DashScope-compatible
+#: ``cache_control`` markers; the default ``implicit`` leaves the request
+#: byte-identical to the pre-cache shape. ``cache_prefix_tokens`` names how
+#: many tokens of the user message form the stable, marked prefix. The
+#: markers are inserted in this generic request path (not in a benchmark
+#: or prompt template), so ALFWorld, TB and every other workload get the
+#: same treatment.
+CACHE_MODE_KEY = "cache_mode"
+CACHE_PREFIX_TOKENS_KEY = "cache_prefix_tokens"
+CACHE_MODES = ("implicit", "explicit")
+DEFAULT_CACHE_PREFIX_TOKENS = 1200
+MIN_CACHE_PREFIX_TOKENS = 1024
+_CHARS_PER_TOKEN = 4
+
+
+def _explicit_cache_blocks(user: str, prefix_tokens: int) -> List[dict]:
+    """Split one user message into a marked stable prefix plus remainder.
+
+    Qwen's explicit cache marker lives on a content block
+    (``cache_control: {"type": "ephemeral"}``), covers everything from the
+    request start to that block, and needs at least 1024 tokens. The split
+    is deliberately benchmark-agnostic: the first ``prefix_tokens`` tokens
+    (at the repo's 4-chars/token estimate) are the stable head each prompt
+    puts first, and the rest is the per-call payload. A prompt shorter
+    than the budget is marked whole; the provider then decides whether it
+    is long enough to cache.
+    """
+    limit = max(prefix_tokens, MIN_CACHE_PREFIX_TOKENS) * _CHARS_PER_TOKEN
+    if len(user) <= limit:
+        return [{"type": "text", "text": user,
+                 "cache_control": {"type": "ephemeral"}}]
+    return [
+        {"type": "text", "text": user[:limit],
+         "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": user[limit:]},
+    ]
+
 
 def _status_is_permanent(status: Any) -> bool:
     """Any other 4xx (bad key, unknown model, oversized context) cannot
@@ -349,11 +387,37 @@ class OpenAICompatClient:
         a stream that stops sending bytes dies at the timeout (httpx read
         timeout), while the 414s call above survives a 300s timeout because
         its chunks keep arriving.
+
+        Prompt caching is per model through ``extra``: ``cache_mode:
+        explicit`` turns the user message into a content-block list whose
+        first block carries ``cache_control`` (Qwen/DashScope-compatible);
+        the default ``implicit`` leaves it a plain string. The two knobs
+        are popped from ``extra`` and never reach the wire.
         """
+        # Cache knobs are request metadata, not payload fields: pop them
+        # from a copy so the handle's model_options stay reusable across
+        # calls and nothing unknown reaches the wire.
+        extra = dict(extra) if extra else {}
+        cache_mode = extra.pop(CACHE_MODE_KEY, "implicit")
+        prefix_tokens = extra.pop(CACHE_PREFIX_TOKENS_KEY,
+                                  DEFAULT_CACHE_PREFIX_TOKENS)
+        if cache_mode not in CACHE_MODES:
+            raise ConfigError(
+                f"{CACHE_MODE_KEY} must be one of {list(CACHE_MODES)}, "
+                f"got {cache_mode!r}")
+        if (isinstance(prefix_tokens, bool)
+                or not isinstance(prefix_tokens, int)
+                or prefix_tokens < 1):
+            raise ConfigError(
+                f"{CACHE_PREFIX_TOKENS_KEY} must be a positive int, "
+                f"got {prefix_tokens!r}")
         messages: list = []
         if system:
             messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": user})
+        user_content: Any = user
+        if cache_mode == "explicit" and user:
+            user_content = _explicit_cache_blocks(user, prefix_tokens)
+        messages.append({"role": "user", "content": user_content})
         wire_model = self._aliases.pick(model)
         payload: Dict[str, Any] = {
             "model": wire_model,
