@@ -72,7 +72,7 @@ def test_tb_context_renders_the_pre_slot_wording(name):
 
 def test_the_neutral_profile_section_renders_the_tb_wording():
     kind = TB_CONTEXT.slots["agent_kind"]
-    assert profile_section("HEADER", "", kind) == (
+    assert profile_section("skill_reader", "", kind) == (
         SNAPSHOT["no_weak_profile_section"])
 
 
@@ -96,7 +96,7 @@ def test_no_tb_vocabulary_outside_the_tb_context(context):
         rendered = _render(name, context, caller_value="dummy").lower()
         for word in TB_VOCABULARY:
             assert word.lower() not in rendered, (context.name, name, word)
-    for text in (profile_section("HEADER", "", context.slots["agent_kind"]),
+    for text in (profile_section("skill_reader", "", context.slots["agent_kind"]),
                  *context.variables().values()):
         for word in TB_VOCABULARY:
             assert word.lower() not in text.lower(), (context.name, word)

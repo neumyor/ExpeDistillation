@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError, ModelOutputError
 from expedistill.llm.call import ModelHandle, call_model
+from expedistill.prompts.profile import profile_section
 
 __all__ = ["SIMILARITY_INPUTS", "assign_groups", "find_similar",
            "merge_skills"]
@@ -233,6 +234,7 @@ def merge_skills(
     handle: ModelHandle,
     *,
     mode: str,
+    weak_profile: str = "",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Tuple[str, str]:
@@ -243,6 +245,11 @@ def merge_skills(
     near-duplicates, "conflict" for opposite advice. Anything else is a
     caller bug and raises ValueError before any model call; so does a source
     list with fewer than two skills, which has nothing to merge.
+
+    ``weak_profile`` is the same reader profile the writing prompts get
+    (``prompts/profile.py``): the merge is a writing step too, and the
+    deployment constraints it states (the reader's memory, the length
+    target) bind the merged card exactly as they bind an authored one.
 
     Output contract (MERGE prompt): a JSON object with a non-empty string
     ``content`` (stripped) and a ``summary`` held to the one-line rule.
@@ -260,7 +267,10 @@ def merge_skills(
         f"### {skill.skill_id}\n{skill.content}" for skill in sources)
     parsed = call_model(
         handle, "MERGE",
-        {"mode": mode, "skills_block": skills_block},
+        {"mode": mode, "skills_block": skills_block,
+         "profile_section": profile_section(
+             "merged_skill_reader", weak_profile,
+             handle.prompt_defaults.get("agent_kind"))},
         output_json=True, usage=usage, run_dir=run_dir,
     )
     if not isinstance(parsed, dict):

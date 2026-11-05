@@ -15,6 +15,7 @@ from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError, ModelOutputError
 from expedistill.llm import json_script, make_fake_handle
 from expedistill.prompts.learning_context import GENERIC
+from expedistill.prompts.profile import profile_section
 from expedistill.prompts.registry import get as get_prompt
 
 
@@ -216,10 +217,27 @@ def test_merge_skills_dedup_wiring_and_result():
         skills_block=("### s0\nCheck the log file first.\n\n"
                       "### s1\nLook at the log file\n"
                       "before anything else."),
+        profile_section=profile_section(
+            "merged_skill_reader", "", handle.prompt_defaults.get("agent_kind")),
     )
     assert handle.client.calls[0]["user"] == expected
     assert merged == "Read the log file first."
     assert summary == "read the log before acting"
+
+
+def test_merge_skills_passes_the_reader_profile():
+    # 2026-11-03: the curator is a writing path too, so the reader profile
+    # (deployment constraints, length target) must reach the MERGE prompt.
+    handle = make_fake_handle(script=json_script({
+        "content": "Read the log file first.",
+        "summary": "read the log before acting"}))
+
+    merge_skills(SKILLS[:2], handle, mode="dedup",
+                 weak_profile="the reader sees two steps")
+
+    user = handle.client.calls[0]["user"]
+    assert "the reader sees two steps" in user
+    assert "binding for every step" in user
 
 
 def test_merge_skills_conflict_mode_string():

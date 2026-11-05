@@ -955,6 +955,7 @@ def curate_bank(
     drop_low_value: bool = False,
     similarity_input: str = "full",
     grouping_input: str = "full",
+    weak_profile: str = "",
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
@@ -973,6 +974,11 @@ def curate_bank(
     resumable at the unit level (see module docstring). Raises ConfigError
     when the bank is still over budget after ``curation_rounds`` rounds;
     nothing is deleted in that case.
+
+    ``weak_profile`` is the reader profile the merge prompt receives
+    (2026-11-03): the curator is a writing step too, so the deployment
+    constraints and the length target bind the merged card the same way
+    they bind an authored one. Empty keeps the neutral no-profile section.
 
     ``merge_check`` (M3, plan section 3's curate family): ``exam`` --
     each kept merge re-answers every source's exam; ``none`` (the default
@@ -1241,6 +1247,7 @@ def curate_bank(
                     try:
                         content, summary = merge_skills(
                             sources, curator_handle, mode=mode,
+                            weak_profile=weak_profile,
                             usage=usage, run_dir=run_dir)
                         if sectioned and not has_skill_sections(content):
                             # K5 section check: a structure-losing merge

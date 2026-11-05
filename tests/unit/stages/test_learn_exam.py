@@ -165,4 +165,4 @@ def test_without_a_profile_the_config_profile_decides(tmp_path, monkeypatch):
     from expedistill.prompts.profile import profile_section
     stored, handle = _land_scoped(tmp_path, "both", monkeypatch)
     assert stored.version == 2
-    assert profile_section("x", "") in handle.client.calls[0]["user"]
+    assert profile_section("skill_reader", "") in handle.client.calls[0]["user"]

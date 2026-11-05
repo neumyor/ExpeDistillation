@@ -184,7 +184,8 @@ def test_merge_keeps_the_first_sources_markers(client):
     block = ("### s1\n[When to use] a\n[Steps] b\n"
              "[Do not use when] d\n\n### s2\n[When to use] e\n"
              "[Steps] f\n[Do not use when] h")
-    user = get_prompt("MERGE").format(mode="dedup", skills_block=block)
+    user = get_prompt("MERGE").format(
+        mode="dedup", skills_block=block, profile_section="reader profile")
     parsed = extract_json(client.complete("fake-strong", "s", user))
     merged = parsed["content"]
     assert parsed["summary"]

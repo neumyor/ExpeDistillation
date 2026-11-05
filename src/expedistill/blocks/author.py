@@ -361,7 +361,7 @@ def write_skill(
         "steps_view": steps_view,
         "segment_position": segment_position.strip() or NO_SEGMENT_POSITION,
         "profile_section": profile_section(
-            "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+            "skill_reader",
             weak_profile, handle.prompt_defaults.get("agent_kind")),
     }
     if mode == "diagnose":
@@ -488,7 +488,7 @@ def rewrite_skill(
         "error_description": error_description,
         "scope_section": scope_notice(scope, skill.summary),
         "profile_section": profile_section(
-            "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+            "skill_reader",
             weak_profile, handle.prompt_defaults.get("agent_kind")),
     }
     parsed = call_model(

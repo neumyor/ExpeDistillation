@@ -12,6 +12,8 @@ REWRITE/MERGE/SIMILARITY templates must reproduce the markers literally
 import re
 import string
 
+import pytest
+
 from expedistill.core.models import SKILL_MARKERS
 from expedistill.blocks.author import SKILL_SECTION_FIELDS
 from expedistill.prompts import PROMPTS, get
@@ -52,7 +54,7 @@ EXPECTED = {
     ),
     "LEAK_AUDIT_JUDGE": ("D8", {"skill_text", "scene_text", "reference_answer"}),
     "SIMILARITY": ("G7", {"skills_listing"}),
-    "MERGE": ("G8", {"mode", "skills_block"}),
+    "MERGE": ("G8", {"mode", "skills_block", "profile_section"}),
     "GROUP": ("G9", {"skills_listing"}),
     "CLUSTER_TRIGGER_FAMILY": (
         "Cluster authoring",
@@ -199,20 +201,35 @@ def test_format_with_dummy_values_succeeds():
 
 def test_profile_section_off_is_neutral():
     from expedistill.prompts.profile import profile_section
-    neutral = profile_section("HEADER", "")
-    assert profile_section("HEADER", None) == neutral
-    assert profile_section("HEADER", "  ") == neutral
+    neutral = profile_section("skill_reader", "")
+    assert profile_section("skill_reader", None) == neutral
+    assert profile_section("skill_reader", "  ") == neutral
     assert GENERIC.slots["agent_kind"] in neutral
-    assert profile_section("HEADER", "a profile") == "HEADER\na profile"
+
+
+def test_a_profile_is_followed_by_the_binding_line():
+    from expedistill.prompts.profile import PROFILE_ROLES, profile_section
+    section = profile_section("skill_reader", "a profile")
+    assert section.startswith(
+        PROFILE_ROLES["skill_reader"] + "\na profile\n\n")
+    # Whatever the profile states (capability or execution context) binds
+    # every node the writer produces.
+    assert "information the profile says the reader will not have" in section
+
+
+def test_unknown_profile_role_is_rejected():
+    from expedistill.prompts.profile import profile_section
+    with pytest.raises(ValueError, match="unknown profile role"):
+        profile_section("no_such_role", "a profile")
 
 
 def test_neutral_profile_section_names_the_benchmarks_agent_kind():
-    from expedistill.prompts.profile import profile_section
+    from expedistill.prompts.profile import PROFILE_ROLES, profile_section
     assert "generally capable household agent" in profile_section(
-        "HEADER", "", "household")
+        "skill_reader", "", "household")
     # A profile text never carries the kind.
-    assert profile_section("HEADER", "a profile", "household") == (
-        "HEADER\na profile")
+    assert profile_section("skill_reader", "a profile", "household").startswith(
+        PROFILE_ROLES["skill_reader"] + "\na profile\n\n")
 
 
 def test_templates_are_nonempty():

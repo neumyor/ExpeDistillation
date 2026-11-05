@@ -61,6 +61,8 @@ Generalization comes first. The merged skill must help on OTHER tasks of the
 same kind, not only on the tasks the sources came from. Rebuild the skill in a
 general form; do not paste the sources' sections one after another.
 
+{profile_section}
+
 MERGE MODE: {mode}
 - "dedup": the skills teach the same thing. Distill them into one general
   lesson. Where the sources describe the same situation with task-specific

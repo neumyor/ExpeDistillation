@@ -188,7 +188,7 @@ def attribute_attempts(
         "trajectory_window": trajectory_window,
         "skills_listing": _skills_listing(skills),
         "profile_section": profile_section(
-            "THE MODEL THAT EXECUTED THE TASK (weak model profile):",
+            "task_executor",
             weak_profile, handle.prompt_defaults.get("agent_kind")),
     }
     aliases = dict(skill_aliases or {})
@@ -219,7 +219,7 @@ def revise_from_attempts(
             "skill_text": skill_text,
             "attempt_evidence": attempt_evidence,
             "profile_section": profile_section(
-                "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+                "skill_reader",
                 weak_profile, handle.prompt_defaults.get("agent_kind")),
         },
         output_json=True, usage=usage, run_dir=run_dir)

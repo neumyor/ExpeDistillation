@@ -48,8 +48,7 @@ WEAK_PROFILE = "A small model; known to skip intermediate steps."
 
 def _profile_section(weak_profile=WEAK_PROFILE):
     return profile_section(
-        "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
-        weak_profile,
+        "skill_reader", weak_profile,
     )
 
 DISTILL_SECTIONS = {
@@ -223,10 +222,10 @@ def test_write_skill_without_profile_sends_the_neutral_section():
         description=subtask.description,
         steps_view=STEPS_VIEW,
         segment_position=NO_SEGMENT_POSITION,
-        profile_section=profile_section("", ""),
+        profile_section=profile_section("skill_reader", ""),
     )
     assert user == expected
-    assert GENERIC.slots["agent_kind"] in profile_section("", "")
+    assert GENERIC.slots["agent_kind"] in profile_section("skill_reader", "")
     assert WEAK_PROFILE not in user
 
 

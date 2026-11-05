@@ -319,7 +319,7 @@ def write_cluster_skill(
             "reason": cluster["reason"],
             "cards": cards,
             "profile_section": profile_section(
-                "THE MODEL THAT WILL READ THE SKILL (weak model profile):",
+                "skill_reader",
                 weak_profile, handle.prompt_defaults.get("agent_kind")),
         },
         output_json=True, usage=usage, run_dir=run_dir)
