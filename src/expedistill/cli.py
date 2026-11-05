@@ -84,6 +84,9 @@ from expedistill.stages.remerge_bank import remerge_bank
 from expedistill.stages.import_bank import SOURCE_FORMATS, import_external_bank
 from expedistill.stages.judge_skills import judge_phase
 from expedistill.stages.paper_tables import run as run_paper_tables
+from expedistill.stages.segmentation_metrics import (
+    run as run_segmentation_metrics,
+)
 from expedistill.infra.manifest import FrozenProtocolChanged, load_or_none
 from expedistill.core.config import (
     FREEZE_LABEL,
@@ -731,6 +734,17 @@ def _cmd_exam_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_segmentation_metrics(args: argparse.Namespace) -> int:
+    try:
+        table = run_segmentation_metrics(
+            args.arm, out_md=args.out_md, out_json=args.out_json)
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(table)
+    return 0
+
+
 def _cmd_paper_tables(args: argparse.Namespace) -> int:
     try:
         text = run_paper_tables(
@@ -1010,6 +1024,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--metric", default="avg_at_n",
         choices=("avg_at_n", "avg_at_n_conservative", "pass_at_n"))
     tables.set_defaults(func=_cmd_paper_tables)
+
+    segmentation = sub.add_parser(
+        "segmentation-metrics",
+        help="Experiment 3's mechanism metrics over finished runs: test "
+             "scores, bank sizes, skill anchors and mid-task opens (reads "
+             "runs, never writes them)")
+    segmentation.add_argument(
+        "--arm", action="append", required=True, metavar="LABEL=RUN_DIR",
+        help="one finished run and its column label, e.g. K=5=runs/...; "
+             "repeat for each column")
+    segmentation.add_argument("--out-md", type=Path, default=None)
+    segmentation.add_argument("--out-json", type=Path, default=None)
+    segmentation.set_defaults(func=_cmd_segmentation_metrics)
 
     summary = sub.add_parser(
         "summary", help="print a run's stage summaries and usage totals")

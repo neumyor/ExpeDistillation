@@ -1,0 +1,221 @@
+{
+ "arms": [
+  {
+   "label": "K=5",
+   "run_dir": "/Users/yimingniu/Code/SkillEvolvePaperList/repos/experiments/ExpeDistillation-MM-submit/runs/exp3_k5_final_20261103_2141",
+   "test_phase": "p07:test",
+   "control_source": "external_campaign",
+   "tasks": 134,
+   "trials": 402,
+   "avg_at_n": 0.6990049751243781,
+   "pass_at_n": 0.7910447761194029,
+   "infra_missing": {
+    "with_bank": [],
+    "control": []
+   },
+   "bank_phases": [
+    "p02:learn_add",
+    "p04:learn",
+    "p06:learn_trial"
+   ],
+   "initial_bank": {
+    "phase": "p02:learn_add",
+    "skills": 20,
+    "known": 20,
+    "unknown": 0,
+    "at_task_start": 5,
+    "mid_task": 15,
+    "mid_task_share": 0.75,
+    "anchor_steps": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     2,
+     3,
+     3,
+     4,
+     5,
+     5,
+     6,
+     8,
+     14,
+     16,
+     24,
+     24,
+     24,
+     27,
+     32
+    ]
+   },
+   "final_bank": {
+    "phase": "p06:learn_trial",
+    "skills": 10,
+    "known": 10,
+    "unknown": 0,
+    "at_task_start": 3,
+    "mid_task": 7,
+    "mid_task_share": 0.7,
+    "anchor_steps": [
+     0,
+     0,
+     0,
+     2,
+     3,
+     5,
+     6,
+     24,
+     24,
+     32
+    ]
+   },
+   "reads": {
+    "trials": 402,
+    "opened": 402,
+    "mid_task_open": 299,
+    "open_rate": 1.0,
+    "mid_task_open_rate": 0.7437810945273632
+   }
+  },
+  {
+   "label": "K=3",
+   "run_dir": "/Users/yimingniu/Code/SkillEvolvePaperList/repos/experiments/ExpeDistillation-MM-submit/runs/exp3_k3_20261104_0020",
+   "test_phase": "p07:test",
+   "control_source": "external_campaign",
+   "tasks": 134,
+   "trials": 402,
+   "avg_at_n": 0.6865671641791045,
+   "pass_at_n": 0.7910447761194029,
+   "infra_missing": {
+    "with_bank": [],
+    "control": []
+   },
+   "bank_phases": [
+    "p02:learn_add",
+    "p04:learn",
+    "p06:learn_trial"
+   ],
+   "initial_bank": {
+    "phase": "p02:learn_add",
+    "skills": 19,
+    "known": 19,
+    "unknown": 0,
+    "at_task_start": 6,
+    "mid_task": 13,
+    "mid_task_share": 0.6842105263157895,
+    "anchor_steps": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     3,
+     3,
+     4,
+     6,
+     6,
+     7,
+     11,
+     15,
+     16,
+     16,
+     24,
+     25,
+     27
+    ]
+   },
+   "final_bank": {
+    "phase": "p06:learn_trial",
+    "skills": 8,
+    "known": 8,
+    "unknown": 0,
+    "at_task_start": 3,
+    "mid_task": 5,
+    "mid_task_share": 0.625,
+    "anchor_steps": [
+     0,
+     0,
+     0,
+     3,
+     4,
+     6,
+     9,
+     11
+    ]
+   },
+   "reads": {
+    "trials": 402,
+    "opened": 399,
+    "mid_task_open": 284,
+    "open_rate": 0.9925373134328358,
+    "mid_task_open_rate": 0.7064676616915423
+   }
+  },
+  {
+   "label": "K=1",
+   "run_dir": "/Users/yimingniu/Code/SkillEvolvePaperList/repos/experiments/ExpeDistillation-MM-submit/runs/exp3_k1_v6_20261103_1932",
+   "test_phase": "p07:test",
+   "control_source": "external_campaign",
+   "tasks": 134,
+   "trials": 402,
+   "avg_at_n": 0.6616915422885572,
+   "pass_at_n": 0.7761194029850746,
+   "infra_missing": {
+    "with_bank": [],
+    "control": []
+   },
+   "bank_phases": [
+    "p02:learn_add",
+    "p04:learn",
+    "p06:learn_trial"
+   ],
+   "initial_bank": {
+    "phase": "p02:learn_add",
+    "skills": 9,
+    "known": 9,
+    "unknown": 0,
+    "at_task_start": 9,
+    "mid_task": 0,
+    "mid_task_share": 0.0,
+    "anchor_steps": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "final_bank": {
+    "phase": "p06:learn_trial",
+    "skills": 7,
+    "known": 7,
+    "unknown": 0,
+    "at_task_start": 7,
+    "mid_task": 0,
+    "mid_task_share": 0.0,
+    "anchor_steps": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "reads": {
+    "trials": 402,
+    "opened": 402,
+    "mid_task_open": 271,
+    "open_rate": 1.0,
+    "mid_task_open_rate": 0.6741293532338308
+   }
+  }
+ ]
+}
