@@ -175,10 +175,12 @@ def _default_client(model_name: str,
     The provider NAME comes from ``EXPEDISTILL_LLM_PROVIDER`` (default
     ``openai_compat``); the adapter gives the builder's client the
     ``make_client(model_name)`` shape, and building one per unique model
-    keeps the documented one-client-per-model layout, so a later
-    per-model endpoint needs no loop change.
+    keeps the documented one-client-per-model layout. ``model_name`` is
+    forwarded so a builder can pick that model's transport (openai_compat
+    reads the per-model endpoint override from the environment).
     """
-    return providers.default_client(timeout_sec=timeout_sec)
+    return providers.default_client(timeout_sec=timeout_sec,
+                                    model=model_name)
 
 
 def _build_handles(

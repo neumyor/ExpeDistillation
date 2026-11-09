@@ -182,8 +182,12 @@ def load_plan(path: str) -> Dict[str, Any]:
     return plan
 
 
-def from_env(timeout_sec: float = 300.0) -> "FakeProviderClient":
+def from_env(timeout_sec: float = 300.0,
+             model: Optional[str] = None) -> "FakeProviderClient":
     """The PROVIDERS entry's builder (the table's documented shape).
+
+    ``model`` is the model the client will serve; the plan answers every
+    model alike, so it is accepted and ignored.
 
     Reads and validates the plan EAGERLY: a broken plan is a ConfigError
     at handle-build time, before the freeze step locks anything and

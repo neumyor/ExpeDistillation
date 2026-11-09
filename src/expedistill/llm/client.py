@@ -33,16 +33,38 @@ from expedistill.infra.reliability import (
 
 __all__ = [
     "ALIASES_ENV",
+    "API_KEYS_ENV",
     "API_KEY_ENV",
+    "ENDPOINTS_ENV",
     "ENDPOINT_ENV",
+    "THINK_IN_CONTENT_ENV",
     "AliasPool",
     "CompletionResult",
     "OpenAICompatClient",
     "parse_aliases",
+    "parse_model_overrides",
 ]
 
 ENDPOINT_ENV = "EXPEDISTILL_LLM_ENDPOINT"
 API_KEY_ENV = "EXPEDISTILL_LLM_API_KEY"
+
+#: ``model=base_url;other=base_url``: a per-model endpoint override, for a
+#: run whose roles are split across two servers (e.g. a self-hosted model
+#: next to a gateway serving the rest). Both are transports, not identity:
+#: the manifest keeps recording the logical model NAME, so switching a
+#: model's server never changes what a run says it ran.
+ENDPOINTS_ENV = "EXPEDISTILL_LLM_ENDPOINTS"
+#: ``model=key;other=key``: the key for an overridden endpoint. A model
+#: without an entry sends the default key.
+API_KEYS_ENV = "EXPEDISTILL_LLM_API_KEYS"
+
+#: Comma-separated model names whose server splits the thinking into a
+#: separate ``reasoning`` channel (vLLM with ``--reasoning-parser``). For
+#: those, the client puts the thinking back into the text as
+#: ``<think>...</think>`` -- which is what the ALFWorld protocol requires
+#: and what the same model returns through a gateway that does not split
+#: it. Unset (the default) leaves every response exactly as received.
+THINK_IN_CONTENT_ENV = "EXPEDISTILL_LLM_THINK_IN_CONTENT"
 
 #: ``logical=alias1,alias2;other=aliasA,aliasB``. A gateway that rate-limits
 #: per request id (not per model) serves one model under several ids; the
@@ -125,6 +147,10 @@ class CompletionResult:
     finish_reason: Optional[str] = None
     cached_tokens: Optional[int] = None
     raw_usage: Optional[Dict[str, Any]] = None
+    #: The provider's separate reasoning channel, when one exists and the
+    #: response was returned unmerged. ``text`` already carries it when the
+    #: client was built with THINK_IN_CONTENT_ENV listing the model.
+    reasoning: Optional[str] = None
 
 
 def _usage_dict(usage: Any) -> Optional[Dict[str, Any]]:
@@ -188,6 +214,10 @@ class _StreamedReply:
     #: the same object shape the non-streaming path saw), from the last chunk
     #: that carried one.
     usage: Any
+    #: The streamed ``delta.reasoning`` channel (vLLM's qwen3 reasoning
+    #: parser fills it and leaves the thinking out of ``content``); None
+    #: when the endpoint never opened that channel.
+    reasoning: Optional[str] = None
 
 
 def _drain_stream(stream: Iterable[Any]) -> _StreamedReply:
@@ -203,6 +233,7 @@ def _drain_stream(stream: Iterable[Any]) -> _StreamedReply:
     getattr, so SimpleNamespace chunks and SDK chunks behave identically.
     """
     content_parts = []
+    reasoning_parts = []
     refusal_parts = []
     finish_reason: Optional[str] = None
     usage_obj: Any = None
@@ -223,6 +254,13 @@ def _drain_stream(stream: Iterable[Any]) -> _StreamedReply:
         piece = getattr(delta, "content", None)
         if piece is not None:
             content_parts.append(piece)
+        # vLLM's qwen3 parser streams the thinking out of band; the gateways
+        # we otherwise use fold it into ``content`` and never open this
+        # channel, so collecting it here is a no-op for them.
+        thinking = (getattr(delta, "reasoning", None)
+                    or getattr(delta, "reasoning_content", None))
+        if thinking:
+            reasoning_parts.append(thinking)
         refusal_piece = getattr(delta, "refusal", None)
         if refusal_piece:
             refusal_parts.append(refusal_piece)
@@ -231,6 +269,7 @@ def _drain_stream(stream: Iterable[Any]) -> _StreamedReply:
         refusal="".join(refusal_parts) if refusal_parts else None,
         finish_reason=finish_reason,
         usage=usage_obj,
+        reasoning="".join(reasoning_parts) if reasoning_parts else None,
     )
 
 
@@ -254,6 +293,30 @@ def parse_aliases(raw: str) -> Dict[str, List[str]]:
             raise ConfigError(
                 f"{ALIASES_ENV} names one logical model twice")
         table[logical.strip()] = list(dict.fromkeys(names))
+    return table
+
+
+def parse_model_overrides(raw: str, env_name: str) -> Dict[str, str]:
+    """``model=value;other=value`` -> ``{"model": "value", ...}``.
+
+    The value is a base URL or an API key, so the split is on the FIRST
+    ``=`` and everything after it is kept verbatim. An empty string means
+    no overrides. A malformed entry is a configuration error that names
+    the variable, never the value (a URL and a key are both access
+    details)."""
+    table: Dict[str, str] = {}
+    for entry in (part.strip() for part in raw.split(";")):
+        if not entry:
+            continue
+        model, sep, value = entry.partition("=")
+        model, value = model.strip(), value.strip()
+        if not sep or not model or not value:
+            raise ConfigError(
+                f"{env_name} entries must look like 'model=value'; one "
+                "entry is malformed")
+        if model in table:
+            raise ConfigError(f"{env_name} names one model twice")
+        table[model] = value
     return table
 
 
@@ -306,8 +369,10 @@ class OpenAICompatClient:
 
     def __init__(self, endpoint: str, api_key: str,
                  timeout_sec: float = 300.0,
-                 aliases: Optional[AliasPool] = None):
+                 aliases: Optional[AliasPool] = None,
+                 think_in_content: bool = False):
         self._aliases = aliases or AliasPool()
+        self._think_in_content = think_in_content
         # Imported lazily so test doubles can patch this attribute without
         # importing the SDK for registry-only use.
         from openai import OpenAI
@@ -322,13 +387,20 @@ class OpenAICompatClient:
         )
 
     @classmethod
-    def from_env(cls, timeout_sec: float = 300) -> "OpenAICompatClient":
+    def from_env(cls, timeout_sec: float = 300,
+                 model: Optional[str] = None) -> "OpenAICompatClient":
         """Build a client from EXPEDISTILL_LLM_ENDPOINT / EXPEDISTILL_LLM_API_KEY.
 
         ``timeout_sec`` is the per-request client timeout, a run setting
         threaded in from the pipeline (an unstable endpoint that hangs
         otherwise burns the full default per request); it is NOT frozen into
         the manifest.
+
+        ``model`` is the logical model this client will serve. When it
+        carries an entry in EXPEDISTILL_LLM_ENDPOINTS, that endpoint (and,
+        if given, its EXPEDISTILL_LLM_API_KEYS key) replaces the default
+        pair -- the pipeline builds one client per unique model, so a run
+        can spread its roles over several servers.
 
         A missing variable is a configuration error, not an infrastructure
         error: it stops the run immediately. The message points at
@@ -347,9 +419,21 @@ class OpenAICompatClient:
                 + ", ".join(missing)
                 + "; copy .env.example to .env and fill them in (never commit .env)"
             )
+        if model:
+            overrides = parse_model_overrides(
+                os.environ.get(ENDPOINTS_ENV, ""), ENDPOINTS_ENV)
+            if model in overrides:
+                endpoint = overrides[model]
+                keys = parse_model_overrides(
+                    os.environ.get(API_KEYS_ENV, ""), API_KEYS_ENV)
+                api_key = keys.get(model, api_key)
         aliases = AliasPool(parse_aliases(os.environ.get(ALIASES_ENV, "")))
+        think = {name.strip() for name in
+                 os.environ.get(THINK_IN_CONTENT_ENV, "").split(",")
+                 if name.strip()}
         return cls(endpoint=endpoint, api_key=api_key, timeout_sec=timeout_sec,
-                   aliases=aliases)
+                   aliases=aliases,
+                   think_in_content=bool(model) and model in think)
 
     def complete(
         self,
@@ -525,6 +609,15 @@ class OpenAICompatClient:
                 finish_reason=finish_reason,
             )
             raise error
+        # A server that splits the thinking out (vLLM's reasoning parser)
+        # hands back an answer stripped of it. Reunite the two exactly as
+        # the model produced them, so the caller sees the same text the
+        # gateway form gives. The guard keeps an endpoint that already
+        # carries the thinking in ``content`` from getting it twice.
+        reasoning = reply.reasoning
+        if (self._think_in_content and reasoning
+                and "<think>" not in content.lower()):
+            content = f"<think>{reasoning.strip()}</think>{content}"
         return CompletionResult(
             text=content,
             in_tokens=(usage or {}).get("prompt_tokens"),
@@ -532,4 +625,5 @@ class OpenAICompatClient:
             finish_reason=finish_reason,
             cached_tokens=_cached_tokens(usage_obj),
             raw_usage=usage,
+            reasoning=reasoning,
         )

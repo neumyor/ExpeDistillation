@@ -19,9 +19,21 @@ def test_default_is_openai_compat(monkeypatch):
     monkeypatch.delenv("EXPEDISTILL_LLM_PROVIDER", raising=False)
     seen = []
     monkeypatch.setitem(PROVIDERS, "openai_compat",
-                        lambda timeout_sec: seen.append(timeout_sec))
+                        lambda timeout_sec, model: seen.append(
+                            (timeout_sec, model)))
     assert default_client(timeout_sec=12.0) is None
-    assert seen == [12.0]
+    assert seen == [(12.0, None)]
+
+
+def test_the_builder_receives_the_model_name(monkeypatch):
+    # A builder may pick the model's transport from the name (the
+    # per-model endpoint override); it must therefore see the name.
+    monkeypatch.delenv("EXPEDISTILL_LLM_PROVIDER", raising=False)
+    seen = []
+    monkeypatch.setitem(PROVIDERS, "openai_compat",
+                        lambda timeout_sec, model: seen.append(model))
+    default_client(timeout_sec=1.0, model="qwen")
+    assert seen == ["qwen"]
 
 
 def test_unknown_provider_is_a_config_error(monkeypatch):
@@ -33,5 +45,5 @@ def test_unknown_provider_is_a_config_error(monkeypatch):
 def test_env_names_provider(monkeypatch):
     monkeypatch.setenv("EXPEDISTILL_LLM_PROVIDER", "stub")
     monkeypatch.setitem(providers_mod.PROVIDERS, "stub",
-                        lambda timeout_sec: "stub-client")
-    assert default_client(timeout_sec=1.0) == "stub-client"
+                        lambda timeout_sec, model: "stub-client")
+    assert default_client(timeout_sec=1.0, model="m") == "stub-client"

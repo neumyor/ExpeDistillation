@@ -14,15 +14,21 @@ from expedistill.infra.reliability import (
     ProviderRefusalError,
 )
 from expedistill.llm.client import (
+    API_KEYS_ENV,
     API_KEY_ENV,
+    ENDPOINTS_ENV,
     ENDPOINT_ENV,
+    THINK_IN_CONTENT_ENV,
     OpenAICompatClient,
+    parse_model_overrides,
 )
 
 
-def _chunk(delta_content=None, delta_refusal=None, finish_reason=None):
+def _chunk(delta_content=None, delta_refusal=None, finish_reason=None,
+           delta_reasoning=None):
     """One streamed chunk shaped like SDK ChatCompletionChunk."""
-    delta = SimpleNamespace(content=delta_content, refusal=delta_refusal)
+    delta = SimpleNamespace(content=delta_content, refusal=delta_refusal,
+                            reasoning=delta_reasoning)
     choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
     return SimpleNamespace(choices=[choice], usage=None)
 
@@ -44,7 +50,8 @@ def _content_pieces(content):
     return [content[i:i + 4] for i in range(0, len(content), 4)]
 
 
-def chat_response(content, *, finish_reason="stop", refusal=None, usage=None):
+def chat_response(content, *, finish_reason="stop", refusal=None, usage=None,
+                  reasoning=None):
     """Script the chunk stream an endpoint emits for this final response.
 
     Same signature the non-streaming stub had, so existing tests only change
@@ -56,6 +63,9 @@ def chat_response(content, *, finish_reason="stop", refusal=None, usage=None):
     chunks = []
     if refusal is not None:
         chunks.append(_chunk(delta_refusal=refusal))
+    if reasoning is not None:
+        for piece in _content_pieces(reasoning):
+            chunks.append(_chunk(delta_reasoning=piece))
     if content is not None:
         for piece in _content_pieces(content):
             chunks.append(_chunk(delta_content=piece))
@@ -170,6 +180,96 @@ def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
     assert StubSDKClient.last.init_kwargs["max_retries"] == 0
     # The wrapper itself must never hold the key.
     assert not hasattr(client, "api_key")
+
+
+def test_parse_model_overrides_reads_pairs(monkeypatch):
+    assert parse_model_overrides("", ENDPOINTS_ENV) == {}
+    assert parse_model_overrides(
+        "qwen=http://host:8010/v1; other = http://b/v1 ",
+        ENDPOINTS_ENV) == {"qwen": "http://host:8010/v1",
+                           "other": "http://b/v1"}
+    # The value is a URL: only the FIRST '=' splits it.
+    assert parse_model_overrides(
+        "qwen=http://h/v1?x=1", ENDPOINTS_ENV) == {
+            "qwen": "http://h/v1?x=1"}
+
+
+@pytest.mark.parametrize("raw", ["qwen", "=http://h/v1", "qwen=",
+                                 "a=1;a=2"])
+def test_parse_model_overrides_rejects_malformed(monkeypatch, raw):
+    with pytest.raises(ConfigError, match=ENDPOINTS_ENV):
+        parse_model_overrides(raw, ENDPOINTS_ENV)
+
+
+def test_from_env_model_override_replaces_endpoint_and_key(
+        monkeypatch, stub_sdk):
+    # A run whose roles live on two servers: the overridden model gets its
+    # own base URL and key, every other model keeps the default pair.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://gateway/v1")
+    monkeypatch.setenv(API_KEY_ENV, "gateway-key")
+    monkeypatch.setenv(ENDPOINTS_ENV, "weak=http://selfhosted/v1")
+    monkeypatch.setenv(API_KEYS_ENV, "weak=selfhosted-key")
+    stub_sdk()
+    OpenAICompatClient.from_env(model="weak")
+    assert StubSDKClient.last.init_kwargs["base_url"] == "http://selfhosted/v1"
+    assert StubSDKClient.last.init_kwargs["api_key"] == "selfhosted-key"
+    OpenAICompatClient.from_env(model="strong")
+    assert StubSDKClient.last.init_kwargs["base_url"] == "http://gateway/v1"
+    assert StubSDKClient.last.init_kwargs["api_key"] == "gateway-key"
+    # No key override for that model: the default key is sent.
+    monkeypatch.delenv(API_KEYS_ENV)
+    OpenAICompatClient.from_env(model="weak")
+    assert StubSDKClient.last.init_kwargs["api_key"] == "gateway-key"
+
+
+def test_reasoning_channel_is_reported_but_not_merged_by_default(
+        monkeypatch, stub_sdk):
+    # A server that splits the thinking out leaves it out of the text; the
+    # caller still sees it on the result, and text is exactly what arrived.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.delenv(THINK_IN_CONTENT_ENV, raising=False)
+    stub_sdk(response=chat_response("<action>go to desk 1</action>",
+                                    reasoning="I should check the desk."))
+    result = OpenAICompatClient.from_env(model="weak").complete("weak", "s", "u")
+    assert result.text == "<action>go to desk 1</action>"
+    assert result.reasoning == "I should check the desk."
+
+
+def test_think_in_content_puts_the_reasoning_back(monkeypatch, stub_sdk):
+    # vLLM's qwen3 reasoning parser streams the thinking out of band; the
+    # ALFWorld protocol requires <think>...</think> in the reply, so a
+    # listed model gets its own thinking reunited with its answer.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(THINK_IN_CONTENT_ENV, "weak, other")
+    stub_sdk(response=chat_response("\n<action>go to desk 1</action>",
+                                    reasoning="  I should check the desk.  "))
+    result = OpenAICompatClient.from_env(model="weak").complete("weak", "s", "u")
+    assert result.text == ("<think>I should check the desk.</think>"
+                           "\n<action>go to desk 1</action>")
+
+
+def test_think_in_content_leaves_an_unlisted_model_alone(monkeypatch, stub_sdk):
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(THINK_IN_CONTENT_ENV, "other")
+    stub_sdk(response=chat_response("<action>x</action>", reasoning="r"))
+    result = OpenAICompatClient.from_env(model="weak").complete("weak", "s", "u")
+    assert result.text == "<action>x</action>"
+
+
+def test_think_in_content_does_not_duplicate_an_existing_block(
+        monkeypatch, stub_sdk):
+    # The gate can stay on when a gateway folds the thinking into content
+    # itself: the guard is what keeps that from doubling the block.
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+    monkeypatch.setenv(THINK_IN_CONTENT_ENV, "weak")
+    stub_sdk(response=chat_response(
+        "<think>already here</think><action>x</action>", reasoning="already here"))
+    result = OpenAICompatClient.from_env(model="weak").complete("weak", "s", "u")
+    assert result.text == "<think>already here</think><action>x</action>"
 
 
 def test_complete_uses_streaming_transport(monkeypatch, stub_sdk):
