@@ -1171,3 +1171,98 @@ def test_learn_summary_includes_cluster_outcomes(tmp_path):
 
     assert summary["outcomes"] == {"added": 42}
     assert summary["uncovered_add_tasks"] == uncovered
+
+
+# ---------------------------------------------------------------------------
+# The learned-playbook switch (2026-11-05)
+# ---------------------------------------------------------------------------
+
+LEARNED = "Search every place once. " * 20
+
+
+class _PlaybookPlugin:
+    """The TB plugin with the learned-playbook capability switched on."""
+
+    playbook_prompt_name = "ALFWORLD_PLAYBOOK_WRITE"
+
+    def __init__(self, real):
+        self._real = real
+        self.sheet_counts = []
+
+    def playbook_facts(self, sheets):
+        self.sheet_counts.append(len(sheets))
+        return "BASELINE FACTS"
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _learned_phases():
+    sequence, phases = _exam_sequence()
+    phases["test"] = ExecutePhaseSpec(
+        role="test", tasks="test",
+        delivery={"name": "folder", "playbook_source": "learned"},
+        execution={"name": "real_folder"},
+        compare=CompareSpec(against="fresh_bare"))
+    return sequence, phases
+
+
+def _run_first_learn_phase(tmp_path, monkeypatch, phases_of):
+    from expedistill.stages import learn_playbook
+    from tests.helpers.plugins import ensure_plugin
+    ensure_plugin("alfworld")
+    sequence, phases = phases_of()
+    handles = {"author": make_fake_handle("author", [
+        "<playbook>" + LEARNED + "</playbook>",
+        _distill_script()]),
+        "rewriter": make_fake_handle("rewriter", []),
+        "segmenter": make_fake_handle("segmenter", [])}
+    ctx = _make_ctx(tmp_path, sequence, phases, handles)
+    plugin = _PlaybookPlugin(ensure_plugin(BENCHMARK))
+    monkeypatch.setattr(learn_playbook, "get_plugin", lambda name: plugin)
+    _install_curation(monkeypatch)
+    _seed_baseline(ctx.store, weak_correctness=False)
+    _seed_segment(ctx.store)
+    phase = _phase(sequence, phases, 1)
+    return ctx, phase, plugin, handles
+
+
+def test_the_first_learn_phase_writes_the_playbook_when_asked(
+        tmp_path, monkeypatch):
+    from expedistill.composites import playbook_store
+    ctx, phase, plugin, handles = _run_first_learn_phase(
+        tmp_path, monkeypatch, _learned_phases)
+    phase_learn.run(ctx, phase)
+    path = playbook_store.playbook_path(ctx.run_dir, "p02:learn")
+    assert path.read_text(encoding="utf-8") == LEARNED.strip()
+    assert plugin.sheet_counts == [3]
+    # The playbook is the first author call; the skill write follows.
+    assert "BASELINE FACTS" in handles["author"].client.calls[0]["user"]
+    assert len(handles["author"].client.calls) == 2
+
+
+def test_the_phase_writes_no_playbook_without_the_switch(
+        tmp_path, monkeypatch):
+    from expedistill.composites import playbook_store
+    ctx, phase, plugin, handles = _run_first_learn_phase(
+        tmp_path, monkeypatch, _exam_sequence)
+    handles["author"].client.script.pop(0)      # only the skill write
+    phase_learn.run(ctx, phase)
+    assert not playbook_store.playbook_path(
+        ctx.run_dir, "p02:learn").exists()
+    assert plugin.sheet_counts == []
+    assert len(handles["author"].client.calls) == 1
+
+
+def test_a_resumed_learn_phase_keeps_the_written_playbook(
+        tmp_path, monkeypatch):
+    from expedistill.composites import playbook_store
+    ctx, phase, plugin, handles = _run_first_learn_phase(
+        tmp_path, monkeypatch, _learned_phases)
+    playbook_store.write_learned_playbook(
+        ctx.run_dir, phase.label, "EARLIER RUN", facts_chars=1)
+    handles["author"].client.script.pop(0)
+    phase_learn.run(ctx, phase)
+    assert playbook_store.playbook_path(
+        ctx.run_dir, phase.label).read_text() == "EARLIER RUN"
+    assert plugin.sheet_counts == []

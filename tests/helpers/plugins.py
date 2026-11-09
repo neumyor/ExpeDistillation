@@ -24,8 +24,8 @@ __all__ = ["benchmark_prompt_names", "ensure_plugin", "reload_plugin"]
 
 def benchmark_prompt_names(name: str):
     """Every registered prompt the benchmark ``name`` owns."""
-    prefix = f"{name.upper()}_TASK_PROMPT"
-    return sorted(prompt for prompt in PROMPTS if prompt.startswith(prefix))
+    prefixes = (f"{name.upper()}_TASK_PROMPT", f"{name.upper()}_PLAYBOOK")
+    return sorted(prompt for prompt in PROMPTS if prompt.startswith(prefixes))
 
 
 def _reload_or_import(module_name: str):

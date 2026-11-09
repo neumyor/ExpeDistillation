@@ -78,7 +78,7 @@ def run_test(ctx: StageContext, phase: PhaseInstance,
     role = resolve._test_role(resolve._execution_params(spec))
     _require_folder_capability(spec, ctx.config.benchmark)
 
-    delivery, delivery_params = resolve._resolve_delivery(spec)
+    delivery, delivery_params = resolve._resolve_delivery(spec, ctx, phase)
     bank = phase_disk._bank_skills(ctx, phase)
     benchmark = ctx.config.benchmark
 

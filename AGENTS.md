@@ -148,6 +148,8 @@ src/expedistill/
                           让整条相位序列在真实 benchmark 插件上零网络运行（smoke）
   benchmarks/             第 3 层：benchmark 插件
     base.py               插件接口：load_tasks / run / view_rules / task_prompt；
+                          `playbook_prompt_name` / `playbook_facts` 声明可学习
+                          playbook 能力（None=不支持）；
                           `verdict_rule` 声明该 benchmark 默认的逐 run 判分规则
                           （默认 `scorer`，TB 为 `tb_scorer`）；可选能力声明
                           skill_folder_prompt_name（技能文件夹执行
@@ -169,7 +171,10 @@ src/expedistill/
     alfworld/             适配外层 benchmark/alfworld-eval/：plugin.py 插件；
                           env.py 环境封装；protocol.py 与外层统一 runner 一致的
                           执行协议（系统消息、第一步模板、历史窗口、动作解析、
-                          技能目录与全局 playbook 的拼接）
+                          技能目录与全局 playbook 的拼接）；playbook.py 该 benchmark
+                          的可学习 playbook 两件套：从 baseline 答卷提取事实、
+                          写作 prompt（插件用 `playbook_prompt_name` 与
+                          `playbook_facts` 声明）
   blocks/                 第 4 层：功能积木，一个文件一组相关积木
     execute.py            E1：按 benchmark 取插件执行
     tasks.py              D1 任务加载、D2 划分
@@ -183,6 +188,8 @@ src/expedistill/
     audit.py              D8 泄题审计
     adherence.py          技能适用性判定与遵循度判定（按轨迹，模型积木）
     curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
+    playbook.py           G13 写全局 playbook：用插件给的 prompt 名和事实文本
+                          调一次 author 模型，校验回复（与 benchmark 无关）
     retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
     attribution.py        G11 attempt 修订、G12 attempt 归因（live_run 验收的模型积木；
                           prompt 注册由 prompts/__init__ 全量负责，无需防御性 import）
@@ -250,6 +257,8 @@ src/expedistill/
     provenance.py         每个技能版本一条 Provenance 的账本：record_version（唯一
                           写入口，技能与来源一起落盘）、find_provenance、
                           check_provenance（learn 相位末与 exam 开考前的边界检查）
+    playbook_store.py     学出来的 playbook 落盘：`playbook.md` 写在 learn 相位
+                          目录里，之后的执行相位读最近一份
     skill_materialize.py  folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
                           从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
                           （带 YAML 头）并写 catalog.md 兜底；test 相位派发前
@@ -303,6 +312,9 @@ src/expedistill/
                           四种 role 各一个模块（`run_baseline` 摸底 / `run_exam`
                           泛化考试 / `run_live` 实战验收 / `run_test` 终测）
     phase_learn.py        learn 相位驱动（R9）：按 P02/P04/P06/exam 分流
+    learn_playbook.py     可学习 playbook 开关的执行：delivery 写了
+                          `playbook_source: learned` 时，baseline 之后的第一个
+                          learn 相位从 baseline 答卷写出 playbook.md（幂等）
     learn_add.py          P02 add 路径：切段、证据、写新 skill、回执；
                           author.name=cluster_by_trigger 时转交
                           learn_add_cluster

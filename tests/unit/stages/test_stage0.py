@@ -975,3 +975,71 @@ def test_pre_v4_run_directory_gets_the_maintenance_branch_hint(
         stage0_freeze.run(ctx)
     # Exactly the FIRST call's load: the refused resume loads nothing.
     assert plugin.load_specs == [["t1", "t2", "t3"]]
+
+
+# ---------------------------------------------------------------------------
+# The learned-playbook switch: frozen only when a delivery asks for it
+# ---------------------------------------------------------------------------
+
+def _learned_phases():
+    phases = copy.deepcopy(PHASES)
+    phases["test"]["delivery"] = {"name": "folder",
+                                  "playbook_source": "learned"}
+    phases["test"]["execution"] = {"name": "real_folder"}
+    return phases
+
+
+def test_a_learned_playbook_freezes_the_writer_prompt(monkeypatch, tmp_path):
+    class Plugin(StagePlugin):
+        playbook_prompt_name = "FAKE_PLAYBOOK_WRITE"
+        skill_folder_prompt_name = "FAKE_TASK_FOLDER"
+
+    _install_plugin(monkeypatch, Plugin())
+    for name in ("FAKE_PLAYBOOK_WRITE", "FAKE_TASK_FOLDER"):
+        monkeypatch.setitem(prompts.PROMPTS, name, PromptSpec(
+            name=name, template="x", description="test"))
+    ctx = make_ctx(tmp_path, make_config(phases=_learned_phases()))
+    stage0_freeze.run(ctx)
+    frozen = load_manifest(ctx.run_dir)["prompt_digests"]
+    assert frozen["FAKE_PLAYBOOK_WRITE"] == prompts.digest(
+        "FAKE_PLAYBOOK_WRITE")
+
+
+def test_the_writer_prompt_is_not_frozen_without_the_switch(
+        monkeypatch, tmp_path):
+    class Plugin(StagePlugin):
+        playbook_prompt_name = "FAKE_PLAYBOOK_WRITE"
+
+    _install_plugin(monkeypatch, Plugin())
+    monkeypatch.setitem(prompts.PROMPTS, "FAKE_PLAYBOOK_WRITE", PromptSpec(
+        name="FAKE_PLAYBOOK_WRITE", template="x", description="test"))
+    ctx = make_ctx(tmp_path, make_config())
+    stage0_freeze.run(ctx)
+    assert "FAKE_PLAYBOOK_WRITE" not in load_manifest(
+        ctx.run_dir)["prompt_digests"]
+
+
+def test_a_learned_playbook_on_a_plugin_without_the_capability_is_refused(
+        monkeypatch, tmp_path):
+    class Plugin(StagePlugin):
+        skill_folder_prompt_name = "FAKE_TASK_FOLDER"
+
+    _install_plugin(monkeypatch, Plugin())
+    monkeypatch.setitem(prompts.PROMPTS, "FAKE_TASK_FOLDER", PromptSpec(
+        name="FAKE_TASK_FOLDER", template="x", description="test"))
+    ctx = make_ctx(tmp_path, make_config(phases=_learned_phases()))
+    with pytest.raises(ConfigError, match="no learned-playbook capability"):
+        stage0_freeze.run(ctx)
+
+
+def test_an_unregistered_writer_prompt_is_refused(monkeypatch, tmp_path):
+    class Plugin(StagePlugin):
+        playbook_prompt_name = "FAKE_PLAYBOOK_MISSING"
+        skill_folder_prompt_name = "FAKE_TASK_FOLDER"
+
+    _install_plugin(monkeypatch, Plugin())
+    monkeypatch.setitem(prompts.PROMPTS, "FAKE_TASK_FOLDER", PromptSpec(
+        name="FAKE_TASK_FOLDER", template="x", description="test"))
+    ctx = make_ctx(tmp_path, make_config(phases=_learned_phases()))
+    with pytest.raises(ConfigError, match="playbook_prompt_name"):
+        stage0_freeze.run(ctx)

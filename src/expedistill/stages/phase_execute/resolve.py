@@ -28,6 +28,7 @@ from expedistill.methods.execution import (
     RealExecutionParams,
     RealFolderExecutionParams,
 )
+from expedistill.composites import playbook_store
 from expedistill.stages.context import StageContext
 
 __all__ = [
@@ -55,7 +56,8 @@ _ALLOWED_EXECUTION_PARAMS = {
 }
 
 
-def _resolve_delivery(spec: ExecutePhaseSpec) -> Tuple[Any, Any]:
+def _resolve_delivery(spec: ExecutePhaseSpec, ctx: Any = None,
+                      phase: Any = None) -> Tuple[Any, Any]:
     """(driver module, params) for the phase's delivery mapping: the
     registry's delivery family over the phase's OWN raw mapping (v4 --
     the ``name`` key plus that method's parameters).
@@ -66,8 +68,28 @@ def _resolve_delivery(spec: ExecutePhaseSpec) -> Tuple[Any, Any]:
     file path is repo-relative (the run scripts start in the repo root);
     an absolute path also works. No playbook key means the delivery is
     byte-identical to the pre-playbook behaviour.
+
+    ``playbook_source: learned`` reads the playbook an earlier learn phase
+    wrote (``ctx`` and ``phase`` locate it); a caller that has no run
+    context cannot ask for one.
     """
     delivery = dict(spec.delivery)
+    if delivery.get("playbook_source") and delivery.get("playbook_file"):
+        raise ConfigError(
+            "delivery sets playbook_source "
+            f"{delivery['playbook_source']!r} and also playbook_file; a "
+            "delivery has one playbook source")
+    if delivery.get("playbook_source") == "learned":
+        # The source key selects where the text comes from; once the text is
+        # injected as ``playbook`` the key must go, or the params check
+        # would see two playbook sources.
+        delivery.pop("playbook_source")
+        if ctx is None or phase is None:
+            raise ConfigError(
+                "playbook_source 'learned' needs the run context to find "
+                "the learned playbook; this caller has none")
+        delivery["playbook"] = playbook_store.load_learned_playbook(
+            ctx.run_dir, phase.index)
     playbook_file = delivery.get("playbook_file", "")
     playbook_sha = delivery.get("playbook_sha256", "")
     if playbook_file:

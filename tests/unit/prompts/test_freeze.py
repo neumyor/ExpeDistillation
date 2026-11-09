@@ -124,7 +124,8 @@ def test_each_benchmark_registers_only_prompts_its_plugin_declares():
     """Every prompt a benchmark registers must be in its frozen set.
 
     A plugin declares the prompts it runs under: ``task_prompt_name``, the
-    optional ``skill_folder_prompt_name`` and ``protocol_prompt_names``.
+    optional ``skill_folder_prompt_name``, ``protocol_prompt_names`` and the
+    optional ``playbook_prompt_name``.
     Stage 0 freezes exactly those. A registration outside the declared set
     would either miss the freeze or leak a benchmark-private prompt into
     every manifest of that benchmark.
@@ -139,6 +140,8 @@ def test_each_benchmark_registers_only_prompts_its_plugin_declares():
         if plugin.skill_folder_prompt_name is not None:
             declared.add(plugin.skill_folder_prompt_name)
         declared.update(plugin.protocol_prompt_names)
+        if plugin.playbook_prompt_name is not None:
+            declared.add(plugin.playbook_prompt_name)
         registered = set()
         for path in package.glob("*.py"):
             registered |= _registered_names(path)

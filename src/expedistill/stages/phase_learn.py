@@ -98,8 +98,8 @@ from expedistill.methods.curation import phase_bank as curation_phase_bank
 from expedistill.methods.review.contracts import ReviewContext, TrialFinding
 from expedistill.methods.review.driver import review
 from expedistill.stages import (
-    learn_add, learn_apply, learn_exam, learn_ledger, learn_requirement,
-    model_profile)
+    learn_add, learn_apply, learn_exam, learn_ledger, learn_playbook,
+    learn_requirement, model_profile)
 
 __all__ = ["run"]
 
@@ -136,6 +136,11 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     phase_dir.mkdir(parents=True, exist_ok=True)
     current_kind, current, control, compare_rule = _review_reports(
         ctx, names, specs, phase.index)
+    if current_kind is None and learn_playbook.requested(config):
+        # Switch: a delivery asked for ``playbook_source: learned``. The
+        # baseline report this phase reviews is the evidence.
+        learn_playbook.ensure_playbook(
+            ctx, phase, current, config.effective_weak_profile())
     current_pos = _current_execute_position(names, specs, phase.index)
     current_spec = specs[names[current_pos]]
     bank = _previous_bank(ctx, names, specs, phase.index)

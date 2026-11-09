@@ -100,7 +100,7 @@ def run_live(ctx: StageContext, phase: PhaseInstance,
               in {ids.make_task_id(benchmark, raw) for raw in phase.task_ids}}
 
     task_ids = sorted(groups)
-    delivery, delivery_params = resolve._resolve_delivery(spec)
+    delivery, delivery_params = resolve._resolve_delivery(spec, ctx, phase)
     rows = delivery.resolve(lm.pending_groups(store), task_ids,
                            delivery_params)
     if any(engine._folder_manifest_of(row) is not None for row in rows):

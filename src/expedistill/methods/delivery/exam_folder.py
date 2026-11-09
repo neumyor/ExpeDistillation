@@ -37,7 +37,8 @@ from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError
 from expedistill.inject import bank_reference
 from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
-from expedistill.methods.delivery import folder_delivery as folder, units
+from expedistill.methods.delivery import (
+    folder_delivery as folder, units, validate_playbook_source)
 
 __all__ = ["ExamFolderParams", "resolve"]
 
@@ -63,6 +64,7 @@ class ExamFolderParams:
     playbook: str = ""
     playbook_file: str = ""
     playbook_sha256: str = ""
+    playbook_source: str = ""
 
     def __post_init__(self) -> None:
         folder.validate_description_mode(self.description_mode)
@@ -71,6 +73,7 @@ class ExamFolderParams:
                 raise ConfigError(
                     f"methods.delivery.exam_folder {name} must be a string, "
                     f"got {type(getattr(self, name)).__name__}")
+        validate_playbook_source("methods.delivery.exam_folder", self)
 
 
 def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,

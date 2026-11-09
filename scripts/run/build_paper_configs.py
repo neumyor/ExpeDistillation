@@ -415,6 +415,10 @@ class Arm:
     #: exam_folder delivery in the run renders it above the card list
     #: (the 2026-11-04 P0 switch). None keeps the reference behaviour.
     playbook: Optional[str] = None
+    #: ``learned``: every folder and exam_folder delivery takes the playbook
+    #: the learn phase after the baseline writes from the baseline trials
+    #: (2026-11-05). Exclusive with ``playbook``.
+    playbook_source: Optional[str] = None
 
 
 def arms() -> List[Arm]:
@@ -466,6 +470,16 @@ def arms() -> List[Arm]:
             partial(full_method, k=k),
             benchmarks=("alfworld",),
             playbook=PLAYBOOK_FILE))
+    # Learned playbook (2026-11-05): the same delivery switch as e6, but the
+    # text is written by the learn phase after the baseline from the
+    # baseline trials instead of read from a hand-written file.
+    for k in (5, 3, 1):
+        out.append(Arm(
+            f"e7_learnedpb_k{k}", "e7",
+            f"reference + learned global playbook, K={k}",
+            partial(full_method, k=k),
+            benchmarks=("alfworld",),
+            playbook_source="learned"))
     # Coverage ablation (2026-11-04): the task gate stays ``any_weak_failed``
     # -- the library still targets failures -- but every trajectory and every
     # segment of the authorized tasks reaches the writer. Both switches are
@@ -633,6 +647,12 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
                     "folder", "exam_folder"):
                 delivery["playbook_file"] = arm.playbook
                 delivery["playbook_sha256"] = digest
+    if arm.playbook_source:
+        for spec in phases.values():
+            delivery = spec.get("delivery")
+            if isinstance(delivery, dict) and delivery.get("name") in (
+                    "folder", "exam_folder"):
+                delivery["playbook_source"] = arm.playbook_source
     unused = set(phases) - set(sequence)
     undefined = set(sequence) - set(phases)
     if unused or undefined:

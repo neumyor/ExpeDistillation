@@ -143,7 +143,7 @@ def run_exam(ctx: StageContext, phase: PhaseInstance,
               spec: ExecutePhaseSpec) -> Dict[str, Any]:
     """Run the generalization exam phase."""
     params = resolve._execution_params(spec)
-    delivery, delivery_params = resolve._resolve_delivery(spec)
+    delivery, delivery_params = resolve._resolve_delivery(spec, ctx, phase)
     rule_name = spec.acceptance or verdicts.default_verdict_rule("exam")
     if rule_name != "exam_judge":
         raise ConfigError(

@@ -106,8 +106,8 @@ def test_the_matrix_has_the_expected_files():
         rest = rest.removeprefix("v3_")
         by_prefix.setdefault(rest.split("_")[0], []).append((bench, name))
     assert {key: len(value) for key, value in by_prefix.items()} == {
-        "e1": 43, "e2": 13, "e3": 6, "e4": 18, "e5": 9, "e6": 3}
-    assert len(NAMES) == 92
+        "e1": 43, "e2": 13, "e3": 6, "e4": 18, "e5": 9, "e6": 3, "e7": 3}
+    assert len(NAMES) == 95
     # TB bare is the external campaign control, so only the local
     # benchmarks get a bare config.
     assert _name("tb21", "e1_bare") not in NAMES
@@ -457,6 +457,22 @@ def test_playbook_arm_adds_only_the_delivery_playbook(files):
         assert delivery["playbook_file"] == BUILDER.PLAYBOOK_FILE
         assert len(delivery["playbook_sha256"]) == 64
     assert p0["rules"] == ours["rules"]
+
+
+def test_learned_playbook_arm_adds_only_the_learned_source(files):
+    # 2026-11-05: the reference method; the folder and exam_folder
+    # deliveries ask for the playbook the learn phase writes.
+    ours = files[_name("alfworld", "e1_ours")]
+    learned = files[_name("alfworld", "e7_learnedpb_k5")]
+    assert _diff(learned, ours) == sorted([
+        "phases.exam.delivery.playbook_source",
+        "phases.test.delivery.playbook_source",
+    ])
+    for phase in ("exam", "test"):
+        delivery = learned["phases"][phase]["delivery"]
+        assert delivery["playbook_source"] == "learned"
+        assert "playbook_file" not in delivery
+    assert learned["rules"] == ours["rules"]
 
 
 @pytest.mark.parametrize("bench", BENCHMARKS)

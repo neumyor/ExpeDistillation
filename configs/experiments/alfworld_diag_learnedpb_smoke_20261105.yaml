@@ -1,0 +1,207 @@
+# Diagnostic: 2-task smoke for the learned playbook (playbook_source: learned). Not a paper arm.
+benchmark: alfworld
+invalid_redispatch_limit: 1
+mode: split
+model_options:
+  deepseek-v4-flash-0731-tencent:
+    reasoning_effort: max
+models:
+  answerer: qwen3.6-flash-distill
+  auditor: deepseek-v4-flash-0731-tencent
+  author: deepseek-v4-flash-0731-tencent
+  curator: deepseek-v4-flash-0731-tencent
+  examiner: deepseek-v4-flash-0731-tencent
+  executor_strong: deepseek-v4-flash-0731-tencent
+  executor_weak: qwen3.6-flash-distill
+  judge: deepseek-v4-flash-0731-tencent
+  rewriter: deepseek-v4-flash-0731-tencent
+  segmenter: deepseek-v4-flash-0731-tencent
+n_attempts_strong: 3
+n_attempts_weak: 3
+phases:
+  baseline:
+    acceptance: null
+    compare: null
+    delivery:
+      name: none
+    execution:
+      arms:
+      - executor_strong
+      - executor_weak
+      name: real
+    kind: execute
+    role: baseline
+    tasks: train
+  exam:
+    acceptance: null
+    compare: null
+    delivery:
+      description_mode: summary_then_when_to_use
+      name: exam_folder
+      playbook_source: learned
+    execution:
+      bare_control: false
+      leak_audit: false
+      max_skill_reads: 3
+      name: exam
+    kind: execute
+    role: exam
+    tasks: train
+  learn:
+    author:
+      classify_retry_limit: 2
+      cluster_retry_limit: 2
+      max_cards_per_prompt: 40
+      max_chars_per_card: 1200
+      min_cluster_size: 1
+      name: cluster_by_trigger
+      skill_retry_limit: 2
+    curate:
+      drop_low_value: false
+      grouping_input: full
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      similarity_input: summary
+      token_budget: null
+    kind: learn
+    review:
+      K: 5
+      after_steps: 10
+      before_steps: 10
+      decision: trial_level
+      name: review
+      retry_limit: 2
+      unread_in_won_group: delete
+      write_lessons: true
+    role: learn
+  learn_add:
+    author:
+      classify_retry_limit: 2
+      cluster_retry_limit: 2
+      max_cards_per_prompt: 40
+      max_chars_per_card: 1200
+      min_cluster_size: 1
+      name: cluster_by_trigger
+      skill_retry_limit: 2
+    curate:
+      drop_low_value: false
+      grouping_input: full
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      similarity_input: summary
+      token_budget: null
+    kind: learn
+    review:
+      K: 3
+      after_steps: 10
+      before_steps: 10
+      decision: skill_level
+      name: review
+      retry_limit: 2
+      unread_in_won_group: delete
+      write_lessons: true
+    role: learn
+  learn_trial:
+    author:
+      classify_retry_limit: 2
+      cluster_retry_limit: 2
+      max_cards_per_prompt: 40
+      max_chars_per_card: 1200
+      min_cluster_size: 1
+      name: cluster_by_trigger
+      skill_retry_limit: 2
+    curate:
+      drop_low_value: false
+      grouping_input: full
+      merge_check: none
+      name: agentbrew
+      rounds: 3
+      similarity_input: summary
+      token_budget: null
+    kind: learn
+    review:
+      K: 5
+      after_steps: 10
+      before_steps: 10
+      decision: trial_level
+      name: review
+      retry_limit: 2
+      unread_in_won_group: delete
+      write_lessons: true
+    role: learn
+  test:
+    acceptance: null
+    compare:
+      against: external_campaign
+      external:
+        model_key: qwen3.6-flash-distill
+        path: ../seed/alfworld_bare_q_20261102.json
+        sha256: df45c9b744d27db3f48116a8f69a1f6dba68aa9f340f9c1e14f3ab67cb4990c5
+      rule: null
+    delivery:
+      description_mode: summary_then_when_to_use
+      name: folder
+      playbook_source: learned
+    execution:
+      name: real_folder
+    kind: execute
+    role: test
+    tasks: test
+rules:
+  segment_select: strong_success_weak_failed
+  task_select: any_weak_failed
+  trajectory_select: strong1_weak1
+schema_version: 7
+sequence:
+- baseline
+- learn_add
+- exam
+- learn
+- exam
+- learn_trial
+- test
+split:
+  test:
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222917_366542/game.tw-pddl
+  - json_2.1.1/valid_unseen/look_at_obj_in_light-AlarmClock-None-DeskLamp-308/trial_T20190908_222933_607649/game.tw-pddl
+  train:
+  - json_2.1.1/train/pick_cool_then_place_in_recep-Bread-None-CounterTop-15/trial_T20190909_085448_256298/game.tw-pddl
+  - json_2.1.1/train/pick_clean_then_place_in_recep-Kettle-None-Cabinet-2/trial_T20190909_043103_418752/game.tw-pddl
+token_budgets:
+  default_max_output_tokens: 65536
+  max_input_tokens: null
+  roles:
+    answerer:
+      max_input_tokens: 262144
+      max_output_tokens: 65536
+    auditor:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    author:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    curator:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    examiner:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    executor_strong:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    executor_weak:
+      max_input_tokens: 262144
+      max_output_tokens: 65536
+    judge:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    rewriter:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+    segmenter:
+      max_input_tokens: 524288
+      max_output_tokens: 65536
+use_weak_profile: true
+weak_profile_file: ../profiles/alfworld_unified_memory_20261103.md

@@ -30,6 +30,8 @@ PROFILE_ROLES = {
     "merged_skill_reader": ("THE MODEL THAT WILL READ THE MERGED SKILL "
                             "(weak model profile):"),
     "task_executor": "THE MODEL THAT EXECUTED THE TASK (weak model profile):",
+    "playbook_reader": ("THE MODEL THAT WILL PLAY WITH THIS PLAYBOOK IN VIEW "
+                        "AT EVERY STEP (weak model profile):"),
 }
 
 #: The no-profile section: no capability claims, no invented weaknesses.

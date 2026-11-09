@@ -108,6 +108,7 @@ from expedistill.methods.review import MIN_TRIAL_LEVEL_INPUT_TOKENS
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import write_json
+from expedistill.stages import learn_playbook
 from expedistill.stages.context import StageContext
 
 __all__ = ["run"]
@@ -219,7 +220,9 @@ def _check_split_covers_task_set(config: Any, tasks: Sequence[Task]) -> None:
             f"not listed: {unlisted}")
 
 
-def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
+def _prompt_digests(benchmark: str, *,
+                    learned_playbook: bool = False
+                    ) -> Dict[str, Optional[str]]:
     """EVERY registered method prompt plus exactly this benchmark's task
     prompt -- the v3 full freeze (the plan's section 5).
 
@@ -258,6 +261,20 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
                 "-- the runner's other prompts are part of the frozen "
                 "protocol, so the plugin and its registration disagree")
         names.add(extra)
+    if learned_playbook:
+        # Frozen only when a delivery asks for a learned playbook, so a
+        # manifest that never uses the capability keeps its old digests.
+        writer = plugin.playbook_prompt_name
+        if writer is None:
+            raise ConfigError(
+                f"benchmark {benchmark!r} has no learned-playbook "
+                "capability (playbook_prompt_name is None) but the config "
+                "sets playbook_source 'learned'")
+        if writer not in prompts.PROMPTS:
+            raise ConfigError(
+                f"benchmark {benchmark!r} declares playbook_prompt_name "
+                f"{writer!r} but no prompt of that name is registered")
+        names.add(writer)
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
@@ -273,7 +290,9 @@ def build_manifest(config: Any, tasks: Sequence[Any], *,
     diff a source run against before assembling (ruling 4's whitelist
     walk) -- one assembly, so the two can never drift apart.
     """
-    prompt_digests = _prompt_digests(config.benchmark)
+    prompt_digests = _prompt_digests(
+        config.benchmark,
+        learned_playbook=learn_playbook.requested(config))
     frozen_config = dataclasses.replace(
         config, prompts_digests=prompt_digests)
     return {

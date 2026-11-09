@@ -5,6 +5,7 @@ stage 0 can validate them before anything freezes.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from expedistill.core.config import ConfigError
 from expedistill.inject.skill_text import (
@@ -13,7 +14,8 @@ from expedistill.inject.skill_text import (
 )
 
 __all__ = ["ExamFolderParams", "FolderParams", "GroupByTaskParams",
-           "NoneParams", "RetrievalParams", "WholeBankParams"]
+           "NoneParams", "PLAYBOOK_SOURCES", "RetrievalParams",
+           "WholeBankParams", "validate_playbook_source"]
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,22 @@ class WholeBankParams:
     """
 
     verbatim: bool = False
+
+
+PLAYBOOK_SOURCES = ("", "learned")
+
+
+def validate_playbook_source(where: str, params: Any) -> None:
+    """``playbook_source`` is empty or ``learned``, and a learned playbook
+    cannot be combined with a playbook file (two sources, one slot)."""
+    if params.playbook_source not in PLAYBOOK_SOURCES:
+        raise ConfigError(
+            f"{where} playbook_source must be one of {PLAYBOOK_SOURCES}, "
+            f"got {params.playbook_source!r}")
+    if params.playbook_source and (params.playbook_file or params.playbook):
+        raise ConfigError(
+            f"{where} sets playbook_source {params.playbook_source!r} and "
+            "also a playbook file; a delivery has one playbook source")
 
 
 @dataclass(frozen=True)
@@ -56,6 +74,9 @@ class FolderParams:
     #: drivers read only ``playbook``.
     playbook_file: str = ""
     playbook_sha256: str = ""
+    #: ``learned`` takes the playbook from the earlier learn phase that
+    #: wrote one (stages/learn_playbook.py) instead of from a file.
+    playbook_source: str = ""
 
     def __post_init__(self) -> None:
         if self.description_mode not in DESCRIPTION_MODES:
@@ -67,6 +88,7 @@ class FolderParams:
                 raise ConfigError(
                     f"methods.delivery.folder {name} must be a string, got "
                     f"{type(getattr(self, name)).__name__}")
+        validate_playbook_source("methods.delivery.folder", self)
 
 
 @dataclass(frozen=True)

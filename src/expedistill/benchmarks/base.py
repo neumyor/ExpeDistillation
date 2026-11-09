@@ -29,8 +29,9 @@ import os
 import signal
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
+from expedistill.core.answer_sheet import AnswerSheet
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
 from expedistill.prompts.learning_context import GENERIC, LearningContext
@@ -41,6 +42,7 @@ __all__ = [
     "Task",
     "RunOutcome",
     "ViewRules",
+    "PlaybookRequirement",
     "BaseEnv",
     "BenchmarkPlugin",
     "environment_call",
@@ -98,6 +100,29 @@ class RunOutcome:
             raise CodeBugError(
                 f"RunOutcome.correctness must be True, False or None, got "
                 f"{self.correctness!r}")
+
+
+@dataclass(frozen=True)
+class PlaybookRequirement:
+    """One machine check on a written playbook.
+
+    ``describe`` is what the writer is told when the check fails, so it has
+    to name the missing part in the writer's own terms ("part 3 must say
+    the walk is one-way"), not in the checker's. ``matches`` sees the
+    extracted playbook text and returns whether the requirement is met.
+    """
+
+    name: str
+    describe: str
+    matches: Callable[[str], bool]
+
+    def __post_init__(self) -> None:
+        if not self.name or not self.describe:
+            raise ConfigError("a PlaybookRequirement needs a name and a "
+                              "description for the writer")
+        if not callable(self.matches):
+            raise ConfigError(
+                f"playbook requirement {self.name!r} has no matches()")
 
 
 @dataclass(frozen=True)
@@ -370,6 +395,43 @@ class BenchmarkPlugin(abc.ABC):
     #: wording. It is part of the experiment identity: stage 0 freezes its
     #: digest.
     learning_context: LearningContext = GENERIC
+
+    #: Learned-playbook capability: the B2 name of the prompt that writes
+    #: this benchmark's global playbook from baseline trial facts, or None
+    #: (the default) when the benchmark has none. A plugin that declares it
+    #: must also (a) override :meth:`playbook_facts` and (b) render the
+    #: delivery manifest's ``playbook_text`` in its runner, because a
+    #: playbook the runner never shows is a silent no-op. Stage 0 refuses a
+    #: config that asks for a learned playbook on a plugin without it.
+    #: The prompt's variables are ``facts``, ``profile_section`` and
+    #: ``correction_note``; its output contract is the one
+    #: ``blocks/playbook.extract_playbook`` reads.
+    playbook_prompt_name: Optional[str] = None
+
+    def playbook_facts(self, sheets: Sequence[AnswerSheet]) -> str:
+        """The benchmark-specific facts the playbook writer reads.
+
+        ``sheets`` are the baseline phase's trial-level answer sheets (both
+        arms, every attempt). The default refuses: a plugin without the
+        capability is never asked, and a plugin that declares
+        ``playbook_prompt_name`` must override this.
+        """
+        raise ConfigError(
+            f"benchmark {self.name!r} declares no learned-playbook "
+            "capability (playbook_prompt_name is None)")
+
+    def playbook_requirements(self) -> Sequence["PlaybookRequirement"]:
+        """What the written playbook must contain, as machine checks.
+
+        The write is one model call, and the same facts can produce a
+        complete playbook or a partial one; these checks turn "the writer
+        forgot part 3" into a reason to write again instead of a silent
+        quality difference between runs. Each requirement is checked
+        against the extracted text; the missing ones go back to the writer
+        as the correction note. Empty by default: a plugin that declares no
+        requirements gets the old single-attempt behaviour.
+        """
+        return ()
 
     def aux_success(self, traj: Trajectory) -> Optional[bool]:
         """Auxiliary success of one trajectory.

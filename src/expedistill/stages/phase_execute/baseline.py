@@ -42,7 +42,7 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
     # 1. RESOLVE PARAMETERS
     # ========================================================================
     params = resolve._execution_params(spec)
-    delivery, delivery_params = resolve._resolve_delivery(spec)
+    delivery, delivery_params = resolve._resolve_delivery(spec, ctx, phase)
     rule_name = resolve._resolve_verdict_rule(spec, ctx.config.benchmark)
     limit = resolve._redispatch_limit(ctx)
 
