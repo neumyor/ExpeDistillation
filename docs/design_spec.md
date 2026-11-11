@@ -1107,7 +1107,10 @@ curation 的合并产物不考（整理阶段的合并回归考试复用各源�
   （与 `playbook_file` 互斥）：baseline 之后的第一个 learn 相位用插件的
   `playbook_facts` 和 `playbook_prompt_name` 从 baseline 答卷写出
   `playbook.md`，之后的执行相位读最近的一份（2026-11-05；
-  `docs/decisions/learned_playbook_20261105.md`）。第一轮任务提示词由
+  `docs/decisions/learned_playbook_20261105.md`）。**TB 的 playbook**：交付清单里的
+`playbook_text` 由插件渲染成 `TB_TASK_PROMPT_READ_PLAYBOOK`（playbook + skill-read 文本），上传为任务目录
+的 `SKILL_READ_SUFFIX.md`；vendor 的 `TencentSkillTerminus2` 有这个文件就用它代替内置 suffix，所以 playbook
+出现在首轮提示词里、任务描述之后（`docs/decisions/tb_playbook_in_read_suffix_20261111.md`）。第一轮任务提示词由
   Harbor/Terminus 自己拼；远端部署的 `Terminus2._build_skills_section`
   会扫描 `skills_dir` 下深度 2 的 `SKILL.md`，解析 YAML 头，把技能名、
   描述和完整路径生成 `<available_skills>` 放进首轮提示词。因此

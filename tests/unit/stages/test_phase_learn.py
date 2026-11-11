@@ -1181,7 +1181,8 @@ LEARNED = "Search every place once. " * 20
 
 
 class _PlaybookPlugin:
-    """The TB plugin with the learned-playbook capability switched on."""
+    """The TB plugin with a fake learned-playbook capability: its own facts and
+    no requirement checks."""
 
     playbook_prompt_name = "ALFWORLD_PLAYBOOK_WRITE"
 
@@ -1192,6 +1193,9 @@ class _PlaybookPlugin:
     def playbook_facts(self, sheets):
         self.sheet_counts.append(len(sheets))
         return "BASELINE FACTS"
+
+    def playbook_requirements(self):
+        return ()
 
     def __getattr__(self, name):
         return getattr(self._real, name)

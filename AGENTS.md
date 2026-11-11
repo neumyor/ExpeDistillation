@@ -166,7 +166,11 @@ src/expedistill/
     registry.py           按名字取插件
     tb/                   TB runner（远程 Harbor）+ 任务加载 + 截断规则 + 执行 prompt：
                           plugin.py 插件；remote.py 远程主机与 Harbor 调用；
-                          trajectory.py 从 Harbor 的 trajectory.json 重建逐步轨迹
+                          trajectory.py 从 Harbor 的 trajectory.json 重建逐步轨迹；
+                          skill_read.py skill-read suffix 的具名 prompt 与渲染
+                          （带 playbook 时放在 suffix 前面，由插件上传为任务目录的
+                          SKILL_READ_SUFFIX.md）；playbook.py 该 benchmark 的可学习
+                          playbook 两件套（baseline 事实提取、写作 prompt、必备部分检查）
     searchqa/             适配外层 benchmark/searchqa-eval/：plugin.py 插件；
                           env.py 评测环境与判分器的加载
     alfworld/             适配外层 benchmark/alfworld-eval/：plugin.py 插件；

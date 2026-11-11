@@ -177,7 +177,9 @@ phases:
 两种来源只改变 prompt 里的常驻文本，技能的学习、检验、整理流程不变。不写这两个键时，
 manifest 与 prompt 逐字节不变。学习来源只读训练集的摸底轨迹，不使用测试集信息。
 对应配置：`alfworld_split_paper_v3_e6_playbook_k*`（手写）与
-`alfworld_split_paper_v3_e7_learnedpb_k*`（学习）。设计与取舍见
+`alfworld_split_paper_v3_e7_learnedpb_k*`（学习）。TB 2.1 的版本是 `tb21_v7_playbook_20261111`（学习）与
+`tb21_v7_playbook_nopb_20261111`（同库、test 不带 playbook 的对照）：playbook 作为 skill-read suffix
+的前半段进入首轮提示词（`docs/decisions/tb_playbook_in_read_suffix_20261111.md`）。设计与取舍见
 `docs/decisions/global_playbook_p0_20261104.md` 与
 `docs/decisions/learned_playbook_20261105.md`。
 

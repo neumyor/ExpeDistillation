@@ -140,7 +140,16 @@ from typing import Any, Dict, List, Mapping, NoReturn, Optional, Sequence, Tuple
 
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.tb.learning import TB_CONTEXT
+from expedistill.benchmarks.tb.playbook import (
+    PLAYBOOK_PROMPT_NAME,
+    facts_from_sheets,
+    playbook_requirements,
+)
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
+from expedistill.benchmarks.tb.skill_read import (
+    READ_SUFFIX_FILENAME,
+    render_read_suffix,
+)
 from expedistill.benchmarks.tb.trajectory import (
     reconstruct_skip_counts,
     reconstruct_steps,
@@ -609,6 +618,19 @@ _FOLDER_MANIFEST_KEY = "skill_folder"
 _FOLDER_DIR_KEY = "skill_folder_dir"
 
 
+def _read_suffix_of(manifest: Dict[str, Any]) -> Optional[str]:
+    """The skill-read suffix a folder unit uploads, or None.
+
+    Only a manifest that carries a playbook has one: without a playbook the
+    vendored agent's built-in suffix (byte-identical to
+    ``TB_TASK_PROMPT_READ``) applies, so nothing extra is uploaded and the
+    run's conditions stay what they were before playbooks existed."""
+    playbook = manifest.get("playbook_text")
+    if not isinstance(playbook, str) or not playbook.strip():
+        return None
+    return render_read_suffix(playbook)
+
+
 def _folder_of(task: Task) -> Optional[Tuple[Dict[str, Any], Path]]:
     """A folder unit's (manifest, materialized local directory), or None.
 
@@ -710,8 +732,20 @@ class TBPlugin(BenchmarkPlugin):
     # materialized folder into the sandbox through the skills-mode
     # directory (the module docstring's submission design).
     skill_folder_prompt_name = "TB_TASK_PROMPT_FOLDER"
+    #: Learned-playbook capability: ``tb/playbook.py`` holds the writing
+    #: prompt; the folder unit's playbook reaches the agent as the front of
+    #: the skill-read suffix (``tb/skill_read.py``).
+    playbook_prompt_name = PLAYBOOK_PROMPT_NAME
+    protocol_prompt_names = ("TB_TASK_PROMPT_READ",
+                             "TB_TASK_PROMPT_READ_PLAYBOOK")
     verdict_rule = "tb_scorer"
     learning_context = TB_CONTEXT
+
+    def playbook_facts(self, sheets):
+        return facts_from_sheets(sheets)
+
+    def playbook_requirements(self):
+        return playbook_requirements()
 
     def __init__(self,
                  *,
@@ -805,8 +839,10 @@ class TBPlugin(BenchmarkPlugin):
         if folder is not None:
             skill_md = TB_SKILL_FOLDER_GUIDANCE
             folder_prompt_name = self.skill_folder_prompt_name
+            read_suffix = _read_suffix_of(folder[0])
         else:
             skill_md = skills_block
+            read_suffix = None
             folder_prompt_name = self.task_prompt_name
         poll_seconds = _env_float(POLL_ENV, DEFAULT_POLL_SECONDS,
                                   self._poll_seconds)
@@ -833,9 +869,12 @@ class TBPlugin(BenchmarkPlugin):
             eval_mode, skill_meta = self._skill_plan(root, run_id, task_name,
                                                      skill_md, folder)
             meta.update(skill_meta)
+            if read_suffix is not None:
+                meta["read_suffix_uploaded"] = True
             record_file = workdir / _RECORD_DIR / f"{run_id}.json"
             conditions = self._conditions(
-                run_id, eval_mode, skill_md, folder, max_input_tokens)
+                run_id, eval_mode, skill_md, folder, max_input_tokens,
+                read_suffix)
             record = self._read_record(record_file, run_id)
             recorded_pid = record.get("pid") if record else None
             # The pre-submit probe is a connection too: gate it with the
@@ -871,7 +910,8 @@ class TBPlugin(BenchmarkPlugin):
                 with _UPLOAD_GATE:
                     self._upload_launch_files(link, root, run_id, skill_meta,
                                               task_name, skill_md, workdir,
-                                              conditions, folder)
+                                              conditions, folder,
+                                              read_suffix)
                     pid = self._submit(link, root, run_id, task_name,
                                        model_name, eval_mode,
                                        skill_meta.get("remote_skill_root"),
@@ -1107,8 +1147,8 @@ class TBPlugin(BenchmarkPlugin):
                              skill_meta: Dict[str, Any], task_name: str,
                              skill_md: str, workdir: Path,
                              conditions: Dict[str, Any],
-                             folder: Optional[Tuple[Dict[str, Any], Path]]
-                             ) -> None:
+                             folder: Optional[Tuple[Dict[str, Any], Path]],
+                             read_suffix: Optional[str] = None) -> None:
         """Fresh launches only: upload the run's SKILL.md (the D9 block
         verbatim, or the folder guidance for a folder unit; the remote
         skill agent wraps it into the agent's task prompt), a folder
@@ -1139,6 +1179,20 @@ class TBPlugin(BenchmarkPlugin):
             if alias_file:
                 link.put(str(local), alias_file,
                          timeout=SUBMIT_TIMEOUT_SECONDS)
+            if read_suffix is not None:
+                # The vendored agent reads this file in place of its
+                # built-in skill-read suffix (see tb/skill_read.py).
+                local_suffix = local.parent / READ_SUFFIX_FILENAME
+                local_suffix.write_text(read_suffix, encoding="utf-8")
+                link.put(str(local_suffix),
+                         str(Path(skill_meta["remote_skill_file"]).parent
+                             / READ_SUFFIX_FILENAME),
+                         timeout=SUBMIT_TIMEOUT_SECONDS)
+                if alias_file:
+                    link.put(str(local_suffix),
+                             str(Path(alias_file).parent
+                                 / READ_SUFFIX_FILENAME),
+                             timeout=SUBMIT_TIMEOUT_SECONDS)
             if folder is not None:
                 self._upload_folder_files(link, root, run_id, skill_meta,
                                           task_name, folder)
@@ -1259,7 +1313,8 @@ class TBPlugin(BenchmarkPlugin):
 
     def _conditions(self, run_id: str, eval_mode: str, skill_md: str,
                     folder: Optional[Tuple[Dict[str, Any], Path]],
-                    max_input_tokens: int) -> Dict[str, Any]:
+                    max_input_tokens: int,
+                    read_suffix: Optional[str] = None) -> Dict[str, Any]:
         """What the launch of ``run_id`` depends on beyond the run id:
         the forwarded runner knobs, the context ceiling and the uploaded
         content's bytes.
@@ -1287,6 +1342,8 @@ class TBPlugin(BenchmarkPlugin):
                     str(manifest.get("description_mode")),
                     _folder_dir_digest(folder_dir, names),
                 ])
+                if read_suffix is not None:
+                    digest_payload += "\n" + read_suffix
             skill_digest = hashlib.sha256(
                 digest_payload.encode("utf-8")).hexdigest()
         return {
