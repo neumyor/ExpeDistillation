@@ -61,7 +61,7 @@ rsync -az --delete \
 
 "${SSH[@]}" "$EXPEDISTILL_TB_HOST" bash -s "$REMOTE_DIR" "$COMMIT" "$DIRTY_B64" <<'REMOTE'
 set -euo pipefail
-dir="$1"; commit="$2"; dirty_note="$(printf '%s' "$3" | base64 -d)"
+dir="$1"; commit="$2"; dirty_note="$(printf '%s' "${3:-}" | base64 -d)"
 cd "$dir"
 if [[ ! -x .venv/bin/python ]]; then
     python3 -m venv .venv
