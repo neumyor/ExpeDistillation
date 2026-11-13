@@ -1,15 +1,16 @@
-"""Skill text fields shared by the folder delivery and its materializer.
+"""The only renderers of a skill's text (layer 1, pure functions).
 
-The catalog line and the SKILL.md YAML ``description`` must be derived
-from the same skill text, but the delivery (layer 6) and the folder
-materializer (layer 5) sit on opposite sides of the layer rule: the
-composite may not import the methods layer. This module keeps the two
-derivations in one place, below both.
+A skill is stored as fields (``core.models.Skill``); every consumer that
+needs one block of skill text -- injection, SKILL.md, the learn phase's
+writer inputs, judges -- calls ``render_card``, and every catalog line or SKILL.md
+``description`` comes from ``description_text``. The folder delivery
+(layer 6) and the folder materializer (layer 5) both import from here,
+below both.
 
 The description mode is the operator's choice:
 
 - ``summary``: the skill's one-line WHAT sentence;
-- ``when_to_use``: the ``[When to use]`` section body;
+- ``when_to_use``: the ``when_to_use`` field;
 - ``summary_then_when_to_use``: the summary followed by the trigger.
 
 A missing preferred field falls back to the other one, then to an
@@ -23,17 +24,22 @@ import re
 from collections.abc import Mapping
 from typing import Any, Union
 
-from expedistill.core.models import SKILL_MARKERS
-
 __all__ = [
     "DEFAULT_DESCRIPTION_MODE",
     "DESCRIPTION_MODES",
     "SKILL_DESCRIPTION_MAX_CHARS",
+    "SKILL_MARKERS",
     "description_text",
+    "normalize_newlines",
+    "normalize_step",
     "one_line",
+    "render_card",
     "validate_description_mode",
     "when_to_use_line",
 ]
+
+#: The section headers of a rendered card, in order.
+SKILL_MARKERS = ("[When to use]", "[Steps]", "[Do not use when]")
 
 #: The three supported composition rules.
 DESCRIPTION_MODES = (
@@ -49,9 +55,6 @@ DEFAULT_DESCRIPTION_MODE = "summary_then_when_to_use"
 #: The Agent Skills format's hard ceiling for one description.
 SKILL_DESCRIPTION_MAX_CHARS = 1024
 
-#: The section marker whose body says WHEN the skill applies.
-_WHEN_TO_USE = SKILL_MARKERS[0]
-
 #: The separator between the summary and the trigger in the combined
 #: mode. Kept explicit so the catalog and SKILL.md stay readable. A
 #: trigger that already opens with "Use when" is joined with a space:
@@ -59,12 +62,27 @@ _WHEN_TO_USE = SKILL_MARKERS[0]
 _TRIGGER_JOINER = " Use when: "
 _TRIGGER_PREFIXES = ("use when", "use this when", "use it when")
 
+#: A step's own "1. " / "12) " prefix: the renderer numbers the steps, so
+#: a stray self-numbering is stripped rather than double-numbered.
+_SELF_NUMBERING_RE = re.compile(r"^\s*\d+[.)]\s+")
+
 
 def one_line(text: str) -> str:
     """Collapse every whitespace run (newlines included) to one space."""
     if not isinstance(text, str):
         return ""
     return re.sub(r"\s+", " ", text).strip()
+
+
+def normalize_newlines(value: str) -> str:
+    """``value`` with CRLF and lone CR newlines normalized to ``\\n``."""
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def normalize_step(item: str) -> str:
+    """One step as stored and rendered: newlines normalized, a stray
+    leading "1. " / "12) " removed, outer whitespace stripped."""
+    return _SELF_NUMBERING_RE.sub("", normalize_newlines(item)).strip()
 
 
 def _field(record: Union[Any, Mapping[str, Any]], name: str,
@@ -75,30 +93,41 @@ def _field(record: Union[Any, Mapping[str, Any]], name: str,
     return getattr(record, name, default)
 
 
-def when_to_use_line(content: str) -> str:
-    """The ``[When to use]`` section body as one line, '' when absent.
+def render_card(record: Union[Any, Mapping[str, Any]]) -> str:
+    """The skill's full text, as the executor sees it when it opens it.
 
-    The section body runs from the marker line's remainder (the
-    renderer puts the first sentence on the marker line) to the next
-    section marker or the end of the content.
+    An imported skill renders its ``verbatim_text``. Every other skill
+    renders as::
+
+        [When to use] {when_to_use}
+        [Steps]
+        1. {steps[0]}
+        2. {steps[1]}
+        [Do not use when] {not_applicable_when}
+
+    A multi-line step keeps its continuation lines at column 0. Accepts a
+    Skill or a bank row mapping.
     """
-    if not isinstance(content, str):
-        return ""
-    body = []
-    in_section = False
-    for line in content.splitlines():
-        if in_section and any(line.startswith(section_marker)
-                              for section_marker in SKILL_MARKERS):
-            break
-        if not in_section:
-            if line.startswith(_WHEN_TO_USE):
-                in_section = True
-                body.append(line[len(_WHEN_TO_USE):])
-            continue
-        body.append(line)
-    if not in_section:
-        return ""
-    return one_line(" ".join(body))
+    verbatim = _field(record, "verbatim_text", "") or ""
+    if verbatim:
+        return verbatim
+    (use_marker, steps_marker, close_marker) = SKILL_MARKERS
+    items = [f"{index}. {normalize_step(item)}"
+             for index, item in enumerate(_field(record, "steps", ()), 1)]
+    when_to_use = normalize_newlines(_field(record, "when_to_use", "")).strip()
+    not_applicable = normalize_newlines(
+        _field(record, "not_applicable_when", "")).strip()
+    return "\n".join([
+        f"{use_marker} {when_to_use}",
+        steps_marker,
+        *items,
+        f"{close_marker} {not_applicable}",
+    ])
+
+
+def when_to_use_line(record: Union[Any, Mapping[str, Any]]) -> str:
+    """The skill's ``when_to_use`` field as one line, '' when empty."""
+    return one_line(_field(record, "when_to_use", "") or "")
 
 
 def validate_description_mode(mode: str) -> str:
@@ -121,7 +150,7 @@ def description_text(record: Union[Any, Mapping[str, Any]],
     validate_description_mode(mode)
     skill_id = str(_field(record, "skill_id", "") or "unknown")
     summary = one_line(_field(record, "summary", "") or "")
-    trigger = when_to_use_line(_field(record, "content", "") or "")
+    trigger = when_to_use_line(record)
 
     if mode == "summary":
         text = summary or trigger

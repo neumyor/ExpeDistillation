@@ -286,7 +286,7 @@ def test_k1_stores_the_unscored_unit_and_continues(monkeypatch, tmp_path):
     store = Store(tmp_path / "run")
     try:
         trajectories = batch_execute(
-            store=store, benchmark=name,
+            store=store, phase_label="p01:baseline", benchmark=name,
             tasks=[Task(task_id="empty", instruction="empty"),
                    Task(task_id="fine", instruction="fine")],
             role="weak", model_name="m",

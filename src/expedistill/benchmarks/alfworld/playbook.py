@@ -1,7 +1,7 @@
-"""ALFWorld's learned-playbook pieces: baseline facts and the writing prompt.
+"""ALFWorld's playbook pieces: baseline facts and the update prompt.
 
-The generic pipeline (``blocks/playbook.py``, ``stages/learn_playbook.py``)
-knows nothing about ALFWorld. This module is what the plugin hands it:
+The generic playbook evolution (``methods/evolve_text``) knows nothing about
+ALFWorld. This module is what the prompt pack hands it:
 
 * :func:`facts_from_sheets` turns the baseline phase's trial-level answer
   sheets into the text the writer reads. Per task type: how often each arm
@@ -12,8 +12,9 @@ knows nothing about ALFWorld. This module is what the plugin hands it:
   and of a failing trial. Across all trials: how often a ``go to`` returned
   to a place already visited and how far apart those visits were, which is
   what tells the writer whether a rule keyed on memory can be followed;
-* ``ALFWORLD_PLAYBOOK_WRITE`` is the prompt that turns those facts into the
-  global playbook.
+* ``ALFWORLD_PLAYBOOK_UPDATE`` replaces the method's ``PLAYBOOK_UPDATE``
+  (the pack's ``overrides``): the same placeholders, plus the guidance on
+  reading these facts and the labelled parts the checks require.
 
 Only train-split baseline sheets reach this code, so nothing about the test
 tasks can leak into the playbook.
@@ -30,17 +31,17 @@ from expedistill.prompts.registry import PromptSpec, register
 __all__ = ["PLAYBOOK_PROMPT_NAME", "facts_from_sheets",
            "playbook_requirements"]
 
-PLAYBOOK_PROMPT_NAME = "ALFWORLD_PLAYBOOK_WRITE"
+PLAYBOOK_PROMPT_NAME = "ALFWORLD_PLAYBOOK_UPDATE"
 
-#: The six parts the writing prompt asks for, each labelled in the text so
-#: a missing part is checkable instead of a judgement call.
+#: The parts the update prompt asks for, each labelled in the text so a
+#: missing part is checkable instead of a judgement call.
 REQUIRED_LABELS = (
     ("format", "## format",
      "state the reply format and that the action comes from the admissible "
      "list"),
-    ("recipes", "## recipes",
-     "give one recipe per task type, from finding the object to the final "
-     "placement"),
+    ("skills", "## skills",
+     "tell the reader to open a skill card whenever its situation matches "
+     "the card's when-to-use line"),
     ("search order", "## search order",
      "give the place-kind order per task type and the rule for the next "
      "go-to"),
@@ -58,9 +59,9 @@ REQUIRED_LABELS = (
 def playbook_requirements() -> Sequence[PlaybookRequirement]:
     """ALFWorld's machine checks on a written playbook.
 
-    Five of the six are the labelled parts the prompt demands; the identity
-    part also has to be symmetric, because that is the whole point of the
-    rule (a one-directional pair is a pair of examples, not a rule).
+    Each is a labelled part the prompt demands; the identity part also has
+    to be symmetric, because that is the whole point of the rule (a
+    one-directional pair is a pair of examples, not a rule).
     """
     def has_label(label: str):
         return lambda text: label in text.lower()
@@ -71,14 +72,16 @@ def playbook_requirements() -> Sequence[PlaybookRequirement]:
     # The identity part is the one substantive check: forbid-the-example
     # phrasing ("if the task says A ... if the task says B") is what makes
     # the rule transfer to a pair the writer never saw.
-    identity = requirements[3]
+    position = next(index for index, item in enumerate(requirements)
+                    if item.name == "object identity")
+    identity = requirements[position]
     symmetric = identity.matches
 
     def identity_ok(text: str) -> bool:
         return (symmetric(text)
                 and text.lower().count("if the task says") >= 2)
 
-    requirements[3] = PlaybookRequirement(
+    requirements[position] = PlaybookRequirement(
         identity.name,
         identity.describe + "; write the rule in both directions "
                             "(the task says A, and the task says B)",
@@ -625,20 +628,38 @@ def facts_from_sheets(sheets: Sequence[AnswerSheet]) -> str:
     return text
 
 
-PLAYBOOK_WRITE = register(
+PLAYBOOK_UPDATE = register(
     PromptSpec(
         name=PLAYBOOK_PROMPT_NAME,
-        template="""You write the GLOBAL PLAYBOOK for a weaker {agent_kind} agent that plays {benchmark_name}.
+        template="""You maintain the GLOBAL PLAYBOOK for a weaker {agent_kind} agent that plays {benchmark_name}.
 The playbook is shown to the agent at EVERY step, above its list of skill
-cards, for the whole episode. It is general strategy, not a skill card and
-not a list of answers to particular tasks.
+cards, for the whole episode. A skill card teaches what to do in one kind of
+situation; the playbook holds only the general strategy that helps on every
+task. It is not a skill card and not a list of answers to particular tasks.
 
-BASELINE FACTS (measured on training tasks only; the agent ran without any
-skills; "strong" is a stronger reference model, "weak" is the agent you
-write for):
+ENVIRONMENT PROTOCOL (fixed; the agent already receives it, so never repeat
+or contradict it):
+{protocol}
+
+CURRENT PLAYBOOK ("(empty)" before the first version):
+{old_playbook}
+
+FACTS (in the first learning round: baseline facts measured on training
+tasks only; the agent ran without any skills; "strong" is a stronger
+reference model, "weak" is the agent you write for. In every later round:
+the trigger-evidence counts, i.e. which skill cards the agent had in its
+catalog but did not open before the step where a failed trial went wrong,
+and how often; "(none)" when there are none):
 {facts}
 
+NOTES FROM THIS ROUND'S FAILURE DIAGNOSES:
+{playbook_notes}
+
 How to read the facts:
+- Trigger-evidence counts: the playbook should tell the agent to check
+  its skill catalog at the situations those cards cover; never name the
+  cards or their subtasks. The bullets below describe the baseline
+  facts.
 - "where successful trials first took the object" is the evidence for
   search order: name the place kinds in that order, per task type.
 - "object identity" counts failing trials that handled an object whose name
@@ -651,46 +672,33 @@ How to read the facts:
   delivered a wrong noun and then delivered the right one still succeeded,
   so a wrong delivery is recoverable and the playbook must say how.
 - "object names that share a scene and share a word" lists pairs of
-  different objects that can be in one room. The training trials only
-  confused a few pairs, but the same situation arises for ANY pair of
-  objects whose names are related (one name inside the other, or the same
-  last word), and the pairs in the next rooms will differ. State the rule
-  for the whole class, not for the listed pairs.
+  different objects that can be in one room. The same situation arises for
+  ANY pair of objects whose names are related (one name inside the other,
+  or the same last word), and the pairs in the next rooms will differ.
+  State the rule for the whole class, not for the listed pairs.
 - "re-place loops" counts failing trials that put the object at the
-  destination and then took it back out. That happens when the object or
-  the destination is wrong: the agent keeps re-delivering instead of
-  re-checking the task names.
-- "median visits per place" is how many times a failing trial went back
-  to a place it had already stood in: a number above 1.5 means the failing
-  trials spend their budget in a circle of a few places while the
-  admissible list names many more. That is the evidence for the instance
-  sweep and for class exhaustion.
+  destination and then took it back out: the agent keeps re-delivering
+  instead of re-checking the task names.
+- "median visits per place" above 1.5 means the failing trials spend their
+  budget in a circle of a few places while the admissible list names many
+  more: the evidence for the instance sweep and for class exhaustion.
 - "actions between the transform and the first delivery" is the cost of
   extra checking after cleaning, heating or cooling; a low number is the
   target.
 - "destination instance" counts trials that went to the exact numbered
   place they finally delivered to while holding nothing, split by outcome.
-  The last clause is the verdict, computed from those counts: "clearly
-  higher", "similar or lower", or "too few trials". Act on it literally.
-  Only "clearly higher" supports a rule against visiting the destination;
-  on the other two, a rule would remove a real search step, so write no
-  prohibition at all -- not even a softened one.
+  The last clause is the verdict: "clearly higher", "similar or lower", or
+  "too few trials". Only "clearly higher" supports a rule against visiting
+  the destination; on the other two write no prohibition at all.
 - "second object" is the evidence for the two-object tasks: how often the
   second object came from the same place kind as the first.
 - "repeated opening" counts failing trials that opened the same container
-  more than once; it is the evidence for the container rule below.
+  more than once: the evidence for the container rule below.
 - "gap between two visits of the same place" and the reader-memory line
-  tell you which rules the reader can actually follow. Any rule that needs
-  a record of the places visited so far is impossible for this reader: it
-  remembers only the current observation and the last two interactions.
-  Give an ORDER instead: pick from the admissible-action list by a fixed
-  rule (for example: always take the first listed place of the most likely
-  kind that the current observation does not show you are already at), so
-  that following the order cannot revisit a place. The same limit applies
-  to containers: "the container you are standing at" is visible in the
-  current observation, so a rule that says what to do at the container in
-  front of the reader is executable, while "containers opened so far" is
-  not.
+  tell you which rules the reader can actually follow. A rule that needs a
+  record of the places visited so far is impossible for this reader. Give
+  an ORDER instead, chosen from the admissible-action list by a fixed rule,
+  so that following the order cannot revisit a place.
 
 {profile_section}
 
@@ -698,106 +706,55 @@ The agent's reply format is fixed by the protocol:
 <think>brief reason</think><action>one admissible action</action>
 Do not change it and do not tell the agent to skip the <think> part.
 
-Write the playbook with these parts, in this order. Begin each part with its
-label on a line of its own, exactly as written here (`## format`,
-`## recipes`, `## search order`, `## object identity`, `## delivering`,
-`## prohibitions`): the labels are checked, and a playbook without them is
-rejected and written again.
+Update the playbook: keep every rule of the current playbook that the notes
+and facts do not contradict, add what they show is missing, and drop a rule
+only when the evidence shows that it misleads. Write it with these parts, in
+this order. Begin each part with its label on a line of its own, exactly as
+written here (`## format`, `## skills`, `## search order`,
+`## object identity`, `## delivering`, `## prohibitions`): the labels are
+checked, and a playbook without them is rejected and written again.
 1. One line stating the reply format and that the action must come from the
    admissible-action list.
-2. One recipe per task type that appears in the facts: the ordered actions
-   from finding the object to the final placement. Every recipe's search
-   step must say, in the recipe itself and not only in the search-order
-   part, that arriving at a closed container means opening it before
-   moving on: the observation says "X is closed", and the very next action
-   is `open X`. The facts show failing trials arriving at a closed
-   container and walking away from it. For the two-object task
-   the recipe must say what to do after the first delivery: check the
-   destination the reader just used for a second copy (it is in the last
-   interactions), and only then continue the walk forward; the facts give
-   how often the second object came from the same place kind as the first,
-   and that share justifies the rule ("usually", not "always").
-3. Search order, per task type, using the "where successful trials first
-   took the object" evidence. State it as an order over place kinds, plus
-   the rule for choosing the next place (see the order advice above). The
-   search-order part must also tell the reader that the admissible-action
-   list keeps naming every place for the whole episode: the room
-   description leaves the observation after the first step, and a reader
-   that searches only what the current observation happens to show walks
-   the same handful of places until the step budget ends. These rules
-   belong here:
-   - the walk is one-way: when it reaches the end it does not restart from
-     the beginning in the same search; the reader continues from where the
-     observation shows it is;
+2. Skills: whenever the current situation matches a card's "when to use"
+   line, open that card before acting and follow it; the playbook is the
+   general strategy and never replaces a matching card. Do not write
+   step-by-step recipes for a task type here: those belong in skill cards.
+3. Search order, per task type, as an order over place kinds plus the rule
+   for choosing the next place. These rules belong here:
+   - arriving at a closed container means opening it before moving on: the
+     observation says "X is closed", and the very next action is `open X`;
+   - the admissible-action list keeps naming every place for the whole
+     episode, while the room description leaves the observation after the
+     first step;
+   - the walk is one-way: it does not restart from the beginning in the
+     same search;
    - container rule: after the reader opens a container and the
-     observation does not show the object inside, that container is done --
-     the next action is another container or another place kind, never the
-     same opener again. The facts give how often failing trials re-opened a
-     container, so the rule can be stated as a measured problem.
-   - instance sweep within a kind: while the current kind still has an
-     instance the reader has not been to in this search, the next go-to is
-     the next numbered instance of that kind, never a different kind. Take
-     it from the admissible list: after "countertop 1" comes
-     "countertop 2", then "countertop 3"; the list names every instance of
-     every kind. The order is the NUMBER, not the list position: the list
-     sorts names as text, so "shelf 10" sits next to "shelf 1" and
-     "shelf 2" comes after "shelf 19". Say it as a numbered walk ("1, then
-     2, then 3", "9, then 10"), not as "the first listed place": picking
-     the first listed place of a kind after leaving it returns the reader
-     to instance 1 forever, and the facts show failing trials spending
-     their whole budget in that circle (tens of go-to actions over a
-     handful of places).
+     observation does not show the object inside, that container is done;
+   - instance sweep within a kind: the next go-to is the next numbered
+     instance of the current kind ("1, then 2, then 3", "9, then 10"),
+     ordered by NUMBER, not by list position;
    - class exhaustion: a kind is done only when every instance the
-     admissible list names for it has been visited. Only then move to the
-     next kind in the order, and never come back to a finished kind in the
-     same search. Do not alternate between kinds: alternation is what
-     turns a six-instance kind into a two-instance ping-pong.
-   - destination instance: apply the "destination instance" fact and its
-     verdict. The destination is ONE numbered place (for example
-     "cabinet 1"). Only when the verdict is "clearly higher", write: while
-     not holding the object, do not reach that exact numbered place before
-     the sweep would; on "similar or lower" or "too few trials", write no
-     prohibition at all, and do not invent a task type to mark. Whenever
-     the rule is written, it applies to the exact numbered place, never to
-     its kind, and it never breaks the sweep: the reader visits that place
-     last among its kind, not never.
-   - how the rules fit together: the search order gives the kinds, the
-     instance sweep walks each kind end to end, class exhaustion decides
-     when to switch, and the destination note only changes where one
-     numbered place sits inside its kind. Write them as one short
-     procedure in that order, so the reader never has to weigh one rule
-     against another.
-4. Object identity, written as a procedure the reader can run. The task
-   sentence names an object with one noun, and the scene may hold another
-   object whose name is related (a name inside it, or the same last word).
-   The playbook must contain all of these, in plain if-then sentences:
-   - match by the whole noun: remove the trailing number from an object
-     name in the observation; it is the task's object only if the rest is
-     exactly the task's noun. Say it symmetrically: if the task says A, an
-     object named B is not it, and if the task says B, an object named A
-     is not it. Illustrate with one pair from the facts' list and one pair
-     the facts' list does not contain, and say that the rule applies to any
-     two related names;
-   - never reason that a related name "serves as" or "counts as" the task's
-     noun: the environment accepts only the exact noun, and the facts show
-     that every delivery of a different noun failed;
-   - if the observation shows only a related name and not the task's noun,
-     the task's object is somewhere else: continue the search and do not
-     pick the related one up;
-   - recovery: if the reader has delivered an object and the environment
-     did not report success, compare the noun it delivered with the task's
-     noun. Different noun: take it back out, and continue the search for
-     the exact noun. Same noun: do not take it back (see part 5).
-5. Delivering and stopping: put the object at the named destination. If the
-   delivered noun is the task's own noun, stop there; do not take it back
-   and re-place it, and check the destination's name against the task
-   sentence instead. This rule and the recovery rule in part 4 do not
-   conflict, because they apply to different nouns: write one sentence that
-   says which applies to which, so the reader never has to choose. After a
-   clean, heat or cool, go straight to the destination.
-6. The mistakes the failing examples show, each as one short prohibition.
-   Every prohibition must be a statement the reader can check against what
-   it sees now; drop any that needs a memory of earlier steps.
+     admissible list names for it has been visited; never come back to a
+     finished kind in the same search and never alternate between kinds;
+   - destination instance: apply the "destination instance" verdict
+     literally, for the exact numbered place, never for its kind.
+4. Object identity, as a procedure: match by the whole noun (remove the
+   trailing number; the rest must be exactly the task's noun), stated
+   symmetrically ("if the task says A, an object named B is not it, and if
+   the task says B, an object named A is not it"), illustrated with one
+   pair from the facts and one pair the facts do not contain; never reason
+   that a related name "counts as" the task's noun; if only a related name
+   is in view, continue the search; recovery: after a delivery the
+   environment did not accept, compare the nouns, and take a wrong noun back
+   out and continue the search.
+5. Delivering and stopping: put the object at the named destination; if the
+   delivered noun is the task's own noun, stop there and do not take it
+   back. Say in one sentence which of this rule and the recovery rule
+   applies to which noun. After a clean, heat or cool, go straight to the
+   destination. In a two-object task, after the first delivery, check the
+   destination just used for a second copy before walking on.
+6. The mistakes the failing examples and the notes show, each as one short
+   prohibition the reader can check against what it sees now.
 
 Hard limits:
 - Every rule must be checkable at the moment it fires from the current
@@ -820,8 +777,9 @@ nothing after the closing tag:
 </playbook>
 """,
         description=(
-            "Learned playbook: write ALFWorld's global playbook from the "
-            "baseline trial facts (the plugin's playbook_prompt_name)."
+            "ALFWorld's PLAYBOOK_UPDATE: evolve the global playbook from the "
+            "facts (baseline facts first, trigger-evidence counts later) "
+            "and the diagnosis notes (the pack's override)."
         ),
     )
 )

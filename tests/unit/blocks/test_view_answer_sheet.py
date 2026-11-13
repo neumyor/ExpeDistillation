@@ -2,14 +2,13 @@
 
 The JSON record stays canonical; this renderer is the human-readable
 derived artifact.  Each execution kind gets its own section (trajectory
-steps, exam answer, external reward table), and a missing/terminal trial
+steps, external reward table), and a missing/terminal trial
 renders the coverage section alone.
 """
 
 from expedistill.benchmarks.base import ViewRules
 from expedistill.blocks.view import render_answer_sheet
 from expedistill.composites.answer_sheets import (
-    execution_from_attempt,
     execution_from_external,
     execution_from_trajectory,
 )
@@ -18,18 +17,10 @@ from expedistill.core.answer_sheet import (
     CoverageRecord,
     GradingRecord,
 )
-from expedistill.core.ids import (
-    make_attempt_id,
-    make_exam_id,
-    make_skill_id,
-    make_subtask_id,
-    make_trajectory_id,
-)
-from expedistill.core.models import Attempt, Step, Trajectory
+from expedistill.core.ids import make_trajectory_id
+from expedistill.core.models import Step, Trajectory
 
 TASK = "tb:task-1"
-EXAM = make_exam_id(
-    make_skill_id(make_subtask_id(make_trajectory_id(TASK, "weak", 0), 0)), 1)
 
 
 def _sheet(execution, *, unit_id="unit-1", attempt=0, grading=None):
@@ -46,7 +37,7 @@ def _sheet(execution, *, unit_id="unit-1", attempt=0, grading=None):
 
 def test_trajectory_sheet_renders_headers_and_the_numbered_steps():
     trajectory = Trajectory(
-        trajectory_id=make_trajectory_id(TASK, "weak", 0),
+        trajectory_id=make_trajectory_id("p03:practice", TASK, "weak", 0),
         task_id=TASK,
         benchmark="tb",
         model_role="weak",
@@ -90,7 +81,7 @@ def test_trajectory_sheet_honours_the_view_rules():
         max_obs_chars=20, head_keep=5, tail_keep=5,
         truncation_marker="[... {omitted} characters omitted ...]")
     trajectory = Trajectory(
-        trajectory_id=make_trajectory_id(TASK, "weak", 0),
+        trajectory_id=make_trajectory_id("p03:practice", TASK, "weak", 0),
         task_id=TASK,
         benchmark="tb",
         model_role="weak",
@@ -106,35 +97,6 @@ def test_trajectory_sheet_honours_the_view_rules():
 
     assert "... 90 characters omitted ..." in text
     assert "x" * 50 not in text
-
-
-def test_exam_sheet_renders_the_answer_and_the_judge_grading():
-    attempt = Attempt(
-        attempt_id=make_attempt_id(EXAM, 0),
-        exam_id=EXAM,
-        skill_id="skill-1",
-        skill_version=2,
-        purpose="acceptance",
-        weak_answer="the answer is 42",
-        steps=[Step(action="cat foo/SKILL.md", observation="rule"),
-               Step(action="the answer is 42", observation="")],
-        judge_verdict=True,
-        judge_reason="correct",
-        retry_round=1,
-    )
-    execution = execution_from_attempt(
-        attempt, unit_id="unit-2", phase_label="p03:exam")
-    grading = GradingRecord(
-        verdict="success", basis="exam_judge: correct",
-        rule_name="exam_judge")
-
-    text = render_answer_sheet(_sheet(
-        execution, unit_id="unit-2", attempt=1, grading=grading))
-
-    assert "## Trajectory" in text
-    assert "the answer is 42" in text
-    assert "- verdict: `success`" in text
-    assert "- basis: exam_judge: correct" in text
 
 
 def test_external_sheet_renders_the_reward_table_and_provenance():
@@ -172,7 +134,7 @@ def test_a_missing_or_terminal_sheet_renders_coverage_alone():
     assert text.startswith("# Answer sheet `gap:unit-4:0`")
     assert "- coverage: `terminal` / `leak`" in text
     assert ("_No execution record: this trial was missing or terminal "
-            "before an answer existed._") in text
+            "before a run was stored._") in text
     assert "## " not in text
     assert "- task:" not in text
     assert "- verdict:" not in text

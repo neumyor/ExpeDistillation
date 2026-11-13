@@ -5,7 +5,7 @@ it resolves the catalog text and the per-skill file LIST into the unit
 row's ``aux["skill_folder"]``, and touching the file system belongs
 here (layer 5 owns disk IO). This module writes that folder out: one
 directory per skill containing ``SKILL.md`` (YAML frontmatter plus the
-skill's three-section content) plus the catalog file (the manifest's
+skill's card) plus the catalog file (the manifest's
 catalog text, verbatim). The frontmatter is what Harbor's Terminus
 agent parses to build its ``<available_skills>`` list; a file without
 it is silently skipped, so every rendered skill file carries it.
@@ -42,9 +42,11 @@ carried into the run environment (the sandbox upload goes strictly by
 the manifest's file names), so a local directory audit should read the
 folder against the manifest, not trust the directory alone.
 
-Wiring: the test-phase driver (``stages/phase_execute/final_test.py``)
-materializes the phase's folder once, before dispatch, into the phase
-directory's ``skill_folder/``.
+Wiring: the practice and test phase drivers (through
+``stages/phase_execute/phase_disk.materialize_folder``) materialize the
+phase's folder once, before dispatch, into the phase directory's
+``skill_folder/``. An empty bank's manifest lists no files: the call then
+only creates the (empty) directory, so every folder unit has one.
 """
 
 import os
@@ -61,6 +63,7 @@ from expedistill.inject import bank_reference
 from expedistill.inject.skill_text import (
     DEFAULT_DESCRIPTION_MODE,
     description_text,
+    render_card,
     validate_description_mode,
 )
 
@@ -156,18 +159,13 @@ def _validate_filename(filename: Any) -> str:
 def _render_skill_file(record: Union[Skill, Mapping[str, Any]],
                        filename: str, description_mode: str) -> str:
     """The exact bytes of one skill's SKILL.md: YAML frontmatter then
-    the skill's three-section content.
+    the skill's card (``render_card``).
 
     ``name`` is the manifest directory (the delivery derived it from
     the skill id); ``description`` is the configured composition. The
-    content is unchanged -- the frontmatter is packaging, not part of
-    the stored skill.
+    frontmatter is packaging, not part of the stored skill.
     """
-    content = record.get("content") if isinstance(record, Mapping) \
-        else record.content
-    if not isinstance(content, str):
-        raise CodeBugError(
-            f"skill {filename!r} has non-string content: {content!r}")
+    content = render_card(record)
     name = PurePosixPath(filename).parts[0]
     description = description_text(record, description_mode)
     if not description:
@@ -200,7 +198,7 @@ def materialize_skill_folder(folder: Mapping[str, Any],
     content read from ``bank`` at the recorded version (a missing
     skill or a version drift is a CodeBugError); the catalog file
     (``catalog_filename``) carries ``catalog_text`` when it is
-    non-empty -- an empty accepted bank carries no catalog (the
+    non-empty -- an empty active bank carries no catalog (the
     null-state lesson), so nothing is written for it. A manifest whose
     file names are unsafe or duplicated is a CodeBugError: the manifest
     is contract, and a silently shadowed file would be a wrong folder.

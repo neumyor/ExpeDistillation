@@ -5,30 +5,29 @@ trajectory (prompts ``SKILL_APPLICABILITY_JUDGE`` / ``SKILL_ADHERENCE_JUDGE``):
 
 * ``judge_applicability`` -- for every card of the delivered list, did the
   situation named by its trigger arise anywhere in the trial?
-* ``judge_adherence`` -- for one card the agent opened, which of its numbered
+* ``judge_adherence`` -- for one skill the agent opened, which of its
   steps did the agent carry out afterwards?
 
-Validation is strict, like the exam blocks: ``call_model``'s format budget
-covers JSON parsing only, so a reply that parses but breaks the contract (a
-card id outside the list, a listed card left out, a step number the card does
-not have, a status outside the four words) raises ModelOutputError rather
-than being repaired by guessing. The blocks return plain dicts and touch no
-disk; persistence belongs to the stage that calls them.
+Validation is strict: ``call_model``'s format budget covers JSON parsing
+only, so a reply that parses but breaks the contract (a card id outside the
+list, a listed card left out, a step number the card does not have, a status
+outside the four words) raises ModelOutputError rather than being repaired
+by guessing. The blocks return plain dicts and touch no disk; persistence
+belongs to the stage that calls them.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
-from expedistill.core.skill_sections import split_sections
+from expedistill.core.models import Skill
 from expedistill.infra.reliability import ModelOutputError
+from expedistill.inject.skill_text import render_card
 from expedistill.llm.call import ModelHandle, call_model
 
 __all__ = [
     "ADHERENCE_STATUSES",
-    "card_steps",
     "judge_adherence",
     "judge_applicability",
     "render_card_listing",
@@ -36,31 +35,6 @@ __all__ = [
 
 #: The only statuses SKILL_ADHERENCE_JUDGE may emit for one card step.
 ADHERENCE_STATUSES = ("followed", "partial", "skipped", "not_reached")
-
-_STEPS_MARKER = "[Steps]"
-
-
-def card_steps(card_text: str) -> List[str]:
-    """The numbered items of a card's ``[Steps]`` section, in order.
-
-    Items are recognised by their running number (``1.`` / ``1)``): item k
-    starts at the first line after item k-1 that begins with ``k.``, so a
-    continuation line that happens to start with some other number (a
-    heredoc body, say) does not split an item. A card without a ``[Steps]``
-    section, or with no numbered item in it, has no steps.
-    """
-    block = split_sections(card_text).get(_STEPS_MARKER)
-    if block is None:
-        return []
-    items: List[str] = []
-    for line in block.split("\n")[1:]:
-        match = re.match(rf"{len(items) + 1}[.)]\s+(.*)", line)
-        if match:
-            items.append(match.group(1))
-        elif items:
-            items[-1] += "\n" + line
-    return items
-
 
 def _validated_cards(cards: Sequence[Mapping[str, Any]]) -> List[Dict[str, str]]:
     """The card list as ``[{"skill_id", "description"}]``; a malformed list
@@ -188,30 +162,33 @@ def judge_applicability(
 
 
 def judge_adherence(
-    card_text: str,
+    skill: Skill,
     trajectory_view: str,
     handle: ModelHandle,
     *,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> List[Dict[str, Any]]:
-    """How far one opened card's numbered steps were carried out.
+    """How far one opened skill's steps were carried out.
 
-    ``card_text`` is the card as the agent read it; ``trajectory_view`` is
-    the rendered trial from the step where the card was opened. Returns one
-    ``{"number", "status", "evidence"}`` per numbered ``[Steps]`` item, in
-    order, ``status`` one of ``ADHERENCE_STATUSES``. A card with no numbered
-    step is a caller bug (ValueError: there is nothing to judge); a reply
-    that skips, repeats or invents a step number, or uses another status,
-    raises ModelOutputError.
+    The judge reads the skill's card as the agent read it
+    (``render_card``); ``trajectory_view`` is the rendered trial from the
+    step where the card was opened. Returns one ``{"number", "status",
+    "evidence"}`` per step, in order, ``status`` one of
+    ``ADHERENCE_STATUSES``. A skill without steps is a caller bug
+    (ValueError: there is nothing to judge); a reply that skips, repeats
+    or invents a step number, or uses another status, raises
+    ModelOutputError.
     """
-    n_steps = len(card_steps(card_text))
+    n_steps = len(skill.steps)
     if n_steps == 0:
-        raise ValueError("the card has no numbered [Steps] item to judge")
+        raise ValueError(
+            f"skill {skill.skill_id!r} has no steps to judge")
     prompt = "SKILL_ADHERENCE_JUDGE"
     parsed = _object(prompt, call_model(
         handle, prompt,
-        {"card_text": card_text, "trajectory_view": trajectory_view,
+        {"card_text": render_card(skill),
+         "trajectory_view": trajectory_view,
          "n_steps": str(n_steps)},
         output_json=True, usage=usage, run_dir=run_dir))
 

@@ -30,14 +30,14 @@ from expedistill.stages import phase_execute
 from expedistill.stages.context import RunSettings, StageContext
 from expedistill.stages.phase_execute.phase_disk import (
     SUMMARY_NAME,
-    _arm_dir,
+    arm_dir,
     execute_phase_dir,
 )
 from tests.unit.stages.test_final_test_folder_wiring import (
     _FAKE,
     _c_phase,
+    _card,
     _config,
-    _group_skill,
     _install_plugin,
     _reset_registry,
     _write_bank,
@@ -65,7 +65,7 @@ def _ctx_at(root):
         usage=UsageRecorder(run_dir / "llm_requests" / "usage.jsonl"),
         handles={role: make_fake_handle(role)
                  for role in ("executor_strong", "executor_weak",
-                              "examiner", "answerer", "judge", "auditor")},
+                              "judge")},
         workdir_root=run_dir / "workdirs",
         run_settings=RunSettings(),
     )
@@ -75,7 +75,7 @@ def test_a_folder_c_phase_resumed_mid_run_lands_on_the_one_shot_summary(
         monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, CattingPlugin(capable=True))
     phase = _c_phase()
-    skills = [_group_skill("t1"), _group_skill("t2")]
+    skills = [_card(1), _card(2)]
 
     # The one-shot run: every unit executes once, the summary lands.
     ctx_once = _ctx_at(tmp_path / "one_shot")
@@ -92,8 +92,8 @@ def test_a_folder_c_phase_resumed_mid_run_lands_on_the_one_shot_summary(
     _write_bank(ctx_half, skills)
     stored_id = _trajectory_id("t1")
     for arm in ("with_bank", "control"):
-        source = Store(_arm_dir(ctx_once, phase, arm) / "store")
-        target = Store(_arm_dir(ctx_half, phase, arm) / "store")
+        source = Store(arm_dir(ctx_once, phase, arm) / "store")
+        target = Store(arm_dir(ctx_half, phase, arm) / "store")
         shutil.copy(source.path_for("trajectories", stored_id),
                     target.path_for("trajectories", stored_id))
 

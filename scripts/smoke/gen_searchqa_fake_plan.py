@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Generate the fake-provider plan for the SearchQA live smoke.
+"""Generate the fake-provider plan for a SearchQA smoke run.
 
 Reads the outer searchqa-eval repo's materialized items and writes the
 JSON plan the ``fake`` LLM provider consumes
 (``EXPEDISTILL_FAKE_PROVIDER_PLAN``; schema in
 ``src/expedistill/llm/fake_provider.py``). The task ids and their weak-
-executor policies mirror ``configs/experiments/searchqa_split_live_smoke_v4.yaml``:
+executor policies are the smoke's experiment identity:
 
-* t1 (Tom Clancy)      -- policy ``skills``: round-0 keep;
-* t2 (bubble gum)      -- policy ``revised_skills``: round-0 miss ->
-                          G10/G11 revision -> round-1 keep;
+* t1 (Tom Clancy)      -- policy ``skills``: correct once a skill
+                          reaches the prompt;
+* t2 (bubble gum)      -- policy ``revised_skills``: correct only after a
+                          rewrite carrying the revision marker landed;
 * t3 (Angela Bassett)  -- policy ``revised_skills``: same as t2;
-* t4 (Sails)           -- policy ``never``: both rounds miss -> the last
-                          learn phase deletes the group;
+* t4 (Sails)           -- policy ``never``: never correct;
 * t5 (finale, test)    -- policy ``skills``: the test-phase with-bank arm
                           passes, the bare control fails.
 
@@ -60,7 +60,7 @@ def main() -> int:
             items[str(item["id"])] = item
 
     plan = {"strong_model": "fake-strong", "weak_model": "fake-weak",
-            "revision_marker": "REVISED-BY-G11", "questions": {}}
+            "revision_marker": "REVISED", "questions": {}}
     for task_id, policy in POLICIES.items():
         item = items[task_id]
         plan["questions"][item["question"]] = {

@@ -118,8 +118,7 @@ def run_react(
     Termination: when the env flags ``is_terminated``/``is_truncated`` the
     verdict comes from ``success_fn()``; a step-budget exhaustion is
     ``False``. Infrastructure failures (``InfrastructureError`` from the
-    model call or from ``env.step``, including the ``environment_call``
-    deadline) propagate -- K1 retries the unit, D3 never counts the
+    model call or from ``env.step``) propagate -- K1 retries the unit, D3 never counts the
     attempt against the model. A ``ModelOutputError`` from the model call
     (no usable reply) ends the episode with ``correctness=None`` and
     ``meta["termination"] = "model_output_error"`` plus the error text,

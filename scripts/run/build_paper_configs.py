@@ -1,25 +1,23 @@
 #!/usr/bin/env python
 """Generate the paper's experiment configs, one YAML per (arm, benchmark).
 
-Purpose: the four paper experiments (docs/decisions/paper_experiments_code_
-20261030.md) are a matrix of arms that must differ in exactly one factor.
-Writing them by hand invites drift, so the matrix lives here as data and the
-YAMLs are rendered from it. The script builds dicts and dumps them with
-``yaml.safe_dump(sort_keys=False)`` in the key order of
-``tb21_p02p08_exam_small20_20261030.yaml``; it holds no method logic.
+Purpose: the paper's main table (experiment e1, docs/decisions/
+evidence_driven_evolution_20261113.md section 6) is a set of arms that must
+differ in exactly the intended factors. Writing them by hand invites drift,
+so the arms live here as data and the YAMLs are rendered from them. The
+script builds dicts and dumps them with ``yaml.safe_dump(sort_keys=False)``;
+it holds no method logic.
 
 Inputs
-    configs/experiments/ source configs (frozen records, never modified):
-      tb21     tb21_p02p08_exam_small20_20261030.yaml   split, tasks, control
-      alfworld alfworld_split_live_run_20261020.yaml    split
-      searchqa searchqa_split_live_run_20261020_v4.yaml split
-    Gateway model ids per benchmark and the student id are parameters
-    (--d-model BENCH=ID, --q-model ID) with the source configs' values as
-    defaults; endpoints and keys never enter a config.
+    scripts/run/paper_splits.py: each benchmark's train / val / test
+    (/ reserved) split, TB's task list and TB's external campaign control
+    file. Gateway model ids per benchmark and the student id are parameters
+    (--d-model BENCH=ID, --q-model ID); endpoints and keys never enter a
+    config.
 
 Outputs
-    configs/experiments/<bench>_split_paper_<exp>_<arm>.yaml, bench in
-    {tb21, alfworld, searchqa}. No new top-level files.
+    configs/experiments/<bench>_paper_<exp>_<arm>.yaml, bench in
+    {tb21, alfworld, searchqa}.
 
 Usage
     .venv/bin/python scripts/run/build_paper_configs.py            # write
@@ -27,29 +25,37 @@ Usage
     .venv/bin/python scripts/run/build_paper_configs.py --print-index
 
 ``--check`` writes nothing and exits 1 when a file is missing, differs from
-the render, or is stale (matches ``*_split_paper_*.yaml`` but is no longer
+the render, or is stale (matches ``*_paper_*.yaml`` but is no longer
 produced). A config whose formal run has started must never be regenerated
 with different parameters (AGENTS section 6): change the script, then give
 the new arm a new name.
 
-Common to every config: schema 7, mode split, D = deepseek-v4-flash, Q =
-qwen3.6-flash-distill, 3 attempts per arm, one token-budget block on every
-benchmark (author and rewriter input budget 524288 when D fills them, as
-trial_level requires). ALFWorld enables ``use_weak_profile`` with the
-deployment-constraint profile (the reader's two-interaction memory); the
-other benchmarks keep it off and pass no profile. The input
-budget follows the MODEL, not the role: 524288 for D and 262144 for Q, so a
-teacher Q is never declared a context it does not have. The reference method
-(``e1_ours``) is the sequence baseline, learn_add, exam, learn, exam,
-learn_trial, test with cluster_by_trigger authoring, agentbrew curation,
-K = 5, teacher D and student Q. TB tests use the external campaign control
-(model_key qwen for student Q, dpsk for student D); ALFWorld and SearchQA
-use fresh_bare.
+Common to every config: schema 9, D = deepseek-v4-flash, Q =
+qwen3.6-flash-distill, 3 attempts per baseline arm, one token-budget block
+on every benchmark. The input budget follows the MODEL, not the role: 524288
+for D and 262144 for Q, so a role Q fills is never declared a context it
+does not have. The role table is executor_strong, executor_weak, segmenter,
+author, rewriter and judge; the teacher (D) fills every role but
+executor_weak, which the student fills.
 
-Arm index (experiment, arm, what differs from its reference; ``--print-index``
-names the reference of every row and computes the difference)
-    e1  ours                the reference method (reference of e1, e2, e3,
-                            e4_a0, e4_a3_joint, e4_joint9)
+The reference method (``e1_ours``) is the sequence baseline, learn,
+practice, learn, practice, learn, test: one ``learn`` definition (review K
+= 5, retry_limit 2, write_lessons; the ``subtask_cards`` author with its
+default guards), a ``practice`` definition on the train list with the
+``folder`` delivery and ``real_folder`` execution (``attempts`` ALFWorld 3,
+TB 2, SearchQA 1) and the evolved playbook, and the folder test with the
+evolved playbook (the test control never sees it). The test-only arms
+(imported external banks and bare runs) have no learn phase, so they run
+with the playbook off. TB tests use the external campaign control (model_key
+qwen for student Q); ALFWorld tests use the frozen bare-run file of the
+student model (``BARE_CONTROL_FILES``) as an external_campaign control;
+SearchQA uses fresh_bare.
+
+Arm index (``--print-index`` names the reference of every row and computes
+the difference)
+    e1  ours                the reference method
+    e1  ours_val            ALFWorld only: practice on the val list (39
+                            valid_seen games) instead of train
     e1  <baseline>_folder   test only, folder + real_folder, for baseline in
                             skillopt, evoskill, trace2skill, gepa, expel,
                             agentbrew; run on a run directory prepared by
@@ -77,49 +83,10 @@ names the reference of every row and computes the difference)
     e1  bare_x              the same config shape for X; the user stopped
                             after bare D (2026-11-02), so it is not run and
                             no control file is built for it
-    e2  d2d d2q q2q q2d     teacher -> student. The teacher fills
-                            executor_strong, author, segmenter, curator,
-                            rewriter; the student fills executor_weak and
-                            answerer; examiner, judge, auditor stay D. Sequence
-                            baseline, learn_add, exam, test; learn_add:
-                            write_lessons false, accept_new true, curate none;
-                            the exam only measures; TB control model_key
-                            follows the student.
-    e2  x2q                 ALFWorld only: teacher X (qwen3.8-27b) ->
-                            student Q; same recipe as the four cells above
-    e3  k1                  learn_add review K = 1 (K = 5 is e1_ours)
-    e3  k3                  learn_add review K = 3 (2026-11-04 user request)
-    e4  a0                  no evolution: baseline, learn_add, test;
-                            learn_add accept_new true, curate none
-    e4  a3_joint            scope ablation, joint arm: new_skills false in
-                            learn and learn_trial; revise_scope left at its
-                            default both (so it differs from e1_ours in
-                            new_skills only). Reference of a1 and a2.
-    e4  a1_body             vs a3_joint: revise_scope body in learn and
-                            learn_trial (new_skills false as in a3)
-    e4  a2_trigger          vs a3_joint: revise_scope trigger in learn and
-                            learn_trial (new_skills false as in a3)
-    e4  joint9              nine-phase sequence with a third trial_level
-                            definition learn_final; revise_scope both in all
-                            three learn definitions (new_skills stays true)
-    e4  staged9             vs joint9: learn (P04) body and learn_trial (P06)
-                            trigger; learn_final (P08, last learn phase, no
-                            rewrite left) stays both
 
-Every ALFWorld config is named ``alfworld_split_paper_v3_*``. v2 was the
-2026-11-02 unified-protocol alignment; v3 (2026-11-03) adds the
-deployment-constraint profile and the read policy that keeps card reads out
-of the unified protocol's two-step history. The older
-``alfworld_split_paper_*`` and ``..._v2_*`` files stay frozen as the record
-of their protocol. Every
-with-bank ALFWorld arm's control is the frozen bare file of its student
-model (``BARE_CONTROL_FILES``), built from the ``e1_bare_q/d/x`` runs and
-pinned by sha256: each model is bare-run once and every comparison reuses
-that measurement.
-
-new_skills false matters for the scope arms: with it on, a new skill gets a
-fresh trigger written from weak-model failure evidence, so "trigger frozen"
-(a1) would not be frozen and "body frozen" (a2) would still gain new bodies.
+The ablation arms (e2 teacher -> student, e3 segmentation budget, e4
+revision scope and no_skills, e5 coverage) are defined in the decision
+document's section 6 and come back here when the ablations run.
 """
 
 import argparse
@@ -127,11 +94,15 @@ import copy
 import hashlib
 import sys
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import yaml
+
+# Loaded by file path in the tests, so the sibling data module is not on
+# sys.path by default.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import paper_splits  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "configs" / "experiments"
@@ -142,22 +113,14 @@ LOCAL_BENCHMARKS = ("alfworld", "searchqa")
 BENCHMARK_NAMES = {"tb21": "tb", "alfworld": "alfworld",
                    "searchqa": "searchqa"}
 
-#: The source configs the splits (and TB's control file) are copied from.
-SOURCE_CONFIGS = {
-    "tb21": "tb21_p02p08_exam_small20_20261030.yaml",
-    "alfworld": "alfworld_split_live_run_20261020.yaml",
-    "searchqa": "searchqa_split_live_run_20261020_v4.yaml",
-}
-
-#: Gateway ids of D differ per benchmark config today; Q is one id.
+#: Gateway ids of D differ per benchmark; Q is one id.
 DEFAULT_D_MODELS = {
     "tb21": "deepseek-v4-flash-0731--ali",
     "alfworld": "deepseek-v4-flash-0731-tencent",
     "searchqa": "deepseek-v4-flash-0731-tencent",
 }
 DEFAULT_Q_MODEL = "qwen3.6-flash-distill"
-#: The experiment-2 comparator teacher (2026-11-02 user request): bare D is
-#: expected to beat bare X, while X is the better teacher for Q.
+#: The third ALFWorld student a bare arm exists for.
 DEFAULT_X_MODEL = "qwen3.8-27b"
 
 #: The TB external campaign's column per student model.
@@ -174,53 +137,31 @@ POOLED_CONTROL = {
     "model_key": "qwen3.6-flash-distill",
 }
 
-#: One frozen bare run per student model, made under the unified protocol
-#: (2026-11-02). Every with-bank ALFWorld arm reads its test control from the
-#: file of ITS student model: a model is bare-run once, and every comparison
-#: reuses that measurement instead of re-running a fresh control per arm.
-#: The files are built by scripts/run/build_bare_control.py after the bare
-#: runs finish; the sha256 is read from disk at generation time and pinned.
-#:
-#: X has no file: the user stopped after the D bare run (2026-11-02), so the
-#: bare-X arm remains available as a config but is not run, and no with-bank
-#: arm has X as its student.
+#: The frozen bare run of each student model a with-bank ALFWorld arm has,
+#: made under the unified protocol (2026-11-02). Every with-bank ALFWorld
+#: arm reads its test control from the file of ITS student model: a model is
+#: bare-run once, and every comparison reuses that measurement instead of
+#: re-running a fresh control per arm. The files are built by
+#: scripts/run/build_bare_control.py after the bare runs finish; the sha256
+#: is read from disk at generation time and pinned.
 SEED_DIR = REPO_ROOT / "configs" / "seed"
 BARE_CONTROL_FILES = {
     "q": "alfworld_bare_q_20261102.json",
-    # D re-ran at the 65536 output budget (2026-11-03); the earlier 4096
-    # file stays on disk as the record but no arm pins it.
-    "d": "alfworld_bare_d_20261103.json",
 }
 
 BASELINES = ("skillopt", "evoskill", "trace2skill", "gepa", "expel",
              "agentbrew")
 
-#: The ALFWorld deployment profile handed to every authoring/rewriting
-#: prompt (2026-11-03): the reader's context under the unified protocol
-#: (current observation + last two interactions + opened cards), so a
-#: written node cannot depend on state the reader no longer has. Relative
-#: to the config file's directory (configs/experiments).
-ALFWORLD_PROFILE_FILE = "../profiles/alfworld_unified_memory_20261103.md"
-
-#: The P0 global playbook (2026-11-04): a repo-relative path the phase
-#: resolver reads and renders above the skill card list on every step.
-#: The config freezes its sha256 so a post-freeze edit is refused.
-PLAYBOOK_FILE = "configs/playbooks/alfworld_global_20261104.md"
-
-FILE_GLOB = "*_split_paper_*.yaml"
+FILE_GLOB = "*_paper_*.yaml"
 HEADER = ("# Generated by scripts/run/build_paper_configs.py -- edit the "
           "script, not this file.")
 
 DESCRIPTION_MODE = "summary_then_when_to_use"
 
-ROLES = ("answerer", "auditor", "author", "curator", "examiner",
-         "executor_strong", "executor_weak", "judge", "rewriter",
-         "segmenter")
-#: Roles the student fills.
-STUDENT_ROLES = ("answerer", "executor_weak")
-#: Roles the teacher fills; the rest (examiner, judge, auditor) stay D.
-TEACHER_ROLES = ("author", "curator", "executor_strong", "rewriter",
-                 "segmenter")
+ROLES = ("executor_strong", "executor_weak", "segmenter", "author",
+         "rewriter", "judge")
+#: The role the student fills; the teacher fills every other role.
+STUDENT_ROLES = ("executor_weak",)
 
 #: Input budget per model: D (reasoning, 512K context) and Q (256K).
 D_INPUT_TOKENS = 524288
@@ -228,87 +169,59 @@ Q_INPUT_TOKENS = 262144
 
 RULES = {
     "segment_select": "strong_success_weak_failed",
-    "task_select": "any_weak_failed",
     "trajectory_select": "strong1_weak1",
 }
 
-SEQUENCE_FULL = ["baseline", "learn_add", "exam", "learn", "exam",
-                 "learn_trial", "test"]
-SEQUENCE_NINE = ["baseline", "learn_add", "exam", "learn", "exam",
-                 "learn_trial", "exam", "learn_final", "test"]
+#: The reference method's sequence (design spec 2.4).
+SEQUENCE_OURS = ["baseline", "learn", "practice", "learn", "practice",
+                 "learn", "test"]
+
+#: Weak-model samples per task in each practice phase.
+PRACTICE_ATTEMPTS = {"tb21": 2, "alfworld": 3, "searchqa": 1}
 
 
 # ---------------------------------------------------------------------------
-# Phase definitions (key order of the TB example)
+# Phase definitions
 # ---------------------------------------------------------------------------
 
-def _cluster_author() -> Dict[str, Any]:
-    return {"name": "cluster_by_trigger", "max_cards_per_prompt": 40,
-            "max_chars_per_card": 1200, "min_cluster_size": 1,
-            "classify_retry_limit": 2, "cluster_retry_limit": 2,
-            "skill_retry_limit": 2}
-
-
-def _agentbrew() -> Dict[str, Any]:
-    return {"drop_low_value": False, "grouping_input": "full",
-            "merge_check": "none", "name": "agentbrew", "rounds": 3,
-            "similarity_input": "summary", "token_budget": None}
-
-
-def _no_curation() -> Dict[str, Any]:
-    return {"name": "none", "token_budget": None}
-
-
-def _review(decision: str, *, k: int = 5, write_lessons: bool = True,
-            revise_scope: Optional[str] = None,
-            new_skills: Optional[bool] = None,
-            accept_new: bool = False) -> Dict[str, Any]:
-    """A review block; a switch is spelled only when the arm sets it, so
-    the reference method carries none of them."""
-    block: Dict[str, Any] = {
-        "name": "review", "decision": decision,
-        "unread_in_won_group": "delete", "before_steps": 10,
-        "after_steps": 10, "K": k, "retry_limit": 2,
-        "write_lessons": write_lessons}
-    if revise_scope is not None:
-        block["revise_scope"] = revise_scope
-    if new_skills is not None:
-        block["new_skills"] = new_skills
-    if accept_new:
-        block["accept_new"] = True
-    return block
-
-
-def _learn_phase(review: Dict[str, Any],
-                 curate: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    return {"author": _cluster_author(),
-            "curate": curate if curate is not None else _agentbrew(),
-            "review": review, "kind": "learn", "role": "learn"}
+def _learn_phase() -> Dict[str, Any]:
+    """The one learn definition: the review parameters and the
+    ``subtask_cards`` author with its default guards spelled out."""
+    return {"author": {"name": "subtask_cards", "typing_chunk_size": 100,
+                       "max_segments_per_card": 8,
+                       "max_chars_per_segment": 1200,
+                       "write_retry_limit": 2},
+            "review": {"name": "review", "K": 5, "retry_limit": 2,
+                       "write_lessons": True},
+            "kind": "learn", "role": "learn"}
 
 
 def _baseline_phase() -> Dict[str, Any]:
-    return {"acceptance": None, "compare": None,
+    return {"acceptance": None,
             "delivery": {"name": "none"},
             "execution": {"arms": ["executor_strong", "executor_weak"],
                           "name": "real"},
             "kind": "execute", "role": "baseline", "tasks": "train"}
 
 
-def _exam_phase() -> Dict[str, Any]:
-    return {"acceptance": None, "compare": None,
+def _practice_phase(tasks: str, attempts: int) -> Dict[str, Any]:
+    """The practice phase: the final test's folder presentation on the
+    train or val list, the weak executor only."""
+    return {"acceptance": None,
             "delivery": {"description_mode": DESCRIPTION_MODE,
-                         "name": "exam_folder"},
-            "execution": {"bare_control": False, "leak_audit": False,
-                          "max_skill_reads": 3, "name": "exam"},
-            "kind": "execute", "role": "exam", "tasks": "train"}
+                         "name": "folder"},
+            "execution": {"attempts": attempts, "name": "real_folder"},
+            "kind": "execute", "playbook": "evolved", "role": "practice",
+            "tasks": tasks}
 
 
-def _final_test_phase(kind: str, compare: Dict[str, Any]) -> Dict[str, Any]:
+def _final_test_phase(kind: str, compare: Dict[str, Any],
+                      playbook: str) -> Dict[str, Any]:
     """The test phase: ``folder`` pairs with real_folder, ``whole`` is the
-    whole-bank injection under plain real (core.config checklist item 8),
-    ``whole_verbatim`` the same with every skill text injected exactly as
-    stored (imported baseline documents must not be flattened). The sampling
-    depth is the global n_attempts_weak."""
+    whole-bank injection under plain real, ``whole_verbatim`` the same with
+    every skill text injected exactly as stored (imported baseline
+    documents must not be flattened). The sampling depth is the global
+    n_attempts_weak."""
     if kind == "folder":
         delivery = {"description_mode": DESCRIPTION_MODE, "name": "folder"}
         execution = {"name": "real_folder"}
@@ -319,80 +232,16 @@ def _final_test_phase(kind: str, compare: Dict[str, Any]) -> Dict[str, Any]:
         execution = {"name": "real"}
     else:
         raise ValueError(f"unknown test delivery kind {kind!r}")
-    return {"acceptance": None, "compare": compare, "delivery": delivery,
-            "execution": execution, "kind": "execute", "role": "test",
-            "tasks": "test"}
+    phase = {"acceptance": None, "compare": compare, "delivery": delivery,
+             "execution": execution, "kind": "execute", "role": "test",
+             "tasks": "test"}
+    if playbook != "off":
+        phase["playbook"] = playbook
+    return phase
 
 
 # ---------------------------------------------------------------------------
-# Method recipes: test phase -> (sequence, phases)
-# ---------------------------------------------------------------------------
-
-Recipe = Callable[[Dict[str, Any]], Tuple[List[str], Dict[str, Any]]]
-
-
-def full_method(test: Dict[str, Any], *, k: int = 5,
-                scopes: Optional[Dict[str, str]] = None,
-                new_skills: Optional[bool] = None,
-                nine: bool = False) -> Tuple[List[str], Dict[str, Any]]:
-    """exam + trial_level. ``scopes`` maps a trial_level learn definition to
-    its ``revise_scope``; ``new_skills`` is spelled in every trial_level
-    definition when given; ``nine`` adds the third definition
-    ``learn_final`` so P04, P06 and P08 can carry different scopes."""
-    scopes = scopes or {}
-
-    def trial(name: str) -> Dict[str, Any]:
-        return _learn_phase(_review("trial_level",
-                                    revise_scope=scopes.get(name),
-                                    new_skills=new_skills))
-
-    phases = {
-        "baseline": _baseline_phase(),
-        "learn_add": _learn_phase(_review("skill_level", k=k)),
-        "exam": _exam_phase(),
-        "learn": trial("learn"),
-        "learn_trial": trial("learn_trial"),
-    }
-    if nine:
-        phases["learn_final"] = trial("learn_final")
-    phases["test"] = test
-    return list(SEQUENCE_NINE if nine else SEQUENCE_FULL), phases
-
-
-def test_only(test: Dict[str, Any]) -> Tuple[List[str], Dict[str, Any]]:
-    """A run directory prepared by import-bank carries the bank; only the
-    test phase runs."""
-    return ["test"], {"test": test}
-
-
-def teacher_student(test: Dict[str, Any]
-                    ) -> Tuple[List[str], Dict[str, Any]]:
-    """Experiment 2: the add phase accepts what it writes and the exam only
-    measures, since no learn phase follows it."""
-    phases = {
-        "baseline": _baseline_phase(),
-        "learn_add": _learn_phase(
-            _review("skill_level", write_lessons=False, accept_new=True),
-            curate=_no_curation()),
-        "exam": _exam_phase(),
-        "test": test,
-    }
-    return ["baseline", "learn_add", "exam", "test"], phases
-
-
-def no_evolution(test: Dict[str, Any]) -> Tuple[List[str], Dict[str, Any]]:
-    """Experiment 4 arm A0: the P02 bank is the final bank."""
-    phases = {
-        "baseline": _baseline_phase(),
-        "learn_add": _learn_phase(_review("skill_level", accept_new=True),
-                                  curate=_no_curation()),
-        "test": test,
-    }
-    return ["baseline", "learn_add", "test"], phases
-
-
-# ---------------------------------------------------------------------------
-# The arm matrix
+# The arms
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -400,134 +249,62 @@ class Arm:
     stem: str
     exp: str
     summary: str
-    recipe: Recipe
+    #: True: the reference method's sequence; False: the test phase only.
+    method: bool = True
     benchmarks: Tuple[str, ...] = BENCHMARKS
-    teacher: str = "d"
     student: str = "q"
     test: str = "folder"
+    #: The list every practice phase runs (``train`` or ``val``).
+    practice_tasks: str = "train"
     #: The stem ``--print-index`` diffs this arm against.
     reference: str = "e1_ours"
-    #: Per-arm overrides of the named rules (the coverage ablation sets
-    #: ``segment_select`` / ``trajectory_select``; every other arm keeps
-    #: the reference RULES below).
-    rules: Tuple[Tuple[str, str], ...] = ()
-    #: A repo-relative global-playbook file; when set, every folder and
-    #: exam_folder delivery in the run renders it above the card list
-    #: (the 2026-11-04 P0 switch). None keeps the reference behaviour.
-    playbook: Optional[str] = None
-    #: ``learned``: every folder and exam_folder delivery takes the playbook
-    #: the learn phase after the baseline writes from the baseline trials
-    #: (2026-11-05). Exclusive with ``playbook``.
-    playbook_source: Optional[str] = None
 
 
 def arms() -> List[Arm]:
-    out = [Arm("e1_ours", "e1",
-               "reference: exam + trial_level, K=5, teacher D, student Q",
-               full_method)]
+    out = [
+        Arm("e1_ours", "e1",
+            "reference: baseline, learn, practice, learn, practice, learn, "
+            "test; teacher D, student Q"),
+        Arm("e1_ours_val", "e1",
+            "the reference method practising on the val list",
+            benchmarks=("alfworld",), practice_tasks="val"),
+    ]
     for baseline in BASELINES:
         out.append(Arm(
             f"e1_{baseline}_folder", "e1",
             f"{baseline} bank, test only, folder + real_folder",
-            test_only))
+            method=False))
         out.append(Arm(
             f"e1_{baseline}_whole", "e1",
             f"{baseline} bank, test only, whole_bank (verbatim) + real",
-            test_only, test="whole_verbatim"))
+            method=False, test="whole_verbatim"))
     out.append(Arm(
         "e1_bare", "e1",
         "bare: test only, whole_bank on an empty bank + fresh_bare",
-        test_only, benchmarks=("searchqa",), test="whole"))
+        method=False, benchmarks=("searchqa",), test="whole"))
     for student in ("q", "d", "x"):
         out.append(Arm(
             f"e1_bare_{student}", "e1",
             f"bare {student.upper()}: test only, whole_bank on an empty "
             "bank; the run that freezes that model's control file",
-            test_only, benchmarks=("alfworld",), student=student, test="whole"))
-    for teacher in ("d", "q"):
-        for student in ("d", "q"):
-            out.append(Arm(
-                f"e2_{teacher}2{student}", "e2",
-                f"teacher {teacher.upper()} -> student {student.upper()}",
-                teacher_student, teacher=teacher, student=student))
-    out.append(Arm(
-        "e2_x2q", "e2",
-        "teacher X (qwen3.8-27b) -> student Q",
-        teacher_student, teacher="x", student="q",
-        benchmarks=("alfworld",)))
-    out.append(Arm("e3_k1", "e3", "learn_add review K=1",
-                   partial(full_method, k=1)))
-    out.append(Arm("e3_k3", "e3", "learn_add review K=3",
-                   partial(full_method, k=3)))
-    # P0 (2026-11-04): the reference method plus the always-visible global
-    # playbook (task recipes, pick-two bookkeeping, search-loop recovery).
-    # The playbook rides the folder and exam_folder deliveries, so the
-    # external bare control (no folder) is untouched.
-    for k in (5, 3, 1):
-        out.append(Arm(
-            f"e6_playbook_k{k}", "e6",
-            f"reference + global playbook, K={k}",
-            partial(full_method, k=k),
-            benchmarks=("alfworld",),
-            playbook=PLAYBOOK_FILE))
-    # Learned playbook (2026-11-05): the same delivery switch as e6, but the
-    # text is written by the learn phase after the baseline from the
-    # baseline trials instead of read from a hand-written file.
-    for k in (5, 3, 1):
-        out.append(Arm(
-            f"e7_learnedpb_k{k}", "e7",
-            f"reference + learned global playbook, K={k}",
-            partial(full_method, k=k),
-            benchmarks=("alfworld",),
-            playbook_source="learned"))
-    # Coverage ablation (2026-11-04): the task gate stays ``any_weak_failed``
-    # -- the library still targets failures -- but every trajectory and every
-    # segment of the authorized tasks reaches the writer. Both switches are
-    # named rules, so the reference arms keep their behaviour byte-identical.
-    for k in (5, 3, 1):
-        out.append(Arm(
-            f"e5_allcover_k{k}", "e5",
-            f"coverage: all trajectories + all segments, K={k}",
-            partial(full_method, k=k),
-            rules=(("segment_select", "all"),
-                   ("trajectory_select", "all"))))
-    out.append(Arm("e4_a0", "e4",
-                   "A0: baseline, learn_add (accept_new, no curation), test",
-                   no_evolution))
-    out.append(Arm(
-        "e4_a3_joint", "e4",
-        "A3: scope ablation joint arm, new_skills false in learn and "
-        "learn_trial",
-        partial(full_method, new_skills=False)))
-    out.append(Arm(
-        "e4_a1_body", "e4",
-        "A1: revise_scope body, new_skills false, in learn and learn_trial",
-        partial(full_method, new_skills=False,
-                scopes={"learn": "body", "learn_trial": "body"}),
-        reference="e4_a3_joint"))
-    out.append(Arm(
-        "e4_a2_trigger", "e4",
-        "A2: revise_scope trigger, new_skills false, in learn and "
-        "learn_trial",
-        partial(full_method, new_skills=False,
-                scopes={"learn": "trigger", "learn_trial": "trigger"}),
-        reference="e4_a3_joint"))
-    out.append(Arm(
-        "e4_joint9", "e4",
-        "nine-phase reference: revise_scope both in all three learn "
-        "definitions",
-        partial(full_method, nine=True,
-                scopes={"learn": "both", "learn_trial": "both",
-                        "learn_final": "both"})))
-    out.append(Arm(
-        "e4_staged9", "e4",
-        "nine-phase staged: learn body, learn_trial trigger, "
-        "learn_final both",
-        partial(full_method, nine=True,
-                scopes={"learn": "body", "learn_trial": "trigger",
-                        "learn_final": "both"}),
-        reference="e4_joint9"))
+            method=False, benchmarks=("alfworld",), student=student,
+            test="whole"))
     return out
+
+
+def phases_of(arm: Arm, bench: str, test: Dict[str, Any]
+              ) -> Tuple[List[str], Dict[str, Any]]:
+    """The arm's sequence and phase definitions around its test phase."""
+    if not arm.method:
+        return ["test"], {"test": test}
+    phases = {
+        "baseline": _baseline_phase(),
+        "learn": _learn_phase(),
+        "practice": _practice_phase(arm.practice_tasks,
+                                    PRACTICE_ATTEMPTS[bench]),
+        "test": test,
+    }
+    return list(SEQUENCE_OURS), phases
 
 
 # ---------------------------------------------------------------------------
@@ -546,36 +323,22 @@ class Generated(NamedTuple):
     config: Dict[str, Any]
 
 
-def load_source(bench: str, source_dir: Path) -> Source:
-    """Copy the split (and TB's task list and control file identity) from
-    the benchmark's source config, read as plain YAML."""
-    path = Path(source_dir) / SOURCE_CONFIGS[bench]
-    with open(path, "r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle)
-    split = raw["split"]
-    for key in ("train", "test"):
-        if not isinstance(split.get(key), list) or not split[key]:
-            raise ValueError(f"{path}: split.{key} must be a non-empty list")
-    external = None
-    if bench == "tb21":
-        pinned = raw["phases"]["test"]["compare"]["external"]
-        external = {"path": pinned["path"], "sha256": pinned["sha256"]}
-    return Source(split=copy.deepcopy(split),
-                  tasks=copy.deepcopy(raw.get("tasks")), external=external)
+def load_source(bench: str) -> Source:
+    """The benchmark's split (and TB's task list and control file identity)
+    from paper_splits."""
+    tasks = paper_splits.TASKS.get(bench)
+    return Source(
+        split=copy.deepcopy(paper_splits.SPLITS[bench]),
+        tasks=list(tasks) if tasks is not None else None,
+        external=(dict(paper_splits.TB21_EXTERNAL) if bench == "tb21"
+                  else None))
 
 
-def _models(teacher: str, student: str, d_model: str,
-            q_model: str, x_model: str) -> Dict[str, str]:
+def _models(student: str, d_model: str, q_model: str,
+            x_model: str) -> Dict[str, str]:
     by_letter = {"d": d_model, "q": q_model, "x": x_model}
-    models = {}
-    for role in ROLES:
-        if role in TEACHER_ROLES:
-            models[role] = by_letter[teacher]
-        elif role in STUDENT_ROLES:
-            models[role] = by_letter[student]
-        else:
-            models[role] = d_model
-    return models
+    return {role: by_letter[student] if role in STUDENT_ROLES else d_model
+            for role in ROLES}
 
 
 def _token_budgets(models: Dict[str, str], d_model: str, q_model: str,
@@ -592,7 +355,6 @@ def _token_budgets(models: Dict[str, str], d_model: str, q_model: str,
 
 
 def _sha256(path: Path) -> str:
-    import hashlib
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -618,18 +380,16 @@ def _test_compare(source: Source, bench: str, arm: Arm, d_model: str,
             # The bare arm is the measurement: the zero-execution placeholder
             # keeps its control arm from re-running the same bare model.
             return {"against": "external_campaign",
-                    "external": dict(POOLED_CONTROL), "rule": None}
+                    "external": dict(POOLED_CONTROL)}
         return {"against": "external_campaign",
                 "external": _bare_control(arm.student, d_model, q_model,
-                                          x_model),
-                "rule": None}
+                                          x_model)}
     if source.external is None:
-        return {"against": "fresh_bare", "rule": None}
+        return {"against": "fresh_bare"}
     return {"against": "external_campaign",
             "external": {"model_key": CAMPAIGN_KEYS[arm.student],
                          "path": source.external["path"],
-                         "sha256": source.external["sha256"]},
-            "rule": None}
+                         "sha256": source.external["sha256"]}}
 
 
 def build_config(source: Source, bench: str, arm: Arm, d_model: str,
@@ -637,29 +397,10 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
                  explicit_cache_models: Sequence[str] = (),
                  cache_prefix_tokens: Optional[int] = None) -> Dict[str, Any]:
     compare = _test_compare(source, bench, arm, d_model, q_model, x_model)
-    sequence, phases = arm.recipe(_final_test_phase(arm.test, compare))
-    if arm.playbook:
-        text = (REPO_ROOT / arm.playbook).read_text(encoding="utf-8")
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        for spec in phases.values():
-            delivery = spec.get("delivery")
-            if isinstance(delivery, dict) and delivery.get("name") in (
-                    "folder", "exam_folder"):
-                delivery["playbook_file"] = arm.playbook
-                delivery["playbook_sha256"] = digest
-    if arm.playbook_source:
-        for spec in phases.values():
-            delivery = spec.get("delivery")
-            if isinstance(delivery, dict) and delivery.get("name") in (
-                    "folder", "exam_folder"):
-                delivery["playbook_source"] = arm.playbook_source
-    unused = set(phases) - set(sequence)
-    undefined = set(sequence) - set(phases)
-    if unused or undefined:
-        raise ValueError(
-            f"{arm.stem}: sequence and phase definitions disagree "
-            f"(unused {sorted(unused)}, undefined {sorted(undefined)})")
-    models = _models(arm.teacher, arm.student, d_model, q_model, x_model)
+    test = _final_test_phase(arm.test, compare,
+                             "evolved" if arm.method else "off")
+    sequence, phases = phases_of(arm, bench, test)
+    models = _models(arm.student, d_model, q_model, x_model)
     model_options: Dict[str, Dict[str, Any]] = {
         d_model: {"reasoning_effort": "max"}}
     for model_name in explicit_cache_models:
@@ -670,14 +411,13 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
     config: Dict[str, Any] = {
         "benchmark": BENCHMARK_NAMES[bench],
         "invalid_redispatch_limit": 1,
-        "mode": "split",
         "model_options": model_options,
         "models": models,
         "n_attempts_strong": 3,
         "n_attempts_weak": 3,
         "phases": {name: phases[name] for name in dict.fromkeys(sequence)},
-        "rules": {**RULES, **dict(arm.rules)},
-        "schema_version": 7,
+        "rules": dict(RULES),
+        "schema_version": 9,
         "sequence": sequence,
         "split": copy.deepcopy(source.split),
     }
@@ -685,28 +425,14 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
         config["tasks"] = list(source.tasks)
     config["token_budgets"] = _token_budgets(models, d_model, q_model,
                                              x_model)
-    # The reader's execution context is a fact the writer must know
-    # (2026-11-03); ALFWorld is the benchmark whose unified protocol has the
-    # two-interaction memory. Other benchmarks keep the switch off.
-    config["use_weak_profile"] = bench == "alfworld"
-    if bench == "alfworld":
-        config["weak_profile_file"] = ALFWORLD_PROFILE_FILE
     return config
 
 
 def file_name(bench: str, arm: Arm) -> str:
-    # The ALFWorld configs carry a protocol-generation marker. v2 was the
-    # 2026-11-02 unified-protocol alignment; v3 adds the deployment-constraint
-    # profile and the read policy that keeps card reads out of the two-step
-    # history (2026-11-03). AGENTS section 6 forbids rewriting a config that a
-    # formal run already started, so the earlier files stay frozen as the
-    # record of their protocol.
-    if bench == "alfworld":
-        return f"alfworld_split_paper_v3_{arm.stem}.yaml"
-    return f"{bench}_split_paper_{arm.stem}.yaml"
+    return f"{bench}_paper_{arm.stem}.yaml"
 
 
-def generate(source_dir: Path, d_models: Dict[str, str],
+def generate(d_models: Dict[str, str],
              q_model: str,
              x_model: str = DEFAULT_X_MODEL,
              stems: Optional[Sequence[str]] = None,
@@ -720,7 +446,7 @@ def generate(source_dir: Path, d_models: Dict[str, str],
     those runs finish).
     """
     wanted = set(stems) if stems else None
-    sources = {bench: load_source(bench, source_dir) for bench in BENCHMARKS}
+    sources = {bench: load_source(bench) for bench in BENCHMARKS}
     out: Dict[str, Generated] = {}
     for bench in BENCHMARKS:
         for arm in arms():
@@ -767,15 +493,9 @@ def diff_paths(a: Any, b: Any, prefix: str = "",
     return [prefix] if a != b else []
 
 
-def _in_generated_family(name: str) -> bool:
-    """Whether a config file belongs to the CURRENT generation family.
-
-    ``alfworld_split_paper_*.yaml`` without ``_v3_`` is the frozen record of
-    an earlier protocol generation (pre-unified, or unified v2); it is never
-    regenerated and never stale.
-    """
-    return name.startswith(("tb21_split_paper_", "searchqa_split_paper_",
-                            "alfworld_split_paper_v3_"))
+def _stale(out_dir: Path, rendered: Dict[str, str]) -> List[str]:
+    return [path.name for path in sorted(out_dir.glob(FILE_GLOB))
+            if path.name not in rendered]
 
 
 def check(out_dir: Path, rendered: Dict[str, str]) -> List[str]:
@@ -786,16 +506,14 @@ def check(out_dir: Path, rendered: Dict[str, str]) -> List[str]:
             problems.append(f"missing: {name}")
         elif path.read_bytes() != text.encode("utf-8"):
             problems.append(f"differs: {name}")
-    for path in sorted(out_dir.glob(FILE_GLOB)):
-        if _in_generated_family(path.name) and path.name not in rendered:
-            problems.append(f"stale: {path.name}")
+    problems.extend(f"stale: {name}" for name in _stale(out_dir, rendered))
     return problems
 
 
 def index(generated: Dict[str, Generated]) -> str:
     """One markdown row per file: the arm's reference stem and the computed
-    diff against that reference on the same benchmark (a ``curate`` block
-    counts as one difference). ``e1_ours`` is the reference of itself."""
+    diff against that reference on the same benchmark. ``e1_ours`` is the
+    reference of itself."""
     configs = {(item.bench, item.arm.stem): item.config
                for item in generated.values()}
     lines = ["| experiment | arm | benchmark | file | diffed against | "
@@ -809,8 +527,8 @@ def index(generated: Dict[str, Generated]) -> str:
         else:
             reference = item.arm.reference
             differs = ", ".join(diff_paths(
-                item.config, configs[(item.bench, reference)],
-                leaves=("curate",))) or "(identical)"
+                item.config, configs[(item.bench, reference)])) \
+                or "(identical)"
         arm = item.arm.stem.split("_", 1)[1]
         lines.append(f"| {item.arm.exp} | {arm} | {item.bench} | {name} | "
                      f"{reference} | {differs} |")
@@ -834,8 +552,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         description="Generate the paper's experiment configs.")
     parser.add_argument("--out-dir", default=str(CONFIG_DIR),
                         help="where the YAMLs are written / checked")
-    parser.add_argument("--source-dir", default=str(CONFIG_DIR),
-                        help="where the source configs live")
     parser.add_argument("--d-model", action="append", default=[],
                         metavar="BENCH=ID",
                         help="gateway id of D for one benchmark")
@@ -864,8 +580,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     stems = [stem.strip() for stem in args.stems.split(",") if stem.strip()]
 
     try:
-        generated = generate(Path(args.source_dir),
-                             _parse_d_models(args.d_model), args.q_model,
+        generated = generate(_parse_d_models(args.d_model), args.q_model,
                              args.x_model, stems=stems or None,
                              explicit_cache_models=args.explicit_cache_model,
                              cache_prefix_tokens=args.cache_prefix_tokens)
@@ -891,10 +606,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not stems:
         # A partial generation (--stems) is not evidence that the other
         # arms are stale.
-        for path in sorted(out_dir.glob(FILE_GLOB)):
-            if _in_generated_family(path.name) and path.name not in rendered:
-                print(f"warning: stale file not produced any more: "
-                      f"{path.name}", file=sys.stderr)
+        for name in _stale(out_dir, rendered):
+            print(f"warning: stale file not produced any more: {name}",
+                  file=sys.stderr)
     print(f"wrote {len(rendered)} configs to {out_dir}")
     return 0
 

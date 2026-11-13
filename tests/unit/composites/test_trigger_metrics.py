@@ -6,9 +6,16 @@ import pytest
 
 from expedistill.composites.trigger_metrics import (
     GROUPS,
-    replay_metrics,
+    card_use_metrics,
     trigger_metrics,
 )
+from expedistill.core.answer_sheet import (
+    AnswerSheet,
+    CoverageRecord,
+    ExecutionRecord,
+    GradingRecord,
+)
+from expedistill.core.models import Step
 
 CARDS = ["a", "b", "c"]
 
@@ -135,44 +142,59 @@ def test_a_contradictory_record_is_refused(change):
 
 
 # ---------------------------------------------------------------------------
-# replay_metrics
+# card_use_metrics (a practice phase's mechanism metrics)
 # ---------------------------------------------------------------------------
 
-def _row(target_opened, other_opened, verdict):
-    return {"target_opened": target_opened, "other_opened": other_opened,
-            "verdict": verdict}
+_FOLDER = {"files": [{"skill_id": "type/001/skill", "version": 1,
+                      "filename": "type-001-skill/SKILL.md"},
+                     {"skill_id": "type/002/skill", "version": 1,
+                      "filename": "type-002-skill/SKILL.md"}]}
 
 
-def test_replay_metrics_follow_the_registered_definitions():
-    metrics = replay_metrics([
-        _row(True, 0, "success"), _row(True, 2, "failure"),
-        _row(False, 1, "success"), _row(False, 0, "failure"),
-        _row(True, 1, "success")])
-
-    assert metrics["n"] == 5
-    assert metrics["recall"] == {"value": 0.6, "target_opened": 3, "n": 5}
-    assert metrics["misfire"] == {"value": 0.8, "other_opened": 4, "n": 5}
-    assert metrics["plan_pass_rate"] == {"value": 0.6, "passed": 3, "n": 5}
-    assert metrics["pass_given_target_opened"] == {
-        "value": pytest.approx(2 / 3), "passed": 2, "n": 3}
-    assert metrics["pass_given_target_not_opened"] == {
-        "value": 0.5, "passed": 1, "n": 2}
-
-
-def test_replay_metrics_with_an_empty_group_report_none():
-    metrics = replay_metrics([_row(True, 0, "success")])
-
-    assert metrics["pass_given_target_not_opened"] == {
-        "value": None, "passed": 0, "n": 0}
-    assert replay_metrics([])["recall"]["value"] is None
+def _sheet(actions, verdict):
+    """A graded practice sheet whose steps are ``actions``; ``verdict``
+    None is a gap sheet (no execution)."""
+    coverage = CoverageRecord(unit_id="u", attempt_index=0,
+                              present=verdict is not None,
+                              status="present" if verdict else "missing")
+    if verdict is None:
+        return AnswerSheet(sheet_id="gap", phase_label="p03:practice",
+                           coverage=coverage, execution=None)
+    execution = ExecutionRecord(
+        sheet_id="s", unit_id="u", phase_label="p03:practice",
+        task_ref="tb:t1", role="weak", arm="weak", model_role="weak",
+        model_name="m", sample_index=0,
+        steps=[Step(action=action, observation="") for action in actions],
+        artifacts={"trajectory_id": "traj", "skill_folder": _FOLDER})
+    return AnswerSheet(
+        sheet_id="s", phase_label="p03:practice", coverage=coverage,
+        execution=execution,
+        grading=GradingRecord(verdict=verdict, basis="", rule_name="scorer"))
 
 
-@pytest.mark.parametrize("row", [
-    {"target_opened": 1, "other_opened": 0, "verdict": "success"},
-    {"target_opened": True, "other_opened": True, "verdict": "success"},
-    {"target_opened": True, "other_opened": 0, "verdict": "passed"},
-    {"target_opened": True, "other_opened": 0},
-])
-def test_a_malformed_replay_row_is_refused(row):
-    with pytest.raises(ValueError):
-        replay_metrics([row])
+def test_card_use_metrics_count_valid_trials_per_card():
+    read_first = "ReadSkill[type-001-skill/SKILL.md]"
+    sheets = [
+        _sheet([read_first, "go"], "success"),
+        _sheet([read_first, "cat type-002-skill/SKILL.md"], "failure"),
+        _sheet(["go"], "failure"),
+        # Invalid and missing trials stay out of every count but trials.
+        _sheet([read_first], "invalid"),
+        _sheet([], None),
+    ]
+
+    metrics = card_use_metrics(sheets)
+
+    assert metrics["trials"] == 4
+    assert (metrics["valid"], metrics["success"]) == (3, 1)
+    assert metrics["success_rate"] == pytest.approx(1 / 3)
+    assert (metrics["opened_any"], metrics["opened_any_success"]) == (2, 1)
+    assert metrics["cards"] == {
+        "type/001/skill": {"opened": 2, "opened_success": 1},
+        "type/002/skill": {"opened": 1, "opened_success": 0}}
+
+
+def test_card_use_metrics_without_trials_report_none_rates():
+    metrics = card_use_metrics([])
+    assert metrics["success_rate"] is None
+    assert metrics["cards"] == {}

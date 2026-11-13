@@ -5,10 +5,10 @@ Orchestration:
     2. Plan units for both arms (strong, weak)
     3. Execute both arms through K1 (run-level store)
     4. Build trial-level answer sheets + coverage, grade them
-    5. Write the reuse index and summary; check for holes
+    5. Write the summary; check for holes
 
-The execute driver no longer builds unit-level report cards: coverage
-and unit summaries are derived by pure functions from the trial sheets.
+Coverage and unit summaries are derived by pure functions from the
+trial sheets.
 """
 
 from typing import Any, Dict, List, Set
@@ -41,25 +41,21 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 1. RESOLVE PARAMETERS
     # ========================================================================
-    params = resolve._execution_params(spec)
-    delivery, delivery_params = resolve._resolve_delivery(spec, ctx, phase)
-    rule_name = resolve._resolve_verdict_rule(spec, ctx.config.benchmark)
-    limit = resolve._redispatch_limit(ctx)
-
-    tasks = engine._prefixed_task_map(ctx, list(phase.task_ids))
+    resolved = resolve.resolve_phase(ctx, phase, spec)
+    tasks = engine.task_map(ctx, list(phase.task_ids))
     depths = {"strong": ctx.config.n_attempts_strong,
               "weak": ctx.config.n_attempts_weak}
 
     # ========================================================================
     # 2. PLAN UNITS FOR BOTH ARMS
     # ========================================================================
-    rows = delivery.resolve(None, list(tasks), delivery_params)
+    rows = resolved.delivery_rows(None, list(tasks))
 
     plans_by_role: Dict[str, list] = {}
     specs: List[UnitSpec] = []
-    for arm in params.arms:
-        role = resolve._ROLE_OF_ARM[arm]
-        plans = engine._plan_units(
+    for arm in resolved.execution.arms:
+        role = resolve.ROLE_OF_ARM[arm]
+        plans = engine.plan_units(
             rows, tasks, phase_label=phase.label,
             benchmark=ctx.config.benchmark, role=role,
             n_attempts=depths[role])
@@ -77,7 +73,7 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
             )
             for plan in plans)
 
-    phase_disk._write_units(
+    phase_disk.write_units(
         ctx, phase,
         [plan.unit for role in ("strong", "weak")
          for plan in plans_by_role[role]])
@@ -90,9 +86,10 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
     trajectories = []
 
     for role in ("strong", "weak"):
-        arm_trajectories, arm_holes = engine._run_arm_units(
+        arm_trajectories, arm_holes = engine.run_arm_units(
             ctx, phase, plans=plans_by_role[role], store=ctx.store,
-            arm=role, limit=limit, accepted=set(stage1_holes))
+            arm=role, limit=resolved.redispatch_limit,
+            accepted=set(stage1_holes))
         trajectories.extend(arm_trajectories)
 
         if arm_holes and ctx.run_settings.allow_infra_shortfall:
@@ -106,7 +103,7 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 4. TRIAL SHEETS + COVERAGE + GRADING
     # ========================================================================
-    coverage_records = coverage.baseline_coverage(
+    coverage_records = coverage.store_coverage(
         ctx.store, specs, accepted_holes=stage1_holes)
     executions = [
         answer_sheets.execution_from_trajectory(
@@ -121,7 +118,7 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
     ]
     sheets = answer_sheets.assemble_answer_sheets(
         executions, coverage_records, phase_label=phase.label)
-    answer_sheets.grade_answer_sheets(sheets, rule_name)
+    answer_sheets.grade_answer_sheets(sheets, resolved.verdict_rule)
 
     every_hole = set(stage1_holes) | holes
     summary = {
@@ -141,10 +138,6 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
     answer_sheets.write_coverage(
         coverage_records, phase_dir / phase_report.COVERAGE_NAME)
     phase_report.write_unit_specs(specs, phase_dir)
-    phase_disk._write_reuse_index(
-        ctx, phase,
-        [(unit.unit_id, unit.status, unit.cause)
-         for unit in report.units])
 
     # ========================================================================
     # 5. WRITE SUMMARY AND CHECK HOLES

@@ -1,18 +1,19 @@
 """Shared plumbing of the read-only analyses over a finished run (layer 7).
 
-``judge-skills`` and ``exam-replay`` read a finished run and write their own
-results elsewhere. Two rules keep them honest, and both live here so the two
-stages cannot drift:
+``judge-skills`` reads a finished run and writes its own results elsewhere.
+Two rules keep it honest, and both live here so every analysis that writes
+rows applies them the same way:
 
 * the output directory is never inside the run it reads (the run directory
   stays byte-for-byte what the experiment left);
 * the settings that decide what a stored row means (which run, which phase,
-  which model answered or judged) are pinned in ``analysis_config.json`` on
-  the first start, and a resume with different settings is refused -- rows
-  from two answering models in one file would be a result nobody ran.
+  which model judged) are pinned in ``analysis_config.json`` on the first
+  start, and a resume with different settings is refused -- rows from two
+  judge models in one file would be a result nobody ran.
 
-The second helper finds which phases left a skill bank artifact: the bank a
-phase received is the latest artifact of an earlier phase.
+The second helper (used by ``segmentation-metrics`` too) finds which phases
+left a skill bank artifact: the bank a phase received is the latest artifact
+of an earlier phase.
 """
 
 import json

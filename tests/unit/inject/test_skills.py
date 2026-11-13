@@ -1,32 +1,29 @@
-"""Unit tests for D9 skill injection and D10 bank-length accounting."""
-from expedistill.core.models import SKILL_MARKERS, Skill
+"""Unit tests for D9 skill injection."""
+from expedistill.core.models import Skill
+from expedistill.inject.skill_text import SKILL_MARKERS, render_card
 from expedistill.inject.skills import (
     bank_reference,
-    count_bank_tokens,
     estimate_tokens,
     format_skills_block,
-    skill_ref,
 )
 
 
-def make_skill(skill_id, content, version=1, group=None):
+def make_skill(skill_id, when_to_use, version=1, steps=("Do it.",)):
     return Skill(
         skill_id=skill_id,
-        content=content,
-        subtask_id=f"subtask-of-{skill_id}",
+        subtask_type=f"type-of-{skill_id}",
         source_subtasks=[f"subtask-of-{skill_id}"],
+        summary=f"Skill {skill_id}.",
+        when_to_use=when_to_use,
+        steps=list(steps),
+        not_applicable_when="never",
         version=version,
-        group=group,
     )
 
 
-def as_dict(skill):
-    return {
-        "skill_id": skill.skill_id,
-        "version": skill.version,
-        "content": skill.content,
-        "group": skill.group,
-    }
+def imported(skill_id, text):
+    return {"skill_id": skill_id, "summary": f"Skill {skill_id}.",
+            "verbatim_text": text}
 
 
 # ---------------------------------------------------------------------------
@@ -38,104 +35,37 @@ def test_empty_skill_list_is_bare_empty_string():
     assert format_skills_block([]) == ""
 
 
-def test_single_ungrouped_skill():
-    skill = make_skill("s1", "Check the config before restarting.")
+def test_single_skill_is_its_card_on_one_bullet():
+    skill = make_skill("s1", "Before restarting.")
     assert format_skills_block([skill]) == (
         "## Skill rules\n"
-        "- Check the config before restarting."
+        "- [When to use] Before restarting. [Steps] 1. Do it. "
+        "[Do not use when] never"
     )
 
 
-def test_groups_are_alphabetical_and_ungrouped_last():
-    skills = [
-        make_skill("s1", "first", group="zeta"),
-        make_skill("s2", "second", group=None),
-        make_skill("s3", "third", group="alpha"),
-        make_skill("s4", "fourth", group="zeta"),
-    ]
-    block = format_skills_block(skills)
-    assert block == (
-        "## Skill rules\n"
-        "### alpha\n"
-        "- third\n"
-        "### zeta\n"
-        "- first\n"
-        "- fourth\n"
-        "- second"
-    )
-
-
-def test_input_order_is_stable_within_a_group():
-    skills = [
-        make_skill("s1", "a", group="g"),
-        make_skill("s2", "b", group="g"),
-        make_skill("s3", "c", group="g"),
-    ]
-    assert format_skills_block(skills).endswith("- a\n- b\n- c")
-
-
-def test_all_grouped_skills_have_no_ungrouped_tail():
-    skills = [make_skill("s1", "a", group="g")]
-    assert format_skills_block(skills) == "## Skill rules\n### g\n- a"
-
-
-def test_groups_override_wins_and_none_un_groups():
-    skills = [
-        make_skill("s1", "a", group="own"),
-        make_skill("s2", "b", group="own"),
-    ]
-    block = format_skills_block(skills, groups={"s1": "override", "s2": None})
-    assert block == "## Skill rules\n### override\n- a\n- b"
-
-
-def test_blank_group_is_treated_as_ungrouped():
-    skill = make_skill("s1", "a", group="")
-    assert format_skills_block([skill]) == "## Skill rules\n- a"
+def test_input_order_is_kept():
+    skills = [make_skill(name, name) for name in ("c", "a", "b")]
+    lines = format_skills_block(skills).split("\n")[1:]
+    assert [line.split("] ", 1)[1][0] for line in lines] == ["c", "a", "b"]
 
 
 def test_internal_newlines_collapse_to_single_spaces():
     skill = make_skill("s1", "Step one.\n\nStep two.\n  Step three.\n")
     block = format_skills_block([skill])
     assert block.count("\n") == 1  # header + one single-line bullet
-    assert block == "## Skill rules\n- Step one. Step two. Step three."
+    assert "[When to use] Step one. Step two. Step three. [Steps]" in block
 
 
-def test_section_markers_survive_single_line_compression():
-    # Protocol v2: a stored skill is multi-line marker text, and the
-    # injection block compresses it onto one bullet. The compression
-    # destroys the line structure (so has_skill_sections must never read the
-    # block) but keeps every marker literal, so the weak model still sees
-    # the section headers -- pinned here instead of asserted by eye.
-    content = "\n".join([
-        "[When to use] when a service reports an unexpected state",
-        "[Steps]",
-        "1. inspect the reported state",
-        "2. run the command that matches the state",
-        "[Do not use when] no state was reported",
-    ])
-    block = format_skills_block([make_skill("s1", content)])
-    assert block.count("\n") == 1  # header + one single-line bullet
-    for marker in SKILL_MARKERS:
-        assert marker in block
-
-
-def test_multiline_heredoc_content_compresses_markers_survive():
-    # The 2026-10-13 incident payload class (docs/decisions/
-    # g2_multiline_and_json_extraction_fix_20261014.md): stored content
-    # whose steps item is a multi-line heredoc. The bullet must still be
-    # ONE line with every marker literal and the command text intact --
-    # one skill, one line, nothing silently truncated.
-    content = "\n".join([
-        "[When to use] when a service reports an unexpected state",
-        "[Steps]",
-        "1. run this exact block:",
-        "python3 - <<'PY'",
-        "print('ok')",
-        "PY",
-        "[Do not use when] no state was reported",
-    ])
-    block = format_skills_block([make_skill("s1", content)])
-    assert block.count("\n") == 1  # header + one single-line bullet
+def test_multiline_heredoc_step_compresses_and_markers_survive():
+    # The 2026-10-13 incident payload class: a multi-line heredoc step.
+    # The bullet is ONE line with every marker literal and the command
+    # text intact -- one skill, one line, nothing silently truncated.
+    skill = make_skill("s1", "when a service reports an unexpected state",
+                       steps=["run this exact block:\npython3 - <<'PY'\n"
+                              "print('ok')\nPY"])
+    block = format_skills_block([skill])
+    assert block.count("\n") == 1
     for marker in SKILL_MARKERS:
         assert marker in block
     assert "python3 - <<'PY'" in block
@@ -143,23 +73,13 @@ def test_multiline_heredoc_content_compresses_markers_survive():
 
 
 def test_dict_and_object_inputs_render_identically():
-    skills = [
-        make_skill("s1", "a", group="g"),
-        make_skill("s2", "b"),
-    ]
+    skills = [make_skill("s1", "a"), make_skill("s2", "b")]
     assert (format_skills_block(skills)
-            == format_skills_block([as_dict(s) for s in skills]))
-
-
-def test_dict_input_without_optional_keys():
-    # version defaults to 1, group to None: same defaults as Skill.
-    assert format_skills_block([{"skill_id": "s1", "content": "a"}]) == (
-        "## Skill rules\n- a"
-    )
+            == format_skills_block([s.to_dict() for s in skills]))
 
 
 # ---------------------------------------------------------------------------
-# estimate_tokens / count_bank_tokens
+# estimate_tokens
 # ---------------------------------------------------------------------------
 
 def test_estimate_tokens_is_a_fourth_of_the_length_with_floor_one():
@@ -170,32 +90,12 @@ def test_estimate_tokens_is_a_fourth_of_the_length_with_floor_one():
     assert estimate_tokens("a" * 100) == 25
 
 
-def test_count_bank_tokens_empty_bank_costs_nothing():
-    # 0, not estimate_tokens("") == 1: an empty bank spends no phantom token.
-    assert count_bank_tokens([]) == 0
-
-
-def test_count_bank_tokens_matches_block_estimate():
-    skills = [
-        make_skill("s1", "a" * 40, group="g"),
-        make_skill("s2", "b" * 60),
-    ]
-    block = format_skills_block(skills)
-    assert count_bank_tokens(skills) == estimate_tokens(block)
-    assert count_bank_tokens(skills) == count_bank_tokens(
-        skills, groups={"s1": "h"})
-    assert count_bank_tokens(skills) > 0
-
-
 # ---------------------------------------------------------------------------
-# bank_reference / skill_ref
+# bank_reference
 # ---------------------------------------------------------------------------
 
 def test_bank_reference_format_and_stability():
-    skills = [
-        make_skill("s1", "a"),
-        make_skill("s2", "b", version=3),
-    ]
+    skills = [make_skill("s1", "a"), make_skill("s2", "b", version=3)]
     ref = bank_reference(skills)
     assert ref.startswith("bank:")
     assert len(ref) == len("bank:") + 12
@@ -203,10 +103,12 @@ def test_bank_reference_format_and_stability():
     assert bank_reference(skills) == ref  # deterministic
 
 
-def test_bank_reference_is_sensitive_to_content_version_and_membership():
+def test_bank_reference_is_sensitive_to_card_version_and_membership():
     base = [make_skill("s1", "a")]
     assert bank_reference(base) != bank_reference(
         [make_skill("s1", "a changed")])
+    assert bank_reference(base) != bank_reference(
+        [make_skill("s1", "a", steps=["Do something else."])])
     assert bank_reference(base) != bank_reference(
         [make_skill("s1", "a", version=2)])
     assert bank_reference(base) != bank_reference(
@@ -214,21 +116,10 @@ def test_bank_reference_is_sensitive_to_content_version_and_membership():
     assert bank_reference(base) != bank_reference([])
 
 
-def test_bank_reference_ignores_grouping():
-    # The digest covers skills, not the rendered block: regrouping is free.
-    assert bank_reference([make_skill("s1", "a", group="g")]) == \
-        bank_reference([make_skill("s1", "a", group=None)])
-
-
 def test_bank_reference_accepts_dicts():
     skills = [make_skill("s1", "a", version=2)]
-    assert bank_reference(skills) == bank_reference([as_dict(s) for s in skills])
-
-
-def test_skill_ref_format():
-    assert skill_ref(make_skill("s1", "a")) == "s1@v1"
-    assert skill_ref(make_skill("s1", "a", version=7)) == "s1@v7"
-    assert skill_ref({"skill_id": "s1", "content": "a"}) == "s1@v1"
+    assert bank_reference(skills) == bank_reference(
+        [s.to_dict() for s in skills])
 
 
 # ---------------------------------------------------------------------------
@@ -238,30 +129,26 @@ def test_skill_ref_format():
 _DOCUMENT = "# Playbook\n\n## Step 1\n- check the fridge\n- open it\n\n## Step 2\nclose it"
 
 
+def test_an_imported_skill_renders_its_document():
+    assert render_card(imported("doc", _DOCUMENT)) == _DOCUMENT
+
+
 def test_verbatim_keeps_the_document_layout_byte_for_byte():
-    block = format_skills_block(
-        [{"skill_id": "doc", "content": _DOCUMENT}], verbatim=True)
+    block = format_skills_block([imported("doc", _DOCUMENT)], verbatim=True)
     assert block == "## Skill rules\n\n" + _DOCUMENT
 
 
 def test_the_default_still_flattens_the_same_document():
-    block = format_skills_block([{"skill_id": "doc", "content": _DOCUMENT}])
+    block = format_skills_block([imported("doc", _DOCUMENT)])
     assert "\n\n" not in block.split("\n", 1)[1]
     assert block.splitlines()[1].startswith("- # Playbook ## Step 1")
 
 
 def test_verbatim_separates_several_skills_by_one_blank_line():
     block = format_skills_block(
-        [{"skill_id": "a", "content": "first\nline"},
-         {"skill_id": "b", "content": "second"}], verbatim=True)
+        [imported("a", "first\nline"), imported("b", "second")],
+        verbatim=True)
     assert block == "## Skill rules\n\nfirst\nline\n\nsecond"
-
-
-def test_verbatim_ignores_groups():
-    block = format_skills_block(
-        [{"skill_id": "a", "content": "x", "group": "g"}],
-        groups={"a": "other"}, verbatim=True)
-    assert "###" not in block
 
 
 def test_an_empty_list_is_empty_in_both_modes():

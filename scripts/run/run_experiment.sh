@@ -14,7 +14,7 @@
 # liveness source -- never use pgrep -f.
 #
 # Example:
-#   scripts/run/run_experiment.sh configs/experiments/searchqa_split_live_run_20261020.yaml
+#   scripts/run/run_experiment.sh configs/experiments/searchqa_paper_e1_ours.yaml
 
 set -euo pipefail
 

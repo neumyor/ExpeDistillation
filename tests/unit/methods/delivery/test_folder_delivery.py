@@ -1,36 +1,30 @@
 """The skill-folder M2 delivery tests: catalog rendering, the manifest,
 the whole_bank-parity bookkeeping and the load-time C-role boundary.
 
-Milestone map (the 2026-10-17 alignment ruling): M1 added the Skill
-``summary`` field; M2 delivers the ``folder`` method -- a pure
-``resolve`` that renders the catalog text and the folder manifest into
-the unit rows (the composite-layer materialization lives in
-composites/skill_materialize.py and has its own test file). The M3 pairing
-(real_folder execution, plugin capability bits) is not in the table
-yet; here the folder play ends at the unit row.
+The ``folder`` method is a pure ``resolve`` that renders the catalog
+text and the folder manifest into the unit rows (the composite-layer
+materialization lives in composites/skill_materialize.py and has its own
+test file); here the folder play ends at the unit row. Only the bank's
+active cards are delivered.
 """
 
 import pytest
 
 from expedistill.benchmarks.base import Task
-from expedistill.composites.decision import reuse_key, reusable_units
 from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core.config import (
     ConfigError,
     FOLDER_DELIVERY_NAME,
+    PHASE_ROLE_PRACTICE,
     PHASE_ROLE_TEST,
     parse_phases,
 )
 from expedistill.core.contracts import ExecutionUnitRow
-from expedistill.core.ids import (
-    make_subtask_id,
-    make_task_id,
-    make_trajectory_id,
-)
+from expedistill.core.ids import make_task_id, make_type_id
 from expedistill.core.models import Skill
 from expedistill.inject import bank_reference
 from expedistill.methods import resolve_fixed, resolve_params
-from expedistill.methods.delivery import FolderParams, WholeBankParams
+from expedistill.methods.delivery.params import FolderParams, WholeBankParams
 from expedistill.methods.delivery import folder_delivery as folder_driver
 from expedistill.methods.delivery.folder_delivery import (
     CATALOG_FILENAME,
@@ -43,29 +37,33 @@ from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
 
-MARKED = "\n".join([
-    "[When to use] The service rejects connections.",
-    "Check the log file before restarting anything.",
-    "[Steps]",
-    "1. Check the service status.",
-    "[Do not use when] The status command already reports running.",
-])
+MARKED = {
+    "when_to_use": "The service rejects connections.\n"
+                   "Check the log file before restarting anything.",
+    "steps": ["Check the service status."],
+    "not_applicable_when": "The status command already reports running.",
+}
 
 
-def _skill(task_raw: str, *, summary: str = "", status: str = "accepted",
-           content: str = MARKED) -> Skill:
-    task_id = make_task_id(BENCHMARK, task_raw)
-    subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
-    return make_skill(subtask_id, content, summary=summary, status=status)
+def _skill(serial: int, *, summary: str = "A service skill.",
+           status: str = "active") -> Skill:
+    return make_skill(make_type_id(serial), **MARKED, summary=summary,
+                      status=status)
+
+
+def _row(serial: int, **fields) -> dict:
+    """A bank row with fields a stored Skill cannot hold (an empty
+    summary or trigger): the catalog renders rows as well as skills."""
+    return {**_skill(serial).to_dict(), **fields}
 
 
 def _bank():
-    """One full-membership phase artifact: two accepted, one pending."""
-    accepted_a = _skill("t1", summary="Restart a stuck service safely.")
-    accepted_b = _skill("t2", summary="Check the log before restarting.")
-    pending = _skill("t3", summary="A pending skill, never delivered.",
-                     status="pending")
-    return [accepted_a, accepted_b, pending], [accepted_a, accepted_b]
+    """One full-membership phase artifact: two active, one discarded."""
+    active_a = _skill(1, summary="Restart a stuck service safely.")
+    active_b = _skill(2, summary="Check the log before restarting.")
+    discarded = _skill(3, summary="A discarded skill, never delivered.",
+                       status="discarded")
+    return [active_a, active_b, discarded], [active_a, active_b]
 
 
 def _tasks(*raws):
@@ -77,7 +75,7 @@ def _tasks(*raws):
 # ---------------------------------------------------------------------------
 
 def test_the_catalog_opens_with_the_usage_rules():
-    catalog = render_catalog([_skill("t1", summary="Restart safely.")])
+    catalog = render_catalog([_skill(1, summary="Restart safely.")])
     lines = catalog.splitlines()
     assert lines[0] == "## Skill folder catalog (fallback)"
     rules = [line for line in lines if line.startswith("- ")]
@@ -127,48 +125,34 @@ def test_a_reserved_word_in_the_directory_name_is_refused():
         skill_dirname("Anthropic/helper")
 
 
-def test_an_empty_summary_falls_back_to_the_when_to_use_section():
-    skill = _skill("t1", summary="")  # the v2-migration shape
-    catalog = render_catalog([skill], description_mode="summary")
+def test_an_empty_summary_falls_back_to_the_when_to_use_field():
+    catalog = render_catalog([_row(1, summary="")],
+                             description_mode="summary")
     entry = catalog.splitlines()[-1]
-    # The section body (marker-line remainder plus continuation lines)
-    # collapsed to one line; [Steps] never leaks into the description.
+    # The trigger collapsed to one line; the steps never leak into the
+    # description.
     assert entry.endswith(
         "| The service rejects connections. Check the log file before "
         "restarting anything.")
 
 
-def test_a_retired_failure_reference_gets_the_explicit_placeholder():
-    """The 2026-10-19 ruling: only [When to use] is a fallback; a
-    pre-ruling [Trigger] skill is not migrated and reads as markerless."""
-    content = "\n".join([
-        "[Trigger] The model restarts the service blindly.",
-        "[Why it fails] The lock file is still held.",
-        "[Do instead] Check the lock file, then restart.",
-        "[Do not use when] The status command already reports running.",
-    ])
-    skill = _skill("t1", summary="", content=content)
-    entry = render_catalog([skill], description_mode="summary").splitlines()[-1]
-    assert entry.endswith("| (no summary)")
-
-
-def test_a_markerless_skill_gets_the_explicit_placeholder():
-    skill = _skill("t1", content="Just some prose with no sections.")
-    catalog = render_catalog([skill], description_mode="summary")
+def test_no_summary_and_no_trigger_gets_the_explicit_placeholder():
+    row = _row(1, summary="", when_to_use="")
+    catalog = render_catalog([row], description_mode="summary")
     assert catalog.splitlines()[-1].endswith("| (no summary)")
 
 
 def test_a_long_description_is_kept_whole_in_the_catalog():
     # A clipped trigger reads as a different rule: the catalog line keeps
     # the whole description (the length budget lives in the G2 prompts).
-    long = _skill("t1", summary="a" * 450)
+    long = _skill(1, summary="a" * 450)
     entry = render_catalog([long], description_mode="summary").splitlines()[-1]
     assert entry.endswith("| " + "a" * 450)
     assert "[truncated]" not in entry
 
 
 def test_the_three_description_modes():
-    skill = _skill("t1", summary="Restart safely.")
+    skill = _skill(1, summary="Restart safely.")
     trigger = "The service rejects connections. Check the log file "\
               "before restarting anything."
     summary_entry = render_catalog(
@@ -186,14 +170,14 @@ def test_the_three_description_modes():
 # The manifest and the resolved rows
 # ---------------------------------------------------------------------------
 
-def test_the_manifest_carries_the_accepted_files_and_the_bank_fingerprint():
+def test_the_manifest_carries_the_active_files_and_the_bank_fingerprint():
     bank, accepted = _bank()
     manifest = skill_folder_manifest(bank)
     assert manifest["catalog_filename"] == CATALOG_FILENAME
     assert manifest["catalog_text"] == render_catalog(accepted)
     assert manifest["description_mode"] == "summary_then_when_to_use"
     # The fingerprint is the phase artifact's bank-summary digest: over
-    # the FULL bank (pending included), never a new version number.
+    # the FULL bank (discarded included), never a new version number.
     assert manifest["bank_fingerprint"] == bank_reference(bank)
     # The rev-1 ruling: the file list is a NAME MAPPING -- no content
     # travels with the manifest (progressive disclosure survives every
@@ -204,25 +188,13 @@ def test_the_manifest_carries_the_accepted_files_and_the_bank_fingerprint():
         for skill in accepted]
 
 
-def test_the_manifest_and_rows_carry_the_global_playbook():
-    # 2026-11-04 P0: the delivery switch rides the manifest; the empty
-    # default keeps the pre-playbook prompt identical.
-    bank, _ = _bank()
-    assert "playbook_text" not in skill_folder_manifest(bank)
-    manifest = skill_folder_manifest(bank, playbook_text="GLOBAL PLAYBOOK")
-    assert manifest["playbook_text"] == "GLOBAL PLAYBOOK"
-    rows = folder_driver.resolve(
-        bank, _tasks("t1"), FolderParams(playbook="GLOBAL PLAYBOOK"))
-    assert rows[0].aux["skill_folder"]["playbook_text"] == "GLOBAL PLAYBOOK"
-
-
-def test_the_rows_mirror_whole_banks_accepted_bookkeeping():
+def test_the_rows_mirror_whole_banks_active_bookkeeping():
     bank, accepted = _bank()
     tasks = _tasks("t1", "t2")
     folder_rows = folder_driver.resolve(bank, tasks, FolderParams())
     whole_rows = resolve_fixed("delivery", "whole_bank")[0].resolve(
         bank, tasks, WholeBankParams())
-    # Same accepted-set digest, same unit ids, input task order -- the
+    # Same active-set digest, same unit ids, input task order -- the
     # reuse and decision plumbing cannot tell the bookkeeping apart.
     assert [row.unit_id for row in folder_rows] == \
         [row.unit_id for row in whole_rows]
@@ -240,9 +212,9 @@ def test_the_rows_mirror_whole_banks_accepted_bookkeeping():
         skill_folder_manifest(bank)
 
 
-def test_an_empty_accepted_bank_renders_no_catalog():
-    pending = _skill("t3", status="pending")
-    rows = folder_driver.resolve([pending], _tasks("t1"), FolderParams())
+def test_an_empty_active_bank_renders_no_catalog():
+    discarded = _skill(3, status="discarded")
+    rows = folder_driver.resolve([discarded], _tasks("t1"), FolderParams())
     # The null-state lesson: an empty injection is the empty string,
     # never a header claiming experience exists.
     assert rows[0].skills_injected.startswith("bank:")
@@ -255,9 +227,9 @@ def test_colliding_directory_names_are_refused_loudly():
     # The safe-alphabet mapping is not injective: two distinct ids can
     # map to one directory, and one file must not silently shadow the
     # other.
-    left = _skill("t1", summary="Left.")
+    left = _skill(1, summary="Left.")
     left.skill_id = "a:b"
-    right = _skill("t2", summary="Right.")
+    right = _skill(2, summary="Right.")
     right.skill_id = "a/b"
     with pytest.raises(ValueError, match="silently"):
         skill_folder_manifest([left, right])
@@ -266,17 +238,17 @@ def test_colliding_directory_names_are_refused_loudly():
 def test_a_skill_named_catalog_gets_its_own_directory():
     # The catalog file is catalog.md at the root; a skill id "catalog"
     # maps to catalog/SKILL.md and does not collide with it.
-    skill = _skill("t1", summary="Clash.")
+    skill = _skill(1, summary="Clash.")
     skill.skill_id = "catalog"
     manifest = skill_folder_manifest([skill])
     assert manifest["files"][0]["filename"] == "catalog/SKILL.md"
 
 
 # ---------------------------------------------------------------------------
-# The join with the reuse plumbing (end to end)
+# The delivery-side id against the frozen key
 # ---------------------------------------------------------------------------
 
-def test_folder_unit_ids_join_the_reuse_plumbing():
+def test_folder_unit_ids_follow_the_frozen_key():
     bank, _accepted = _bank()
     rows = folder_driver.resolve(bank, _tasks("t1", "t2"), FolderParams())
     phase_label = "p03:test"
@@ -294,17 +266,6 @@ def test_folder_unit_ids_join_the_reuse_plumbing():
         digest = row.unit_id.rsplit(":", 1)[1]
         assert unit.unit_id == \
             f"p03:test:{BENCHMARK}:{row.task_ref}:weak:{digest}"
-        assert reuse_key(unit).startswith(row.task_ref)
-    # The same folder again reuses: nothing re-executes under rule 1.
-    assert reusable_units(units, units) == \
-        {unit.unit_id: unit.unit_id for unit in units}
-    # A changed folder does not: a different catalog block is a
-    # different measurement.
-    changed = [ExecutionUnitRow(
-        unit_id=units[0].unit_id, task_ref=units[0].task_ref,
-        skills_injected=units[0].skills_injected,
-        skills_block="a changed catalog", aux={})]
-    assert reusable_units(changed, units) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -314,16 +275,14 @@ def test_folder_unit_ids_join_the_reuse_plumbing():
 _LEARN = {
     "kind": "learn",
     "review": {"name": "review", "K": 5, "retry_limit": 2},
-    "author": {"name": "distill_diagnose"},
-    "curate": {"name": "none", "token_budget": 4096},
+    "author": {"name": "subtask_cards"},
 }
 
 
 def _execute(role, tasks, delivery, execution=None):
     raw = {"kind": "execute", "role": role, "tasks": tasks,
            "delivery": delivery,
-           "execution": execution
-           or {"name": "exam" if role == "exam" else "real"}}
+           "execution": execution or {"name": "real"}}
     if role == "baseline":
         raw["execution"]["arms"] = ["executor_strong", "executor_weak"]
     return raw
@@ -333,31 +292,36 @@ def _parse_with(role_phase, sequence):
     phases = {"baseline": _execute("baseline", "train", {"name": "none"}),
               "learn": _LEARN}
     phases.update(role_phase)
-    return parse_phases(phases, sequence, n_attempts_weak=1)
+    return parse_phases(phases, sequence)
 
 
 def test_a_test_role_phase_may_deliver_the_folder():
-    # Since M3 the folder delivery pairs with the real_folder execution
-    # (checklist item 8's pairing rule), so the test phase parses with it.
     specs = _parse_with(
         {"test": _execute("test", "test", {"name": FOLDER_DELIVERY_NAME},
-                       execution={"name": "real_folder"})},
+                          execution={"name": "real_folder"})},
         ["baseline", "learn", "test"])
     assert specs["test"].delivery["name"] == FOLDER_DELIVERY_NAME
     assert specs["test"].role == PHASE_ROLE_TEST
 
 
-@pytest.mark.parametrize("role,tasks", [
-    ("exam", "train"),       # A
-    ("live", "train"),       # B
-    ("baseline", "train"),   # D
-])
-def test_the_other_roles_refuse_the_folder(role, tasks):
-    with pytest.raises(ConfigError,
-                       match=r"legal only for role 'test' \(the test phase"):
-        _parse_with(
-            {"X": _execute(role, tasks, {"name": FOLDER_DELIVERY_NAME})},
-            ["baseline", "learn", "X"])
+def test_a_practice_phase_delivers_the_folder():
+    specs = _parse_with(
+        {"practice": _execute("practice", "train",
+                              {"name": FOLDER_DELIVERY_NAME},
+                              execution={"name": "real_folder"}),
+         "test": _execute("test", "test", {"name": "whole_bank"})},
+        ["baseline", "learn", "practice", "learn", "test"])
+    assert specs["practice"].delivery["name"] == FOLDER_DELIVERY_NAME
+    assert specs["practice"].role == PHASE_ROLE_PRACTICE
+
+
+def test_the_baseline_refuses_the_folder():
+    with pytest.raises(ConfigError, match="baseline"):
+        parse_phases(
+            {"baseline": _execute("baseline", "train",
+                                  {"name": FOLDER_DELIVERY_NAME},
+                                  execution={"name": "real_folder"})},
+            ["baseline"])
 
 
 # ---------------------------------------------------------------------------

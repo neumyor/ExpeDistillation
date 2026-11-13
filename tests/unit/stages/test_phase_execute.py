@@ -1,12 +1,12 @@
-"""W2-A: the execute-phase driver (R9/R8) -- phases over the fake
-benchmark.
+"""The execute-phase driver -- baseline, practice and test phases over
+the fake benchmark.
 
 Fake plugin through the real import machinery (the stub-finder pattern
 of tests/unit/stages), fake model handles from llm.fake, phase specs
 built directly (core.config's parsed shapes). The independent probes
-are the plugin's call records, the FakeClient call counts (a rerun or a
-reused unit makes zero model calls) and the phase directory's persisted
-units / report rows.
+are the plugin's call records, the FakeClient call counts (a rerun
+makes zero model calls) and the phase directory's persisted units /
+report rows.
 """
 
 import hashlib
@@ -29,21 +29,15 @@ from expedistill.benchmarks.base import (
 from expedistill.benchmarks.registry import ConfigError, _reset_registry, register_plugin
 from tests.helpers.plugins import reload_plugin
 from expedistill.composites import (
-    answer_sheets as _answer_sheets,
+    evolving_text,
     phase_bank,
     phase_report,
     shortfall,
     unit_ids,
     verdicts,
 )
-from expedistill.composites.provenance import record_version
-from expedistill.composites.trace import trace_at
-from expedistill.core.trace import Provenance
-from expedistill.core.answer_sheet import CoverageRecord, UnitSpec
+from expedistill.core import vocabulary
 from expedistill.core.config import (
-    PHASE_ROLE_BASELINE,
-    PHASE_ROLE_EXAM,
-    PHASE_ROLE_LIVE,
     CompareSpec,
     ExecutePhaseSpec,
     ExternalControlSpec,
@@ -51,38 +45,44 @@ from expedistill.core.config import (
     PhaseInstance,
 )
 from expedistill.core.ids import (
-    make_skill_id,
-    make_subtask_id,
     make_task_id,
     make_trajectory_id,
+    make_type_id,
+    parse_trajectory_id,
 )
-from expedistill.core.models import Skill, Step, Subtask, Trajectory
+from expedistill.core.models import EvolvingText, Trajectory
 from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.infra.usage import UsageRecorder
-from expedistill.llm.fake import json_script, make_fake_handle
+from expedistill.composites.skill_use import skill_read_events
+from expedistill.inject import bank_reference, format_playbook_block
+from expedistill.llm.fake import make_fake_handle
 from expedistill.methods.delivery import folder_delivery as skill_folder
 from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages import phase_execute
+from expedistill.stages.phase_execute import engine
 from expedistill.stages.context import RunSettings, StageContext
+from tests.helpers.configs import reference_method
+from tests.helpers.skills import make_skill
 
 _FAKE = "fakebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
 TASK_IDS = ("t1", "t2", "t3")
 
-MARKED = "\n".join([
-    "[When to use] The service rejects connections.",
-    "[Steps]",
-    "1. Check the service status.",
-    "2. Restart the service.",
-    "[Do not use when] The status command already reports running.",
-])
+MARKED = {
+    "when_to_use": "The service rejects connections.",
+    "steps": ["Check the service status.", "Restart the service."],
+    "not_applicable_when": "The status command already reports running.",
+}
 
 
 class PhasePlugin(BenchmarkPlugin):
     """The fixed task set; ``behavior(record)`` decides each run's
     outcome (default success). The call records are the independent
-    probe for order and resume assertions."""
+    probe for order and resume assertions; a record carries the task's
+    meta, so a folder unit's manifest is visible to the probe."""
+
+    skill_folder_prompt_name = "FAKE_TASK_FOLDER"
 
     def __init__(self, behavior=None):
         self.behavior = behavior
@@ -104,7 +104,7 @@ class PhasePlugin(BenchmarkPlugin):
 
     def run(self, task, handle, skills_block, workdir):
         record = {"task_id": task.task_id, "handle": handle,
-                  "skills_block": skills_block}
+                  "skills_block": skills_block, "meta": dict(task.meta)}
         self.calls.append(record)
         handle.client.complete(handle.name, "system", task.instruction)
         if self.behavior is None:
@@ -117,15 +117,6 @@ class PhasePlugin(BenchmarkPlugin):
 
     @property
     def task_prompt_name(self):
-        return "FAKE_TASK"
-
-
-class FolderPhasePlugin(PhasePlugin):
-    """The live-folder test's plugin: it declares the folder capability
-    so the execution boundary accepts a folder unit."""
-
-    @property
-    def skill_folder_prompt_name(self):
         return "FAKE_TASK"
 
 
@@ -175,9 +166,7 @@ def make_config(**overrides):
     # helpers below; this sequence only has to be a legal method.
     defaults = dict(
         benchmark=_FAKE,
-        mode="full",
         models={"executor_strong": "big-model", "executor_weak": "weak-7b"},
-        weak_profile="a weak model",
         n_attempts_strong=1,
         n_attempts_weak=2,
         rules={},
@@ -201,10 +190,7 @@ def make_handles(**overrides):
     handles = {
         "executor_strong": make_fake_handle("strong"),
         "executor_weak": make_fake_handle("weak"),
-        "examiner": make_fake_handle("examiner"),
-        "answerer": make_fake_handle("answerer"),
         "judge": make_fake_handle("judge"),
-        "auditor": make_fake_handle("auditor"),
     }
     handles.update(overrides)
     return handles
@@ -237,8 +223,8 @@ def _pin_k1(monkeypatch):
             return real(**kwargs)
         return wrapper
 
-    monkeypatch.setattr(phase_execute, "batch_execute",
-                        injecting(phase_execute.batch_execute))
+    monkeypatch.setattr(engine, "batch_execute",
+                        injecting(engine.batch_execute))
 
 
 def baseline_spec(**overrides):
@@ -250,29 +236,25 @@ def baseline_spec(**overrides):
     return ExecutePhaseSpec(**spec)
 
 
-def live_spec(**overrides):
-    spec = dict(role="live", tasks="train",
-                delivery={"name": "group_by_task"},
-                execution={"name": "real", "n_attempts": 1},
-                compare=CompareSpec(against="baseline"))
+def practice_spec(**overrides):
+    spec = dict(role="practice", tasks="train",
+                delivery={"name": "folder"},
+                execution={"name": "real_folder"})
     spec.update(overrides)
     return ExecutePhaseSpec(**spec)
 
 
-def exam_spec(**overrides):
-    spec = dict(role="exam", tasks="train",
-                delivery={"name": "exam_folder"},
-                execution={"name": "exam", "bare_control": True,
-                           "leak_audit": True, "max_skill_reads": 3})
-    spec.update(overrides)
-    return ExecutePhaseSpec(**spec)
+def reference_config(**overrides):
+    """A config whose sequence is the reference method (practice phases
+    at p03 / p05 read the learn phases at p02 / p04)."""
+    return make_config(**{**reference_method(), **overrides})
 
 
 def c_spec(**overrides):
     spec = dict(role="test", tasks="test",
                 delivery={"name": "whole_bank"},
                 execution={"name": "real"},
-                compare=CompareSpec(against="baseline"))
+                compare=CompareSpec(against="fresh_bare"))
     spec.update(overrides)
     return ExecutePhaseSpec(**spec)
 
@@ -284,13 +266,10 @@ def phase_of(index, name, spec, task_ids=None):
                                         else TASK_IDS))
 
 
-def make_group_skill(task_id, content=MARKED, version=1,
-                    status="pending"):
-    subtask_id = make_subtask_id(
-        make_trajectory_id(task_id, "strong", 0), 0)
-    return Skill(skill_id=make_skill_id(subtask_id), content=content,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 version=version, status=status)
+def make_card(serial=1, fields=MARKED, version=1, status="active"):
+    """The card of subtask type ``type/<serial>``."""
+    return make_skill(make_type_id(serial), version=version, status=status,
+                      **{**fields, "summary": f"Card {serial}."})
 
 
 def write_bank_artifact(ctx, label, skills):
@@ -305,36 +284,27 @@ def write_bank_artifact(ctx, label, skills):
                          + "\n")
 
 
-def report_rows(ctx, phase):
-    """The phase's trial-level unit summaries, read from its artifacts."""
-    kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
-            PHASE_ROLE_LIVE: "live"}.get(phase.spec.role)
-    if kind is None:
-        raise AssertionError(
-            f"no report kind for role {phase.spec.role!r}")
-    report = phase_report.read_phase_report(
-        phase_bank.phase_bank_dir(ctx.run_dir, phase.label),
-        phase_kind=kind, learning_usable=True)
-    if report is None:
-        raise AssertionError(
-            f"phase {phase.label!r} wrote no trial-level artifacts")
-    return report.units
+def write_playbook(ctx, label, text):
+    """The playbook a learn phase leaves for the next execute phase."""
+    evolving_text.write_text(ctx.run_dir, EvolvingText(
+        kind=evolving_text.PLAYBOOK, text=text, version=1,
+        phase_label=label))
 
 
-def unit_verdicts(ctx, phase):
-    """The phase's execution-side reuse index, keyed by unit id."""
-    path = (phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-            / phase_execute.phase_disk.REUSE_INDEX_NAME)
-    return {row["unit_id"]: row for row in read_jsonl(path)}
-
-
-def phase_units(ctx, phase):
-    """The phase's derived unit summaries, read off the trial artifacts."""
+def read_report(ctx, phase):
+    """The phase's trial-level report, read from its artifacts."""
     report = phase_report.read_phase_report(
         phase_bank.phase_bank_dir(ctx.run_dir, phase.label),
         phase_kind=phase.spec.role, learning_usable=True)
-    assert report is not None
-    return report.units
+    if report is None:
+        raise AssertionError(
+            f"phase {phase.label!r} wrote no trial-level artifacts")
+    return report
+
+
+def report_rows(ctx, phase):
+    """The phase's trial-level unit summaries, read from its artifacts."""
+    return read_report(ctx, phase).units
 
 
 def snapshot_bank(ctx):
@@ -373,7 +343,7 @@ def test_baseline_runs_both_arms_and_writes_the_report(monkeypatch,
     assert len(weak_calls) == 6
     rows = report_rows(ctx, phase)
     assert len(rows) == 6  # 3 tasks x 2 roles (baseline phases split by role)
-    assert all(row.status == verdicts.STATUS_NORMAL for row in rows)
+    assert all(row.status == vocabulary.STATUS_NORMAL for row in rows)
     assert all(row.valid_count == row.success_count for row in rows)
     # The summary and the report are both on disk under the phase dir.
     directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
@@ -395,8 +365,8 @@ def _record_rollout_workers(monkeypatch):
             return real(**kwargs)
         return wrapper
 
-    monkeypatch.setattr(phase_execute, "batch_execute",
-                        spy(phase_execute.batch_execute))
+    monkeypatch.setattr(engine, "batch_execute",
+                        spy(engine.batch_execute))
     return seen
 
 
@@ -424,24 +394,19 @@ def test_rollouts_follow_workers_when_no_rollout_limit_is_set(monkeypatch,
 
 def test_baseline_leaves_the_bank_unchanged_r4(monkeypatch, tmp_path):
     # R4's byte invariant holds for every phase that makes no bank calls.
-    # (The live role's exception is the frozen verdicts-ledger protocol's
-    # own commit -- judge_round/finalize_group, the coordinator's
-    # 2026-10-16 ruling -- pinned by the live tests instead.)
     _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     before = snapshot_bank(ctx)
 
     phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:learn", [skill])
+    assert snapshot_bank(ctx) == before
+    card = make_card()
+    ctx.store.save(card, "skills")
+    write_bank_artifact(ctx, "p02:learn", [card])
     before = snapshot_bank(ctx)
-    examiner, answerer, judge, auditor = _exam_script(bare_correct=True)
-    ctx = make_ctx(tmp_path, make_config(),
-                   handles=make_handles(examiner=examiner, answerer=answerer,
-                                        judge=judge, auditor=auditor))
-    phase_execute.run(ctx, phase_of(2, "exam", exam_spec()))
-    write_bank_artifact(ctx, "p04:learn", [make_group_skill(
-        _prefixed("t1"), status="accepted")])
+    phase_execute.run(ctx, phase_of(2, "practice", practice_spec()))
+    assert snapshot_bank(ctx) == before
+    write_bank_artifact(ctx, "p04:learn", [card])
     before = snapshot_bank(ctx)
     phase_execute.run(ctx, phase_of(4, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))
@@ -459,7 +424,6 @@ def test_r4_call_face():
     assert sources
     for source in sources:
         assert "discard_skill(" not in source
-        assert "accept_skill(" not in source
 
 
 def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
@@ -483,7 +447,8 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
     summary_path = (phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
                     / "phase_summary.json")
     assert read_json(summary_path)["infra_missing"] == [
-        "traj/fakebench:t2/strong/00", "traj/fakebench:t2/weak/00"]
+        "traj/p01_baseline/fakebench:t2/strong/00",
+        "traj/p01_baseline/fakebench:t2/weak/00"]
     state = read_json(phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
                       / "weak" / phase_execute.REDISPATCH_NAME)
     # The budget (default 1) was spent: one re-dispatch offer of the hole
@@ -511,16 +476,16 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
     assert summary["complete"] is False  # the hole stays a hole
     accepted = read_json(shortfall.stage1_shortfall_path(
         ctx.run_dir))["unit_ids"]
-    assert accepted == ["traj/fakebench:t2/strong/00",
-                        "traj/fakebench:t2/weak/00"]
+    assert accepted == ["traj/p01_baseline/fakebench:t2/strong/00",
+                        "traj/p01_baseline/fakebench:t2/weak/00"]
     # With the holes durably accepted the report row appears: the
     # accepted record widens the reader's universe, and every unit of
     # the task being a hole reads as all_holes.
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     hole_row = next(row for row in rows.values()
                     if "t2" in row.unit_id and row.role == "weak")
-    assert hole_row.status == verdicts.STATUS_NOT_TESTABLE
-    assert hole_row.cause == verdicts.CAUSE_ALL_HOLES
+    assert hole_row.status == vocabulary.STATUS_NOT_TESTABLE
+    assert hole_row.cause == vocabulary.CAUSE_ALL_HOLES
 
 
 def test_baseline_resume_without_the_flag_honours_accepted_holes(
@@ -559,7 +524,8 @@ def test_baseline_resume_without_the_flag_honours_accepted_holes(
     assert len(plugin.calls) == calls_before
     assert resumed == accepted_summary
     assert resumed["infra_accepted"] == [
-        "traj/fakebench:t2/strong/00", "traj/fakebench:t2/weak/00"]
+        "traj/p01_baseline/fakebench:t2/strong/00",
+        "traj/p01_baseline/fakebench:t2/weak/00"]
 
 
 def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
@@ -586,473 +552,293 @@ def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
     rows = {row.unit_id: row for row in report_rows(ctx, phase)}
     weak_row = next(row for row in rows.values()
                     if "t1" in row.unit_id and row.role == "weak")
-    assert weak_row.status == verdicts.STATUS_NOT_TESTABLE
-    assert weak_row.cause == verdicts.CAUSE_ALL_HOLES
+    assert weak_row.status == vocabulary.STATUS_NOT_TESTABLE
+    assert weak_row.cause == vocabulary.CAUSE_ALL_HOLES
     assert len(weak_row.artifacts["sheet_ids"]) == 1
     assert weak_row.valid_count == 0
     assert summary["complete"] is True  # nothing is missing
 
 
 # ---------------------------------------------------------------------------
-# The live phase (B)
+# The practice phase
 # ---------------------------------------------------------------------------
 
-def _weak_baseline_behavior(record):
-    """Strong succeeds; weak fails t1 (the grouped task) and succeeds the
-    rest -- so t1 has headroom and the others are control-perfect."""
-    if record["handle"].role == "strong":
-        return _outcome(record["task_id"], True)
-    return _outcome(record["task_id"], record["task_id"] != "t1")
+def _read_first(record):
+    """A run that opens the first listed card at step 0 (when the folder
+    lists one); only t1 succeeds."""
+    folder = record["meta"].get("skill_folder") or {}
+    steps = []
+    if folder.get("files"):
+        steps.append({"action": f"ReadSkill[{folder['files'][0]['filename']}]",
+                      "observation": "the card"})
+    steps.append({"action": f"exec {record['task_id']}", "observation": "ok"})
+    return RunOutcome(steps=steps, correctness=record["task_id"] == "t1")
 
 
-def test_live_control_perfect_skips_the_group(monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch,
-                             PhasePlugin(_weak_baseline_behavior))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    # The group universe is the store's pending members (the same
-    # derivation the frozen audit line carries).
-    ctx.store.save(make_group_skill(_prefixed("t2")), "skills")
-    calls_before = len(plugin.calls)
+def test_practice_runs_the_executor_with_the_active_cards(monkeypatch,
+                                                          tmp_path):
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, reference_config())
+    active, discarded = make_card(1), make_card(2, status="discarded")
+    write_bank_artifact(ctx, "p02:learn", [active, discarded])
+    write_playbook(ctx, "p02:learn", "Always look first.")
+    phase = phase_of(2, "practice", practice_spec(playbook="evolved"))
 
-    phase = phase_of(2, "live", live_spec())
-    phase_execute.run(ctx, phase)
-
-    # D's weak arm was all-success on t2: the group is short-circuited
-    # with zero executions -- through the ledger's weak_already_knows
-    # terminal row, and the report row carries the cause.
-    assert len(plugin.calls) == calls_before
-    stored = unit_verdicts(ctx, phase)
-    assert sorted(row["status"] for row in stored.values()) == [
-        verdicts.STATUS_NOT_RUN_CONTROL_PERFECT]
-    row = report_rows(ctx, phase)[0]
-    assert row.status == verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
-    assert row.cause == verdicts.CAUSE_WEAK_ALREADY_KNOWS
-
-
-def test_live_folder_materializes_each_group_and_writes_usage(
-        monkeypatch, tmp_path):
-    _install_plugin(monkeypatch,
-                    FolderPhasePlugin(lambda record: _outcome(
-                        record["task_id"],
-                        record["handle"].role == "strong")))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
-
-    phase = phase_of(2, "live", live_spec(
-        delivery={"name": "folder_by_task",
-                  "description_mode": "when_to_use"},
-        execution={"name": "real", "n_attempts": 1}))
     summary = phase_execute.run(ctx, phase).summary
 
-    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-    folder = directory / "skill_folder" / "t1"
-    skill_files = list(folder.glob("*/SKILL.md"))
-    assert len(skill_files) == 1
-    assert "name:" in skill_files[0].read_text(encoding="utf-8")
-    assert "skill_usage" not in summary
-    assert (directory / "answer_sheets").is_dir()
-    assert (directory / "skill_folder").is_dir()
+    # Only the weak executor ran, at its global depth, on every task.
+    assert {call["handle"].role for call in plugin.calls} == {"weak"}
+    assert len(plugin.calls) == len(TASK_IDS) * 2
+    # One phase-level folder: the active card only, the playbook beside it.
+    manifests = [call["meta"]["skill_folder"] for call in plugin.calls]
+    assert all(manifest == manifests[0] for manifest in manifests)
+    assert [entry["skill_id"] for entry in manifests[0]["files"]] == [
+        active.skill_id]
+    assert manifests[0]["playbook_text"] == "Always look first."
+    folder_dir = Path(plugin.calls[0]["meta"]["skill_folder_dir"])
+    assert (folder_dir / skill_folder.skill_filename(
+        active.skill_id)).is_file()
+    assert not (folder_dir / skill_folder.skill_filename(
+        discarded.skill_id)).exists()
+    # The runs land in the run-level store, tagged with this phase.
+    assert sorted(ctx.store.ids("trajectories")) == sorted(
+        make_trajectory_id("p03:practice", _prefixed(task), "weak", attempt)
+        for task in TASK_IDS for attempt in range(2))
+    assert summary["role"] == "practice"
+    assert summary["tasks"] == "train"
+    assert summary["executor"] == "weak"
+    assert summary["n_attempts"] == 2
+    assert summary["bank_reference"] == bank_reference([active])
+    assert summary["playbook_shown"] is True
+    assert summary["complete"] is True
+    assert summary["metrics"]["tasks"] == len(TASK_IDS)
+    rows = report_rows(ctx, phase)
+    assert {row.arm for row in rows} == {"weak"}
+    assert all(row.success_count == 2 for row in rows)
+    # A rerun of the finished phase executes nothing.
+    calls_before = len(plugin.calls)
+    phase_execute.run(ctx, phase)
+    assert len(plugin.calls) == calls_before
 
 
-def test_live_measures_then_reuses_across_phases(monkeypatch, tmp_path):
-    # Weak fails everywhere (baseline AND live), so round 0 is a miss:
-    # the group stays pending and the ledger keeps its round-0 row.
-    plugin = _install_plugin(monkeypatch,
-                             PhasePlugin(lambda record: _outcome(
-                                 record["task_id"],
-                                 record["handle"].role == "strong")))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
+def test_practice_runs_its_task_list_at_its_attempts(monkeypatch, tmp_path):
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, reference_config())
+    write_bank_artifact(ctx, "p02:learn", [make_card()])
+    phase = phase_of(2, "practice", practice_spec(
+        tasks="val", execution={"name": "real_folder", "attempts": 3}),
+        task_ids=("t3",))
 
-    first = phase_of(2, "live", live_spec())
-    phase_execute.run(ctx, first)
-    measured = report_rows(ctx, first)
-    assert len(measured) == 1
-    assert measured[0].status == verdicts.STATUS_NORMAL
-    assert measured[0].success_count == 0
-    calls_after_first = len(plugin.calls)
-    # The ledger's round-0 row exists (the resume protocol's truth).
-    ledger = read_jsonl(ctx.run_dir / "stage4_acceptance" / "live_run"
-                        / "verdicts.jsonl")
-    assert [row["round"] for row in ledger] == [0]
-    assert ledger[0]["better"] is False
+    summary = phase_execute.run(ctx, phase).summary
 
-    # The second live phase measures round 1, but the group's block is
-    # byte-identical (the revision produced no new version): rule 1
-    # reuses the round-0 verdict -- zero executions, no round-1 row
-    # (the no-op guard's phase-world shape).
-    second = phase_of(4, "live", live_spec())
-    phase_execute.run(ctx, second)
-
-    assert len(plugin.calls) == calls_after_first
-    second_verdicts = unit_verdicts(ctx, second)
-    assert list(second_verdicts) == [
-        measured[0].unit_id.replace(first.label, second.label)]
-    assert second_verdicts[next(iter(second_verdicts))]["status"] == \
-        measured[0].status
-    ledger = read_jsonl(ctx.run_dir / "stage4_acceptance" / "live_run"
-                        / "verdicts.jsonl")
-    assert [row["round"] for row in ledger] == [0]
-
-    # The reused unit's summary is carried under the new phase's unit id,
-    # so the next learn phase can still decide it (counts included).
-    carried = phase_report.read_carried_units(
-        phase_bank.phase_bank_dir(ctx.run_dir, second.label))
-    new_id = measured[0].unit_id.replace(first.label, second.label)
-    assert [unit.unit_id for unit in carried] == [new_id]
-    assert (carried[0].valid_count, carried[0].success_count) == (
-        measured[0].valid_count, measured[0].success_count)
-    assert carried[0].artifacts["reused_from"] == measured[0].unit_id
+    assert [call["task_id"] for call in plugin.calls] == ["t3"] * 3
+    assert summary["tasks"] == "val"
+    assert summary["n_attempts"] == 3
+    assert sorted(ctx.store.ids("trajectories")) == [
+        make_trajectory_id("p03:practice", _prefixed("t3"), "weak", attempt)
+        for attempt in range(3)]
 
 
-def test_live_shortfall_accepts_the_missing_attempt_of_a_partial_group(
-        monkeypatch, tmp_path):
-    """A group with one stored attempt and one infra-missing attempt must
-    have the missing unit accepted under --allow-infra-shortfall; the
-    group-level "any trajectory stored" test used to skip it, so the
-    phase raised after writing its summary."""
+def test_practice_refuses_a_delivery_other_than_the_folder(tmp_path):
+    ctx = make_ctx(tmp_path, reference_config())
+    phase = phase_of(2, "practice", practice_spec(
+        delivery={"name": "whole_bank"}))
+    with pytest.raises(ConfigError, match="folder"):
+        phase_execute.run(ctx, phase)
+
+
+def test_practice_redispatches_like_the_baseline(monkeypatch, tmp_path):
     _pin_k1(monkeypatch)
-    live_t1_calls = {"n": 0}
 
     def behavior(record):
-        task = record["task_id"]
-        if record["handle"].role == "strong":
-            return _outcome(task, True)
-        if record["skills_block"]:  # the live arm
-            if task == "t1":
-                live_t1_calls["n"] += 1
-                if live_t1_calls["n"] > 1:
-                    raise InfrastructureError("sandbox exploded")
-            return _outcome(task, True)
-        return _outcome(task, task != "t1")  # baseline weak
+        if record["task_id"] == "t2":
+            raise InfrastructureError("sandbox exploded")
+        return _outcome(record["task_id"], True)
 
-    _install_plugin(monkeypatch, PhasePlugin(behavior))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=2),
-                   allow_infra_shortfall=True)
+    plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
+    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+    write_bank_artifact(ctx, "p02:learn", [make_card()])
+    phase = phase_of(2, "practice", practice_spec())
+    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
+    hole = make_trajectory_id("p03:practice", _prefixed("t2"), "weak", 0)
+
+    with pytest.raises(InfrastructureError, match="infra_missing"):
+        phase_execute.run(ctx, phase)
+
+    assert read_json(directory / "phase_summary.json")["infra_missing"] == [
+        hole]
+    state = read_json(directory / "weak" / phase_execute.REDISPATCH_NAME)
+    assert [entry["passes"] for unit_id, entry in state.items()
+            if "t2" in unit_id] == [1]
+    # The spent budget: a resume re-raises without a new execution.
+    calls_before = len(plugin.calls)
+    with pytest.raises(InfrastructureError):
+        phase_execute.run(ctx, phase)
+    assert len(plugin.calls) == calls_before
+    # Accepted under the flag, durably, in the arm's own record.
+    accepting = make_ctx(tmp_path, ctx.config, allow_infra_shortfall=True)
+    summary = phase_execute.run(accepting, phase).summary
+    assert summary["infra_accepted"] == [hole]
+    assert summary["complete"] is False
+    assert read_json(directory / "weak" / shortfall.SHORTFALL_NAME)[
+        "unit_ids"] == [hole]
+    hole_row = next(row for row in report_rows(ctx, phase)
+                    if "t2" in row.unit_id)
+    assert hole_row.cause == vocabulary.CAUSE_ALL_HOLES
+
+
+def test_practice_sheets_carry_the_trajectory_and_the_folder(monkeypatch,
+                                                             tmp_path):
+    _install_plugin(monkeypatch, PhasePlugin(_read_first))
+    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+    card = make_card()
+    write_bank_artifact(ctx, "p02:learn", [card])
+    write_playbook(ctx, "p02:learn", "Look first.")
+    phase = phase_of(2, "practice", practice_spec(playbook="evolved"))
+
+    phase_execute.run(ctx, phase)
+
+    sheets = read_report(ctx, phase).sheets
+    assert len(sheets) == len(TASK_IDS)
+    for sheet in sheets:
+        artifacts = sheet.execution.artifacts
+        trajectory = ctx.store.load("trajectories",
+                                    artifacts["trajectory_id"], Trajectory)
+        assert trajectory.task_id == sheet.execution.task_ref
+        folder = artifacts["skill_folder"]
+        assert [entry["skill_id"] for entry in folder["files"]] == [
+            card.skill_id]
+        assert card.skill_id in folder["catalog_text"]
+        assert folder["playbook_text"] == "Look first."
+        # What the learn phase recovers: the card was opened at step 0.
+        assert [(event["skill_id"], event["step_index"])
+                for event in skill_read_events(trajectory, folder)] == [
+            (card.skill_id, 0)]
+
+
+def test_practice_summary_reports_the_mechanism_metrics(monkeypatch,
+                                                        tmp_path):
+    _install_plugin(monkeypatch, PhasePlugin(_read_first))
+    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+    first, second = make_card(1), make_card(2)
+    write_bank_artifact(ctx, "p02:learn", [first, second])
+
+    summary = phase_execute.run(
+        ctx, phase_of(2, "practice", practice_spec())).summary
+
+    use = summary["skill_use"]
+    assert (use["trials"], use["valid"], use["success"]) == (3, 3, 1)
+    assert use["success_rate"] == pytest.approx(1 / 3)
+    assert (use["opened_any"], use["opened_any_success"]) == (3, 1)
+    assert use["cards"] == {
+        first.skill_id: {"opened": 3, "opened_success": 1},
+        second.skill_id: {"opened": 0, "opened_success": 0}}
+    assert summary["skill_files_read"] == {
+        make_trajectory_id("p03:practice", _prefixed(task), "weak", 0):
+            [first.skill_id]
+        for task in TASK_IDS}
+    assert summary["metrics"]["pass_at_n"] == pytest.approx(1 / 3)
+
+
+def test_baseline_and_two_practice_phases_never_share_an_id(monkeypatch,
+                                                            tmp_path):
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+    card = make_card()
+
     phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
+    write_bank_artifact(ctx, "p02:learn", [card])
+    phase_execute.run(ctx, phase_of(2, "practice", practice_spec()))
+    # The same bank again: only the phase tells the two practices apart.
+    write_bank_artifact(ctx, "p04:learn", [card])
+    phase_execute.run(ctx, phase_of(4, "practice", practice_spec()))
 
-    phase = phase_of(2, "live", live_spec(
-        execution={"name": "real", "n_attempts": 2}))
+    stored = ctx.store.ids("trajectories")
+    assert len(plugin.calls) == len(stored) == 4 * len(TASK_IDS)
+    weak_t1 = sorted(parse_trajectory_id(trajectory_id).phase_label
+                     for trajectory_id in stored
+                     if parse_trajectory_id(trajectory_id).task_id
+                     == _prefixed("t1")
+                     and parse_trajectory_id(trajectory_id).role == "weak")
+    assert weak_t1 == ["p01:baseline", "p03:practice", "p05:practice"]
+
+
+def test_an_empty_bank_still_runs_as_a_folder_unit(monkeypatch, tmp_path):
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+    write_bank_artifact(ctx, "p02:learn", [make_card(status="discarded")])
+    write_playbook(ctx, "p02:learn", "Look first.")
+    phase = phase_of(2, "practice", practice_spec(playbook="evolved"))
+
     summary = phase_execute.run(ctx, phase).summary
 
-    assert summary["complete"] is True
-    assert summary["infra_shortfall_accepted"] is True
-    accepted = read_json(
-        ctx.run_dir / "stage4_acceptance" / "live_run" / "round00"
-        / shortfall.SHORTFALL_NAME)["unit_ids"]
-    assert accepted == ["traj/fakebench:t1/weak/01"]
-    rows = report_rows(ctx, phase)
-    assert len(rows) == 1
-    assert rows[0].status == verdicts.STATUS_NORMAL
-    assert rows[0].success_count == 1
-    assert rows[0].valid_count == 1
-    ledger = read_jsonl(ctx.run_dir / "stage4_acceptance" / "live_run"
-                        / "verdicts.jsonl")
-    assert ledger[-1]["judged_with_shortfall"] is True
+    assert len(plugin.calls) == len(TASK_IDS)
+    for call in plugin.calls:
+        manifest = call["meta"]["skill_folder"]
+        assert manifest["files"] == []
+        assert manifest["catalog_text"] == ""
+        assert manifest["playbook_text"] == "Look first."
+        assert Path(call["meta"]["skill_folder_dir"]).is_dir()
+        assert call["skills_block"] == format_playbook_block("Look first.")
+    assert summary["bank_reference"] == bank_reference([])
+    assert summary["skill_use"]["cards"] == {}
 
 
-def test_live_phase_with_an_empty_group_universe_completes(
+def test_the_folder_test_delivers_active_cards_and_an_empty_folder(
         monkeypatch, tmp_path):
-    """The assembled-run shape: every bank member accepted, no pending
-    group anywhere -- the live phase has nothing to measure and must
-    COMPLETE (empty units, empty report) instead of feeding an empty
-    task list to the plugin (TB refuses empty lists on purpose)."""
+    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+    write_bank_artifact(ctx, "p06:learn", [make_card(status="discarded")])
+    write_playbook(ctx, "p06:learn", "Look first.")
+    phase = phase_of(6, "test", c_spec(
+        delivery={"name": "folder"}, execution={"name": "real_folder"},
+        playbook="evolved"))
+
+    summary = phase_execute.run(ctx, phase).summary
+
+    with_bank = [call for call in plugin.calls
+                 if "skill_folder" in call["meta"]]
+    control = [call for call in plugin.calls
+               if "skill_folder" not in call["meta"]]
+    assert len(with_bank) == len(control) == len(TASK_IDS)
+    for call in with_bank:
+        assert call["meta"]["skill_folder"]["files"] == []
+        assert call["meta"]["skill_folder"]["playbook_text"] == "Look first."
+        assert Path(call["meta"]["skill_folder_dir"]).is_dir()
+    assert all(call["skills_block"] == "" for call in control)
+    assert summary["bank_reference"] == bank_reference([])
+
+
+def test_the_whole_bank_test_delivers_active_cards_only(monkeypatch,
+                                                        tmp_path):
     plugin = _install_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    calls_before = len(plugin.calls)
+    active = make_card(1)
+    discarded = make_card(2, status="discarded", fields={
+        **MARKED, "when_to_use": "The disk is full."})
+    write_bank_artifact(ctx, "p02:learn", [active, discarded])
 
-    phase = phase_of(2, "live", live_spec())
-    phase_execute.run(ctx, phase)
+    summary = phase_execute.run(ctx, phase_of(2, "test", c_spec())).summary
 
-    assert len(plugin.calls) == calls_before  # zero executions
-    assert read_jsonl(phase_bank.phase_bank_dir(
-        ctx.run_dir, phase.label) / phase_execute.UNITS_NAME) == []
-    assert report_rows(ctx, phase) == []
-    # The ledger footprint exists even with nothing to measure: the
-    # empty live_run tree says "the phase ran and judged nothing".
-    assert (ctx.run_dir / "stage4_acceptance" / "live_run").is_dir()
-
-
-def test_live_injection_overflow_skips_the_group(monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch,
-                             PhasePlugin(_weak_baseline_behavior))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    ctx.store.save(make_group_skill(_prefixed("t1")), "skills")
-    calls_before = len(plugin.calls)
-
-    phase = phase_of(2, "live", live_spec(
-        execution={"name": "real", "n_attempts": 1,
-                   "max_injection_tokens": 1}))
-    phase_execute.run(ctx, phase)
-
-    assert len(plugin.calls) == calls_before
-    row = report_rows(ctx, phase)[0]
-    assert row.status == verdicts.STATUS_NOT_TESTABLE
-    assert row.cause == verdicts.CAUSE_INJECTION_OVERFLOW
-
-
-# ---------------------------------------------------------------------------
-# The exam phase (A)
-# ---------------------------------------------------------------------------
-
-def _exam_universe(ctx, tmp_path):
-    """One pending skill on t1 with its subtask and trajectory stored."""
-    task_id = _prefixed("t1")
-    trajectory = Trajectory(
-        trajectory_id=make_trajectory_id(task_id, "strong", 0),
-        task_id=task_id, benchmark=_FAKE, model_role="strong",
-        model_name="big-model", attempt_index=0,
-        steps=[Step(action="check", observation="down"),
-               Step(action="restart", observation="ok")],
-        correctness=True)
-    ctx.store.save(trajectory, "trajectories")
-    subtask = Subtask(
-        subtask_id=make_subtask_id(trajectory.trajectory_id, 0),
-        task_id=task_id, trajectory_id=trajectory.trajectory_id,
-        source="strong", trajectory_success=True, segment_index=0,
-        step_range=(0, 2), label="restart", description="restart steps",
-        success=True)
-    ctx.store.save(subtask, "subtasks")
-    skill = make_group_skill(task_id)
-    # The learning phase writes the candidate; the recomputed acceptance
-    # report enumerates the store's candidates.
-    ctx.store.save(skill, "skills")
-    unit_id = unit_ids.unit_id_for_trajectory(
-        phase_label="p01:baseline", benchmark=_FAKE, trajectory=trajectory)
-    execution = _answer_sheets.execution_from_trajectory(
-        trajectory, unit_id=unit_id, phase_label="p01:baseline")
-    sheet = _answer_sheets.assemble_answer_sheets(
-        [execution], [CoverageRecord(
-            unit_id=unit_id, attempt_index=0, present=True,
-            status="present")], phase_label="p01:baseline")
-    dest = phase_bank.phase_bank_dir(ctx.run_dir, "p01:baseline")
-    _answer_sheets.write_answer_sheets(
-        sheet, dest / phase_report.ANSWER_SHEETS_DIR, render_markdown=False)
-    _answer_sheets.write_coverage(
-        [CoverageRecord(unit_id=unit_id, attempt_index=0, present=True,
-                        status="present")],
-        dest / phase_report.COVERAGE_NAME)
-    phase_report.write_unit_specs(
-        [UnitSpec(unit_id=unit_id, phase_label="p01:baseline",
-                  task_ref=task_id, role="strong", arm="strong",
-                  expected_attempts=1, injected_skills=None)],
-        dest)
-    scene = trace_at(sheet[0], 1)
-    record_version(
-        ctx.store, phase_bank.phase_bank_dir(ctx.run_dir, "p02:learn"),
-        ctx.run_dir, skill,
-        Provenance(
-            skill_id=skill.skill_id, version=skill.version,
-            phase_label="p02:learn", cause="add", scene=scene,
-            sources=[scene], note="restart the service"))
-    return skill
-
-
-def _exam_script(bare_correct, leaked=False, with_skill_correct=None):
-    """Handles for one generalization exam unit."""
-    examiner = make_fake_handle(
-        "examiner", [json_script({
-            "scene_text": "The service rejects connections. What next?",
-            "expected_behavior": "Restart the service and verify it.",
-            "reference_answer": "Restart the service."})])
-    dirname = skill_folder.skill_dirname(
-        make_skill_id(make_subtask_id(
-            make_trajectory_id(_prefixed("t1"), "strong", 0), 0)))
-    answerer_replies = [json_script({"plan": "bare plan"})]
-    if not bare_correct and not leaked:
-        answerer_replies.extend([
-            json_script({"skills": [dirname], "reason": "restart"}),
-            json_script({"plan": "restart and verify"}),
-        ])
-    answerer = make_fake_handle("answerer", answerer_replies)
-    judge_replies = [json_script({
-        "verdict": "success" if bare_correct else "failure",
-        "reason": "" if bare_correct else "vague"})]
-    if not bare_correct and not leaked:
-        judge_replies.append(json_script({
-            "verdict": ("success" if (with_skill_correct is None or
-                                      with_skill_correct) else "failure"),
-            "reason": "" if with_skill_correct is None or with_skill_correct
-            else "wrong plan"}))
-    judge = make_fake_handle("judge", judge_replies)
-    auditor = make_fake_handle(
-        "auditor", [] if bare_correct else
-        [json_script({"leaked": leaked, "reason": "because"})])
-    return examiner, answerer, judge, auditor
-
-
-def test_exam_reuses_an_unchanged_pending_skill_across_two_phases(
-        monkeypatch, tmp_path):
-    # Rule 1 on the exam role, the R5 shape: a revise that produced no
-    # new version leaves the pending skill byte-identical, so the NEXT
-    # exam phase reuses the previous verdict with zero executions. The
-    # join goes through the real benchmark slot on BOTH the units and
-    # the report rows (one source), which is exactly what the review's
-    # blocking finding broke.
-    _install_plugin(monkeypatch, PhasePlugin())
-    ctx = make_ctx(tmp_path, make_config())
-    skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:learn", [skill])
-    examiner, answerer, judge, auditor = _exam_script(
-        bare_correct=False, with_skill_correct=True)
-    ctx = make_ctx(tmp_path, make_config(),
-                   handles=make_handles(examiner=examiner, answerer=answerer,
-                                        judge=judge, auditor=auditor))
-    first = phase_of(2, "exam", exam_spec())
-    phase_execute.run(ctx, first)
-    assert [unit.status for unit in phase_units(ctx, first)
-            if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]
-    first_rows = {row.unit_id: row for row in report_rows(ctx, first)}
-    calls_after_first = sum(
-        len(handle.client.calls) for handle in ctx.handles.values())
-
-    # The learn phase between the two exam phases accepted nothing and
-    # revised nothing (the rewrite produced no new version): its
-    # artifact carries the same pending skill.
-    write_bank_artifact(ctx, "p04:learn", [skill])
-
-    second = phase_of(4, "exam", exam_spec())
-    phase_execute.run(ctx, second)
-
-    # The second exam has no changed skill version to test: the bank is
-    # byte-identical, so the phase plans no unit and makes no model call.
-    assert phase_units(ctx, second) == []
-    assert sum(len(handle.client.calls)
-               for handle in ctx.handles.values()) == calls_after_first
-    assert first_rows
-
-
-def test_exam_bare_correct_skips_the_with_skill_answer(monkeypatch,
-                                                       tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
-    ctx = make_ctx(tmp_path, make_config())
-    skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:learn", [skill])
-    examiner, answerer, judge, auditor = _exam_script(bare_correct=True)
-    ctx = make_ctx(tmp_path, make_config(),
-                   handles=make_handles(examiner=examiner, answerer=answerer,
-                                        judge=judge, auditor=auditor))
-
-    phase = phase_of(2, "exam", exam_spec())
-    phase_execute.run(ctx, phase)
-
-    # The exam was generated at execution time and answered bare once;
-    # the control was perfect, so the with-skill answer never ran.
-    assert len(examiner.client.calls) == 1
-    assert len(answerer.client.calls) == 1
-    assert len(judge.client.calls) == 1
-    stored = next(unit for unit in phase_units(ctx, phase)
-                  if unit.injected_skills is not None)
-    assert stored.status == verdicts.STATUS_NOT_RUN_CONTROL_PERFECT
-    assert stored.cause == verdicts.CAUSE_WEAK_ALREADY_KNOWS
-    rows = {row.unit_id: row for row in report_rows(ctx, phase)}
-    bare_row = next(row for row in rows.values()
-                    if row.injected_skills is None)
-    assert bare_row.status == verdicts.STATUS_NORMAL
-    assert bare_row.success_count == 1
-
-
-def test_exam_measures_the_with_skill_answer(monkeypatch, tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
-    ctx = make_ctx(tmp_path, make_config())
-    skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:learn", [skill])
-    examiner, answerer, judge, auditor = _exam_script(bare_correct=False)
-    ctx = make_ctx(tmp_path, make_config(),
-                   handles=make_handles(examiner=examiner, answerer=answerer,
-                                        judge=judge, auditor=auditor))
-
-    phase = phase_of(2, "exam", exam_spec())
-    phase_execute.run(ctx, phase)
-
-    # Bare wrong -> leak audit (clean) -> with-skill answer -> judged.
-    assert len(answerer.client.calls) == 3
-    assert len(auditor.client.calls) == 1
-    assert [unit.status for unit in phase_units(ctx, phase)
-            if unit.injected_skills is not None] == [verdicts.STATUS_NORMAL]
-    rows = {row.unit_id: row for row in report_rows(ctx, phase)}
-    skill_row = next(row for row in rows.values()
-                     if row.injected_skills is not None)
-    assert skill_row.status == verdicts.STATUS_NORMAL
-    assert skill_row.success_count == 1
-
-
-def test_exam_leaked_version_voids_the_measurement(monkeypatch, tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
-    ctx = make_ctx(tmp_path, make_config())
-    skill = _exam_universe(ctx, tmp_path)
-    write_bank_artifact(ctx, "p02:learn", [skill])
-    examiner, answerer, judge, auditor = _exam_script(bare_correct=False,
-                                                      leaked=True)
-    ctx = make_ctx(tmp_path, make_config(),
-                   handles=make_handles(examiner=examiner, answerer=answerer,
-                                        judge=judge, auditor=auditor))
-
-    phase = phase_of(2, "exam", exam_spec())
-    phase_execute.run(ctx, phase)
-
-    stored = next(unit for unit in phase_units(ctx, phase)
-                  if unit.injected_skills is not None)
-    assert stored.status == verdicts.STATUS_NOT_TESTABLE
-    assert stored.cause == verdicts.CAUSE_LEAK
-    rows = {row.unit_id: row for row in report_rows(ctx, phase)}
-    skill_row = next(row for row in rows.values()
-                     if row.injected_skills is not None)
-    assert skill_row.status == verdicts.STATUS_NOT_TESTABLE
-    assert skill_row.cause == verdicts.CAUSE_LEAK
-    # The leaked version never spent a with-skill answer (C1).
-    assert len(answerer.client.calls) == 1
+    blocks = {call["skills_block"] for call in plugin.calls
+              if call["skills_block"]}
+    assert len(blocks) == 1
+    block = blocks.pop()
+    assert MARKED["when_to_use"] in block
+    assert "The disk is full." not in block
+    assert summary["bank_reference"] == bank_reference([active])
 
 
 # ---------------------------------------------------------------------------
 # The final-test phase (C)
 # ---------------------------------------------------------------------------
 
-def test_c_phase_reuses_the_d_control_and_computes_the_delta(
-        monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch,
-                             PhasePlugin(_weak_baseline_behavior))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-    skill = make_group_skill(_prefixed("t1"), status="accepted")
-    write_bank_artifact(ctx, "p02:learn", [skill])
-    calls_before = len(plugin.calls)
 
-    phase = phase_of(2, "test", c_spec(), task_ids=TASK_IDS)
-    result = phase_execute.run(ctx, phase).summary
-
-    # The with-bank arm executed; the control was reused from D's store
-    # (zero new weak-bare calls beyond the with-bank arm's own). The
-    # plugin's behavior keys on the role alone, so the weak with-bank
-    # arm fails t1 exactly like D's weak bare arm did: the delta is an
-    # honest zero over the shared denominators.
-    with_bank_calls = [call for call in plugin.calls[calls_before:]]
-    assert len(with_bank_calls) == 3
-    assert result["control_source"] == "baseline_reuse"
-    assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
-    assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
-    # C writes no acceptance report / reuse index (section 3 rule 9):
-    # only trial-level answer sheets, both arms included.
-    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-    assert not (directory / phase_execute.phase_disk.REUSE_INDEX_NAME).exists()
-    test_report = phase_report.read_phase_report(
-        directory, phase_kind="test", learning_usable=False)
-    assert test_report is not None
-    assert {unit.arm for unit in test_report.units} == {"with_bank", "control"}
-
-
-def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
+def test_c_phase_fresh_bare_comparison(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, PhasePlugin())
-    config = make_config(mode="split", n_attempts_weak=1)
+    config = make_config(n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
-    skill = make_group_skill(_prefixed("t1"), status="accepted")
-    write_bank_artifact(ctx, "p02:learn", [skill])
+    write_bank_artifact(ctx, "p02:learn", [make_card()])
 
     phase = phase_of(2, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS)
@@ -1063,6 +849,12 @@ def test_c_phase_fresh_bare_control_in_split_mode(monkeypatch, tmp_path):
     # denominators, and both summaries cover every task.
     assert result["with_bank"]["tasks"] == result["control"]["tasks"] == 3
     assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
+    # C writes trial-level answer sheets, both arms included.
+    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
+    test_report = phase_report.read_phase_report(
+        directory, phase_kind="test", learning_usable=False)
+    assert test_report is not None
+    assert {unit.arm for unit in test_report.units} == {"with_bank", "control"}
 
 
 def test_c_phase_external_campaign_control_zero_execution(
@@ -1072,10 +864,9 @@ def test_c_phase_external_campaign_control_zero_execution(
     file's bytes copied into the phase directory and the delta computed
     against the aligned first-n rewards."""
     plugin = _install_plugin(monkeypatch, PhasePlugin())
-    config = make_config(mode="split", n_attempts_weak=1)
+    config = make_config(n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
-    write_bank_artifact(ctx, "p02:learn", [make_group_skill(
-        _prefixed("t1"), status="accepted")])
+    write_bank_artifact(ctx, "p02:learn", [make_card()])
 
     rewards = {"t1": [1.0, 0.0, 1.0, 0.0, 0.0],
                "t2": [0.0, 0.0, 0.0, 1.0, 1.0],
@@ -1130,10 +921,9 @@ def test_c_phase_external_campaign_refuses_a_drifted_file(
     re-exported (or edited) campaign file stops the phase with the old
     digest named beside the pinned one."""
     _install_plugin(monkeypatch, PhasePlugin())
-    config = make_config(mode="split", n_attempts_weak=1)
+    config = make_config(n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
-    write_bank_artifact(ctx, "p02:learn", [make_group_skill(
-        _prefixed("t1"), status="accepted")])
+    write_bank_artifact(ctx, "p02:learn", [make_card()])
 
     payload = {"tasks": {"qwen:t1": {"n": 5,
                                      "rewards": [1.0] * 5,
@@ -1155,9 +945,8 @@ def test_c_phase_external_campaign_refuses_a_drifted_file(
 
 def test_c_phase_reruns_every_time(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, PhasePlugin())
-    ctx = make_ctx(tmp_path, make_config(mode="split", n_attempts_weak=1))
-    write_bank_artifact(ctx, "p02:learn", [make_group_skill(
-        _prefixed("t1"), status="accepted")])
+    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
+    write_bank_artifact(ctx, "p02:learn", [make_card()])
 
     phase_execute.run(ctx, phase_of(2, "test", c_spec(compare=CompareSpec(
         against="fresh_bare")), task_ids=TASK_IDS))
@@ -1177,12 +966,12 @@ def test_unit_id_rebuild_matches_the_delivery_sha8():
     row = delivery_units.make_row(_prefixed("t1"),
                                   [{"skill_id": "s1", "version": 2}],
                                   "block bytes")
-    full = unit_ids.make_unit_id(phase_label="p03:live", benchmark=_FAKE,
+    full = unit_ids.make_unit_id(phase_label="p03:test", benchmark=_FAKE,
                                  task_ref=row.task_ref, role="weak",
                                  skills_injected=row.skills_injected)
     sha8 = hashlib.sha256(unit_ids.canonical_skills(
         row.skills_injected).encode("utf-8")).hexdigest()[:8]
-    assert full == f"p03:live:{_FAKE}:{_prefixed('t1')}:weak:{sha8}"
+    assert full == f"p03:test:{_FAKE}:{_prefixed('t1')}:weak:{sha8}"
     # The delivery-side id is exactly the join the rebuild consumes.
     assert row.unit_id == f"{_prefixed('t1')}:{sha8}"
     # The three raw shapes stay distinct keys (the frozen rule).
@@ -1201,12 +990,12 @@ def test_run_rejects_a_learn_phase(tmp_path):
 
 def test_execution_params_refuse_unknown_keys(tmp_path):
     ctx = make_ctx(tmp_path, make_config())
-    bad = phase_of(2, "live", live_spec(
-        execution={"name": "real", "n_attempts": 2, "surprise": 1}))
+    bad = phase_of(2, "test", c_spec(
+        execution={"name": "real", "surprise": 1}))
     with pytest.raises(ConfigError, match="surprise"):
         phase_execute.run(ctx, bad)
     arms_off_baseline = phase_of(
-        2, "live", live_spec(execution={"name": "real", "n_attempts": 2,
+        2, "test", c_spec(execution={"name": "real",
                                      "arms": ["executor_weak"]}))
     with pytest.raises(ConfigError, match="arms"):
         phase_execute.run(ctx, arms_off_baseline)
@@ -1229,27 +1018,27 @@ def test_tb_scorer_rule_consumes_the_verifier_facts():
     # A pseudo zero: a reward exists but the verifier never ran.
     verdict, basis = rule({"correctness": None,
                            "metrics": {"verifier_ran": False}})
-    assert verdict == verdicts.RUN_INVALID
+    assert verdict == vocabulary.RUN_INVALID
     assert "pseudo zero" in basis
     # The verifier's evidence never came back (the log was missing).
     verdict, basis = rule({"correctness": None,
                            "metrics": {"verifier_ran": None}})
-    assert verdict == verdicts.RUN_INVALID
+    assert verdict == vocabulary.RUN_INVALID
     assert "never came back" in basis
     # A run that died on a model output error.
     verdict, basis = rule({"correctness": None,
                            "metrics": {"exception_type":
                                        "ModelOutputError"}})
-    assert verdict == verdicts.RUN_INVALID
+    assert verdict == vocabulary.RUN_INVALID
     assert "ModelOutputError" in basis
     # A plain missing verdict (no facts at all).
     verdict, _ = rule({"correctness": None, "metrics": {}})
-    assert verdict == verdicts.RUN_INVALID
+    assert verdict == vocabulary.RUN_INVALID
     # The scorer's own answer decides when it exists.
     assert rule({"correctness": True, "metrics": {}})[0] == \
-        verdicts.RUN_SUCCESS
+        vocabulary.RUN_SUCCESS
     assert rule({"correctness": False, "metrics": {}})[0] == \
-        verdicts.RUN_FAILURE
+        vocabulary.RUN_FAILURE
     # TB's default binding is the named rule.
     reload_plugin("tb")
     assert verdicts.default_verdict_rule("tb") == "tb_scorer"

@@ -12,8 +12,6 @@ execute_learn_repair_plan_20261016.md, boundaries doc section 3 rule 2):
 2. K1's retry stays mechanical: a run that came back with a scorer
    verdict -- however suspicious its facts look -- is never retried;
    only a run that raised an infrastructure failure is.
-3. Exam answering (the exam-phase execution half) persists the answer with
-   correctness blank (``judge_verdict=None``) and never grades.
 
 No network, no real model: the TB remote is the stateful fake from
 tests/unit/benchmarks/tb_fake_remote.py, the model is llm.fake.
@@ -27,18 +25,14 @@ import types
 
 import pytest
 
-from expedistill.core.trace import TraceRef
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.composites.batch_execute import batch_execute
-from expedistill.composites.exam_answering import answer_exam
-from expedistill.core import ids
-from expedistill.core.models import Attempt, Exam
 from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store
 from expedistill.llm.call import ModelHandle
-from expedistill.llm.fake import json_script, make_fake_handle
+from expedistill.llm.fake import make_fake_handle
 from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink, trial_files
 
 _FAKE = "fakebench"
@@ -177,6 +171,7 @@ def test_a_suspicious_looking_result_is_executed_exactly_once(tmp_path):
     try:
         result = batch_execute(
             store=Store(tmp_path / "run"),
+            phase_label="p01:baseline",
             benchmark=_FAKE,
             tasks=[Task(task_id="t1", instruction="do t1")],
             role="weak",
@@ -213,6 +208,7 @@ def test_only_an_infrastructure_failure_is_retried(tmp_path):
     try:
         result = batch_execute(
             store=Store(tmp_path / "run"),
+            phase_label="p01:baseline",
             benchmark=_FAKE,
             tasks=[Task(task_id="t1", instruction="do t1")],
             role="weak",
@@ -229,42 +225,3 @@ def test_only_an_infrastructure_failure_is_retried(tmp_path):
         sys.meta_path.pop()
         sys.modules.pop(_MODULE, None)
         _reset_registry()
-
-
-# ---------------------------------------------------------------------------
-# 3. Exam answering leaves correctness blank (boundaries doc section 3
-#    rule 5: answering is execution, "right or wrong" stays None)
-# ---------------------------------------------------------------------------
-
-def _exam():
-    skill_id = "searchqa:q1:weak:0:seg0000:skill0000"
-    return Exam(
-        exam_id=ids.make_exam_id(skill_id, 1),
-        skill_id=skill_id, skill_version=1,
-        scene_text="What is the capital of France?",
-        expected_behavior="Name Paris.",
-        reference_answer="Paris",
-        scene=TraceRef("p01:baseline", "sheet-0", 0),
-    )
-
-
-def test_answer_exam_persists_an_unjudged_attempt_and_never_grades(tmp_path):
-    handle = make_fake_handle(
-        "weak", script=[json_script({"plan": "Paris, the city of light."})])
-    store = Store(tmp_path / "run")
-    attempt = answer_exam(
-        store=store,
-        exam=_exam(),
-        answerer_handle=handle,
-        skill_folder=None,
-        skills_block=None,
-        purpose="acceptance",
-    )
-    # Correctness is blank: answering is execution, the judge is acceptance.
-    assert attempt.judge_verdict is None
-    assert attempt.weak_answer == "Paris, the city of light."
-    # Exactly one model call happened: the answer. No judge call.
-    assert len(handle.client.calls) == 1
-    stored = store.load("attempts", attempt.attempt_id, Attempt)
-    assert stored.judge_verdict is None
-    assert stored.weak_answer == "Paris, the city of light."

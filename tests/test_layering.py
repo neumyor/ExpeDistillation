@@ -78,9 +78,9 @@ def test_methods_do_not_import_each_other():
     """One method driver never imports another slot's or method's module.
 
     The registry is the only seam between methods (the plan's section 2:
-    ``methods/acceptance/exam`` may not import ``live_run`` or anything
-    under ``methods/delivery``, and vice versa); a violation here is a
-    method reaching around the by-name dispatch.
+    ``methods/review`` may not import anything under ``methods/delivery``,
+    and vice versa); a violation here is a method reaching around the
+    by-name dispatch.
     """
     offenders = []
     for path in sorted((ROOT / 'methods').rglob('*.py')):

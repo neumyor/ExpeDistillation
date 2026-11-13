@@ -2,8 +2,8 @@
 
 This is the one place trial-level answer sheets become unit counts.  The
 tests pin the status/cause mapping (normal counts, accepted holes,
-missing dispatches, control-perfect skips, leak priority), the auxiliary
-success count, the unknown-unit guard, and the D3-shaped task metrics.
+missing dispatches, cause priority), the auxiliary success count, the
+unknown-unit guard, and the D3-shaped task metrics.
 """
 
 import pytest
@@ -129,22 +129,7 @@ def test_a_unit_with_no_sheets_at_all_is_not_a_zero_score():
     assert summary.cause == "invalid_redispatch_exhausted"
 
 
-def test_a_control_perfect_skip_is_not_run_control_perfect():
-    sheets = [_gap("unit-1", 0, "weak_already_knows")]
-
-    summary = unit_summary.summarize_unit(sheets, _spec(expected_attempts=1))
-
-    assert summary.valid_count == 0
-    assert summary.status == "not_run_control_perfect"
-    assert summary.cause == "weak_already_knows"
-
-
 @pytest.mark.parametrize("causes, expected", [
-    ({"leak", "zero_execution"}, "leak"),
-    ({"injection_overflow", "exam_generation_failed"},
-     "injection_overflow"),
-    ({"exam_generation_failed", "invalid_redispatch_exhausted"},
-     "exam_generation_failed"),
     ({"invalid_redispatch_exhausted", "all_holes"},
      "invalid_redispatch_exhausted"),
     ({"all_holes", "zero_execution"}, "all_holes"),

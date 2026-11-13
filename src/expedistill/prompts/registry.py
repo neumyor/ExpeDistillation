@@ -19,7 +19,6 @@ __all__ = [
     "PromptSpec",
     "PROMPTS",
     "digest",
-    "digests",
     "get",
     "register",
 ]
@@ -76,11 +75,3 @@ def get(name: str) -> str:
 def digest(name: str) -> str:
     """sha256 hexdigest of prompt ``name``'s template (for manifest freezing)."""
     return hashlib.sha256(_spec(name).template.encode("utf-8")).hexdigest()
-
-
-def digests() -> Dict[str, str]:
-    """Digest of every registered prompt, keyed by name."""
-    return {
-        name: hashlib.sha256(spec.template.encode("utf-8")).hexdigest()
-        for name, spec in sorted(PROMPTS.items())
-    }

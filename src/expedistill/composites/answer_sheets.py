@@ -1,6 +1,6 @@
 """Trial-level answer-sheet builders and derived export (layer 5).
 
-Execution owns the canonical ``Trajectory`` / ``Attempt`` records.  This
+Execution owns the canonical ``Trajectory`` records.  This
 module only turns them into ``ExecutionRecord`` views, joins them with
 coverage records, grades each present trial, and optionally writes the
 derived JSON + Markdown answer sheets under a phase directory.
@@ -15,19 +15,17 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from expedistill.composites import verdicts
 from expedistill.composites.unit_ids import make_gap_sheet_id
-from expedistill.core import ids
 from expedistill.core.answer_sheet import (
     AnswerSheet,
     CoverageRecord,
     ExecutionRecord,
 )
-from expedistill.core.models import Attempt, Trajectory
+from expedistill.core.models import Trajectory
 from expedistill.core.vocabulary import COVERAGE_PRESENT
 from expedistill.infra.store import object_filename, write_json, write_jsonl
 
 __all__ = [
     "assemble_answer_sheets",
-    "execution_from_attempt",
     "execution_from_external",
     "execution_from_trajectory",
     "grade_answer_sheets",
@@ -44,8 +42,10 @@ def execution_from_trajectory(
     """The trial-level view of one stored trajectory.
 
     ``folder`` is the delivery manifest that made this trajectory's skill
-    files visible; carrying it on the execution record lets the usage and
-    attribution extractors work from the AnswerSheet alone.
+    files visible (its ``files``, ``catalog_text`` and, when the phase
+    shows one, ``playbook_text``); carrying it on the execution record
+    lets the learn phase recover what the executor saw and which cards
+    it opened from the AnswerSheet alone.
     """
     artifacts = {"trajectory_id": trajectory.trajectory_id}
     if folder is not None:
@@ -73,52 +73,6 @@ def execution_from_trajectory(
         metrics=dict(trajectory.meta or {}),
         artifacts=artifacts,
         aux_success=aux_success,
-        kind="trajectory",
-    )
-
-
-def execution_from_attempt(
-        attempt: Attempt, *, unit_id: str, phase_label: str,
-        arm: Optional[str] = None,
-        folder: Optional[Mapping[str, object]] = None,
-        exam: Optional[object] = None) -> ExecutionRecord:
-    """The trial-level view of one exam answer (no scorer correctness).
-
-    ``folder`` is the exam's candidate catalog manifest.  It travels in
-    ``artifacts["skill_folder"]`` so the same skill-usage and trial-review
-    extractors that read live folder trials can read exam trials.  The
-    answer is represented as a trajectory: the exam's two turns (skill
-    selection and plan) are ``Attempt.steps``.
-    """
-    skills = None
-    if attempt.skill_id is not None:
-        skills = [{"skill_id": attempt.skill_id,
-                   "version": attempt.skill_version}]
-    artifacts = {"attempt_id": attempt.attempt_id}
-    if folder is not None:
-        artifacts["skill_folder"] = dict(folder)
-    metrics = {}
-    if exam is not None:
-        metrics["scene_text"] = getattr(exam, "scene_text", "")
-        metrics["expected_behavior"] = getattr(exam, "expected_behavior", "")
-    return ExecutionRecord(
-        sheet_id=attempt.attempt_id,
-        unit_id=unit_id,
-        phase_label=phase_label,
-        task_ref=attempt.exam_id,
-        role="weak",
-        arm=arm,
-        model_role="weak",
-        model_name="",
-        sample_index=ids.parse_attempt_id(attempt.attempt_id)[1],
-        skills_injected=skills,
-        steps=list(getattr(attempt, "steps", None) or []),
-        answer=attempt.weak_answer,
-        raw_correctness=None,
-        metrics=metrics,
-        aux={"judge_verdict": attempt.judge_verdict,
-             "judge_reason": attempt.judge_reason},
-        artifacts=artifacts,
         kind="trajectory",
     )
 

@@ -1,66 +1,61 @@
-"""B3 Store: layout, save/load by ID, atomic writes, JSONL bank."""
+"""B3 Store: layout, save/load by ID, atomic writes, JSONL ledgers."""
 
 import json
 
 import pytest
 
-from expedistill.core.trace import TraceRef
 from expedistill.core.ids import (
-    make_attempt_id, make_exam_id, make_skill_id, make_subtask_id,
-    make_task_id, make_trajectory_id,
+    make_skill_id, make_subtask_id, make_task_id, make_trajectory_id,
+    make_type_id,
 )
-from expedistill.core.models import Attempt, Exam, Skill, Step, Subtask, Trajectory
+from expedistill.core.models import Skill, Step, Subtask, Trajectory
 from expedistill.infra import store as store_mod
 from expedistill.infra.store import (
-    KIND_DIRS, Store, append_jsonl, kind_for, object_id, read_json, read_jsonl,
+    KIND_DIRS, Store, append_jsonl, object_id, read_json, read_jsonl,
     write_json,
 )
+from tests.helpers.skills import text_fields
 
-ALL_DIRS = sorted(set(KIND_DIRS.values())
-                  | {"stage5_curation", "stage6_test", "llm_requests"})
+ALL_DIRS = sorted(set(KIND_DIRS.values()) | {"llm_requests"})
+TRAJECTORY = "traj/p01_baseline/tb:task-1/strong/00"
 
 
 def a_trajectory(task="tb:task-1", role="strong", attempt=0):
     return Trajectory(
-        trajectory_id=make_trajectory_id(make_task_id("tb", task), role, attempt),
+        trajectory_id=make_trajectory_id(
+            "p01:baseline", make_task_id("tb", task), role, attempt),
         task_id=task, benchmark="tb", model_role=role, model_name="m",
         attempt_index=attempt,
         steps=[Step(action="ls", observation="a b")])
 
 
-def a_subtask(trajectory="traj/tb:task-1/strong/00", index=1):
+def a_subtask(trajectory=TRAJECTORY, index=1):
     return Subtask(
-        subtask_id=make_subtask_id(trajectory, index), task_id="tb:task-1",
+        subtask_id=make_subtask_id(trajectory, index),
+        phase_label="p02:learn", task_id="tb:task-1",
         trajectory_id=trajectory, source="strong", trajectory_success=True,
         segment_index=index, step_range=(0, 1), label="l", description="d",
         success=True)
 
 
-def a_skill(subtask="traj/tb:task-1/strong/00/seg01"):
-    return Skill(skill_id=make_skill_id(subtask), content="do the thing",
-                 subtask_id=subtask, source_subtasks=[subtask])
-
-
-def an_exam(subtask="traj/tb:task-1/strong/00/seg01"):
-    skill_id = make_skill_id(subtask)
-    return Exam(exam_id=make_exam_id(skill_id, 1), skill_id=skill_id,
-                skill_version=1, scene_text="q?", expected_behavior="b",
-                reference_answer="a",
-                scene=TraceRef("p02:learn", "sheet-0", 0))
-
-
-def an_attempt(exam="traj/tb:task-1/strong/00/seg01/skill/v01/exam"):
-    return Attempt(attempt_id=make_attempt_id(exam, 0), exam_id=exam,
-                   purpose="bare", weak_answer="answer")
+def a_skill(serial=1):
+    type_id = make_type_id(serial)
+    return Skill(skill_id=make_skill_id(type_id), subtask_type=type_id,
+                 **text_fields("do the thing"),
+                 source_subtasks=[make_subtask_id(TRAJECTORY, 1)])
 
 
 EXAMPLES = [
     ("trajectories", a_trajectory()),
     ("subtasks", a_subtask()),
     ("skills", a_skill()),
-    ("exams", an_exam()),
-    ("attempts", an_attempt()),
 ]
+
+
+def test_the_store_kinds():
+    # Trajectories, segments and skills are per-object JSON; the subtask
+    # type table and the segment-to-type assignments are JSONL ledgers.
+    assert set(KIND_DIRS) == {"trajectories", "subtasks", "skills"}
 
 
 def test_init_creates_full_layout(tmp_path):
@@ -121,11 +116,7 @@ def test_unknown_kind_rejected(tmp_path):
         s.save(a_skill(), "nonsense")
 
 
-def test_kind_for_and_object_id():
-    for kind, obj in EXAMPLES:
-        assert kind_for(obj) == kind
-    with pytest.raises(ValueError):
-        kind_for(object())
+def test_object_id_needs_an_id_field():
     with pytest.raises(ValueError):
         object_id(object())
 
@@ -168,21 +159,12 @@ def test_read_json_missing_raises(tmp_path):
         read_json(tmp_path / "absent.json")
 
 
-def test_append_bank_appends_lines(tmp_path):
+def test_bank_reads_the_run_level_file(tmp_path):
     s = Store(tmp_path)
-    s.append_bank({"skill_id": "a"})
-    s.append_bank({"skill_id": "b"})
+    assert s.bank() == []
+    append_jsonl(tmp_path / "skill_bank.jsonl", {"skill_id": "a"})
+    append_jsonl(tmp_path / "skill_bank.jsonl", {"skill_id": "b"})
     assert s.bank() == [{"skill_id": "a"}, {"skill_id": "b"}]
-
-
-def test_append_bank_repairs_missing_newline(tmp_path):
-    # A previous interrupted append may leave no trailing newline; the next
-    # append must not glue two records onto one line.
-    s = Store(tmp_path)
-    path = tmp_path / "skill_bank.jsonl"
-    path.write_text('{"skill_id": "a"}')  # no trailing newline
-    s.append_bank({"skill_id": "b"})
-    assert len(s.bank()) == 2
 
 
 def test_append_jsonl_creates_parent(tmp_path):
@@ -262,16 +244,6 @@ def test_non_record_fragments_are_truncated(tmp_path, fragment):
     append_jsonl(path, {"n": 3})
     append_jsonl(path, {"n": 4})
     assert read_jsonl(path) == [{"n": 1}, {"n": 3}, {"n": 4}]
-
-
-def test_bank_survives_torn_tail(tmp_path):
-    s = Store(tmp_path)
-    s.append_bank({"skill_id": "a"})
-    with (tmp_path / "skill_bank.jsonl").open("ab") as stream:
-        stream.write(b'{"skill_id": "b", "con')
-    s.append_bank({"skill_id": "c"})
-    s.append_bank({"skill_id": "d"})
-    assert [r["skill_id"] for r in s.bank()] == ["a", "c", "d"]
 
 
 @pytest.mark.parametrize("block", [1, 3, 7, 64 * 1024])

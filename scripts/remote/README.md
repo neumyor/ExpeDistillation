@@ -117,7 +117,6 @@ kill -0 "$(cat $RUN/driver.pid)" && echo alive      # 存活只看 pidfile，不
 tail -f $RUN/driver.console.log
 cd <deploy-base>/<commit>
 .venv/bin/expedistill summary --run-dir $RUN
-.venv/bin/python scripts/audit/audit_live_run.py --run-dir $RUN --out $RUN/audit.json
 ```
 
 ## 注意

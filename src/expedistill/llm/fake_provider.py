@@ -3,10 +3,10 @@
 A checked-in counterpart of ``llm/fake.py``'s test double that the
 PROVIDERS table can name: setting ``EXPEDISTILL_LLM_PROVIDER=fake``
 builds this client instead of the real endpoint, so a whole phase
-sequence (freeze -> D -> L -> B -> ... -> C) runs against REAL benchmark
-plugins with zero network. The golden matrix pins the phase machinery on
-a stub benchmark; this provider exists for the other direction -- the
-real plugins (SearchQA/ALFWorld/TB's local seam) under the fake model.
+sequence (freeze -> D -> L -> A -> ... -> C) runs against REAL benchmark
+plugins with zero network. The golden matrix drives a stub benchmark
+with it; smokes drive the real plugins (SearchQA/ALFWorld/TB's local
+seam) under the fake model.
 
 The script is a JSON PLAN loaded from the path named by
 ``EXPEDISTILL_FAKE_PROVIDER_PLAN`` (operational, like every endpoint
@@ -17,7 +17,7 @@ answers and, per question, which way the weak executor should go:
     {
       "strong_model": "fake-strong",      # answers every plan question
       "weak_model":   "fake-weak",        # follows the policy
-      "revision_marker": "REVISED-BY-G11",
+      "revision_marker": "REVISED",
       "segment_steps": 1,                 # optional: steps per G1 segment
       "questions": {
         "<the full question text>": {
@@ -33,13 +33,10 @@ plan question correctly, whatever the policy says):
 
 * ``always`` -- correct bare or injected;
 * ``skills`` -- correct iff skills reach the prompt: a ``## Skill rules``
-  block, or a skill card the model opened with ``ReadSkill[<location>]``
-  (round 0 keeps);
+  block, or a skill card the model opened with ``ReadSkill[<location>]``;
 * ``revised_skills`` -- correct only once the skills in the prompt carry
-  the revision marker (round 0 misses, the G10/G11 revision flips round
-  1);
-* ``never`` -- never correct (both rounds miss, the last learn phase
-  deletes the group).
+  the revision marker the two rewrite fakes append;
+* ``never`` -- never correct.
 
 The executors speak the SearchQA grammar when the prompt offers
 ``Search[<query>]``: one ``Search[<the question>]``, then
@@ -52,25 +49,23 @@ analysis are exercised. A prompt without ``Search[<query>]`` (the stub
 tasks of the unit suites) gets the single ``Finish[<answer>]`` of the
 original script.
 
-Everything else is dispatched on the prompt text by the same anchor
-style as the golden matrix's ``_script`` (tests/golden/harness.py):
-one correct-contract response per named method prompt the phase world
+Everything else is dispatched on the prompt text by anchor: one
+correct-contract response per named method prompt the phase world
 calls, loud refusal on anything else -- an unexpected prompt in a smoke
-is a finding, never improvised. The paper method's prompts (cluster
-authoring, the generalization exam, trial-level review, the requirement
-skill, the profile update, the two skill-use judges) answer
-deterministically: choices that need variety (which family, which skill
-the exam reader opens, which exam plan fails) are a stable function of
-the prompt text, so a rerun reproduces a run byte for byte and a smoke
-still sees some failures to review. The two live prompts get the revision
-marker treatment the golden matrix pioneered: G10 marks every listed
-skill for revision with a concrete problem, G11 returns the original
-skill with the marker line appended, so the weak-executor policy can
-key the round on it exactly like the golden live plugin does. REWRITE
-reads its ``{scope_section}``: in a ``body`` or ``trigger`` scope the
-marker lands in the part the scope allows, and the part it forbids is
-edited anyway, so a smoke can see ``blocks.author.enforce_scope`` restore
-it.
+is a finding, never improvised. The paper method's prompts (the trial
+diagnosis, the subtask typing, the card writer, the profile and playbook
+updates, the two rewrites, the two skill-use judges) answer
+deterministically: choices that need variety (whether a failure is
+``general``, which note is empty) are a stable function of the prompt
+text, so a rerun reproduces a run byte for byte and a smoke still sees
+every kind of evidence. The diagnosis blames the trial's last step; the
+typing puts segments with the same label into one type (the table's type
+of that name when there is one); the card writer copies the type's entry
+state into ``when_to_use``. REVISE_TRIGGER appends the revision marker the
+``revised_skills`` policy keys on to ``when_to_use``, REVISE_CONTENT to
+``not_applicable_when``; REVISE_CONTENT reads the current fields back from
+the rendered card in the prompt. The playbook fake writes every part label
+the prompt demands, so a benchmark's playbook checks pass.
 
 The client is deliberately benchmark-agnostic: it never imports a
 benchmark package, it only matches question text the plan provides.
@@ -83,7 +78,6 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from expedistill.core.models import SKILL_MARKERS
 from expedistill.infra.reliability import ConfigError
 from expedistill.inject.skills import BLOCK_HEADER
 
@@ -100,9 +94,9 @@ __all__ = [
 #: Environment variable naming the plan JSON (the provider's only knob).
 PLAN_ENV = "EXPEDISTILL_FAKE_PROVIDER_PLAN"
 
-#: Default marker the G11 fake appends to a revised skill; the
+#: Default marker the rewrite fakes append to a revised skill; the
 #: ``revised_skills`` policy keys on it. Overridable in the plan.
-REVISION_MARKER = "REVISED-BY-G11"
+REVISION_MARKER = "REVISED"
 
 #: The weak executor's closed policy vocabulary (module docstring).
 POLICIES = ("always", "skills", "revised_skills", "never")
@@ -117,11 +111,6 @@ _WRONG_ANSWER = "not the answer the grader expects"
 
 #: The skill-folder prompt's card location, one per listed card.
 _LOCATION_RE = re.compile(r"<location>\s*(.*?)\s*</location>", re.S)
-
-#: One line of an exam catalog: ``<skill id> | <dir>/SKILL.md | <text>``.
-_CATALOG_LINE_RE = re.compile(
-    r"^(?P<id>\S.*?) \| (?P<file>[a-z0-9][a-z0-9-]*/SKILL\.md) \| "
-    r"(?P<description>.*)$", re.M)
 
 
 def load_plan(path: str) -> Dict[str, Any]:
@@ -231,11 +220,20 @@ def _one_line(text: str, limit: int = 200) -> str:
     return " ".join(text.split())[:limit]
 
 
-def _ids_of(block: str) -> List[str]:
-    """``- <id>`` lines of a listing; ``(none)`` / ``(empty bank)`` is
-    the empty list."""
-    return [line[2:].strip() for line in block.splitlines()
-            if line.startswith("- ")]
+def _card_fields(card: str) -> Dict[str, Any]:
+    """The three body fields of a rendered skill card (the inverse of
+    ``inject.skill_text.render_card`` for the cards this fake writes)."""
+    head, _, rest = card.partition("\n[Steps]\n")
+    steps_text, _, tail = rest.partition("\n[Do not use when] ")
+    steps: List[str] = []
+    for line in steps_text.split("\n"):
+        match = re.match(rf"{len(steps) + 1}\. (.*)", line)
+        if match:
+            steps.append(match.group(1))
+        elif steps:
+            steps[-1] += "\n" + line
+    return {"when_to_use": head.split("[When to use] ", 1)[1],
+            "steps": steps, "not_applicable_when": tail}
 
 
 class FakeProviderClient:
@@ -275,35 +273,16 @@ class FakeProviderClient:
     # -- dispatch ---------------------------------------------------------
 
     def _reply(self, model: str, user: str) -> str:
-        # Method prompts first: the G10 attribution prompt embeds the
-        # RENDERED task instruction (question included), so the execution
-        # fallback must never see it.
+        # Method prompts first: a method prompt may embed the RENDERED
+        # task instruction (question included), so the execution fallback
+        # must never see it.
         if user.startswith("You are given the view"):
             return self._segment(user)
-        if "The subtask SUCCEEDED" in user:
-            return self._distill()
-        if "WHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING" in user:
-            return self._diagnose()
-        if user.startswith("You are attributing ONE window"):
-            return self._attempt_attribution(user)
-        if user.startswith("A skill was active in real attempts"):
-            return self._attempt_revision(user)
-        if user.startswith("A skill written for a weak model failed"):
-            return self._rewrite(user)
-        if user.startswith("You are curating a bank of skills written "
-                          "for a weak model. Find"):
-            return self._similarity(user)
-        if user.startswith("You are curating a bank of skills written "
-                          "for a weak model. Merge"):
-            return self._merge(user)
-        if user.startswith("You are curating a bank of skills written "
-                          "for a weak model. Assign"):
-            return self._group(user)
+        if user.startswith("A skill card written for a weaker"):
+            return self._revise(user)
         for anchor, handler in self._method_prompts():
             if user.startswith(anchor):
                 return handler(user)
-        if "CLUSTER THEME: " in user:
-            return self._cluster_skill(user)
         question = self._question_of(user)
         if question is not None:
             return self._action(model, question, user)
@@ -315,33 +294,21 @@ class FakeProviderClient:
         """The paper method's prompts, by the first words of the template
         (text no vocabulary slot touches)."""
         return (
-            ("You classify ONE segment of a ", self._trigger_family),
-            ("You group subtasks of ONE trigger-timing family",
-             self._cluster_subtasks),
-            ("Reconstruct one exam scene", self._exam_scene),
-            ("Choose which skills from the library catalog",
-             self._exam_trigger),
-            ("Write an action plan for the situation below",
-             self._exam_plan),
-            ("Judge whether the plan below handles the scene",
-             self._exam_judge),
             ("You analyze ONE failed trial of a weaker",
-             self._trial_failure_analysis),
-            ("You analyze ONE failed paper exam of a weaker",
-             self._trial_exam_analysis),
-            ("You merge per-trial failure diagnoses into ONE phase review",
-             self._requirement_aggregation),
+             self._trial_analysis),
+            ("You sort segments of ", self._subtask_typing),
+            ("You are writing ONE skill card", self._card_write),
             ("You maintain the accumulated profile of a weaker",
              self._profile_update),
-            ("You write ONE reusable three-section skill for a weaker",
-             self._requirement_skill),
+            ("You maintain the GLOBAL PLAYBOOK",
+             self._playbook_update),
             ("An agent worked on one task. Before starting it was shown",
              self._applicability_judge),
             ("An agent opened one skill card during a trial.",
              self._adherence_judge),
         )
 
-    # -- G1 / G2 ----------------------------------------------------------
+    # -- G1 ---------------------------------------------------------------
 
     def _segment(self, user: str) -> str:
         steps = len(re.findall(r"^step \d+$", user, re.M))
@@ -374,435 +341,100 @@ class FakeProviderClient:
             })
         return _fenced(segments)
 
-    @staticmethod
-    def _distill() -> str:
-        return _fenced({
-            "when_to_use": "when a question needs an exact short answer",
-            "steps": ["search the question's key terms",
-                      "reply with Finish[<the short answer>]"],
-            "not_applicable_when": "the answer is already known",
-            "summary": "search before submitting the final answer",
-        })
+    # -- the learn phase: diagnosis, typing, card writing ------------------------
 
     @staticmethod
-    def _diagnose() -> str:
-        return _fenced({
-            "when_to_use": "about to submit an answer without searching "
-                           "first: the guess misses the gold phrasing",
-            "steps": ["search the question's key terms",
-                      "reply with Finish[<the short answer>]"],
-            "not_applicable_when": "a search was already done",
-            "summary": "never submit an answer before searching for it",
-        })
-
-    # -- G10 / G11 / G6 ---------------------------------------------------
-
-    def _attempt_attribution(self, user: str) -> str:
-        ids = [line.split("skill_id: ", 1)[1].strip()
-               for line in user.splitlines()
-               if line.startswith("skill_id: ")]
-        if not ids:
+    def _trial_analysis(user: str) -> str:
+        """The last step fails; one trial in four is ``general``; which
+        note is empty varies with the trial, so the evolving texts see both
+        empty and non-empty notes."""
+        last = re.search(r"an integer from 0 to (\d+)", user)
+        if last is None:
             raise AssertionError(
-                "the SKILL_ATTEMPT_ATTRIBUTION prompt listed no skills")
-        return _fenced({"skills": [
-            {"skill_id": skill_id,
-             "trigger_context": "the window shows the task context",
-             "behavior_after_trigger": "the model followed the observed "
-                                       "procedure",
-             "improvement": "name the concrete state before acting"}
-            for skill_id in ids]})
-
-    def _attempt_revision(self, user: str) -> str:
-        original = user.split("SKILL (current version):\n", 1)[1].split(
-            "\n\nATTEMPT EVIDENCE:", 1)[0]
+                "TRIAL_FAILURE_ANALYSIS names no step range")
+        failing = int(last.group(1))
+        opened = _between(user, "when it opened\nnone):\n",
+                          "\n\nTHE TRIAL").strip()
+        flavour = _pick(user, 3, "trial-analysis")
         return _fenced({
-            "skill_text": (original + "\n" + self.revision_marker +
-                           ": name the concrete state before acting."),
-            "revision_reason": "made the trigger condition concrete",
-            "summary": "a sharper capability line",
-        })
-
-    def _rewrite(self, user: str) -> str:
-        original = user.split("SKILL (current version):\n", 1)[1].split(
-            "\n\nEXAM QUESTION:", 1)[0]
-        note = self.revision_marker + ": name the concrete state before acting."
-        if "SCOPE OF THIS REWRITE - the trigger only" in user:
-            text = self._edit_section(original, "[When to use]", note,
-                                      "[Do not use when]")
-        elif "SCOPE OF THIS REWRITE - the body only" in user:
-            text = self._edit_section(original, "[Do not use when]", note,
-                                      "[When to use]")
-        else:
-            text = original + "\n" + note
-        return _fenced({
-            "failure_category": "wrong_trigger",
-            "skill_text": text,
-            "rewrite_reason": "made the trigger condition concrete",
-            "summary": "search before submitting the final answer",
+            "reason": f"The trial went wrong at step {failing}: the agent "
+                      "acted without checking the evidence against the "
+                      "task" + (" although it had opened a card."
+                                if opened != "(none)" else "."),
+            "failing_step": failing,
+            "scope": ("general" if _pick(user, 4, "trial-scope") == 0
+                      else "subtask"),
+            "model_note": ("The weak reader skips verification unless told "
+                           "explicitly." if flavour != 1 else ""),
+            "playbook_note": ("Check the result against the task text "
+                              "before finishing." if flavour != 2 else ""),
         })
 
     @staticmethod
-    def _edit_section(text: str, allowed: str, note: str,
-                      forbidden: str) -> str:
-        """``text`` with ``note`` ending the ``allowed`` section and a
-        stray edit ending the ``forbidden`` one (a rewriter that ignores
-        its scope; the splice must undo it)."""
-        pending = {allowed: note,
-                   forbidden: "OUT-OF-SCOPE-EDIT: unrelated wording."}
-        out: List[str] = []
+    def _subtask_typing(user: str) -> str:
+        """Segments with the same label share a type: an existing type of
+        that name, else one new type per distinct label."""
+        table = _between(user, "table is empty):\n",
+                         "\n\nSEGMENTS TO SORT").strip()
+        existing = {}
+        if table != "(none)":
+            for line in table.splitlines():
+                type_id, name, _entry = line.split(" | ", 2)
+                existing.setdefault(name, type_id)
+        segments: List[Tuple[str, str]] = []
         current = None
-
-        def flush() -> None:
-            if current in pending:
-                out.append(pending.pop(current))
-
-        for line in text.split("\n"):
-            marker = next((m for m in SKILL_MARKERS if line.startswith(m)),
-                          None)
-            if marker is not None:
-                flush()
-                current = marker
-            out.append(line)
-        flush()
-        out.extend(pending.values())  # sections the text lacks: nothing to splice
-        return "\n".join(out)
-
-    # -- G7 / G8 / G9 -------------------------------------------------------
-
-    @staticmethod
-    def _listing_ids(user: str) -> List[str]:
-        """The skill ids of a G7/G9 listing: the paragraph after the
-        prompt's ``SKILLS:`` header, ``- <skill_id>: <content>`` per line.
-        TWO cuts matter: the header (the template's own bullets like
-        ``- similar_groups: ...`` must never parse as skills) and the
-        listing's end (the first blank line -- the renderer emits one
-        contiguous paragraph, the template prose follows after a gap)."""
-        listing = user.split("SKILLS:\n", 1)[1].split("\n\n", 1)[0]
-        return [line[2:].split(": ", 1)[0]
-                for line in listing.splitlines()
-                if line.startswith("- ")]
-
-    def _similarity(self, user: str) -> str:
-        ids = self._listing_ids(user)
-        groups = [ids[:2]] if len(ids) >= 2 else []
-        return _fenced({"similar_groups": groups, "conflicts": [],
-                        "low_value": []})
-
-    @staticmethod
-    def _merge(user: str) -> str:
-        sources = []
-        for block in re.split(r"^### ", user, flags=re.M)[1:]:
-            _skill_id, _, content = block.partition("\n")
-            if content.strip():
-                sources.append(content.strip())
-        if not sources:
-            raise AssertionError("the MERGE prompt listed no skills")
-        return _fenced({
-            "content": (sources[0] + "\nMerged from " +
-                        str(max(2, len(sources))) + " near-duplicate skills."),
-            "summary": "search before submitting the final answer",
-        })
-
-    def _group(self, user: str) -> str:
-        ids = self._listing_ids(user)
-        return _fenced({"groups": {skill_id: "search answer discipline"
-                                   for skill_id in ids}})
-
-    # -- cluster authoring --------------------------------------------------
-
-    @staticmethod
-    def _trigger_family(user: str) -> str:
-        """A failed segment is a ``when_command_fails`` moment; otherwise
-        the segment's place in its trajectory names the family."""
-        keys = re.findall(r'^- "([a-z_]+)":', user, re.M)
-        if not keys:
-            raise AssertionError(
-                "CLUSTER_TRIGGER_FAMILY listed no family keys")
-        if "SEGMENT SUCCESS: False" in user and "when_command_fails" in keys:
-            family = "when_command_fails"
-        else:
-            place = re.search(r"segment (\d+) of (\d+)", user)
-            first, total = ((int(place.group(1)), int(place.group(2)))
-                            if place else (1, 1))
-            if first == total and "before_submitting" in keys:
-                family = "before_submitting"
-            elif first == 1 and "at_task_start" in keys:
-                family = "at_task_start"
+        for line in _between(user, "reached its own goal):\n",
+                             "\n\nRules:").splitlines():
+            if line.startswith("SUBTASK_ID: "):
+                current = line[len("SUBTASK_ID: "):]
+            elif line.startswith("LABEL: ") and current is not None:
+                segments.append((current, line[len("LABEL: "):]))
+                current = None
+        if not segments:
+            raise AssertionError("SUBTASK_TYPING listed no segments")
+        new_types: List[Dict[str, str]] = []
+        keys: Dict[str, str] = {}
+        assignments = []
+        for subtask_id, label in segments:
+            label = label.strip()
+            if label in existing:
+                ref = existing[label]
             else:
-                family = keys[_pick(user, len(keys))]
-        return _fenced({"family": family,
-                        "reason": "the steps show this moment"})
+                if label not in keys:
+                    keys[label] = f"new{len(keys) + 1}"
+                    new_types.append({
+                        "key": keys[label], "name": label,
+                        "entry_state": f"The agent is about to {label}."})
+                ref = keys[label]
+            assignments.append({"subtask_id": subtask_id.strip(),
+                                "type": ref})
+        return _fenced({"new_types": new_types, "assignments": assignments})
 
     @staticmethod
-    def _cluster_subtasks(user: str) -> str:
-        """Pairs of consecutive ids (a leftover joins the last pair), so a
-        smoke sees both multi-member and single-member clusters."""
-        ids = sorted(re.findall(r"^SUBTASK_ID: (.+)$", user, re.M))
-        if not ids:
-            raise AssertionError("CLUSTER_SUBTASKS listed no subtask cards")
-        groups = [ids[index:index + 2] for index in range(0, len(ids), 2)]
-        if len(groups) > 1 and len(groups[-1]) == 1:
-            groups[-2].extend(groups.pop())
-        family = re.search(r"^FAMILY: (\S+)", user, re.M)
-        label = family.group(1).replace("_", " ") if family else "search"
-        return _fenced({"clusters": [
-            {"theme": f"search the passages for the evidence ({label}, "
-                      f"group {number})",
-             "subtask_ids": group,
-             "reason": "the members call for the same search discipline"}
-            for number, group in enumerate(groups, start=1)]})
-
-    @staticmethod
-    def _cluster_skill(user: str) -> str:
-        phrase = re.search(r"^OPENING PHRASE: (.+)$", user, re.M)
-        theme = re.search(r"^CLUSTER THEME: (.+)$", user, re.M)
-        if phrase is None or theme is None:
+    def _card_write(user: str) -> str:
+        name = re.search(r"^SUBTASK TYPE: (.+)$", user, re.M)
+        entry = _between(user, "when this subtask starts):\n",
+                         "\n\nHOW THE STRONG MODEL").strip()
+        if name is None or not entry:
             raise AssertionError(
-                "CLUSTER_SKILL lacks its OPENING PHRASE / CLUSTER THEME")
+                "CARD_WRITE lacks its SUBTASK TYPE / ENTRY STATE")
         return _fenced({
-            "when_to_use": phrase.group(1).strip() + " the question names "
-                           "an entity and asks for a short exact answer.",
+            "when_to_use": entry,
             "steps": [
-                "When the question names an entity, do Search[<query>] "
-                "with its key terms; verify the passage names the entity; "
-                "if not, reword <query> and search again.",
-                "When a passage answers the question, copy the shortest "
-                "phrase that does; verify it matches the asked form; if "
-                "unsure, search once more.",
-                "When the answer is ready, do Finish[<answer>]; verify "
-                "it is a short phrase, not a sentence; if it is long, cut "
-                "it down first.",
+                "When the task names what to look for, do the first "
+                "action toward it; verify the feedback names it; if not, "
+                "try the next place.",
+                "When the feedback shows the target, act on it; verify the "
+                "state changed; if not, read the feedback and retry once.",
+                "When the target state is reached, finish; verify it "
+                "matches the task text; if not, go back one step.",
             ],
-            "not_applicable_when": "the answer was already submitted.",
-            "summary": "Teach the reader to "
-                       + _one_line(theme.group(1)) + ".",
+            "not_applicable_when": "the subtask is already done.",
+            "summary": "Teach the reader to " + _one_line(name.group(1))
+                       + ".",
         })
 
-    # -- the generalization exam ---------------------------------------------
-
-    @staticmethod
-    def _exam_scene(user: str) -> str:
-        instruction = _between(
-            user, "that produced the trajectory was asked to do):\n",
-            "\n\nSTEPS BEFORE THE CUT")
-        question = re.search(r"^## Question\n(.+)$", instruction, re.M)
-        topic = _one_line(question.group(1) if question else instruction)
-        prior = _between(user, "the reader sees everything up to here):\n",
-                         "\n\nSTEPS AFTER THE CUT")
-        observed = re.findall(r"^observation: (.+)$", prior, re.M)
-        latest = (f" The latest observation reads: {_one_line(observed[-1])}"
-                  if observed else "")
-        return _fenced({
-            "scene_text": f"A reader is answering the question "
-                          f"\"{topic}\" with a stepwise search.{latest}",
-            "expected_behavior": "Search with the question's key terms, "
-                                 "check the passage against the question "
-                                 "and submit a short answer only after "
-                                 "checking.",
-            "reference_answer": "Search[<key terms>], read the passage, "
-                                "then Finish[<short answer>].",
-        })
-
-    def _exam_trigger(self, user: str) -> str:
-        scene = _between(user, "SCENE:\n", "\n\nSKILL CATALOG")
-        catalog = _between(user, "SKILL CATALOG", "\n\nRules:")
-        entries = _CATALOG_LINE_RE.findall(catalog)
-        allowed = re.search(r"may open at most (\d+) skill", user)
-        limit = int(allowed.group(1)) if allowed else 1
-        chosen: List[int] = []
-        if entries and limit > 0:
-            index = _pick(scene, len(entries) + 1, "trigger")
-            if index < len(entries):
-                chosen.append(index)
-                if limit > 1 and len(entries) > 1 \
-                        and _pick(scene, 3, "second") == 0:
-                    chosen.append((index + 1) % len(entries))
-        names = []
-        for position in chosen:
-            skill_id, filename, _description = entries[position]
-            # Both spellings the catalog shows are legal names.
-            names.append(filename.split("/", 1)[0]
-                         if _pick(skill_id, 2) else skill_id)
-        reason = ("the catalog line matches the scene" if names
-                  else "no catalog line describes this scene")
-        return _fenced({"skills": names, "reason": reason})
-
-    @staticmethod
-    def _exam_plan(user: str) -> str:
-        scene = _between(user, "SCENE:\n", "\n\nWHY THESE SKILLS")
-        opened = _between(user, "OPENED SKILLS:\n",
-                          "\n\nWrite a plan the reader would follow now:")
-        steps = ["Search with the question's key terms.",
-                 "Check the returned passage against the question.",
-                 "Reply with Finish[<short answer>]."]
-        trigger = re.search(r"^\[When to use\] (.+)$", opened, re.M)
-        if trigger:
-            steps.insert(0, "Apply the opened skill: "
-                         + _one_line(trigger.group(1), 120))
-        if _pick(scene, 2, "plan-shape"):
-            return _fenced({"plan": steps})
-        return _fenced({"plan": " ".join(
-            f"{number}. {step}" for number, step in enumerate(steps, 1))})
-
-    @staticmethod
-    def _exam_judge(user: str) -> str:
-        scene = _between(user, "SCENE:\n", "\n\nEXPECTED BEHAVIOR")
-        opened = _between(user, "SKILLS THE MODEL OPENED:\n",
-                          "\n\nWHY IT OPENED THEM:").strip()
-        plan = _between(user, "THE MODEL'S PLAN:\n",
-                        "\n\nThe verdict is")
-        if not opened:
-            return _fenced({
-                "verdict": "failure",
-                "reason": "The plan was written without opening any skill "
-                          "and never checks the passage against the "
-                          "question."})
-        if _pick(scene + "\0" + plan, 3, "judge") == 0:
-            return _fenced({
-                "verdict": "failure",
-                "reason": "The plan submits an answer without checking the "
-                          "passage against the question."})
-        return _fenced({
-            "verdict": "success",
-            "reason": "The plan searches, checks the passage and answers "
-                      "briefly."})
-
-    # -- trial-level review ----------------------------------------------------
-
-    @staticmethod
-    def _trial_failure_analysis(user: str) -> str:
-        steps = _between(user, "TRIAL STEPS:\n",
-                         "\n\nSKILLS ACTUALLY DELIVERED")
-        delivered = _ids_of(_between(
-            user, "SKILLS ACTUALLY DELIVERED TO THIS TRIAL:\n",
-            "\n\nALL SKILLS IN THE CURRENT BANK"))
-        count = len(re.findall(r"^step \d+$", steps, re.M))
-        opened_at = None
-        for match in re.finditer(
-                r"^step (\d+)\naction: (?:> )?(?:ReadSkill\[|cat )",
-                steps, re.M):
-            opened_at = int(match.group(1))
-            break
-        entries = []
-        if delivered:
-            if opened_at is None:
-                issue = ("the card matched the situation but the model "
-                         "never opened it")
-                start = 0
-            else:
-                issue = ("the model opened the card and did not follow "
-                         "its verification step")
-                start = opened_at
-            entries.append({"skill_id": delivered[0], "issue": issue,
-                            "step_start": start,
-                            "step_end": max(count, start + 1)})
-        flavour = _pick(steps, 3, "trial")
-        return _fenced({
-            "reason": "The trial submitted an answer that does not match "
-                      "the passage it had retrieved.",
-            "profile_note": ("The weak reader answers from memory instead "
-                             "of the retrieved passage."
-                             if flavour == 0 else ""),
-            "skills": entries,
-            "new_skill_note": ("No skill covers checking the passage "
-                               "against the question before answering."
-                               if flavour != 1 else ""),
-        })
-
-    @staticmethod
-    def _trial_exam_analysis(user: str) -> str:
-        judge_reason = _between(user, "JUDGE'S REASON FOR THE FAILURE:\n",
-                                "\n\nSKILL UNDER EXAMINATION").strip()
-        exam_skill = re.search(
-            r"\(this exam was written for it\):\nSKILL_ID: (.+)", user)
-        if exam_skill is None:
-            raise AssertionError(
-                "TRIAL_EXAM_ANALYSIS names no skill under examination")
-        exam_id = exam_skill.group(1).strip()
-        opened = re.findall(
-            r"^SKILL_ID: (.+)$",
-            _between(user, "SKILLS THE MODEL OPENED:\n",
-                     "\n\nTHE MODEL'S PLAN"), re.M)
-        opened = [skill_id.strip() for skill_id in opened]
-        flavour = _pick(judge_reason + exam_id, 3, "exam-analysis")
-        if exam_id not in opened:
-            issue = ("it was not opened, and its catalog line should have "
-                     "matched this scene: its trigger is defective"
-                     if flavour else
-                     "it was not opened, and its catalog line rightly does "
-                     "not match this scene: the model chose wrongly")
-        elif flavour:
-            issue = ("it was opened, and it does not cover the defect the "
-                     "judge names: its content is defective")
-        else:
-            issue = ("it was opened, and it covers what the judge says is "
-                     "wrong: the model did not follow a correct skill")
-        others = [skill_id for skill_id in opened if skill_id != exam_id]
-        return _fenced({
-            "reason": "The judge says: " + (judge_reason
-                                            or "the plan is wrong."),
-            "exam_skill_issue": issue,
-            "profile_note": ("The weak reader skips verification unless "
-                             "told explicitly." if flavour != 2 else ""),
-            "skills": ([{"skill_id": others[0],
-                         "issue": "opened and misleading for this scene"}]
-                       if others else []),
-            "new_skill_note": ("No skill covers verifying the passage "
-                               "against the question before answering."
-                               if flavour == 0 else ""),
-        })
-
-    def _requirement_aggregation(self, user: str) -> str:
-        findings = re.split(r"^SHEET_ID: ", _between(
-            user, "TRIAL FINDINGS:\n", "\n\nCURRENT SKILL BANK:"),
-            flags=re.M)[1:]
-        skills_of: Dict[str, List[str]] = {}
-        noted: List[str] = []
-        for finding in findings:
-            sheet_id = finding.split("\n", 1)[0].strip()
-            named = re.search(r"^SKILLS: (.*)$", finding, re.M)
-            names = [name.strip() for name in
-                     (named.group(1).split(", ") if named else [])
-                     if name.strip() and name.strip() != "(none)"]
-            for name in names:
-                skills_of.setdefault(name, []).append(sheet_id)
-            note = finding.split("NEW_SKILL_NOTE:\n", 1)[-1].strip()
-            if note and note != "(none)":
-                noted.append(sheet_id)
-        measured = _ids_of(_between(
-            user, "MEASURED SKILLS (one action is required for every id "
-                  "below):\n", "\n\nDo two jobs."))
-        actions = []
-        for skill_id in measured:
-            sheets = skills_of.get(skill_id)
-            if not sheets:
-                actions.append({
-                    "skill_id": skill_id, "action": "keep",
-                    "reason": "No finding implicated this skill.",
-                    "source_sheet_ids": []})
-                continue
-            action = "delete" if _pick(skill_id, 4, "delete") == 0 \
-                else "revise"
-            actions.append({
-                "skill_id": skill_id, "action": action,
-                "reason": "The findings show the skill's trigger or "
-                          "content did not prevent the failure.",
-                "source_sheet_ids": sheets})
-        half = len(noted) // 2 if len(noted) > 2 else len(noted)
-        requirements = []
-        for title, sheets in (
-                ("Verify the passage against the question", noted[:half]),
-                ("Shorten the final answer to the asked form", noted[half:])):
-            if sheets:
-                requirements.append({
-                    "title": title,
-                    "description": title + " before replying with "
-                                   "Finish[<answer>].",
-                    "trigger": "Before answering, when a passage was "
-                               "retrieved.",
-                    "source_sheet_ids": sheets})
-        return _fenced({"skill_actions": actions,
-                        "new_skill_requirements": requirements})
+    # -- the evolving texts -------------------------------------------------
 
     @staticmethod
     def _profile_update(user: str) -> str:
@@ -819,26 +451,63 @@ class FakeProviderClient:
         return _fenced({"profile_text": "\n".join(lines[:8])})
 
     @staticmethod
-    def _requirement_skill(user: str) -> str:
-        title = re.search(r"^REQUIREMENT TITLE: (.+)$", user, re.M)
-        trigger = re.search(r"^REQUIREMENT TRIGGER: (.+)$", user, re.M)
-        if title is None:
-            raise AssertionError(
-                "REQUIREMENT_SKILL lacks its REQUIREMENT TITLE")
-        label = _one_line(title.group(1))
-        return _fenced({
-            "summary": f"Teach the reader to {label.lower()}.",
-            "when_to_use": _one_line(trigger.group(1)) if trigger
-                           else "Before answering.",
-            "steps": [
-                f"When a passage was retrieved, {label.lower()}; verify "
-                "the passage names the entity the question asks about; "
-                "if not, search again with <query>.",
-                "When the check passes, reply with Finish[<answer>]; "
-                "verify the answer is short.",
-            ],
-            "not_applicable_when": "no passage was retrieved yet.",
-        })
+    def _playbook_update(user: str) -> str:
+        """The old rules plus one line per note, under every part label the
+        prompt demands, padded past the playbook's minimum length."""
+        old = _between(user, "before the first version):\n",
+                       "\n\n").strip()
+        notes = _between(user, "NOTES FROM THIS ROUND'S FAILURE "
+                               "DIAGNOSES:\n", "\n\n").strip()
+        labels: List[str] = []
+        for label in re.findall(r"(?:^|`)(## [a-z ]+?)(?:`|$)", user, re.M):
+            if label not in labels:
+                labels.append(label)
+        rules = [] if old == "(empty)" else [
+            line for line in old.splitlines()
+            if line.startswith("- ") and line not in labels]
+        for note in ([] if notes == "(none)" else notes.split("\n\n")):
+            rule = "- " + _one_line(note, 160)
+            if rule not in rules:
+                rules.append(rule)
+        rules = rules or ["- Read the task text before the first action."]
+        body = ["When the situation matches a skill card's when-to-use "
+                "line, open that card before acting.",
+                "If the task says A, an object named B is not it; if the "
+                "task says B, an object named A is not it."]
+        parts = [label + "\n" + "\n".join(rules) for label in labels] \
+            or ["\n".join(rules)]
+        text = "\n\n".join(body + parts)
+        while len(text) < 320:
+            text += ("\n- Check the result against the task text before "
+                     "finishing.")
+        return "<playbook>\n" + text + "\n</playbook>"
+
+    # -- the two rewrite prompts ------------------------------------------
+
+    def _revise(self, user: str) -> str:
+        note = self.revision_marker + ": name the concrete state before acting."
+        words = " ".join(user.split())
+        if "Rewrite ONLY the trigger" in words:
+            summary = re.search(r"^CURRENT SUMMARY: (.+)$", user, re.M)
+            trigger = re.search(r"^CURRENT WHEN TO USE: (.+)$", user, re.M)
+            if summary is None or trigger is None:
+                raise AssertionError("REVISE_TRIGGER lacks its current "
+                                     "trigger")
+            return _fenced({
+                "summary": summary.group(1).strip(),
+                "when_to_use": trigger.group(1).strip() + " " + note,
+                "revision_reason": "made the trigger name the entry "
+                                   "state's observable signs"})
+        if "Rewrite ONLY the content" in words:
+            card = _between(user, "THE CARD (current version):\n",
+                            "\n\nTHE PLAYBOOK THE AGENT SEES")
+            fields = _card_fields(card)
+            return _fenced({
+                "steps": fields["steps"],
+                "not_applicable_when": fields["not_applicable_when"]
+                                       + "\n" + note,
+                "revision_reason": "added the missing check"})
+        raise AssertionError("a rewrite prompt names neither side")
 
     # -- the skill-use judges --------------------------------------------------
 

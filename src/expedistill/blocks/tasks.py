@@ -9,19 +9,17 @@ plugins.
 
 D2 adapts the old ``evaluation/splits.py`` discipline (ExpeToSkill-merged):
 a split is frozen data, not a procedure. The config carries explicit train /
-test / reserved task-id lists (no ratio sampling here -- stage 0 derives the
-frozen lists before the run starts, and what D2 sees is already data), and
-D2 only verifies that the lists are consistent with the loaded task set:
-unknown ids, overlap, and uncovered tasks are ConfigErrors, so a stale split
-fails loudly instead of silently evaluating half a task set.
+val / test / reserved task-id lists (no ratio sampling here -- stage 0
+derives the frozen lists before the run starts, and what D2 sees is already
+data), and D2 only verifies that the lists are consistent with the loaded
+task set: unknown ids, overlap, and uncovered tasks are ConfigErrors, so a
+stale split fails loudly instead of silently evaluating half a task set.
 
-Protocol v2 (2026-10-13) adds ``reserved``: the frozen partition that
-belongs to NEITHER arm (held back from both distillation and the test; the
-TB reuse experiment keeps AgentBrew's validation slice there for dev
-smokes). The key set is exactly ``{"train", "test"}`` or
-``{"train", "test", "reserved"}`` -- the same contract core.config
-validates at load time (different layer, defense in depth) -- and a
-two-key spec means ``reserved`` is empty, never absent from the return.
+``val`` is the list a practice phase may run instead of train; ``reserved``
+is held back from every phase (the TB reuse experiment keeps AgentBrew's
+validation slice there for dev smokes). Both are optional -- the same key
+contract core.config validates at load time (different layer, defense in
+depth) -- and an absent one is empty, never absent from the return.
 """
 
 from __future__ import annotations
@@ -36,13 +34,12 @@ from typing import Any, List, Optional, Sequence, Set, Tuple, Union
 
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import resolve_plugin
-from expedistill.core.config import MODES, SPLIT_LIST_KEY_SETS
+from expedistill.core.config import (
+    SPLIT_LIST_KEYS,
+    SPLIT_REQUIRED_KEYS,
+    split_lists,
+)
 from expedistill.infra.reliability import ConfigError
-
-#: The explicit split lists in report order. D2 re-checks the key sets
-#: (core.config's SPLIT_LIST_KEY_SETS) because what reaches it is data by
-#: then, not necessarily a freshly loaded config.
-_LIST_KEY_ORDER = ("train", "test", "reserved")
 
 __all__ = ["load_tasks", "split_tasks", "tasks_digest"]
 
@@ -66,42 +63,29 @@ def load_tasks(
 
 def split_tasks(
     tasks: List[Task],
-    mode: str,
     split_spec: Optional[dict],
-) -> Tuple[List[Task], List[Task], List[Task]]:
-    """Divide the loaded tasks into (train, test, reserved) (D2, contract 3).
+) -> Tuple[List[Task], List[Task], List[Task], List[Task]]:
+    """Divide the loaded tasks into (train, val, test, reserved) (D2).
 
-    * ``full``: train and test are both the whole task list (the experiment
-      distills on everything and re-runs with the bank) and reserved is
-      empty; ``split_spec`` is the config's concern in this mode and is not
-      interpreted here.
-    * ``split``: ``split_spec`` must be explicit frozen lists with keys
-      exactly ``{"train", "test"}`` or ``{"train", "test", "reserved"}``.
-      Every list is a list of task-id strings. Unknown ids, an overlap
-      between ANY two lists, and tasks missing from all three are
-      ConfigErrors (with the offending ids listed). The two-key form yields
-      ``reserved == []`` -- callers may rely on the third element always
-      being present (stage 0 freezes all three keys even then).
+    ``split_spec`` must be explicit frozen lists: ``train`` and ``test``
+    required, ``val`` and ``reserved`` optional (D2 re-checks the key set
+    because what reaches it is data by then, not necessarily a freshly
+    loaded config). Every list is a list of task-id strings. Unknown ids,
+    an overlap between ANY two lists, and tasks missing from all four are
+    ConfigErrors (with the offending ids listed). An absent optional list
+    yields ``[]`` -- callers may rely on all four elements (stage 0
+    freezes all four keys).
 
-    All three returned lists keep the input ``tasks`` order; the split lists
+    All four returned lists keep the input ``tasks`` order; the split lists
     carry membership, not ordering.
     """
-    if mode == "full":
-        return list(tasks), list(tasks), []
-    if mode != "split":
-        raise ConfigError(f"mode must be one of {MODES}, got {mode!r}")
     key_set = frozenset(split_spec) if isinstance(split_spec, dict) else None
-    if key_set not in SPLIT_LIST_KEY_SETS:
+    if key_set is None or not SPLIT_REQUIRED_KEYS <= key_set \
+            or key_set - set(SPLIT_LIST_KEYS):
         raise ConfigError(
-            "split mode requires split_spec = {'train': [...], "
-            "'test': [...]} or {'train': [...], 'test': [...], "
-            "'reserved': [...]}, got " + repr(split_spec))
-    id_lists = {
-        "train": split_spec["train"],
-        "test": split_spec["test"],
-        # Absent in the two-key form: held back means empty, never absent.
-        "reserved": split_spec.get("reserved") or [],
-    }
+            "split_spec must give the lists 'train' and 'test' (optionally "
+            "'val' and 'reserved'), got " + repr(split_spec))
+    id_lists = split_lists(split_spec)
     for name, ids in id_lists.items():
         if (not isinstance(ids, list)
                 or not all(isinstance(task_id, str) for task_id in ids)):
@@ -117,24 +101,24 @@ def split_tasks(
     if unknown:
         raise ConfigError(
             f"split lists name task ids that were not loaded: {unknown}")
-    for first, second in (("train", "test"), ("train", "reserved"),
-                          ("test", "reserved")):
-        overlap = sorted(set(id_lists[first]) & set(id_lists[second]))
-        if overlap:
-            raise ConfigError(
-                f"split lists {first!r} and {second!r} overlap on: {overlap}")
+    for index, first in enumerate(SPLIT_LIST_KEYS):
+        for second in SPLIT_LIST_KEYS[index + 1:]:
+            overlap = sorted(set(id_lists[first]) & set(id_lists[second]))
+            if overlap:
+                raise ConfigError(
+                    f"split lists {first!r} and {second!r} overlap on: "
+                    f"{overlap}")
     missing = sorted(known - listed)
     if missing:
         raise ConfigError(
-            "train, test and reserved must cover every loaded task; "
+            "train, val, test and reserved must cover every loaded task; "
             f"missing: {missing}")
 
-    memberships = {
-        name: set(ids) for name, ids in id_lists.items()}
-    split = tuple(
+    memberships = {name: set(ids) for name, ids in id_lists.items()}
+    train, val, test, reserved = (
         [task for task in tasks if task.task_id in memberships[name]]
-        for name in _LIST_KEY_ORDER)
-    return split[0], split[1], split[2]
+        for name in SPLIT_LIST_KEYS)
+    return train, val, test, reserved
 
 
 # ---------------------------------------------------------------------------

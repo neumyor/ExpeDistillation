@@ -4,18 +4,8 @@ README 1.1 rule 3: everything benchmark-specific lives in one plugin directory
 (runner, task loading, view rules, task prompt); this module defines the shared
 vocabulary those plugins speak, so ``blocks/`` and above stay benchmark-blind.
 
-Migrated from the SkillExpand repo (ExpeToSkill-merged @ TB-eval 4f436af):
-
-- ``benchmarks/base.py`` BaseEnv + ``environment_call`` deadline decorator.
-  The gym.Env base class is dropped (nothing used the gym API beyond the two
-  methods we keep here); the 5-tuple ``step`` return is collapsed to a plain
-  observation string because the loop reads termination state from
-  ``is_terminated``/``is_truncated`` instead of unpacking a tuple.
-- The pipe-error translation the old repo registered globally
-  (BrokenPipeError/ConnectionResetError/EOFError -> EnvironmentFailure) is kept
-  as a lesson: native environments run in subprocesses, and losing the pipes is
-  an infrastructure failure, never evidence about the agent. Here the
-  translation lives inside ``environment_call`` so it is the single boundary.
+``BaseEnv.step`` returns a plain observation string: the loop reads
+termination state from ``is_terminated``/``is_truncated``.
 
 Deliberately NOT here: any stop-convention helper ("answer:"/"Finish[...]"
 extraction). In the old repo the action parser was per-benchmark
@@ -23,38 +13,25 @@ extraction). In the old repo the action parser was per-benchmark
 """
 
 import abc
-import functools
-import math
-import os
-import signal
-import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (Any, Callable, Dict, List, Mapping, Optional, Sequence,
+                    Tuple, Union)
 
 from expedistill.core.answer_sheet import AnswerSheet
 from expedistill.core.models import Trajectory
-from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
+from expedistill.infra.reliability import CodeBugError, ConfigError
 from expedistill.prompts.learning_context import GENERIC, LearningContext
 
 __all__ = [
-    "ENV_TIMEOUT_ENV",
-    "DEFAULT_ENV_TIMEOUT_SECONDS",
     "Task",
     "RunOutcome",
     "ViewRules",
     "PlaybookRequirement",
+    "PromptPack",
+    "GENERIC_PACK",
     "BaseEnv",
     "BenchmarkPlugin",
-    "environment_call",
 ]
-
-#: Environment-variable override for the default environment-call deadline.
-ENV_TIMEOUT_ENV = "EXPEDISTILL_ENV_TIMEOUT_SECONDS"
-DEFAULT_ENV_TIMEOUT_SECONDS = 120.0
-
-#: Subprocess/pipe failures that the deadline wrapper reclassifies as infra:
-#: the environment died under us, the agent did nothing wrong.
-_NATIVE_ENV_ERRORS = (BrokenPipeError, ConnectionResetError, EOFError)
 
 
 @dataclass
@@ -123,6 +100,41 @@ class PlaybookRequirement:
         if not callable(self.matches):
             raise ConfigError(
                 f"playbook requirement {self.name!r} has no matches()")
+
+
+@dataclass(frozen=True)
+class PromptPack:
+    """Every benchmark-specific prompt input of one benchmark, in one place.
+
+    - ``vocabulary``: the learning prompts' vocabulary slots.
+    - ``protocol``: environment facts for writers -- what the executor sees
+      at each step, which actions exist, the constraints every written
+      procedure must respect. Wired into every handle's ``prompt_defaults``
+      as the ``protocol`` slot.
+    - ``executor_prompts``: the registered names of every prompt the runner
+      sends to the executor; stage 0 freezes their digests.
+    - ``playbook_seed``: the initial playbook text.
+    - ``playbook_facts``: computes the playbook writer's facts from the
+      baseline answer sheets; None when the benchmark has no playbook facts.
+    - ``playbook_checks``: machine checks every written playbook must pass.
+    - ``overrides``: method prompt name -> registered replacement name,
+      wired into every handle's ``prompt_aliases``. Stage 0 refuses a
+      replacement that is unregistered or whose placeholders differ.
+    """
+
+    vocabulary: LearningContext
+    protocol: str
+    executor_prompts: Tuple[str, ...]
+    playbook_seed: str
+    playbook_facts: Optional[Callable[[Sequence[AnswerSheet]], str]]
+    playbook_checks: Tuple[PlaybookRequirement, ...]
+    overrides: Mapping[str, str]
+
+
+#: The pack of a plugin that declares none: GENERIC wording, nothing else.
+GENERIC_PACK = PromptPack(
+    vocabulary=GENERIC, protocol="", executor_prompts=(), playbook_seed="",
+    playbook_facts=None, playbook_checks=(), overrides={})
 
 
 @dataclass(frozen=True)
@@ -208,69 +220,6 @@ class BaseEnv(abc.ABC):
         if budget is None:
             return False
         return getattr(self, "curr_step", 0) > budget
-
-
-def environment_call(function=None, *, seconds: Optional[float] = None):
-    """Deadline wrapper for environment methods, hardened at SkillExpand.
-
-    Usable bare (``@environment_call``) or with an explicit bound
-    (``@environment_call(seconds=30)``); without an explicit bound the value
-    comes from ``EXPEDISTILL_ENV_TIMEOUT_SECONDS`` (default 120s), read at
-    each call so tests and ops can tune it without rebuilding.
-
-    - A method exceeding the deadline raises InfrastructureError (a hung
-      sandbox is an interrupted unit, not the agent's failure).
-    - A subprocess/pipe death inside the method is reclassified to
-      InfrastructureError, the old repo's global translation lesson.
-    - A malformed deadline value is a ConfigError (stop and fix the config).
-    - signal.setitimer only works on the process main thread; from any other
-      thread this raises RuntimeError instead of silently losing the deadline.
-      Run environments that need deadlines on the main thread or through a
-      process pool (B5 ``thread=False``).
-    """
-    if function is not None:
-        return _bounded_call(function, seconds)
-    def decorator(fn):
-        return _bounded_call(fn, seconds)
-    return decorator
-
-
-def _bounded_call(function, explicit_seconds):
-    @functools.wraps(function)
-    def bounded(*args, **kwargs):
-        seconds = explicit_seconds
-        if seconds is None:
-            raw = os.environ.get(ENV_TIMEOUT_ENV, "")
-            try:
-                seconds = float(raw) if raw.strip() else DEFAULT_ENV_TIMEOUT_SECONDS
-            except ValueError:
-                raise ConfigError(
-                    f"{ENV_TIMEOUT_ENV} must be a number, got {raw!r}") from None
-        if not math.isfinite(seconds) or seconds <= 0:
-            raise ConfigError(
-                f"{ENV_TIMEOUT_ENV} must be finite and positive, got {seconds!r}")
-        if threading.current_thread() is not threading.main_thread():
-            raise RuntimeError(
-                "environment_call deadlines require the process main thread; "
-                "run this environment on the main thread or a process pool")
-
-        def expired(signum, frame):
-            raise InfrastructureError(
-                f"environment call {function.__name__} exceeded {seconds:g}s")
-
-        previous = signal.getsignal(signal.SIGALRM)
-        signal.signal(signal.SIGALRM, expired)
-        signal.setitimer(signal.ITIMER_REAL, seconds)
-        try:
-            return function(*args, **kwargs)
-        except _NATIVE_ENV_ERRORS as exc:
-            raise InfrastructureError(
-                f"environment call {function.__name__} lost its subprocess: "
-                f"{type(exc).__name__}: {exc}") from exc
-        finally:
-            signal.setitimer(signal.ITIMER_REAL, 0)
-            signal.signal(signal.SIGALRM, previous)
-    return bounded
 
 
 class BenchmarkPlugin(abc.ABC):
@@ -380,58 +329,17 @@ class BenchmarkPlugin(abc.ABC):
     #: manifest and refuses an unregistered name) and cannot drift.
     skill_folder_prompt_name: Optional[str] = None
 
-    #: Additional B2 prompt names a plugin's runner uses besides
-    #: ``task_prompt_name`` and ``skill_folder_prompt_name`` (e.g. a
-    #: protocol's step-1 template, system message and correction request).
-    #: Stage 0 freezes their digests too: a runner whose prompt text changed
-    #: without a manifest difference could otherwise resume across two
-    #: protocols. Empty by default.
-    protocol_prompt_names: Tuple[str, ...] = ()
+    #: Every benchmark-specific prompt input (``PromptPack``). The pipeline
+    #: wires its vocabulary, protocol and overrides into every model handle;
+    #: stage 0 freezes it.
+    prompt_pack: PromptPack = GENERIC_PACK
 
-    #: The benchmark's vocabulary for the learning-side prompts (what the
-    #: agent is called, the capability families, the final action, ...;
-    #: prompts/learning_context.py). The pipeline wires it into every model
-    #: handle, so a plugin that declares nothing writes with GENERIC
-    #: wording. It is part of the experiment identity: stage 0 freezes its
-    #: digest.
-    learning_context: LearningContext = GENERIC
-
-    #: Learned-playbook capability: the B2 name of the prompt that writes
-    #: this benchmark's global playbook from baseline trial facts, or None
-    #: (the default) when the benchmark has none. A plugin that declares it
-    #: must also (a) override :meth:`playbook_facts` and (b) render the
-    #: delivery manifest's ``playbook_text`` in its runner, because a
-    #: playbook the runner never shows is a silent no-op. Stage 0 refuses a
-    #: config that asks for a learned playbook on a plugin without it.
-    #: The prompt's variables are ``facts``, ``profile_section`` and
-    #: ``correction_note``; its output contract is the one
-    #: ``blocks/playbook.extract_playbook`` reads.
-    playbook_prompt_name: Optional[str] = None
-
-    def playbook_facts(self, sheets: Sequence[AnswerSheet]) -> str:
-        """The benchmark-specific facts the playbook writer reads.
-
-        ``sheets`` are the baseline phase's trial-level answer sheets (both
-        arms, every attempt). The default refuses: a plugin without the
-        capability is never asked, and a plugin that declares
-        ``playbook_prompt_name`` must override this.
-        """
-        raise ConfigError(
-            f"benchmark {self.name!r} declares no learned-playbook "
-            "capability (playbook_prompt_name is None)")
-
-    def playbook_requirements(self) -> Sequence["PlaybookRequirement"]:
-        """What the written playbook must contain, as machine checks.
-
-        The write is one model call, and the same facts can produce a
-        complete playbook or a partial one; these checks turn "the writer
-        forgot part 3" into a reason to write again instead of a silent
-        quality difference between runs. Each requirement is checked
-        against the extracted text; the missing ones go back to the writer
-        as the correction note. Empty by default: a plugin that declares no
-        requirements gets the old single-attempt behaviour.
-        """
-        return ()
+    #: Whether the runner shows a non-folder ``skills_block`` as plain
+    #: prompt text, so an execute phase's playbook can ride at its top
+    #: (``whole_bank`` and ``none`` deliveries). A folder unit always
+    #: carries the playbook in its manifest's ``playbook_text``, which every
+    #: runner with a ``skill_folder_prompt_name`` must render.
+    playbook_in_skills_block: bool = True
 
     def aux_success(self, traj: Trajectory) -> Optional[bool]:
         """Auxiliary success of one trajectory.

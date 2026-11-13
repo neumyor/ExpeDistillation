@@ -1,4 +1,4 @@
-"""Provenance value objects: where a skill version and its exam come from.
+"""Provenance value objects: where a skill version comes from.
 
 ``TraceRef`` names one exact place in one stored execution: a phase, one
 answer sheet and a step index. Nothing else is stored -- task, attempt,
@@ -9,9 +9,9 @@ pointer. ``composites.trace.trace_at`` is the only constructor callers use
 cannot be written; this module only validates the shape.
 
 ``Provenance`` is one row per skill version: which learn phase produced it,
-why, where an exam of it should be cut (``scene``) and the evidence behind
-it (``sources``, audit only). ``TraceContext`` is what ``resolve`` returns:
-the rendered text a prompt may read about a ``TraceRef``.
+why (``cause``), and the evidence positions behind it (``sources``).
+``TraceContext`` is what ``resolve`` returns: the rendered text a prompt may
+read about a ``TraceRef``.
 
 Standard library only (layer 0).
 """
@@ -26,8 +26,10 @@ __all__ = [
     "TraceRef",
 ]
 
-#: Why a skill version exists; the vocabulary the ledger accepts.
-PROVENANCE_CAUSES = ("add", "revise", "requirement", "merge")
+#: Why a skill version exists; the vocabulary the ledger accepts: a new
+#: card for a gap, or a one-side rewrite driven by trigger or content
+#: evidence.
+PROVENANCE_CAUSES = ("add", "revise_trigger", "revise_content")
 
 
 @dataclass(frozen=True)
@@ -79,7 +81,6 @@ class Provenance:
     version: int
     phase_label: str
     cause: str
-    scene: Optional[TraceRef]
     sources: List[TraceRef] = field(default_factory=list)
     note: str = ""
 
@@ -93,13 +94,10 @@ class Provenance:
             raise ValueError(
                 f"Provenance.version must be an int >= 1, got "
                 f"{self.version!r}")
-        if self.scene is not None and not isinstance(self.scene, TraceRef):
-            raise ValueError("Provenance.scene must be a TraceRef or None")
-        if self.cause != "merge" and self.scene is None:
+        if not all(isinstance(source, TraceRef) for source in self.sources):
             raise ValueError(
-                f"Provenance of {self.skill_id!r} v{self.version} "
-                f"(cause={self.cause!r}) needs a scene: only a merge "
-                "product is exempt from an exam")
+                f"Provenance of {self.skill_id!r} v{self.version}: every "
+                f"source must be a TraceRef, got {self.sources!r}")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -107,20 +105,17 @@ class Provenance:
             "version": self.version,
             "phase_label": self.phase_label,
             "cause": self.cause,
-            "scene": self.scene.to_dict() if self.scene else None,
             "sources": [source.to_dict() for source in self.sources],
             "note": self.note,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Provenance":
-        scene = data.get("scene")
         return cls(
             skill_id=data["skill_id"],
             version=data["version"],
             phase_label=data["phase_label"],
             cause=data["cause"],
-            scene=TraceRef.from_dict(scene) if scene is not None else None,
             sources=[TraceRef.from_dict(item)
                      for item in data.get("sources") or []],
             note=data.get("note", ""))

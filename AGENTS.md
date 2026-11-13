@@ -72,7 +72,7 @@ docs/
   reports/     实验报告、结果分析（必须引用 run 目录和审计结果）
   runbooks/    操作手册：怎么部署、怎么启动、怎么查进度、出问题怎么处理
   notes/       调研笔记、论文阅读笔记、与其他系统的对比
-  archive/     过时的文档（移入而不是删除，文件开头注明过时原因和替代文档）
+  archive/     过时的文档（移到这里保存，文件开头注明过时原因和替代文档）
 ```
 
 规定：
@@ -81,7 +81,7 @@ docs/
    `docs/reviews/design_review_20261010.md`。同一主题同一天有多份时加
    `_v2`；
 2. **文件开头**写三行：日期、一句话说明这份文档是什么、它对应 log.md 的哪一条；
-3. `docs/design_spec.md` 是设计正本，docs 下的其他文档是过程记录。决定一旦落地，
+3. `docs/design_spec.md` 是设计正本，docs 下的其他文档是过程记录。决定一旦实现，
    结论要回写设计正本，docs 里保留讨论过程，两者不能矛盾；
 4. 每份新文档都要在 log.md 对应条目的"工件"里出现；
 5. 文档用中文写；代码标识符、文件名、路径保持原样。
@@ -91,274 +91,213 @@ docs/
 ```
 src/expedistill/
   core/                   第 0 层：只依赖标准库
-    models.py             五个对象：Trajectory / Subtask / Skill / Exam / Attempt
+    models.py             持久对象：Trajectory（schema 3，编号带相位标签）/ Subtask
+                          （schema 2，带 phase_label）/ SubtaskType / Skill（schema 5，
+                          一个子任务类型一张卡，状态 active / discarded）/ EvolvingText；
+                          技能的触发条件字段与正文字段（TRIGGER_FIELDS / CONTENT_FIELDS）
     trace.py              值对象 TraceRef / Provenance / TraceContext（只做形状校验）
-    ids.py                确定性 ID 规则
-    skill_sections.py     技能文本的三节（[When to use] / [Steps] / [Do not use
-                          when]）切分与拼接：触发条件 = summary + [When to use]，
-                          正文 = 其余两节；`revise_scope` 的纯文本基础
-    config.py             实验配置结构（schema v7：sequence + phases + review 槽位 + use_weak_profile 开关）、模型角色表
-    config_upgrade.py     v2→v3→v4→v5→v6 升级纯函数（config.py 重新导出）
-    contracts.py          交付与决策的冻结交接形状（执行单元行及其列表别名 /
-                          任务清单行）；执行→验收的 trial 级记录见
+    ids.py                确定性 ID 规则：轨迹 traj/<相位>/<任务>/<角色>/<序号>
+                          （parse_trajectory_id 先返回相位标签）、段、类型 type/NNN、
+                          技能 <type_id>/skill（make_skill_id 只接受类型 id）
+    config.py             实验配置结构（schema 9：sequence + phases；相位角色
+                          baseline / practice / test / learn；train / val / test /
+                          reserved 四个列表与执行相位的 tasks 字段；执行相位的
+                          playbook 开关）、模型角色表、加载期检查清单
+    contracts.py          交付与学习操作的交接形状（执行单元行及其列表别名 /
+                          任务清单行 TaskListRow）；执行→验收的 trial 级记录见
                           answer_sheet.py 的 ExecutionRecord
     answer_sheet.py       trial 级 AnswerSheet / ExecutionRecord / CoverageRecord /
                           GradingRecord，以及 unit 级 UnitSpec / UnitSummary /
                           PhaseReport 的接口形状
-    vocabulary.py         success/failure/invalid、normal/not_testable/
-                          not_run_control_perfect 与 cause 词的唯一定义处
+    vocabulary.py         success/failure/invalid、normal/not_testable 与 cause 词的
+                          唯一定义处
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
   infra/                  第 1 层：与业务无关的运行支撑
-    store.py              B3 对象存储（原子写、按 ID 读、判断单元是否完成）
+    store.py              B3 对象存储（原子写、按 ID 读、判断单元是否完成、JSONL 账本）
     manifest.py           B4 冻结
     parallel.py           B5 并行池
     reliability.py        B6 异常分类、重试策略、单元失败记录
     runlock.py            B7 run 目录排他锁
     usage.py              B7 用量跨进程累加
-  prompts/                第 1 层：B2 prompt 注册表
+  prompts/                第 1 层：B2 prompt 注册表（__init__ 的 import 清单登记全部
+                          方法 prompt，manifest 冻结它们的 digest）
     registry.py           登记、取用、计算 digest
-    llm.py                 B1 自己的协议 prompt（默认 system 消息等）
-    segment.py            G1 切段
-    author.py             G2 提炼 / 诊断、G6 改写
-    cluster_author.py     P02 cluster_by_trigger：trigger 分族、族内聚类、
-                          按类写 skill 的三个 prompt
-    exam.py               EXAM_SCENE 复原考场、EXAM_TRIGGER 选技能、
-                          EXAM_PLAN 写计划、EXAM_JUDGE 判卷
-    curate.py             G7 找相似、G8 合并、G9 分组
+    llm.py                B1 自己的协议 prompt（DEFAULT_SYSTEM、REPAIR_INSTRUCTION）
+    segment.py            G1 切段（SEGMENT）
+    cards.py              G2 归类（SUBTASK_TYPING）、G3 写卡（CARD_WRITE），两者共用的
+                          重问说明 CARDS_CORRECTION
+    diagnose.py           诊断：TRIAL_FAILURE_ANALYSIS，重问说明 DIAGNOSIS_CORRECTION
+    evolve.py             画像与 playbook 的演化：PROFILE_UPDATE、PLAYBOOK_UPDATE，
+                          重写说明 EVOLVE_CORRECTION、PLAYBOOK_PARTS_CORRECTION
+    revise.py             改写一侧：REVISE_TRIGGER、REVISE_CONTENT，诊断段落
+                          REVISION_DIAGNOSIS
+    adherence.py          技能适用性与遵循度两个裁判 prompt（judge-skills 用）
     learning_context.py   学习提示词的 benchmark 词汇槽：LearningContext、GENERIC；
                           call_model 按 GENERIC、句柄默认值、调用方变量三层填充
-    revision_scope.py     REWRITE 的改写范围提示（REVISION_SCOPE_BODY / _TRIGGER）
-    adherence.py          技能适用性与遵循度两个裁判 prompt（论文的使用分析）
-    attribution.py        G11 attempt 修订、G12 attempt 归因（v3 起进
-                          __init__ 的 import 清单——全量冻结，manifest 冻结全部
-                          已注册方法 prompt 的 digest）
-    profile.py            弱模型画像段的构造：`PROFILE_ROLES` 登记各写作 prompt
-                          的读者标题行（技能读者 / 合并后技能读者 / 任务执行者），
-                          积木只传角色名，不写标题文本
-  inject/                 第 1 层：D9 skill 注入（纯函数，执行和作答共用）
-    skills.py             技能块渲染与 token 估计
-    skill_text.py         技能文本字段（目录行与 SKILL.md 的 description）的
-                          共用推导：folder 交付（第 6 层）与物化（第 5 层）都要用，
-                          放在两者之下
+    profile.py            画像段的构造：PROFILE_ROLES 登记各写作 prompt 的读者标题行，
+                          画像为空时给中性段落
+  inject/                 第 1 层：D9 技能注入（纯函数）
+    skills.py             技能块渲染、playbook 块、整库引用与 token 估计
+    skill_text.py         技能文本的唯一渲染处：render_card（打开后看到的全文）、
+                          description_text（目录行与 SKILL.md 的 description）
   llm/                    第 2 层：B1 调用模型
-    client.py             底层客户端（OpenAI 兼容接口）+ 请求 ID 别名池（同一模型的多个网关 ID 轮转）
+    client.py             底层客户端（OpenAI 兼容接口）+ 请求 ID 别名池
     providers.py          provider 注册表（纯数据表：名字 → builder；环境变量选择）
-    call.py               call_model：取 prompt → 请求 → 解析 → 格式错误重试 → 记账落盘
+    call.py               ModelHandle（含 prompt_defaults / prompt_aliases）与
+                          call_model：取 prompt → 请求 → 解析 → 格式错误重试 → 记账落盘
     fake.py               测试用假模型（按脚本返回固定内容）
     fake_provider.py      注册进 providers 表的 `fake` provider：按计划文件返回，
                           让整条相位序列在真实 benchmark 插件上零网络运行（smoke）
   benchmarks/             第 3 层：benchmark 插件
-    base.py               插件接口：load_tasks / run / view_rules / task_prompt；
-                          `playbook_prompt_name` / `playbook_facts` 声明可学习
-                          playbook 能力（None=不支持）；
-                          `verdict_rule` 声明该 benchmark 默认的逐 run 判分规则
-                          （默认 `scorer`，TB 为 `tb_scorer`）；可选能力声明
-                          skill_folder_prompt_name（技能文件夹执行
-                          real_folder，M3；None=不支持）
+    base.py               插件接口：load_tasks / run / view_rules / task_prompt_name；
+                          PromptPack 与 PlaybookRequirement；可选能力
+                          skill_folder_prompt_name（技能文件夹执行，None=不支持）、
+                          verdict_rule（缺省 `scorer`）、aux_metric_name、
+                          playbook_in_skills_block
     react_loop.py         本地 benchmark 共用的逐步 ReAct 执行循环
     skill_folder.py       本地 benchmark 的渐进式技能披露：<available_skills>
                           目录与 ReadSkill[<位置>] 读取（循环自己响应，
                           评测环境收不到）
     aux.py                辅助指标的插件接线（声明与打分器包装）
-    learning.py           （tb/、alfworld/、searchqa/ 各一份）该 benchmark 的学习
-                          提示词词汇：智能体是谁、能力族、最终动作、五个触发
-                          时机短语；插件用 `learning_context` 声明，写进 manifest
     registry.py           按名字取插件
-    tb/                   TB runner（远程 Harbor）+ 任务加载 + 截断规则 + 执行 prompt：
-                          plugin.py 插件；remote.py 远程主机与 Harbor 调用；
+    tb/                   TerminalBench：plugin.py 插件（远程 Harbor 提交、取回、
+                          技能文件夹上传）；remote.py 远程主机与本机两种传输；
                           trajectory.py 从 Harbor 的 trajectory.json 重建逐步轨迹；
-                          skill_read.py skill-read suffix 的具名 prompt 与渲染
-                          （带 playbook 时放在 suffix 前面，由插件上传为任务目录的
-                          SKILL_READ_SUFFIX.md）；playbook.py 该 benchmark 的可学习
-                          playbook 两件套（baseline 事实提取、写作 prompt、必备部分检查）
+                          skill_read.py skill-read 后缀的具名 prompt 与渲染（带
+                          playbook 时放在后缀前面，上传为 SKILL_READ_SUFFIX.md）；
+                          playbook.py 摸底事实提取与 TB_PLAYBOOK_UPDATE；
+                          prompt_pack.py 提示词包
     searchqa/             适配外层 benchmark/searchqa-eval/：plugin.py 插件；
-                          env.py 评测环境与判分器的加载
+                          env.py 评测环境与判分器的加载；prompt_pack.py 提示词包
     alfworld/             适配外层 benchmark/alfworld-eval/：plugin.py 插件；
-                          env.py 环境封装；protocol.py 与外层统一 runner 一致的
-                          执行协议（系统消息、第一步模板、历史窗口、动作解析、
-                          技能目录与全局 playbook 的拼接）；playbook.py 该 benchmark
-                          的可学习 playbook 两件套：从 baseline 答卷提取事实、
-                          写作 prompt（插件用 `playbook_prompt_name` 与
-                          `playbook_facts` 声明）
+                          env.py 子进程环境封装；protocol.py 与外层统一 runner 一致
+                          的执行协议（系统消息、第一步模板、历史窗口、动作解析、
+                          技能目录与 playbook 的拼接）；playbook.py 摸底事实提取与
+                          ALFWORLD_PLAYBOOK_UPDATE；prompt_pack.py 提示词包
   blocks/                 第 4 层：功能积木，一个文件一组相关积木
     execute.py            E1：按 benchmark 取插件执行
     tasks.py              D1 任务加载、D2 划分
-    metrics.py            D3 成绩统计、D4 挑题
-    rules.py              D4 / D6 / 轨迹挑选的具名规则
-    view.py               D5 轨迹视图
+    metrics.py            D3 成绩统计
+    rules.py              D6 段筛选与轨迹挑选的具名规则
+    view.py               D5 轨迹视图、答卷的 Markdown 视图
     segment.py            G1 切段、D7 切段校验
     select.py             D6 段筛选
-    author.py             G2 写 skill、G6 改写 skill
-    exam.py               EXAM_TRIGGER / EXAM_PLAN 作答、EXAM_JUDGE 判卷
-    audit.py              D8 泄题审计
-    adherence.py          技能适用性判定与遵循度判定（按轨迹，模型积木）
-    curate.py             G7 找相似、G8 合并、G9 分组（D10 库长度统计在 inject/skills.py）
-    playbook.py           G13 写全局 playbook：用插件给的 prompt 名和事实文本
-                          调一次 author 模型，校验回复（与 benchmark 无关）
-    retrieve.py           D11 skill 检索：词法两步检索纯函数（类别路由 + 类内 top-k）
-    attribution.py        G11 attempt 修订、G12 attempt 归因（live_run 验收的模型积木；
-                          prompt 注册由 prompts/__init__ 全量负责，无需防御性 import）
+    subtask_types.py      G2 归类：段卡片、类型表渲染、一块段的 SUBTASK_TYPING 调用与
+                          校验（新类型按段编号顺序第一次被用到时编号）
+    author.py             写作 prompt 返回字段的校验：触发条件两字段、正文两字段、
+                          四字段
+    adherence.py          技能适用性判定与遵循度判定（judge-skills 用）
   composites/             第 5 层：组合积木（负责落盘与续跑）
-    batch_execute.py      K1
-    segment_checked.py    K2
-    exam_answering.py     K3 作答部分（R0 拆分：序列号、同题锁、作答落盘）
-    exam_grading.py       K3 判卷部分（R0 拆分：跨崩溃持续的判卷修复预算）
-    exam_once.py          K3 薄接线：作答 + 判卷拼成一条 Attempt
-    acceptance_leak.py    K4 泄题判定（R0 拆分：D8 判定与 leak_verdicts 账本；
-                          exam 相位驱动 phase_execute 调用）
-    acceptance_skill_status.py  从存量记录读出 skill 状态、考题的已判作答
-                          序列与裸答（报告读取器与 exam 相位驱动共用）
-    curation.py           K5
-    curation_waves.py     K5 每轮的单元规划（纯函数：分波、去重、派发编号）
-    live_measurement.py   K6 测量部分（R0 拆分：live_run 路径与账本名、组推导、
-                          基线读取、注入审计行、幸存组推导、轨迹视图的
-                          预算裁剪）
-    live_verdicts.py      K6 判定部分（R0 拆分：轮判定、no-op 守卫、组终态提交；
-                          discard_reason 词表的 K6 侧再导出在此；live 相位驱动
-                          phase_execute 经它写判定账本）
-    decision.py           决策规则（M3 起的纯函数）：P02 baseline-gap 与
-                          exam 的统一入口 decide_task_list、4.2/4.3 规则表；
-                          discard_reason 词表与 strict 短路规则集的定义处
-    unit_ids.py           unit id / canonical injected skills / gap sheet id
-                          的纯身份规则
+    batch_execute.py      K1 批量执行（TB 远程命名空间含相位标签）
+    segment_checked.py    K2 切段（带校验）
+    locate.py             K3 定位：切一条轨迹（0 步轨迹记审计跳过）、挑摸底强模型轨迹、
+                          按块归类本相位的新段；子任务类型表 subtask_types.jsonl 与
+                          段归属 segment_types.jsonl（只追加；两次追加之间崩溃时删掉
+                          本相位没有段用到的类型）
+    evidence.py           证据分配（纯函数）：Evidence 行、route（gap / trigger /
+                          content / none）、plan_cards（每个类型或每张卡一个单元）、
+                          删除规则 content_failed_twice、trigger_facts、discarded_types
+    sheet_facts.py        从一张摸底或练习答卷读出执行者看到的目录与 playbook、打开过的
+                          卡（第一次打开的步号与当时交付的版本全文）
+    decision.py           纯函数：parse_unit_id、终测的 final_test_delta、
+                          control_arm_source
+    learn_ledger.py       学习账本：revisions.jsonl / outcomes.jsonl、删除的落盘、
+                          版本记录入口 record_version、按目标排序提交 commit_order
+    evolving_text.py      每个学习相位的 profile.json / playbook.json 存取；读取紧邻
+                          上一个学习相位的版本；playbook 显示能力检查
+    unit_ids.py           unit id / 注入技能规范形 / 空洞答卷 id 的身份规则
     answer_sheets.py      trial 级 ExecutionRecord 构建、coverage 与 execution
-                          装配、逐 trial 判分、answer_sheets/JSON+Markdown 导出
-    coverage.py           expected trial vs stored trial 的 coverage 记录
+                          装配、逐 trial 判分、answer_sheets/ 的 JSON + Markdown 导出
+    coverage.py           应有 trial 与已存 trial 的 coverage 记录
                           （present / missing / terminal + cause）；不判分、不聚合
+    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet；
+                          default_verdict_rule 读插件的 verdict_rule
+    unit_summary.py       AnswerSheet + UnitSpec → UnitSummary 的纯聚合函数
+    phase_report.py       相位报告：读取 unit_specs / answer_sheets / coverage，
+                          现算 UnitSummary
     paired_stats.py       配对统计的纯函数：按任务自助法的置信区间、胜负平、
                           McNemar 精确检验、单臂噪声底；只用标准库
     trigger_metrics.py    技能使用的预登记指标：触发召回、误触发、遵循度、
-                          按适用/打开分层的成功率；考试重答的召回与通过率
-    unit_summary.py       AnswerSheet + UnitSpec → UnitSummary 的纯聚合函数
-                          （summarize_unit / summarize_phase / task_metrics）
-    phase_report.py       相位报告 envelope：读取 unit_specs/answer_sheets/
-                          coverage，现算 UnitSummary；carried_units 让规则 1
-                          复用的单元仍进入下一学习相位的决策；不落 report card
-    evidence_package.py   P02/exam 的 fact-only 证据包形状
-    skill_use.py          统一判断 skill 在 attempt 是否被使用、在哪些 step
-                          被 cat；folder 读取解析与 group/whole-bank 的
-                          injected 规则都在这里
-    skill_attempt_evidence.py  P04/P06 的 SkillAttemptEvidence / 窗口证据
-    shortfall.py          接受空洞的落盘记录（摸底相位的记录在 run 根的
-                          stage1_baseline/ 下，live 基线加载与 test 相位的
-                          复用对照都读它）
-    skill_status.py       skill 状态提交（accept/discard）的唯一入口
-    external_control.py   外部 campaign 对照的加载与校验（sha256 钉住、任务
-                          覆盖、对齐深度的奖励切出）；test 相位
-                          against: external_campaign 时对照臂由此取数，零执行
-    skill_usage.py        live folder 轮次的逐尝试使用事实：从 trial 级
-                          AnswerSheet 的 ExecutionRecord.steps +
-                          artifacts.skill_folder 提取可用技能、读取/未读、结果
-    verdicts.py           per-trial 判分核：具名判分规则 + grade_sheet；
-                          `default_verdict_rule` 读插件的 `verdict_rule`，
-                          exam 伪 benchmark 固定为 exam_judge
-    phase_bank.py         R7 每个 learn 相位结束时的库工件（写与跨相位加载）
-    trace.py              来源指针的函数：trace_at（唯一构造 TraceRef，拒绝
-                          考试答卷与越界步号）、resolve（唯一还原来源上下文，
-                          出题用完整前缀）、scene_of（考试回到真实场景）、
-                          render_scenes（写作者读到的真实步骤：前缀限
-                          WRITER_BEFORE_STEPS 步，同一次执行的多个窗口合并
-                          后只渲染一次）
+                          按适用/打开分层的成功率；练习摘要的 skill_use
+                          （card_use_metrics）
+    skill_use.py          判断一次执行打开了哪些技能、在哪些步骤
+                          （cat 与 ReadSkill[...] 同等看待）
+    skill_status.py       discard_skill（丢弃的唯一入口）
+    shortfall.py          已接受基础设施空洞的落盘记录
+    external_control.py   外部冻结成绩文件的加载与校验（sha256、任务覆盖、
+                          按采样深度截取奖励）；test 相位 against: external_campaign
+                          时对照臂由此取数，零执行
+    phase_bank.py         每个学习相位的技能库工件布局、写出与读取（全部已存技能，
+                          含 discarded，按技能 id 排序）
+    skill_materialize.py  folder 单元清单的幂等物化：按清单的库指纹从相位库读技能，
+                          写成 `<skill>/SKILL.md`（带 YAML 头）并写 catalog.md 兜底
+    trace.py              来源指针的函数：trace_at（唯一构造 TraceRef，只接受摸底或
+                          练习答卷与范围内的步号）、resolve（唯一还原来源上下文）、
+                          trace_of_trajectory、render_scenes 与 render_windows（改写者
+                          读到的真实步骤，同一次执行的多个窗口合并后只渲染一次）；
+                          task_instruction 按任务 id 取 benchmark 的任务说明
     provenance.py         每个技能版本一条 Provenance 的账本：record_version（唯一
                           写入口，技能与来源一起落盘）、find_provenance、
-                          check_provenance（learn 相位末与 exam 开考前的边界检查）
-    playbook_store.py     学出来的 playbook 落盘：`playbook.md` 写在 learn 相位
-                          目录里，之后的执行相位读最近一份
-    skill_materialize.py  folder 单元清单的幂等物化（M2/M3）：按清单的库指纹
-                          从相位库读正文，把每个技能写成 `<skill>/SKILL.md`
-                          （带 YAML 头）并写 catalog.md 兜底；test 相位派发前
-                          物化一次全部单元共享，live 的 `folder_by_task` 按
-                          任务各物化一份
+                          check_provenance（学习相位末的边界检查）
   methods/                第 6 层：方法驱动与参数契约（纯数据表注册，
                           见 methods/registry.py；解析按需 import 驱动）
     params.py             通用参数构建器（未知键/类型/缺键全响亮失败）
-    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（五族：
-                          delivery / execution / review / author / curation）
+    registry.py           (族, 名字) → (驱动, 参数类) 的纯数据表（四族：
+                          delivery / execution / review / author）
     execution/            execution 族参数契约：RealExecutionParams /
-                          ExamExecutionParams / RealFolderExecutionParams
-                          （无驱动，相位驱动直接消费）+ README.md（模块说明与参数表）
-    review/               review 族：ReviewParams + `driver.py`（决策后只给
-                          revise/add 行收集证据）+ `strategies.py`（P04/P06 的
-                          task_level / skill_level 与 exam 多版本合并）+
-                          `trial.py`（逐失败 trial 分析）+ `trial_review.py`
-                          （trial_level 编排：分析、聚合、画像）+
-                          `aggregation.py`（多 trial 合并成动作和新需求）+
-                          `profile.py`（累积模型画像）+
-                          `trial_evidence.py`（AnswerSheet → 既有证据对象）+
-                          `attribution.py`（live 窗口证据）+
-                          `add_evidence.py` / `segmentation.py`（P02 add 证据）+
-                          `exam_evidence.py`（exam 答卷证据）+
-                          `contracts.py`（ReviewContext / ReviewItem /
-                          ReviewResult / TrialFinding / NewSkillRequirement）+
-                          README.md
-    author/               author 族：AuthoringParams + write.py 驱动（P02 写新 skill）
-                          + cluster_by_trigger.py（P02 跨 task 的 trigger 族
-                          聚类写作，ClusterAuthoringParams）
-                          + revise.py（P04/P06 每 skill 一次写作，读
-                          SkillAttemptEvidence；不做 keep/delete 策略）+
-                          requirement.py（把一个聚合需求写成一个新 skill）+
-                          README.md
-    curation/             库整理驱动 agentbrew.py、none.py（只作用于已接受集，
-                          预算硬阀）+ phase_bank.py（R7 相位库入口：工件携带全部
-                          成员，待定成员原样透传）+ Params + README.md（模块说明与参数表）
-    delivery/             注入驱动 whole_bank.py、retrieval.py、exam_folder.py、
-                          group_by_task.py、none.py、folder_delivery.py（test
-                          技能文件夹交付，配置名 `folder`；可带全局 playbook）、
-                          folder_by_task.py（live 逐任务技能文件夹）+ units.py
-                          （各驱动共用的执行单元行构造）+
-                          各自的 Params + README.md（模块说明与参数表）
-  stages/                 第 7 层：相位世界的流程（薄分发 + 写摘要/相位末抛错）
-    stage0_freeze.py      冻结步（p00）：配置、任务表、manifest 冻结
-    phase_execute/        执行相位驱动包（R9/R8）：__init__ 分发入口 run()；
-                          phase_disk.py 相位目录（`execute_phase_dir`）/早相位/
-                          库产物/复用连接；resolve.py 配置映射到驱动与参数
-                          （含读取 `playbook_file`）；engine.py 派发→判分→重派
-                          引擎；baseline.py / exam.py / live.py / final_test.py
-                          四种 role 各一个模块（`run_baseline` 摸底 / `run_exam`
-                          泛化考试 / `run_live` 实战验收 / `run_test` 终测）
-    phase_learn.py        learn 相位驱动（R9）：按 P02/P04/P06/exam 分流
-    learn_playbook.py     可学习 playbook 开关的执行：delivery 写了
-                          `playbook_source: learned` 时，baseline 之后的第一个
-                          learn 相位从 baseline 答卷写出 playbook.md（幂等）
-    learn_add.py          P02 add 路径：切段、证据、写新 skill、回执；
-                          author.name=cluster_by_trigger 时转交
-                          learn_add_cluster
-    learn_add_cluster.py  P02 跨 task 的 trigger 族聚类写作落地：分族、
-                          聚类、按类写 skill、五个中间工件、逐类续跑
-    learn_apply.py        P04/P06 per-skill apply：keep/delete 逐 skill，
-                          revise 按 task 一次归因后逐 skill 写作
-    learn_exam.py         exam 路径：多版本 merge、考卷证据、keep/delete/revise
-    learn_requirement.py  trial_level 的新需求落地：每个需求写一个 skill
-    model_profile.py      累积弱模型画像的相位工件（初始为空）
-    learn_ledger.py       共享账本：task_list / revisions / outcomes、回执、
-                          版本守卫、keep/delete 落地
+                          RealFolderExecutionParams（executor、attempts；相位驱动
+                          直接使用）+ README.md（参数表）
+    delivery/             交付驱动 none.py、whole_bank.py、folder_delivery.py
+                          （配置名 `folder`）+ units.py（各驱动共用的执行单元行构造
+                          与 playbook 拼接）+ params.py（全部交付 Params，不 import
+                          驱动）+ README.md
+    review/               ReviewParams（K、retry_limit、write_lessons）
+    diagnose/             学习第 1 步：diagnose_trial（TRIAL_FAILURE_ANALYSIS）、Finding
+    evolve_text/          学习第 4 步：evolve_text 外壳（画像与 playbook 共用，
+                          含 playbook 的长度与必备部分检查）
+    revise/               学习第 5 步的改写：revise_trigger、revise_content、
+                          diagnosis_text、带版本守卫的 apply_revision
+    cards/                author 族 `subtask_cards`：CardAuthoringParams（__init__）；
+                          material.py 一个类型的写卡材料（强模型成功段、弱模型失败段）；
+                          writer.py write_card（CARD_WRITE，不合格带原因重写）
+  stages/                 第 7 层：相位流程与只读工具
+    stage0_freeze.py      冻结步（p00）：方法族解析、提示词包检查、任务表、manifest 冻结
     context.py            StageContext / RunSettings（相位驱动的公共上下文）
-    assemble_reuse.py      装配工具（不占 K 号）：按 train 溯源从源 run 装配新 run；
-                          上移到本层是为了复用 stage0 的 build_manifest（组合层
-                          不得 import 阶段层）
-    fork_run.py            分叉工具（不占 K 号）：把已完结 run 的前 K 个相位拷进新
-                          run，新配置从第 K+1 个相位接着跑（`fork-run` 子命令）
-    remerge_bank.py        用新的 MERGE prompt 或读者画像重跑已完结 run 最后一个
-                          learn 相位的合并步骤，结果写成测试专用 run 的已接受库
-                          （`remerge-bank` 子命令）
-    import_bank.py         把外部方法的产物（markdown / 技能文件夹 / notes）写成
-                          测试专用 run 的已接受技能库（`import-bank` 子命令）
-    analysis_common.py     只读分析的共用约束：输出目录不得在被读的 run 里，
+    phase_execute/        执行相位驱动包：__init__ 分发入口 run()；
+                          phase_disk.py 相位目录与磁盘事实（execute_phase_dir、
+                          arm_dir、bank_skills、write_units、materialize_folder：
+                          库为空也物化空目录）；
+                          resolve.py 一次调用 resolve_phase 把配置映射成
+                          ResolvedPhase（执行参数、执行者与采样次数、交付驱动与参数、
+                          playbook 文本、判分规则、重派预算），另有
+                          execution_params、executor_role、bare_delivery_rows；
+                          engine.py 派发→重派引擎（Plan、plan_units、
+                          task_objects、task_map、dispatch_arm、run_arm_units、
+                          arm_trajectories；K1 经 engine.batch_execute 调用，测试在此
+                          替换）；baseline.py / practice.py / final_test.py 三种执行
+                          角色各一个模块
+    phase_learn.py        学习相位驱动：五步（诊断、定位、分配证据、演化画像与
+                          playbook、演化技能库），按 A–E 五组并行，账本按确定顺序提交
+    fork_run.py           分叉工具：把已完结 run 的前 K 个相位与它们产生的 run 级对象
+                          拷进新 run，新配置从第 K+1 个相位接着跑（`fork-run` 子命令）
+    import_baseline.py    复用摸底：把已有 run 的摸底轨迹改写编号后写进新 run，新 run 的
+                          摸底零执行（`import-baseline` 子命令）
+    import_bank.py        把外部方法的产物（markdown / 技能文件夹 / notes）写成
+                          测试专用 run 的技能库（`import-bank` 子命令）
+    analysis_common.py    只读分析的共用约束：输出目录不得在被读的 run 里，
                           首次设置写进 analysis_config.json，续跑设置不同即拒绝
-    judge_skills.py        只读：判定测试/实战相位每个 trial 的技能使用——适用、
+    judge_skills.py       只读：判定 test 或 practice 相位每个 trial 的技能使用——适用、
                           打开、遵循（`judge-skills` 子命令）
-    exam_replay.py         只读：用另一个答题模型在同一技能库、同一批考题上重答
-                          （`exam-replay` 子命令）
-    paper_tables.py        只读：按配对统计量比较已完结的 run，生成论文表格
+    paper_tables.py       只读：按配对统计量比较已完结的 run，生成论文表格
                           （`paper-tables` 子命令）
     segmentation_metrics.py 只读：分段消融的机制指标——测试成绩、初始/最终库大小、
-                          技能 anchor 不在任务开始的比例、任务中途打开率
+                          技能锚点不在任务开始的比例、任务中途打开率
                           （`segmentation-metrics` 子命令）
   cli.py                  第 8 层：命令行入口（唯一的方法入口）+ 相位循环
-                          （run_experiment 逐个派发 sequence 条目）；子命令
-                          run / summary / assemble-reuse / fork-run /
-                          import-bank / judge-skills / exam-replay /
-                          paper-tables / segmentation-metrics / remerge-bank
+                          （run_experiment 逐个派发 sequence 条目）+ 模型句柄构建
+                          （从提示词包填 prompt_defaults / prompt_aliases）；子命令
+                          run / summary / fork-run / import-baseline / import-bank /
+                          judge-skills / paper-tables / segmentation-metrics
 ```
 
 积木编号与文件的对应以设计正本第三节为准；新增积木时两处同时更新。
@@ -420,23 +359,32 @@ src/expedistill/
 
 ```
 scripts/
-  run/        启动实验：按配置调用 cli，例如 run_experiment.sh <配置名>
-              （负责加载环境变量、起 supervisor、写 pidfile，不含方法参数）
-              freeze_tb_split.py：从 AgentBrew 冻结 JSON 生成并校验配置三列表
-              convert_v3_configs.py：一次性 schema v3→v5 配置转换（写新文件名；
-                                  显式传入 v2 文件时在内存里链式走 v2→v3→v4→v5→v6）
-              launch_tb21_live_run.py：正式实验的 detached 启动器
+  run/        启动实验与准备实验输入：
+              run_experiment.sh <配置名>：加载环境变量、脱离终端启动 driver、
+                                  写 pidfile 与续跑命令（不含方法参数）
+              supervise_tb_run.py：TB 终测相位的 detached supervisor（读 pidfile、
+                                  轮询产物文件，driver 退出后按摘要判断是否重跑同一条命令）
               build_paper_configs.py：按论文实验矩阵生成全部配置
-                                  （`configs/experiments/*_paper_*.yaml`，
+                                  （`configs/experiments/<bench>_paper_<exp>_<arm>.yaml`，
                                   `--check` 校验与磁盘一致，`--print-index` 打印
                                   各臂与参照臂的差异）
+              paper_splits.py：论文配置共用的划分（含 ALFWorld 的 val 列表）、TB 任务表
+                                  与外部对照文件信息
+              build_bare_control.py：把一次 ALFWorld 裸跑写成该学生模型的冻结成绩文件
+              build_pooled_control.py：汇总多个 run 的裸跑对照，写成冻结成绩文件
   remote/     在基准主机上运行实验：deploy_bench_host.sh（rsync 部署，一个提交一个目录；未提交的改动加 `--force`，目录名带时间戳、永不覆盖）、
               start_run_bench_host.sh（在基准主机上起/续跑 run）、README.md（运维手册）；
               driver 与 Harbor 同机，run 目录、分析、审计都留在基准主机
-  analysis/   读 run 目录产出统计和图表，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
+  analysis/   读 run 目录或归档产出统计，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
               paper_tables.py：`paper-tables` 子命令的薄入口
-  audit/      run 完整性审计（重复执行、对象一致性、统计口径），见第六节；
-              scan_private.py：提交前扫描已跟踪文件里的私有部署信息
+              tb21_f3_baseline.py：从 campaign 归档离线计算 TB 摸底基准数字
+              tb_archive_sample.py / tb_archive_validate.py：从基准主机归档抽样，
+                                  并用它校验 TB 轨迹重建
+  audit/      scan_private.py：提交前扫描已跟踪文件里的私有部署信息
+  smoke/      冒烟与启动工具：gen_searchqa_fake_plan.py（SearchQA 假模型冒烟的计划文件）、
+              launch_detached.py（start_new_session 启动长命令并写 pidfile）、
+              smoke_tb_dryrun.py / smoke_tb_live.py（TB 提交链路的 DRY_RUN 与单题真实冒烟）、
+              tb_g1_segment_smoke.py（一次真实的 G1 切段调用）
 ```
 
 规定：
@@ -452,7 +400,7 @@ scripts/
 5. TB 远程链路以外层 `scripts/tb21/` 为参考实现，`scripts/remote/` 调 Harbor
    的方式（镜像、重试名单、超时参数）与其保持一致，有差异要在脚本开头注明；
 6. 正式实验在基准主机上运行：`EXPEDISTILL_TB_HOST=local`，driver 与 Harbor 同机，
-   不再经 ssh/scp。代码按提交放在 `<deploy-base>/<commit>/`，run 目录放在
+   不经过 ssh/scp。代码按提交放在 `<deploy-base>/<commit>/`，run 目录放在
    `<runs-dir>/`，结果不拉回本机，分析也在基准主机上做；具体路径只写在被
    gitignore 的 `.env` 和基准主机上的密钥文件里，不写进仓库。
 
@@ -462,21 +410,18 @@ scripts/
 
 ```
 configs/
-  experiments/   每个实验一份配置：benchmark、模式（split / full）、模型角色表、
-                 采样次数、相位序列（sequence + phases，方法参数全部在相位
-                 定义里）、无效重派预算、具名规则的名字；
-                 schema_version 7（v1/v2/v3/v4/v5/v6 文件是冻结的历史记录，转换走
-                 scripts/run/convert_v3_configs.py，结果写新文件名）
-  profiles/      弱模型画像（一个弱模型一份文本）
-  playbooks/     常驻全局 playbook（交付层文本，folder / exam_folder 交付的
-                 `playbook_file` 指向这里；默认不启用）
-  seed/          外部 campaign 的冻结成绩文件（外部对照的取数来源，
-                 字节级拷贝 + sha256 由实验配置钉住；本仓库不修改它，
-                 campaign 侧重导出后按新 sha256 换新文件名）
+  experiments/   每个实验一份配置：benchmark、模型角色表、采样次数、划分与任务表、
+                 相位序列（sequence + phases，方法参数全部在相位定义里）、
+                 无效重派预算、具名规则的名字、token 预算；schema_version 9。
+                 论文配置全部由 scripts/run/build_paper_configs.py 生成
+  seed/          外部 campaign 与裸跑的冻结成绩文件（外部对照的取数来源，
+                 字节级拷贝 + sha256 由实验配置固定；本仓库不修改它，
+                 重导出后按新 sha256 换新文件名）
 ```
 
-1. 一份配置对应一个实验，文件名即实验名：`<benchmark>_<mode>_<要点>.yaml`；
-2. 已经启动过正式 run 的配置**不再修改**，要改就复制一份新名字；
+1. 一份配置对应一个实验，文件名即实验名：`<bench>_paper_<exp>_<arm>.yaml`
+   （`bench` ∈ {`tb21`, `alfworld`, `searchqa`}）；改配置先改生成脚本，再重新生成；
+2. 已经启动过正式 run 的配置**保持原样**，参数要变就给新臂起新名字；
 3. 配置只写方法参数和模型名，**端点地址、密钥从环境变量读**，不写进仓库、
    配置、日志或 manifest。需要的环境变量列在 `.env.example`。
 
@@ -490,7 +435,7 @@ configs/
    破坏续跑的改动在 stage 0 会被明确拒载并指向该规则；
 2. run 目录内部布局见设计正本第四节；run 开始时写 manifest，之后每次启动都与
    manifest 逐字段比对，不一致直接拒绝（`infra/manifest.py`）；
-3. **逐单元落盘、可续跑**：一次执行、一次切段、一次作答都是一个单元，完成
+3. **逐单元落盘、可续跑**：一次执行、一次切段、一次诊断都是一个单元，完成
    一个写一个（原子写：先写临时文件再改名）。再次启动时按确定 ID 跳过已完成单元；
 4. **run 目录加排他锁**（`infra/runlock.py`），第二个进程启动直接报错并给出
    持有者 PID；
@@ -498,9 +443,10 @@ configs/
 6. **失败分类处置**（`infra/reliability.py`）：基础设施异常重试、模型输出格式
    错误按次数修复、配置错误立即停止、代码 bug 立即停止整个流程。失败单元单独
    记录，不得混进成功结果，也不得悄悄丢掉；
-7. **每个 run 跑完先用 `scripts/audit/` 做完整性审计，再使用它的数字**。
-   有问题的 run 一律作废（在 run 目录写 `INVALID.md` 说明原因），不进结果表，
-   并在 log.md 记录；
+7. **每个 run 跑完先做完整性检查，再使用它的数字**：`expedistill summary`
+   加设计正本第七节"run 跑完后的完整性检查"列出的人工核对项（`scripts/audit/`
+   只有提交前的私有信息扫描）。有问题的 run 一律作废（在 run 目录写 `INVALID.md`
+   说明原因），不进结果表，并在 log.md 记录；
 8. **修复只在新 run 目录里重建**，不在有问题的 run 上原地修补；
 9. 长任务前的检查按外层 AGENTS.md 第一节：先 1–2 道题跑通全链路、检查不变量、
    核对对照组，再上全量。
@@ -514,15 +460,24 @@ configs/
    为 `True`（判分器判对）/ `False`（判错）/ `None`（没拿到判分结果）；
    基础设施失败（沙箱超时、断网等）抛 `InfrastructureError`，由 K1 重试；
    Trajectory 的 ID、角色等簿记字段由 E1 组装）、`view_rules`（截断规则）、
-   `task_prompt`（执行 prompt，登记进 prompt 注册表）；支持技能文件夹的插件
-   再声明 `skill_folder_prompt_name`（指向 folder 模式执行 prompt 的注册名，
-   digest 进 manifest；tb、searchqa、alfworld 都已声明，folder / folder_by_task 相位落到
-   不声明的插件时，test / live 相位驱动在派发前响亮拒绝，E1 的逐单元守卫
-   保留作第二道）；
-2. 在 `benchmarks/registry.py` 登记名字；
-3. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
+   `task_prompt_name`（执行 prompt 的注册名）；
+2. 写 `benchmarks/<名字>/prompt_pack.py`，导出 `PROMPT_PACK`（`PromptPack`），
+   插件用 `prompt_pack` 属性声明。七个字段：`vocabulary`（学习提示词的词汇槽）、
+   `protocol`（给写作者的环境事实）、`executor_prompts`（执行提示词的注册名，
+   digest 进 manifest）、`playbook_seed`（playbook 初始文本，可为空）、
+   `playbook_facts`（从摸底答卷计算事实的函数，可为 None）、`playbook_checks`
+   （playbook 必备部分）、`overrides`（方法提示词名 → 本 benchmark 替换提示词名，
+   替换提示词的占位符必须与原提示词相同）。替换提示词和执行提示词都在
+   `benchmarks/<名字>/` 里注册；
+3. 可选能力：支持技能文件夹的插件声明 `skill_folder_prompt_name`（folder 模式
+   执行 prompt 的注册名；folder 相位落到不声明的插件时，test 相位驱动在派发前
+   拒绝，E1 的逐单元守卫作第二道）；技能块不是普通提示词文本的插件把
+   `playbook_in_skills_block` 设为 `False`；判分规则不是 `scorer` 的插件声明
+   `verdict_rule`；有辅助指标的插件声明 `aux_metric_name` 并实现 `aux_success`；
+4. 在 `benchmarks/registry.py` 登记名字；
+5. 在 `tests/unit/benchmarks/` 加测试：用录好的原始输出测轨迹转换；另加 1 道题的
    真实执行冒烟（标 `live`）；
-4. `blocks/` 及以上不改一行代码。如果非改不可，说明插件接口不够用，先改
+6. `blocks/` 及以上不改一行代码。如果非改不可，说明插件接口不够用，先改
    接口和设计正本，再实现。
 
 ### 新增一块积木
@@ -530,23 +485,26 @@ configs/
 1. 先在设计正本第三节的积木表里登记编号、输入输出；
 2. 放进对应目录的文件；调模型的话同时在 `prompts/` 登记 prompt；
 3. 写单元测试（调模型的用 `llm/fake.py`）；
-4. 在设计正本 3.5 的"相位 → 积木组装"表里写明哪个相位用它。
+4. 在设计正本 3.6 的"相位 → 积木组装"表里写明哪个相位用它。
 
 ### 新增或修改 prompt
 
 1. prompt 是 `prompts/` 下的具名常量，带一句话说明用途和所属积木；
 2. 每个 prompt 的 digest 写进 manifest。**改一个字也是新实验**，必须新建 run
    目录，不得在旧 run 上续跑；
-3. 输出格式（JSON 字段）与 prompt 放在一起定义，两者一起改。
+3. 输出格式（JSON 字段）与 prompt 放在一起定义，两者一起改；
+4. benchmark 专用的提示词（执行提示词、替换提示词）登记在 `benchmarks/<名字>/`，
+   并写进该 benchmark 提示词包的 `executor_prompts` 或 `overrides`。
 
 ### 修改数据对象
 
-1. 五个对象的字段只在 `core/models.py` 定义，其他地方不得自造字段；
+1. 持久对象的字段只在 `core/models.py` 定义，其他地方不得自造字段；
 2. 改字段含义、删除字段、或改变已有字段的类型/必填性/语义都要升
    `schema_version`，并在设计正本第四节同步。新增可选字段且带默认值时，
    **如果旧代码读取新数据不会出错**（旧代码会忽略未知键，新代码会补全缺省键），
-   则不必升版本号——这减少了每次小改动的连带测试同步成本；
-3. 读旧版本对象时要么能正确迁移，要么明确报错，不能静默读成默认值。
+   则不必升版本号；
+3. 升版本即拒绝旧版本的记录，不写升级函数；读到旧版本对象明确报错，不能静默
+   读成默认值。
 
 ## 八、测试：开发过程中如何测试和新增测试
 
@@ -556,9 +514,9 @@ configs/
 tests/
   unit/          每块积木的单元测试，目录与 src/expedistill/ 对应
   composites/    组合积木测试（假模型 + 临时 run 目录，含中断续跑）
-  golden/        回归测试（4 组合 golden 矩阵 + 崩溃续跑验证 + 修订窗口探针）
-  fixtures/      构造好的轨迹、段、skill、考题样例；benchmark 原始输出录像；
-                 golden 矩阵的 4 组合快照（exam/live × whole_bank/retrieval）
+  golden/        回归测试（2 组合 golden 矩阵 + 崩溃续跑验证 + 修订窗口探针）
+  fixtures/      benchmark 原始输出录像（tb / alfworld / searchqa）、学习提示词
+                 渲染样例（prompts/）、golden 矩阵的 2 组合快照（golden/）
   helpers/       多个测试文件共用的测试工具（插件重新注册、模型回复样例、
                  造 skill），一处定义，契约变了只改这里
   test_layering.py
@@ -587,21 +545,26 @@ tests/
    - 用假模型 + 临时 run 目录验证多模块协作
 
 2. **覆盖关键路径**：
-   - baseline → exam → live → test 全流程
+   - baseline → learn → practice → learn → test 全流程
    - 各相位的崩溃点与恢复
 
 ### 8.4 Golden 矩阵回归测试
 
-**4 个组合**（从 8 个精简）：
-- `exam-whole_bank-full`
-- `exam-retrieval-split`
-- `live_run-whole_bank-split`
-- `live_run-retrieval-full`
+**2 个组合**（按 test 相位的交付命名，快照是 `tests/fixtures/golden/<组合>.json`）：
+- `whole_bank`：test 用 `whole_bank` + `real`，playbook 关闭
+- `folder`：test 用 `folder` + `real_folder`，显示演化的 playbook
+
+两个组合的 practice 都用 `folder` + `real_folder` 并显示演化的 playbook。
 
 **覆盖策略**：
-- 每个轴（acceptance/delivery/mode）的两个取值各出现 2 次
-- 全部 4 个组合都跑崩溃续跑验证（3 档进度：0.3/0.6/0.95）
-- `revision_window.py`：保留"修订已落盘、重答未开始"的特殊崩溃点覆盖
+- 两个组合都跑论文的七相位序列 `baseline, learn, practice, learn, practice, learn, test`
+  （一个 `learn` 定义复用三次），每个组合一次跑完 35 次模型调用
+- 三个学习相位依次覆盖：两张缺口新卡；一次正文改写与一次触发改写；删除规则与一次触发改写
+- 两个组合都在三个崩溃点上做崩溃续跑验证（`harness.CRASH_POINTS`：`diagnosis` 两次诊断
+  之间、`revise` 改写调用前、`new_cards` 两张新卡之间）
+- `--workers 1` 与 `--workers 8` 的快照逐字节相同
+  （`test_eight_workers_write_the_same_snapshot_as_one`，`generate.py` 生成时也核对）
+- `revision_window.py`：覆盖"改写已落盘、下一个 practice 还没执行"的崩溃点
 
 **何时重新生成**：
 - 修改提示词后
@@ -614,14 +577,14 @@ python tests/golden/generate.py
 ```
 
 生成后检查：
-- 4 个组合的 JSON 文件
-- `provenance.json`（记录 base commit 和调用数）
+- 2 个组合的 JSON 文件（`whole_bank.json`、`folder.json`）
+- `provenance.json`（记录每个组合的模型调用数与崩溃点的调用序号）
 - 运行 `pytest tests/golden -q` 确认通过
 
 ### 8.5 契约测试原则
 
-**断言契约，而非捕获字面量**：
-- 测试应该重新调用函数比较结果，而不是硬编码字面量
+**断言契约，不捕获字面量**：
+- 测试重新调用函数比较结果，不硬编码字面量
 - 只有真正需要冻结的协议表面（如 golden 矩阵的 prompt 名称集合、
   run 目录的顶层键集合）才写成字面量
 
@@ -629,14 +592,14 @@ python tests/golden/generate.py
 ```python
 # ❌ 不推荐：硬编码 14 个 sha256 字面量
 _GOLDEN_PROMPT_DIGESTS = {
-    "EXAM_SCENE": "a1b2c3...",
+    "CARD_WRITE": "a1b2c3...",
     "SEGMENT": "d4e5f6...",
     ...
 }
 
 # ✅ 推荐：固定名称集合，digest 值重新计算
 FROZEN_PROMPT_NAMES = frozenset({
-    "EXAM_SCENE", "EXAM_TRIGGER", "EXAM_PLAN", "EXAM_JUDGE", "SEGMENT", ...
+    "SEGMENT", "SUBTASK_TYPING", "TRIAL_FAILURE_ANALYSIS", "CARD_WRITE", ...
 })
 
 def _expected_prompt_digests():
@@ -663,34 +626,38 @@ assert manifest["prompt_digests"] == _expected_prompt_digests()
 示例：
 ```python
 from tests.helpers.skills import make_skill
-from expedistill.llm.fake import FakeClient
+from expedistill.inject.skill_text import render_card
 
-def test_author_write_with_profile():
-    client = FakeClient(replies=[
-        '```python\ndef solution():\n    pass\n```'
-    ])
-    skill = write_skill(
-        client, task="...", profile="...", ...
-    )
-    assert skill.name == "..."
-    assert "def solution" in skill.code
+def test_render_card_numbers_the_steps():
+    skill = make_skill("type/001", "when the drawer is closed",
+                       steps=["go to the drawer", "open the drawer"])
+    card = render_card(skill)
+    assert "1. go to the drawer" in card
+    assert "2. open the drawer" in card
 ```
 
 **步骤 2：组合测试（如果改了多模块协作）**
 
 1. 在 `tests/composites/` 创建测试
-2. 必须包含崩溃续跑用例：
+2. 必须包含崩溃续跑用例：在某次模型调用前模拟崩溃，用同一条命令续跑，比较续跑结果与
+   一次跑完的结果。端到端的写法用 `tests/golden/harness.py` 的现成工具：
 ```python
-def test_baseline_exam_crash_resume(tmp_path):
-    # 第一趟：跑到一半崩溃
-    ctx = run_baseline_until_crash(tmp_path, crash_at=0.5)
-    
-    # 第二趟：续跑完成
-    ctx_resumed = resume_run(tmp_path)
-    
-    # 验证：结果与一次跑完相同
-    assert ctx_resumed.result == run_baseline_once(tmp_path)
+from tests.golden.harness import (
+    GoldenPlugin, assert_resume_equivalent, installed_plugin,
+    run_crash_and_resume, run_straight, snapshot, write_config)
+
+def test_a_crash_resumes_to_the_straight_run(tmp_path):
+    combo = {"delivery": "whole_bank"}
+    config = write_config(tmp_path / "config.yaml", combo)
+    with installed_plugin(GoldenPlugin()):
+        run_straight(config, tmp_path / "straight")
+        run_crash_and_resume(config, tmp_path / "crashed", crash_at=10)
+    assert_resume_equivalent(snapshot(tmp_path / "straight"),
+                             snapshot(tmp_path / "crashed"))
 ```
+   单个组合积木的续跑用例在临时 run 目录上直接调用它两次：第一次在中途抛出异常
+   （例如 monkeypatch 某个落盘函数），第二次正常跑完，再与一次跑完的产物比较
+   （参考 `tests/composites/test_learn_phase_resume.py`）。
 
 **步骤 3：Golden 矩阵（如果改了端到端行为）**
 
@@ -701,21 +668,20 @@ pytest tests/golden -q
 ```
 
 检查 git diff：
-- 4 个 JSON 文件的变化是否符合预期
+- 2 个 JSON 文件的变化是否符合预期
 - `provenance.json` 的调用数变化
 
 **步骤 4：更新文档（如果升了 schema 版本）**
 
-1. 在设计正本第四节补充 schema 历史
-2. 更新 `config_upgrade.py` 的升级函数
-3. 添加升级函数的测试用例
+1. 在设计正本第二、四节写明新的 schema 版本与字段
+2. 用 `scripts/run/build_paper_configs.py` 重新生成配置
 
 ### 8.7 测试数据管理
 
 **测试夹具**（`tests/fixtures/`）：
-- `golden/`：4 个组合的完整快照（588 KB）
-- `benchmark/`：原始输出录像（TB、ALFWorld、SearchQA）
-- 其他：构造好的轨迹、段、skill、考题样例
+- `golden/`：2 个组合的完整快照（约 680 KB）
+- `tb/`、`alfworld/`、`searchqa/`：原始输出录像
+- `prompts/`：学习提示词的渲染样例
 
 **不要做的事**：
 - ❌ 从 `runs/` 里直接读真实运行数据
@@ -732,7 +698,7 @@ pytest tests/golden -q
 
 **本地开发**：
 ```bash
-# 全量测试（约 45 秒，2211 个用例）
+# 全量测试（约 50 秒，约 2400 个用例）
 pytest tests -q
 
 # 只跑单元测试
@@ -755,7 +721,7 @@ ruff check src tests scripts --select E9,F
 - [ ] 新功能有对应的单元测试
 - [ ] 改了多模块协作有组合测试
 - [ ] 改了端到端行为重新生成了 golden 矩阵
-- [ ] 升级了 schema 版本时更新了设计正本和升级函数
+- [ ] 升级了 schema 版本时更新了设计正本并重新生成了配置
 
 **需要真实服务的测试**：
 - 标记 `@pytest.mark.live`，默认不跑
@@ -763,33 +729,18 @@ ruff check src tests scripts --select E9,F
 
 ### 8.9 Schema 版本规则
 
-**什么时候升 `CONFIG_SCHEMA_VERSION`**：
+**什么时候升 `CONFIG_SCHEMA_VERSION`**（当前为 9）：
 - ✅ 改字段含义、删除字段、改类型/必填性/语义
 - ❌ 新增可选字段且带默认值，旧代码能忽略未知键、新代码能补全缺省键
 
 **判断标准**：
 - **元数据字段**（如 `description: str = ""`）：不影响运行行为，不升版本
-- **行为开关**（如 `use_weak_profile: bool = False`）：影响运行结果，升版本
+- **行为开关**（如执行相位的 `playbook`）：影响运行结果，升版本
 - **可选参数**（如 `max_retries: int = 3`）：旧代码能用默认值正确运行，不升版本
 
-**升级函数要求**：
-- 每个版本的升级函数是纯函数：`upgrade_vN_config(old: dict) -> dict`
-- 放在 `src/expedistill/core/config_upgrade.py`
-- 必须有测试覆盖：仓库全部历史配置的升级加载往返
-
-**示例**：
-```python
-def upgrade_v4_config(config: dict) -> dict:
-    """v4 → v5: 新增 use_weak_profile 开关，默认 False."""
-    if config.get("schema_version") != 4:
-        raise ConfigError("...")
-    
-    return {
-        **config,
-        "schema_version": 5,
-        "use_weak_profile": False,
-    }
-```
+**升版本即拒绝旧版本**：加载器只接受当前版本，其他版本报配置错误并提示用
+`scripts/run/build_paper_configs.py` 重新生成；不写升级函数。对象的 schema 版本
+（`core/models.py` 的 `*_SCHEMA_VERSION`）同样处理。
 
 ### 8.10 测试覆盖维护
 
@@ -831,8 +782,8 @@ def upgrade_v4_config(config: dict) -> dict:
 
 ### 10.1 按需迁移：设计文档说了算
 
-1. **迁移清单从设计正本第一节的积木表推导**：只有设计需要的积木对应的源码
-   才迁移（对应关系见设计正本第五节）。清单里没有的，即使看起来有用也不迁，
+1. **迁移清单从设计正本第三节的积木表推导**：只有设计需要的积木对应的源码
+   才迁移（对应关系见设计正本第九节）。清单里没有的，即使看起来有用也不迁，
    避免无用代码扰乱新架构；
 2. 迁移前先核对：这个模块在老仓库里依赖了什么、被什么依赖，只带依赖闭包，
    不整体拷贝；

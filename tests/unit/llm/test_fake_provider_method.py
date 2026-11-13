@@ -1,37 +1,28 @@
 """The fake provider's answers to the paper method's prompts.
 
-Every reply is checked by the REAL consumer of that prompt (the cluster
-authoring driver, the exam blocks, the trial-level review, the requirement
-writer, the REWRITE block, the two skill-use judges), so a reply that its
-strict validator would refuse fails here and not in a smoke. The weak
-executor is driven through the real SearchQA plugin, reading cards from a
-really materialized skill folder.
+Every reply is checked by the REAL consumer of that prompt (the trial
+diagnosis, the subtask typing block, the card writer, the two text
+evolvers, the two rewrite methods, the two skill-use judges), so a reply
+that its strict validator would refuse fails here and not in a smoke. The
+weak executor is driven through the real SearchQA plugin, reading cards
+from a really materialized skill folder.
 """
 
 import dataclasses
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from expedistill.benchmarks.alfworld.learning import ALFWORLD_CONTEXT
-from expedistill.benchmarks.searchqa.learning import SEARCHQA_CONTEXT
+from expedistill.benchmarks.alfworld.prompt_pack import PROMPT_PACK as ALFWORLD_PACK
+from expedistill.benchmarks.searchqa.prompt_pack import PROMPT_PACK as SEARCHQA_PACK
 from expedistill.benchmarks.searchqa.plugin import SearchQAPlugin
-from expedistill.blocks import adherence, exam
-from expedistill.blocks.author import has_skill_sections, rewrite_skill
+from expedistill.blocks import adherence
 from expedistill.blocks.segment import segment, validate_segments
-from expedistill.composites.evidence_package import EvidencePackage
-from expedistill.core.answer_sheet import (
-    AnswerSheet,
-    CoverageRecord,
-    ExecutionRecord,
-    GradingRecord,
-    PhaseReport,
-    UnitSummary,
-)
-from expedistill.core.ids import make_subtask_id, make_task_id, make_trajectory_id
-from expedistill.core.models import Exam, Skill, Step, Subtask
-from expedistill.core.trace import TraceRef
+from expedistill.blocks.subtask_types import segment_card, type_segments
+from expedistill.composites.sheet_facts import sheet_facts
+from expedistill.core.ids import (
+    make_subtask_id, make_task_id, make_trajectory_id, make_type_id)
+from expedistill.core.models import Subtask, SubtaskType
 from expedistill.infra.reliability import ConfigError
 from expedistill.llm.call import ModelHandle
 from expedistill.llm.fake_provider import (
@@ -39,24 +30,21 @@ from expedistill.llm.fake_provider import (
     FakeProviderClient,
     load_plan,
 )
-from expedistill.methods.author import ClusterAuthoringParams
-from expedistill.methods.author import cluster_by_trigger as cluster
-from expedistill.methods.author.requirement import write_requirement
-from expedistill.composites.exam_answering import _aliases
-from expedistill.composites.skill_materialize import materialize_skill_folder
-from expedistill.methods.delivery.folder_delivery import (
-    render_catalog,
-    skill_folder_manifest,
-)
-from expedistill.methods.review import trial_review
-from expedistill.methods.review.contracts import (
-    NewSkillRequirement,
-    ReviewContext,
-)
+from expedistill.methods.cards import CardAuthoringParams
+from expedistill.methods.cards.material import Material
+from expedistill.methods.cards.writer import write_card
+from expedistill.methods.diagnose import diagnose_trial
+from expedistill.methods.evolve_text import evolve_text
+from expedistill.methods.revise import revise_content, revise_trigger
 from tests.helpers.plugins import ensure_plugin
 from tests.helpers.searchqa_stub import fixture_items, install_eval_repo_stub
-from tests.helpers.skill_folder import CARD_BODY, folder_task_meta
+from tests.helpers.skill_folder import (
+    CARD_FIELDS, folder_task_meta, write_skill_folder)
 from tests.helpers.skills import make_skill
+from tests.helpers.traces import execution_sheet
+
+ALFWORLD_CONTEXT = ALFWORLD_PACK.vocabulary
+SEARCHQA_CONTEXT = SEARCHQA_PACK.vocabulary
 
 ITEM = fixture_items()[0]
 QUESTION = ITEM["question"]
@@ -75,7 +63,7 @@ PLAN = {
 @pytest.fixture(autouse=True)
 def _searchqa_plugin():
     # Other suites reset the global registry; the plugin (and its prompts)
-    # must be registered again for the review and executor tests.
+    # must be registered again for the executor tests.
     ensure_plugin("searchqa")
 
 
@@ -105,7 +93,6 @@ def test_plan_segment_steps_is_checked(tmp_path, patch, match):
 
 
 def test_plan_read_mode_vocabulary_is_checked(tmp_path):
-    import json
     plan = {"questions": {QUESTION: {"answer": ANSWER, "read": "maybe"}}}
     path = tmp_path / "plan.json"
     path.write_text(json.dumps(plan), encoding="utf-8")
@@ -156,22 +143,31 @@ def _run(tmp_path, *, plan=None, model="fake-weak", folder=True,
     """One SearchQA episode through the real plugin; ``marker`` puts the
     revision marker into the card text the model can open."""
     task = SearchQAPlugin._to_task(ITEM)
-    body = f"{CARD_BODY}\n{REVISION_MARKER}: concrete" if marker \
-        else CARD_BODY
-    bank = [make_skill(f"traj/searchqa:{name}/strong/00/seg00", body,
-                       summary=f"Card {name}.", status="pending")
-            for name in ("alpha", "beta")]
-    manifest = skill_folder_manifest(
-        bank, "summary_then_when_to_use", accepted_only=False)
-    materialize_skill_folder(manifest, bank, tmp_path / "f")
-    locations = [entry["filename"] for entry in manifest["files"]]
+    manifest, bank, locations = write_skill_folder(tmp_path / "f")
+    if marker:
+        bank = [dataclasses.replace(
+            skill, not_applicable_when=skill.not_applicable_when
+            + f"\n{REVISION_MARKER}: concrete") for skill in bank]
+        manifest, bank, locations = _rewrite_folder(tmp_path / "g", bank)
     if folder:
-        task.meta.update(folder_task_meta(manifest, tmp_path / "f"))
+        task.meta.update(folder_task_meta(
+            manifest, tmp_path / ("g" if marker else "f")))
     client = _client(plan)
     handle = _handle(client, role="executor_weak", model=model)
     outcome = SearchQAPlugin().run(task, handle, skills_block="",
                                    workdir=tmp_path)
     return outcome, client, locations
+
+
+def _rewrite_folder(target, bank):
+    from expedistill.composites.skill_materialize import (
+        materialize_skill_folder)
+    from expedistill.methods.delivery.folder_delivery import (
+        skill_folder_manifest)
+    manifest = skill_folder_manifest(bank, "summary_then_when_to_use")
+    materialize_skill_folder(manifest, bank, target)
+    return manifest, bank, [entry["filename"]
+                            for entry in manifest["files"]]
 
 
 def _actions(outcome):
@@ -244,471 +240,136 @@ def test_without_search_in_the_action_list_the_original_single_finish_stays():
 
 
 # ---------------------------------------------------------------------------
-# cluster authoring
+# the learn phase: diagnosis, typing, card writing
 # ---------------------------------------------------------------------------
 
-def _subtask(task, segment_index, *, source="strong", success=True):
-    trajectory_id = make_trajectory_id(make_task_id("searchqa", task),
-                                       source, 0)
+def _sheet(task, n_steps=4):
+    sheet = execution_sheet(make_task_id("searchqa", task), "weak", 0,
+                            benchmark="searchqa", n_steps=n_steps)
+    return sheet, sheet_facts(sheet, lambda skill_id: None)
+
+
+def test_a_diagnosis_blames_the_last_step_and_varies_its_scope():
+    findings = [diagnose_trial(*_sheet(f"t{index}"), handle=_handle())
+                for index in range(12)]
+    assert {finding.failing_step for finding in findings} == {3}
+    assert {finding.scope for finding in findings} == {"subtask", "general"}
+    assert {bool(finding.model_note) for finding in findings} == {True,
+                                                                  False}
+    again = diagnose_trial(*_sheet("t0"), handle=_handle())
+    assert again == findings[0]
+
+
+def _subtask(task, index, label):
+    trajectory_id = make_trajectory_id(
+        "p01:baseline", make_task_id("searchqa", task), "strong", 0)
     return Subtask(
-        subtask_id=make_subtask_id(trajectory_id, segment_index),
-        task_id=make_task_id("searchqa", task),
-        trajectory_id=trajectory_id, source=source,
-        trajectory_success=success, segment_index=segment_index,
-        step_range=(segment_index, segment_index + 1),
-        label="answer the question", description="submit the answer",
-        success=success, context_summary="the search is done")
+        subtask_id=make_subtask_id(trajectory_id, index),
+        phase_label="p02:learn", task_id=make_task_id("searchqa", task),
+        trajectory_id=trajectory_id, source="strong",
+        trajectory_success=True, segment_index=index,
+        step_range=(index, index + 1), label=label,
+        description=f"{label}, step {index}", success=True)
 
 
-def _experience(task, segment_index, of=2, **kwargs):
-    return {
-        "subtask": _subtask(task, segment_index, **kwargs),
-        "steps_view": "step 0\naction: Finish[x]\nobservation: ok",
-        "mode": "distill",
-        "segment_position": f"segment {segment_index + 1} of {of} in its "
-                            "trajectory; it covers original steps 0 to 0",
-    }
+def test_the_typing_puts_a_label_into_one_type():
+    subtasks = [_subtask("a", 0, "search for the evidence"),
+                _subtask("a", 1, "answer the question"),
+                _subtask("b", 0, "search for the evidence")]
+    cards = {sub.subtask_id: segment_card(sub, "step 0\naction: x", 400)
+             for sub in subtasks}
+    first = type_segments(cards, [], phase_label="p02:learn",
+                          handle=_handle())
+    assert [(row.type_id, row.name) for row in first.new_types] == [
+        ("type/001", "search for the evidence"),
+        ("type/002", "answer the question")]
+    assert first.assignments[subtasks[0].subtask_id] == \
+        first.assignments[subtasks[2].subtask_id] == "type/001"
+
+    later = [_subtask("c", 0, "answer the question"),
+             _subtask("c", 1, "recover from a rejected action")]
+    second = type_segments(
+        {sub.subtask_id: segment_card(sub, "", 400) for sub in later},
+        first.new_types, phase_label="p04:learn", handle=_handle())
+    assert second.assignments[later[0].subtask_id] == "type/002"
+    assert [row.type_id for row in second.new_types] == ["type/003"]
 
 
-def test_a_failed_segment_is_a_when_a_command_fails_moment():
-    result = cluster.classify_trigger(
-        _experience("a", 1, success=False, source="weak"),
-        handle=_handle(), max_chars=400)
-    assert result["family"] == "when_command_fails"
-
-
-@pytest.mark.parametrize("segment_index, of, family", [
-    (0, 2, "at_task_start"), (1, 2, "before_submitting"),
-    (0, 1, "before_submitting")])
-def test_a_successful_segment_is_classified_by_its_position(
-        segment_index, of, family):
-    result = cluster.classify_trigger(
-        _experience("a", segment_index, of=of), handle=_handle(),
-        max_chars=400)
-    assert result["family"] == family
-    assert result["family"] in cluster.TRIGGER_FAMILIES
-
-
-def test_families_are_clustered_in_pairs_without_the_fallback():
-    experiences = [_experience(task, 1) for task in "abcde"]
-    clusters = cluster.cluster_family(
-        "before_submitting", experiences, handle=_handle(),
-        params=ClusterAuthoringParams())
-    assert sorted(len(item["subtask_ids"]) for item in clusters) == [2, 3]
-    assert not any(item.get("fallback") for item in clusters)
-    assert sorted(sid for item in clusters for sid in item["subtask_ids"]) \
-        == sorted(item["subtask"].subtask_id for item in experiences)
-
-
-def test_a_lone_subtask_is_a_cluster_of_one():
-    experiences = [_experience("a", 1)]
-    clusters = cluster.cluster_family(
-        "before_submitting", experiences, handle=_handle(),
-        params=ClusterAuthoringParams())
-    assert [len(item["subtask_ids"]) for item in clusters] == [1]
-    assert not clusters[0].get("fallback")
-
-
-@pytest.mark.parametrize("context", [SEARCHQA_CONTEXT, ALFWORLD_CONTEXT])
-@pytest.mark.parametrize("family", list(cluster.TRIGGER_FAMILIES))
-def test_the_cluster_skill_opens_with_the_benchmarks_phrase(context, family):
-    experiences = [_experience(task, 1) for task in "ab"]
-    handle = _handle(context=context)
-    clusters = cluster.cluster_family(
-        family, experiences, handle=handle,
-        params=ClusterAuthoringParams())
-    by_id = {item["subtask"].subtask_id: item for item in experiences}
-    skill = cluster.write_cluster_skill(
-        clusters[0], by_id, weak_profile="", handle=handle,
-        params=ClusterAuthoringParams())
-    phrase = context.variables()[f"phrase_{family}"]
-    assert skill.content.startswith(f"[When to use] {phrase}")
-    assert has_skill_sections(skill.content)
-    assert skill.summary and "\n" not in skill.summary
-    assert skill.source_subtasks == sorted(clusters[0]["subtask_ids"])
+def test_the_card_writer_copies_the_entry_state():
+    subtask_type = SubtaskType(
+        type_id=make_type_id(1), name="answer the question",
+        entry_state="The agent has a passage that names the answer.",
+        phase_label="p02:learn")
+    material = Material(strong=[{
+        "subtask": _subtask("a", 1, "answer the question"),
+        "steps_view": "step 1\naction: Finish[x]\nobservation: ok"}])
+    skill = write_card(subtask_type, material, profile="", playbook="",
+                       handle=_handle(), params=CardAuthoringParams())
+    assert skill.when_to_use == subtask_type.entry_state
+    assert len(skill.steps) == 3
+    assert skill.summary == "Teach the reader to answer the question."
 
 
 # ---------------------------------------------------------------------------
-# the generalization exam
+# the evolving texts
 # ---------------------------------------------------------------------------
-
-def _skills(count=3):
-    return [make_skill(f"traj/searchqa:t{index}/strong/00/seg00",
-                       f"[When to use] when {index}\n[Steps]\n1. do it\n"
-                       "[Do not use when] never",
-                       summary=f"card {index}", status="pending")
-            for index in range(count)]
-
-
-def _catalog(skills):
-    return render_catalog(skills)
-
-
-def test_the_exam_scene_is_built_from_the_task_prompt_and_the_prefix():
-    scene = exam.write_scene(
-        f"## Question\n{QUESTION}\n\n## Transcript so far\n",
-        "step 0\naction: Search[x]\nobservation: a passage about it",
-        "step 1\naction: Finish[y]\nobservation: ok",
-        "[When to use] x", "P02 cluster", _handle())
-    assert QUESTION in scene["scene_text"]
-    assert "a passage about it" in scene["scene_text"]
-    assert all(scene[field].strip() for field in exam.SCENE_FIELDS)
-
-
-def test_the_exam_scene_without_a_prefix_has_no_observation_to_quote():
-    scene = exam.write_scene(
-        f"## Question\n{QUESTION}", "", "step 0\naction: Search[x]",
-        "[When to use] x", "n", _handle())
-    assert "latest observation" not in scene["scene_text"]
-
-
-def _known_names(skills):
-    """Every spelling answer_exam hands choose_skills for these cards."""
-    manifest = skill_folder_manifest(
-        skills, "summary_then_when_to_use", accepted_only=False)
-    return manifest, list(_aliases(manifest))
-
-
-def test_the_trigger_names_catalog_cards_within_the_read_limit():
-    skills = _skills(10)
-    manifest, known = _known_names(skills)
-    spellings = set()
-    picks = []
-    for index in range(40):
-        selected, reason = exam.choose_skills(
-            f"scene number {index}", manifest["catalog_text"], known, 3,
-            _handle())
-        assert set(selected) <= set(known)
-        assert len(selected) <= 3 and reason
-        spellings.update("id" if name.startswith("traj/") else "dir"
-                         for name in selected)
-        picks.append(tuple(selected))
-    assert () in picks and any(len(pick) >= 2 for pick in picks)
-    assert len({pick for pick in picks}) > 3
-    assert spellings == {"id", "dir"}   # both catalog spellings are used
-
-
-def test_the_trigger_respects_a_read_limit_of_one_and_an_empty_catalog():
-    skills = _skills(3)
-    manifest, known = _known_names(skills)
-    for index in range(20):
-        selected, _ = exam.choose_skills(
-            f"scene {index}", manifest["catalog_text"], known, 1, _handle())
-        assert len(selected) <= 1
-    selected, _ = exam.choose_skills("scene", "", [], 3, _handle())
-    assert selected == []
-
-
-def test_the_plan_quotes_an_opened_skill_in_both_shapes():
-    skills = _skills(1)
-    plans = {exam.write_plan(f"scene {index}", skills[0].content, "why",
-                             _handle()) for index in range(12)}
-    assert all("Apply the opened skill" in plan for plan in plans)
-    assert any("\n" in plan for plan in plans)      # a list of steps
-    assert any("\n" not in plan for plan in plans)  # one numbered string
-    bare = exam.write_plan("scene", "", "", _handle())
-    assert "Apply the opened skill" not in bare
-
-
-def test_the_judge_fails_a_plan_that_opened_nothing_and_varies_otherwise():
-    verdicts = {}
-    for index in range(30):
-        success, reason = exam.judge(
-            f"scene {index}", "behave", "reference", _catalog(_skills()),
-            "cat dir/SKILL.md", "why", f"plan {index}", _handle())
-        assert reason.strip()
-        verdicts[index] = success
-    assert set(verdicts.values()) == {True, False}
-    success, reason = exam.judge(
-        "scene", "behave", "reference", "", "", "", "plan", _handle())
-    assert success is False and "without opening any skill" in reason
-    again, _ = exam.judge(
-        "scene 0", "behave", "reference", "", "cat x/SKILL.md", "",
-        "plan 0", _handle())
-    assert again == verdicts[0]
-
-
-# ---------------------------------------------------------------------------
-# trial-level review
-# ---------------------------------------------------------------------------
-
-SKILL, OTHER = _skills(2)
-
-
-def _unit(unit_id, skill, task_ref, phase):
-    return UnitSummary(
-        unit_id=unit_id, phase_label=phase, task_ref=task_ref, role="weak",
-        arm=None, expected_attempts=1,
-        injected_skills=[{"skill_id": skill.skill_id, "version": 1}],
-        valid_count=1, success_count=0, status="normal", cause="")
-
-
-def _sheet(unit_id, phase, execution_fields, verdict="failure"):
-    execution = ExecutionRecord(
-        sheet_id=f"{unit_id}/att00", unit_id=unit_id, phase_label=phase,
-        role="weak", arm=None, model_role="weak", model_name="fake-weak",
-        sample_index=0, **execution_fields)
-    return AnswerSheet(
-        sheet_id=execution.sheet_id, phase_label=phase,
-        coverage=CoverageRecord(unit_id=unit_id, attempt_index=0,
-                                present=True, status="present"),
-        execution=execution,
-        grading=GradingRecord(verdict=verdict, basis="test",
-                              rule_name="test"))
-
-
-def _folder(*skills):
-    return {
-        "files": [{"skill_id": skill.skill_id, "version": 1,
-                   "filename": skill.skill_id.replace(":", "-").replace(
-                       "/", "-") + "/SKILL.md"} for skill in skills],
-        "catalog_text": _catalog(skills),
-    }
-
-
-def _exam_sheet(skill, opened):
-    folder = _folder(SKILL, OTHER)
-    names = {entry["skill_id"]: entry["filename"]
-             for entry in folder["files"]}
-    cats = "\n".join(f"cat {names[item.skill_id]}" for item in opened)
-    unit = f"exam-{skill.skill_id}"
-    return unit, _sheet(unit, "p03:exam", dict(
-        task_ref=f"{skill.skill_id}/v01/exam",
-        skills_injected=[{"skill_id": skill.skill_id, "version": 1}],
-        steps=[Step(action=cats or "# no skill opened",
-                    observation="\n\n".join(i.content for i in opened)),
-               Step(action="restart it", observation="")],
-        answer="restart it",
-        metrics={"scene_text": "A reader is answering a question.",
-                 "expected_behavior": "search, check, answer"},
-        aux={"judge_reason": "The plan submits an answer without checking "
-                             "the passage against the question."},
-        artifacts={"skill_folder": folder}, kind="trajectory"))
-
-
-def _context(**changes):
-    base = ReviewContext(
-        phase_kind="exam", phase_label="p04:learn",
-        source_phase_label="p03:exam", checks_left=1, round=0,
-        delivery="exam_folder", compare_rule="strict_rate_gain",
-        n_attempts_weak=1, benchmark="searchqa", weak_profile="",
-        task_select_rule="any_weak_failed", trajectory_select="all",
-        segment_select="strong_success_weak_failed", workers=1)
-    return dataclasses.replace(base, **changes)
-
-
-def _exam_store():
-    scene = TraceRef("p01:baseline", "real-sheet", 1)
-    return SimpleNamespace(load=lambda kind, object_id, cls=None: Exam(
-        exam_id=object_id, skill_id=SKILL.skill_id, skill_version=1,
-        scene_text="s", expected_behavior="e", reference_answer="r",
-        scene=scene))
-
-
-def _exam_report(opened_by_skill):
-    sheets, units = [], []
-    for skill, opened in opened_by_skill:
-        unit, sheet = _exam_sheet(skill, opened)
-        sheets.append(sheet)
-        units.append(_unit(unit, skill, f"{skill.skill_id}/v01/exam",
-                           "p03:exam"))
-    return PhaseReport(phase_kind="exam", learning_usable=True,
-                       sheets=sheets, units=units)
-
-
-def _review(report, context, bank, client=None):
-    return trial_review.run_trial_review(
-        current=report, bank=bank, context=context,
-        handles={"author": _handle(client)}, store=_exam_store())
-
-
-def test_an_exam_review_decides_every_skill_and_writes_the_requirement():
-    report = _exam_report([(SKILL, []), (OTHER, [SKILL])])
-    result = _review(report, _context(), [SKILL, OTHER])
-
-    assert not result.failed_targets and not result.model_errors
-    assert len(result.trial_findings) == 2
-    assert {item.row.target_id for item in result.items} \
-        == {SKILL.skill_id, OTHER.skill_id}
-    assert {item.row.action for item in result.items} <= {
-        "keep", "revise", "delete"}
-    # An exam skill is always the first of its finding's skills.
-    for finding, (skill, _) in zip(
-            result.trial_findings, [(SKILL, []), (OTHER, [SKILL])]):
-        assert finding.skill_ids[0] == skill.skill_id
-    sheet_ids = {finding.sheet_id for finding in result.trial_findings}
-    for requirement in result.new_skill_requirements:
-        assert set(requirement.source_sheet_ids) <= sheet_ids
-        assert requirement.title and requirement.description
-    assert result.profile_update.strip()
-    assert "\n\n" not in result.profile_update
-
-
-def test_the_exam_review_is_deterministic():
-    def once():
-        result = _review(_exam_report([(SKILL, []), (OTHER, [SKILL])]),
-                         _context(), [SKILL, OTHER])
-        return ([(item.row.target_id, item.row.action)
-                 for item in result.items],
-                [finding.reason for finding in result.trial_findings],
-                result.profile_update,
-                [item.title for item in result.new_skill_requirements])
-    assert once() == once()
-
-
-def test_the_exam_review_exercises_every_action_across_skills():
-    skills = _skills(12)
-    report = _exam_report([(skill, []) for skill in skills])
-    result = _review(report, _context(), skills)
-    actions = {item.row.action for item in result.items}
-    assert {"revise", "delete"} <= actions
-
-
-def _live_review(monkeypatch, steps):
-    """One failed live trial through the review; the task prompt lookup is
-    replaced (it would load the real benchmark)."""
-    from expedistill.methods.review import trial
-    monkeypatch.setattr(trial.attribution, "task_instruction_for",
-                        lambda benchmark, task: "task")
-    folder = _folder(SKILL)
-    unit = "live-unit"
-    sheet = _sheet(unit, "p03:live", dict(
-        task_ref="searchqa:t1", skills_injected=[{
-            "skill_id": SKILL.skill_id, "version": 1}],
-        steps=steps(folder), raw_correctness=False,
-        artifacts={"skill_folder": folder}))
-    report = PhaseReport(
-        phase_kind="live", learning_usable=True, sheets=[sheet],
-        units=[_unit(unit, SKILL, "searchqa:t1", "p03:live")])
-    return trial_review.run_trial_review(
-        current=report, bank=[SKILL],
-        context=_context(phase_kind="live", source_phase_label="p03:live",
-                         delivery="folder_by_task"),
-        handles={"author": _handle()})
-
-
-def test_a_live_trial_review_names_the_unread_delivered_skill(monkeypatch):
-    result = _live_review(monkeypatch, lambda folder: [
-        Step(action="Search[q]", observation="a passage"),
-        Step(action="Finish[wrong]", observation="INCORRECT")])
-    finding = result.trial_findings[0]
-    assert finding.skill_ids == [SKILL.skill_id]
-    assert (finding.step_start, finding.step_end) == (0, 2)
-    assert [item.row.target_id for item in result.items] \
-        == [SKILL.skill_id]
-    assert result.items[0].row.action in ("revise", "delete")
-
-
-def test_a_live_trial_that_opened_the_card_points_at_the_read_step(
-        monkeypatch):
-    result = _live_review(monkeypatch, lambda folder: [
-        Step(action="Search[q]", observation="a passage"),
-        Step(action=f"ReadSkill[{folder['files'][0]['filename']}]",
-             observation=SKILL.content),
-        Step(action="Finish[wrong]", observation="INCORRECT")])
-    assert result.trial_findings[0].step_start == 1
-
-
-
 
 def test_the_profile_merges_notes_without_repeating_them():
-    from expedistill.methods.review import profile
     handle = _handle()
-    first = profile.update_profile(
-        old_profile="", notes=["It skips verification.", ""],
-        handle=handle)
+    first = evolve_text(
+        "profile", "", ["It skips verification.", ""], "", handle)
     assert first == "- It skips verification."
-    second = profile.update_profile(
-        old_profile=first,
-        notes=["It skips verification.", "It answers from memory."],
-        handle=handle)
+    second = evolve_text(
+        "profile", first,
+        ["It skips verification.", "It answers from memory."], "", handle)
     assert second.splitlines() == [
         "- It skips verification.", "- It answers from memory."]
-    assert profile.update_profile(
-        old_profile=second, notes=[], handle=handle) == second
+    assert evolve_text("profile", second, [], "", handle) == second
+
+
+def test_the_playbook_carries_every_label_the_override_demands():
+    from expedistill.benchmarks.alfworld.playbook import playbook_requirements
+    from expedistill.methods.evolve_text import missing_requirements
+    handle = dataclasses.replace(
+        _handle(context=ALFWORLD_CONTEXT),
+        prompt_aliases=dict(ALFWORLD_PACK.overrides))
+    text = evolve_text(
+        "playbook", "", ["Open the matching card before acting."],
+        "BASELINE FACTS", handle, checks=playbook_requirements())
+    assert missing_requirements(text, playbook_requirements()) == []
 
 
 # ---------------------------------------------------------------------------
-# the requirement skill
+# the two rewrite prompts
 # ---------------------------------------------------------------------------
 
-def test_the_requirement_skill_carries_the_trigger_and_three_sections():
-    subtask = _subtask("a", 0, source="weak", success=False)
-    requirement = NewSkillRequirement(
-        requirement_id="req/abc", title="Verify the passage",
-        description="verify it before replying",
-        trigger="Before answering, when a passage was retrieved.",
-        evidence=EvidencePackage(
-            target="req/abc", facts=[],
-            segments=[{"sheet_id": "s1", "step_range": [0, 1]}],
-            source_experiences=[{
-                "subtask": subtask, "steps_view": "step 0",
-                "mode": "diagnose", "segment_position": "trial window"}]),
-        source_sheet_ids=["s1"])
-    skill = write_requirement(
-        requirement, weak_profile="- it skips checks",
-        source_context="the real steps", handle=_handle())
-    assert isinstance(skill, Skill) and has_skill_sections(skill.content)
-    assert skill.content.startswith(
-        "[When to use] Before answering, when a passage was retrieved.")
-    assert "verify the passage" in skill.summary.lower()
-    assert skill.status == "pending"
+_MARK = REVISION_MARKER + ": name the concrete state before acting."
 
 
-# ---------------------------------------------------------------------------
-# REWRITE and its scope notice
-# ---------------------------------------------------------------------------
-
-def _rewrite(skill, scope):
-    return rewrite_skill(
-        skill, "question", "weak answer", "what was wrong", "", _handle(),
-        source_context="context", scope=scope)
+def _card():
+    return make_skill(make_type_id(1), CARD_FIELDS["when_to_use"],
+                      steps=["Search first.", "Then answer."],
+                      not_applicable_when="never", summary="Answer briefly.")
 
 
-def _sections(content):
-    from expedistill.core.skill_sections import split_sections
-    return split_sections(content)
+def test_a_trigger_rewrite_marks_when_to_use_and_keeps_the_summary():
+    skill = _card()
+    revision = revise_trigger(
+        skill, catalog="the catalog", evidence_steps="steps",
+        diagnosis="not opened", playbook="", profile="", handle=_handle())
+    assert revision.side == "trigger"
+    assert revision.fields["when_to_use"].endswith(_MARK)
+    assert revision.fields["summary"] == skill.summary
 
 
-def test_a_rewrite_without_a_scope_marks_the_end_of_the_skill():
-    skill = _skills(1)[0]
-    new = _rewrite(skill, "both")
-    assert new["content"].endswith(REVISION_MARKER
-                                   + ": name the concrete state before "
-                                     "acting.")
-    assert new["summary"] != skill.summary
-
-
-def test_a_body_scope_keeps_the_trigger_and_the_summary_after_the_splice():
-    skill = _skills(1)[0]
-    new = _rewrite(skill, "body")
-    old, now = _sections(skill.content), _sections(new["content"])
-    assert now["[When to use]"] == old["[When to use]"]
-    assert REVISION_MARKER in now["[Do not use when]"]
-    assert "OUT-OF-SCOPE-EDIT" not in new["content"]
-    assert new["summary"] == skill.summary
-
-
-def test_a_trigger_scope_keeps_the_body_and_rewrites_the_summary():
-    skill = _skills(1)[0]
-    new = _rewrite(skill, "trigger")
-    old, now = _sections(skill.content), _sections(new["content"])
-    assert REVISION_MARKER in now["[When to use]"]
-    assert now["[Steps]"] == old["[Steps]"]
-    assert now["[Do not use when]"] == old["[Do not use when]"]
-    assert "OUT-OF-SCOPE-EDIT" not in new["content"]
-    assert new["summary"] != skill.summary
-
-
-def test_the_unspliced_scope_replies_do_carry_the_forbidden_edit():
-    skill = _skills(1)[0]
-    body_prompt_client = _client()
-    user = ("A skill written for a weak model failed its acceptance exam.\n"
-            "SKILL (current version):\n" + skill.content +
-            "\n\nEXAM QUESTION:\nq\n\n"
-            "SCOPE OF THIS REWRITE - the body only. The trigger is fixed.\n")
-    reply = body_prompt_client.complete("fake-strong", "s", user)
-    assert "OUT-OF-SCOPE-EDIT" in reply
+def test_a_content_rewrite_marks_the_end_of_the_content():
+    skill = _card()
+    revision = revise_content(
+        skill, evidence_steps="steps", diagnosis="opened, misses a step",
+        playbook="the playbook", profile="", handle=_handle())
+    assert revision.side == "content"
+    assert revision.fields["steps"] == skill.steps
+    assert revision.fields["not_applicable_when"].endswith(_MARK)
 
 
 # ---------------------------------------------------------------------------
@@ -735,8 +396,9 @@ def test_the_applicability_judge_marks_nothing_applicable_without_steps():
 
 
 def test_the_adherence_judge_scores_every_numbered_step():
-    card = ("[When to use] at start\n[Steps]\n1. one\n2. two\n3. three\n"
-            "4. four\n5. five\n[Do not use when] never")
+    card = make_skill(make_type_id(1), "at start",
+                      steps=["one", "two", "three", "four", "five"],
+                      not_applicable_when="never")
     result = adherence.judge_adherence(card, _view(2), _handle())
     assert [item["number"] for item in result] == [1, 2, 3, 4, 5]
     assert {item["status"] for item in result} <= set(
@@ -760,7 +422,6 @@ def test_unknown_prompts_are_still_refused(user):
 
 
 def test_a_template_drift_in_an_anchor_section_is_loud():
-    user = ("Judge whether the plan below handles the scene correctly.\n"
-            "no sections at all")
+    user = "You sort segments of text.\nno sections at all"
     with pytest.raises(AssertionError, match="anchor"):
         _client().complete("fake-strong", "s", user)

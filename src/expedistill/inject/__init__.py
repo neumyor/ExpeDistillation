@@ -1,22 +1,21 @@
-"""Layer 1: D9 skill injection and D10 bank-length accounting (pure functions).
+"""Layer 1: D9 skill injection (pure functions).
 
-The single source of "skills go into the prompt": exam answering (G4) and real
-execution (E1) both render the block here, so acceptance-time and test-time
-injection are the same code path by construction. No disk IO, no model calls.
+The single source of "skills go into the prompt": every executor prompt that
+carries the bank inline (E1, via the ``whole_bank`` delivery) renders the block
+here, so every phase injects through the same code path by construction. No
+disk IO, no model calls.
 """
 
 from expedistill.inject.skills import (
     bank_reference,
-    count_bank_tokens,
     estimate_tokens,
+    format_playbook_block,
     format_skills_block,
-    skill_ref,
 )
 
 __all__ = [
     "bank_reference",
-    "count_bank_tokens",
     "estimate_tokens",
+    "format_playbook_block",
     "format_skills_block",
-    "skill_ref",
 ]

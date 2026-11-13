@@ -49,7 +49,7 @@ def _execution(unit_id, task_ref, arm, index, verdict, *, role, label,
 def write_test_run(
         root: Path, *, with_bank: Mapping[str, Sequence[str]],
         control: Mapping[str, Sequence[str]], benchmark: str = "alfworld",
-        role: str = "weak", model: str = "weak-model", mode: str = "split",
+        role: str = "weak", model: str = "weak-model",
         sequence: Sequence[str] = ("baseline", "learn", "test"),
         test_phases: Sequence[str] = ("test",), data_phase: str = "test",
         external_control: bool = False,
@@ -71,7 +71,6 @@ def write_test_run(
              for phase in sequence}
     write_json(run_dir / "manifest.json", {
         "benchmark": benchmark,
-        "mode": mode,
         "config": {
             "models": {"executor_weak": "weak-model",
                        "executor_strong": "strong-model"},
@@ -149,7 +148,6 @@ def write_test_run(
             unit_summary.task_metrics(units, 0), 0)
     write_json(phase_dir / "phase_summary.json", {
         "role": "test",
-        "mode": mode,
         "control_source": control_source or (
             "external_campaign" if external_control else "fresh_bare"),
         "with_bank": metrics["with_bank"],

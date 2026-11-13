@@ -1,7 +1,7 @@
-"""TB's learned-playbook pieces: baseline facts and the writing prompt.
+"""TB's playbook pieces: baseline facts and the update prompt.
 
-The generic pipeline (``blocks/playbook.py``, ``stages/learn_playbook.py``)
-knows nothing about Terminal Bench. This module is what the plugin hands it:
+The generic playbook evolution (``methods/evolve_text``) knows nothing about
+Terminal Bench. This module is what the prompt pack hands it:
 
 * :func:`facts_from_sheets` turns the baseline phase's trial-level answer
   sheets into the text the writer reads: per task how often each arm
@@ -10,9 +10,10 @@ knows nothing about Terminal Bench. This module is what the plugin hands it:
   lost rounds to unparsable replies; whether they checked their work before
   declaring completion; and one compact command skeleton of a successful and
   of a failing weak trial;
-* ``TB_PLAYBOOK_WRITE`` is the prompt that turns those facts into the global
-  playbook. It carries the skill-read suffix the agent is already given, so
-  the playbook adds rules instead of repeating that text.
+* ``TB_PLAYBOOK_UPDATE`` replaces the method's ``PLAYBOOK_UPDATE`` (the
+  pack's ``overrides``): the same placeholders, plus the guidance on reading
+  these facts and the skill-read suffix the agent is already given, so the
+  playbook adds rules instead of repeating that text.
 
 Only train-split baseline sheets reach this code, so nothing about the test
 tasks can leak into the playbook. Everything here is computed from the
@@ -33,7 +34,7 @@ from expedistill.prompts.registry import PromptSpec, register
 __all__ = ["PLAYBOOK_PROMPT_NAME", "facts_from_sheets",
            "playbook_requirements"]
 
-PLAYBOOK_PROMPT_NAME = "TB_PLAYBOOK_WRITE"
+PLAYBOOK_PROMPT_NAME = "TB_PLAYBOOK_UPDATE"
 
 #: The parts the writing prompt asks for, each labelled in the text so a
 #: missing part is checkable instead of a judgement call.
@@ -320,23 +321,41 @@ def playbook_requirements() -> Sequence[PlaybookRequirement]:
                  for name, label, describe in REQUIRED_LABELS)
 
 
-TB_PLAYBOOK_WRITE = register(
+TB_PLAYBOOK_UPDATE = register(
     PromptSpec(
         name=PLAYBOOK_PROMPT_NAME,
-        template="""You write the GLOBAL PLAYBOOK for a weaker {agent_kind} agent that solves {benchmark_name} tasks.
+        template="""You maintain the GLOBAL PLAYBOOK for a weaker {agent_kind} agent that solves {benchmark_name} tasks.
 The playbook is placed in the agent's first message, right after the task
 description and in front of its skill-selection instructions, and stays in
 its conversation for the whole task. The agent works through a terminal: it
 types commands, reads the screen, and finishes by declaring the task
-complete. The playbook is general working discipline, not a skill card and
-not a list of answers to particular tasks.
+complete. The playbook is general working discipline that helps on every
+task; it is not a skill card, never replaces a skill card that matches the
+situation, and is not a list of answers to particular tasks.
 
-BASELINE FACTS (measured on training tasks only; the agent ran without any
-skills; "strong" is a stronger reference model, "weak" is the agent you
-write for):
+ENVIRONMENT PROTOCOL (fixed; the agent already receives it, so never repeat
+or contradict it):
+{protocol}
+
+CURRENT PLAYBOOK ("(empty)" before the first version):
+{old_playbook}
+
+FACTS (in the first learning round: baseline facts measured on training
+tasks only; the agent ran without any skills; "strong" is a stronger
+reference model, "weak" is the agent you write for. In every later round:
+the trigger-evidence counts, i.e. which skill cards the agent had in its
+catalog but did not open before the step where a failed trial went wrong,
+and how often; "(none)" when there are none):
 {facts}
 
+NOTES FROM THIS ROUND'S FAILURE DIAGNOSES:
+{playbook_notes}
+
 How to read the facts:
+- Trigger-evidence counts: the playbook should tell the agent to check
+  its skill catalog at the situations those cards cover; never name the
+  cards or their subtasks. The bullets below describe the baseline
+  facts.
 - "outcome per task" shows where the weak model loses against the strong
   one; the rules you write should be the behaviour the strong model shows
   and the weak model lacks, not task-specific knowledge.
@@ -361,16 +380,20 @@ How to read the facts:
 
 THE AGENT ALREADY RECEIVES THE FOLLOWING TEXT AFTER YOUR PLAYBOOK. Do not
 repeat any of it, do not contradict it, and do not restate its shell hygiene,
-threshold or completion-gate rules. Add only what the facts show it lacks:
+threshold or completion-gate rules. Add only what the facts and notes show it
+lacks:
 
 ----
-""" + TB_TASK_PROMPT_READ.template + """
+""" + TB_TASK_PROMPT_READ.template.replace("{", "{{").replace("}", "}}") + """
 ----
 
 {profile_section}
 
-Write the playbook with these parts, in this order. Begin each part with its
-label on its own line, exactly as written (the labels are checked):
+Update the playbook: keep every rule of the current playbook that the notes
+and facts do not contradict, add what they show is missing, and drop a rule
+only when the evidence shows that it misleads. Write it with these parts, in
+this order. Begin each part with its label on its own line, exactly as
+written (the labels are checked):
 ## orientation
 ## working loop
 ## recovery
@@ -382,7 +405,8 @@ Hard limits:
   screen, the agent's own previous commands and the task text. A rule that
   needs anything else is a defect.
 - Do not name files, programs, libraries, commands or values from particular
-  training tasks. Name only general kinds of action.
+  training tasks. Name only general kinds of action. Never write a
+  step-by-step recipe for one kind of task: that belongs in a skill card.
 - Use short sentences, one instruction each, in plain if-then form where
   possible. Plain Markdown, no code fences.
   Aim for 1,500 to 3,500 characters; the limit is 20,000. The agent keeps the
@@ -400,8 +424,9 @@ nothing after the closing tag:
 </playbook>
 """,
         description=(
-            "Learned playbook: write Terminal Bench's global playbook from "
-            "the baseline trial facts (the plugin's playbook_prompt_name)."
+            "Terminal Bench's PLAYBOOK_UPDATE: evolve the global playbook "
+            "from the facts (baseline facts first, trigger-evidence counts "
+            "later) and the diagnosis notes (the pack's override)."
         ),
     )
 )

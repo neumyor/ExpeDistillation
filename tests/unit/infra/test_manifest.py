@@ -3,12 +3,11 @@
 import pytest
 
 from expedistill.infra.manifest import (
-    FrozenProtocolChanged, freeze, load, load_manifest, load_or_none,
+    FrozenProtocolChanged, freeze, load, load_or_none,
 )
 
 MAPPING = {
     "benchmark": "tb",
-    "mode": "split",
     "seed": 7,
     "retry_limit": 3,
     "role_table": {"strong": "model-a", "weak": "model-b"},
@@ -66,5 +65,4 @@ def test_load_helpers(tmp_path):
         load(tmp_path)
     freeze(tmp_path, MAPPING)
     assert load_or_none(tmp_path) == MAPPING
-    assert load_manifest(tmp_path) == MAPPING
-    assert load_manifest is load
+    assert load(tmp_path) == MAPPING

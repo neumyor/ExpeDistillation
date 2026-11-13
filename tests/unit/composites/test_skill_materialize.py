@@ -5,7 +5,7 @@ folder writer.
 unit row's ``aux["skill_folder"]``) -- a NAME MAPPING, never the
 skills (the rev-1 ruling: progressive disclosure) -- plus the phase
 bank it resolves against, and writes the real directory: one markdown
-file per accepted skill plus the catalog. The frozen contract under
+file per active skill plus the catalog. The frozen contract under
 test: the manifest's bank_fingerprint gates the bank (a bank that
 moved is a loud error), byte-exact replay (idempotent, chosen form:
 unchanged content is not rewritten), deterministic file names, the
@@ -19,41 +19,31 @@ import yaml
 
 from expedistill.composites import skill_use
 from expedistill.composites.skill_materialize import materialize_skill_folder
-from expedistill.core.ids import (
-    make_subtask_id,
-    make_task_id,
-    make_trajectory_id,
-)
+from expedistill.core.ids import make_type_id
 from expedistill.core.models import Skill, Trajectory
 from expedistill.infra.reliability import CodeBugError
-from expedistill.methods.delivery import FolderParams
+from expedistill.methods.delivery.params import FolderParams
 from expedistill.methods.delivery import folder_delivery as folder_driver
-from tests.helpers.skills import make_skill
+from expedistill.inject.skill_text import render_card
+from tests.helpers.skills import make_skill, text_fields
 
-BENCHMARK = "tb"
-
-MARKED = "\n".join([
-    "[When to use] The service rejects connections.",
-    "[Steps]",
-    "1. Check the service status.",
-    "[Do not use when] The status command already reports running.",
-])
+MARKED = {
+    "when_to_use": "The service rejects connections.",
+    "steps": ["Check the service status."],
+    "not_applicable_when": "The status command already reports running.",
+}
 
 
-def _skill(task_raw: str, *, summary: str = "",
-           content: str = MARKED) -> Skill:
-    task_id = make_task_id(BENCHMARK, task_raw)
-    subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
-    return make_skill(subtask_id, content, summary=summary,
-                      status="accepted")
+def _skill(serial: int, *, summary: str = "A service skill.") -> Skill:
+    return make_skill(make_type_id(serial), **MARKED, summary=summary)
 
 
 def _manifest(tmp_path):
     """A real manifest off the delivery driver (the M3 input shape),
     its bank, a materialized folder, and the two skills' expected file
     names."""
-    bank = [_skill("t1", summary="Restart a stuck service safely."),
-            _skill("t2", summary="Check the log before restarting.")]
+    bank = [_skill(1, summary="Restart a stuck service safely."),
+            _skill(2, summary="Check the log before restarting.")]
     rows = folder_driver.resolve(bank, ["task-a"], FolderParams())
     manifest = rows[0].aux["skill_folder"]
     folder = materialize_skill_folder(manifest, bank, tmp_path / "folder")
@@ -79,12 +69,12 @@ def test_the_folder_writes_each_skill_directory_and_the_catalog(tmp_path):
     manifest, bank, folder = _manifest(tmp_path)
     assert sorted(entry.name for entry in folder.iterdir()) == \
         ["catalog.md",
-         "traj-tb-t1-strong-00-seg00-skill",
-         "traj-tb-t2-strong-00-seg00-skill"]
+         "type-001-skill",
+         "type-002-skill"]
     # The catalog file is the manifest's catalog text verbatim.
     assert (folder / "catalog.md").read_text(encoding="utf-8") == \
         manifest["catalog_text"]
-    bodies = {skill.skill_id: skill.content for skill in bank}
+    bodies = {skill.skill_id: render_card(skill) for skill in bank}
     for entry in manifest["files"]:
         text = (folder / entry["filename"]).read_text(encoding="utf-8")
         front, body = _split_frontmatter(text)
@@ -111,7 +101,7 @@ def test_the_frontmatter_is_a_valid_agent_skill_header(tmp_path):
 
 
 def test_the_three_description_modes_reach_the_frontmatter(tmp_path):
-    bank = [_skill("t1", summary="Restart a stuck service safely.")]
+    bank = [_skill(1, summary="Restart a stuck service safely.")]
     expected = {
         "summary": "Restart a stuck service safely.",
         "when_to_use": "The service rejects connections.",
@@ -129,7 +119,7 @@ def test_the_three_description_modes_reach_the_frontmatter(tmp_path):
         text = (folder / entry["filename"]).read_text(encoding="utf-8")
         front, body = _split_frontmatter(text)
         assert front["description"] == description
-        assert body == bank[0].content
+        assert body == render_card(bank[0])
 
 
 def test_replaying_the_same_manifest_changes_nothing(tmp_path):
@@ -161,7 +151,7 @@ def test_a_changed_bank_rewrites_only_the_changed_files(tmp_path):
                       if entry["filename"] == changed_name)
     for skill in bank:
         if skill.skill_id == changed_id:
-            skill.content = skill.content + "\nOne more step."
+            skill.steps = skill.steps + ["One more step."]
             skill.version = 2
     rows = folder_driver.resolve(bank, ["task-a"], FolderParams())
     manifest = rows[0].aux["skill_folder"]
@@ -180,15 +170,16 @@ def test_extra_files_are_left_alone(tmp_path):
 
 
 def test_an_empty_bank_manifest_writes_nothing(tmp_path):
+    # An empty bank's folder still exists (every folder unit carries a
+    # directory), and holds nothing.
     target = tmp_path / "empty"
-    target.mkdir()
-    pending = _skill("t1")
-    pending.status = "pending"
-    rows = folder_driver.resolve([pending], ["task-a"], FolderParams())
+    discarded = _skill(1)
+    discarded.status = "discarded"
+    rows = folder_driver.resolve([discarded], ["task-a"], FolderParams())
     manifest = rows[0].aux["skill_folder"]
     assert manifest["files"] == [] and manifest["catalog_text"] == ""
-    materialize_skill_folder(manifest, [pending], target)
-    assert list(target.iterdir()) == []
+    assert materialize_skill_folder(manifest, [discarded], target) == target
+    assert target.is_dir() and list(target.iterdir()) == []
 
 
 def test_a_bank_that_moved_under_the_manifest_is_refused(tmp_path):
@@ -266,9 +257,9 @@ def test_the_skill_directory_rule_is_one_contract(tmp_path):
     # One odd id end to end: the delivery derives the name, the
     # materializer accepts it, and the read parser counts a cat of the
     # exact relative path.
-    odd = Skill(skill_id="tb:odd/id.name 中", content=MARKED,
-                subtask_id="s0", source_subtasks=["s0"],
-                summary="Odd id.", status="accepted")
+    odd = Skill(skill_id="tb:odd/id.name 中", subtask_type="type/001",
+                source_subtasks=["s0"],
+                **text_fields(**{**MARKED, "summary": "Odd id."}))
     manifest = folder_driver.skill_folder_manifest([odd])
     filename = manifest["files"][0]["filename"]
     assert filename == "tb-odd-id-name/SKILL.md"

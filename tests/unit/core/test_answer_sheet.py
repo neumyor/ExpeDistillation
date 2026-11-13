@@ -2,8 +2,7 @@
 
 ``to_dict`` is the derived-artifact surface (the JSON export), so each
 record kind is checked for its exact payload shape: a trajectory's steps
-become plain dicts, an exam answer carries its answer text, an external
-trial carries its rewards, and the trial envelope nests coverage,
+become plain dicts, an external trial carries its rewards, and the trial envelope nests coverage,
 execution and grading without inventing fields.
 """
 
@@ -63,22 +62,21 @@ def test_execution_record_to_dict_keeps_an_absent_step_list_none():
     assert payload["steps"] is None
 
 
-def test_execution_record_to_dict_carries_the_exam_answer_payload():
+def test_execution_record_has_no_exam_answer_payload():
+    # The text exam is gone: a trial is a trajectory or an external reward.
+    assert "answer" not in {field.name for field in fields(ExecutionRecord)}
+
+
+def test_execution_record_to_dict_carries_the_injected_skills():
     record = _execution(
-        sheet_id="att-1",
-        task_ref="exam-1",
-        kind="attempt",
-        answer="42",
-        skills_injected=[{"skill_id": "s1", "version": 2}],
-        aux={"judge_verdict": True, "judge_reason": "correct"},
+        skills_injected=[{"skill_id": "type/001/skill", "version": 2}],
+        aux={"note": "kept"},
         raw_correctness=None,
     )
     payload = record.to_dict()
-    assert payload["kind"] == "attempt"
-    assert payload["answer"] == "42"
-    assert payload["skills_injected"] == [{"skill_id": "s1", "version": 2}]
-    assert payload["aux"] == {"judge_verdict": True,
-                              "judge_reason": "correct"}
+    assert payload["skills_injected"] == [
+        {"skill_id": "type/001/skill", "version": 2}]
+    assert payload["aux"] == {"note": "kept"}
     assert payload["raw_correctness"] is None
 
 

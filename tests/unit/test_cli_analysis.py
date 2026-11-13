@@ -1,8 +1,9 @@
-"""CLI wiring of the four analysis subcommands: import-bank, judge-skills,
-exam-replay and paper-tables. The stages are tested on their own; what is
+"""CLI wiring of the analysis subcommands: import-bank, judge-skills and
+paper-tables. The stages are tested on their own; what is
 pinned here is the argument mapping, the handles built from the run's frozen
 config, and the error contract."""
 
+import dataclasses
 import json
 
 import pytest
@@ -11,21 +12,27 @@ from types import SimpleNamespace
 
 from expedistill import cli
 from expedistill.infra.reliability import ConfigError, InfrastructureError
+from expedistill.benchmarks.base import GENERIC_PACK
 from expedistill.prompts.learning_context import LearningContext
-from tests.helpers.skill_use_runs import write_exam_source_run
+from tests.helpers.skill_use_runs import write_source_run
 
-VOCABULARY = LearningContext(name="fake", slots={"agent_kind": "a fake agent"})
+PACK = dataclasses.replace(
+    GENERIC_PACK,
+    vocabulary=LearningContext(name="fake",
+                               slots={"agent_kind": "a fake agent"}),
+    protocol="fake protocol",
+    overrides={"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"})
 
 
 @pytest.fixture
 def source_run(monkeypatch, tmp_path):
     """A finished run whose benchmark has no plugin: the CLI only asks the
-    plugin for its learning vocabulary, so that lookup is stubbed."""
+    plugin for its prompt pack, so that lookup is stubbed."""
     monkeypatch.setattr(
         cli, "resolve_plugin",
-        lambda name: SimpleNamespace(learning_context=VOCABULARY))
+        lambda name: SimpleNamespace(prompt_pack=PACK))
     run_dir = tmp_path / "source"
-    write_exam_source_run(run_dir)
+    write_source_run(run_dir)
     return run_dir
 
 
@@ -79,7 +86,7 @@ def test_import_bank_errors_exit_one(monkeypatch, capsys, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# judge-skills and exam-replay build their handles from the frozen config
+# judge-skills builds its handle from the frozen config
 # ---------------------------------------------------------------------------
 
 class _Recorder:
@@ -115,12 +122,13 @@ def test_judge_skills_uses_the_runs_frozen_judge_and_budgets(
     assert handle.max_tokens == 512
     assert clients.models == [("big-model", 77.0)]
     assert handle.run_dir == out
-    # The benchmark's vocabulary rides every analysis handle, like the
+    # The benchmark's prompt pack rides every analysis handle, like the
     # handles of a real run.
-    assert handle.prompt_defaults == {"agent_kind": "a fake agent"}
+    assert handle.prompt_defaults == {"agent_kind": "a fake agent",
+                                      "protocol": "fake protocol"}
+    assert handle.prompt_aliases == {"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"}
     assert (seen["phase"], seen["workers"], seen["arm"],
-            seen["bank_phase_label"]) == ("p06:test", 4, "with_bank",
-                                          "p04:learn")
+            seen["bank_phase_label"]) == ("p06:test", 4, None, "p04:learn")
     assert _last_json(capsys, "judge-skills: ") == {"judged_trials": 3}
 
 
@@ -138,41 +146,6 @@ def test_judge_skills_accepts_another_judge_model(
     assert seen["handle"].name == "other-judge"
 
 
-def test_exam_replay_builds_two_handles_and_reads_the_exam_cap(
-        monkeypatch, capsys, tmp_path, source_run):
-    clients, seen = _Recorder(), {}
-    monkeypatch.setattr(cli, "_default_client", clients)
-
-    def fake_replay(run_dir, out_dir, answerer, judge, **kwargs):
-        seen.update(answerer=answerer, judge=judge, **kwargs)
-        return {"answered": 4}
-
-    monkeypatch.setattr(cli, "replay_exams", fake_replay)
-    code = cli.main(["exam-replay", "--run-dir", str(source_run),
-                     "--out-dir", str(tmp_path / "out"),
-                     "--answerer-model", "student-model"])
-    assert code == 0
-    assert (seen["answerer"].role, seen["answerer"].name) \
-        == ("answerer", "student-model")
-    assert (seen["judge"].role, seen["judge"].name) == ("judge", "big-model")
-    # The cap comes from the source run's exam phase (the helper's is 3).
-    assert seen["max_skill_reads"] == 3
-    assert seen["bank_phase_label"] is None and seen["workers"] == 1
-    assert _last_json(capsys, "exam-replay: ") == {"answered": 4}
-
-
-def test_exam_replay_cap_can_be_overridden(monkeypatch, tmp_path, source_run):
-    monkeypatch.setattr(cli, "_default_client", _Recorder())
-    seen = {}
-    monkeypatch.setattr(
-        cli, "replay_exams",
-        lambda run_dir, out_dir, answerer, judge, **kw: seen.update(kw) or {})
-    cli.main(["exam-replay", "--run-dir", str(source_run),
-              "--out-dir", str(tmp_path / "out"),
-              "--answerer-model", "m", "--max-skill-reads", "1"])
-    assert seen["max_skill_reads"] == 1
-
-
 def test_a_run_without_a_manifest_is_refused(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(cli, "_default_client", _Recorder())
     code = cli.main(["judge-skills", "--run-dir", str(tmp_path / "nowhere"),
@@ -185,15 +158,23 @@ def test_analysis_infra_exhaustion_exits_three(
         monkeypatch, capsys, tmp_path, source_run):
     monkeypatch.setattr(cli, "_default_client", _Recorder())
 
-    def fake_replay(*args, **kwargs):
-        raise InfrastructureError("3 exam(s) are pending on infrastructure")
+    def fake_judge(*args, **kwargs):
+        raise InfrastructureError("3 trial(s) are pending on infrastructure")
 
-    monkeypatch.setattr(cli, "replay_exams", fake_replay)
-    code = cli.main(["exam-replay", "--run-dir", str(source_run),
+    monkeypatch.setattr(cli, "judge_phase", fake_judge)
+    code = cli.main(["judge-skills", "--run-dir", str(source_run),
                      "--out-dir", str(tmp_path / "out"),
-                     "--answerer-model", "m"])
+                     "--phase", "p07:test"])
     assert code == cli.EXIT_INFRA_RESUMABLE
     assert "pending on infrastructure" in capsys.readouterr().err
+
+
+def test_the_exam_replay_subcommand_is_gone(tmp_path):
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["exam-replay", "--run-dir", str(tmp_path),
+                  "--out-dir", str(tmp_path / "out"),
+                  "--answerer-model", "m"])
+    assert excinfo.value.code == 2
 
 
 # ---------------------------------------------------------------------------

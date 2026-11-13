@@ -24,9 +24,6 @@ __all__ = [
 
 
 _CAUSE_PRIORITY = (
-    vocabulary.CAUSE_LEAK,
-    vocabulary.CAUSE_INJECTION_OVERFLOW,
-    vocabulary.CAUSE_EXAM_GENERATION_FAILED,
     vocabulary.CAUSE_INVALID_REDISPATCH_EXHAUSTED,
     vocabulary.CAUSE_ALL_HOLES,
     vocabulary.CAUSE_ZERO_EXECUTION,
@@ -39,9 +36,8 @@ def summarize_unit(sheets: Sequence[AnswerSheet],
 
     A present graded trial is success/failure; invalid trials are excluded
     from ``valid_count``.  A unit with no valid trial takes its cause from
-    the coverage records: control-perfect is a skip (not a zero), accepted
-    holes alone are ``all_holes``, a real missing dispatch is
-    ``invalid_redispatch_exhausted``.
+    the coverage records: accepted holes alone are ``all_holes``, a real
+    missing dispatch is ``invalid_redispatch_exhausted``.
     """
     unit_sheets = [sheet for sheet in sheets
                    if sheet.coverage.unit_id == spec.unit_id]
@@ -58,9 +54,6 @@ def summarize_unit(sheets: Sequence[AnswerSheet],
               if sheet.coverage.cause}
     if valid_count:
         status, cause = vocabulary.STATUS_NORMAL, ""
-    elif vocabulary.CAUSE_WEAK_ALREADY_KNOWS in causes:
-        status = vocabulary.STATUS_NOT_RUN_CONTROL_PERFECT
-        cause = vocabulary.CAUSE_WEAK_ALREADY_KNOWS
     else:
         status = vocabulary.STATUS_NOT_TESTABLE
         cause = _unit_cause(
@@ -114,16 +107,16 @@ def task_metrics(summaries: Iterable[UnitSummary],
                  n_attempts: int) -> Dict[str, Dict[str, int]]:
     """D3-shaped task metrics derived from unit summaries.
 
-    One task's summaries are summed (exam versions share a task only in
-    the exam path; the test path has one summary per task/arm).
+    One task's summaries are summed (a phase has one summary per
+    task/arm, so the sum is the defensive form of a single row).
     """
     metrics: Dict[str, Dict[str, int]] = {}
     aux_seen: Dict[str, bool] = {}
     for summary in summaries:
         per = metrics.setdefault(summary.task_ref, {
             "attempts": 0, "valid": 0, "success": 0, "infra": 0})
-        # Exam retries can produce more judged sheets than the unit's
-        # expected_attempts (expected is the planned depth, not a cap).
+        # Expected is the planned depth; never report fewer attempts
+        # than valid trials.
         attempts = max(summary.expected_attempts, summary.valid_count)
         per["attempts"] += attempts
         per["valid"] += summary.valid_count
@@ -163,9 +156,8 @@ def _unit_cause(causes: set, expected_attempts: int,
                 *, no_valid_cause: str) -> str:
     if not causes:
         # Every expected trial is present but none has a valid sample:
-        # the role decides whether that is an all-hole baseline or an
-        # unscored live/exam run.  A unit with no sheet at all is a
-        # missing dispatch.
+        # the unit spec names the cause.  A unit with no sheet at all is
+        # a missing dispatch.
         if any(sheet.coverage.present for sheet in unit_sheets):
             return no_valid_cause
         return (vocabulary.CAUSE_INVALID_REDISPATCH_EXHAUSTED

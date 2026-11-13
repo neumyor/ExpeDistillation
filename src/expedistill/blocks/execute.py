@@ -43,6 +43,7 @@ __all__ = ["run_one", "make_task_id"]
 #: Plugin packages live directly under this prefix; one benchmark = one
 def run_one(
     *,
+    phase_label: str,
     benchmark: str,
     task: Task,
     model_role: str,
@@ -76,6 +77,10 @@ def run_one(
     ``call_model``; the TB runner's usage is read back from the Harbor
     trial by K1).
 
+    ``phase_label`` is the execute phase that runs the unit; it tags the
+    trajectory id, so the same task run by the baseline and by every
+    practice phase never shares an id.
+
     ``model_role`` must be one of ``core.models.MODEL_ROLES`` and
     ``attempt_index`` >= 0; violations raise ValueError from the id rule
     (``core.ids.make_trajectory_id``) before anything is executed.
@@ -103,16 +108,18 @@ def run_one(
             f"benchmark {benchmark!r} does not support skill folders (the "
             "real_folder execution): its plugin declares no "
             "skill_folder_prompt_name, and a skill-folder unit needs one")
+    task_id = make_task_id(benchmark, task.task_id)
+    trajectory_id = make_trajectory_id(
+        phase_label, task_id, model_role, attempt_index)
     outcome = plugin.run(task, handle, skills_block, workdir)
     if not isinstance(outcome, RunOutcome):
         raise CodeBugError(
             f"plugin {benchmark!r} run() must return a RunOutcome, got "
             f"{type(outcome).__name__}")
-    task_id = make_task_id(benchmark, task.task_id)
     meta = dict(outcome.meta)
     meta["workdir"] = str(workdir)
     return Trajectory(
-        trajectory_id=make_trajectory_id(task_id, model_role, attempt_index),
+        trajectory_id=trajectory_id,
         task_id=task_id,
         benchmark=benchmark,
         model_role=model_role,

@@ -12,18 +12,21 @@ gives their ReAct loop the same contract:
 - a card's text appears only when the model replies with
   ``ReadSkill[<location>]``. The loop answers that action itself, so the
   evaluation environment never sees it;
-- reading is capped at :data:`MAX_READS` DISTINCT cards per attempt and
-  costs no environment step. A loop of repeat or refused reads is free for
-  a fixed allowance, after which each read costs one step, so a model that
-  keeps asking cannot stall the episode. The ALFWorld loop also keeps reads
-  out of the unified protocol's two-step history and holds every opened card
-  in a persistent prompt block.
+- reading is capped at :data:`MAX_READS` per attempt and a served read
+  costs no environment step. The SearchQA loop counts every read and charges
+  each refused one a step. The ALFWorld loop counts DISTINCT cards, keeps
+  reads out of the unified protocol's two-step history, holds every opened
+  card in a persistent prompt block, and charges repeat or refused reads a
+  step after a free allowance, so a model that keeps asking cannot stall the
+  episode.
 
 The folder itself is the delivery's work: the manifest arrives on
 ``task.meta["skill_folder"]`` and the materialized directory on
 ``task.meta["skill_folder_dir"]`` (the same channel the TB plugin reads).
-The module is benchmark-blind; a plugin only chooses its prompt and where
-the card list goes in it.
+A manifest with no files (an empty bank) is still a folder unit: the
+folder prompt with an empty ``<available_skills>`` list and the playbook
+in its usual place. The module is benchmark-blind; a plugin only chooses
+its prompt and where the card list goes in it.
 """
 
 import re
@@ -143,7 +146,7 @@ def _check_location(location: Any) -> str:
 class SkillFolder:
     """One folder unit's card list and reader."""
 
-    def __init__(self, folder_dir: Path, cards: List[SkillCard],
+    def __init__(self, folder_dir: Optional[Path], cards: List[SkillCard],
                  playbook_text: str = ""):
         self._dir = folder_dir
         self._cards = sorted(cards, key=lambda card: card.location)
@@ -155,9 +158,10 @@ class SkillFolder:
     def from_task(cls, task: Task) -> Optional["SkillFolder"]:
         """The task's skill folder, or None for a unit without one.
 
-        A manifest with no files is the delivery's empty-bank null state
-        and runs bare. A manifest with files but no materialized directory
-        is a wiring bug: the phase driver materializes before dispatch.
+        A manifest with no files is the empty bank: a folder with no cards
+        (the unit keeps the folder prompt and the playbook). A manifest
+        with files but no materialized directory is a wiring bug: the
+        phase driver materializes before dispatch.
         """
         meta = task.meta if isinstance(task.meta, dict) else {}
         manifest = meta.get(_MANIFEST_KEY)
@@ -168,8 +172,9 @@ class SkillFolder:
                 f"task {task.task_id!r} carries {_MANIFEST_KEY!r} but it "
                 f"is not the folder manifest mapping, got {manifest!r}")
         entries = manifest.get("files") or []
+        playbook_text = str(manifest.get("playbook_text") or "")
         if not entries:
-            return None
+            return cls(None, [], playbook_text)
         folder_dir = meta.get(_DIR_KEY)
         if not isinstance(folder_dir, str) or not folder_dir:
             raise CodeBugError(
@@ -183,7 +188,6 @@ class SkillFolder:
                 entry.get("filename") if isinstance(entry, Mapping) else None)
             cards.append(_parse_card(
                 location, (root / location).read_text(encoding="utf-8")))
-        playbook_text = str(manifest.get("playbook_text") or "")
         return cls(root, cards, playbook_text)
 
     @property
@@ -196,7 +200,11 @@ class SkillFolder:
         return self._playbook_text
 
     def available_skills_block(self) -> str:
-        """The ``<available_skills>`` list, shaped like Terminus's."""
+        """The ``<available_skills>`` list, shaped like Terminus's; an
+        empty folder renders the open and close tags with nothing in
+        between."""
+        if not self._cards:
+            return "<available_skills>\n</available_skills>"
         root = Element("available_skills")
         for card in self._cards:
             skill = SubElement(root, "skill")
@@ -212,7 +220,7 @@ class SkillFolder:
         The observation is the whole file, as a ``cat`` of it would print.
         """
         card = self._by_location.get(canonical_location(target))
-        if card is None:
+        if card is None or self._dir is None:
             return _unknown_card_message(target.strip()), False
         text = (self._dir / card.location).read_text(encoding="utf-8")
         return text, True

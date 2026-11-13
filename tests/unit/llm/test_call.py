@@ -352,8 +352,7 @@ def test_empty_content_reask_disabled_makes_one_call():
 
 
 def test_empty_content_plain_text_propagates_immediately():
-    # Plain-text calls (method-level since protocol v2 that is MERGE alone --
-    # SKILL_DISTILL, like REWRITE, calls with output_json=True) keep the
+    # Plain-text calls (at method level the playbook writer) keep the
     # current contract: empty content fails the unit at once, exactly one
     # request.
     handle = make_fake_handle(script=[_empty_content_error()])

@@ -1,35 +1,35 @@
-"""Deterministic ID rules (README 1.1 rule 6 and section 2).
+"""Deterministic ID rules (design spec 3.1 rule 6 and section 4.1).
 
-Every child ID is the parent ID plus a fixed suffix; nothing here depends on
-randomness, wall-clock time or model output. Re-running the same inputs yields
-the same IDs, which is what lets a resumed run decide "this unit was already
-done" by ID lookup alone (B3).
+Every ID is built from its parent's ID or a program-assigned serial; nothing
+here depends on randomness, wall-clock time or model output. Re-running the
+same inputs yields the same IDs, which is what lets a resumed run decide
+"this unit was already done" by ID lookup alone (B3).
 
 Rules (each ``make_*`` implements exactly one line of this table)::
 
     task_id            = f"{benchmark}:{raw_task_id}"
-    trajectory_id      = f"traj/{task_id}/{role}/{attempt:02d}"
+    trajectory_id      = f"traj/{phase_tag}/{task_id}/{role}/{attempt:02d}"
     subtask_id         = f"{trajectory_id}/seg{index:02d}"
-    skill_id           = f"{subtask_id}/skill"
-    exam_id            = f"{skill_id}/v{version:02d}/exam"
-    attempt_id         = f"{exam_id}/att{serial:02d}"
-    merged skill_id    = f"bank/merge/{serial:04d}"
+    type_id            = f"type/{serial:03d}"
+    skill_id           = f"{type_id}/skill"
 
-``role`` is "strong" or "weak" (models.MODEL_ROLES).
+``phase_tag`` is the execute phase's label with the colon replaced by an
+underscore (``p01:baseline`` -> ``p01_baseline``, see ``phase_tag``), so one
+task's baseline run and its practice runs -- and the segments cut from
+them -- never share an id. ``role`` is "strong" or "weak"
+(models.MODEL_ROLES). Imported skills keep their own ``import/...`` ids
+(stages/import_bank.py); they have no subtask type.
 
-Determinism caveat for the serial numbers: ``attempt`` is the sampling index
-(0..n-1), ``index`` the segment's position in its trajectory, and ``serial``
-is a *running number in creation order*. The serial-based IDs are therefore
-only reproducible if the run replays the same creation order -- which the
-stages guarantee by always processing units in a fixed (sorted-by-parent-ID)
-order. A re-run that creates attempts in a different order produces different
-IDs for the same logical attempts; that is a property of the scheme, not a
-bug, and it is why creation order is fixed in the stages.
+``attempt`` is the sampling index (0..n-1) and ``index`` the segment's
+position in its trajectory. The type ``serial`` is a running number in
+order of appearance in the run's append-only type table; it is reproducible
+because the learn phase assigns new types in a fixed order.
 
-Zero padding is a minimum width, not a cap: serial 100 is ``att100`` and the
-parsers accept any canonical width >= 2. Consequence: string order of IDs is
-not numeric order once a serial outgrows its padding (``att100`` < ``att99``),
-so anything that needs creation order must sort by the parsed number.
+Zero padding is a minimum width, not a cap: attempt 100 is ``100`` and the
+parsers accept any canonical width at or above the padding. Consequence:
+string order of IDs is not numeric order once a number outgrows its
+padding, so anything that needs creation order must sort by the parsed
+number.
 
 The parse helpers are the inverse of the make functions; they raise ValueError
 on malformed IDs so a typo'd ID fails at the call site instead of silently
@@ -37,30 +37,43 @@ matching nothing in the store.
 """
 
 import re
-from typing import Any, Tuple
+from typing import NamedTuple, Tuple
 
 from expedistill.core.models import MODEL_ROLES
 
 _TRAJ_PREFIX = "traj/"
+_TYPE_PREFIX = "type/"
+_SKILL_SUFFIX = "/skill"
 _SEG = "seg"
-_ATT = "att"
 
-#: A zero-padded serial as the make_* functions write it: at least two ASCII
-#: digits. ``{n:02d}`` pads but does not cap, so the 100th attempt is
-#: ``att100`` and the parser must accept any width >= 2.
-_SERIAL_RE = re.compile(r"[0-9]{2,}")
+#: A phase label as core.config.phase_label writes it: ``p<NN>:<name>``,
+#: the name over the colon-free phase-name charset.
+_PHASE_LABEL_RE = re.compile(r"(p[0-9]{2,}):([A-Za-z0-9._-]+)")
+
+#: The same label with the colon replaced (``phase_tag``'s output).
+_PHASE_TAG_RE = re.compile(r"(p[0-9]{2,})_([A-Za-z0-9._-]+)")
 
 
-def _parse_serial(text: str) -> int:
-    """Inverse of ``f"{n:02d}"``; ValueError on anything that formatter could
-    not have produced (non-ASCII digits, signs, fewer than two digits, or
-    extra leading zeros such as "007", which would alias "07")."""
-    if not _SERIAL_RE.fullmatch(text):
+def _parse_serial(text: str, width: int = 2) -> int:
+    """Inverse of ``f"{n:0{width}d}"``; ValueError on anything that
+    formatter could not have produced (non-ASCII digits, signs, fewer than
+    ``width`` digits, or extra leading zeros such as "007" for width 2,
+    which would alias "07")."""
+    if not (len(text) >= width and text.isascii() and text.isdigit()):
         raise ValueError(text)
     value = int(text)
-    if f"{value:02d}" != text:
+    if f"{value:0{width}d}" != text:
         raise ValueError(text)
     return value
+
+
+class TrajectoryIdParts(NamedTuple):
+    """What a trajectory id names, in id order."""
+
+    phase_label: str
+    task_id: str
+    role: str
+    attempt: int
 
 
 # ---------------------------------------------------------------------------
@@ -71,12 +84,28 @@ def make_task_id(benchmark: str, raw_task_id: str) -> str:
     return f"{benchmark}:{raw_task_id}"
 
 
-def make_trajectory_id(task_id: str, role: str, attempt: int) -> str:
+def phase_tag(phase_label: str) -> str:
+    """The path-safe form of a phase label: ``p03:practice`` ->
+    ``p03_practice``. ValueError on anything that is not a phase label."""
+    if not isinstance(phase_label, str) \
+            or not _PHASE_LABEL_RE.fullmatch(phase_label):
+        raise ValueError(
+            f"not a phase label (p<NN>:<name>): {phase_label!r}")
+    return phase_label.replace(":", "_", 1)
+
+
+def make_trajectory_id(phase_label: str, task_id: str, role: str,
+                       attempt: int) -> str:
+    """The id of one execution: the execute phase that ran it, the task,
+    the executor role and the sampling index."""
+    tag = phase_tag(phase_label)
+    if not isinstance(task_id, str) or not task_id:
+        raise ValueError(f"task_id must be a non-empty string, got {task_id!r}")
     if role not in MODEL_ROLES:
         raise ValueError(f'role must be one of {MODEL_ROLES}, got {role!r}')
     if attempt < 0:
         raise ValueError(f"attempt must be >= 0, got {attempt}")
-    return f"traj/{task_id}/{role}/{attempt:02d}"
+    return f"{_TRAJ_PREFIX}{tag}/{task_id}/{role}/{attempt:02d}"
 
 
 def make_subtask_id(trajectory_id: str, index: int) -> str:
@@ -85,41 +114,18 @@ def make_subtask_id(trajectory_id: str, index: int) -> str:
     return f"{trajectory_id}/{_SEG}{index:02d}"
 
 
-def make_skill_id(subtask_id: str) -> str:
-    return f"{subtask_id}/skill"
+def make_type_id(serial: int) -> str:
+    """The id of the subtask type with this serial (order of appearance in
+    the run's type table, from 1)."""
+    if isinstance(serial, bool) or not isinstance(serial, int) or serial < 1:
+        raise ValueError(f"type serial must be an int >= 1, got {serial!r}")
+    return f"{_TYPE_PREFIX}{serial:03d}"
 
 
-def make_exam_id(skill_id: str, version: int) -> str:
-    """One exam per skill version (generalization exam, decision doc
-    generalization_exam_20261027). The version is the ``Skill.version`` the
-    exam tests, zero-padded like the other serials."""
-    if version < 0:
-        raise ValueError(f"skill version must be >= 0, got {version}")
-    return f"{skill_id}/v{version:02d}/exam"
-
-
-def make_attempt_id(exam_id: str, serial: int) -> str:
-    if serial < 0:
-        raise ValueError(f"attempt serial must be >= 0, got {serial}")
-    return f"{exam_id}/{_ATT}{serial:02d}"
-
-
-def make_merged_skill_id(serial: int) -> str:
-    """Merged-skill ID; the serial is assigned by curation (stage 5) in merge
-    order, so like attempt serials it is reproducible only under the same
-    creation order."""
-    if serial < 0:
-        raise ValueError(f"merge serial must be >= 0, got {serial}")
-    return f"bank/merge/{serial:04d}"
-
-
-def is_stage3_candidate(skill: Any) -> bool:
-    """True when ``skill`` is a stage-3 candidate: its id is exactly the
-    stage-3 skill id of its own subtask. Merged skills (``bank/merge/NNNN``,
-    stage 5) fail by construction -- their id is the merge's, not the
-    anchor subtask's. Duck-typed on purpose (``.skill_id`` /
-    ``.subtask_id``), so core stays free of model imports."""
-    return skill.skill_id == make_skill_id(skill.subtask_id)
+def make_skill_id(type_id: str) -> str:
+    """The id of the one skill a subtask type may have."""
+    parse_type_id(type_id)
+    return f"{type_id}{_SKILL_SUFFIX}"
 
 
 # ---------------------------------------------------------------------------
@@ -148,24 +154,27 @@ def raw_task_id(task_id: str, benchmark: str) -> str:
     return raw
 
 
-def parse_trajectory_id(trajectory_id: str) -> Tuple[str, str, int]:
-    """Return (task_id, role, attempt)."""
+def parse_trajectory_id(trajectory_id: str) -> TrajectoryIdParts:
+    """Return (phase_label, task_id, role, attempt)."""
     if not trajectory_id.startswith(_TRAJ_PREFIX):
         raise ValueError(f"not a trajectory id: {trajectory_id!r}")
     rest = trajectory_id[len(_TRAJ_PREFIX):]
+    tag, _, rest = rest.partition("/")
+    tag_match = _PHASE_TAG_RE.fullmatch(tag)
     # A raw task id may itself contain '/' (unlikely but not forbidden), so
     # split from the right: the last two components are always role/attempt.
     parts = rest.rsplit("/", 2)
-    if len(parts) != 3 or parts[1] not in MODEL_ROLES:
+    if tag_match is None or len(parts) != 3 or parts[1] not in MODEL_ROLES \
+            or not parts[0]:
         raise ValueError(f"malformed trajectory id: {trajectory_id!r}")
     task_id, role, attempt_s = parts
-    if not task_id:
-        raise ValueError(f"malformed trajectory id: {trajectory_id!r}")
     try:
-        return task_id, role, _parse_serial(attempt_s)
+        attempt = _parse_serial(attempt_s)
     except ValueError:
         raise ValueError(
             f"malformed trajectory id: {trajectory_id!r}") from None
+    label = f"{tag_match.group(1)}:{tag_match.group(2)}"
+    return TrajectoryIdParts(label, task_id, role, attempt)
 
 
 def parse_subtask_id(subtask_id: str) -> Tuple[str, int]:
@@ -179,29 +188,14 @@ def parse_subtask_id(subtask_id: str) -> Tuple[str, int]:
         raise ValueError(f"malformed subtask id: {subtask_id!r}") from None
 
 
-def parse_exam_id(exam_id: str) -> Tuple[str, int]:
-    """Return (skill_id, version) from a generalization exam id."""
-    skill_id, sep, tail = exam_id.rpartition("/v")
-    if not sep or not tail.endswith("/exam"):
-        raise ValueError(f"malformed exam id: {exam_id!r}")
-    version = tail[:-len("/exam")]
+def parse_type_id(type_id: str) -> int:
+    """Return the type's serial."""
+    if not isinstance(type_id, str) or not type_id.startswith(_TYPE_PREFIX):
+        raise ValueError(f"not a subtask type id: {type_id!r}")
     try:
-        return skill_id, _parse_serial(version)
+        serial = _parse_serial(type_id[len(_TYPE_PREFIX):], width=3)
     except ValueError:
-        raise ValueError(f"malformed exam id: {exam_id!r}") from None
-
-
-def parse_attempt_id(attempt_id: str) -> Tuple[str, int]:
-    """Return (exam_id, serial)."""
-    exam_id, _, suffix = attempt_id.rpartition("/")
-    if not exam_id or not suffix.startswith(_ATT):
-        raise ValueError(f"malformed attempt id: {attempt_id!r}")
-    try:
-        return exam_id, _parse_serial(suffix[len(_ATT):])
-    except ValueError:
-        raise ValueError(f"malformed attempt id: {attempt_id!r}") from None
-
-
-def task_id_of(trajectory_id: str) -> str:
-    """Convenience: the task id embedded in a trajectory id."""
-    return parse_trajectory_id(trajectory_id)[0]
+        raise ValueError(f"malformed subtask type id: {type_id!r}") from None
+    if serial < 1:
+        raise ValueError(f"malformed subtask type id: {type_id!r}")
+    return serial

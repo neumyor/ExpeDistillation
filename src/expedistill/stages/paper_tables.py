@@ -190,7 +190,6 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
             "run_dir": str(run_dir),
             "phase_label": label,
             "benchmark": manifest["benchmark"],
-            "mode": manifest["mode"],
             "role": role,
             "model": config["models"].get(f"executor_{role}"),
             "delivery": config["phases"][name]["delivery"].get("name"),

@@ -3,12 +3,10 @@
 ``{"unit_ids": [...]}`` -- the durable "these holes are accepted"
 decision, written before any judgment reads the shrunken sample and
 honoured by every later call with or without the flag (AGENTS.md
-section 6). Stage 1 keeps it per run, the live rounds keep it per round;
-the read/write pair was pasted in three places with identical bodies, so
-it lives here once.
-
-Stage 6's accepted record is a DIFFERENT shape (per-arm id lists) and
-stays in its stage module on purpose.
+section 6). The baseline keeps one record for both arms in
+``stage1_baseline/``; practice and test keep one per arm in the phase
+directory (``<arm>/``). Every record has this same shape, and the
+read/write pair lives here once.
 """
 
 from pathlib import Path
@@ -19,13 +17,12 @@ from expedistill.infra.store import read_json, write_json
 
 __all__ = ["SHORTFALL_NAME", "read_unit_ids", "write_unit_ids"]
 
-#: The record's file name wherever it lives (stage 1 dir, round dir).
+#: The record's file name wherever it lives (baseline dir, arm dir).
 SHORTFALL_NAME = "accepted_infra_shortfall.json"
 
-#: Stage 1's record lives beside its trajectories (the run layout's
+#: The baseline's record lives beside its trajectories (the run layout's
 #: ``stage1_baseline/``); the path helpers keep that layout knowledge
-#: with the record, so the stage-4 live driver can read stage 1's holes
-#: without importing the stage-1 module (layers: methods < stages).
+#: with the record.
 STAGE1_DIR = "stage1_baseline"
 
 

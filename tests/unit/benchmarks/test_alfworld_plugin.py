@@ -570,10 +570,11 @@ def test_the_plugin_declares_the_folder_capability(plugin):
     assert plugin.skill_folder_prompt_name == FOLDER_PROMPT_NAME
     assert FOLDER_PROMPT_NAME in PROMPTS
     assert FOLDER_PROMPT_NO_HISTORY_NAME in PROMPTS
-    # The protocol's other prompts freeze with the task prompt.
-    assert set(plugin.protocol_prompt_names) == {
-        SYSTEM_PROMPT_NAME, PROMPT_NO_HISTORY_NAME,
-        FOLDER_PROMPT_NO_HISTORY_NAME, CORRECTION_PROMPT_NAME}
+    # Every prompt the runner sends is listed in the pack and freezes.
+    assert set(plugin.prompt_pack.executor_prompts) == {
+        SYSTEM_PROMPT_NAME, PROMPT_NO_HISTORY_NAME, PROMPT_NAME,
+        FOLDER_PROMPT_NO_HISTORY_NAME, FOLDER_PROMPT_NAME,
+        CORRECTION_PROMPT_NAME}
 
 
 def test_the_folder_prompts_are_the_plain_prompts_plus_the_read_rule():
@@ -613,6 +614,23 @@ def test_a_folder_unit_shows_the_card_list_and_hides_the_card_text(
     assert "ReadSkill[<location>]" in first_user
     assert CARD_BODY not in first_user
     assert "CATALOG FALLBACK" not in first_user
+
+
+def test_an_empty_folder_keeps_the_folder_prompt_and_the_playbook(
+        plugin, eval_env, tmp_path):
+    # An empty bank is still a folder unit: the folder prompt, the playbook
+    # above an empty card list -- the same place as with cards.
+    task = plugin.load_tasks([GAME_REL])[0]
+    task.meta["skill_folder"] = {"files": [],
+                                 "playbook_text": "Look before acting."}
+    handle = make_fake_handle(role="executor", script=[reply("win")])
+    outcome = plugin.run(task, handle, "", tmp_path)
+    first_user = handle.client.calls[0]["user"]
+    assert "ReadSkill[<location>]" in first_user
+    assert "<available_skills>\n</available_skills>" in first_user
+    assert first_user.index("Look before acting.") \
+        < first_user.index("<available_skills>")
+    assert outcome.meta["skill_list_shown"] is True
 
 
 def test_opening_a_card_costs_no_game_step(plugin, eval_env, tmp_path):

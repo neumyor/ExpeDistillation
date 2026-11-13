@@ -1,4 +1,4 @@
-"""core/contracts.py: the frozen delivery/decision interface shapes (R0).
+"""core/contracts.py: the frozen delivery / learn-operation shapes.
 
 These tests freeze the FIELD SETS -- the join key and the value slots the
 module boundaries doc names -- so any change to a shape has to touch this
@@ -34,11 +34,12 @@ def test_task_list_row_fields():
 
 def test_shapes_construct_with_plain_values():
     unit = ExecutionUnitRow(
-        unit_id="p00:baseline:tb:task1:weak:abcd0123", task_ref="tb:task1",
-        skills_injected=["s1"], skills_block="[s1]", aux={})
+        unit_id="p03:practice:tb:task1:weak:abcd0123", task_ref="tb:task1",
+        skills_injected=["type/001/skill"], skills_block="", aux={})
     task = TaskListRow(
-        target_kind="skill", target_id="s1", action="keep",
-        reason="improved", basis_unit=unit.unit_id)
+        target_kind="skill", target_id="type/001/skill",
+        action="revise_content", reason="opened before the failing step",
+        basis_unit=unit.unit_id)
     assert (unit.unit_id, task.basis_unit) == (unit.unit_id,) * 2
 
 

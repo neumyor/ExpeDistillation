@@ -1,4 +1,4 @@
-"""W1-D (R5): the five delivery drivers' frozen resolve signature.
+"""W1-D (R5): the delivery drivers' frozen resolve signature.
 
 ``resolve(bank, tasks, params) -> ExecutionUnitList`` -- asserted per
 driver, positionally and by keyword, for every registered delivery
@@ -13,87 +13,50 @@ Decision doc: docs/decisions/execute_learn_repair_plan_20261016.md, R5.
 import pytest
 
 from expedistill.benchmarks.base import Task
-from expedistill.blocks.retrieve import derive_categories, select_skills
-from expedistill.composites.live_measurement import pending_groups
 from expedistill.core.contracts import ExecutionUnitRow
-from expedistill.core.ids import (
-    make_exam_id,
-    make_subtask_id,
-    make_task_id,
-    make_trajectory_id,
-)
+from expedistill.core.ids import make_type_id
 from expedistill.core.models import Skill
-from expedistill.infra.reliability import CodeBugError
-from expedistill.infra.store import Store
 from expedistill.inject import bank_reference, format_skills_block
 from expedistill.methods import resolve_fixed
-from expedistill.methods.delivery import (
-    ExamFolderParams,
+from expedistill.methods.delivery.params import (
     FolderParams,
-    GroupByTaskParams,
     NoneParams,
-    RetrievalParams,
     WholeBankParams,
 )
-from expedistill.methods.delivery import retrieval, units
+from expedistill.methods.delivery import units
 from tests.helpers.skills import make_skill
 
-BENCHMARK = "tb"
 
-MARKED = "\n".join([
-    "[When to use] The service rejects connections.",
-    "[Steps]",
-    "1. Check the service status.",
-    "2. Restart the service.",
-    "[Do not use when] The status command already reports running.",
-])
+MARKED = {
+    "when_to_use": "The service rejects connections.",
+    "steps": ["Check the service status.", "Restart the service."],
+    "not_applicable_when": "The status command already reports running.",
+}
 
 
-def _skill(task_id: str, content: str = MARKED, status: str = "pending"
-           ) -> Skill:
-    subtask_id = make_subtask_id(make_trajectory_id(task_id, "strong", 0), 0)
-    return make_skill(subtask_id, content, status=status)
+def _skill(serial: int, status: str = "active") -> Skill:
+    return make_skill(make_type_id(serial), **MARKED, status=status)
 
 
 def _driver(name: str):
-    """The registered driver module for a fixed name (the registry seam).
-
-    retrieval is imported directly: its params have required fields, so
-    resolve_fixed's empty raw mapping cannot build them (the same reason
-    the config always spells them out).
-    """
-    if name == "retrieval":
-        return retrieval
+    """The registered driver module for a fixed name (the registry seam)."""
     return resolve_fixed("delivery", name)[0]
 
 
 def _operands(name: str):
     """A minimal (bank, tasks, params) triple the driver resolves."""
-    prefixed = make_task_id(BENCHMARK, "t1")
-    skill = _skill(prefixed)
+    skill = _skill(1)
     task = Task(task_id="t1", instruction="restart the service")
     if name == "none":
         return None, [task], NoneParams()
     if name == "whole_bank":
         return [skill], [task], WholeBankParams()
-    if name == "exam_folder":
-        return ([skill], [make_exam_id(skill.skill_id, skill.version)],
-                ExamFolderParams())
-    if name == "group_by_task":
-        return {prefixed: [skill]}, [prefixed], GroupByTaskParams()
     if name == "folder":
-        accepted = _skill(prefixed, status="accepted")
-        return [accepted], [task], FolderParams()
-    if name == "retrieval":
-        return ([skill], [task],
-                RetrievalParams(top_k=1, max_categories=2, min_score=0.0))
+        return [skill], [task], FolderParams()
     raise AssertionError(f"unknown delivery driver {name!r}")
 
 
-@pytest.mark.parametrize("name", [
-    "none", "whole_bank", "exam_folder", "group_by_task", "retrieval",
-    "folder",
-])
+@pytest.mark.parametrize("name", ["none", "whole_bank", "folder"])
 def test_frozen_signature_returns_unit_rows(name):
     # The one signature every delivery driver resolves: positional and
     # keyword spellings agree, and every row is a frozen ExecutionUnitRow.
@@ -127,8 +90,7 @@ def test_whole_bank_rows_carry_the_bank_digest():
     # The fixed injection: the bank digest string (never a reference
     # list -- that would change the trajectory bookkeeping) and the
     # whole-bank D9 block, identical on every row.
-    bank = [_skill(make_task_id(BENCHMARK, "t1"), status="accepted"),
-            _skill(make_task_id(BENCHMARK, "t2"), status="accepted")]
+    bank = [_skill(1), _skill(2)]
     driver = _driver("whole_bank")
     rows = driver.resolve(bank, [Task(task_id="t1", instruction="do t1"),
                                  Task(task_id="t2", instruction="do t2")],
@@ -139,123 +101,14 @@ def test_whole_bank_rows_carry_the_bank_digest():
     assert [row.task_ref for row in rows] == ["t1", "t2"]
 
 
-def test_exam_folder_resolves_exam_refs():
-    # The exam-phase operand contract: tasks are the deterministic exam
-    # identifiers (<subtask_id>/exam); delivery resolves the identifier
-    # opaquely and renders the whole-bank catalog (R5, the
-    # generalization-exam ruling).
-    from expedistill.methods.delivery.folder_delivery import render_catalog
-
-    skill = _skill(make_task_id(BENCHMARK, "t1"))
-    exam = make_exam_id(skill.skill_id, skill.version)
-    driver = _driver("exam_folder")
-    rows = driver.resolve([skill], [exam], ExamFolderParams())
-    assert len(rows) == 1
-    row = rows[0]
-    assert row.task_ref == exam
-    assert row.skills_injected == bank_reference([skill])
-    assert row.skills_block == render_catalog([skill])
-
-
-def test_exam_folder_keeps_any_ref_and_renders_an_empty_catalog():
-    # The driver does not join a ref back to a skill (the exam's own
-    # bookkeeping owns that); it renders one catalog row per given ref.
-    # An empty bank renders no catalog at all (the D9 null-state rule).
-    driver = _driver("exam_folder")
-    rows = driver.resolve([], ["whatever"], ExamFolderParams())
+def test_folder_renders_an_empty_catalog_for_an_empty_bank():
+    # An empty bank renders no catalog at all (the D9 null-state rule),
+    # but every row still carries the folder manifest.
+    driver = _driver("folder")
+    rows = driver.resolve([], ["whatever"], FolderParams())
     assert [row.task_ref for row in rows] == ["whatever"]
     assert rows[0].skills_block == ""
     assert rows[0].aux["skill_folder"]["files"] == []
-
-
-def test_group_by_task_rows_match_the_pending_group(tmp_path):
-    # The group view is the previous learn phase's bank artifact; today
-    # pending_groups(store) produces it. The row's references and block
-    # are that derivation verbatim.
-    prefixed = make_task_id(BENCHMARK, "t1")
-    skill = _skill(prefixed)
-    store = Store(tmp_path / "run")
-    store.save(skill, "skills")
-    driver = _driver("group_by_task")
-    rows = driver.resolve(pending_groups(store), [prefixed],
-                          GroupByTaskParams())
-    assert len(rows) == 1
-    row = rows[0]
-    assert row.task_ref == prefixed
-    assert row.skills_injected == [
-        {"skill_id": skill.skill_id, "version": skill.version}]
-    assert row.skills_block == format_skills_block([skill])
-
-
-def test_group_by_task_refuses_a_task_without_a_group():
-    # An empty injection would be a bare run under the with-skills
-    # label; a dispatched group is never empty.
-    driver = _driver("group_by_task")
-    with pytest.raises(CodeBugError, match="no pending skill group"):
-        driver.resolve({}, [make_task_id(BENCHMARK, "t1")],
-                       GroupByTaskParams())
-
-
-def _retrieval_bank_and_tasks():
-    # Accepted members: the retrieval driver ranks over the bank's
-    # accepted set only (the phase artifacts carry pending members too).
-    bank = [_skill(make_task_id(BENCHMARK, "t1"),
-                   "[When to use] The service rejects connections.\n"
-                   "Always read the log file first.", status="accepted"),
-            _skill(make_task_id(BENCHMARK, "t2"),
-                   "[When to use] The config check fails.\n"
-                   "Restart only after the config check.",
-                   status="accepted")]
-    tasks = [Task(task_id="t2", instruction="debug the failing service"),
-             Task(task_id="t1", instruction="read the log file")]
-    return bank, tasks
-
-
-def test_retrieval_rows_match_the_selection_rule():
-    # The rows are exactly select_skills' per-task output (ground truth
-    # recomputed here), one row per task in task-id order -- the order
-    # the audit freezes.
-    bank, tasks = _retrieval_bank_and_tasks()
-    params = RetrievalParams(top_k=1, max_categories=2, min_score=0.0)
-    driver = _driver("retrieval")
-    rows = driver.resolve(bank, tasks, params)
-    assert [row.task_ref for row in rows] == ["t1", "t2"]
-    categories = derive_categories(bank)
-    for row, task in zip(rows, sorted(tasks, key=lambda t: t.task_id)):
-        result = select_skills(task.instruction, bank, categories,
-                               top_k=1, max_categories=2, min_score=0.0)
-        assert row.skills_injected == [
-            units.skill_reference(record) for record in result["selected"]]
-        assert row.skills_block == format_skills_block(result["selected"])
-
-
-def test_retrieval_below_threshold_keeps_the_empty_list_semantics():
-    # [] is a retrieval that reached no threshold -- a bare run INSIDE
-    # the with-bank arm, never the control's None (both markers stay
-    # distinct unit ids too).
-    bank, tasks = _retrieval_bank_and_tasks()
-    params = RetrievalParams(top_k=2, max_categories=2, min_score=0.99)
-    rows = _driver("retrieval").resolve(bank, tasks, params)
-    assert all(row.skills_injected == [] and row.skills_block == ""
-               for row in rows)
-    assert units.unit_id("t1", []) != units.unit_id("t1", None)
-
-
-def test_retrieval_audit_side_channel():
-    # The audit is the side channel (R5): audit_rows recomputes exactly
-    # what resolve resolved, one canonical row per task, and the write
-    # stays write_audit's job. (The Wave 1 legacy delegation seam was
-    # removed with the phase drivers' call-site rewrite, W2-A.)
-    bank, tasks = _retrieval_bank_and_tasks()
-    params = RetrievalParams(top_k=1, max_categories=2, min_score=0.0)
-    driver = _driver("retrieval")
-    rows = driver.resolve(bank, tasks, params)
-    audit = retrieval.audit_rows(bank, tasks, params)
-    assert [row["task_id"] for row in audit] == [row.task_ref
-                                                for row in rows]
-    assert all(set(row) == {"task_id", "routed", "scores", "selected",
-                            "threshold_passed", "categories"}
-               for row in audit)
 
 
 def test_unit_id_digest_rules():
@@ -268,10 +121,7 @@ def test_unit_id_digest_rules():
         "t1", [{"skill_id": "s", "version": 1}])
 
 
-@pytest.mark.parametrize("name", [
-    "none", "whole_bank", "exam_folder", "group_by_task", "retrieval",
-    "folder",
-])
+@pytest.mark.parametrize("name", ["none", "whole_bank", "folder"])
 def test_malformed_resolve_calls_fail_loudly(name):
     # Neither convention accepts a half-spelled call; the dispatcher
     # refuses instead of guessing (the params position is the only

@@ -60,6 +60,7 @@ from expedistill.benchmarks.skill_folder import (
     read_target,
 )
 from expedistill.infra.reliability import ConfigError, ModelOutputError
+from expedistill.inject import format_playbook_block
 from expedistill.llm.call import ModelHandle, call_model
 from expedistill.prompts import PromptSpec, register
 
@@ -207,7 +208,6 @@ register(PromptSpec(
 ))
 
 _ACTION_RE = re.compile(r"<action>(.*?)</action>", re.IGNORECASE | re.DOTALL)
-_THINK_RE = re.compile(r"<think>(.*?)</think>", re.IGNORECASE | re.DOTALL)
 _CJK_RE = re.compile(r"[一-鿿]")
 
 
@@ -399,14 +399,8 @@ def run_unified(
         if skill_folder is None:
             folder_block = skills_block
         else:
-            folder_block = ""
-            if skill_folder.playbook_text:
-                # The delivery's global playbook is always visible, above
-                # the card list: the P0 switch (2026-11-04). Empty keeps
-                # the pre-playbook prompt byte-identical.
-                folder_block += ("Global playbook:\n"
-                                 + skill_folder.playbook_text.strip()
-                                 + "\n\n")
+            # The phase's playbook stays visible above the card list.
+            folder_block = format_playbook_block(skill_folder.playbook_text)
             folder_block += ("Available skills:\n"
                              + skill_folder.available_skills_block() + "\n")
             if opened:

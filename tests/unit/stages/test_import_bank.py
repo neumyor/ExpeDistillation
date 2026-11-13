@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from expedistill.core import ids
 from expedistill.core.models import Skill
 from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
@@ -20,10 +19,7 @@ from expedistill.methods.delivery.folder_delivery import skill_dirname
 from expedistill.stages.import_bank import (
     BANK_ORIGIN_NAME,
     SKILL_ID_NAMESPACE,
-    agentbrew_frozen_to_notes_jsonl,
-    expel_rules_to_notes_jsonl,
     import_external_bank,
-    upskill_curated_acp_to_notes_jsonl,
 )
 
 NOTE_ONE = "Check the stove before the pan.\nThen turn the knob."
@@ -69,8 +65,8 @@ def test_a_markdown_file_is_one_skill_summarised_by_its_first_heading(
     (row,) = _bank_rows(tmp_path / "run")
     assert row["skill_id"] == f"{SKILL_ID_NAMESPACE}/skillopt/playbook"
     assert row["summary"] == "Search Playbook"
-    assert row["content"] == "Intro line.\n\n# Search Playbook #\n\nBody text."
-    assert row["status"] == "accepted" and row["version"] == 1
+    assert row["verbatim_text"] == "Intro line.\n\n# Search Playbook #\n\nBody text."
+    assert row["status"] == "active" and row["version"] == 1
     assert result["n_skills"] == 1
     assert result["skill_ids"] == [row["skill_id"]]
 
@@ -107,7 +103,7 @@ def test_a_markdown_file_with_front_matter_keeps_its_description(tmp_path):
     (row,) = _bank_rows(tmp_path / "run")
     assert row["skill_id"] == "import/trace2skill/wise-doc"
     assert row["summary"] == "A wise doc."
-    assert row["content"] == "# Heading\n\nText."
+    assert row["verbatim_text"] == "# Heading\n\nText."
 
 
 @pytest.mark.parametrize("text", ["", "\n\n  \n", "---\nname: x\n---\n"])
@@ -145,8 +141,8 @@ def test_a_skill_folder_gives_one_skill_per_directory_in_name_order(
     assert [row["summary"] for row in rows] == [
         "Quote the passage exactly.",
         "Search the full name before answering."]
-    assert rows[0]["content"] == "Quote it."
-    assert rows[1]["content"] == "# Search first\n\nSearch the full name."
+    assert rows[0]["verbatim_text"] == "Quote it."
+    assert rows[1]["verbatim_text"] == "# Search first\n\nSearch the full name."
     # What the importer did not carry over is listed, not dropped quietly.
     assert result["ignored_files"] == [
         "empty-dir/ (no SKILL.md)", "search-first/references/notes.md"]
@@ -225,17 +221,18 @@ def _notes_file(tmp_path: Path) -> Path:
                   "\n".join(json.dumps(row) for row in rows) + "\n\n")
 
 
-def test_notes_become_one_skill_each_with_scope_as_the_group(tmp_path):
+def test_notes_become_one_skill_each(tmp_path):
     import_external_bank(_notes_file(tmp_path), "notes_jsonl",
                          tmp_path / "run", origin="expel")
 
     rows = _bank_rows(tmp_path / "run")
+    assert all(row["when_to_use"] == "" and row["steps"] == []
+               and "group" not in row for row in rows)
     assert [row["skill_id"] for row in rows] == [
         "import/expel/r1", "import/expel/note-0002", "import/expel/7"]
     assert [row["summary"] for row in rows] == [
         "Stove first", "Prefer exact quotes from the passage.", "Seven."]
-    assert [row["group"] for row in rows] == ["kitchen", None, None]
-    assert rows[0]["content"] == NOTE_ONE
+    assert rows[0]["verbatim_text"] == NOTE_ONE
 
 
 @pytest.mark.parametrize("line", [
@@ -243,7 +240,6 @@ def test_notes_become_one_skill_each_with_scope_as_the_group(tmp_path):
     "[1, 2]",
     json.dumps({"title": "no text"}),
     json.dumps({"text": "   "}),
-    json.dumps({"text": "x", "scope": 3}),
     json.dumps({"text": "x", "id": True}),
 ])
 def test_a_bad_note_is_refused_and_leaves_no_run_directory(tmp_path, line):
@@ -285,7 +281,7 @@ def test_two_notes_with_one_id_are_refused(tmp_path):
 # What an imported skill is
 # ---------------------------------------------------------------------------
 
-def test_imported_skills_are_accepted_members_of_the_bank_and_the_store(
+def test_imported_skills_are_active_members_of_the_bank_and_the_store(
         tmp_path):
     result = import_external_bank(_notes_file(tmp_path), "notes_jsonl",
                                   tmp_path / "run", origin="expel")
@@ -298,12 +294,10 @@ def test_imported_skills_are_accepted_members_of_the_bank_and_the_store(
     assert sorted(store.ids("skills")) == sorted(result["skill_ids"])
     assert from_store == from_bank
     for skill in from_bank:
-        assert skill.status == "accepted"
-        assert skill.discard_reason is None and skill.merged_from == []
-        assert skill.subtask_id == skill.skill_id
+        assert skill.status == "active"
+        assert skill.discard_reason is None
+        assert skill.subtask_type == ""
         assert skill.source_subtasks == []
-        # No loop that picks stage-3 candidates ever sees an external skill.
-        assert not ids.is_stage3_candidate(skill)
 
 
 def test_every_imported_skill_has_its_own_delivery_directory(tmp_path):
@@ -423,135 +417,3 @@ def test_a_missing_source_is_refused(tmp_path, source_format):
         import_external_bank(tmp_path / "nope", source_format,
                              tmp_path / "run", origin="expel")
     assert not (tmp_path / "run").exists()
-
-
-# ---------------------------------------------------------------------------
-# Converters (samples hand-written in the formats the baselines' code reads
-# and writes)
-# ---------------------------------------------------------------------------
-
-# ExpeL's insights: single-sentence strings ending in a period, the shape
-# parse_rules in agent/expel.py keeps.
-EXPEL_RULES = [
-    "When the task asks to heat an object, go to the microwave first.",
-    "Always check every drawer before concluding an item is missing.",
-]
-
-# UpSkill's curated TB guidance: one CLAUDE.md per category, led by an H1.
-UPSKILL_CLAUDE_MD = {
-    "software-engineering": (
-        "# Software Engineering - Curated Guidance\n\n"
-        "## Build C from Source Without X11\n"
-        "Use **distro package source**, not upstream websites.\n"),
-    "debugging": "# Debugging - Curated Guidance\n\nRead the log first.\n",
-}
-
-
-def test_expel_rules_become_one_note_each_in_rank_order(tmp_path):
-    notes = _write(tmp_path / "notes.jsonl",
-                   expel_rules_to_notes_jsonl(EXPEL_RULES))
-
-    import_external_bank(notes, "notes_jsonl", tmp_path / "run",
-                         origin="expel")
-
-    rows = _bank_rows(tmp_path / "run")
-    assert [row["skill_id"] for row in rows] == [
-        "import/expel/rule-001", "import/expel/rule-002"]
-    assert [row["content"] for row in rows] == EXPEL_RULES
-    assert [row["summary"] for row in rows] == EXPEL_RULES
-
-
-@pytest.mark.parametrize("rules", [[], [""], ["fine.", "  "], ["ok.", 3]])
-def test_a_bad_expel_rule_list_is_refused(rules):
-    with pytest.raises(ConfigError):
-        expel_rules_to_notes_jsonl(rules)
-
-
-def test_upskill_categories_become_one_note_each_summarised_by_the_h1(
-        tmp_path):
-    notes = _write(tmp_path / "notes.jsonl",
-                   upskill_curated_acp_to_notes_jsonl(UPSKILL_CLAUDE_MD))
-
-    import_external_bank(notes, "notes_jsonl", tmp_path / "run",
-                         origin="agentbrew")
-
-    rows = _bank_rows(tmp_path / "run")
-    assert [row["skill_id"] for row in rows] == [
-        "import/agentbrew/debugging", "import/agentbrew/software-engineering"]
-    assert [row["summary"] for row in rows] == [
-        "Debugging - Curated Guidance",
-        "Software Engineering - Curated Guidance"]
-    assert rows[1]["content"] == UPSKILL_CLAUDE_MD[
-        "software-engineering"].strip()
-
-
-@pytest.mark.parametrize("files", [{}, {"debugging": " \n"}])
-def test_bad_upskill_guidance_is_refused(files):
-    with pytest.raises(ConfigError):
-        upskill_curated_acp_to_notes_jsonl(files)
-
-
-# AgentBrew's frozen pool: the envelope tbench_eval/agentbrew/memory.py
-# freezes (note fields from agentbrew/notes.py).
-AGENTBREW_ENVELOPE = {
-    "digest": "d",
-    "payload": {
-        "contract_hash": "c",
-        "index": {},
-        "memory": {
-            "generation": 2,
-            "provisional": None,
-            "events": {},
-            "stats": {"git-merge": {"selected": 1, "success": 1,
-                                    "failure": 0}},
-            "notes": {
-                "git-merge": {
-                    "version": 1, "provenance": {"task": "fix-git"},
-                    "note": {
-                        "note_key": "git-merge",
-                        "trigger_pattern": "A merge hits conflicts.",
-                        "corrective_rule": "Compare both sides first.",
-                        "minimal_steps": ["Run git diff.", "Edit hunks."],
-                        "tags": ["git"], "quality_score": 0.9,
-                        "scope": "git"}},
-                "no-scope": {
-                    "version": 1, "provenance": {},
-                    "note": {
-                        "note_key": "no-scope",
-                        "trigger_pattern": "Output is truncated.",
-                        "corrective_rule": "Redirect to a file.",
-                        "minimal_steps": ["Use > out.txt."],
-                        "tags": ["linux"], "quality_score": 0.5,
-                        "scope": None}},
-            },
-        },
-    },
-}
-
-
-def test_agentbrew_notes_keep_the_text_the_student_was_shown(tmp_path):
-    notes = _write(tmp_path / "notes.jsonl",
-                   agentbrew_frozen_to_notes_jsonl(AGENTBREW_ENVELOPE))
-
-    import_external_bank(notes, "notes_jsonl", tmp_path / "run",
-                         origin="agentbrew")
-
-    rows = _bank_rows(tmp_path / "run")
-    assert [row["skill_id"] for row in rows] == [
-        "import/agentbrew/git-merge", "import/agentbrew/no-scope"]
-    assert rows[0]["content"] == "\n".join([
-        "Note: git-merge", "Trigger: A merge hits conflicts.",
-        "Rule: Compare both sides first.", "1. Run git diff.",
-        "2. Edit hunks."])
-    assert rows[0]["summary"] == "A merge hits conflicts."
-    assert [row["group"] for row in rows] == ["git", None]
-
-
-@pytest.mark.parametrize("envelope", [
-    {},
-    {"payload": {"memory": {"notes": {}}}},
-    {"payload": {"memory": {"notes": {"k": {"note": {"note_key": "k"}}}}}},
-])
-def test_a_bad_agentbrew_pool_is_refused(envelope):
-    with pytest.raises(ConfigError):
-        agentbrew_frozen_to_notes_jsonl(envelope)

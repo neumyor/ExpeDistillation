@@ -1,43 +1,36 @@
 """The method table: (family, name) -> driver, params.
 
 Plain data on purpose (the plan's "explicit list, no auto-discovery"
-discipline). R8 re-keyed the table to the five CONTENT families --
-``delivery``, ``execution``, ``review``, ``author``, ``curation`` --
-and retired the four v3 slot keys (segmentation.llm,
-authoring.distill_diagnose, acceptance.exam, acceptance.live_run): the
-v4 config declares phases, not slots, and a learn PHASE is never a
-registry entry -- its content methods (review/author/curation) are.
-Resolving a family imports only what that resolution needs:
+discipline). The table is keyed by the four CONTENT families --
+``delivery``, ``execution``, ``review``, ``author``; a learn PHASE is
+never a registry entry -- its content methods (review/author) are. Resolving a family imports only what that
+resolution needs:
 
 * ``resolve_params`` imports the family's light params package (never a
   driver) and builds the params with loud validation -- stage 0 does
   this for every family of every phase before anything freezes, so a
   typo in the config stops the run before a single task loads.
-* ``resolve`` additionally imports the driver module on demand, so the
-  exam dispatch never loads the live driver and vice versa. The frozen
-  prompt-name surface is the import-time snapshot (``METHOD_PROMPT_
-  NAMES``); importing ``composites`` as a package still pulls the live
-  blocks in through ``composites/__init__`` (baseline behaviour), so the
-  guarded invariant is the name set, not the module graph.
+* ``resolve`` additionally imports the driver module on demand. The
+  frozen prompt-name surface is the import-time snapshot
+  (``METHOD_PROMPT_NAMES``), so the guarded invariant is the name set,
+  not the module graph.
 * ``resolve_fixed`` resolves a name that is not a config choice (the
   bare control arm's ``none`` delivery) with an empty raw mapping
   through the same table and validation.
 
 The raw mapping is the PHASE'S OWN nested mapping (v4): it carries the
 method's ``name`` plus that method's parameters, e.g. a learn phase's
-``curate`` value or an execute phase's ``delivery`` value. A family
+``author`` value or an execute phase's ``delivery`` value. A family
 name asked for by the config that is not in the table is a ConfigError
 listing what the family offers -- same contract as the named-rule
 registries (blocks/rules.py).
 
-Driver-less entries (execution) are not a gap: the
+Driver-less entries (execution, review, author) are not a gap: the
 phase driver consumes their params directly (there is no uniform driver
 surface to dispatch to, and inventing one ahead of the first consumer
 is the over-design the repair plan forbids). Cross-constraint checks
-that used to live on entries (v3's check_authoring, check_live_run)
-moved where their inputs live: the phase-shape checks into
-core.config's load-time checklist, the rule-name validation into
-stage 0.
+live where their inputs live: the phase-shape checks in core.config's
+load-time checklist, the rule-name validation in stage 0.
 """
 
 import importlib
@@ -46,17 +39,11 @@ from typing import Any, Dict, Mapping, NamedTuple, Optional, Tuple
 from expedistill.core.config import ConfigError
 from expedistill.methods.params import build_params
 
-__all__ = ["FAMILIES", "resolve", "resolve_fixed", "resolve_params"]
-
-#: The five method families. Execute phases name delivery and execution;
-#: learn phases name review, author and curation.
-FAMILIES = ("delivery", "execution", "review", "author", "curation")
+__all__ = ["resolve", "resolve_fixed", "resolve_params"]
 
 #: One table entry: the driver module (None while the phase driver
 #: consumes the params directly), the light module holding the params
-#: class. The v3 ``check`` hook is gone: its two users retired with the
-#: v3 slots, and their constraints moved to the config loader (load-time
-#: checklist) and stage 0 (rule-name validation).
+#: class.
 class _Entry(NamedTuple):
     driver: Optional[str]
     params: str
@@ -67,69 +54,34 @@ class _Entry(NamedTuple):
 _ENTRIES: Dict[Tuple[str, str], _Entry] = {
     ("delivery", "whole_bank"):
         _Entry("expedistill.methods.delivery.whole_bank",
-               "expedistill.methods.delivery", "WholeBankParams"),
-    ("delivery", "retrieval"):
-        _Entry("expedistill.methods.delivery.retrieval",
-               "expedistill.methods.delivery", "RetrievalParams"),
+               "expedistill.methods.delivery.params", "WholeBankParams"),
     ("delivery", "none"):
         _Entry("expedistill.methods.delivery.none",
-               "expedistill.methods.delivery", "NoneParams"),
-    # The generalization exam's delivery: the whole-bank catalog the
-    # model searches before opening a skill (text only, no folder on
-    # disk). Paired with the ``exam`` execution by the phase driver.
-    ("delivery", "exam_folder"):
-        _Entry("expedistill.methods.delivery.exam_folder",
-               "expedistill.methods.delivery.exam_folder",
-               "ExamFolderParams"),
-    ("delivery", "group_by_task"):
-        _Entry("expedistill.methods.delivery.group_by_task",
-               "expedistill.methods.delivery", "GroupByTaskParams"),
-    # The skill-folder play (M2): a catalog injection, test role only
-    # (core.config's load-time checklist holds that boundary and the
-    # pairing with the real_folder execution below).
+               "expedistill.methods.delivery.params", "NoneParams"),
+    # The skill-folder play: practice and test phases (core.config's
+    # load-time checklist holds that boundary and the pairing with the
+    # real_folder execution below).
     ("delivery", "folder"):
         _Entry("expedistill.methods.delivery.folder_delivery",
-               "expedistill.methods.delivery", "FolderParams"),
-    # The live phase's progressive-disclosure delivery: one folder per
-    # pending task group, reusing the folder params and materializer.
-    ("delivery", "folder_by_task"):
-        _Entry("expedistill.methods.delivery.folder_by_task",
-               "expedistill.methods.delivery", "FolderParams"),
-    # R8's new family: what kind of run an execute phase makes. Driver-
-    # less -- the phase driver consumes the params directly.
+               "expedistill.methods.delivery.params", "FolderParams"),
+    # What kind of run an execute phase makes. Driver-less -- the phase
+    # driver consumes the params directly.
     ("execution", "real"):
         _Entry(None, "expedistill.methods.execution",
                "RealExecutionParams"),
-    ("execution", "exam"):
-        _Entry(None, "expedistill.methods.execution",
-               "ExamExecutionParams"),
-    # The skill-folder play (M3): real's folder twin, paired with the
-    # folder delivery by core.config's load-time checklist (test role
-    # only).
+    # The skill-folder play: real's folder twin, paired with the folder
+    # delivery by core.config's load-time checklist.
     ("execution", "real_folder"):
         _Entry(None, "expedistill.methods.execution",
                "RealFolderExecutionParams"),
-    ("author", "distill_diagnose"):
-        _Entry("expedistill.methods.author.write",
-               "expedistill.methods.author", "AuthoringParams"),
-    # P02's cross-task cluster writer: trigger-family classification,
-    # per-family problem clustering, then one skill per cluster. The
-    # phase-level orchestration lives in stages/learn_add_cluster.
-    ("author", "cluster_by_trigger"):
-        _Entry("expedistill.methods.author.cluster_by_trigger",
-               "expedistill.methods.author", "ClusterAuthoringParams"),
-    # The learn phase's decision + evidence driver.  It replaces the
-    # former evidence / attribution / decision slots and owns the
-    # baseline-gap, live and exam review strategies.
+    # Every learn phase's card writer: segments are typed into the run's
+    # subtask type table and each type gets at most one card. Driver-less:
+    # stages/phase_learn orchestrates methods/cards.
+    ("author", "subtask_cards"):
+        _Entry(None, "expedistill.methods.cards", "CardAuthoringParams"),
+    # The learn phase's parameters; stages/phase_learn runs the flow.
     ("review", "review"):
-        _Entry("expedistill.methods.review.driver",
-               "expedistill.methods.review", "ReviewParams"),
-    ("curation", "agentbrew"):
-        _Entry("expedistill.methods.curation.agentbrew",
-               "expedistill.methods.curation", "AgentBrewParams"),
-    ("curation", "none"):
-        _Entry("expedistill.methods.curation.none",
-               "expedistill.methods.curation", "NoneParams"),
+        _Entry(None, "expedistill.methods.review", "ReviewParams"),
 }
 
 
@@ -203,7 +155,7 @@ def resolve_params(family: str, raw: Mapping[str, Any]) -> Any:
 def resolve(family: str, raw: Mapping[str, Any]) -> Tuple[Any, Any]:
     """(driver module, params) for the family; imports the driver now.
 
-    For a driver-less family (execution)
+    For a driver-less family (execution, review, author)
     this is a construction bug in the caller: the phase driver owns those params
     and must not ask for a driver that does not exist.
     """

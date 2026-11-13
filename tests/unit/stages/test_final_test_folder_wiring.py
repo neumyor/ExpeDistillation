@@ -1,11 +1,10 @@
-"""Skill-folder M3, the stage wiring: materialize once per phase, attach
-to the with-bank units' tasks, refuse on an incapable plugin.
+"""Skill-folder M3, the stage wiring of the test phase: materialize once
+per phase, attach to the with-bank units' tasks, refuse on an incapable
+plugin.
 
-The test phase is the only phase a folder unit can reach (the load-time
-pairing holds it there), so ``run_test`` is the one driver that
-materializes: the folder delivery's rows share ONE phase-level manifest,
+The folder delivery's rows share ONE phase-level manifest,
 ONE ``materialize_skill_folder`` call under the phase directory serves
-every unit (idempotent across resumes), and ``_plan_units`` attaches
+every unit (idempotent across resumes), and ``plan_units`` attaches
 (manifest, directory) to exactly those units' Task meta -- the plugin's
 own opaque channel. The bare control arm's rows never carry the
 manifest, so its units stay bare.
@@ -39,31 +38,25 @@ from expedistill.core.config import (
     ExperimentConfig,
     PhaseInstance,
 )
-from expedistill.core.ids import (
-    make_skill_id,
-    make_subtask_id,
-    make_task_id,
-    make_trajectory_id,
-)
-from expedistill.core.models import Skill
+from expedistill.core.ids import make_type_id
 from expedistill.infra.reliability import ConfigError as InfraConfigError
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import make_fake_handle
 from expedistill.stages import phase_execute
 from expedistill.stages.context import RunSettings, StageContext
+from expedistill.inject.skill_text import render_card
+from tests.helpers.skills import make_skill
 
 _FAKE = "fakebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
 TASK_IDS = ("t1", "t2", "t3")
 
-MARKED = "\n".join([
-    "[When to use] The service rejects connections.",
-    "[Steps]",
-    "1. Check the service status.",
-    "2. Restart the service.",
-    "[Do not use when] The status command already reports running.",
-])
+MARKED = {
+    "when_to_use": "The service rejects connections.",
+    "steps": ["Check the service status.", "Restart the service."],
+    "not_applicable_when": "The status command already reports running.",
+}
 
 
 class FolderPlugin(BenchmarkPlugin):
@@ -135,10 +128,9 @@ def _clean():
 
 def _config():
     return ExperimentConfig(
-        benchmark=_FAKE, mode="split",
+        benchmark=_FAKE,
         models={"executor_strong": "big-model",
                 "executor_weak": "weak-7b"},
-        weak_profile="a weak model",
         n_attempts_strong=1, n_attempts_weak=1,
         rules={}, sequence=["baseline"],
         phases={"baseline": {"kind": "execute", "role": "baseline",
@@ -157,7 +149,7 @@ def _ctx(tmp_path):
         usage=UsageRecorder(run_dir / "llm_requests" / "usage.jsonl"),
         handles={role: make_fake_handle(role)
                  for role in ("executor_strong", "executor_weak",
-                              "examiner", "answerer", "judge", "auditor")},
+                              "judge")},
         workdir_root=run_dir / "workdirs",
         run_settings=RunSettings(),
     )
@@ -176,12 +168,8 @@ def _c_phase(compare="fresh_bare"):
         task_ids=TASK_IDS)
 
 
-def _group_skill(task_id, status="accepted"):
-    subtask_id = make_subtask_id(
-        make_trajectory_id(make_task_id(_FAKE, task_id), "strong", 0), 0)
-    return Skill(skill_id=make_skill_id(subtask_id), content=MARKED,
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 version=1, status=status)
+def _card(serial, status="active"):
+    return make_skill(make_type_id(serial), status=status, **MARKED)
 
 
 def _write_bank(ctx, skills):
@@ -202,7 +190,7 @@ def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
         monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, FolderPlugin(capable=True))
     ctx = _ctx(tmp_path)
-    skills = [_group_skill("t1"), _group_skill("t2")]
+    skills = [_card(1), _card(2)]
     _write_bank(ctx, skills)
     phase = _c_phase()
 
@@ -228,7 +216,7 @@ def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
         assert call["task"].meta.get("skill_folder") is None
         assert call["task"].meta.get("skill_folder_dir") is None
     # The folder on disk: the catalog plus one <skill>/SKILL.md per
-    # accepted skill (frontmatter plus the skill body).
+    # active skill (frontmatter plus the skill body).
     assert sorted(path.relative_to(folder_dir).as_posix()
                   for path in folder_dir.rglob("*") if path.is_file()) == \
         sorted([manifest["catalog_filename"]]
@@ -238,7 +226,7 @@ def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
     for skill in skills:
         filename = manifest["files"][skills.index(skill)]["filename"]
         text = (folder_dir / filename).read_text(encoding="utf-8")
-        assert text.split("\n---\n", 1)[1].lstrip("\n") == skill.content
+        assert text.split("\n---\n", 1)[1].lstrip("\n") == render_card(skill)
     # The skills block handed to the plugin is the catalog (the delivery's
     # frozen row shape); the capable plugin is the one that must not
     # inject it -- the prompt test holds that side.
@@ -249,7 +237,7 @@ def test_c_phase_materializes_once_and_attaches_to_with_bank_units(
 def test_a_resumed_c_phase_materializes_idempotently(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, FolderPlugin(capable=True))
     ctx = _ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1")])
+    _write_bank(ctx, [_card(1)])
     phase = _c_phase()
     phase_execute.run(ctx, phase)
     folder_dir = Path(ctx.run_dir) / "phases" / "p03_test" / "skill_folder"
@@ -267,25 +255,30 @@ def test_a_resumed_c_phase_materializes_idempotently(monkeypatch, tmp_path):
     assert before == after
 
 
-def test_an_empty_accepted_bank_runs_the_folder_units_bare(
-        monkeypatch, tmp_path):
-    # The D9 empty-injection lesson at the folder boundary: the manifest
-    # lists no files, so no folder materializes, nothing attaches, and
-    # the with-bank units run with an empty skills block -- never a
-    # guidance claiming skills that do not exist.
+def test_an_empty_bank_keeps_the_folder_presentation(monkeypatch,
+                                                     tmp_path):
+    # An empty bank (here: its only card discarded) still runs the
+    # with-bank units as folder units: the manifest with no files and the
+    # (empty) materialized directory attach as with a bank, so the plugin
+    # keeps its folder prompt; only the catalog is empty. The control arm
+    # stays bare.
     plugin = _install_plugin(monkeypatch, FolderPlugin(capable=True))
     ctx = _ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1", status="pending")])
+    _write_bank(ctx, [_card(1, status="discarded")])
     phase = _c_phase()
 
     result = phase_execute.run(ctx, phase).summary
 
     assert result["complete"] is True
-    for call in plugin.calls:
-        assert call["skills_block"] == ""
-        assert call["task"].meta.get("skill_folder") is None
-    assert not (Path(ctx.run_dir) / "phases" / "p03_test"
-                / "skill_folder").exists()
+    folder_dir = Path(ctx.run_dir) / "phases" / "p03_test" / "skill_folder"
+    with_bank = [call for call in plugin.calls
+                 if call["task"].meta.get("skill_folder") is not None]
+    assert len(with_bank) == len(TASK_IDS)
+    for call in with_bank:
+        assert call["task"].meta["skill_folder"]["files"] == []
+        assert call["task"].meta["skill_folder_dir"] == str(folder_dir)
+    assert all(call["skills_block"] == "" for call in plugin.calls)
+    assert folder_dir.is_dir() and not any(folder_dir.iterdir())
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +289,7 @@ def test_a_folder_c_phase_on_an_incapable_plugin_stops_loudly(
         monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, FolderPlugin(capable=False))
     ctx = _ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1")])
+    _write_bank(ctx, [_card(1)])
     phase = _c_phase()
 
     with pytest.raises(InfraConfigError, match="does not support skill"):
@@ -304,17 +297,14 @@ def test_a_folder_c_phase_on_an_incapable_plugin_stops_loudly(
     assert plugin.calls == []  # refused before any unit ran
 
 
-def test_an_incapable_plugin_is_refused_even_with_an_empty_accepted_bank(
+def test_an_incapable_plugin_is_refused_even_with_an_empty_bank(
         monkeypatch, tmp_path):
-    # The M6 review's empty-bank gap: the per-unit E1 guard fires only
-    # when a unit carries the manifest, and an empty accepted bank
-    # attaches none -- without the phase-level check this configuration
-    # (searchqa/alfworld + folder + empty bank) would run the whole
-    # phase bare under the folder experiment's name. The phase driver
-    # now refuses it BEFORE dispatch, bank or no bank.
+    # The phase driver refuses a folder phase on an incapable plugin
+    # BEFORE dispatch, bank or no bank (the per-unit E1 guard is the
+    # second layer).
     plugin = _install_plugin(monkeypatch, FolderPlugin(capable=False))
     ctx = _ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1", status="pending")])
+    _write_bank(ctx, [_card(1, status="discarded")])
     phase = _c_phase()
 
     with pytest.raises(InfraConfigError, match="does not support skill"):

@@ -1,4 +1,4 @@
-"""D3 score statistics and the D4 rule application (layer 4).
+"""D3 score statistics (layer 4).
 
 Pure counting over Trajectory objects; no model, no disk. The metric
 definitions follow the TB campaign's ``scripts/tb21/tb_stats.py`` so stage-1
@@ -38,10 +38,6 @@ always be empty, and two arms could be compared over different task sets).
 Callers that know which units they asked for pass ``expected`` (task_id ->
 n_attempts) and every expected unit without a trajectory is counted as one
 infra attempt.
-
-``failed_tasks`` applies a *named* task_select rule (``blocks/rules.py``) to
-each task's metrics -- D4 is the application, the rule is the definition, so
-redefining "failed" means registering a new named rule, not editing code here.
 """
 
 from __future__ import annotations
@@ -50,7 +46,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set
 
 from expedistill.core.models import Trajectory
 
-__all__ = ["compute_task_metrics", "summarize", "failed_tasks"]
+__all__ = ["compute_task_metrics", "summarize"]
 
 
 def compute_task_metrics(
@@ -190,19 +186,3 @@ def summarize(
             if per_task["infra"] > 0),
         "aux": aux,
     }
-
-
-def failed_tasks(
-    task_metrics: Dict[str, Dict[str, int]],
-    rule: Callable[[Dict[str, int], int], bool],
-    n_attempts: int,
-) -> List[str]:
-    """Return the sorted task_ids for which ``rule(metrics, n_attempts)`` holds.
-
-    D4: the caller resolves the named rule from ``blocks.rules`` (config names
-    are identity there) and passes the callable here, so this block stays
-    agnostic of which rule -- or which definition of "failed" -- is in effect.
-    """
-    return sorted(
-        task_id for task_id, per_task in task_metrics.items()
-        if rule(per_task, n_attempts))

@@ -1,31 +1,29 @@
-"""blocks/adherence.py: both judges' output validation, the card-step
-parser, and what each prompt is given."""
+"""blocks/adherence.py: both judges' output validation and what each
+prompt is given."""
 
 import pytest
 
 from expedistill.blocks.adherence import (
     ADHERENCE_STATUSES,
-    card_steps,
     judge_adherence,
     judge_applicability,
     render_card_listing,
 )
+from expedistill.core.ids import make_type_id
 from expedistill.infra.reliability import ModelOutputError
+from expedistill.inject.skill_text import render_card
 from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.skills import make_skill
+
+TYPE_ID = make_type_id(1)
 
 CARDS = [
     {"skill_id": "s/alpha", "description": "Alpha teaches alpha. Use when A."},
     {"skill_id": "s/beta", "description": "Beta\nteaches beta."},
 ]
-CARD = "\n".join([
-    "[When to use] When it matters.",
-    "[Steps]",
-    "1. first",
-    "2. second line one",
-    "second line two",
-    "3. third",
-    "[Do not use when] Never.",
-])
+SKILL = make_skill(TYPE_ID, "When it matters.",
+                   steps=["first", "second line one\nsecond line two",
+                          "third"])
 
 
 def _entry(skill_id, applicable=True, first_step=1, reason="because"):
@@ -40,9 +38,9 @@ def _applicability(entries, cards=CARDS, n_steps=5):
         n_steps, handle), handle
 
 
-def _adherence(steps, card=CARD):
+def _adherence(steps, skill=SKILL):
     handle = make_fake_handle("judge", json_script({"steps": steps}))
-    return judge_adherence(card, "step 2\naction: a\nobservation: b",
+    return judge_adherence(skill, "step 2\naction: a\nobservation: b",
                            handle), handle
 
 
@@ -51,25 +49,8 @@ def _step(number, status="followed", evidence="e"):
 
 
 # ---------------------------------------------------------------------------
-# card_steps / render_card_listing
+# render_card_listing
 # ---------------------------------------------------------------------------
-
-def test_card_steps_numbers_items_and_keeps_continuation_lines():
-    assert card_steps(CARD) == [
-        "first", "second line one\nsecond line two", "third"]
-
-
-def test_card_steps_is_not_split_by_a_stray_number_in_a_continuation():
-    card = "[Steps]\n1. run\n3. not the next item\n2. real second"
-    assert card_steps(card) == ["run\n3. not the next item", "real second"]
-
-
-@pytest.mark.parametrize("card", [
-    "no markers at all", "[When to use] x\n[Do not use when] y",
-    "[Steps]\nfree text only"])
-def test_a_card_without_numbered_steps_has_none(card):
-    assert card_steps(card) == []
-
 
 def test_listing_puts_id_and_one_line_description_per_card():
     assert render_card_listing(CARDS) == (
@@ -158,7 +139,7 @@ def test_adherence_returns_one_item_per_numbered_step_in_order():
         {"number": 2, "status": "partial", "evidence": "q"},
         {"number": 3, "status": "not_reached", "evidence": ""}]
     prompt = handle.client.calls[0]["user"]
-    assert CARD in prompt
+    assert render_card(SKILL) in prompt
     assert "has 3 numbered item(s)" in prompt
     assert "action: a" in prompt
 
@@ -184,8 +165,10 @@ def test_adherence_statuses_are_the_four_words():
         "followed", "partial", "skipped", "not_reached")
 
 
-def test_a_card_without_numbered_steps_is_not_sent_to_the_model():
+def test_a_skill_without_steps_is_not_sent_to_the_model():
     handle = make_fake_handle("judge", json_script({"steps": []}))
+    imported = make_skill(TYPE_ID, "", steps=[], not_applicable_when="",
+                          verbatim_text="free text")
     with pytest.raises(ValueError):
-        judge_adherence("[Steps]\nfree text", "view", handle)
+        judge_adherence(imported, "view", handle)
     assert handle.client.calls == []

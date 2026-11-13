@@ -1,19 +1,18 @@
 """The whole-bank delivery driver: one fixed injection for the whole arm.
 
-The frozen v1 behaviour (README stage 6): every test task's weak run
-sees the entire curated bank, and the with-bank trajectories record the
-bank digest string as ``skills_injected`` (inject.bank_reference). The
+Every task of the arm sees the entire phase bank (the bank artifact the
+latest learn phase left), and the with-bank trajectories record the bank
+digest string as ``skills_injected`` (inject.bank_reference). The
 per-task resolver returns that same digest and block for every task, so
 the trajectory bookkeeping stays the frozen whole-bank shape (a digest
 string, never a reference list).
 
-The injection is the bank's ACCEPTED members only
-(:func:`units.accepted_bank`): the phase artifacts carry pending
-members too, but the curated accepted set is what "the bank" meant
-before the artifacts existed, so that is what gets injected whole.
+The injection is the bank's ACTIVE cards only
+(:func:`units.active_bank`): the phase artifacts carry discarded
+members too, and they are never delivered.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
-the curated skill bank (Skill objects or bank rows, whatever
+the skill bank (Skill objects or bank rows, whatever
 ``inject.bank_reference`` accepts), ``tasks`` the phase's tasks in any
 form carrying a task identity, and ``params`` the WholeBankParams (``verbatim``, default off).
 One row per task, every row the same fixed (bank digest, D9 block)
@@ -24,7 +23,7 @@ from typing import Any, Sequence
 
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.inject import bank_reference, format_skills_block
-from expedistill.methods.delivery import WholeBankParams
+from expedistill.methods.delivery.params import WholeBankParams
 from expedistill.methods.delivery import units
 
 __all__ = ["resolve"]
@@ -32,10 +31,10 @@ __all__ = ["resolve"]
 
 def resolve(bank: Sequence[Any], tasks: Any,
              params: WholeBankParams) -> ExecutionUnitList:
-    """One row per task: the whole accepted bank, one fixed injection."""
-    accepted = units.accepted_bank(bank)
-    injected = bank_reference(accepted)
-    block = format_skills_block(accepted, verbatim=params.verbatim)
+    """One row per task: the whole active bank, one fixed injection."""
+    active = units.active_bank(bank)
+    injected = bank_reference(active)
+    block = format_skills_block(active, verbatim=params.verbatim)
     return [units.make_row(units.task_ref(task), injected, block)
             for task in tasks]
 

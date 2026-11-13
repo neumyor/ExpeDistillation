@@ -1,4 +1,4 @@
-"""Unit tests for the B2 prompt registry (register / get / digest / digests)."""
+"""Unit tests for the B2 prompt registry (register / get / digest)."""
 
 import hashlib
 
@@ -10,7 +10,6 @@ from expedistill.prompts import (
     PromptNotFoundError,
     PromptSpec,
     digest,
-    digests,
     get,
     register,
 )
@@ -67,10 +66,3 @@ def test_digest_sensitive_to_text_change():
 def test_digest_unknown_raises():
     with pytest.raises(PromptNotFoundError):
         digest("NO_SUCH_PROMPT")
-
-
-def test_digests_covers_every_registered_prompt():
-    result = digests()
-    assert set(result) == set(PROMPTS)
-    for name, value in result.items():
-        assert value == digest(name)

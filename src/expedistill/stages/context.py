@@ -29,7 +29,7 @@ class RunSettings:
     """
 
     #: Per-batch parallelism (B5 thread count) the stages request for work
-    #: that only calls the LLM endpoint (authoring, review, curation, exam).
+    #: that only calls the LLM endpoint (diagnosis, typing, writing, revision).
     workers: int = 1
     #: Parallelism of benchmark rollouts (K1 dispatch of real executions);
     #: ``None`` follows ``workers``. A rollout holds a sandbox on the

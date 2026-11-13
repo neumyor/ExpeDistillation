@@ -51,9 +51,9 @@ REPAIR_INSTRUCTION = prompts.get("REPAIR_INSTRUCTION")
 #: finish_reason="length": the reply was cut off at the output limit, so the
 #: re-ask asks for the complete answer again, more concisely. Same
 #: bounded-re-ask pattern as the empty-content repair; REPAIR_INSTRUCTION is
-#: JSON-specific and must never reach plain-text callers. Method-level
-#: plain-text callers since protocol v2: MERGE alone (SKILL_DISTILL, like
-#: REWRITE, calls with output_json=True).
+#: JSON-specific and must never reach plain-text callers. The method-level
+#: plain-text caller is PLAYBOOK_UPDATE (its reply ends with a tagged
+#: playbook).
 _TRUNCATION_NOTE = (
     "Your previous reply was cut off at the output limit before it was "
     "complete. Reply again with the complete answer, but more concisely, "
@@ -126,10 +126,14 @@ class ModelHandle:
     # "explicit" for Qwen/DashScope-style cache_control markers) and
     # ``cache_prefix_tokens`` (the marked stable-prefix budget).
     extra_body: Dict[str, Any] = field(default_factory=dict)
-    # Vocabulary slots for the learning prompts (prompts/learning_context.py),
-    # wired by the pipeline from the benchmark plugin's learning context.
-    # Slots a template does not use are ignored; empty means GENERIC only.
+    # Vocabulary slots for the learning prompts (prompts/learning_context.py)
+    # plus the benchmark's ``protocol`` text, wired by the pipeline from the
+    # benchmark's prompt pack. Slots a template does not use are ignored;
+    # empty means GENERIC only.
     prompt_defaults: Dict[str, str] = field(default_factory=dict)
+    # Method prompt name -> registered replacement name (the prompt pack's
+    # ``overrides``). Records and dumps keep the method name.
+    prompt_aliases: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Validated here so dataclasses.replace() re-checks as well.
@@ -511,7 +515,9 @@ def call_model(
     ``variables`` are str.format fields of the prompt template; a KeyError is
     a caller bug and propagates. Vocabulary slots of the learning prompts
     (prompts/learning_context.py) fill from GENERIC and the handle's
-    ``prompt_defaults`` when the caller does not pass them. With ``output_json=True`` the response is
+    ``prompt_defaults`` when the caller does not pass them; the template is
+    the one ``handle.prompt_aliases`` names in place of ``prompt_name``, if
+    any. With ``output_json=True`` the response is
     parsed with ``extract_json`` and, on failure, re-asked up to
     ``max_format_retries`` times with ``REPAIR_INSTRUCTION`` appended to the
     conversation; exhaustion raises ModelOutputError. Failure means either
@@ -552,9 +558,8 @@ def call_model(
     exponential backoff; exhaustion re-raises the last error. With
     ``output_json=False`` every other client exception (ProviderRefusalError,
     ConfigError, a client-side ModelOutputError such as empty content, code
-    bugs) propagates at once: plain-text callers (method-level since
-    protocol v2 that is MERGE alone -- SKILL_DISTILL and REWRITE call with
-    ``output_json=True``) turn that into their per-unit dispositions. The
+    bugs) propagates at once: plain-text callers (at method level the
+    playbook writer) turn that into their own dispositions. The
     two budgets are independent:
     infra retries never consume format retries, and each request -- the
     first ask and every repair re-ask -- gets the full infra budget, so one
@@ -562,9 +567,9 @@ def call_model(
     client calls. Failed attempts are recorded (status "error") and dumped
     like any other.
     """
-    template = prompts.get(prompt_name)
+    template = prompts.get(handle.prompt_aliases.get(prompt_name, prompt_name))
     user_text = template.format(**{
-        **learning_context.GENERIC.variables(),
+        **learning_context.default_slots(),
         **handle.prompt_defaults,
         **variables})
     system = DEFAULT_SYSTEM if system_override is None else system_override

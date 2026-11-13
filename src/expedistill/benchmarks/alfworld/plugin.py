@@ -49,16 +49,10 @@ from expedistill.benchmarks.alfworld.env import (
     ALFWorldEnv,
     resolve_gamefile,
 )
-from expedistill.benchmarks.alfworld.learning import ALFWORLD_CONTEXT
-from expedistill.benchmarks.alfworld.playbook import (
-    PLAYBOOK_PROMPT_NAME, facts_from_sheets, playbook_requirements)
+from expedistill.benchmarks.alfworld.prompt_pack import PROMPT_PACK
 from expedistill.benchmarks.alfworld.protocol import (
-    CORRECTION_PROMPT_NAME,
     FOLDER_PROMPT_NAME,
-    FOLDER_PROMPT_NO_HISTORY_NAME,
     PROMPT_NAME,
-    PROMPT_NO_HISTORY_NAME,
-    SYSTEM_PROMPT_NAME,
     protocol_handle,
     run_unified,
 )
@@ -160,21 +154,7 @@ class ALFWorldPlugin(BenchmarkPlugin):
     #: Skill-folder capability: progressive disclosure through the shared
     #: folder contract (``benchmarks/skill_folder.py``).
     skill_folder_prompt_name = FOLDER_PROMPT_NAME
-    learning_context = ALFWORLD_CONTEXT
-    #: Learned-playbook capability: the writing prompt lives in
-    #: ``alfworld/playbook.py``; ``run_unified`` renders the manifest's
-    #: ``playbook_text`` above the card list at every step.
-    playbook_prompt_name = PLAYBOOK_PROMPT_NAME
-    #: The protocol's other frozen prompt names: the step-1 variant of each
-    #: template, the system message and the one-shot correction request.
-    #: Stage 0 freezes these too, so a protocol edit cannot slip past a
-    #: resume.
-    protocol_prompt_names = (
-        SYSTEM_PROMPT_NAME,
-        PROMPT_NO_HISTORY_NAME,
-        FOLDER_PROMPT_NO_HISTORY_NAME,
-        CORRECTION_PROMPT_NAME,
-    )
+    prompt_pack = PROMPT_PACK
 
     @property
     def name(self) -> str:
@@ -183,12 +163,6 @@ class ALFWorldPlugin(BenchmarkPlugin):
     @property
     def task_prompt_name(self) -> str:
         return PROMPT_NAME
-
-    def playbook_facts(self, sheets):
-        return facts_from_sheets(sheets)
-
-    def playbook_requirements(self):
-        return playbook_requirements()
 
     @property
     def view_rules(self) -> ViewRules:

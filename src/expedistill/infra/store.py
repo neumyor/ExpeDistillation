@@ -23,36 +23,26 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Sequence, Any, Dict, Iterator, List, Optional
 
-from expedistill.core.models import Attempt, Exam, Skill, Subtask, Trajectory
 
 #: Object kinds and their directories in the README run layout.
 KIND_DIRS: Dict[str, str] = {
     "trajectories": "stage1_baseline/trajectories",
     "subtasks": "stage2_segments/subtasks",
     "skills": "stage3_generation/skills",
-    "exams": "stage3_generation/exams",
-    "attempts": "stage4_acceptance/attempts",
 }
 
-#: Every directory of the run layout, created by Store on demand. The five
-#: kind directories plus the two stage-only ones and llm_requests/ (B1 writes
-#: its raw request log there).
-LAYOUT_DIRS: List[str] = list(KIND_DIRS.values()) + [
-    "stage5_curation",
-    "stage6_test",
-    "llm_requests",
-]
+#: Every directory of the run layout, created by Store on demand. The three
+#: kind directories plus llm_requests/ (B1 writes its raw request log there).
+LAYOUT_DIRS: List[str] = list(KIND_DIRS.values()) + ["llm_requests"]
 
 #: ID attribute of each object kind. Objects also carry parent ids as foreign
-#: keys (Exam has subtask_id, Subtask has trajectory_id, Skill has subtask_id),
-#: so the persisted ID must always be resolved through the kind, never by
-#: scanning for the first present ``*_id`` field.
+#: keys (Subtask has trajectory_id), so the persisted ID must always be
+#: resolved through the kind, never by scanning for the first present
+#: ``*_id`` field.
 _KIND_ID_FIELD = {
     "trajectories": "trajectory_id",
     "subtasks": "subtask_id",
     "skills": "skill_id",
-    "exams": "exam_id",
-    "attempts": "attempt_id",
 }
 
 #: Every ``*_id`` field any object can carry (foreign keys included).
@@ -60,18 +50,7 @@ _ID_FIELDS = (
     "trajectory_id",
     "subtask_id",
     "skill_id",
-    "exam_id",
-    "attempt_id",
 )
-
-_TYPE_KINDS = (
-    (Trajectory, "trajectories"),
-    (Subtask, "subtasks"),
-    (Skill, "skills"),
-    (Exam, "exams"),
-    (Attempt, "attempts"),
-)
-
 
 def object_id(obj: Any, kind: Optional[str] = None) -> str:
     """The persisted ID of ``obj``.
@@ -109,14 +88,6 @@ def object_filename(obj_id: str) -> str:
 def object_id_of_file(path: Path) -> str:
     """The object ID a stored object's file name encodes."""
     return urllib.parse.unquote(Path(path).stem)
-
-
-def kind_for(obj: Any) -> str:
-    """The store kind of ``obj`` by its type (cheap convenience for callers)."""
-    for cls, kind in _TYPE_KINDS:
-        if isinstance(obj, cls):
-            return kind
-    raise ValueError(f"no store kind for objects of type {type(obj).__name__}")
 
 
 def write_json(path: Path, data: Any, indent: Optional[int] = None) -> None:
@@ -231,8 +202,8 @@ def write_jsonl(path: Path, rows: Sequence[Any]) -> None:
     Whole-file and atomic (temp + fsync + rename): the content is the
     unit, so a crash either leaves the previous file intact or the new
     one complete -- never a torn ledger or doubled rows. This is the
-    right writer when the rows are a pure function of an input set (the
-    curation=none bank, a resolution audit overwritten in full);
+    right writer when the rows are a pure function of an input set (a
+    phase's unit list, an imported bank, a learn ledger rewritten in full);
     ``append_jsonl`` remains the writer for resumable mid-loop appends.
     """
     payload = "".join(
@@ -285,7 +256,7 @@ def append_jsonl(path: Path, record: Dict[str, Any]) -> None:
     Safe for concurrent writers: the whole repair + append runs under
     ``_ledger_lock`` (a per-path threading.Lock plus an flock on
     ``<file>.lock``), so callers -- UnitFailureRecorder, UsageRecorder, the
-    K4/K5 ledgers, the skill bank -- need no locking of their own. Callers
+    learn-phase ledgers, the phase bank -- need no locking of their own. Callers
     must not hold an flock on ``<file>.lock`` themselves around a call
     (flock is per open file description, so that would self-deadlock). The
     guarantee holds for writers that go through append_jsonl on a local
@@ -400,14 +371,7 @@ class Store:
         return sorted(
             object_id_of_file(path) for path in directory.glob("*.json"))
 
-    def append_bank(self, skill_dict: Dict[str, Any]) -> None:
-        """Append one accepted skill to skill_bank.jsonl (stage 5 output).
-
-        The bank is a JSONL ledger, not a file rewritten in full, so a crash
-        loses at most the line being written (see append_jsonl).
-        """
-        append_jsonl(self.run_dir / "skill_bank.jsonl", skill_dict)
-
     def bank(self) -> List[Dict[str, Any]]:
-        """The curated skill bank, in append order (stage 6 injects this)."""
+        """The run-level bank (an imported bank, read before the first
+        learn phase), in file order."""
         return read_jsonl(self.run_dir / "skill_bank.jsonl")

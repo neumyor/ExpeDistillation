@@ -145,8 +145,12 @@ def _tasks(*ids_):
             for i in ids_]
 
 
+PHASE = "p01:baseline"
+
+
 def _expected_id(task_id, attempt):
-    return make_trajectory_id(make_task_id(_FAKE, task_id), "weak", attempt)
+    return make_trajectory_id(PHASE, make_task_id(_FAKE, task_id), "weak",
+                              attempt)
 
 
 def _success(task_id):
@@ -163,6 +167,7 @@ def _run_batch(plugin, monkeypatch, tmp_path, tasks, *, name="run",
     handle = handle if handle is not None else make_fake_handle("weak")
     kwargs = dict(
         store=Store(tmp_path / name),
+        phase_label=PHASE,
         benchmark=_FAKE,
         tasks=tasks,
         role="weak",
@@ -516,7 +521,7 @@ def test_working_handle_carries_usage_and_run_dir(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Per-task skill delivery (retrieval): per-unit values, namespaces, resume
+# Per-task skill delivery: per-unit values, namespaces, resume
 # ---------------------------------------------------------------------------
 
 def test_skills_for_task_injects_each_units_own_values(monkeypatch, tmp_path):
@@ -729,6 +734,9 @@ def test_run_namespace_is_deterministic_and_shared_by_retries(
 
 @pytest.mark.parametrize("change", [
     {"name": "other_run"},
+    # Two practice phases share the run-level store and may deliver the
+    # same bank: only the phase label tells their remote runs apart.
+    {"phase_label": "p03:practice"},
     {"role": "strong"},
     {"model_name": "weak-14b"},
     {"skills_injected": "bank:9f2c1a", "skills_block": "- skill\n"},
@@ -743,10 +751,12 @@ def test_run_namespace_differs_per_arm(monkeypatch, tmp_path, change):
     name = overrides.pop("name", "r1")
     if "role" in overrides:
         overrides["handle"] = make_fake_handle(overrides["role"])
-    if name == "r1" and "role" not in overrides:
-        # Same store and role: the trajectory id is taken, so the other arm
-        # would be skipped as done -- exactly why stage 6 uses separate arm
-        # stores. Run it on a different task of the same store instead.
+    if name == "r1" and "role" not in overrides \
+            and "phase_label" not in overrides:
+        # Same store, phase and role: the trajectory id is taken, so the
+        # other arm would be skipped as done -- exactly why the test phase
+        # uses separate arm stores. Run it on a different task of the same
+        # store instead.
         tasks = _tasks("t2")
     else:
         tasks = _tasks("t1")

@@ -1,4 +1,4 @@
-"""D3/D4 metrics unit tests: infra separation and the avg@N / pass@N
+"""D3 metrics unit tests: infra separation and the avg@N / pass@N
 definitions, on a hand-computed worked example.
 
 The point of the worked example is the per-task-mean-then-task-mean
@@ -11,10 +11,8 @@ import pytest
 
 from expedistill.blocks.metrics import (
     compute_task_metrics,
-    failed_tasks,
     summarize,
 )
-from expedistill.blocks.rules import get_task_select
 from expedistill.core.models import Trajectory
 
 
@@ -121,33 +119,6 @@ def test_summarize_empty():
         "infra_tasks": [],
         "aux": None,
     }
-
-
-def test_failed_tasks_all_valid_failed_rule():
-    rule = get_task_select("all_valid_failed")
-    trajectories = [
-        # f1: full valid sample, all failed -> in F.
-        _traj("f1", 0, False),
-        _traj("f1", 1, False),
-        # f2: infra errors left it short of the sample -> NOT in F.
-        _traj("f2", 0, False),
-        _traj("f2", 1, None),
-        # ok: one success disqualifies.
-        _traj("ok", 0, True),
-        _traj("ok", 1, False),
-    ]
-    assert failed_tasks(
-        compute_task_metrics(trajectories), rule, n_attempts=2) == ["f1"]
-
-
-def test_failed_tasks_output_is_sorted():
-    rule = get_task_select("all_valid_failed")
-    trajectories = [
-        _traj("z", 0, False),
-        _traj("a", 0, False),
-    ]
-    assert failed_tasks(
-        compute_task_metrics(trajectories), rule, n_attempts=1) == ["a", "z"]
 
 
 # ---------------------------------------------------------------------------

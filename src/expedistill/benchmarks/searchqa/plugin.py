@@ -37,7 +37,7 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.benchmarks.react_loop import run_react
-from expedistill.benchmarks.searchqa.learning import SEARCHQA_CONTEXT
+from expedistill.benchmarks.searchqa.prompt_pack import PROMPT_PACK
 from expedistill.benchmarks.skill_folder import (
     MAX_READS,
     READ_ACTION,
@@ -46,6 +46,7 @@ from expedistill.benchmarks.skill_folder import (
 )
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError
+from expedistill.inject import format_playbook_block
 from expedistill.prompts import PromptSpec, register
 
 # Same-package import through the module object (not ``from .env import``)
@@ -143,7 +144,7 @@ class SearchQAPlugin(BenchmarkPlugin):
     #: Skill-folder capability: progressive disclosure through the shared
     #: ReAct loop (``benchmarks/skill_folder.py``).
     skill_folder_prompt_name = "SEARCHQA_TASK_PROMPT_FOLDER"
-    learning_context = SEARCHQA_CONTEXT
+    prompt_pack = PROMPT_PACK
 
     @property
     def name(self) -> str:
@@ -261,12 +262,14 @@ class SearchQAPlugin(BenchmarkPlugin):
             context=task.meta.get("context", ""),
             max_steps=max_steps,
         )
-        # A folder unit shows only the card list; the delivery's catalog
-        # text in ``skills_block`` is the TB fallback and is not used.
+        # A folder unit shows the phase's playbook and the card list; the
+        # delivery's catalog text in ``skills_block`` is the TB fallback
+        # and is not used.
         folder = SkillFolder.from_task(task)
         if folder is not None:
             prompt_name = self.skill_folder_prompt_name
-            skills_block = ("## Skills\n"
+            skills_block = (format_playbook_block(folder.playbook_text)
+                            + "## Skills\n"
                             + folder.available_skills_block() + "\n\n")
         else:
             prompt_name = self.task_prompt_name

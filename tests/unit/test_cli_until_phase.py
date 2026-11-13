@@ -34,8 +34,7 @@ PHASES = {
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
           "review": {"name": "review", "K": 1},
-          "author": {"name": "distill_diagnose"},
-          "curate": {"name": "none", "token_budget": 4096}},
+          "author": {"name": "subtask_cards"}},
     "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
@@ -94,12 +93,11 @@ def config_path(tmp_path):
     path = tmp_path / "exp.yaml"
     path.write_text(json.dumps({
         "benchmark": _FAKE,
-        "mode": "split",
         "models": {"executor_strong": "strong-model",
                    "executor_weak": "weak-model"},
         "n_attempts_strong": 1,
         "n_attempts_weak": 1,
-        "schema_version": 4,
+        "schema_version": 9,
         "sequence": SEQUENCE,
         "phases": PHASES,
         "split": {"train": ["t1"], "test": ["t2"]},

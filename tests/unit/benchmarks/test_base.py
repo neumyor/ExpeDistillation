@@ -1,22 +1,18 @@
 """Tests for benchmarks/base.py: Task/RunOutcome dataclasses, ViewRules,
-BaseEnv contract, the environment_call deadline wrapper, and the
-BenchmarkPlugin abstract interface. No network, no real benchmark."""
+BaseEnv contract and the BenchmarkPlugin abstract interface. No network,
+no real benchmark."""
 
-import threading
-import time
 
 import pytest
 
 from expedistill.benchmarks.base import (
-    ENV_TIMEOUT_ENV,
     BaseEnv,
     BenchmarkPlugin,
     RunOutcome,
     Task,
     ViewRules,
-    environment_call,
 )
-from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
+from expedistill.infra.reliability import CodeBugError, ConfigError
 from expedistill.llm import ModelHandle
 
 
@@ -133,91 +129,6 @@ def test_baseenv_defaults_without_state_attributes():
     env.reset()
     assert not env.is_terminated()
     assert not env.is_truncated()
-
-
-# ---------------------------------------------------------------------------
-# environment_call deadline wrapper
-# ---------------------------------------------------------------------------
-
-def test_environment_call_timeout_raises_infra(monkeypatch):
-    monkeypatch.setenv(ENV_TIMEOUT_ENV, "0.05")
-
-    class _Env(BaseEnv):
-        def reset(self):
-            pass
-
-        @environment_call
-        def step(self, action):
-            time.sleep(0.3)
-            return "too late"
-
-        def success_fn(self):
-            return False
-
-    with pytest.raises(InfrastructureError, match="step exceeded 0.05s"):
-        _Env().step("go")
-
-
-def test_environment_call_explicit_seconds_beats_env_var(monkeypatch):
-    monkeypatch.setenv(ENV_TIMEOUT_ENV, "120")
-
-    @environment_call(seconds=0.05)
-    def slow():
-        time.sleep(0.3)
-
-    with pytest.raises(InfrastructureError):
-        slow()
-
-
-def test_environment_call_bad_env_value_is_config_error(monkeypatch):
-    monkeypatch.setenv(ENV_TIMEOUT_ENV, "soon")
-
-    @environment_call
-    def fast():
-        return "fine"
-
-    with pytest.raises(ConfigError):
-        fast()
-
-
-def test_environment_call_nonpositive_value_is_config_error(monkeypatch):
-    monkeypatch.setenv(ENV_TIMEOUT_ENV, "0")
-
-    @environment_call
-    def fast():
-        return "fine"
-
-    with pytest.raises(ConfigError):
-        fast()
-
-
-def test_environment_call_translates_pipe_errors():
-    @environment_call(seconds=5)
-    def dies():
-        raise BrokenPipeError("pipe gone")
-
-    with pytest.raises(InfrastructureError, match="lost its subprocess"):
-        dies()
-
-
-def test_environment_call_requires_main_thread():
-    @environment_call(seconds=5)
-    def anything():
-        return 1
-
-    failures = []
-
-    def worker():
-        try:
-            anything()
-        except RuntimeError as exc:
-            failures.append(exc)
-
-    thread = threading.Thread(target=worker)
-    thread.start()
-    thread.join()
-    assert len(failures) == 1
-    assert "main thread" in str(failures[0])
 
 
 # ---------------------------------------------------------------------------

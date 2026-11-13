@@ -25,13 +25,7 @@ from expedistill.core.config import (
     ExperimentConfig,
     PhaseInstance,
 )
-from expedistill.core.ids import (
-    make_skill_id,
-    make_subtask_id,
-    make_task_id,
-    make_trajectory_id,
-)
-from expedistill.core.models import Skill
+from expedistill.core.ids import make_type_id
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.fake import make_fake_handle
@@ -44,16 +38,16 @@ from tests.helpers.searchqa_stub import (
     write_eval_dir,
 )
 from tests.helpers.skill_folder import CARD_BODY
+from tests.helpers.skills import make_skill
 
 BENCHMARK = "searchqa"
 
 
 def _config():
     return ExperimentConfig(
-        benchmark=BENCHMARK, mode="split",
+        benchmark=BENCHMARK,
         models={"executor_strong": "big-model",
                 "executor_weak": "weak-7b"},
-        weak_profile="a weak model",
         n_attempts_strong=1, n_attempts_weak=1,
         rules={}, sequence=["baseline"],
         phases={"baseline": {"kind": "execute", "role": "baseline",
@@ -76,8 +70,7 @@ def _weak_policy(system, user):
 def _ctx(tmp_path, weak_script):
     run_dir = tmp_path / "run"
     handles = {role: make_fake_handle(role)
-               for role in ("executor_strong", "examiner", "answerer",
-                            "judge", "auditor")}
+               for role in ("executor_strong", "judge")}
     handles["executor_weak"] = make_fake_handle(
         "executor_weak", script=weak_script)
     return StageContext(
@@ -87,13 +80,9 @@ def _ctx(tmp_path, weak_script):
         run_settings=RunSettings())
 
 
-def _skill(task_id):
-    subtask_id = make_subtask_id(
-        make_trajectory_id(make_task_id(BENCHMARK, task_id), "strong", 0), 0)
-    return Skill(skill_id=make_skill_id(subtask_id), content=CARD_BODY,
-                 summary="Look up the full name first.",
-                 subtask_id=subtask_id, source_subtasks=[subtask_id],
-                 version=1, status="accepted")
+def _skill():
+    return make_skill(make_type_id(1), CARD_BODY,
+                      summary="Look up the full name first.")
 
 
 def _write_bank(ctx, skills):
@@ -126,7 +115,7 @@ def setup(monkeypatch, tmp_path):
     eval_dir = write_eval_dir(tmp_path / "eval", {"test": [item]})
     monkeypatch.setenv(searchqa_env.EVAL_DIR_ENV, str(eval_dir))
     ctx = _ctx(tmp_path, _weak_policy)
-    skill = _skill(item["id"])
+    skill = _skill()
     _write_bank(ctx, [skill])
     return ctx, _phase([item["id"]]), skill
 

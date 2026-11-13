@@ -21,6 +21,7 @@ monkeypatch is exactly the seam. What is pinned here:
   infra_shortfall_accepted ledger flag.
 """
 
+import dataclasses
 import importlib.abc
 import importlib.machinery
 import json
@@ -32,7 +33,8 @@ from pathlib import Path
 import pytest
 
 from expedistill import cli
-from expedistill.benchmarks.base import BenchmarkPlugin, Task, ViewRules
+from expedistill.benchmarks.base import (
+    GENERIC_PACK, BenchmarkPlugin, Task, ViewRules)
 from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.core.config import (
     ExperimentConfig,
@@ -46,11 +48,13 @@ from expedistill.infra.store import read_jsonl
 
 _FAKE = "fakebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
-TASK_IDS = ("t1", "t2", "t3")
+TASK_IDS = ("t1", "t2", "t3", "t4")
 
-#: The fixture method: one baseline, two learns, one final test -- enough
-#: to prove repeated names (L twice) get distinct pNN labels.
-SEQUENCE = ["baseline", "learn", "live", "learn", "test"]
+#: The fixture method: the baseline, two learns around a practice on the
+#: val list, one final test -- enough to prove repeated names (learn
+#: twice) get distinct pNN labels and each execute phase gets the frozen
+#: list its ``tasks`` names.
+SEQUENCE = ["baseline", "learn", "practice", "learn", "test"]
 PHASES = {
     "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
@@ -58,12 +62,10 @@ PHASES = {
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
           "review": {"name": "review", "K": 2},
-          "author": {"name": "distill_diagnose"},
-          "curate": {"name": "none", "token_budget": 4096}},
-    "live": {"kind": "execute", "role": "live", "tasks": "train",
-          "delivery": {"name": "group_by_task"},
-          "execution": {"name": "real", "n_attempts": 1},
-          "compare": {"against": "baseline"}},
+          "author": {"name": "subtask_cards"}},
+    "practice": {"kind": "execute", "role": "practice", "tasks": "val",
+          "delivery": {"name": "folder"},
+          "execution": {"name": "real_folder", "attempts": 3}},
     "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
@@ -125,15 +127,14 @@ def plugin(monkeypatch):
 def _write_config(path: Path) -> Path:
     path.write_text(json.dumps({
         "benchmark": _FAKE,
-        "mode": "split",
         "models": {"executor_strong": "strong-model",
                    "executor_weak": "weak-model"},
         "n_attempts_strong": 1,
         "n_attempts_weak": 2,
-        "schema_version": 4,
+        "schema_version": 9,
         "sequence": SEQUENCE,
         "phases": PHASES,
-        "split": {"train": ["t1", "t2"], "test": ["t3"]},
+        "split": {"train": ["t1", "t2"], "val": ["t4"], "test": ["t3"]},
         "token_budgets": {"default_max_output_tokens": 65536},
     }), encoding="utf-8")
     return path
@@ -201,7 +202,7 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
         make_client=ClientLog().make_client, on_stage=on_stage)
 
     assert [phase.label for _, phase in drivers] == [
-        "p01:baseline", "p02:learn", "p03:live", "p04:learn", "p05:test"]
+        "p01:baseline", "p02:learn", "p03:practice", "p04:learn", "p05:test"]
     # Kinds dispatch by the phase definition, not the position.
     assert [kind for kind, _ in drivers] == [
         "execute", "learn", "execute", "learn", "execute"]
@@ -211,8 +212,9 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
     assert d.spec.role == "baseline"
     assert d.task_ids == ("t1", "t2")
     b = drivers[2][1]
-    assert (b.index, b.name, b.label) == (2, "live", "p03:live")
-    assert b.task_ids == ("t1", "t2")
+    assert (b.index, b.name, b.label) == (2, "practice", "p03:practice")
+    assert b.spec.tasks == "val"
+    assert b.task_ids == ("t4",)
     c = drivers[4][1]
     assert c.spec.tasks == "test"
     assert c.task_ids == ("t3",)
@@ -220,7 +222,7 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
     assert drivers[1][1].task_ids == ()
     # on_stage fired in the same order, and the last summary is the last
     # phase's.
-    assert seen == ["p00:freeze", "p01:baseline", "p02:learn", "p03:live", "p04:learn",
+    assert seen == ["p00:freeze", "p01:baseline", "p02:learn", "p03:practice", "p04:learn",
                    "p05:test"]
     assert last == {"kind": "execute", "index": 4}
 
@@ -234,7 +236,7 @@ def test_the_ledger_rows_key_stage_and_pnn_values(
     # The KEY stays "stage" (consumer compatibility, the implementation
     # contract section 6); the values are p00:freeze then pNN:<name>.
     assert [row["stage"] for row in rows] == [
-        "p00:freeze", "p01:baseline", "p02:learn", "p03:live", "p04:learn", "p05:test"]
+        "p00:freeze", "p01:baseline", "p02:learn", "p03:practice", "p04:learn", "p05:test"]
     assert all(set(row) == {"stage", "summary"} for row in rows)
 
 
@@ -289,7 +291,7 @@ def test_until_phase_stops_after_the_named_entry(
         config_path=config_path, run_dir=tmp_path / "run",
         make_client=ClientLog().make_client, until_phase=2)
     assert [phase.label for _, phase in drivers] == [
-        "p01:baseline", "p02:learn", "p03:live"]
+        "p01:baseline", "p02:learn", "p03:practice"]
     # Freeze always runs, so the return value is a real summary.
     assert last == {"kind": "execute", "index": 2}
 
@@ -344,8 +346,8 @@ def test_missing_role_is_config_error_naming_role_and_config(
     config_path = tmp_path / "broken.yaml"
     config_path.write_text(
         "benchmark: fakebench\n"
-        "schema_version: 4\n"
-        "mode: full\n"
+        "schema_version: 9\n"
+        "split: {train: [t1, t2, t4], test: [t3]}\n"
         "models:\n"
         "  executor_strong: strong-model\n"
         "  executor_weak: weak-model\n"
@@ -354,9 +356,8 @@ def test_missing_role_is_config_error_naming_role_and_config(
         "phases:\n"
         "  D: {kind: execute, role: baseline, delivery: {name: none},"
         " execution: {name: real, arms: [executor_strong, executor_weak]}}\n"
-        "  L: {kind: learn, evidence: {name: segment, K: 2},"
-        " author: {name: distill_diagnose},"
-        " curate: {name: none, token_budget: 4096}}\n"
+        "  L: {kind: learn, review: {name: review, K: 2},"
+        " author: {name: subtask_cards}}\n"
         "  C: {kind: execute, role: test, tasks: test,"
         " delivery: {name: whole_bank}, execution: {name: real},"
         " compare: {against: fresh_bare}}\n",
@@ -376,8 +377,8 @@ def test_invalid_config_is_config_error(plugin, tmp_path):
     config_path = tmp_path / "no_weak.yaml"
     config_path.write_text(
         "benchmark: fakebench\n"
-        "schema_version: 4\n"
-        "mode: full\n"
+        "schema_version: 9\n"
+        "split: {train: [t1, t2, t4], test: [t3]}\n"
         "models:\n"
         "  executor_strong: strong-model\n",
         encoding="utf-8")
@@ -392,7 +393,7 @@ def test_one_client_per_unique_model(plugin, config_path, tmp_path, drivers):
     log = ClientLog()
     cli.run_experiment(config_path=config_path, run_dir=tmp_path / "run",
                        make_client=log.make_client)
-    # Ten roles, two distinct model names: two clients.
+    # Six roles, two distinct model names: two clients.
     assert len(log.clients) == 2
     assert {client.model for client in log.clients} == {
         "strong-model", "weak-model"}
@@ -400,7 +401,7 @@ def test_one_client_per_unique_model(plugin, config_path, tmp_path, drivers):
 
 def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
     config = ExperimentConfig(
-        benchmark=_FAKE, mode="full",
+        benchmark=_FAKE,
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model",
                 "judge": "judge-model"},
@@ -425,14 +426,39 @@ def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
         assert handles[role].extra_body == expected, role
     # Unlisted models get a fresh private dict, not a shared default.
     assert (handles["executor_weak"].extra_body
-            is not handles["answerer"].extra_body)
+            is not handles["segmenter"].extra_body)
+
+
+def test_build_handles_wires_the_prompt_pack(plugin, monkeypatch, tmp_path):
+    pack = dataclasses.replace(
+        GENERIC_PACK, protocol="what the reader sees",
+        overrides={"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"})
+    monkeypatch.setattr(LoopPlugin, "prompt_pack", pack)
+    config = ExperimentConfig(
+        benchmark=_FAKE,
+        models={"executor_strong": "strong-model",
+                "executor_weak": "weak-model"},
+        sequence=["baseline", "learn", "test"],
+        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
+        token_budgets={"default_max_output_tokens": 65536},
+    )
+    handles = cli._build_handles(
+        config, tmp_path / "experiment.yaml", ClientLog().make_client,
+        infra_retries=0, infra_backoff_seconds=0.0)
+    for handle in handles.values():
+        assert handle.prompt_defaults == {
+            **GENERIC_PACK.vocabulary.variables(),
+            "protocol": "what the reader sees"}
+        assert handle.prompt_aliases == {"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"}
+    assert (handles["author"].prompt_aliases
+            is not handles["judge"].prompt_aliases)
 
 
 def test_build_handles_wires_output_budget_per_role(plugin, tmp_path):
     # Per-role overrides fall back to default_max_output_tokens; the
     # handle's max_tokens is the only place the budget becomes live.
     config = ExperimentConfig(
-        benchmark=_FAKE, mode="full",
+        benchmark=_FAKE,
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
         sequence=["baseline", "learn", "test"],
@@ -456,7 +482,7 @@ def test_build_handles_wires_input_budget_per_role(plugin, tmp_path):
     # Terminus model_info; unlisted roles stay None (the adapter's
     # historical 131072 fallback).
     config = ExperimentConfig(
-        benchmark=_FAKE, mode="full",
+        benchmark=_FAKE,
         models={"executor_strong": "strong-model",
                 "executor_weak": "weak-model"},
         sequence=["baseline", "learn", "test"],
@@ -540,14 +566,14 @@ def test_a_stopped_run_replays_from_the_first_phase(
     rows = read_jsonl(cli.ledger_path(run_dir))
     assert [row["stage"] for row in rows] == [
         "p00:freeze", "p01:baseline", "p02:learn",
-        "p00:freeze", "p01:baseline", "p02:learn", "p03:live", "p04:learn", "p05:test"]
+        "p00:freeze", "p01:baseline", "p02:learn", "p03:practice", "p04:learn", "p05:test"]
 
 
 def test_the_frozen_sequence_survives_the_resume_check(
         plugin, config_path, tmp_path, drivers):
     # The manifest's config payload round-trips through from_dict on the
-    # next start (B4 compares field by field): a run started under v4
-    # resumes under v4 without a spurious mismatch.
+    # next start (B4 compares field by field): a run resumes under the
+    # same schema without a spurious mismatch.
     run_dir = tmp_path / "run"
     cli.run_experiment(config_path=config_path, run_dir=run_dir,
                        make_client=ClientLog().make_client, until_phase=0)

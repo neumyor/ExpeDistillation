@@ -1,10 +1,10 @@
 """The benchmark vocabulary of the learning prompts (prompts/learning_context.py).
 
-Pins four things: the TB context renders every learning prompt to the wording
-the prompts carried before the vocabulary became slots (a fixture rendered
-from the pre-change templates); the other contexts leave no TB vocabulary in
-any prompt; every context defines exactly the documented slots and every slot
-is used; each plugin declares its context.
+Pins four things: the TB context renders the learning prompts to the
+recorded wording (a fixture of the TB renderings); the other contexts leave
+no TB vocabulary in any prompt; every context defines exactly the documented
+slots and every slot is used; each plugin's prompt pack carries its
+context.
 """
 
 import json
@@ -13,22 +13,23 @@ from pathlib import Path
 
 import pytest
 
-from expedistill.benchmarks.alfworld.learning import ALFWORLD_CONTEXT
+from expedistill.benchmarks.alfworld.prompt_pack import PROMPT_PACK as ALFWORLD_PACK
 from expedistill.benchmarks.alfworld.plugin import ALFWorldPlugin
-from expedistill.benchmarks.searchqa.learning import SEARCHQA_CONTEXT
+from expedistill.benchmarks.searchqa.prompt_pack import PROMPT_PACK as SEARCHQA_PACK
 from expedistill.benchmarks.searchqa.plugin import SearchQAPlugin
-from expedistill.benchmarks.tb.learning import TB_CONTEXT
+from expedistill.benchmarks.tb.prompt_pack import PROMPT_PACK as TB_PACK
 from expedistill.benchmarks.tb.plugin import TBPlugin
 from expedistill.prompts import METHOD_PROMPT_NAMES, PROMPTS, get
 from expedistill.prompts.learning_context import (
     GENERIC,
-    SLOT_DOCS,
-    TRIGGER_FAMILY_KEYS,
     LearningContext,
     slots_for,
-    trigger_timing_slots,
 )
 from expedistill.prompts.profile import profile_section
+
+ALFWORLD_CONTEXT = ALFWORLD_PACK.vocabulary
+SEARCHQA_CONTEXT = SEARCHQA_PACK.vocabulary
+TB_CONTEXT = TB_PACK.vocabulary
 
 SNAPSHOT = json.loads(
     (Path(__file__).resolve().parents[2] / "fixtures" / "prompts"
@@ -60,10 +61,10 @@ def _normalized(text):
     return " ".join(text.split())
 
 
-# -- TB renders the wording the prompts had before the slots ----------------
+# -- TB renders the recorded wording -----------------------------------------
 
 @pytest.mark.parametrize("name", sorted(SNAPSHOT["prompts"]))
-def test_tb_context_renders_the_pre_slot_wording(name):
+def test_tb_context_renders_the_recorded_wording(name):
     # Line wrapping may differ (a slot value cannot know in which template
     # it ends up and where that template wrapped); the words may not.
     assert _normalized(_render(name, TB_CONTEXT)) == _normalized(
@@ -73,14 +74,7 @@ def test_tb_context_renders_the_pre_slot_wording(name):
 def test_the_neutral_profile_section_renders_the_tb_wording():
     kind = TB_CONTEXT.slots["agent_kind"]
     assert profile_section("skill_reader", "", kind) == (
-        SNAPSHOT["no_weak_profile_section"])
-
-
-def test_the_tb_family_tables_are_the_pre_slot_ones():
-    assert {key: TB_CONTEXT.slots[f"meaning_{key}"]
-            for key in TRIGGER_FAMILY_KEYS} == SNAPSHOT["trigger_families"]
-    assert {key: TB_CONTEXT.slots[f"phrase_{key}"]
-            for key in TRIGGER_FAMILY_KEYS} == SNAPSHOT["trigger_phrases"]
+        SNAPSHOT["no_profile_section"])
 
 
 def test_the_snapshot_prompts_are_registered():
@@ -104,7 +98,8 @@ def test_no_tb_vocabulary_outside_the_tb_context(context):
 
 def test_tb_vocabulary_is_in_the_tb_context():
     # The guard above would pass vacuously if the words were never there.
-    text = _render("SKILL_DISTILL", TB_CONTEXT)
+    text = (_render("CARD_WRITE", TB_CONTEXT)
+            + _render("REVISE_CONTENT", TB_CONTEXT))
     for word in ("Terminal Bench", "TB21", "terminal", "mark_task_complete"):
         assert word in text
 
@@ -112,34 +107,29 @@ def test_tb_vocabulary_is_in_the_tb_context():
 # -- the slots ---------------------------------------------------------------
 
 @pytest.mark.parametrize("context", CONTEXTS, ids=lambda context: context.name)
-def test_every_context_defines_exactly_the_documented_slots(context):
-    assert set(context.slots) == set(SLOT_DOCS)
+def test_every_context_defines_exactly_the_generic_slots(context):
+    assert set(context.slots) == set(GENERIC.slots)
 
 
 def test_every_slot_is_used():
-    # The phrase_ / meaning_ slots are read by the cluster authoring driver,
-    # not by a template.
     used = set()
     for spec in PROMPTS.values():
         used |= _placeholders(spec.template)
-    for key in TRIGGER_FAMILY_KEYS:
-        used |= {f"phrase_{key}", f"meaning_{key}"}
-    assert set(SLOT_DOCS) <= used
+    assert set(GENERIC.slots) <= used
 
 
-def test_every_slot_has_a_nonempty_value_and_documentation():
+def test_every_slot_has_a_nonempty_value():
     for context in CONTEXTS:
         for slot, text in context.slots.items():
             assert text.strip(), (context.name, slot)
-    for slot, doc in SLOT_DOCS.items():
-        assert doc.strip(), slot
 
 
 def test_slots_for_overlays_prompt_defaults_on_generic():
     merged = slots_for({"agent_kind": "household"})
     assert merged["agent_kind"] == "household"
     assert merged["task_tag"] == GENERIC.slots["task_tag"]
-    assert slots_for({}) == GENERIC.variables()
+    assert slots_for({}) == {"protocol": "", **GENERIC.variables()}
+    assert slots_for({"protocol": "the rules"})["protocol"] == "the rules"
 
 
 def test_the_manifest_form_carries_every_slot():
@@ -147,41 +137,12 @@ def test_the_manifest_form_carries_every_slot():
         "name": "tb", "slots": dict(TB_CONTEXT.slots)}
 
 
-# -- trigger_timing_slots ----------------------------------------------------
-
-def _table(prefix):
-    return {key: f"{prefix} {key}" for key in TRIGGER_FAMILY_KEYS}
-
-
-def test_trigger_timing_slots_build_the_menus():
-    slots = trigger_timing_slots(
-        phrases=_table("phrase"), moments=_table("moment"),
-        family_meanings=_table("family"), subtask_meanings=_table("meaning"))
-    assert slots["phrase_at_task_start"] == "phrase at_task_start"
-    assert slots["meaning_at_any_step"] == "meaning at_any_step"
-    menu = slots["timing_menu"].split("\n")
-    assert menu[0] == '  "phrase at_task_start"'
-    assert menu[1] == "      moment at_task_start;"
-    assert menu[-1] == "      moment at_any_step."
-    family_menu = slots["family_menu"].split("\n")
-    assert family_menu[0] == '- "at_task_start": family at_task_start.'
-    assert len(family_menu) == len(TRIGGER_FAMILY_KEYS)
-
-
-def test_trigger_timing_slots_refuse_a_table_with_the_wrong_keys():
-    tables = dict(phrases=_table("p"), moments=_table("m"),
-                  family_meanings=_table("f"), subtask_meanings=_table("s"))
-    tables["moments"] = {"at_task_start": "only one"}
-    with pytest.raises(ValueError, match="moments"):
-        trigger_timing_slots(**tables)
-
-
 # -- the plugins declare their context ---------------------------------------
 
 def test_each_plugin_declares_its_context():
-    assert TBPlugin.learning_context is TB_CONTEXT
-    assert ALFWorldPlugin.learning_context is ALFWORLD_CONTEXT
-    assert SearchQAPlugin.learning_context is SEARCHQA_CONTEXT
+    assert TBPlugin.prompt_pack.vocabulary is TB_CONTEXT
+    assert ALFWorldPlugin.prompt_pack.vocabulary is ALFWORLD_CONTEXT
+    assert SearchQAPlugin.prompt_pack.vocabulary is SEARCHQA_CONTEXT
     assert isinstance(GENERIC, LearningContext)
 
 
@@ -195,7 +156,6 @@ def test_alfworld_commands_are_the_engine_vocabulary():
     for command in ("go to", "take", "move", "examine", "inventory", "clean",
                     "heat", "cool"):
         assert command in rules
-    assert "Nothing happens." in ALFWORLD_CONTEXT.slots["timing_menu"]
 
 
 def test_searchqa_actions_come_from_the_task_prompt():

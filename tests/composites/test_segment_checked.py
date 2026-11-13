@@ -13,7 +13,8 @@ from expedistill.core.models import Step, Subtask, Trajectory
 from expedistill.infra.store import Store, read_jsonl
 from expedistill.llm.fake import json_script, make_fake_handle
 
-TRAJ_ID = "traj/tb:t1/strong/00"
+TRAJ_ID = "traj/p01_baseline/tb:t1/strong/00"
+LEARN = "p02:learn"
 
 
 def make_trajectory(role="strong", correctness=False, n_steps=4,
@@ -54,7 +55,8 @@ def test_happy_path_builds_and_stores_subtasks_with_correct_fields(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=json_script(valid_payload()))
     result = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
 
     assert len(result) == 2
@@ -64,6 +66,7 @@ def test_happy_path_builds_and_stores_subtasks_with_correct_fields(tmp_path):
     assert second.subtask_id == f"{TRAJ_ID}/seg01"
     assert first.task_id == "tb:t1"
     assert first.trajectory_id == TRAJ_ID
+    assert first.phase_label == second.phase_label == LEARN
     assert first.source == "strong"
     assert first.trajectory_success is False  # correctness was False
     assert first.step_range == (0, 2)
@@ -90,7 +93,8 @@ def test_source_and_trajectory_success_follow_the_trajectory(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=json_script(valid_payload()))
     result = segment_checked(
-        store=store, trajectory=make_trajectory(role="weak", correctness=True),
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(role="weak", correctness=True),
         K=4, view_rules=None, handle=handle, segment_retry_limit=0,
         run_dir=tmp_path)
     assert result[0].source == "weak"
@@ -108,7 +112,8 @@ def test_retry_prepends_the_error_preamble_and_then_succeeds(tmp_path):
         json_script(valid_payload()),
     ])
     result = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
 
     assert [s.subtask_id for s in result] == [f"{TRAJ_ID}/seg00",
@@ -133,7 +138,8 @@ def test_context_summary_is_capped_at_500_chars(tmp_path):
     ]
     handle = make_fake_handle(script=json_script(payload))
     result = segment_checked(
-        store=store, trajectory=make_trajectory(n_steps=3), K=3,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(n_steps=3), K=3,
         view_rules=None, handle=handle, segment_retry_limit=0,
         run_dir=tmp_path)
     assert result[2].context_summary == ("a: " + "x" * 300 + "; b: " + "y" * 300)[:500]
@@ -151,7 +157,8 @@ def test_exhaustion_returns_none_and_writes_the_audit_record(tmp_path):
         json_script(gap_payload()),
     ])
     result = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
 
     assert result is None
@@ -169,7 +176,8 @@ def test_exhaustion_with_run_dir_none_audits_into_the_store_run_dir(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=[json_script(gap_payload())])
     result = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=0)  # no run_dir argument
     assert result is None
     records = read_jsonl(tmp_path / "stage2_segments" / "segmentation_audit.jsonl")
@@ -185,7 +193,8 @@ def test_resume_returns_stored_subtasks_without_model_calls(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=json_script(valid_payload()))
     first = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
 
     # A "restarted process": fresh store handle, fresh handle whose script
@@ -193,7 +202,9 @@ def test_resume_returns_stored_subtasks_without_model_calls(tmp_path):
     store2 = Store(tmp_path)
     fresh_handle = make_fake_handle(script=[])
     second = segment_checked(
-        store=store2, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store2, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4,
+        view_rules=None,
         handle=fresh_handle, segment_retry_limit=1)
 
     assert second == first
@@ -204,17 +215,20 @@ def test_resume_ignores_other_trajectories_subtasks(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=json_script(valid_payload()))
     segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=0, run_dir=tmp_path)
 
-    other = make_trajectory(correctness=False, trajectory_id="traj/tb:t1/weak/00",
-                            role="weak")
+    other = make_trajectory(
+        correctness=False, role="weak",
+        trajectory_id="traj/p01_baseline/tb:t1/weak/00")
     other_handle = make_fake_handle(script=json_script(valid_payload()))
     result = segment_checked(
-        store=store, trajectory=other, K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=other, K=4, view_rules=None,
         handle=other_handle, segment_retry_limit=0, run_dir=tmp_path)
     assert len(result) == 2
-    assert result[0].subtask_id == "traj/tb:t1/weak/00/seg00"
+    assert result[0].subtask_id == "traj/p01_baseline/tb:t1/weak/00/seg00"
     assert result[0].source == "weak"
     assert len(other_handle.client.calls) == 1
 
@@ -230,7 +244,8 @@ def test_model_output_error_is_a_failed_attempt_then_success(tmp_path):
         json_script(valid_payload()),
     ])
     result = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
 
     assert [s.step_range for s in result] == [(0, 2), (2, 4)]
@@ -245,7 +260,8 @@ def test_model_output_error_exhaustion_is_skipped_not_crashed(tmp_path):
         json_script([42]),
     ])
     result = segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
     assert result is None
     records = read_jsonl(tmp_path / "stage2_segments" / "segmentation_audit.jsonl")
@@ -266,7 +282,8 @@ def test_more_than_k_segments_fail_validation_until_at_most_k(tmp_path):
     ])
     trajectory = make_trajectory(n_steps=6)
     result = segment_checked(
-        store=store, trajectory=trajectory, K=2, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=trajectory, K=2, view_rules=None,
         handle=handle, segment_retry_limit=1, run_dir=tmp_path)
 
     assert len(result) == 2  # the retry payload, which respects K=2
@@ -279,7 +296,8 @@ def test_exactly_k_segments_is_accepted(tmp_path):
     payload = [seg(0, 1, "a"), seg(1, 2, "b"), seg(2, 3, "c")]
     handle = make_fake_handle(script=json_script(payload))
     result = segment_checked(
-        store=store, trajectory=make_trajectory(n_steps=3), K=3,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(n_steps=3), K=3,
         view_rules=None, handle=handle, segment_retry_limit=0,
         run_dir=tmp_path)
     assert [s.segment_index for s in result] == [0, 1, 2]
@@ -304,7 +322,8 @@ def test_infrastructure_error_propagates_without_audit_record(tmp_path):
     ])
     with pytest.raises(InfrastructureError):
         segment_checked(
-            store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+            store=store, phase_label=LEARN,
+            trajectory=make_trajectory(), K=4, view_rules=None,
             handle=handle, segment_retry_limit=3, run_dir=tmp_path)
 
     assert read_jsonl(
@@ -320,14 +339,16 @@ def test_skipped_trajectory_is_not_reoffered_on_resume(tmp_path):
     store = Store(tmp_path)
     handle = make_fake_handle(script=[json_script(gap_payload())])
     assert segment_checked(
-        store=store, trajectory=make_trajectory(), K=4, view_rules=None,
+        store=store, phase_label=LEARN,
+        trajectory=make_trajectory(), K=4, view_rules=None,
         handle=handle, segment_retry_limit=0, run_dir=tmp_path) is None
 
     # A later process whose model would now answer well: the frozen run
     # already decided this unit, so no call is made and nothing is stored.
     fresh = make_fake_handle(script=[json_script(valid_payload())])
     result = segment_checked(
-        store=Store(tmp_path), trajectory=make_trajectory(), K=4,
+        store=Store(tmp_path), phase_label=LEARN,
+        trajectory=make_trajectory(), K=4,
         view_rules=None, handle=fresh, segment_retry_limit=0,
         run_dir=tmp_path)
 

@@ -1,7 +1,7 @@
 """Layer 8: the command-line entry point (the only method entry, AGENTS.md 5)
 and, since R9 deleted stages/pipeline.py, the sequence loop itself.
 
-Four subcommands:
+The subcommands:
 
 * ``run`` -- one experiment run: load the config, take the run directory,
   freeze, then run the config's phase SEQUENCE in order -- one
@@ -22,7 +22,7 @@ Four subcommands:
     ProviderRefusalError exit 1 (a human must change something; repeating
     the same command cannot help);
   - ModelOutputError (a call whose output stayed malformed after its repair
-    budget escaped a stage, e.g. K5's whole-bank G7/G9 calls) exits 1 too:
+    budget escaped a stage) exits 1 too:
     finished units are saved and re-running the same command retries the
     call, but a human should look first -- a supervisor must not loop on it;
   - InfrastructureError exits EXIT_INFRA_RESUMABLE (3): a stage finished
@@ -36,34 +36,31 @@ Four subcommands:
 * ``summary`` -- read a finished (or running) run's progress ledger and usage
   totals WITHOUT recomputing anything (the ledger is the source of truth;
   re-running phases to check them would burn model calls). A resumed run
-  appends a fresh line per phase, so the LAST line per phase wins. The
+  appends a fresh line per phase, so the LAST line per phase wins. A
+  practice phase prints its card use (``skill_use``: success rate, opened
+  trials, delivered and opened cards) and a learn phase its evidence
+  counts and card outcomes instead of the whole summary. The
   completeness checklist comes from the manifest's frozen sequence, never
   a code constant. Usage is printed twice: the overall/by-role totals,
   then one line per (role, prompt) with the pre-registered token
   statistics of ``infra.usage.UsageStats.by_role_prompt`` (medians over
   ok rows, totals over all rows, unknown never coerced to 0). Exit 1
   when the ledger shows the run is incomplete (a phase never completed).
-* ``assemble-reuse`` -- assemble a fresh run directory from a finished
-  source run and a reuse config (the TB frozen-split reuse experiment).
-  ``--level`` picks the reuse level (revision 3 of the integration plan):
-  ``bank`` (default) copies the source run's stage 1-5 train-lineage
-  artifacts and the filtered bank (zero model calls downstream), while
-  ``baseline`` copies ONLY the train-side stage-1 trajectories (plus the
-  accepted stage-1 infra shortfall) and stages 2-6 run fresh under the
-  current protocol. Both levels validate the identity (the ruling-4
-  whitelist diff, respectively revision 3's pinned minimum), copy under
-  the run lock, assert the negative list and write ASSEMBLED_FROM.md
-  provenance. Prints the returned per-kind counts as one JSON line. No
-  model calls; its expected failures (ConfigError, a locked run
-  directory, an identity mismatch) exit 1 with a clear message, the same
-  contract as ``run``.
 * ``fork-run`` -- copy the first phases of a finished run (their phase
-  directories and the run-level stores) into a fresh run directory, so a
-  new config that starts with the same phases can extend or branch the
-  run without redoing them. The skill store is rebuilt from the prefix's
-  last learn artifact when a later learn phase of the source rewrote it.
-  No model calls; prints one JSON line, and its expected failures exit 1
-  like ``assemble-reuse``.
+  directories and the run-level objects they created) into a fresh run
+  directory, so a new config that starts with the same phases can extend
+  or branch the run without redoing them. The skill store is rebuilt from
+  the prefix's last learn artifact.
+  No model calls; prints one JSON line, and its expected failures
+  (ConfigError, a locked run directory, an identity mismatch) exit 1 with
+  a clear message, the same contract as ``run``.
+* ``import-baseline`` -- write an earlier run's baseline trajectories into
+  a fresh run directory under the new config's baseline label, so the new
+  run's baseline phase finds every unit stored. Same output and exit
+  contract as ``fork-run``.
+* ``import-bank``, ``judge-skills``, ``paper-tables``,
+  ``segmentation-metrics`` -- the preparation and analysis tools of design
+  spec 3.9.
 """
 
 import argparse
@@ -74,13 +71,11 @@ import shlex
 import sys
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from expedistill.benchmarks.registry import resolve_plugin
-from expedistill.stages.assemble_reuse import LEVELS, assemble_reuse
-from expedistill.stages.exam_replay import replay as replay_exams
 from expedistill.stages.fork_run import fork_run
-from expedistill.stages.remerge_bank import remerge_bank
+from expedistill.stages.import_baseline import import_baseline
 from expedistill.stages.import_bank import SOURCE_FORMATS, import_external_bank
 from expedistill.stages.judge_skills import judge_phase
 from expedistill.stages.paper_tables import run as run_paper_tables
@@ -229,8 +224,7 @@ def _build_handles(
     builder = make_client or partial(_default_client,
                                      timeout_sec=llm_timeout_sec)
     clients: Dict[str, Any] = {}
-    prompt_defaults = resolve_plugin(
-        cfg.benchmark).learning_context.variables()
+    prompt_defaults, prompt_aliases = _prompt_pack_wiring(cfg.benchmark)
 
     def client_for(model_name: str) -> Any:
         if model_name not in clients:
@@ -263,9 +257,20 @@ def _build_handles(
             infra_retries=infra_retries,
             infra_backoff_seconds=infra_backoff_seconds,
             prompt_defaults=dict(prompt_defaults),
+            prompt_aliases=dict(prompt_aliases),
         )
 
     return {role: handle_for(role) for role in ROLE_DEFAULTS}
+
+
+def _prompt_pack_wiring(benchmark: str) -> Tuple[Dict[str, str],
+                                                 Dict[str, str]]:
+    """The handle's ``prompt_defaults`` and ``prompt_aliases`` from the
+    benchmark's prompt pack: the vocabulary slots plus the protocol text,
+    and the method-prompt overrides."""
+    pack = resolve_plugin(benchmark).prompt_pack
+    defaults = {**pack.vocabulary.variables(), "protocol": pack.protocol}
+    return defaults, dict(pack.overrides)
 
 
 def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
@@ -479,10 +484,10 @@ def run_experiment(
             return summary
 
         # The freeze step always runs, so the return value below is
-        # always a real summary.
-        last_summary = record(FREEZE_LABEL, stage0_freeze.run(ctx))
-        train_ids = last_summary["train"]
-        test_ids = last_summary["test"]
+        # always a real summary. Its train / val / test lists are the
+        # frozen task lists an execute phase's ``tasks`` field names.
+        freeze_summary = record(FREEZE_LABEL, stage0_freeze.run(ctx))
+        last_summary = freeze_summary
 
         for index, name in enumerate(cfg.sequence):
             if until_phase is not None and index > until_phase:
@@ -491,8 +496,7 @@ def run_experiment(
             label = phase_label(index, name)
             task_ids: tuple = ()
             if isinstance(spec, ExecutePhaseSpec):
-                task_ids = tuple(train_ids if spec.tasks == "train"
-                                else test_ids)
+                task_ids = tuple(freeze_summary[spec.tasks])
             phase = PhaseInstance(index=index, name=name, label=label,
                                   spec=spec, task_ids=task_ids)
             result = _phase_driver(spec.kind).run(ctx, phase)
@@ -599,31 +603,6 @@ def _resume_hint(args: argparse.Namespace) -> str:
             else "the same command")
 
 
-def _cmd_assemble_reuse(args: argparse.Namespace) -> int:
-    # The default level IS the historical assembly, so the default call
-    # keeps the historical three-argument shape; only an explicitly
-    # requested non-default level changes the contract being invoked.
-    if args.level == "bank":
-        summary = assemble_reuse(
-            source_run=args.source_run,
-            config_path=args.config,
-            run_dir=args.run_dir,
-        )
-    else:
-        summary = assemble_reuse(
-            source_run=args.source_run,
-            config_path=args.config,
-            run_dir=args.run_dir,
-            level=args.level,
-        )
-    # One compact JSON line, the same style as the per-stage lines: the
-    # console output is a progress record, ASSEMBLED_FROM.md at the run
-    # root is the durable provenance record.
-    print("assemble-reuse: " + json.dumps(
-        summary, ensure_ascii=False, sort_keys=True))
-    return 0
-
-
 def _cmd_fork_run(args: argparse.Namespace) -> int:
     summary = fork_run(
         source_run=args.source_run,
@@ -636,36 +615,21 @@ def _cmd_fork_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_import_baseline(args: argparse.Namespace) -> int:
+    summary = import_baseline(source_run=args.source_run,
+                              config_path=args.config,
+                              run_dir=args.run_dir)
+    print("import-baseline: " + json.dumps(
+        summary, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def _cmd_import_bank(args: argparse.Namespace) -> int:
     summary = import_external_bank(
         args.source, args.source_format, args.run_dir, origin=args.origin)
     print("import-bank: " + json.dumps(
         {key: value for key, value in summary.items() if key != "skill_ids"},
         ensure_ascii=False, sort_keys=True))
-    return 0
-
-
-def _cmd_remerge_bank(args: argparse.Namespace) -> int:
-    """Re-run the source run's recorded merges into a test-only bank."""
-    config_path = Path(args.config)
-    try:
-        cfg = load_config(str(config_path))
-    except (ValueError, OSError) as exc:
-        raise ConfigError(f"invalid config {config_path}: {exc}") from exc
-    handles = _build_handles(
-        cfg, config_path, None,
-        infra_retries=args.llm_infra_retries,
-        infra_backoff_seconds=args.llm_infra_backoff,
-        llm_timeout_sec=args.llm_timeout)
-    usage = UsageRecorder(usage_path(args.run_dir))
-    summary = remerge_bank(
-        source_run=args.source_run,
-        run_dir=args.run_dir,
-        weak_profile=cfg.effective_weak_profile(),
-        curator_handle=handles["curator"],
-        usage=usage)
-    print("remerge-bank: " + json.dumps(summary, ensure_ascii=False,
-                                       sort_keys=True))
     return 0
 
 
@@ -682,8 +646,9 @@ def _frozen_config(run_dir: Path) -> ExperimentConfig:
 def _analysis_handle(cfg: ExperimentConfig, args: argparse.Namespace,
                      role: str, model_name: str, out_dir: Path) -> Any:
     """A handle for an analysis call: the run's own budgets and model
-    options for ``role``, the benchmark's learning vocabulary, and the
-    analysis output directory as its request log and usage ledger."""
+    options for ``role``, the benchmark's prompt pack, and the analysis
+    output directory as its request log and usage ledger."""
+    prompt_defaults, prompt_aliases = _prompt_pack_wiring(cfg.benchmark)
     return make_handle(
         role, model_name, _default_client(model_name, args.llm_timeout),
         extra_body=dict(cfg.model_options.get(model_name, {})),
@@ -691,8 +656,7 @@ def _analysis_handle(cfg: ExperimentConfig, args: argparse.Namespace,
         max_input_tokens=cfg.max_input_tokens_for(role),
         infra_retries=args.llm_infra_retries,
         infra_backoff_seconds=args.llm_infra_backoff,
-        prompt_defaults=resolve_plugin(
-            cfg.benchmark).learning_context.variables(),
+        prompt_defaults=prompt_defaults, prompt_aliases=prompt_aliases,
         usage=UsageRecorder(usage_path(out_dir)), run_dir=out_dir)
 
 
@@ -706,33 +670,6 @@ def _cmd_judge_skills(args: argparse.Namespace) -> int:
         bank_phase_label=args.bank_phase)
     print("judge-skills: " + json.dumps(summary, ensure_ascii=False,
                                         sort_keys=True))
-    return 0
-
-
-def _source_exam_reads(cfg: ExperimentConfig) -> int:
-    """The skill-read cap of the source run's exam phase (3 when none)."""
-    for name in cfg.sequence:
-        spec = cfg.phases[name]
-        if getattr(spec, "role", None) == "exam":
-            return int(spec.execution.get("max_skill_reads", 3))
-    return 3
-
-
-def _cmd_exam_replay(args: argparse.Namespace) -> int:
-    cfg = _frozen_config(args.run_dir)
-    judge_model = args.judge_model or cfg.models["judge"]
-    answerer = _analysis_handle(
-        cfg, args, "answerer", args.answerer_model, args.out_dir)
-    judge = _analysis_handle(cfg, args, "judge", judge_model, args.out_dir)
-    summary = replay_exams(
-        args.run_dir, args.out_dir, answerer, judge,
-        bank_phase_label=args.bank_phase,
-        max_skill_reads=(args.max_skill_reads
-                         if args.max_skill_reads is not None
-                         else _source_exam_reads(cfg)),
-        workers=args.workers)
-    print("exam-replay: " + json.dumps(summary, ensure_ascii=False,
-                                       sort_keys=True))
     return 0
 
 
@@ -775,6 +712,40 @@ def _expected_labels(run_dir: Path) -> Optional[List[str]]:
                              for index, name in enumerate(sequence)]
 
 
+def _summary_view(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """What ``summary`` prints for one phase: the practice phase's card
+    use and the learn phase's evidence counts, the whole summary for the
+    other roles (the full record stays in the ledger)."""
+    role = summary.get("role")
+    if role == "practice":
+        use = summary.get("skill_use") or {}
+        cards = use.get("cards") or {}
+        return {
+            "role": role, "tasks": summary.get("tasks"),
+            "complete": summary.get("complete"),
+            "trials": use.get("trials"), "valid": use.get("valid"),
+            "success": use.get("success"),
+            "success_rate": use.get("success_rate"),
+            "opened_any": use.get("opened_any"),
+            "opened_any_success": use.get("opened_any_success"),
+            "cards_delivered": len(cards),
+            "cards_opened": sum(1 for card in cards.values()
+                                if card.get("opened")),
+        }
+    if role == "learn":
+        bank = summary.get("bank") or {}
+        return {
+            "role": role, "input_phase": summary.get("input_phase"),
+            "failed_sheets": summary.get("failed_sheets"),
+            "diagnosed": summary.get("diagnosed"),
+            "located": summary.get("located"),
+            "evidence": summary.get("evidence"),
+            "outcomes": summary.get("outcomes"),
+            "bank_size": bank.get("size"),
+        }
+    return summary
+
+
 def _cmd_summary(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir)
     expected = _expected_labels(run_dir)
@@ -806,7 +777,7 @@ def _cmd_summary(args: argparse.Namespace) -> int:
         if summary is None:
             print(f"{name}: (not completed)")
         else:
-            print(_stage_line(name, summary))
+            print(_stage_line(name, _summary_view(summary)))
 
     totals = UsageRecorder(usage_path(run_dir)).totals()
     print("usage: " + json.dumps(totals, ensure_ascii=False, sort_keys=True))
@@ -845,7 +816,8 @@ def build_parser() -> argparse.ArgumentParser:
                           "ledger)")
     run.add_argument("--workers", type=int, default=1,
                      help="parallel workers for steps that only call the LLM "
-                          "endpoint: authoring, review, curation and exam "
+                          "endpoint: diagnosis, segmentation, typing, card "
+                          "writing and revision "
                           "units (default 1)")
     run.add_argument("--rollout-workers", type=int, default=None,
                      help="parallel benchmark rollouts (real executions on "
@@ -891,32 +863,6 @@ def build_parser() -> argparse.ArgumentParser:
                           "later resume")
     run.set_defaults(func=_cmd_run)
 
-    assemble = sub.add_parser(
-        "assemble-reuse",
-        help="assemble a fresh run from a finished source run's "
-             "train-lineage artifacts (zero model calls)")
-    assemble.add_argument("--source-run", required=True, type=Path,
-                          help="the finished source run directory "
-                               "(its manifest defines the protocol the "
-                               "reuse config must match)")
-    assemble.add_argument("--config", required=True, type=Path,
-                          help="the reuse experiment config YAML "
-                               "(configs/experiments/)")
-    assemble.add_argument("--run-dir", required=True, type=Path,
-                          help="fresh run directory to assemble (created; "
-                               "must not contain a manifest -- the "
-                               "pipeline freezes one on its first start)")
-    assemble.add_argument("--level", choices=LEVELS, default="bank",
-                          help="reuse level (revision 3): 'bank' (default) "
-                               "copies the source run's stage 1-5 "
-                               "train-lineage artifacts and the filtered "
-                               "bank -- zero model calls downstream; "
-                               "'baseline' copies ONLY the train-side "
-                               "stage-1 trajectories (plus the accepted "
-                               "stage-1 infra shortfall) and stages 2-6 "
-                               "run fresh under the current protocol")
-    assemble.set_defaults(func=_cmd_assemble_reuse)
-
     fork = sub.add_parser(
         "fork-run",
         help="copy the first phases of a finished run into a fresh run "
@@ -935,10 +881,29 @@ def build_parser() -> argparse.ArgumentParser:
                            "e.g. p05 copies p01 through p05")
     fork.set_defaults(func=_cmd_fork_run)
 
+    baseline = sub.add_parser(
+        "import-baseline",
+        help="write an earlier run's baseline trajectories into a fresh run "
+             "directory, so its baseline phase runs no unit (zero model "
+             "calls)")
+    baseline.add_argument("--source-run", required=True, type=Path,
+                          help="the run whose stage1_baseline trajectories "
+                               "are reused (only read)")
+    baseline.add_argument("--config", required=True, type=Path,
+                          help="the NEW run's config YAML; it starts with "
+                               "the baseline and agrees with the source on "
+                               "the benchmark, the executor models and the "
+                               "sampling depths")
+    baseline.add_argument("--run-dir", required=True, type=Path,
+                          help="fresh run directory (created; must hold no "
+                               "manifest and no trajectory)")
+    baseline.set_defaults(func=_cmd_import_baseline)
+
     importer = sub.add_parser(
         "import-bank",
         help="write an external method's skills into a fresh run directory "
-             "as its accepted bank, for a test-only run (zero model calls)")
+             "as its skill bank (every skill active), for a test-only run "
+             "(zero model calls)")
     importer.add_argument("--source", required=True, type=Path,
                           help="the baseline's artifact (a file or a "
                                "directory, by --source-format)")
@@ -952,26 +917,6 @@ def build_parser() -> argparse.ArgumentParser:
                           help="the method's name; it prefixes every "
                                "imported skill id")
     importer.set_defaults(func=_cmd_import_bank)
-
-    remerge = sub.add_parser(
-        "remerge-bank",
-        help="re-run a finished run's recorded MERGE groups with the "
-             "current prompt and reader profile, writing the result as a "
-             "test-only run's accepted bank")
-    remerge.add_argument("--source-run", required=True, type=Path,
-                         help="the finished run whose last learn phase holds "
-                              "curation_log.json and skill_bank.jsonl")
-    remerge.add_argument("--config", required=True,
-                         help="the config of the new test-only run (its "
-                              "curator model and weak profile drive the "
-                              "re-merge)")
-    remerge.add_argument("--run-dir", required=True, type=Path,
-                         help="fresh run directory (created; the first "
-                              "`run` invocation freezes its manifest)")
-    remerge.add_argument("--llm-infra-retries", type=int, default=3)
-    remerge.add_argument("--llm-infra-backoff", type=float, default=5.0)
-    remerge.add_argument("--llm-timeout", type=float, default=300)
-    remerge.set_defaults(func=_cmd_remerge_bank)
 
     def _analysis_arguments(command: argparse.ArgumentParser) -> None:
         command.add_argument("--run-dir", required=True, type=Path,
@@ -989,28 +934,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     judging = sub.add_parser(
         "judge-skills",
-        help="judge how a finished test or live phase used its delivered "
-             "skills: trigger recall, misfire and adherence")
+        help="judge how a finished test or practice phase used its "
+             "delivered skills: trigger recall, misfire and adherence")
     _analysis_arguments(judging)
     judging.add_argument("--phase", required=True, metavar="LABEL",
-                         help="the phase to judge, e.g. p07:test")
-    judging.add_argument("--arm", default="with_bank",
-                         help="the arm to judge (default with_bank)")
+                         help="the phase to judge, e.g. p07:test or "
+                              "p03:practice")
+    judging.add_argument("--arm", default=None,
+                         help="the arm to judge (default: with_bank for a "
+                              "test phase, every trial of a practice phase)")
     judging.add_argument("--judge-model", default=None,
                          help="default: the run's frozen judge model")
     judging.set_defaults(func=_cmd_judge_skills)
-
-    replaying = sub.add_parser(
-        "exam-replay",
-        help="re-answer a finished run's exams with another answering "
-             "model against the same skill bank")
-    _analysis_arguments(replaying)
-    replaying.add_argument("--answerer-model", required=True)
-    replaying.add_argument("--judge-model", default=None,
-                           help="default: the run's frozen judge model")
-    replaying.add_argument("--max-skill-reads", type=int, default=None,
-                           help="default: the source exam phase's value")
-    replaying.set_defaults(func=_cmd_exam_replay)
 
     tables = sub.add_parser(
         "paper-tables",
@@ -1041,7 +976,8 @@ def build_parser() -> argparse.ArgumentParser:
     segmentation.set_defaults(func=_cmd_segmentation_metrics)
 
     summary = sub.add_parser(
-        "summary", help="print a run's stage summaries and usage totals")
+        "summary", help="print each phase's summary (practice: card use; "
+                        "learn: evidence counts) and the usage totals")
     summary.add_argument("--run-dir", required=True, type=Path,
                          help="the run directory to read")
     summary.set_defaults(func=_cmd_summary)

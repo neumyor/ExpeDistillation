@@ -1,11 +1,7 @@
-"""CLI (layer 8) tests: run/summary/assemble-reuse wiring and the error
-contract.
+"""CLI (layer 8) tests: run/summary wiring and the error contract.
 
 ``run`` is tested against a monkeypatched run_experiment (the sequence
-loop), ``summary`` against a fabricated manifest + ledger, and
-``assemble-reuse`` against both a monkeypatched assemble_reuse (wiring,
-printing, error contract) and one REAL end-to-end assembly over the
-synthetic source run of tests/unit/stages/test_assemble_reuse.py. The
+loop) and ``summary`` against a fabricated manifest + ledger. The
 loop's own behavior (fake drivers over a fake benchmark) is covered by
 tests/unit/test_cli_run_loop.py.
 """
@@ -37,8 +33,8 @@ def _fabricate_ledger(run_dir: Path, labels) -> None:
     line for every given label."""
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "manifest.json").write_text(json.dumps(
-        {"benchmark": "fakebench", "mode": "full",
-         "config": {"sequence": SEQUENCE, "schema_version": 4}}),
+        {"benchmark": "fakebench",
+         "config": {"sequence": SEQUENCE, "schema_version": 9}}),
         encoding="utf-8")
     with (run_dir / "pipeline_log.jsonl").open("w", encoding="utf-8") as fh:
         for name in labels:
@@ -311,6 +307,43 @@ def test_summary_takes_last_line_per_phase(capsys, tmp_path):
     assert '"done": true' not in out.splitlines()[-2]
 
 
+def test_summary_prints_card_use_and_evidence_counts(capsys, tmp_path):
+    run_dir = tmp_path / "run"
+    _fabricate_ledger(run_dir, EXPECTED_LABELS)
+    practice = {
+        "role": "practice", "tasks": "train", "complete": True,
+        "skill_files_read": {"traj/p03_practice/t/weak/00": ["x"]},
+        "skill_use": {"trials": 6, "valid": 6, "success": 4,
+                      "success_rate": 4 / 6, "opened_any": 2,
+                      "opened_any_success": 1,
+                      "cards": {"type/001/skill": {"opened": 2,
+                                                   "opened_success": 1},
+                                "type/002/skill": {"opened": 0,
+                                                   "opened_success": 0}}}}
+    learn = {"role": "learn", "input_phase": "p01:baseline",
+             "failed_sheets": 5, "diagnosed": 5, "located": 4,
+             "evidence": {"content": 1, "gap": 3}, "outcomes": {"add": 3},
+             "scopes": {"general": 1, "subtask": 4},
+             "bank": {"size": 3, "members": ["a", "b", "c"]}}
+    with (run_dir / "pipeline_log.jsonl").open("a", encoding="utf-8") as fh:
+        for name, summary in (("p02:learn", learn), ("p03:test", practice)):
+            fh.write(json.dumps({"stage": name, "summary": summary}) + "\n")
+
+    assert cli.main(["summary", "--run-dir", str(run_dir)]) == 0
+    lines = {line.split(": ", 1)[0]: line.split(": ", 1)[1]
+             for line in capsys.readouterr().out.splitlines()
+             if line.startswith("p0")}
+    shown = json.loads(lines["p03:test"])
+    assert shown["success"] == 4 and shown["opened_any"] == 2
+    assert (shown["cards_delivered"], shown["cards_opened"]) == (2, 1)
+    assert "skill_files_read" not in shown
+    shown = json.loads(lines["p02:learn"])
+    assert shown["evidence"] == {"content": 1, "gap": 3}
+    assert shown["bank_size"] == 3 and "scopes" not in shown
+    assert json.loads(lines["p01:baseline"]) == {"stage": "p01:baseline",
+                                                 "done": True}
+
+
 def test_summary_without_ledger_exits_one(capsys, tmp_path):
     run_dir = tmp_path / "empty_run"
     run_dir.mkdir()
@@ -327,7 +360,7 @@ def test_summary_of_a_pre_v4_run_exits_one(capsys, tmp_path):
     run_dir = tmp_path / "old_run"
     run_dir.mkdir()
     (run_dir / "manifest.json").write_text(json.dumps(
-        {"benchmark": "fakebench", "mode": "full",
+        {"benchmark": "fakebench",
          "config": {"schema_version": 3, "methods": {}}}),
         encoding="utf-8")
     code = cli.main(["summary", "--run-dir", str(run_dir)])
@@ -564,62 +597,4 @@ def test_until_phase_non_integer_is_usage_error(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         cli.main(["run", "--config", str(tmp_path / "cfg.yaml"),
                   "--run-dir", str(tmp_path / "run"), "--until-phase", "x"])
-    assert excinfo.value.code == 2
-
-
-# ---------------------------------------------------------------------------
-# assemble-reuse
-# ---------------------------------------------------------------------------
-
-def test_assemble_reuse_calls_through_and_prints_the_summary(
-        monkeypatch, capsys, tmp_path):
-    calls = {}
-    summary = {"source_run": "src", "counts": {"skills": 6}}
-
-    def fake_assemble_reuse(source_run, config_path, run_dir):
-        calls.update(source_run=source_run, config_path=config_path,
-                     run_dir=run_dir)
-        return summary
-
-    monkeypatch.setattr(cli, "assemble_reuse", fake_assemble_reuse)
-    code = cli.main([
-        "assemble-reuse",
-        "--source-run", str(tmp_path / "source"),
-        "--config", str(tmp_path / "cfg.yaml"),
-        "--run-dir", str(tmp_path / "run"),
-    ])
-    captured = capsys.readouterr()
-    assert code == 0
-    assert calls == {"source_run": tmp_path / "source",
-                     "config_path": tmp_path / "cfg.yaml",
-                     "run_dir": tmp_path / "run"}
-    line = captured.out.splitlines()[-1]
-    assert line.startswith("assemble-reuse: ")
-    assert json.loads(line[len("assemble-reuse: "):]) == summary
-
-
-def test_assemble_reuse_reports_expected_errors_nonzero(
-        monkeypatch, capsys, tmp_path):
-    def fake_assemble_reuse(source_run, config_path, run_dir):
-        raise ConfigError("the reuse config differs from the source run")
-
-    monkeypatch.setattr(cli, "assemble_reuse", fake_assemble_reuse)
-    code = cli.main([
-        "assemble-reuse",
-        "--source-run", str(tmp_path / "source"),
-        "--config", str(tmp_path / "cfg.yaml"),
-        "--run-dir", str(tmp_path / "run"),
-    ])
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "differs from the source run" in captured.err
-    assert captured.out == ""
-
-
-def test_assemble_reuse_missing_args_is_usage_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        cli, "assemble_reuse",
-        lambda *a, **k: pytest.fail("assemble_reuse must not be called"))
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main(["assemble-reuse", "--config", str(tmp_path / "cfg.yaml")])
     assert excinfo.value.code == 2

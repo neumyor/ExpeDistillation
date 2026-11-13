@@ -87,10 +87,6 @@ def load(run_dir: Path) -> Dict[str, Any]:
     return read_json(path)
 
 
-#: Alias kept for callers that prefer the explicit name.
-load_manifest = load
-
-
 def load_or_none(run_dir: Path) -> Optional[Dict[str, Any]]:
     """The manifest, or None when the run has not been frozen yet."""
     path = Path(run_dir) / MANIFEST_NAME

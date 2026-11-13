@@ -1,7 +1,6 @@
 """Trial-level answer-sheet builders, assembly, grading and export tests.
 
-Builders read the canonical ``Trajectory`` / ``Attempt`` / external reward
-facts; assembly joins executions with coverage (defaulting a missing
+Builders read the canonical ``Trajectory`` / external reward facts; assembly joins executions with coverage (defaulting a missing
 coverage row to present and emitting a gap sheet for a non-present row
 without an execution); grading fills only present trials; the writers
 produce the derived JSON + Markdown artifacts and the coverage JSONL.
@@ -10,24 +9,17 @@ produce the derived JSON + Markdown artifacts and the coverage JSONL.
 from expedistill.composites import answer_sheets
 from expedistill.composites.unit_ids import make_gap_sheet_id, make_unit_id
 from expedistill.core.answer_sheet import CoverageRecord
-from expedistill.core.ids import (
-    make_attempt_id,
-    make_exam_id,
-    make_skill_id,
-    make_subtask_id,
-    make_trajectory_id,
-)
-from expedistill.core.models import Attempt, Step, Trajectory
+from expedistill.core.ids import make_trajectory_id
+from expedistill.core.models import Step, Trajectory
 from expedistill.infra.store import object_filename, read_json, read_jsonl
 
 TASK = "tb:task-1"
-EXAM = make_exam_id(
-    make_skill_id(make_subtask_id(make_trajectory_id(TASK, "weak", 0), 0)), 1)
+PHASE = "p03:practice"
 
 
 def _trajectory(**overrides):
     base = dict(
-        trajectory_id=make_trajectory_id(TASK, "weak", 0),
+        trajectory_id=make_trajectory_id(PHASE, TASK, "weak", 0),
         task_id=TASK,
         benchmark="tb",
         model_role="weak",
@@ -42,28 +34,13 @@ def _trajectory(**overrides):
     return Trajectory(**base)
 
 
-def _attempt(**overrides):
-    base = dict(
-        attempt_id=make_attempt_id(EXAM, 0),
-        exam_id=EXAM,
-        skill_id="skill-1",
-        skill_version=2,
-        purpose="acceptance",
-        weak_answer="42",
-        judge_verdict=True,
-        judge_reason="the answer is right",
-        retry_round=1,
-    )
-    base.update(overrides)
-    return Attempt(**base)
-
-
 def test_the_sheet_filename_fits_a_long_alfworld_game_path():
     task = ("alfworld:json_2.1.1/valid_unseen/"
             "look_at_obj_in_light-AlarmClock-None-DeskLamp-308/"
             "trial_T20190908_222917_366542/game.tw-pddl")
     trajectory = _trajectory(
-        trajectory_id=make_trajectory_id(task, "weak", 0), task_id=task,
+        trajectory_id=make_trajectory_id("p01:baseline", task, "weak", 0),
+        task_id=task,
         benchmark="alfworld")
     unit = make_unit_id(phase_label="p01:baseline", benchmark="alfworld",
                         task_ref=task, role="weak", skills_injected=None)
@@ -101,6 +78,20 @@ def test_execution_from_trajectory_reads_every_trial_fact():
     assert record.source == "local"
 
 
+def test_execution_from_trajectory_carries_the_folder_manifest():
+    # A folder unit's sheet keeps the manifest the executor saw (files,
+    # catalog and playbook) beside the trajectory id.
+    folder = {"files": [{"skill_id": "type/001/skill", "version": 1,
+                         "filename": "type-001-skill/SKILL.md"}],
+              "catalog_text": "catalog", "playbook_text": "Look first."}
+    trajectory = _trajectory()
+    record = answer_sheets.execution_from_trajectory(
+        trajectory, unit_id="unit-1", phase_label=PHASE, folder=folder)
+    assert record.artifacts == {"trajectory_id": trajectory.trajectory_id,
+                                "skill_folder": folder}
+    assert record.artifacts["skill_folder"] is not folder
+
+
 def test_execution_from_trajectory_adds_no_scorer_verdict_of_its_own():
     record = answer_sheets.execution_from_trajectory(
         _trajectory(correctness=None), unit_id="unit-1",
@@ -108,40 +99,6 @@ def test_execution_from_trajectory_adds_no_scorer_verdict_of_its_own():
     assert record.raw_correctness is None
     assert record.aux_success is None
     assert record.arm is None
-
-
-def test_execution_from_attempt_carries_the_answer_and_judge_facts():
-    attempt = _attempt()
-    record = answer_sheets.execution_from_attempt(
-        attempt, unit_id="unit-2", phase_label="p03:exam",
-        arm="with_bank")
-
-    assert record.sheet_id == attempt.attempt_id
-    assert record.unit_id == "unit-2"
-    assert record.phase_label == "p03:exam"
-    assert record.task_ref == attempt.exam_id
-    assert record.role == "weak"
-    assert record.arm == "with_bank"
-    assert record.model_role == "weak"
-    assert record.model_name == ""
-    assert record.sample_index == 0
-    assert record.skills_injected == [{"skill_id": "skill-1", "version": 2}]
-    assert record.answer == "42"
-    assert record.steps == []
-    assert record.raw_correctness is None
-    assert record.metrics == {}
-    assert record.aux == {"judge_verdict": True,
-                          "judge_reason": "the answer is right"}
-    assert record.artifacts == {"attempt_id": attempt.attempt_id}
-    assert record.kind == "trajectory"
-    assert record.source == "local"
-
-
-def test_execution_from_a_bare_attempt_has_no_injected_skills():
-    record = answer_sheets.execution_from_attempt(
-        _attempt(skill_id=None, skill_version=None, purpose="bare"),
-        unit_id="unit-2", phase_label="p03:exam")
-    assert record.skills_injected is None
 
 
 def test_execution_from_external_marks_a_positive_reward_as_correct():
@@ -236,7 +193,7 @@ def test_grade_answer_sheets_fills_only_present_trials():
     executions, coverage, _ = _sheets_for_assembly()
     executions.append(answer_sheets.execution_from_trajectory(
         _trajectory(
-            trajectory_id=make_trajectory_id(TASK, "weak", 1),
+            trajectory_id=make_trajectory_id(PHASE, TASK, "weak", 1),
             attempt_index=1, correctness=None),
         unit_id="unit-4", phase_label="p03:live"))
     sheets = answer_sheets.assemble_answer_sheets(
@@ -253,18 +210,6 @@ def test_grade_answer_sheets_fills_only_present_trials():
     assert by_id[executions[0].sheet_id] in sheets
     assert all(sheet.grading is not None for sheet in sheets
                if sheet.execution is not None)
-
-
-def test_grade_answer_sheets_routes_an_attempt_through_the_exam_rule():
-    attempt_record = answer_sheets.execution_from_attempt(
-        _attempt(judge_verdict=False, judge_reason="wrong"),
-        unit_id="unit-2", phase_label="p03:exam")
-    sheets = answer_sheets.assemble_answer_sheets(
-        [attempt_record], [], phase_label="p03:exam")
-    graded = answer_sheets.grade_answer_sheets(sheets, "exam_judge")
-    assert graded[0].grading.verdict == "failure"
-    assert graded[0].grading.rule_name == "exam_judge"
-    assert graded[0].grading.basis.startswith("exam_judge: wrong")
 
 
 def test_grade_answer_sheets_routes_an_external_reward_through_its_rule():

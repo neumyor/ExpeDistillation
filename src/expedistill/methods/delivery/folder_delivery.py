@@ -2,9 +2,8 @@
 
 The agent is handed ONE read-only folder of skills. Each delivered skill
 is a directory containing ``SKILL.md`` with YAML frontmatter (``name``
-and ``description``) and the skill's three-section body. The test phase
-delivers the accepted set; the live phase's ``folder_by_task`` passes
-``accepted_only=False`` so its pending group is the delivered set. Harbor's
+and ``description``) and the skill's card. The practice and test phases
+deliver the bank's active cards. Harbor's
 Terminus agent discovers those files itself, renders an
 ``<available_skills>`` list with each exact location, and appends it to
 the initial prompt; the agent cats the skill it needs. The catalog file
@@ -29,12 +28,14 @@ materialization reads them from it (with the fingerprint checked) --
 the unit row stays as light as the old top-k one.
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
-the curated skill bank, ``tasks`` the phase's tasks, ``params`` the
-FolderParams. One row per test task, every row the same fixed
-(bank digest, catalog) pair -- the accepted-set bookkeeping mirrors
-whole_bank exactly: ``skills_injected`` is the ACCEPTED bank's digest
-(:func:`units.accepted_bank`, the pre-phase-artifact meaning of "the
-bank"), so the unit ids join the reuse/decision plumbing unchanged.
+the phase skill bank, ``tasks`` the phase's tasks, ``params`` the
+FolderParams. One row per task, every row the same fixed
+(bank digest, catalog) pair -- the active-set bookkeeping mirrors
+whole_bank exactly: ``skills_injected`` is the ACTIVE cards' digest
+(:func:`units.active_bank`), so the unit ids follow the same rule as
+whole_bank's. An empty active set still yields folder rows: the manifest
+lists no files and renders no catalog, and the unit runs with the folder
+prompt and the playbook all the same.
 """
 
 import hashlib
@@ -52,7 +53,7 @@ from expedistill.inject.skill_text import (
     validate_description_mode,
     when_to_use_line,
 )
-from expedistill.methods.delivery import FolderParams
+from expedistill.methods.delivery.params import FolderParams
 from expedistill.methods.delivery import units
 
 __all__ = ["CATALOG_FILENAME", "render_catalog", "resolve",
@@ -159,13 +160,13 @@ def _description(record: Union[Skill, Mapping[str, Any]],
     whole: a clipped trigger reads as a different rule, so the length
     budget lives in the G2 prompts, not in a clip here.
 
-    A skill with neither a summary nor a [When to use] section keeps the
+    A skill with neither a summary nor a when_to_use keeps the
     catalog's explicit placeholder; the SKILL.md frontmatter renderer
     uses a non-empty generic fallback instead, because the Agent Skills
     format rejects an empty description.
     """
     summary = one_line(_field(record, "summary", "") or "")
-    trigger = when_to_use_line(_field(record, "content", "") or "")
+    trigger = when_to_use_line(record)
     if not summary and not trigger:
         return _NO_DESCRIPTION
     return description_text(record, description_mode)
@@ -188,9 +189,8 @@ def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],
 
 
 def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
-                          description_mode: str = DEFAULT_DESCRIPTION_MODE,
-                          accepted_only: bool = True,
-                          playbook_text: str = "") -> Dict[str, Any]:
+                          description_mode: str = DEFAULT_DESCRIPTION_MODE
+                          ) -> Dict[str, Any]:
     """The folder manifest a folder unit carries (M3's materialization
     input)::
 
@@ -202,11 +202,8 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
          "files": [{"skill_id", "version", "filename"},
                    ...]}                      # member set, bank order
 
-    The file list is the bank's ACCEPTED members by default
-    (whole_bank's bookkeeping). ``accepted_only=False`` keeps every
-    member instead: the live phase's pending group is the set under
-    test, so its folder must contain the pending candidates. It is a
-    NAME MAPPING, not the skills: no content travels with the manifest
+    The file list is the bank's ACTIVE members (whole_bank's
+    bookkeeping). It is a NAME MAPPING, not the skills: no content travels with the manifest
     (the rev-1 ruling -- progressive disclosure must survive every
     stage; the composite materialization reads each skill's body from
     the phase bank, checking it against the fingerprint below). The
@@ -219,11 +216,10 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
     lesson: an empty injection is the empty string, never a header
     claiming experience exists)."""
     validate_description_mode(description_mode)
-    accepted = (units.accepted_bank(bank) if accepted_only
-                else list(bank))
+    active = units.active_bank(bank)
     files: List[Dict[str, Any]] = []
     owner_of: Dict[str, str] = {}
-    for record in accepted:
+    for record in active:
         skill_id = _field(record, "skill_id")
         filename = skill_filename(skill_id)
         if filename in owner_of:
@@ -240,17 +236,11 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
     manifest = {
         "bank_fingerprint": bank_reference(bank),
         "catalog_filename": CATALOG_FILENAME,
-        "catalog_text": (render_catalog(accepted, description_mode)
+        "catalog_text": (render_catalog(active, description_mode)
                          if files else ""),
         "description_mode": description_mode,
         "files": files,
     }
-    if playbook_text:
-        # The global playbook rides the manifest, not the catalog: the
-        # folder reader renders it above the card list on every step.
-        # Omitted when empty so the pre-playbook manifest stays
-        # byte-identical (golden snapshots and frozen runs).
-        manifest["playbook_text"] = playbook_text
     return manifest
 
 
@@ -258,7 +248,7 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
             params: FolderParams) -> ExecutionUnitList:
     """resolve(bank, tasks, params) -> ExecutionUnitList  [frozen, R5]:
     one row per task, input order (whole_bank's shape), every row the
-    same fixed (accepted-bank digest, catalog) pair and the folder
+    same fixed (active-bank digest, catalog) pair and the folder
     manifest in ``aux["skill_folder"]`` (shared read-only across the
     phase's rows -- it is phase-level data; a per-unit consumer must
     copy before mutating).
@@ -270,10 +260,8 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
     ``params.description_mode`` is carried in the manifest so the
     materializer and the catalog use the same composition rule.
     """
-    accepted = units.accepted_bank(bank)
-    manifest = skill_folder_manifest(bank, params.description_mode,
-                                     playbook_text=params.playbook)
-    injected = bank_reference(accepted)
+    manifest = skill_folder_manifest(bank, params.description_mode)
+    injected = bank_reference(units.active_bank(bank))
     block = manifest["catalog_text"]
     return [units.make_row(units.task_ref(task), injected, block,
                            {"skill_folder": manifest})

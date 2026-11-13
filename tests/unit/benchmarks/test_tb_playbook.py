@@ -1,12 +1,13 @@
 """TB's learned-playbook facts, requirements and writing prompt."""
 
 import json
+import string
 
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.benchmarks.tb.playbook import (
     PLAYBOOK_PROMPT_NAME, REQUIRED_LABELS, facts_from_sheets,
     playbook_requirements)
-from expedistill.blocks.playbook import missing_requirements
+from expedistill.methods.evolve_text import missing_requirements
 from expedistill.core.answer_sheet import (
     AnswerSheet, CoverageRecord, ExecutionRecord, GradingRecord)
 from expedistill.core.models import Step
@@ -103,15 +104,21 @@ def test_requirements_name_every_labelled_part():
         "orientation", "working loop", "verification", "prohibitions"]
 
 
-def test_plugin_declares_the_capability_and_the_prompt_has_its_slots():
+def test_the_pack_overrides_the_playbook_update_with_matching_slots():
     plugin = TBPlugin()
-    assert plugin.playbook_prompt_name == PLAYBOOK_PROMPT_NAME
-    assert plugin.playbook_facts([]) == "(no scored baseline trials)"
-    template = get_prompt(PLAYBOOK_PROMPT_NAME)
-    for slot in ("{facts}", "{profile_section}", "{correction_note}",
-                 "{agent_kind}", "{benchmark_name}"):
-        assert slot in template
+    pack = plugin.prompt_pack
+    assert pack.overrides == {"PLAYBOOK_UPDATE": PLAYBOOK_PROMPT_NAME}
+    assert pack.playbook_facts([]) == "(no scored baseline trials)"
+    assert [check.name for check in pack.playbook_checks] \
+        == [check.name for check in playbook_requirements()]
+    assert _slots(get_prompt(PLAYBOOK_PROMPT_NAME)) \
+        == _slots(get_prompt("PLAYBOOK_UPDATE"))
     # The prompt tells the writer what the agent already receives.
-    assert get_prompt("TB_TASK_PROMPT_READ") in template
-    template.format(agent_kind="terminal", benchmark_name="TB",
-                    facts="F", profile_section="P", correction_note="")
+    assert get_prompt("TB_TASK_PROMPT_READ") in get_prompt(
+        PLAYBOOK_PROMPT_NAME)
+    assert not plugin.playbook_in_skills_block
+
+
+def _slots(template):
+    return {field for _, field, _, _ in string.Formatter().parse(template)
+            if field is not None}

@@ -18,6 +18,7 @@ import pytest
 
 from expedistill import prompts
 from expedistill.benchmarks.base import (
+    GENERIC_PACK,
     BenchmarkPlugin,
     Task,
     ViewRules,
@@ -27,14 +28,13 @@ from expedistill.benchmarks.registry import (
     _reset_registry,
     register_plugin,
 )
-from expedistill.blocks.rules import TASK_SELECT
+from expedistill.blocks.rules import SEGMENT_SELECT
 from expedistill.core.config import DEFAULT_RULES, ExperimentConfig
 from expedistill.infra.manifest import FrozenProtocolChanged, load as load_manifest
 from expedistill.infra.store import Store, read_json
 from expedistill.infra.usage import UsageRecorder
 from expedistill.prompts import PromptSpec
 from expedistill.blocks.tasks import tasks_digest
-from expedistill.prompts.learning_context import GENERIC
 from expedistill.stages import stage0_freeze
 from expedistill.stages.context import StageContext
 
@@ -128,9 +128,11 @@ def clean_registry():
     _reset_registry()
 
 
-#: The exam-style method every fixture carries (an exam phase so stage 0
-#: resolves the exam execution and the merge_check: exam constraint).
-SEQUENCE = ["baseline", "learn", "exam", "learn", "test"]
+#: The method every fixture carries: the baseline, two learn phases with a
+#: practice phase between them, and a whole-bank final test (so stage 0
+#: resolves every family: none / folder / whole_bank, real / real_folder,
+#: review, author).
+SEQUENCE = ["baseline", "learn", "practice", "learn", "test"]
 PHASES = {
     "baseline": {"kind": "execute", "role": "baseline", "tasks": "train",
           "delivery": {"name": "none"},
@@ -138,12 +140,10 @@ PHASES = {
                         "arms": ["executor_strong", "executor_weak"]}},
     "learn": {"kind": "learn",
           "review": {"name": "review", "K": 4},
-          "author": {"name": "distill_diagnose"},
-          "curate": {"name": "agentbrew", "token_budget": 4096,
-                     "rounds": 3, "merge_check": "exam"}},
-    "exam": {"kind": "execute", "role": "exam", "tasks": "train",
-          "delivery": {"name": "exam_folder"},
-          "execution": {"name": "exam"}},
+          "author": {"name": "subtask_cards"}},
+    "practice": {"kind": "execute", "role": "practice", "tasks": "train",
+          "delivery": {"name": "folder"},
+          "execution": {"name": "real_folder", "attempts": 2}},
     "test": {"kind": "execute", "role": "test", "tasks": "test",
           "delivery": {"name": "whole_bank"},
           "execution": {"name": "real"},
@@ -154,15 +154,13 @@ PHASES = {
 def make_config(**overrides):
     defaults = dict(
         benchmark=_FAKE,
-        mode="split",
         models={"executor_strong": "big-model", "executor_weak": "weak-7b"},
-        weak_profile="a weak model",
         n_attempts_strong=1,
         n_attempts_weak=2,
         sequence=list(SEQUENCE),
         phases=copy.deepcopy(PHASES),
         split={"train": ["t1", "t2"], "test": ["t3"]},
-        rules={"task_select": "all_valid_failed", "trajectory_select": "all"},
+        rules={"trajectory_select": "all"},
     )
     defaults.update(overrides)
     return ExperimentConfig(**defaults)
@@ -194,18 +192,17 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert result["train"] == ["t1", "t2"]
     assert result["test"] == ["t3"]
     # The returned dict is id lists only (the pipeline JSON-dumps it into
-    # its ledger), so its exact key set is part of the contract. All three
-    # split keys are always present (ruling 7); a two-key spec means
-    # reserved is [], never absent.
-    assert set(result) == {"tasks", "train", "test", "reserved"}
-    assert result["reserved"] == []
+    # its ledger), so its exact key set is part of the contract. All four
+    # split keys are always present; a two-key spec means val and reserved
+    # are [], never absent.
+    assert set(result) == {"tasks", "train", "val", "test", "reserved"}
+    assert result["val"] == result["reserved"] == []
     json.dumps(result)
 
     manifest = load_manifest(ctx.run_dir)
     assert manifest["benchmark"] == _FAKE
-    assert manifest["mode"] == "split"
-    assert manifest["split"] == {"train": ["t1", "t2"], "test": ["t3"],
-                                "reserved": []}
+    assert manifest["split"] == {"train": ["t1", "t2"], "val": [],
+                                "test": ["t3"], "reserved": []}
     assert manifest["model_roles"]["executor_strong"] == "big-model"
     assert manifest["rules"] == config.rules
     # The fake plugin declares no auxiliary metric: frozen as null.
@@ -220,30 +217,36 @@ def test_freeze_writes_manifest_and_summary(monkeypatch, tmp_path):
     assert plugin.load_specs == [["t1", "t2", "t3"]]
 
     summary = read_json(ctx.run_dir / "stage0_summary.json")
-    assert summary == {"tasks": 3, "train": ["t1", "t2"], "test": ["t3"],
-                       "reserved": []}
+    assert summary == {"tasks": 3, "train": ["t1", "t2"], "val": [],
+                       "test": ["t3"], "reserved": []}
 
 
-def test_full_mode_freezes_whole_set_as_train_and_test(monkeypatch, tmp_path):
-    _install_plugin(monkeypatch, StagePlugin())
-    config = make_config(mode="full", split=None)
+# ---------------------------------------------------------------------------
+# val and reserved: the optional lists are loaded and frozen
+# ---------------------------------------------------------------------------
+
+def test_four_key_split_freezes_and_loads_every_list(monkeypatch, tmp_path):
+    plugin = _install_plugin(monkeypatch, StagePlugin())
+    phases = copy.deepcopy(PHASES)
+    phases["practice"]["tasks"] = "val"
+    config = make_config(
+        phases=phases,
+        split={"train": ["t1"], "val": ["t3"], "test": ["t2"],
+               "reserved": []})
     ctx = make_ctx(tmp_path, config)
     result = stage0_freeze.run(ctx)
-    assert result["tasks"] == 3
-    assert result["train"] == list(TASK_IDS)
-    assert result["test"] == list(TASK_IDS)
-    assert result["reserved"] == []
+
+    assert result == {"tasks": 3, "train": ["t1"], "val": ["t3"],
+                      "test": ["t2"], "reserved": []}
+    # The union of all four lists is what D1 loaded.
+    assert plugin.load_specs == [["t1", "t2", "t3"]]
     manifest = load_manifest(ctx.run_dir)
-    assert manifest["split"] == {
-        "train": list(TASK_IDS), "test": list(TASK_IDS), "reserved": []}
+    assert manifest["split"] == {"train": ["t1"], "val": ["t3"],
+                                "test": ["t2"], "reserved": []}
+    assert read_json(ctx.run_dir / "stage0_summary.json") == result
 
 
-# ---------------------------------------------------------------------------
-# reserved: the third split list is loaded, frozen, held out of both arms
-# ---------------------------------------------------------------------------
-
-def test_reserved_flow_freezes_three_keys_and_loads_reserved(
-        monkeypatch, tmp_path):
+def test_reserved_flow_freezes_and_loads_reserved(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, StagePlugin())
     config = make_config(
         split={"train": ["t1"], "test": ["t2"], "reserved": ["t3"]})
@@ -251,14 +254,13 @@ def test_reserved_flow_freezes_three_keys_and_loads_reserved(
     result = stage0_freeze.run(ctx)
 
     # reserved is LOADED (the lists must cover the task set exactly) but
-    # lands in neither arm's list.
-    assert result == {"tasks": 3, "train": ["t1"], "test": ["t2"],
-                      "reserved": ["t3"]}
-    # The union of all three lists is what D1 loaded.
+    # no phase runs it.
+    assert result == {"tasks": 3, "train": ["t1"], "val": [],
+                      "test": ["t2"], "reserved": ["t3"]}
     assert plugin.load_specs == [["t1", "t2", "t3"]]
 
     manifest = load_manifest(ctx.run_dir)
-    assert manifest["split"] == {"train": ["t1"], "test": ["t2"],
+    assert manifest["split"] == {"train": ["t1"], "val": [], "test": ["t2"],
                                 "reserved": ["t3"]}
     summary = read_json(ctx.run_dir / "stage0_summary.json")
     assert summary == result
@@ -278,9 +280,7 @@ def test_reserved_with_config_tasks_must_cover_exactly(monkeypatch, tmp_path):
     assert plugin.load_specs == [["t1", "t2"]]
 
 
-def test_two_key_spec_regression_freezes_empty_reserved(monkeypatch, tmp_path):
-    # The pre-v2 shape keeps working and freezes reserved: [] -- old
-    # configs are historical records that must still load and resume.
+def test_two_key_spec_resumes_byte_stably(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, StagePlugin())
     config = make_config()
     ctx = make_ctx(tmp_path, config)
@@ -407,26 +407,29 @@ def test_manifest_freezes_tasks_digest(monkeypatch, tmp_path):
 # Task set from config.tasks
 # ---------------------------------------------------------------------------
 
-def test_tb_like_plugin_full_mode_with_task_list(monkeypatch, tmp_path):
+def test_tb_like_plugin_with_task_list(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, TBLikePlugin())
-    config = make_config(mode="full", split=None, tasks=["t1", "t3"])
+    config = make_config(split={"train": ["t1"], "test": ["t3"]},
+                         tasks=["t1", "t3"])
     ctx = make_ctx(tmp_path, config)
     result = stage0_freeze.run(ctx)
     assert plugin.load_specs == [["t1", "t3"]]
-    assert result == {"tasks": 2, "train": ["t1", "t3"],
-                      "test": ["t1", "t3"], "reserved": []}
+    assert result == {"tasks": 2, "train": ["t1"], "test": ["t3"],
+                      "reserved": [], "val": []}
     manifest = load_manifest(ctx.run_dir)
     assert manifest["config"]["tasks"] == ["t1", "t3"]
 
 
-def test_tb_like_plugin_full_mode_with_task_file(monkeypatch, tmp_path):
+def test_tb_like_plugin_with_task_file(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, TBLikePlugin())
     task_file = tmp_path / "tasks.txt"
     task_file.write_text("t2\nt3\n", encoding="utf-8")
-    config = make_config(mode="full", split=None, tasks=str(task_file))
+    config = make_config(split={"train": ["t2"], "test": ["t3"]},
+                         tasks=str(task_file))
     result = stage0_freeze.run(make_ctx(tmp_path, config))
     assert plugin.load_specs == [str(task_file)]
-    assert result["train"] == ["t2", "t3"]
+    assert result == {"tasks": 2, "train": ["t2"], "test": ["t3"],
+                      "reserved": [], "val": []}
 
 
 def test_tb_like_plugin_ratio_split_derives_from_task_set(
@@ -442,7 +445,7 @@ def test_tb_like_plugin_ratio_split_derives_from_task_set(
 
 def test_tb_like_plugin_without_tasks_still_rejected(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, TBLikePlugin())
-    config = make_config(mode="full", split=None)
+    config = make_config(split={"ratio": 0.5, "seed": 0})
     with pytest.raises(ConfigError, match="explicit task list"):
         stage0_freeze.run(make_ctx(tmp_path, config))
 
@@ -471,7 +474,7 @@ def test_explicit_split_matching_task_set_loads_task_set(
     result = stage0_freeze.run(make_ctx(tmp_path, config))
     assert plugin.load_specs == [["t1", "t2"]]
     assert result == {"tasks": 2, "train": ["t2"], "test": ["t1"],
-                      "reserved": []}
+                      "reserved": [], "val": []}
 
 
 # ---------------------------------------------------------------------------
@@ -487,8 +490,7 @@ def test_rule_defaults_are_frozen(monkeypatch, tmp_path):
     assert manifest["config"]["rules"] == DEFAULT_RULES
 
 
-@pytest.mark.parametrize("key", ["task_select", "segment_select",
-                                 "trajectory_select"])
+@pytest.mark.parametrize("key", ["segment_select", "trajectory_select"])
 def test_unknown_rule_name_fails_at_stage0_before_anything(
         monkeypatch, tmp_path, key):
     plugin = _install_plugin(monkeypatch, StagePlugin())
@@ -504,11 +506,11 @@ def test_unknown_rule_name_fails_at_stage0_before_anything(
 def test_registered_custom_rule_name_accepted(monkeypatch, tmp_path):
     _install_plugin(monkeypatch, StagePlugin())
     name = "stage0_test_only_rule"
-    if name not in TASK_SELECT:
-        TASK_SELECT.register(name)(lambda metrics, n_attempts: True)
-    ctx = make_ctx(tmp_path, make_config(rules={"task_select": name}))
+    if name not in SEGMENT_SELECT:
+        SEGMENT_SELECT.register(name)(lambda subtask: True)
+    ctx = make_ctx(tmp_path, make_config(rules={"segment_select": name}))
     stage0_freeze.run(ctx)
-    assert load_manifest(ctx.run_dir)["rules"]["task_select"] == name
+    assert load_manifest(ctx.run_dir)["rules"]["segment_select"] == name
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +538,7 @@ def test_external_control_file_verified_at_freeze(monkeypatch, tmp_path):
     stage0_freeze.run(ctx)
     manifest = load_manifest(ctx.run_dir)
     assert manifest["config"]["phases"]["test"]["compare"] == {
-        "against": "external_campaign", "rule": None,
+        "against": "external_campaign",
         "external": {"path": str(score_path), "sha256": sha,
                      "model_key": "qwen"}}
 
@@ -620,7 +622,8 @@ def test_real_searchqa_plugin_freezes_its_task_prompt_digest(
         Task(task_id=i, instruction=f"q {i}") for i in spec])
     _reset_registry()
     register_plugin(plugin)
-    config = make_config(benchmark="searchqa", mode="full", split=None,
+    config = make_config(benchmark="searchqa",
+                         split={"train": ["q1"], "test": ["q2"]},
                          tasks=["q1", "q2"])
     ctx = make_ctx(tmp_path, config)
     stage0_freeze.run(ctx)
@@ -647,7 +650,8 @@ def test_real_alfworld_plugin_freezes_its_task_prompt_digest(
         Task(task_id=i, instruction=f"task {i}") for i in spec])
     _reset_registry()
     register_plugin(plugin)
-    config = make_config(benchmark="alfworld", mode="full", split=None,
+    config = make_config(benchmark="alfworld",
+                         split={"train": ["g1"], "test": ["g2"]},
                          tasks=["g1", "g2"])
     ctx = make_ctx(tmp_path, config)
     stage0_freeze.run(ctx)
@@ -660,6 +664,7 @@ def test_real_alfworld_plugin_freezes_its_task_prompt_digest(
         "ALFWORLD_TASK_PROMPT_NO_HISTORY",
         "ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER",
         "ALFWORLD_TASK_PROMPT_CORRECTION",
+        "ALFWORLD_PLAYBOOK_UPDATE",
     }
     for name in protocol:
         assert frozen[name] == prompts.digest(name)
@@ -687,15 +692,16 @@ def test_declared_aux_metric_name_is_frozen_and_changing_it_refuses(
 # Duplicate task ids from the plugin (e.g. a task file listing one twice)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("split", [None, {"ratio": 0.5, "seed": 0},
-                                   {"ratio": 0.5, "seed": 3}])
+@pytest.mark.parametrize("split", [
+    {"train": ["t1", "t2"], "test": ["t3"]},
+    {"ratio": 0.5, "seed": 0},
+    {"ratio": 0.5, "seed": 3}])
 def test_duplicate_ids_in_task_file_rejected_before_split(
         monkeypatch, tmp_path, split):
     _install_plugin(monkeypatch, TBLikePlugin())
     task_file = tmp_path / "tasks.txt"
     task_file.write_text("t1\nt2\nt3\nt2\nt1\n", encoding="utf-8")
-    mode = "full" if split is None else "split"
-    ctx = make_ctx(tmp_path, make_config(mode=mode, split=split,
+    ctx = make_ctx(tmp_path, make_config(split=split,
                                          tasks=str(task_file)))
     with pytest.raises(ConfigError, match=r"duplicate.*\['t1', 't2'\]"):
         stage0_freeze.run(ctx)
@@ -704,7 +710,7 @@ def test_duplicate_ids_in_task_file_rejected_before_split(
 
 # ---------------------------------------------------------------------------
 # Acceptance protocol (decision doc 2026-10-14): the manifest freeze
-# contract, the live_run digest branch and the improve-rule name check
+# contract and the verdict-rule name check
 # ---------------------------------------------------------------------------
 
 #: The frozen prompt surface: every method prompt registered at
@@ -717,35 +723,24 @@ def test_duplicate_ids_in_task_file_rejected_before_split(
 #: moves with the text, and the freeze still refuses an old run directory:
 #: a deliberate text change is a new experiment).
 FROZEN_PROMPT_NAMES = frozenset({
-    "CLUSTER_SKILL",
-    "CLUSTER_SUBTASKS",
-    "CLUSTER_TRIGGER_FAMILY",
+    "CARDS_CORRECTION",
+    "CARD_WRITE",
     "DEFAULT_SYSTEM",
-    "EXAM_JUDGE",
-    "EXAM_PLAN",
-    "EXAM_SCENE",
-    "EXAM_TRIGGER",
+    "DIAGNOSIS_CORRECTION",
+    "EVOLVE_CORRECTION",
     "FAKE_TASK",
-    "GROUP",
-    "LEAK_AUDIT_JUDGE",
-    "SKILL_ATTEMPT_ATTRIBUTION",
-    "SKILL_ATTEMPT_REVISION",
-    "MERGE",
-    "REPAIR_INSTRUCTION",
-    "REWRITE",
-    "SEGMENT",
-    "SIMILARITY",
-    "SKILL_DIAGNOSE",
-    "SKILL_DISTILL",
-    "TRIAL_FAILURE_ANALYSIS",
-    "TRIAL_EXAM_ANALYSIS",
-    "TRIAL_REQUIREMENT_AGGREGATION",
+    "PLAYBOOK_PARTS_CORRECTION",
+    "PLAYBOOK_UPDATE",
     "PROFILE_UPDATE",
-    "REQUIREMENT_SKILL",
-    "REVISION_SCOPE_BODY",
-    "REVISION_SCOPE_TRIGGER",
+    "REPAIR_INSTRUCTION",
+    "REVISE_CONTENT",
+    "REVISE_TRIGGER",
+    "REVISION_DIAGNOSIS",
+    "SEGMENT",
     "SKILL_ADHERENCE_JUDGE",
     "SKILL_APPLICABILITY_JUDGE",
+    "SUBTASK_TYPING",
+    "TRIAL_FAILURE_ANALYSIS",
 })
 
 
@@ -762,9 +757,8 @@ def _loaded_tasks():
     return [Task(task_id=i, instruction=f"do {i}") for i in TASK_IDS]
 
 
-@pytest.mark.parametrize("shape", ["full", "split"])
-def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
-        monkeypatch, tmp_path, shape):
+def test_config_freeze_mapping_matches_the_fixed_baseline(
+        monkeypatch, tmp_path):
     """The manifest freezes exactly the run that is about to execute.
 
     Each frozen surface is checked against its live source rather than a
@@ -772,24 +766,16 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
     need no manual sync here: ``config`` equals ``to_dict()`` of the same
     config with the digests filled (what the freeze builds); the
     ``prompt_digests`` name set is pinned while every value equals
-    ``prompts.digest`` (the full freeze -- the two live names included by
-    design, their digests never called by an exam run); ``rules`` and
+    ``prompts.digest`` (the full freeze); ``rules`` and
     ``model_roles`` are the config's completed tables; ``tasks_digest`` is
-    recomputed with the stage's own digest. The split shapes stay explicit
-    contract assertions: full mode (config split null) freezes the whole set
-    in both arms, split mode the explicit lists, and ``reserved`` is always
-    present.
+    recomputed with the stage's own digest. The split shape stays an
+    explicit contract assertion: the explicit lists are frozen, and
+    ``val`` and ``reserved`` are always present.
     """
     _install_plugin(monkeypatch, StagePlugin())
-    if shape == "full":
-        config = make_config(mode="full", split=None)
-        assert config.split is None
-        expected_split = {"train": list(TASK_IDS), "test": list(TASK_IDS),
-                          "reserved": []}
-    else:
-        config = make_config()
-        expected_split = {"train": ["t1", "t2"], "test": ["t3"],
-                          "reserved": []}
+    config = make_config()
+    expected_split = {"train": ["t1", "t2"], "val": [], "test": ["t3"],
+                      "reserved": []}
     ctx = make_ctx(tmp_path, config)
 
     stage0_freeze.run(ctx)
@@ -798,17 +784,17 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
     # The manifest's exact top-level key set is part of the frozen
     # protocol: an added or dropped key changes every resume comparison.
     assert set(manifest) == {
-        "benchmark", "mode", "split", "config", "prompt_digests",
-        "learning_context", "rules", "model_roles", "tasks_digest",
+        "benchmark", "split", "config", "prompt_digests",
+        "prompt_pack", "rules", "model_roles", "tasks_digest",
         "aux_metric"}
-    assert manifest["learning_context"] == GENERIC.to_dict()
+    assert manifest["prompt_pack"] == {
+        "vocabulary": GENERIC_PACK.vocabulary.to_dict(), "protocol": "",
+        "playbook_seed": "", "overrides": {}}
     assert manifest["benchmark"] == config.benchmark
-    assert manifest["mode"] == config.mode
-    # Split shapes are contract, not captured data (ruling 7): full mode
-    # freezes the whole set in both arms, split mode the explicit lists,
-    # and `reserved` is [] but never absent.
+    # The split shape is contract, not captured data: the explicit
+    # lists, and `val` / `reserved` are [] but never absent.
     assert manifest["split"] == expected_split
-    assert set(manifest["split"]) == {"train", "test", "reserved"}
+    assert set(manifest["split"]) == {"train", "val", "test", "reserved"}
     assert manifest["config"]["split"] == config.split
 
     # Fixed name set, live values: a dropped/extra registration or a wrong
@@ -835,57 +821,9 @@ def test_exam_config_freeze_mapping_matches_the_fixed_baseline(
     assert manifest["tasks_digest"] == stage0_freeze.tasks_digest(
         _loaded_tasks())
     assert manifest["aux_metric"] is None
-    # The exam phase's exam execution freezes like every phase definition.
-    assert (manifest["config"]["phases"]["exam"]["execution"]
-            == {"name": "exam"})
-
-
-def test_the_full_prompt_freeze_covers_the_live_digests(
-        monkeypatch, tmp_path):
-    # Since v3 the freeze is FULL: an exam-sequence run still freezes the
-    # two live prompts' digests (they register at prompts/__init__ import
-    # like every method prompt) -- a manifest listing digests this run
-    # never calls is noise, not risk.
-    _install_plugin(monkeypatch, StagePlugin())
-    ctx = make_ctx(tmp_path, make_config())
-
-    stage0_freeze.run(ctx)
-
-    manifest = load_manifest(ctx.run_dir)
-    frozen = manifest["prompt_digests"]
-    assert set(frozen) == set(prompts.METHOD_PROMPT_NAMES) | {"FAKE_TASK"}
-    assert frozen["SKILL_ATTEMPT_REVISION"] == prompts.digest(
-        "SKILL_ATTEMPT_REVISION")
-    assert manifest["config"]["prompts_digests"] == frozen
-
-
-def test_unknown_compare_rule_stops_stage0(monkeypatch, tmp_path):
-    """The comparison criterion is part of the experiment identity: a
-    typo in an execute phase's compare.rule name is a ConfigError
-    before anything is loaded or frozen, exactly like the three
-    task/segment/trajectory rule names."""
-    plugin = _install_plugin(monkeypatch, StagePlugin())
-    config = make_config(
-        sequence=["baseline", "learn", "live", "learn", "test"],
-        phases={
-            "baseline": PHASES["baseline"],
-            # A live-only sequence: merge_check flips to 'none' (the
-            # load-time checklist requires an exam phase otherwise).
-            "learn": {**PHASES["learn"],
-                  "curate": {"name": "agentbrew", "token_budget": 4096,
-                             "rounds": 3, "merge_check": "none"}},
-            "live": {"kind": "execute", "role": "live", "tasks": "train",
-                  "delivery": {"name": "group_by_task"},
-                  "execution": {"name": "real", "n_attempts": 2},
-                  "compare": {"against": "baseline", "rule": "no_such_rule"}},
-            "test": PHASES["test"],
-        })
-    ctx = make_ctx(tmp_path, config)
-    with pytest.raises(ConfigError, match="no_such_rule"):
-        stage0_freeze.run(ctx)
-    assert plugin.load_specs == []
-    assert not (ctx.run_dir / "manifest.json").exists()
-    assert not (ctx.run_dir / "stage0_summary.json").exists()
+    # The practice phase's execution freezes like every phase definition.
+    assert (manifest["config"]["phases"]["practice"]["execution"]
+            == {"name": "real_folder", "attempts": 2})
 
 
 def test_unknown_acceptance_rule_stops_stage0(monkeypatch, tmp_path):
@@ -894,7 +832,7 @@ def test_unknown_acceptance_rule_stops_stage0(monkeypatch, tmp_path):
     registry before anything is loaded or frozen."""
     plugin = _install_plugin(monkeypatch, StagePlugin())
     phases = copy.deepcopy(PHASES)
-    phases["exam"]["acceptance"] = "no_such_verdict_rule"
+    phases["practice"]["acceptance"] = "no_such_verdict_rule"
     ctx = make_ctx(tmp_path, make_config(phases=phases))
     with pytest.raises(ConfigError, match="no_such_verdict_rule"):
         stage0_freeze.run(ctx)
@@ -902,144 +840,120 @@ def test_unknown_acceptance_rule_stops_stage0(monkeypatch, tmp_path):
     assert not (ctx.run_dir / "manifest.json").exists()
 
 
-def _trial_level_phases():
+# ---------------------------------------------------------------------------
+# The playbook switch: a benchmark must be able to show it
+# ---------------------------------------------------------------------------
+
+def _evolved_phases(delivery):
     phases = copy.deepcopy(PHASES)
-    phases["learn"]["review"]["decision"] = "trial_level"
+    phases["test"]["playbook"] = "evolved"
+    if delivery == "folder":
+        phases["test"]["delivery"] = {"name": "folder"}
+        phases["test"]["execution"] = {"name": "real_folder"}
     return phases
 
 
-def _trial_level_budgets(*, author=524288, rewriter=524288):
-    return {
-        "default_max_output_tokens": 65536,
-        "roles": {
-            "author": {
-                "max_output_tokens": 65536,
-                "max_input_tokens": author,
-            },
-            "rewriter": {
-                "max_output_tokens": 65536,
-                "max_input_tokens": rewriter,
-            },
-        },
-    }
+class _BlockOnlyPlugin(StagePlugin):
+    playbook_in_skills_block = False
+    skill_folder_prompt_name = "FAKE_TASK_FOLDER"
+
+    @property
+    def name(self):
+        return _FAKE
 
 
-def test_trial_level_accepts_512k_input_budgets(monkeypatch, tmp_path):
-    _install_plugin(monkeypatch, StagePlugin())
-    ctx = make_ctx(tmp_path, make_config(
-        phases=_trial_level_phases(),
-        token_budgets=_trial_level_budgets()))
-
-    stage0_freeze.run(ctx)
-
-    assert (ctx.run_dir / "manifest.json").exists()
-
-
-@pytest.mark.parametrize("role,limit", [
-    ("author", 262144),
-    ("author", None),
-    ("rewriter", 262144),
-    ("rewriter", None),
-])
-def test_trial_level_rejects_small_or_unset_input_budget(
-        monkeypatch, tmp_path, role, limit):
-    _install_plugin(monkeypatch, StagePlugin())
-    budgets = _trial_level_budgets()
-    budgets["roles"][role]["max_input_tokens"] = limit
-    ctx = make_ctx(tmp_path, make_config(
-        phases=_trial_level_phases(), token_budgets=budgets))
-
-    with pytest.raises(ConfigError, match=f"trial_level.*{role}"):
+def test_a_playbook_outside_a_folder_needs_a_plain_skills_block(
+        monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, _BlockOnlyPlugin())
+    _register(monkeypatch, "FAKE_TASK_FOLDER", "x")
+    ctx = make_ctx(tmp_path, make_config(phases=_evolved_phases("whole")))
+    with pytest.raises(ConfigError, match="cannot show a playbook"):
         stage0_freeze.run(ctx)
-
     assert not (ctx.run_dir / "manifest.json").exists()
 
 
-@pytest.mark.parametrize("frozen_version", [2, 3])
-def test_pre_v4_run_directory_gets_the_maintenance_branch_hint(
-        monkeypatch, tmp_path, frozen_version):
-    """Schema v4 code cannot resume a pre-v4-frozen run (the key sets
-    differ by design: the v3 ``methods`` slots are gone); the refusal
-    points at the maintenance-branch rule instead of burying the reason
-    in the generic manifest diff (reviewer A). One gate, both eras --
-    the third place the version gate is unified with load_config and
-    from_dict."""
-    plugin = _install_plugin(monkeypatch, StagePlugin())
-    ctx = make_ctx(tmp_path, make_config())
+def test_a_folder_delivery_carries_the_playbook_on_any_benchmark(
+        monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, _BlockOnlyPlugin())
+    _register(monkeypatch, "FAKE_TASK_FOLDER", "x")
+    ctx = make_ctx(tmp_path, make_config(phases=_evolved_phases("folder")))
     stage0_freeze.run(ctx)
-    manifest_path = ctx.run_dir / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["config"]["schema_version"] = frozen_version
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(ConfigError, match="maintenance"):
-        stage0_freeze.run(ctx)
-    # Exactly the FIRST call's load: the refused resume loads nothing.
-    assert plugin.load_specs == [["t1", "t2", "t3"]]
+    assert (ctx.run_dir / "manifest.json").exists()
 
 
 # ---------------------------------------------------------------------------
-# The learned-playbook switch: frozen only when a delivery asks for it
+# The prompt pack: executor prompts and overrides freeze; overrides must fit
 # ---------------------------------------------------------------------------
 
-def _learned_phases():
-    phases = copy.deepcopy(PHASES)
-    phases["test"]["delivery"] = {"name": "folder",
-                                  "playbook_source": "learned"}
-    phases["test"]["execution"] = {"name": "real_folder"}
-    return phases
+def _register(monkeypatch, name, template):
+    monkeypatch.setitem(prompts.PROMPTS, name, PromptSpec(
+        name=name, template=template, description="test"))
 
 
-def test_a_learned_playbook_freezes_the_writer_prompt(monkeypatch, tmp_path):
+def _pack_plugin(**pack_fields):
     class Plugin(StagePlugin):
-        playbook_prompt_name = "FAKE_PLAYBOOK_WRITE"
-        skill_folder_prompt_name = "FAKE_TASK_FOLDER"
-
-    _install_plugin(monkeypatch, Plugin())
-    for name in ("FAKE_PLAYBOOK_WRITE", "FAKE_TASK_FOLDER"):
-        monkeypatch.setitem(prompts.PROMPTS, name, PromptSpec(
-            name=name, template="x", description="test"))
-    ctx = make_ctx(tmp_path, make_config(phases=_learned_phases()))
-    stage0_freeze.run(ctx)
-    frozen = load_manifest(ctx.run_dir)["prompt_digests"]
-    assert frozen["FAKE_PLAYBOOK_WRITE"] == prompts.digest(
-        "FAKE_PLAYBOOK_WRITE")
+        prompt_pack = dataclasses.replace(GENERIC_PACK, **pack_fields)
+    return Plugin()
 
 
-def test_the_writer_prompt_is_not_frozen_without_the_switch(
+def test_the_pack_freezes_its_texts_executor_prompts_and_override_targets(
         monkeypatch, tmp_path):
-    class Plugin(StagePlugin):
-        playbook_prompt_name = "FAKE_PLAYBOOK_WRITE"
-
-    _install_plugin(monkeypatch, Plugin())
-    monkeypatch.setitem(prompts.PROMPTS, "FAKE_PLAYBOOK_WRITE", PromptSpec(
-        name="FAKE_PLAYBOOK_WRITE", template="x", description="test"))
+    method = sorted(prompts.METHOD_PROMPT_NAMES)[0]
+    _register(monkeypatch, "FAKE_STEP", "step {history}")
+    _register(monkeypatch, "FAKE_REPLACEMENT", prompts.get(method) + " more")
+    _install_plugin(monkeypatch, _pack_plugin(
+        protocol="what the reader sees", playbook_seed="seed",
+        executor_prompts=("FAKE_STEP",),
+        overrides={method: "FAKE_REPLACEMENT"}))
     ctx = make_ctx(tmp_path, make_config())
     stage0_freeze.run(ctx)
-    assert "FAKE_PLAYBOOK_WRITE" not in load_manifest(
-        ctx.run_dir)["prompt_digests"]
+    manifest = load_manifest(ctx.run_dir)
+    assert manifest["prompt_pack"]["protocol"] == "what the reader sees"
+    assert manifest["prompt_pack"]["playbook_seed"] == "seed"
+    assert manifest["prompt_pack"]["overrides"] == {
+        method: "FAKE_REPLACEMENT"}
+    for name in ("FAKE_STEP", "FAKE_REPLACEMENT"):
+        assert manifest["prompt_digests"][name] == prompts.digest(name)
 
 
-def test_a_learned_playbook_on_a_plugin_without_the_capability_is_refused(
+def test_an_override_with_other_placeholders_is_refused(
         monkeypatch, tmp_path):
-    class Plugin(StagePlugin):
-        skill_folder_prompt_name = "FAKE_TASK_FOLDER"
+    _register(monkeypatch, "FAKE_METHOD", "write {facts} for {agent_kind}")
+    _register(monkeypatch, "FAKE_REPLACEMENT", "write {facts} and {extra}")
+    _install_plugin(monkeypatch, _pack_plugin(
+        overrides={"FAKE_METHOD": "FAKE_REPLACEMENT"}))
+    ctx = make_ctx(tmp_path, make_config())
+    with pytest.raises(ConfigError, match="placeholders differ") as caught:
+        stage0_freeze.run(ctx)
+    assert "['agent_kind']" in str(caught.value)
+    assert "['extra']" in str(caught.value)
+    assert not (ctx.run_dir / "manifest.json").exists()
 
-    _install_plugin(monkeypatch, Plugin())
-    monkeypatch.setitem(prompts.PROMPTS, "FAKE_TASK_FOLDER", PromptSpec(
-        name="FAKE_TASK_FOLDER", template="x", description="test"))
-    ctx = make_ctx(tmp_path, make_config(phases=_learned_phases()))
-    with pytest.raises(ConfigError, match="no learned-playbook capability"):
+
+def test_an_override_with_the_same_placeholders_in_another_order_passes(
+        monkeypatch, tmp_path):
+    _register(monkeypatch, "FAKE_METHOD", "{a} then {b} {{literal}}")
+    _register(monkeypatch, "FAKE_REPLACEMENT", "{b}, {a} and {a} again")
+    _install_plugin(monkeypatch, _pack_plugin(
+        overrides={"FAKE_METHOD": "FAKE_REPLACEMENT"}))
+    ctx = make_ctx(tmp_path, make_config())
+    stage0_freeze.run(ctx)
+    assert load_manifest(ctx.run_dir)["prompt_pack"]["overrides"] == {
+        "FAKE_METHOD": "FAKE_REPLACEMENT"}
+
+
+def test_an_unregistered_override_target_is_refused(monkeypatch, tmp_path):
+    method = sorted(prompts.METHOD_PROMPT_NAMES)[0]
+    _install_plugin(monkeypatch, _pack_plugin(
+        overrides={method: "FAKE_NOT_REGISTERED"}))
+    ctx = make_ctx(tmp_path, make_config())
+    with pytest.raises(ConfigError, match="FAKE_NOT_REGISTERED"):
         stage0_freeze.run(ctx)
 
 
-def test_an_unregistered_writer_prompt_is_refused(monkeypatch, tmp_path):
-    class Plugin(StagePlugin):
-        playbook_prompt_name = "FAKE_PLAYBOOK_MISSING"
-        skill_folder_prompt_name = "FAKE_TASK_FOLDER"
-
-    _install_plugin(monkeypatch, Plugin())
-    monkeypatch.setitem(prompts.PROMPTS, "FAKE_TASK_FOLDER", PromptSpec(
-        name="FAKE_TASK_FOLDER", template="x", description="test"))
-    ctx = make_ctx(tmp_path, make_config(phases=_learned_phases()))
-    with pytest.raises(ConfigError, match="playbook_prompt_name"):
+def test_an_unregistered_executor_prompt_is_refused(monkeypatch, tmp_path):
+    _install_plugin(monkeypatch, _pack_plugin(
+        executor_prompts=("FAKE_NOT_REGISTERED",)))
+    ctx = make_ctx(tmp_path, make_config())
+    with pytest.raises(ConfigError, match="executor prompt"):
         stage0_freeze.run(ctx)

@@ -33,6 +33,7 @@ from expedistill.infra.reliability import ConfigError
 
 _FAKE = "fakebench"
 _MODULE = f"expedistill.benchmarks.{_FAKE}"
+PHASE = "p03:practice"
 
 
 class FakePlugin(BenchmarkPlugin):
@@ -114,6 +115,7 @@ def clean_registry():
 
 def _run(plugin, tmp_path, **overrides):
     kwargs = dict(
+        phase_label=PHASE,
         benchmark=plugin.name,
         task=Task(task_id="t1", instruction="do the thing", meta={"gold": "x"}),
         model_role="weak",
@@ -141,6 +143,7 @@ def test_success_assembles_full_trajectory(monkeypatch, tmp_path):
     task = Task(task_id="t1", instruction="do the thing")
     handle = object()
     traj = run_one(
+        phase_label=PHASE,
         benchmark=_FAKE,
         task=task,
         model_role="weak",
@@ -152,7 +155,7 @@ def test_success_assembles_full_trajectory(monkeypatch, tmp_path):
         workdir=tmp_path,
     )
     task_id = make_task_id(_FAKE, "t1")
-    assert traj.trajectory_id == make_trajectory_id(task_id, "weak", 3)
+    assert traj.trajectory_id == make_trajectory_id(PHASE, task_id, "weak", 3)
     assert traj.task_id == task_id == "fakebench:t1"
     assert traj.benchmark == _FAKE
     assert traj.model_role == "weak"
@@ -217,7 +220,7 @@ def test_strong_role_and_high_attempt_index_in_id(monkeypatch, tmp_path):
         model_role="strong", model_name="big-model", attempt_index=11,
     )
     task_id = make_task_id(_FAKE, "t1")
-    assert traj.trajectory_id == f"traj/{task_id}/strong/11"
+    assert traj.trajectory_id == f"traj/p03_practice/{task_id}/strong/11"
 
 
 def test_lazy_import_triggers_registration(monkeypatch, tmp_path):
@@ -235,6 +238,7 @@ def test_lazy_import_triggers_registration(monkeypatch, tmp_path):
 def test_missing_plugin_is_config_error(tmp_path):
     with pytest.raises(ConfigError, match="nosuchbench") as excinfo:
         run_one(
+            phase_label=PHASE,
             benchmark="nosuchbench",
             task=Task(task_id="t1", instruction="do the thing"),
             model_role="weak",
@@ -257,6 +261,7 @@ def test_module_imported_but_not_registered_is_config_error(
         monkeypatch, FakePlugin(name="otherbench"), module_name=_FAKE)
     with pytest.raises(ConfigError, match="unknown benchmark plugin"):
         run_one(
+            phase_label=PHASE,
             benchmark=_FAKE,
             task=Task(task_id="t1", instruction="do the thing"),
             model_role="weak",

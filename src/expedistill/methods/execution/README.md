@@ -10,23 +10,18 @@
 
 | 方法 | 做什么 | 用在哪个阶段 | 参数 |
 |---|---|---|---|
-| `real` | 在 benchmark 里真做题 | baseline（摸底）、live（实战验收）、test（最终测试） | 见下 |
-| `exam` | 现场复原场景，弱模型选技能并写计划（判卷、泄题检查归验收） | exam（泛化考试），只能用它 | `max_skill_reads` / `bare_control` / `leak_audit` |
-| `real_folder` | 和 `real` 一样真做题，但技能以文件夹形式放进运行环境 | test（最终测试），必须配 `folder` 交付 | `executor` |
+| `real` | 在 benchmark 里真做题 | baseline（摸底，只能用它）、test（最终测试） | 见下 |
+| `real_folder` | 和 `real` 一样真做题，但技能以文件夹形式放进运行环境 | practice（练习，只能用它）、test（最终测试），必须配 `folder` 交付 | `executor`、`attempts` |
 
 阶段和方法的搭配在读配置时检查，配错直接报错。
 
-`real_folder` 只用于 test。live 的逐任务技能文件夹走 `real` + `folder_by_task`：
-live 的采样深度和注入预算属于 `real`，folder 只改变交付形态；test 没有这两项参数，
-所以用独立的 `real_folder` 名字把 folder 配对钉死。两条路径都能用，但不要互相替换。
+`real_folder` 和 `folder` 交付一一配对。
 
 ## `real`：真做题
 
 ```yaml
 execution:
   name: real
-  n_attempts: 3
-  max_injection_tokens: null
 ```
 
 baseline（摸底）阶段的写法固定为：
@@ -39,11 +34,9 @@ execution:
 
 | 参数 | 含义 | 可选项 | 默认 |
 |---|---|---|---|
-| `n_attempts` | 弱模型每道题做几次 | 正整数，不能超过对照阶段弱模型做的次数；baseline 相位不能写 | 全局 `n_attempts_weak` |
-| `max_injection_tokens` | 注入技能的长度上限（估算 token）。目前只有 live 相位用：一包技能超长时这道题不跑，记为"测不了" | 正整数；`null` = 不设上限 | `null` |
-| `arms` | 谁来做。只有 baseline 相位写，且必须是这一个值；其他阶段只跑弱模型，不能写 | `[executor_strong, executor_weak]` | 不写 |
+| `arms` | 谁来做。只有 baseline 相位写，且必须是这一个值；其他阶段只跑一个执行者，不能写 | `[executor_strong, executor_weak]` | 不写 |
 
-baseline 相位强、弱模型各做几次，看全局的 `n_attempts_strong` / `n_attempts_weak`。
+每道题做几次看全局的 `n_attempts_strong` / `n_attempts_weak`。
 
 ## `real_folder`：技能文件夹做题
 
@@ -51,11 +44,13 @@ baseline 相位强、弱模型各做几次，看全局的 `n_attempts_strong` / 
 execution:
   name: real_folder
   executor: executor_weak
+  attempts: 3
 ```
 
 | 参数 | 含义 | 可选项 | 默认 |
 |---|---|---|---|
-| `executor` | 谁来做 test 阶段的题。采样次数取这个模型的全局次数（`n_attempts_weak` 或 `n_attempts_strong`） | `executor_weak`、`executor_strong` | `executor_weak` |
+| `executor` | 谁来做这个阶段的题 | `executor_weak`、`executor_strong` | `executor_weak` |
+| `attempts` | 每道题做几次；不写就取执行者的全局次数（`n_attempts_weak` 或 `n_attempts_strong`） | 不小于 1 的整数 | 不写 |
 
 选 `executor_strong` 时，`compare.external.model_key` 要指向强模型在 campaign 里的那一列
 （例如 `dpsk`），否则对照用的是另一个模型的成绩。强模型在 Harbor 里的推理强度由进程环境变量

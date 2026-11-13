@@ -27,7 +27,8 @@ from concurrent.futures import (
     BrokenExecutor, Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor,
 )
 from typing import (
-    Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union,
+    Any, Callable, Dict, List, NoReturn, Optional, Sequence, Tuple, TypeVar,
+    Union,
 )
 
 from expedistill.infra.reliability import (
@@ -144,6 +145,21 @@ def _collect(futures: List[Future], items: List[Any]) -> List[Any]:
             failures[index] = exc
     _raise_if_failed(failures, len(items))
     return results
+
+
+def reraise_by_kind(error: ParallelError, what: str) -> NoReturn:
+    """Re-raise a run_parallel failure by its kind.
+
+    When every failed item raised an InfrastructureError the pool's failure
+    is one InfrastructureError (resumable); otherwise the first other
+    failure by item order is re-raised unchanged, so a code bug or a model
+    output error is never disguised as a retryable machine failure.
+    """
+    for index in sorted(error.failures):
+        failure = error.failures[index]
+        if not isinstance(failure, InfrastructureError):
+            raise failure
+    raise InfrastructureError(f"{what}: {error}") from error
 
 
 def _raise_if_failed(failures: Dict[int, BaseException],

@@ -67,11 +67,9 @@ __all__ = ["segment_checked"]
 #: Relative to the run directory (README section 2 layout).
 _AUDIT_PATH = Path("stage2_segments") / "segmentation_audit.jsonl"
 
-#: Public spelling of the audit channel's path for the evidence family's
-#: segmentation wiring (methods.review.segmentation), which appends the
-#: old stage 2's "empty trajectory" exclusion records to the same file.
-#: The old stage duplicated the constant; one owner is cheaper to keep
-#: correct.
+#: Public spelling of the audit channel's path for the learn phase's
+#: locate step (composites.locate), which appends the "empty trajectory"
+#: exclusion records to the same file.
 AUDIT_PATH = _AUDIT_PATH
 
 #: Prepended to the view on retry attempts. Wording is fixed so downstream
@@ -124,6 +122,7 @@ def segment_checked(
     *,
     store: Store,
     trajectory: Trajectory,
+    phase_label: str,
     K: int,
     view_rules: Any,
     handle: Any,
@@ -133,6 +132,8 @@ def segment_checked(
 ) -> Optional[List[Subtask]]:
     """Segment ``trajectory`` into validated Subtasks, or None if unrecoverable.
 
+    ``phase_label`` is the learn phase cutting the segments (stored on each
+    new Subtask; stored subtasks keep the label they were cut under).
     Returns the built (or, on resume, stored) Subtasks in step order, or None
     after ``segment_retry_limit + 1`` attempts have all failed -- with one
     "skipped" audit record appended per the K2 contract -- or None at once,
@@ -178,6 +179,7 @@ def segment_checked(
     for index, entry in enumerate(raw_sorted):
         subtask = Subtask(
             subtask_id=make_subtask_id(trajectory.trajectory_id, index),
+            phase_label=phase_label,
             task_id=trajectory.task_id,
             trajectory_id=trajectory.trajectory_id,
             source=source,

@@ -1,114 +1,65 @@
-"""The method families' param contracts (methods layer; the v2-era
-validators this replaces lived in core.config, which cannot know a
-method's params). R8 re-keyed the registry to the five content families
-and moved the config lookup out of the API: every test resolves a
-family's RAW mapping, exactly what a v4 phase carries. The retired v3
-slot keys (segmentation, authoring, acceptance) have no entries any
-more -- their coverage moved to the evidence/author/execution families
-here and to the load-time checklist in tests/unit/core/test_config_v4.py.
+"""The method families' param contracts (methods layer; core.config
+cannot know a method's params). The registry is keyed by the four content
+families (delivery, execution, review, author) and every test resolves a
+family's RAW mapping, exactly what a phase carries. The role and pairing
+rules around these values live in the load-time checklist
+(tests/unit/core/test_config_v4.py).
+
+Resolution must work while no driver module is importable, so the tests
+that load a driver point a temporary table entry at a light module.
 """
 
 import pytest
 
 from expedistill.core.config import ConfigError
+from expedistill.methods import registry
 from expedistill.methods import resolve, resolve_fixed, resolve_params
-from expedistill.methods.author import AuthoringParams
+from expedistill.methods.cards import CardAuthoringParams
+from expedistill.methods.execution import RealFolderExecutionParams
 from expedistill.methods.params import build_params
 
 
-RETRIEVAL = {"name": "retrieval", "top_k": 5,
-             "max_categories": 3, "min_score": 0.05}
-
-
-class TestRetrievalParams:
-    def test_all_params_load(self):
-        params = resolve_params("delivery", RETRIEVAL)
-        assert params.top_k == 5
-        assert params.max_categories == 3
-        assert params.min_score == 0.05
-
-    def test_unknown_key_rejected(self):
-        with pytest.raises(ConfigError, match="unknown parameter"):
-            resolve_params("delivery", {**RETRIEVAL, "temperature": 0})
-
-    def test_missing_required_key_rejected(self):
-        for missing in ("top_k", "max_categories", "min_score"):
-            delivery = {k: v for k, v in RETRIEVAL.items() if k != missing}
-            with pytest.raises(ConfigError, match=missing):
-                resolve_params("delivery", delivery)
-
-    @pytest.mark.parametrize("key,bad", [
-        ("top_k", 0), ("top_k", -1), ("top_k", True), ("top_k", "5"),
-        ("top_k", 5.0), ("top_k", None),
-        ("max_categories", 0), ("max_categories", -2),
-        ("max_categories", True), ("max_categories", "3"),
-        ("max_categories", None),
-    ])
-    def test_counts_must_be_ints_at_least_one(self, key, bad):
-        with pytest.raises(ConfigError, match=key):
-            resolve_params("delivery", {**RETRIEVAL, key: bad})
-
-    @pytest.mark.parametrize("bad", [-0.1, 1.0, 1.5, True, "0.05", None])
-    def test_min_score_must_be_a_number_below_one(self, bad):
-        with pytest.raises(ConfigError, match="min_score"):
-            resolve_params("delivery", {**RETRIEVAL, "min_score": bad})
-
-    def test_min_score_bounds_inclusive_zero_exclusive_one(self):
-        # The interval is [0, 1): the grid's lower bound is legal here.
-        params = resolve_params("delivery", {**RETRIEVAL, "min_score": 0})
-        assert params.min_score == 0
-
-    def test_whole_bank_rejects_retrieval_params(self):
+class TestDeliveryParams:
+    def test_whole_bank_rejects_unknown_params(self):
         # An ineffective key under whole_bank would mislead about what
         # the run injects; the config is the experiment's identity.
         for key in ("top_k", "max_categories", "min_score"):
             with pytest.raises(ConfigError, match="whole_bank"):
-                resolve_params("delivery", {"name": "whole_bank",
-                                             key: RETRIEVAL[key]})
+                resolve_params("delivery", {"name": "whole_bank", key: 1})
 
     def test_two_method_family_without_a_name_rejected(self):
         with pytest.raises(ConfigError, match="needs a name"):
-            resolve_params("delivery", {"top_k": 5})
+            resolve_params("delivery", {"verbatim": True})
 
     def test_unknown_method_name_lists_the_known_ones(self):
-        with pytest.raises(ConfigError, match="retrieval"):
+        with pytest.raises(ConfigError, match="whole_bank") as excinfo:
             resolve_params("delivery", {"name": "whole_bench"})
+        for name in ("none", "folder"):
+            assert repr(name) in str(excinfo.value)
+        assert "exam_folder" not in str(excinfo.value)
+
+    def test_the_exam_catalog_delivery_is_gone(self):
+        with pytest.raises(ConfigError, match="unknown methods.delivery"):
+            resolve_params("delivery", {"name": "exam_folder"})
 
 
 class TestRealExecutionParams:
-    """The execution family's ``real`` entry (R8's new family): what a
-    v4 execute phase's ``execution`` mapping validates at resolution.
-    The role-consistency and depth rules around these values live in the
-    config loader's checklist (tests/unit/core/test_config_v4.py)."""
+    """The execution family's ``real`` entry: what an execute phase's
+    ``execution`` mapping validates at resolution.
+    The role-consistency rules around these values live in the config
+    loader's checklist (tests/unit/core/test_config_v4.py)."""
 
     def test_all_params_load(self):
         params = resolve_params("execution", {
-            "name": "real", "n_attempts": 3,
-            "max_injection_tokens": 4096,
+            "name": "real",
             "arms": ["executor_strong", "executor_weak"]})
-        assert params.n_attempts == 3
-        assert params.max_injection_tokens == 4096
         assert params.arms == ["executor_strong", "executor_weak"]
 
-    def test_everything_defaults_to_none(self):
-        # None means "the run-time global" (n_attempts -> n_attempts_weak;
-        # no cap; single weak arm) -- the params object carries no policy.
+    def test_arms_default_to_none(self):
+        # None means the single weak arm -- the params object carries no
+        # policy.
         params = resolve_params("execution", {"name": "real"})
-        assert params.n_attempts is None
-        assert params.max_injection_tokens is None
         assert params.arms is None
-
-    @pytest.mark.parametrize("bad", [0, -1, True, "3", 2.5])
-    def test_n_attempts_must_be_a_positive_int(self, bad):
-        with pytest.raises(ConfigError, match="n_attempts"):
-            resolve_params("execution", {"name": "real",
-                                          "n_attempts": bad})
-
-    @pytest.mark.parametrize("bad", [0, -1, True, "4096", 4096.5])
-    def test_max_injection_tokens_positive_int_or_none(self, bad):
-        with pytest.raises(ConfigError, match="max_injection_tokens"):
-            resolve_params("execution", {"name": "real",
-                                          "max_injection_tokens": bad})
 
     @pytest.mark.parametrize("bad", ["both", 5, [], [""], ["a", 5]])
     def test_arms_must_be_a_list_of_role_names(self, bad):
@@ -122,85 +73,51 @@ class TestRealExecutionParams:
                 "name": "real",
                 "arms": ("executor_strong", "executor_weak")})
 
-    def test_unknown_key_rejected(self):
+    @pytest.mark.parametrize("key", ["depth", "n_attempts",
+                                     "max_injection_tokens"])
+    def test_unknown_key_rejected(self, key):
         with pytest.raises(ConfigError, match="unknown parameter"):
-            resolve_params("execution", {"name": "real", "depth": 3})
+            resolve_params("execution", {"name": "real", key: 3})
 
 
-class TestExamExecutionParams:
-    """The generalization exam's three knobs (schema v7): the model may
-    open a bounded number of skill files, and the old bare-answer and
-    leak-audit arms stay available but off by default."""
+class TestRealFolderExecutionParams:
+    """The ``real_folder`` entry: the executor and the optional sampling
+    depth a practice phase sets."""
 
-    def test_the_exam_entry_defaults(self):
-        from expedistill.methods.execution import ExamExecutionParams
-
-        params = resolve_params("execution", {"name": "exam"})
-        assert params == ExamExecutionParams()
-        assert params.max_skill_reads == 3
-        assert params.bare_control is False
-        assert params.leak_audit is False
+    def test_defaults(self):
+        params = resolve_params("execution", {"name": "real_folder"})
+        assert params == RealFolderExecutionParams()
+        assert (params.executor, params.attempts) == ("executor_weak", None)
 
     def test_all_params_load(self):
         params = resolve_params("execution", {
-            "name": "exam", "max_skill_reads": 5,
-            "bare_control": True, "leak_audit": True})
-        assert params.max_skill_reads == 5
-        assert params.bare_control is True
-        assert params.leak_audit is True
+            "name": "real_folder", "executor": "executor_strong",
+            "attempts": 3})
+        assert (params.executor, params.attempts) == ("executor_strong", 3)
 
-    @pytest.mark.parametrize("bad", [0, -1, True, "3", 2.5, None])
-    def test_max_skill_reads_must_be_an_int_at_least_one(self, bad):
-        with pytest.raises(ConfigError, match="max_skill_reads"):
-            resolve_params("execution", {"name": "exam",
-                                          "max_skill_reads": bad})
+    @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "3"])
+    def test_attempts_must_be_an_int_at_least_one(self, bad):
+        with pytest.raises(ConfigError, match="attempts"):
+            resolve_params("execution", {"name": "real_folder",
+                                         "attempts": bad})
 
-    def test_max_skill_reads_bound_is_inclusive_one(self):
-        params = resolve_params("execution", {"name": "exam",
-                                              "max_skill_reads": 1})
-        assert params.max_skill_reads == 1
+    def test_attempts_bound_is_inclusive_one(self):
+        assert resolve_params("execution", {
+            "name": "real_folder", "attempts": 1}).attempts == 1
 
-    @pytest.mark.parametrize("key", ["bare_control", "leak_audit"])
-    @pytest.mark.parametrize("bad", ["yes", 1, 0, None])
-    def test_the_control_switches_must_be_bools(self, key, bad):
-        with pytest.raises(ConfigError, match=key):
-            resolve_params("execution", {"name": "exam", key: bad})
+    def test_an_unknown_executor_is_refused(self):
+        with pytest.raises(ConfigError, match="executor"):
+            resolve_params("execution", {"name": "real_folder",
+                                         "executor": "judge"})
 
-    def test_rejects_real_params(self):
+    @pytest.mark.parametrize("key", ["n_attempts", "max_injection_tokens"])
+    def test_unknown_key_rejected(self, key):
         with pytest.raises(ConfigError, match="unknown parameter"):
-            resolve_params("execution", {"name": "exam", "n_attempts": 1})
+            resolve_params("execution", {"name": "real_folder", key: 1})
 
-
-class TestExamFolderParams:
-    """The generalization exam's delivery: the shared catalog params."""
-
-    def test_defaults_to_the_folder_catalog_mode(self):
-        from expedistill.inject.skill_text import DEFAULT_DESCRIPTION_MODE
-        from expedistill.methods.delivery import ExamFolderParams
-
-        params = resolve_params("delivery", {"name": "exam_folder"})
-        assert params == ExamFolderParams()
-        assert params.description_mode == DEFAULT_DESCRIPTION_MODE
-
-    def test_description_mode_loads(self):
-        from expedistill.methods.delivery import ExamFolderParams
-
-        params = resolve_params("delivery", {"name": "exam_folder",
-                                             "description_mode": "summary"})
-        assert params == ExamFolderParams(description_mode="summary")
-
-    def test_unknown_key_rejected(self):
-        # The retired ``per_skill`` delivery name is not a parameter
-        # either; the params builder refuses unknown keys loudly.
-        with pytest.raises(ConfigError, match="unknown parameter"):
-            resolve_params("delivery", {"name": "exam_folder",
-                                         "per_skill": True})
-
-    def test_description_mode_is_validated_by_the_folder_rule(self):
-        # One validation rule for both catalogs: the folder module's.
-        with pytest.raises(ValueError, match="description_mode"):
-            resolve_params("delivery", {"name": "exam_folder",
-                                         "description_mode": "unknown"})
+    def test_the_exam_execution_is_gone(self):
+        with pytest.raises(ConfigError, match="unknown methods.execution"):
+            resolve_params("execution", {"name": "exam"})
 
 
 class TestReviewAndAuthorParams:
@@ -208,119 +125,59 @@ class TestReviewAndAuthorParams:
         params = resolve_params("review", {"name": "review",
                                            "K": 1, "retry_limit": 0})
         assert (params.K, params.retry_limit) == (1, 0)
-        assert resolve_params(
-            "review", {"name": "review", "decision": "trial_level"}
-        ).decision == "trial_level"
         with pytest.raises(ConfigError, match="K"):
             resolve_params("review", {"name": "review", "K": 0})
 
+    def test_review_drops_the_deferred_revise_scope(self):
+        with pytest.raises(ConfigError, match="revise_scope"):
+            resolve_params("review", {"name": "review",
+                                      "revise_scope": "auto"})
+
     def test_author_params(self):
-        # distill_diagnose is the author family's one method; its params
-        # are empty (the v3 exams switch is gone from the config surface
-        # AND from the params class -- a v4 config naming it is refused
-        # at load, see test_config_v4).
-        params = resolve_params("author", {"name": "distill_diagnose"})
-        assert params == AuthoringParams()
+        # subtask_cards is the author family's one method.
+        params = resolve_params("author", {"name": "subtask_cards"})
+        assert params == CardAuthoringParams()
+
+    def test_review_and_author_have_no_driver(self):
+        for family, raw in (("review", {"name": "review"}),
+                            ("author", {"name": "subtask_cards"})):
+            with pytest.raises(ConfigError, match="no driver"):
+                resolve(family, raw)
 
 
-class TestCurationParams:
-    def test_agentbrew_params(self):
-        params = resolve_params("curation", {
-            "name": "agentbrew", "token_budget": 96000, "rounds": 3})
-        assert (params.token_budget, params.rounds) == (96000, 3)
-        with pytest.raises(ConfigError, match="token_budget"):
-            resolve_params("curation", {"name": "agentbrew",
-                                         "token_budget": 0})
-
-    def test_none_params(self):
-        none = resolve_params("curation", {"name": "none",
-                                           "token_budget": 96000})
-        assert none.token_budget == 96000
-
-    def test_null_budget_is_the_no_fender_ruling(self):
-        # The 2026-10-16 user ruling's v4 image: token ceilings left the
-        # pre-registered parameter set, so null is a legal value for BOTH
-        # curation methods -- the pre-v4 campaigns froze it, and the
-        # reuse identity walk loads those manifests verbatim.
-        assert resolve_params("curation", {
-            "name": "agentbrew", "token_budget": None,
-            "rounds": 3}).token_budget is None
-        assert resolve_params("curation", {
-            "name": "none", "token_budget": None}).token_budget is None
-        for bad in (0, -1, "96000"):
-            with pytest.raises(ConfigError, match="token_budget"):
-                resolve_params("curation", {"name": "agentbrew",
-                                             "token_budget": bad})
-            with pytest.raises(ConfigError, match="token_budget"):
-                resolve_params("curation", {"name": "none",
-                                            "token_budget": bad})
-
-    def test_agentbrew_merge_check_param(self):
-        # "none" is the default since the 2026-10-19 ruling (it was
-        # "exam"); "exam" runs K5's regression exams; anything else is
-        # refused loudly.
-        default = resolve_params("curation", {"name": "agentbrew",
-                                              "token_budget": 96000})
-        assert default.merge_check == "none"
-        params = resolve_params("curation", {
-            "name": "agentbrew", "token_budget": 96000,
-            "merge_check": "exam"})
-        assert params.merge_check == "exam"
-        with pytest.raises(ConfigError, match="merge_check"):
-            resolve_params("curation", {
-                "name": "agentbrew", "token_budget": 96000,
-                "merge_check": "regression"})
+class TestCurationIsGone:
+    @pytest.mark.parametrize("name", ["agentbrew", "none"])
+    def test_the_curation_family_offers_nothing(self, name):
+        with pytest.raises(ConfigError, match=r"known: \[\]"):
+            resolve_params("curation", {"name": name, "token_budget": 1})
 
 
-    def test_agentbrew_low_value_similarity_and_grouping_params(self):
-        # The 2026-10-19/20 switches: all default to today's behaviour.
-        default = resolve_params("curation", {"name": "agentbrew",
-                                              "token_budget": None})
-        assert default.drop_low_value is False
-        assert default.similarity_input == "full"
-        assert default.grouping_input == "full"
-        params = resolve_params("curation", {
-            "name": "agentbrew", "token_budget": None,
-            "drop_low_value": True, "similarity_input": "summary",
-            "grouping_input": "summary"})
-        assert params.drop_low_value is True
-        assert params.similarity_input == "summary"
-        assert params.grouping_input == "summary"
-        with pytest.raises(ConfigError, match="similarity_input"):
-            resolve_params("curation", {
-                "name": "agentbrew", "token_budget": None,
-                "similarity_input": "titles"})
-        with pytest.raises(ConfigError, match="grouping_input"):
-            resolve_params("curation", {
-                "name": "agentbrew", "token_budget": None,
-                "grouping_input": "titles"})
-        with pytest.raises(ConfigError, match="drop_low_value"):
-            resolve_params("curation", {
-                "name": "agentbrew", "token_budget": None,
-                "drop_low_value": "yes"})
+@pytest.fixture()
+def light_driver_entry(monkeypatch):
+    """A delivery entry whose 'driver' is the light params module, so the
+    on-demand driver import is exercised without the real drivers."""
+    entry = registry._Entry("expedistill.methods.delivery.params",
+                            "expedistill.methods.delivery.params",
+                            "NoneParams")
+    monkeypatch.setitem(registry._ENTRIES, ("delivery", "light"), entry)
+    return entry
 
 
 class TestResolveFixed:
     """The by-name entry for call sites whose semantics are not a config
-    choice: the bare control arm (``none``) and the live driver's group
-    injection (``group_by_task``)."""
+    choice, such as the bare control arm (``none``)."""
 
-    def test_fixed_name_builds_empty_params_and_loads_the_driver(self):
-        from expedistill.methods.delivery import NoneParams
+    def test_fixed_name_builds_empty_params_and_loads_the_driver(
+            self, light_driver_entry):
+        from expedistill.methods.delivery.params import NoneParams
 
-        driver, params = resolve_fixed("delivery", "none")
-        assert driver.__name__.endswith(".none")
+        driver, params = resolve_fixed("delivery", "light")
+        assert driver.__name__ == light_driver_entry.driver
         assert isinstance(params, NoneParams)
 
     def test_unknown_name_lists_the_known_ones(self):
         with pytest.raises(ConfigError, match="unknown methods.delivery"):
             resolve_fixed("delivery", "whole_bench")
-
-    def test_required_params_still_fail_loudly(self):
-        # The empty raw mapping is still validated: an entry with
-        # required fields cannot be resolved by fixed name.
-        with pytest.raises(ConfigError, match="missing required parameter"):
-            resolve_fixed("delivery", "retrieval")
 
     def test_driver_less_family_refused_by_resolve_fixed(self):
         # execution/author have no driver to load; asking for one is a
@@ -328,15 +185,13 @@ class TestResolveFixed:
         with pytest.raises(ConfigError, match="no driver"):
             resolve_fixed("execution", "real")
 
-    def test_resolve_imports_the_driver_on_demand(self):
-        driver, params = resolve("curation", {"name": "none",
-                                              "token_budget": 4096})
-        assert driver.__name__.endswith(".none")
-        assert params.token_budget == 4096
+    def test_resolve_imports_the_driver_on_demand(self, light_driver_entry):
+        driver, params = resolve("delivery", {"name": "light"})
+        assert driver.__name__ == light_driver_entry.driver
 
     def test_raw_mapping_must_be_a_mapping(self):
         with pytest.raises(ConfigError, match="mapping"):
-            resolve_params("delivery", "retrieval")
+            resolve_params("delivery", "whole_bank")
 
 
 class TestBuildParams:
@@ -351,6 +206,16 @@ class TestBuildParams:
 
         params = build_params(_Arms, {"arms": ["a", "b"]}, "x", "y")
         assert params.arms == ["a", "b"]
+
+    def test_required_params_fail_loudly(self):
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class _Required:
+            budget: int
+
+        with pytest.raises(ConfigError, match="missing required parameter"):
+            build_params(_Required, {}, "x", "y")
 
     def test_build_params_still_rejects_other_annotations(self):
         from dataclasses import dataclass

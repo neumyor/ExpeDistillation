@@ -118,88 +118,70 @@ def test_segment_reads_a_failure_view(client):
     assert parsed[0]["end"] == 1 and parsed[0]["success"] is False
 
 
-def test_distill_returns_the_protocol_v2_contract(client):
-    user = get_prompt("SKILL_DISTILL").format(
-        **GENERIC.variables(),
-        label="l", description="d", steps_view="s", segment_position="p",
-        profile_section="w")
+_CARD = "[When to use] always\n[Steps]\n1. do it\n[Do not use when] never"
+
+
+def _render(name, **variables):
+    return get_prompt(name).format(
+        **{**GENERIC.variables(), "protocol": "", "profile_section": "w",
+           "correction_note": "", **variables})
+
+
+def test_the_content_rewrite_appends_the_marker(client):
+    user = _render("REVISE_CONTENT", skill_card=_CARD, playbook="pb",
+                   evidence_steps="steps", diagnosis="d")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert set(parsed) == {"when_to_use", "steps",
-                           "not_applicable_when", "summary"}
-    assert isinstance(parsed["steps"], list) and parsed["steps"]
+    assert parsed["steps"] == ["do it"]
+    assert parsed["not_applicable_when"].startswith("never\n")
+    assert REVISION_MARKER in parsed["not_applicable_when"]
+    assert set(parsed) == {"steps", "not_applicable_when", "revision_reason"}
 
 
-def test_diagnose_returns_the_protocol_v2_contract(client):
-    user = get_prompt("SKILL_DIAGNOSE").format(
-        **GENERIC.variables(),
-        label="l", description="d", context_summary="c", steps_view="s",
-        segment_position="p", profile_section="w")
+def test_the_trigger_rewrite_appends_the_marker(client):
+    user = _render("REVISE_TRIGGER", current_summary="Do it.",
+                   current_when_to_use="always", skill_catalog="c",
+                   playbook="pb", evidence_steps="steps", diagnosis="d")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert set(parsed) == {"when_to_use", "steps",
-                           "not_applicable_when", "summary"}
+    assert parsed["summary"] == "Do it."
+    assert parsed["when_to_use"].startswith("always ")
+    assert REVISION_MARKER in parsed["when_to_use"]
 
 
-def test_attempt_revision_appends_the_marker_and_keeps_the_skill(client):
-    original = ("[When to use] always\n[Steps] do it\n"
-                "[Do not use when] never")
-    user = get_prompt("SKILL_ATTEMPT_REVISION").format(
-        **GENERIC.variables(),
-        skill_text=original, attempt_evidence="e", profile_section="w")
+def test_the_trial_analysis_blames_the_last_step(client):
+    user = _render("TRIAL_FAILURE_ANALYSIS", task_instruction="do it",
+                   playbook="(none)", skill_catalog="(none)",
+                   opened_skills="(none)", trial_steps="step 0\nstep 1",
+                   last_step="1")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed["skill_text"] == (
-        original + "\n" + REVISION_MARKER +
-        ": name the concrete state before acting.")
-    assert parsed["skill_text"] != original
-    assert parsed["summary"].strip()
-    assert parsed["revision_reason"].strip()
+    assert parsed["failing_step"] == 1
+    assert parsed["scope"] in ("subtask", "general")
+    assert parsed["reason"]
 
 
-def test_rewrite_appends_the_marker(client):
-    original = ("[When to use] always\n[Steps] do it\n"
-                "[Do not use when] never")
-    user = get_prompt("REWRITE").format(
-        **GENERIC.variables(),
-        skill_text=original, question_text="q", source_context="ctx", weak_answer="a",
-        error_description="e", scope_section="", profile_section="w")
+def test_the_typing_shares_a_type_per_label(client):
+    cards = "\n\n".join(
+        f"SUBTASK_ID: {subtask_id}\nTASK: t\nSOURCE: strong\n"
+        f"SUBTASK_SUCCESS: True\nLABEL: {label}\nDESCRIPTION: d\nSTEPS:\n"
+        for subtask_id, label in (("s1", "find it"), ("s2", "heat it"),
+                                  ("s3", "find it")))
+    user = _render("SUBTASK_TYPING", type_table="type/001 | heat it | x",
+                   cards=cards)
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert REVISION_MARKER in parsed["skill_text"]
-    assert parsed["skill_text"].startswith("[When to use]")
+    assert parsed["new_types"] == [{"key": "new1", "name": "find it",
+                                    "entry_state":
+                                        "The agent is about to find it."}]
+    assert [item["type"] for item in parsed["assignments"]] == [
+        "new1", "type/001", "new1"]
 
 
-def test_similarity_groups_the_first_pair(client):
-    listing = "- s1: content one\n- s2: content two\n- s3: content three"
-    user = get_prompt("SIMILARITY").format(skills_listing=listing)
+def test_the_card_writer_answers_with_the_four_fields(client):
+    user = _render("CARD_WRITE", type_name="heat it",
+                   entry_state="The object is held.", strong_segments="s",
+                   weak_segments="(none)", playbook="(none)")
     parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed == {"similar_groups": [["s1", "s2"]], "conflicts": [],
-                      "low_value": []}
-
-
-def test_similarity_with_one_skill_groups_nothing(client):
-    user = get_prompt("SIMILARITY").format(skills_listing="- s1: content one")
-    parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert parsed == {"similar_groups": [], "conflicts": [], "low_value": []}
-
-
-def test_merge_keeps_the_first_sources_markers(client):
-    block = ("### s1\n[When to use] a\n[Steps] b\n"
-             "[Do not use when] d\n\n### s2\n[When to use] e\n"
-             "[Steps] f\n[Do not use when] h")
-    user = get_prompt("MERGE").format(
-        mode="dedup", skills_block=block, profile_section="reader profile")
-    parsed = extract_json(client.complete("fake-strong", "s", user))
-    merged = parsed["content"]
-    assert parsed["summary"]
-    assert merged.startswith("[When to use] a")
-    assert merged != ("[When to use] a\n[Steps] b\n"
-                     "[Do not use when] d")
-
-
-def test_group_covers_every_listed_skill(client):
-    listing = "- s1: content one\n- s2: content two"
-    user = get_prompt("GROUP").format(
-        **GENERIC.variables(), skills_listing=listing)
-    parsed = extract_json(client.complete("fake-strong", "s", user))
-    assert set(parsed["groups"]) == {"s1", "s2"}
+    assert parsed["when_to_use"] == "The object is held."
+    assert set(parsed) == {"summary", "when_to_use", "steps",
+                           "not_applicable_when"}
 
 
 def test_an_unexpected_prompt_fails_loudly(client):
@@ -232,7 +214,7 @@ def test_weak_policy_revised_skills_needs_the_marker(client):
     assert client.complete(
         "fake-weak", "s", skills) == "Finish[not the answer the grader expects]"
     revised = _execution_user(
-        "## Skill rules\n- advice REVISED-BY-G11: now concrete\n")
+        "## Skill rules\n- advice REVISED: now concrete\n")
     assert client.complete("fake-weak", "s", revised) == f"Finish[{ANSWER}]"
 
 

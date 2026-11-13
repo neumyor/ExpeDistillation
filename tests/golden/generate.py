@@ -1,21 +1,21 @@
-"""Regenerate the golden artifact matrix (P-1 prime; decision doc
-2026-10-15 section 7).
+"""Regenerate the golden artifact matrix.
 
 Usage:
     .venv/bin/python tests/golden/generate.py [--out tests/fixtures/golden]
 
-For every combo (acceptance x delivery x mode) this writes
+For every combo (tests/golden/harness.py's COMBOS) this writes
 ``<out>/<label>.json`` (the normalised artifact snapshot of one straight
 pipeline run) plus ``provenance.json`` (base commit, per-combo model call
-counts, crash points). Each combo additionally runs three crash+resume
-variants whose final artifacts must equal the straight snapshot -- a
-resume-equivalence failure ABORTS generation loudly; the matrix never
-lands on a resume bug or an unnormalised volatile field.
+counts, crash points). Each combo additionally runs once with
+``--workers 8`` and three crash+resume variants (``harness.CRASH_POINTS``:
+between two diagnoses, before a rewrite, between two new cards), whose
+final artifacts must all equal the straight snapshot -- any difference
+ABORTS generation loudly; the matrix never lands on a resume or
+parallelism bug or an unnormalised volatile field.
 
-Regenerate whenever a step DELIBERATELY changes run artifacts (P1b's
-schema switch will) and land the diff in the same commit: that diff is
-what the step's reviewers read. A step that changes nothing must not
-touch the matrix.
+Regenerate whenever a change DELIBERATELY alters run artifacts and land
+the diff in the same commit: that diff is what the change's reviewers
+read. A change that alters nothing must not touch the matrix.
 """
 
 import json
@@ -29,18 +29,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tests.golden.harness import (  # noqa: E402
     COMBOS,
+    CRASH_POINTS,
+    GoldenPlugin,
     assert_resume_equivalent,
     combo_label,
+    crash_points as find_crash_points,
     installed_plugin,
-    plugin_for,
     run_crash_and_resume,
     run_straight,
     snapshot,
     write_config,
 )
-
-#: Crash points as fractions of the straight run's model call count.
-CRASH_FRACTIONS = (0.3, 0.6, 0.95)
 
 
 def _base_commit() -> str:
@@ -57,7 +56,7 @@ def main() -> int:
     provenance = {
         "base_commit": _base_commit(),
         "generated_on": date.today().isoformat(),
-        "crash_fractions": list(CRASH_FRACTIONS),
+        "crash_kinds": [name for name, _, _ in CRASH_POINTS],
         "combos": {},
     }
     for combo in COMBOS:
@@ -65,14 +64,17 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             config = write_config(tmp / "config.yaml", combo)
-            with installed_plugin(plugin_for(combo)):
+            with installed_plugin(GoldenPlugin()):
                 run_dir = tmp / "run"
-                calls = run_straight(config, run_dir)
+                prompts = run_straight(config, run_dir)
+                calls = len(prompts)
                 golden = snapshot(run_dir)
-                crash_points = []
-                for fraction in CRASH_FRACTIONS:
-                    point = max(1, min(calls - 1, round(calls * fraction)))
-                    crash_points.append(point)
+                run_straight(config, tmp / "run_workers8", workers=8)
+                if snapshot(tmp / "run_workers8") != golden:
+                    raise SystemExit(
+                        f"{label}: --workers 8 differs from --workers 1")
+                crash_points = find_crash_points(prompts)
+                for point in crash_points:
                     run_crash_and_resume(config, tmp / f"run_crash_{point}",
                                          point)
                     try:
@@ -88,7 +90,8 @@ def main() -> int:
         provenance["combos"][label] = {"model_calls": calls,
                                        "crash_points": crash_points}
         print(f"{label}: {calls} model calls, "
-              f"3 crash+resume variants equal")
+              f"--workers 8 and {len(crash_points)} crash+resume "
+              f"variants equal")
     (out / "provenance.json").write_text(
         json.dumps(provenance, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8")

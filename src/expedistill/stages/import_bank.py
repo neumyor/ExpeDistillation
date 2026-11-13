@@ -1,4 +1,4 @@
-"""Import an external method's artifact as the accepted bank of a test-only run.
+"""Import an external method's artifact as the bank of a test-only run.
 
 The paper's baselines (SkillOpt, EvoSkill, Trace2Skill, GEPA, ExpeL, AgentBrew)
 train in their own repositories. What this repository evaluates is the
@@ -9,16 +9,16 @@ artifact into the one thing a test phase reads: the run's skill bank.
 What a test-only run (``sequence: [test]``) reads, worked out from the code:
 
 * ``<run>/skill_bank.jsonl``: with no learn phase on disk, the test phase's
-  ``phase_disk._bank_skills`` falls back to ``Store.bank()``, which is this
-  file. Every delivery (``folder``, ``whole_bank``, ``retrieval``) keeps only
-  the members whose status is ``accepted``.
+  ``phase_disk.bank_skills`` falls back to ``Store.bank()``, which is this
+  file. Every delivery (``folder``, ``whole_bank``) keeps only
+  the members whose status is ``active``.
 * Nothing else. ``manifest.json`` is written by the first ``expedistill run``
   (the stage-0 freeze), after the importer; the freeze does not look at the
   bank, so the bank's identity is recorded in ``BANK_ORIGIN.md`` only.
 
 The importer also writes each skill into the object store
-(``stage3_generation/skills``), so the accepted set is visible there exactly
-as a finished learning run would leave it; no test-phase code reads it.
+(``stage3_generation/skills``), so the bank is visible there exactly as a
+finished learning run would leave it; no test-phase code reads it.
 
 Source formats (deterministic, no model, no network):
 
@@ -27,18 +27,15 @@ Source formats (deterministic, no model, no network):
   (``description`` is the summary); one skill per directory, keyed by the
   directory name.
 * ``notes_jsonl``: one JSON object per line with ``text`` and optional
-  ``id``, ``title``, ``scope``; one skill per line.
+  ``id``, ``title``; one skill per line.
 
-A skill's ``content`` is the source text verbatim (front matter removed,
+A skill's ``verbatim_text`` is the source text (front matter removed,
 newlines normalised, outer whitespace stripped): the baseline's words reach
 the weak model unchanged, and the folder delivery's YAML ``description`` is
-the source's own summary. A note's ``scope`` becomes the skill's ``group``.
-Imported skills carry no trajectory, so they use the
-``import/<origin>/<key>`` id namespace, in the way ``bank/merge/NNNN`` is a
-namespace for skills that are not tied to one subtask: ``subtask_id``
-repeats the skill id and ``source_subtasks`` is empty. Such an id is never a
-stage-3 candidate (``ids.is_stage3_candidate``), so no learning loop treats
-the skill as a candidate to accept or discard.
+the source's own summary. The structured skill fields stay empty. Imported
+skills carry no trajectory and belong to no subtask type, so they use the
+``import/<origin>/<key>`` id namespace, ``subtask_type`` is empty and
+``source_subtasks`` is empty. The skills are stored ``active``.
 """
 
 import json
@@ -49,10 +46,8 @@ from typing import (
     Callable,
     Dict,
     List,
-    Mapping,
     NamedTuple,
     Optional,
-    Sequence,
     Tuple,
 )
 
@@ -70,10 +65,7 @@ __all__ = [
     "BANK_ORIGIN_NAME",
     "SKILL_ID_NAMESPACE",
     "SOURCE_FORMATS",
-    "agentbrew_frozen_to_notes_jsonl",
-    "expel_rules_to_notes_jsonl",
     "import_external_bank",
-    "upskill_curated_acp_to_notes_jsonl",
 ]
 
 SOURCE_FORMATS = ("markdown_file", "skill_folder", "notes_jsonl")
@@ -110,9 +102,8 @@ class _Item(NamedTuple):
     """One source item before it becomes a Skill."""
 
     key: str
-    content: str
+    text: str
     summary: str
-    group: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +251,7 @@ def _read_notes_jsonl(path: Path) -> Tuple[List[_Item], List[str]]:
         if not isinstance(text, str) or not _normalise(text):
             raise ConfigError(f"{where}: needs a non-empty string 'text'")
         text = _normalise(text)
-        for field_name in ("title", "scope"):
+        for field_name in ("title",):
             if field_name in row and not isinstance(row[field_name], str):
                 raise ConfigError(f"{where}: '{field_name}' must be a string")
         note_id = row.get("id")
@@ -273,8 +264,7 @@ def _read_notes_jsonl(path: Path) -> Tuple[List[_Item], List[str]]:
                    or _derive_summary(text))
         if not summary:
             raise ConfigError(f"{where}: no title or sentence to summarise")
-        scope = one_line(row.get("scope") or "") or None
-        items.append(_Item(key, text, summary, scope))
+        items.append(_Item(key, text, summary))
     if not items:
         raise ConfigError(f"{path} holds no notes")
     return items, []
@@ -302,7 +292,7 @@ def _check_origin(origin: str) -> str:
 
 
 def _build_skills(origin: str, items: List[_Item]) -> List[Skill]:
-    """One accepted Skill per item, in item order; two items that share a
+    """One active Skill per item, in item order; two items that share a
     key or a delivery directory are refused rather than one shadowing the
     other."""
     skills: List[Skill] = []
@@ -325,9 +315,10 @@ def _build_skills(origin: str, items: List[_Item]) -> List[Skill]:
                 f"the delivery directory {dirname!r}")
         owner_of_dir[dirname] = skill_id
         skills.append(Skill(
-            skill_id=skill_id, content=item.content, subtask_id=skill_id,
-            source_subtasks=[], summary=item.summary, version=1,
-            status="accepted", group=item.group))
+            skill_id=skill_id, subtask_type="", source_subtasks=[],
+            summary=item.summary, when_to_use="", steps=[],
+            not_applicable_when="", verbatim_text=item.text, version=1,
+            status="active"))
     return skills
 
 
@@ -354,7 +345,7 @@ def _render_origin(*, source: Path, source_format: str, origin: str,
         f"- 来源格式：{source_format}",
         f"- 来源方法（origin）：{origin}",
         f"- 导入条数：{len(skills)}",
-        "- 转换：每个来源条目成为一条已接受（accepted）的技能，版本 1，"
+        "- 转换：每个来源条目成为一条在用（active）的技能，版本 1，"
         "正文逐字保留，摘要取自来源",
         "- 用途：只跑 test 相位的 run（sequence: [test]），技能库由这些"
         "技能组成",
@@ -367,7 +358,7 @@ def _render_origin(*, source: Path, source_format: str, origin: str,
 
 def import_external_bank(source: Any, source_format: str, run_dir: Any, *,
                          origin: str) -> Dict[str, Any]:
-    """Write ``source`` into ``run_dir`` as the accepted bank of a test-only
+    """Write ``source`` into ``run_dir`` as the bank of a test-only
     run and return a summary (``run_dir``, ``origin``, ``source``,
     ``source_format``, ``n_skills``, ``skill_ids``, ``ignored_files``).
 
@@ -408,95 +399,3 @@ def import_external_bank(source: Any, source_format: str, run_dir: Any, *,
         "skill_ids": [skill.skill_id for skill in skills],
         "ignored_files": ignored,
     }
-
-
-# ---------------------------------------------------------------------------
-# Converters: a baseline's native artifact as notes_jsonl text
-# ---------------------------------------------------------------------------
-
-def _notes_text(rows: List[Dict[str, str]]) -> str:
-    return "".join(json.dumps(row, ensure_ascii=False) + "\n"
-                   for row in rows)
-
-
-def expel_rules_to_notes_jsonl(rules: Sequence[str]) -> str:
-    """ExpeL's insights as notes_jsonl, one note per rule.
-
-    ``rules`` is the list ExpeL keeps as ``ExpelAgent.rule_items`` and, per
-    fold, in ``cache_rules[fold]`` (agent/expel.py): single-sentence strings,
-    best-supported first. The ids ``rule-001``... follow that order. ExpeL's
-    other half, the retrieved successful trajectories, has no counterpart in
-    a skill bank and is not exported.
-    """
-    rows: List[Dict[str, str]] = []
-    for number, rule in enumerate(rules, 1):
-        if not isinstance(rule, str) or not rule.strip():
-            raise ConfigError(f"ExpeL rule {number} is not a non-empty string")
-        rows.append({"id": f"rule-{number:03d}", "text": rule.strip()})
-    if not rows:
-        raise ConfigError("ExpeL rules list is empty")
-    return _notes_text(rows)
-
-
-def upskill_curated_acp_to_notes_jsonl(
-        claude_md_by_category: Mapping[str, str]) -> str:
-    """UpSkill's curated TB guidance as notes_jsonl, one note per category.
-
-    ``claude_md_by_category`` maps a category directory name to the text of
-    ``curated_acp/<category>/CLAUDE.md`` (scripts/run_curator.py): the only
-    one of the three curated files its serving script deploys
-    (scripts/run_serve.sh). The category is the note id; the note's summary
-    comes from the file's first heading.
-    """
-    rows = []
-    for category in sorted(claude_md_by_category):
-        text = claude_md_by_category[category]
-        if not isinstance(text, str) or not text.strip():
-            raise ConfigError(f"CLAUDE.md of category {category!r} is empty")
-        rows.append({"id": category, "text": text.strip()})
-    if not rows:
-        raise ConfigError("no curated categories given")
-    return _notes_text(rows)
-
-
-def agentbrew_frozen_to_notes_jsonl(envelope: Mapping[str, Any]) -> str:
-    """AgentBrew's frozen note pool (the terminalbench-eval reimplementation)
-    as notes_jsonl, one note per pool entry, in pool order.
-
-    ``envelope`` is the parsed ``<work-dir>/frozen/manifest.json``:
-    ``{"payload": {"memory": {"notes": {key: {"note": {...}, "version",
-    "provenance"}}}}}`` (tbench_eval/agentbrew/memory.py). A note's text is
-    what ``notes.render`` shows the student: the ``Note:`` / ``Trigger:`` /
-    ``Rule:`` lines and the numbered steps. Tags, quality score, statistics,
-    provenance and the dense index are not shown to it and are dropped. The
-    trigger is the summary and the scope is the group, so ``retrieval`` can
-    route by scope the way AgentBrew does.
-    """
-    try:
-        entries = envelope["payload"]["memory"]["notes"]
-    except (KeyError, TypeError) as exc:
-        raise ConfigError(
-            "not an AgentBrew frozen manifest: payload.memory.notes "
-            "is missing") from exc
-    rows: List[Dict[str, str]] = []
-    for key, entry in entries.items():
-        where = f"AgentBrew note {key!r}"
-        try:
-            note = entry["note"]
-            trigger = note["trigger_pattern"]
-            rule = note["corrective_rule"]
-            steps = note["minimal_steps"]
-        except (KeyError, TypeError) as exc:
-            raise ConfigError(f"{where} lacks a required field") from exc
-        if not all(isinstance(value, str) and value.strip()
-                   for value in (trigger, rule, *steps)):
-            raise ConfigError(f"{where} has an empty or non-text field")
-        lines = [f"Note: {key}", f"Trigger: {trigger}", f"Rule: {rule}"]
-        lines += [f"{number}. {step}" for number, step in enumerate(steps, 1)]
-        row = {"id": key, "title": trigger, "text": "\n".join(lines)}
-        if note.get("scope"):
-            row["scope"] = note["scope"]
-        rows.append(row)
-    if not rows:
-        raise ConfigError("the frozen AgentBrew pool holds no notes")
-    return _notes_text(rows)

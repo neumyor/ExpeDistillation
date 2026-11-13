@@ -493,10 +493,19 @@ def test_a_unit_without_a_folder_keeps_the_plain_prompt(
     assert "skill_reads" not in outcome.meta
 
 
-def test_an_empty_folder_manifest_runs_as_a_plain_unit(
+def test_an_empty_folder_keeps_the_folder_prompt_and_the_playbook(
         stub_eval_repo, tmp_path):
+    # An empty bank is still a folder unit: the same prompt and the
+    # playbook in the same place as with cards, an empty card list.
     task = _task_for(_fixture_items()[0])
-    task.meta["skill_folder"] = {"files": []}
+    task.meta["skill_folder"] = {"files": [],
+                                 "playbook_text": "Search the name first."}
     handle = make_fake_handle(role="test", script=["Finish[red cent]"])
-    SearchQAPlugin().run(task, handle, skills_block="", workdir=tmp_path)
-    assert "ReadSkill" not in handle.client.calls[0]["user"]
+    outcome = SearchQAPlugin().run(task, handle, skills_block="",
+                                   workdir=tmp_path)
+    first_user = handle.client.calls[0]["user"]
+    assert "ReadSkill[<location>]" in first_user
+    assert "<available_skills>\n</available_skills>" in first_user
+    assert first_user.index("Search the name first.") \
+        < first_user.index("<available_skills>")
+    assert outcome.meta["skill_list_shown"] is True

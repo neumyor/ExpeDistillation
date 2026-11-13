@@ -15,29 +15,31 @@ names frozen below are the effective ones.
 
 Task set: D1 loads exactly ``config.tasks`` (None = the plugin's full set,
 which a plugin may reject -- TB does). With explicit split lists and no
-``config.tasks``, the union of the lists (``reserved`` included) is loaded;
+``config.tasks``, the union of the four lists is loaded;
 with both given, the union must equal the loaded set exactly (ConfigError
 naming the ids on either side otherwise). A loaded set with a repeated id
 (e.g. a task file naming one twice) is a ConfigError listing the ids,
 checked before any split derivation. A ratio split is derived from the
 loaded set.
 
-The frozen split carries three lists: ``train``, ``test`` and
-``reserved``. ``reserved`` is the partition held back from BOTH arms
-(protocol v2 / the TB frozen-split reuse experiment): it is loaded -- the
-split lists must cover the loaded task set exactly -- but neither distilled
-on nor tested on; it exists so a dev smoke can run held-out tasks without
-touching the measurement. A two-key spec (``{"train", "test"}``) is still
-accepted and freezes ``reserved: []``, so every manifest and summary
-downstream can rely on all three keys being present (integration plan
-ruling 7).
+The frozen split carries four lists: ``train``, ``val``, ``test`` and
+``reserved``. ``val`` is what a practice phase may run instead of train;
+``reserved`` is the partition held back from every phase (the TB
+frozen-split reuse experiment): it is loaded -- the split lists must cover
+the loaded task set exactly -- but never run; it exists so a dev smoke can
+run held-out tasks without touching the measurement. A spec without
+``val`` or ``reserved`` (and every ratio split) freezes them as ``[]``, so
+every manifest and summary downstream can rely on all four keys being
+present.
 
 What the manifest freezes (B4 compares field by field on every start):
-``benchmark``, ``mode``, the explicit ``split`` id lists (all three keys),
+``benchmark``, the explicit ``split`` id lists (all four keys),
 the whole config
 (``config``: every ExperimentConfig field, including ``tasks``, the
-completed ``rules`` and the prompt digests), ``prompt_digests``, ``rules``,
-``model_roles``, ``tasks_digest`` and ``aux_metric``. ``aux_metric`` is the
+completed ``rules`` and the prompt digests), ``prompt_digests``,
+``prompt_pack`` (the benchmark pack's vocabulary, protocol, playbook seed
+and overrides), ``rules``, ``model_roles``, ``tasks_digest`` and
+``aux_metric``. ``aux_metric`` is the
 plugin-declared auxiliary metric's NAME (``BenchmarkPlugin.aux_metric_name``,
 None when the benchmark has none): the auxiliary metric is pre-registered --
 part of the experiment identity, frozen before any result exists, never
@@ -57,8 +59,8 @@ remote-side edits are outside this digest.
 
 Prompt digests are deterministic: the method prompts
 (``prompts.METHOD_PROMPT_NAMES``) plus exactly the configured plugin's
-``task_prompt_name``, never whatever other plugins a process happened to
-import. A task prompt that is not registered in B2 is frozen as ``None``;
+``task_prompt_name``, its pack's ``executor_prompts`` and override targets,
+never whatever other plugins a process happened to import. A task prompt that is not registered in B2 is frozen as ``None``;
 real plugins register theirs at import, so only test fakes hit that case
 (and a later registration still trips the comparison). Since schema v3
 the freeze is FULL: every registered method prompt's digest is frozen on
@@ -78,9 +80,10 @@ from the frozen split fails loudly inside D2 (unknown ids / uncovered tasks
 are ConfigErrors), and drifted content fails on ``tasks_digest``.
 
 The returned dict is exactly ``{"tasks": total, "train": [...ids],
-"test": [...ids], "reserved": [...ids]}`` -- task-id lists only, never
-Task objects, so callers can JSON-serialise it (the pipeline writes it
-straight into its ledger; it reads only ``train`` and ``test``). A stage
+"val": [...ids], "test": [...ids], "reserved": [...ids]}`` -- task-id lists
+only, never Task objects, so callers can JSON-serialise it (the pipeline
+writes it straight into its ledger and hands each execute phase the list
+its ``tasks`` names). A stage
 that needs the Task objects rebuilds them from these ids through
 ``blocks.tasks.load_tasks``, which is deterministic from the frozen config.
 """
@@ -89,9 +92,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
-import json
-import re
-from pathlib import Path
+import string
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from expedistill import prompts
@@ -101,14 +102,18 @@ from expedistill.blocks import rules as rules_block
 from expedistill.blocks import tasks as tasks_block
 from expedistill.blocks.tasks import tasks_digest
 from expedistill.composites import external_control
+from expedistill.composites.evolving_text import check_playbook_capability
 from expedistill.composites.verdicts import get_verdict_rule
-from expedistill.core.config import ExecutePhaseSpec, LearnPhaseSpec
+from expedistill.core.config import (
+    SPLIT_LIST_KEYS,
+    ExecutePhaseSpec,
+    LearnPhaseSpec,
+    split_lists,
+)
 from expedistill.methods import resolve_params
-from expedistill.methods.review import MIN_TRIAL_LEVEL_INPUT_TOKENS
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import write_json
-from expedistill.stages import learn_playbook
 from expedistill.stages.context import StageContext
 
 __all__ = ["run"]
@@ -117,15 +122,9 @@ _SUMMARY_NAME = "stage0_summary.json"
 
 #: Rule key -> registry lookup that raises ConfigError for an unknown name.
 _RULE_GETTERS = {
-    "task_select": rules_block.get_task_select,
     "segment_select": rules_block.get_segment_select,
     "trajectory_select": rules_block.get_trajectory_select,
 }
-
-#: The memory address in a default ``object.__repr__`` ("<X object at
-#: 0x10f...>"): stripped so an opaque meta value hashes the same per run.
-_ADDRESS_RE = re.compile(r" at 0x[0-9a-fA-F]+")
-
 
 def _two_way_train_count(n: int, ratio: float) -> int:
     """Largest-remainder split of ``n`` items into train (``ratio``) + test.
@@ -163,14 +162,14 @@ def _derive_split_spec(task_ids: List[str],
 
 
 def _explicit_split_ids(config: Any) -> Optional[List[str]]:
-    """Sorted union of the explicit split lists (``reserved`` included:
-    the held-back tasks are loaded even though neither arm runs them), or
-    None if there are no explicit lists."""
-    if (config.mode == "split" and isinstance(config.split, dict)
-            and "train" in config.split):
-        return sorted(set(config.split.get("train") or [])
-                      | set(config.split.get("test") or [])
-                      | set(config.split.get("reserved") or []))
+    """Sorted union of the four explicit split lists (``reserved``
+    included: the held-back tasks are loaded even though no phase runs
+    them), or None if there are no explicit lists."""
+    if isinstance(config.split, dict) and "train" in config.split:
+        listed: set = set()
+        for ids in split_lists(config.split).values():
+            listed.update(ids)
+        return sorted(listed)
     return None
 
 
@@ -192,8 +191,8 @@ def _check_unique_ids(tasks: Sequence[Task]) -> None:
     """Every loaded task id must be unique.
 
     The config rejects duplicates in a ``tasks`` list, but a task file is
-    plugin-interpreted; a repeated id there would double-count the task in
-    full mode and make a ratio split fail (or pass) depending on the seed.
+    plugin-interpreted; a repeated id there would make a ratio split fail
+    (or pass) depending on the seed.
     """
     seen: set = set()
     duplicates: set = set()
@@ -215,21 +214,18 @@ def _check_split_covers_task_set(config: Any, tasks: Sequence[Task]) -> None:
     unlisted = sorted(loaded - set(listed))
     if not_in_set or unlisted:
         raise ConfigError(
-            "split train/test lists must cover the configured tasks "
+            "the split lists must cover the configured tasks "
             f"exactly; listed but not in tasks: {not_in_set}; in tasks but "
             f"not listed: {unlisted}")
 
 
-def _prompt_digests(benchmark: str, *,
-                    learned_playbook: bool = False
-                    ) -> Dict[str, Optional[str]]:
+def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
     """EVERY registered method prompt plus exactly this benchmark's task
     prompt -- the v3 full freeze (the plan's section 5).
 
     Must run after D1 imported the plugin package (its prompt registers at
-    import). An unregistered task prompt is frozen as None. The two live
-    prompts are always in the set now: they register at import of
-    ``prompts/__init__`` like every other method prompt, and the static
+    import). An unregistered task prompt is frozen as None. Every method
+    prompt registers at import of ``prompts/__init__``, and the static
     tests pin that every prompts/*.py module is in that import list --
     so the frozen surface can never miss a registered prompt. The cost is
     noise, not risk: a manifest lists digests this run may never call.
@@ -253,61 +249,68 @@ def _prompt_digests(benchmark: str, *,
                 "registered -- the folder prompt is part of the frozen "
                 "protocol, so the plugin and its registration disagree")
         names.add(folder_prompt)
-    for extra in plugin.protocol_prompt_names:
+    pack = plugin.prompt_pack
+    for extra in pack.executor_prompts:
         if extra not in prompts.PROMPTS:
             raise ConfigError(
-                f"benchmark {benchmark!r} declares protocol_prompt_names "
-                f"entry {extra!r} but no prompt of that name is registered "
-                "-- the runner's other prompts are part of the frozen "
-                "protocol, so the plugin and its registration disagree")
+                f"benchmark {benchmark!r} lists executor prompt {extra!r} "
+                "in its prompt pack but no prompt of that name is "
+                "registered -- the runner's prompts are part of the frozen "
+                "protocol, so the pack and its registration disagree")
         names.add(extra)
-    if learned_playbook:
-        # Frozen only when a delivery asks for a learned playbook, so a
-        # manifest that never uses the capability keeps its old digests.
-        writer = plugin.playbook_prompt_name
-        if writer is None:
-            raise ConfigError(
-                f"benchmark {benchmark!r} has no learned-playbook "
-                "capability (playbook_prompt_name is None) but the config "
-                "sets playbook_source 'learned'")
-        if writer not in prompts.PROMPTS:
-            raise ConfigError(
-                f"benchmark {benchmark!r} declares playbook_prompt_name "
-                f"{writer!r} but no prompt of that name is registered")
-        names.add(writer)
+    _check_overrides(benchmark, pack.overrides)
+    names.update(pack.overrides.values())
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
     }
 
 
+def _placeholders(name: str) -> set:
+    return {field for _, field, _, _ in
+            string.Formatter().parse(prompts.get(name))
+            if field is not None}
+
+
+def _check_overrides(benchmark: str, overrides: Any) -> None:
+    """Every override target is registered and fills exactly the
+    placeholders of the method prompt it replaces, so a caller's variables
+    fit either template."""
+    for method_name, target in overrides.items():
+        for name in (method_name, target):
+            if name not in prompts.PROMPTS:
+                raise ConfigError(
+                    f"benchmark {benchmark!r} overrides {method_name!r} "
+                    f"with {target!r}, but no prompt named {name!r} is "
+                    "registered")
+        expected = _placeholders(method_name)
+        actual = _placeholders(target)
+        if actual != expected:
+            raise ConfigError(
+                f"benchmark {benchmark!r} overrides {method_name!r} with "
+                f"{target!r}, whose placeholders differ: missing "
+                f"{sorted(expected - actual)}, extra "
+                f"{sorted(actual - expected)}")
+
+
 def build_manifest(config: Any, tasks: Sequence[Any], *,
-                   train_ids: Sequence[str], test_ids: Sequence[str],
-                   reserved_ids: Sequence[str]) -> Dict[str, Any]:
+                   split: Dict[str, Sequence[str]]) -> Dict[str, Any]:
     """The frozen manifest payload (B4 ``freeze``'s input), pure: the same
-    config, tasks and split ids give the same manifest bytes. Shared with
-    the reuse assembler, which builds the PROSPECTIVE run's manifest to
-    diff a source run against before assembling (ruling 4's whitelist
-    walk) -- one assembly, so the two can never drift apart.
-    """
-    prompt_digests = _prompt_digests(
-        config.benchmark,
-        learned_playbook=learn_playbook.requested(config))
+    config, tasks and split ids give the same manifest bytes. ``split``
+    maps each of ``SPLIT_LIST_KEYS`` to its task ids."""
+    prompt_digests = _prompt_digests(config.benchmark)
     frozen_config = dataclasses.replace(
         config, prompts_digests=prompt_digests)
     return {
         "benchmark": config.benchmark,
-        "mode": config.mode,
-        # All three keys, always (ruling 7): downstream readers never have
-        # to branch on which form the source config used.
-        "split": {"train": list(train_ids), "test": list(test_ids),
-                  "reserved": list(reserved_ids)},
+        # All four keys, always: downstream readers never have to branch
+        # on which form the source config used.
+        "split": {name: list(split[name]) for name in SPLIT_LIST_KEYS},
         "config": frozen_config.to_dict(),
         "prompt_digests": prompt_digests,
-        # The benchmark's vocabulary for the learning prompts is protocol
-        # like the prompt text itself: one changed word is a new experiment.
-        "learning_context": get_plugin(
-            config.benchmark).learning_context.to_dict(),
+        # The benchmark's prompt pack is protocol like the prompt text
+        # itself: one changed word is a new experiment.
+        "prompt_pack": _frozen_pack(get_plugin(config.benchmark).prompt_pack),
         "rules": config.rules,
         "model_roles": config.models,
         "tasks_digest": tasks_digest(tasks),
@@ -317,19 +320,29 @@ def build_manifest(config: Any, tasks: Sequence[Any], *,
     }
 
 
+def _frozen_pack(pack: Any) -> Dict[str, Any]:
+    """The manifest form of a prompt pack: its texts. The named prompts
+    freeze through ``prompt_digests``; the facts and checks are code."""
+    return {
+        "vocabulary": pack.vocabulary.to_dict(),
+        "protocol": pack.protocol,
+        "playbook_seed": pack.playbook_seed,
+        "overrides": dict(pack.overrides),
+    }
+
+
 def _resolve_phase_methods(config: Any) -> None:
     """Resolve every phase family's params, fail-early (R9): a bad
     parameter, an unregistered method name or an unknown named rule
     stops the run before any task is loaded or executed.
 
-    Per-phase: the v4 config carries its method mappings inside the
-    phase definitions (an execute phase resolves delivery + execution,
-    a learn phase evidence + author + attribution + decision + curate),
-    and the named-rule
-    selections the phases carry -- an execute phase's verdict rule
-    (``acceptance``) and comparison rule (``compare.rule``) -- validate
-    against their registries here (core cannot: layer 0 must not import
-    composites or blocks). An ABSENT acceptance name is the benchmark's
+    Per-phase: the config carries its method mappings inside the phase
+    definitions (an execute phase resolves delivery + execution and checks
+    that the benchmark can show its playbook, a learn phase resolves
+    review + author),
+    and the named verdict rule an execute phase carries (``acceptance``)
+    validates against its registry here (core cannot: layer 0 must not
+    import composites). An ABSENT acceptance name is the benchmark's
     default verdict rule, resolved by the phase driver at run time --
     validating it here would refuse every test-plugin benchmark the
     verdict table has not heard of, and the benchmark registry itself
@@ -347,93 +360,43 @@ def _resolve_phase_methods(config: Any) -> None:
         if isinstance(spec, ExecutePhaseSpec):
             resolve_params("delivery", spec.delivery)
             resolve_params("execution", spec.execution)
+            check_playbook_capability(spec, config.benchmark)
             if spec.acceptance is not None:
                 get_verdict_rule(spec.acceptance)
-            if spec.compare is not None and spec.compare.rule is not None:
-                rules_block.get_acceptance_improve(spec.compare.rule)
             if spec.compare is not None \
                     and spec.compare.external is not None:
                 external_control.verify_external_control_file(
                     spec.compare.external.path,
                     spec.compare.external.sha256)
         elif isinstance(spec, LearnPhaseSpec):
-            params = resolve_params("review", spec.review)
+            resolve_params("review", spec.review)
             resolve_params("author", spec.author)
-            resolve_params("curation", spec.curate)
-            if params.decision == "trial_level":
-                _check_trial_level_input_budget(config)
-
-
-def _check_trial_level_input_budget(config: Any) -> None:
-    """Trial-level review sends whole trajectories to two roles.
-
-    The author sees a full failed trial plus every skill card; the
-    rewriter sees every evidence window for a revised skill.  Their
-    configured input budget must be at least 512K, otherwise a long
-    trial can silently exceed the declared context.  This is a config
-    check only: the provider's real context limit still has to be at
-    least the declared value.
-    """
-    for role in ("author", "rewriter"):
-        limit = config.max_input_tokens_for(role)
-        if limit is None or limit < MIN_TRIAL_LEVEL_INPUT_TOKENS:
-            raise ConfigError(
-                "review decision 'trial_level' sends full trial "
-                f"trajectories; model role {role!r} needs "
-                f"max_input_tokens >= {MIN_TRIAL_LEVEL_INPUT_TOKENS}, "
-                f"got {limit!r}")
 
 
 def run(ctx: StageContext) -> Dict[str, Any]:
     """Validate rules, load and split the task set, freeze, write summary.
 
-    Returns ``{"tasks": total, "train": [...ids], "test": [...ids],
-    "reserved": [...ids]}`` (raw task ids, JSON-safe; ``reserved`` is
-    ``[]`` for a two-key spec) and writes the same dict to
-    ``stage0_summary.json`` next to the manifest.
+    Returns ``{"tasks": total, "train": [...ids], "val": [...ids],
+    "test": [...ids], "reserved": [...ids]}`` (raw task ids, JSON-safe; an
+    optional list the spec leaves out is ``[]``) and writes the same dict
+    to ``stage0_summary.json`` next to the manifest.
     """
     config = ctx.config
     _validate_rules(config.rules)
     _resolve_phase_methods(config)
-    # A run frozen under a pre-v4 schema can never resume under v4 code:
-    # the frozen key sets differ by design (the v3 ``methods`` slots are
-    # gone). Point the operator at the maintenance branch instead of
-    # letting the generic manifest-diff refusal bury the reason.
-    manifest_path = Path(ctx.run_dir) / "manifest.json"
-    if manifest_path.exists():
-        try:
-            frozen_version = json.loads(
-                manifest_path.read_text(encoding="utf-8")
-            ).get("config", {}).get("schema_version")
-        except (OSError, ValueError):
-            frozen_version = None
-        if frozen_version in (2, 3):
-            raise ConfigError(
-                f"this run was frozen under config schema v{frozen_version}; "
-                "schema v4 code (the phase sequence) cannot resume it -- "
-                "continue it on its maintenance branch (the run's own "
-                "checkout, AGENTS section 6), or assemble a new run from "
-                "it")
     tasks = tasks_block.load_tasks(config.benchmark, tasks_spec(config))
     _check_unique_ids(tasks)
     _check_split_covers_task_set(config, tasks)
 
     split_spec = config.split
-    if (config.mode == "split" and isinstance(split_spec, dict)
-            and "ratio" in split_spec):
+    if isinstance(split_spec, dict) and "ratio" in split_spec:
         split_spec = _derive_split_spec(
             [task.task_id for task in tasks], split_spec)
-    train_tasks, test_tasks, reserved_tasks = tasks_block.split_tasks(
-        tasks, config.mode, split_spec)
+    divided = tasks_block.split_tasks(tasks, split_spec)
+    split = {name: [task.task_id for task in part]
+             for name, part in zip(SPLIT_LIST_KEYS, divided)}
+    freeze(ctx.run_dir, build_manifest(config, tasks, split=split))
 
-    train_ids = [task.task_id for task in train_tasks]
-    test_ids = [task.task_id for task in test_tasks]
-    reserved_ids = [task.task_id for task in reserved_tasks]
-    freeze(ctx.run_dir, build_manifest(
-        config, tasks, train_ids=train_ids, test_ids=test_ids,
-        reserved_ids=reserved_ids))
-
-    summary = {"tasks": len(tasks), "train": train_ids, "test": test_ids,
-               "reserved": reserved_ids}
+    summary = {"tasks": len(tasks), **split}
     write_json(ctx.run_dir / _SUMMARY_NAME, summary, indent=2)
     return summary

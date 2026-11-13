@@ -1,45 +1,60 @@
-"""Golden-matrix harness: the "behaviour unchanged" instrument of the
-multi-method refactor (P-1 prime, docs/decisions/
-multi_method_framework_20261015.md section 7).
+"""Golden-matrix harness: the "behaviour unchanged" instrument.
 
-What this pins. For four selected combinations of the three mode axes --
-acceptance {exam, live_run} x delivery {whole_bank, retrieval} x experiment
-mode {full, split}, chosen so every axis value still appears twice -- the
-whole phase sequence runs over a stub benchmark with FakeClients, and
-EVERY durable artifact of the run directory is snapshotted:
-the manifest, phase summaries, object stores, ledgers, skill bank,
-injection audit, llm request dumps. A refactor step passes P-0/P-1a only
-if it reproduces these snapshots byte-for-byte (after the volatile-field
-normalisation below).
+What this pins. Two combos of the paper method, differing in the test
+phase's delivery: ``whole_bank`` (whole_bank + real, playbook off) and
+``folder`` (folder + real_folder, the evolved playbook shown). Both run the
+paper's seven-phase sequence ``baseline, learn, practice, learn, practice,
+learn, test`` (one ``learn`` definition reused) on a split stub benchmark;
+both practices always deliver the previous learn phase's bank as a skill
+folder (``folder`` + ``real_folder``) with the evolved playbook. Every learn
+phase diagnoses the failed weak trials of the execute phase before it,
+cuts and types their segments (and, the first time, the strong baseline
+trajectories), routes each failure to gap / trigger / content / none
+evidence, evolves the profile and the playbook, and writes a card per gap
+type or rewrites one side of a card per trigger or content evidence (the
+delete rule in place of a second content rewrite in a row); the test phase
+runs the bank against a fresh bare control. EVERY durable artifact of the
+run directory is snapshotted -- manifest, phase summaries, object stores,
+ledgers, skill bank, answer sheets, llm request dumps -- and a change
+passes only if it reproduces the snapshots after the volatile-field
+normalisation below.
+
+The scripted scenario. The stub plugin makes no model call; its verdicts
+and steps are a fixed function of the task, the role and what the unit
+delivers (``GoldenPlugin``): the strong model always succeeds; the weak
+model fails every training task, opening every listed card first on task
+one and none on tasks two and four, and succeeds on the test task only
+with skills in reach. The model side is ``llm/fake_provider.py``'s
+FakeProviderClient with ONE pinned choice (``GoldenClient``): which step a
+diagnosis blames and the diagnosis scope follow the task (task two fails at
+step 0, the search type; task four is ``general``; every other failure is
+a ``subtask`` failure at its last step, the answer type) instead of the
+fake's prompt hash, so a prompt edit that re-rolls the hash cannot silently
+drop a route from the matrix. Every learn phase therefore sees evidence:
+two gap cards in the first, a content and a trigger rewrite in the second,
+the delete rule and a trigger rewrite in the third
+(``test_golden_matrix`` checks this from the outcomes ledgers).
 
 Resume equivalence at artifact level. Each combo is also run with a
-simulated crash (the client raises after a fraction of the straight run's
-model calls -- a plain RuntimeError, so no stage retries it) and then
-resumed with the same command; the final artifacts must equal the
-straight run's snapshot. That is the crash-resume variant the decision
-doc requires, checked where it matters: on disk.
+simulated crash (the client raises before a chosen model call -- a plain
+RuntimeError, so no stage retries it) and then resumed with the same
+command; the final artifacts must equal the straight run's snapshot. The
+crash points sit inside the learn-phase steps that make model calls per
+item (``CRASH_POINTS``): between two diagnoses, before a rewrite and
+between two new cards.
 
-Snapshot discipline (deliberate, not forbidden). The matrix is a
-regression snapshot like any other: a step that deliberately changes run
-artifacts regenerates it IN THE SAME COMMIT, and the diff is the review
-artifact; a step that changes nothing must not touch it. Known limits,
-by design: fake models only (no remote TB link, no real endpoints) --
-those paths are validated by the live suite and the formal runs.
+Snapshot discipline. A change that deliberately alters run artifacts
+regenerates the matrix (``generate.py``) in the same commit, and the diff
+is the review artifact; a change that alters nothing must not touch it.
+Fake models only: remote links and real endpoints are validated by the
+live suite and the formal runs.
 
-Normalisation is deliberately minimal and lives ONLY here (test code):
-epoch ``time`` / ``duration_ms`` / uuid ``request_id`` values are blanked;
-the run directory's absolute path is elided from any string;
-``pipeline_log.jsonl`` is canonicalised to the last line per stage (its
-documented reader semantics -- a resumed run legitimately appends fresh
-lines). Nothing else may ever differ; a genuine post-crash difference is a
-finding, not noise to hide.
-
-Wave 4 rebuild (the phase world): the harness drives the v4 sequence loop
-(``cli.run_experiment`` -- freeze, then one phase per sequence entry) and
-derives every combo's config through ``upgrade_v3_config`` from the same
-v3 mapping the old harness froze, so the matrix keeps pinning the
-upgrade's own output. The pNN labels the ledger and the ``phases/`` tree
-carry are the semantics module's frozen derivation.
+Normalisation is deliberately minimal and lives ONLY here: epoch ``time``
+/ ``duration_ms`` / uuid ``request_id`` values are blanked; the run
+directory's absolute path is elided from any string;
+``pipeline_log.jsonl`` is canonicalised to the last line per stage (a
+resumed run legitimately appends fresh lines). Nothing else may differ; a
+genuine post-crash difference is a finding, not noise to hide.
 """
 
 from __future__ import annotations
@@ -55,6 +70,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Tuple
 
+import yaml
+
 from expedistill.benchmarks.base import (
     BenchmarkPlugin,
     RunOutcome,
@@ -62,77 +79,137 @@ from expedistill.benchmarks.base import (
     ViewRules,
 )
 from expedistill.cli import run_experiment
-from expedistill.core.config import (
-    ExperimentConfig,
-    save_config,
-    upgrade_v3_config,
-    upgrade_v4_config,
-    upgrade_v5_config,
-    upgrade_v6_config,
-)
-from expedistill.llm.fake import FakeClient, json_script
+from expedistill.llm.fake_provider import FakeProviderClient
 
 #: The stub benchmark name; served through the real import machinery so
 #: every stage resolves it exactly like a checked-in plugin.
 FAKE_BENCH = "fakebench"
 _MODULE = f"expedistill.benchmarks.{FAKE_BENCH}"
 
-#: Task instructions share vocabulary with the scripted skills so the
-#: retrieval delivery has nonzero lexical overlap to rank (a bare "do task
-#: one" scores zero against every skill and would degenerate the matrix's
-#: retrieval combos into empty selections).
+_TASK_PROMPT = "FAKE_TASK"
+_FOLDER_PROMPT = "FAKE_TASK_FOLDER"
+
 _INSTRUCTIONS = {
     "t1": "inspect the reported state of the service for task one",
     "t2": "inspect the reported state of the service for task two",
+    "t3": "inspect the reported state of the service for task three",
+    "t4": "inspect the reported state of the service for task four",
+}
+_SPLIT = {"train": ["t1", "t2", "t4"], "test": ["t3"]}
+
+STRONG_MODEL = "strong-model"
+WEAK_MODEL = "weak-model"
+
+#: The fake provider's plan. The stub plugin never asks an execution
+#: prompt, so no question is planned; ``segment_steps: 1`` cuts every
+#: trajectory into one segment per step (up to the K budget): the last
+#: one is the answer type, the others the search type.
+_PLAN: Dict[str, Any] = {
+    "strong_model": STRONG_MODEL,
+    "weak_model": WEAK_MODEL,
+    "segment_steps": 1,
+    "questions": {},
 }
 
-#: The marker the scripted G11 revision appends to a skill (and the live
-#: plugin keys on). A named constant because the revision-window crash
-#: probe (revision_window.py) crashes on the first block that carries it;
-#: one source of truth for both.
-G11_REVISION_MARKER = "REVISED-BY-G11"
+#: The task words ``GoldenClient`` pins its diagnosis on (module
+#: docstring): a failure on the first is blamed on step 0, one on the
+#: second is ``general``.
+EARLY_TASK = "task two"
+GENERAL_TASK = "task four"
 
-#: The combo axes of the matrix (decision doc section 7, P-1): explicit,
-#: not the full cartesian product -- each axis value appears exactly twice.
+#: The matrix: one combo per test-phase delivery, labelled by it (the
+#: fixture file names).
 COMBOS: Tuple[Dict[str, str], ...] = (
-    {"acceptance": "exam", "delivery": "whole_bank", "mode": "full"},
-    {"acceptance": "exam", "delivery": "retrieval", "mode": "split"},
-    {"acceptance": "live_run", "delivery": "whole_bank", "mode": "split"},
-    {"acceptance": "live_run", "delivery": "retrieval", "mode": "full"},
+    {"delivery": "whole_bank"},
+    {"delivery": "folder"},
 )
 
 
 def combo_label(combo: Dict[str, str]) -> str:
-    """The combo's file/id label, e.g. ``live_run-retrieval-split``."""
-    return "-".join((combo["acceptance"], combo["delivery"], combo["mode"]))
+    return combo["delivery"]
+
+
+#: The prompt openings the crash points anchor on.
+DIAGNOSIS_ANCHOR = "You analyze ONE failed trial"
+REVISE_ANCHOR = "A skill card written for a weaker"
+CARD_ANCHOR = "You are writing ONE skill card"
+
+#: Where the crash+resume variants crash: (name, the first words of a
+#: prompt, which occurrence of it). The crash happens before that call.
+CRASH_POINTS: Tuple[Tuple[str, str, int], ...] = (
+    ("diagnosis", DIAGNOSIS_ANCHOR, 2),
+    ("revise", REVISE_ANCHOR, 1),
+    ("new_cards", CARD_ANCHOR, 2),
+)
+
+
+def crash_points(prompts: List[str]) -> List[int]:
+    """The 1-based call numbers of ``CRASH_POINTS`` in a straight run's
+    ordered prompt log."""
+    points = []
+    for name, anchor, occurrence in CRASH_POINTS:
+        hits = [index for index, user in enumerate(prompts, start=1)
+                if user.startswith(anchor)]
+        if len(hits) < occurrence:
+            raise AssertionError(
+                f"crash point {name!r} needs {occurrence} call(s) starting "
+                f"{anchor!r}; the straight run made {len(hits)}")
+        points.append(hits[occurrence - 1])
+    return points
 
 
 # ---------------------------------------------------------------------------
-# The stub benchmark plugins
+# The stub benchmark plugin
 # ---------------------------------------------------------------------------
 
-class GoldenExamPlugin(BenchmarkPlugin):
-    """Two tasks; strong always succeeds; weak fails bare and succeeds
-    with any skills block (with_bank strictly beats the control arm)."""
+#: Which listed cards the weak model opens, per task: every one or the
+#: first one. A task not listed opens none.
+_READS = {"t1": "all", "t3": "first"}
+
+#: The one task the weak model can solve, and only with skills in reach.
+_SOLVABLE = "t3"
+
+
+class GoldenPlugin(BenchmarkPlugin):
+    """Four tasks. The strong model always succeeds bare. The weak model
+    opens the cards ``_READS`` names from a skill folder (an empty-bank
+    folder lists none), then works two steps; it fails every training
+    task and succeeds on the test task only with skills in reach (a
+    skills block, or a folder listing at least one card)."""
 
     name = FAKE_BENCH
+    skill_folder_prompt_name = _FOLDER_PROMPT
 
     def load_tasks(self, tasks_spec):
-        tasks = [Task(task_id=task_id, instruction=_INSTRUCTIONS[task_id])
-                 for task_id in ("t1", "t2")]
+        tasks = [Task(task_id=task_id, instruction=text)
+                 for task_id, text in _INSTRUCTIONS.items()]
         if tasks_spec is None:
             return tasks
         wanted = set(tasks_spec)
         return [task for task in tasks if task.task_id in wanted]
 
     def run(self, task, handle, skills_block, workdir):
-        correctness = (True if handle.role == "executor_strong"
-                      else (True if skills_block else False))
-        return RunOutcome(
-            steps=[{"action": "run",
-                    "observation": "the environment state"}],
-            correctness=correctness,
-        )
+        strong = handle.role == "executor_strong"
+        folder = task.meta.get("skill_folder") or {}
+        files = list(folder.get("files") or [])
+        steps: List[Dict[str, str]] = []
+        if not strong:
+            reads = {"all": files, "first": files[:1]}.get(
+                _READS.get(task.task_id), [])
+            for entry in reads:
+                location = entry["filename"]
+                card = Path(task.meta["skill_folder_dir"]) / location
+                steps.append({"action": f"ReadSkill[{location}]",
+                              "observation": card.read_text(
+                                  encoding="utf-8")})
+        steps.extend([
+            {"action": "inspect", "observation": "the service reports an "
+                                                 "unexpected state"},
+            {"action": "run", "observation": "the environment state"},
+        ])
+        correctness = strong or (task.task_id == _SOLVABLE
+                                 and (bool(skills_block) or bool(files)))
+        return RunOutcome(steps=steps, correctness=correctness)
 
     @property
     def view_rules(self):
@@ -140,44 +217,15 @@ class GoldenExamPlugin(BenchmarkPlugin):
 
     @property
     def task_prompt_name(self):
-        return "FAKE_TASK"  # never rendered: run() makes no model call
-
-
-class GoldenLivePlugin(GoldenExamPlugin):
-    """The exam plugin with live-round semantics: the weak arm also fails
-    on the UN-revised skill block and only succeeds once the block carries
-    the G11 revision marker -- which forces every group to walk round 0
-    (fail) -> G10/G11 -> round 1 (pass)."""
-
-    def run(self, task, handle, skills_block, workdir):
-        if handle.role == "executor_strong":
-            correctness = True
-        else:
-            correctness = (True if G11_REVISION_MARKER in skills_block
-                           else False)
-        return RunOutcome(
-            steps=[{"action": "run",
-                    "observation": "the environment state"}],
-            correctness=correctness,
-        )
-
-
-def plugin_for(combo: Dict[str, str]) -> BenchmarkPlugin:
-    return GoldenLivePlugin() if combo["acceptance"] == "live_run" \
-        else GoldenExamPlugin()
+        return _TASK_PROMPT
 
 
 @contextmanager
 def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
     """Serve ``plugin`` under the stub package name through the real
-    import machinery (registration happens at import, exactly like a
-    checked-in plugin), and register the stub's task prompt -- the live
-    stage renders it into the G10 input, so unlike the unit-test stubs the
-    golden matrix's FAKE_TASK must be a real B2 entry (mirrors what every
-    checked-in plugin does). Also registers the stub benchmark's verdict
-    rule binding (``scorer`` -- the phase world's baseline phase and report
-    reader judge through the benchmark's default named rule), the same
-    runtime seam the unit suites use. Usable under pytest and standalone."""
+    import machinery (registration happens at import, like a checked-in
+    plugin) and register its two prompts, which stage 0 digests into the
+    manifest. Usable under pytest and standalone."""
     from expedistill.benchmarks.registry import _reset_registry, register_plugin
     from expedistill.prompts import PROMPTS, PromptSpec
 
@@ -194,177 +242,81 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
                 return importlib.machinery.ModuleSpec(name, Loader())
             return None
 
+    prompts = {
+        _TASK_PROMPT: PromptSpec(
+            name=_TASK_PROMPT,
+            template="Solve the task: {instruction}\n{skills_block}\n"
+                     "{history}",
+            description="golden-matrix stub task prompt"),
+        _FOLDER_PROMPT: PromptSpec(
+            name=_FOLDER_PROMPT,
+            template="Solve the task: {instruction}\n{available_skills}\n"
+                     "{history}",
+            description="golden-matrix stub skill-folder task prompt"),
+    }
     sys.modules.pop(_MODULE, None)
     finder = Finder()
     sys.meta_path.insert(0, finder)
-    previous_prompt = PROMPTS.get("FAKE_TASK")
-    PROMPTS["FAKE_TASK"] = PromptSpec(
-        name="FAKE_TASK",
-        template="Solve the task: {instruction}\n{skills_block}\n{history}",
-        description="golden-matrix stub task prompt")
+    previous = {name: PROMPTS.get(name) for name in prompts}
+    PROMPTS.update(prompts)
     try:
         yield plugin
     finally:
         sys.meta_path.remove(finder)
         sys.modules.pop(_MODULE, None)
-        if previous_prompt is None:
-            PROMPTS.pop("FAKE_TASK", None)
-        else:
-            PROMPTS["FAKE_TASK"] = previous_prompt
+        for name, spec in previous.items():
+            if spec is None:
+                PROMPTS.pop(name, None)
+            else:
+                PROMPTS[name] = spec
         _reset_registry()
 
 
 # ---------------------------------------------------------------------------
-# The scripted model side (self-contained on purpose: the golden must not
-# drift when tests/unit/stages/test_pipeline.py's fixtures evolve)
+# The model side
 # ---------------------------------------------------------------------------
 
-#: One valid JSON-contract payload per G2 mode (protocol v2 + the
-#: schema v3 summary): the fake answers satisfy the same contract the
-#: real model is held to.
-_DISTILL_SECTIONS = {
-    "when_to_use": "when a service reports an unexpected state",
-    "steps": ["inspect the reported state",
-              "run the command that matches the state"],
-    "not_applicable_when": "no state was reported",
-    "summary": "inspect the reported service state before acting on it",
-}
-_DIAGNOSE_SECTIONS = {
-    "when_to_use": "about to act on a report without inspecting it first: "
-                   "the action would not match the actual state",
-    "steps": ["inspect the reported state",
-              "run the command that matches the state"],
-    "not_applicable_when": "the state was already inspected",
-    "summary": "never act on a report before inspecting it",
-}
+class GoldenClient(FakeProviderClient):
+    """The fake provider with its diagnosis routing pinned to the task
+    (module docstring): a failure on ``EARLY_TASK`` is blamed on step 0,
+    one on ``GENERAL_TASK`` is ``general``, every other one is a
+    ``subtask`` failure at the fake's own step (the last). The reason and
+    the notes stay the fake's own."""
 
+    def __init__(self) -> None:
+        super().__init__(dict(_PLAN))
 
-def _script(system: str, user: str) -> str:
-    """One correct response per B2 prompt, dispatched by prompt text.
-
-    Covers the exam conversation (segment, exam gen, distill/diagnose,
-    answer, leak audit, judge, rewrite, curate) plus the two live prompts
-    (G10 revises every listed skill; G11 appends a marker line so round 1
-    injects different bytes -- the no-op guard must not skip it).
-    """
-    # -- live G10 / G11 come first: their anchors are live-only --------
-    if user.startswith("You are attributing ONE window"):
-        ids = [line.split("skill_id: ", 1)[1]
-               for line in user.splitlines()
-               if line.startswith("skill_id: ")]
-        assert ids, "the SKILL_ATTEMPT_ATTRIBUTION prompt listed no skills"
-        return json_script({"skills": [
-            {"skill_id": skill_id,
-             "trigger_context": "the window shows the task context",
-             "behavior_after_trigger": "the model followed the observed "
-                                       "procedure",
-             "improvement": "name the concrete state before acting"}
-            for skill_id in ids]})
-    if user.startswith("A skill was active in real attempts"):
-        original = user.split("SKILL (current version):\n", 1)[1].split(
-            "\n\nATTEMPT EVIDENCE:", 1)[0]
-        return json_script({
-            "skill_text": original + "\n" + G11_REVISION_MARKER +
-                          ": name the concrete state before acting.",
-            "revision_reason": "made the trigger condition concrete",
-            "summary": "name the concrete state before acting on it "
-                       "(revised)",
-        })
-    # -- the generalization exam --------------------------------------
-    if user.startswith("Reconstruct one exam scene"):
-        return json_script({
-            "scene_text": "A service reports an unexpected state and stops. "
-                          "What should be done before anything else?",
-            "expected_behavior": "Inspect the reported state first, then "
-                                 "take the matching corrective action.",
-            "reference_answer": "Inspect the state first.",
-        })
-    if user.startswith("Choose which skills"):
-        import re
-        match = re.search(r"([^\s|]+)/SKILL\.md", user)
-        selected = [match.group(1)] if match else []
-        return json_script({"skills": selected,
-                            "reason": "the catalog line matches the scene"})
-    if user.startswith("Write an action plan"):
-        return json_script({"plan": "Inspect the state first, then act."})
-    if user.startswith("Judge whether the plan"):
-        return json_script({"verdict": "success", "reason": ""})
-    # -- the old exam conversation (kept for historical fixtures) -----
-    if user.startswith("You are given the view"):
-        success = "(final status: success)" in user
-        return json_script([{
-            "start": 0, "end": 1, "label": "whole",
-            "description": "do the whole task", "success": success,
-        }])
-    if user.startswith("Write one exam question"):
-        return json_script({
-            "question_text": "A service reports an unexpected state and "
-                             "stops. What should be done before anything "
-                             "else, and why?",
-            "reference_answer": "Inspect the reported state first, then "
-                                "take the matching corrective action.",
-        })
-    if "The subtask SUCCEEDED" in user:
-        return json_script(_DISTILL_SECTIONS)
-    if "WHAT THE PRECEDING PART OF THE TRAJECTORY WAS DOING" in user:
-        return json_script(_DIAGNOSE_SECTIONS)
-    if user.startswith("Answer the question below."):
-        if "## Skill rules" in user:
-            return ("The skill applies. Inspect the state first, then act. "
-                    "Final answer: inspect the state first.")
-        return "I have no idea what should be done here."
-    if user.startswith("Judge whether the skill below leaks"):
-        return json_script({"leaked": False, "reason": "generic advice"})
-    if user.startswith("Grade an exam answer."):
-        graded = user.split("ANSWER TO GRADE:", 1)[1]
-        if "no idea" in graded:
-            return json_script({"verdict": "incorrect",
-                                "error_description": "No action is stated."})
-        return json_script({"verdict": "correct", "error_description": ""})
-    if user.startswith("A skill written for a weak model failed"):
-        original = user.split("SKILL (current version):\n", 1)[1].split(
-            "\n\nEXAM QUESTION:", 1)[0]
-        return json_script({
-            "failure_category": "misread",
-            "skill_text": original,
-            "rewrite_reason": "Shorter sentences.",
-            "summary": "inspect the reported service state before acting "
-                       "on it",
-        })
-    if user.startswith("You are curating a bank of skills written for a "
-                       "weak model. Find"):
-        return json_script({"similar_groups": [], "conflicts": [],
-                            "low_value": []})
-    if user.startswith("You are curating a bank of skills written for a "
-                       "weak model. Merge"):
-        return json_script({
-            "content": "Inspect the state first. Then take the matching "
-                       "action.",
-            "summary": "inspect the state before acting on it"})
-    if user.startswith("You are curating a bank of skills written for a "
-                       "weak model. Assign"):
-        ids = [line[2:].split(": ", 1)[0]
-               for line in user.splitlines()
-               if line.startswith("- ")]
-        return json_script({"groups": {skill_id: "state inspection"
-                                       for skill_id in ids}})
-    raise AssertionError(f"unexpected prompt text:\n{user[:200]}")
+    def _trial_analysis(self, user: str) -> str:
+        fenced = FakeProviderClient._trial_analysis(user)
+        reply = json.loads(fenced.split("\n", 1)[1].rsplit("\n", 1)[0])
+        task = user.split("TASK:\n", 1)[1].split("\n\n", 1)[0]
+        if EARLY_TASK in task:
+            reply["failing_step"] = 0
+        reply["scope"] = "general" if GENERAL_TASK in task else "subtask"
+        return "```json\n" + json.dumps(reply, ensure_ascii=False) + "\n```"
 
 
 class _ClientLog:
-    """make_client hook handing out FakeClients; counts every call."""
+    """make_client hook handing out golden clients that share one ordered
+    call log."""
 
     def __init__(self):
-        self.clients: List[FakeClient] = []
+        self.clients: List[FakeProviderClient] = []
+        self.calls: List[Dict[str, Any]] = []
 
-    def make_client(self, model_name: str) -> FakeClient:
-        client = FakeClient(_script)
+    def make_client(self, model_name: str) -> FakeProviderClient:
+        client = GoldenClient()
+        client.calls = self.calls
         self.clients.append(client)
         return client
 
     @property
     def call_count(self) -> int:
-        return sum(len(client.calls) for client in self.clients)
+        return len(self.calls)
+
+    @property
+    def prompts(self) -> List[str]:
+        return [call["user"] for call in self.calls]
 
 
 class SimulatedCrash(RuntimeError):
@@ -388,7 +340,7 @@ class CrashAfter:
 
         class _CrashingClient:
             def __init__(self):
-                self.inner = FakeClient(_script)
+                self.inner = GoldenClient()
 
             @property
             def calls(self):
@@ -408,50 +360,80 @@ class CrashAfter:
 # Config
 # ---------------------------------------------------------------------------
 
-def write_config(path: Path, combo: Dict[str, str]) -> Path:
-    """Write the combo's experiment config: the same v3 mapping the old
-    harness froze (protocol v2 rule names, live_run at weak depth 2 /
-    exam at depth 1, retrieval's top-1 gate, the v3 curation defaults),
-    mapped onto the v4 phase sequence by ``upgrade_v3_config`` -- the
-    matrix pins the upgrade's own output, not a hand-written sequence."""
-    acceptance = combo["acceptance"]
-    methods: Dict[str, Dict[str, Any]] = {
-        "segmentation": {"K": 1},
-        "authoring": {"exams": True},
-        "acceptance": ({"name": "live_run", "n_attempts": 2,
-                        "improvement": "strict_rate_gain"}
-                       if acceptance == "live_run"
-                       else {"name": "exam"}),
-        # The v3 loader's own defaults for the slots the old harness left
-        # absent (upgrade_v3_config completes them the same way).
-        "curation": {"name": "agentbrew", "token_budget": 4096,
-                     "rounds": 3},
-        "delivery": ({"name": "retrieval", "top_k": 1,
-                      "max_categories": 1, "min_score": 0.02}
-                     if combo["delivery"] == "retrieval"
-                     else {"name": "whole_bank"}),
+#: The paper's reference sequence: one ``learn`` and one ``practice``
+#: definition, each reused.
+SEQUENCE = ("baseline", "learn", "practice", "learn", "practice", "learn",
+            "test")
+
+
+def _learn_phase() -> Dict[str, Any]:
+    return {
+        "kind": "learn",
+        "review": {"name": "review", "K": 5, "retry_limit": 2,
+                   "write_lessons": True},
+        "author": {"name": "subtask_cards",
+                   "typing_chunk_size": 100,
+                   "max_segments_per_card": 8,
+                   "max_chars_per_segment": 1200,
+                   "write_retry_limit": 2},
     }
-    v3 = {
+
+
+def _folder(execution: Dict[str, Any]) -> Dict[str, Any]:
+    """The skill-folder presentation every practice and the folder test
+    share: the active cards as a folder plus the evolved playbook."""
+    return {"delivery": {"name": "folder",
+                         "description_mode": "summary_then_when_to_use"},
+            "execution": execution,
+            "playbook": "evolved"}
+
+
+def _test_phase(delivery: str) -> Dict[str, Any]:
+    if delivery == "folder":
+        method = _folder({"name": "real_folder"})
+    else:
+        method = {"delivery": {"name": "whole_bank"},
+                  "execution": {"name": "real"}}
+    return {"kind": "execute", "role": "test", "tasks": "test",
+            "compare": {"against": "fresh_bare"}, **method}
+
+
+def config_dict(combo: Dict[str, str]) -> Dict[str, Any]:
+    """The combo's schema-9 config: the paper reference shape
+    (``scripts/run/build_paper_configs.py``) on the stub benchmark."""
+    big = {"max_output_tokens": 65536, "max_input_tokens": 524288}
+    return {
         "benchmark": FAKE_BENCH,
-        "mode": combo["mode"],
-        "models": {"executor_strong": "strong-model",
-                   "executor_weak": "weak-model"},
-        "weak_profile": "The weak model misses intermediate steps.",
+        "models": {"executor_strong": STRONG_MODEL,
+                   "executor_weak": WEAK_MODEL},
         "n_attempts_strong": 1,
-        "n_attempts_weak": 2 if acceptance == "live_run" else 1,
-        "methods": methods,
-        "rules": {"task_select": "any_weak_failed",
-                  "segment_select": "strong_success_weak_failed",
-                  "trajectory_select": "strong2_weak2"},
-        "token_budgets": {"default_max_output_tokens": 65536},
-        "split": ({"train": ["t1"], "test": ["t2"]}
-                  if combo["mode"] == "split" else None),
-        "schema_version": 3,
+        "n_attempts_weak": 1,
+        "split": {key: list(value) for key, value in _SPLIT.items()},
+        "rules": {"segment_select": "strong_success_weak_failed",
+                  "trajectory_select": "strong1_weak1"},
+        "token_budgets": {"default_max_output_tokens": 65536,
+                          "roles": {"author": dict(big),
+                                    "rewriter": dict(big)}},
+        "sequence": list(SEQUENCE),
+        "phases": {
+            "baseline": {"kind": "execute", "role": "baseline",
+                         "tasks": "train",
+                         "delivery": {"name": "none"},
+                         "execution": {"name": "real",
+                                       "arms": ["executor_strong",
+                                                "executor_weak"]}},
+            "learn": _learn_phase(),
+            "practice": {"kind": "execute", "role": "practice",
+                         "tasks": "train",
+                         **_folder({"name": "real_folder", "attempts": 1})},
+            "test": _test_phase(combo["delivery"]),
+        },
+        "schema_version": 9,
     }
-    config = ExperimentConfig.from_dict(
-        upgrade_v6_config(upgrade_v5_config(
-            upgrade_v4_config(upgrade_v3_config(v3)))))
-    save_config(config, str(path))
+
+
+def write_config(path: Path, combo: Dict[str, str]) -> Path:
+    path.write_text(yaml.safe_dump(config_dict(combo)), encoding="utf-8")
     return path
 
 
@@ -459,13 +441,33 @@ def write_config(path: Path, combo: Dict[str, str]) -> Path:
 # Running and snapshotting
 # ---------------------------------------------------------------------------
 
-def run_straight(config_path: Path, run_dir: Path) -> int:
-    """One uninterrupted run of the whole phase sequence; returns the
-    model call count."""
+def run_straight(config_path: Path, run_dir: Path,
+                 workers: int = 1) -> List[str]:
+    """One uninterrupted run of the whole phase sequence (``workers`` is
+    the run's ``--workers``); returns the prompts of its model calls, in
+    call order."""
     log = _ClientLog()
     run_experiment(config_path=Path(config_path), run_dir=Path(run_dir),
-                   make_client=log.make_client)
-    return log.call_count
+                   make_client=log.make_client, workers=workers)
+    return log.prompts
+
+
+def is_simulated_crash(exc: BaseException) -> bool:
+    """True when ``exc`` is SimulatedCrash or wraps one: worker pools
+    collect item failures into ParallelError.failures, and some stage
+    drivers re-raise a pool failure as another exception type."""
+    seen = set()
+    pending = [exc]
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, SimulatedCrash):
+            return True
+        pending.extend((current.__cause__, current.__context__))
+        pending.extend((getattr(current, "failures", None) or {}).values())
+    return False
 
 
 def run_crash_and_resume(config_path: Path, run_dir: Path,
@@ -475,33 +477,29 @@ def run_crash_and_resume(config_path: Path, run_dir: Path,
     try:
         run_experiment(config_path=Path(config_path), run_dir=Path(run_dir),
                        make_client=budget.make_client)
+    except Exception as exc:
+        if not is_simulated_crash(exc):
+            raise
+    else:
         raise AssertionError(
             f"crash point {crash_at} never fired ({budget.seen} calls seen)")
-    except SimulatedCrash:
-        pass
     run_straight(config_path, run_dir)
 
 
-#: Values that are blanked wherever these KEYS appear (module docstring:
-#: epoch seconds, wall-clock durations, uuid request ids, and the one
-#: per-invocation bookkeeping counter the stage summaries carry --
-#: ``processed_this_call`` measures the work of ONE pipeline call, which
-#: a crash+resume legitimately splits across calls).
+#: Values blanked wherever these KEYS appear (module docstring), plus the
+#: per-invocation counter ``processed_this_call``, which a crash+resume
+#: legitimately splits across calls.
 _VOLATILE_KEYS = {"time": "<time>", "duration_ms": "<duration_ms>",
                   "request_id": "<request_id>",
                   "processed_this_call": "<processed_this_call>"}
 
-#: The progress ledger, canonicalised to its documented reader view (the
-#: last line per stage) because a resumed run legitimately appends lines.
 _LEDGER = "pipeline_log.jsonl"
 
-#: The request history (llm request dumps and the usage ledger) is
-#: chronological CALL LOG, not result state: a crash+resume re-asks the
-#: interrupted call, so sequence numbers and row order legitimately shift
-#: by one while the multiset of calls stays identical. Both are snapshotted
-#: as a sorted multiset (every dump's content is still pinned byte-for-byte
-#: after volatile-field normalisation; a missing, extra or duplicated call
-#: is a multiset difference and fails the matrix).
+#: The request history (llm request dumps and the usage ledger) is a
+#: chronological call log, not result state: a crash+resume re-asks the
+#: interrupted call, so sequence numbers and row order shift while the
+#: multiset of calls stays identical. Both are snapshotted as a sorted
+#: multiset (every dump's content is still pinned after normalisation).
 _USAGE = "llm_requests/usage.jsonl"
 _REQUESTS_DIR = "llm_requests/"
 
@@ -526,7 +524,7 @@ def _normalize(value: Any, run_dir: Path) -> Any:
 def snapshot(run_dir: Path) -> Dict[str, Any]:
     """The normalised artifact snapshot: every file under ``run_dir``
     except the run lock, keyed by POSIX-relative path. A missing or extra
-    file is a snapshot difference (dict equality catches both)."""
+    file is a snapshot difference."""
     run_dir = Path(run_dir)
     out: Dict[str, Any] = {}
     request_dumps: List[Dict[str, Any]] = []
@@ -541,8 +539,8 @@ def snapshot(run_dir: Path) -> Dict[str, Any]:
                 [json.loads(line) for line in text.splitlines()
                  if line.strip()], run_dir)
         elif rel.startswith(_REQUESTS_DIR) and path.suffix == ".json":
-            # The dump's "seq" is its chronological position -- call
-            # history, not content; the sorted multiset below carries it.
+            # "seq" is the dump's chronological position: call history,
+            # carried by the sorted multiset below.
             dump = json.loads(text)
             dump.pop("seq", None)
             request_dumps.append(_normalize(dump, run_dir))
@@ -552,7 +550,7 @@ def snapshot(run_dir: Path) -> Dict[str, Any]:
             if rel == _LEDGER:
                 last = {}
                 for row in rows:
-                    last[row["stage"]] = row  # the documented reader view
+                    last[row["stage"]] = row
                 rows = [last[stage] for stage in sorted(last)]
             out[rel] = _normalize(rows, run_dir)
         elif path.suffix == ".json":
@@ -568,32 +566,13 @@ def snapshot(run_dir: Path) -> Dict[str, Any]:
 
 
 def _canonical(value: Any) -> str:
-    """A sort key turning a normalised record into its canonical JSON."""
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def assert_equal_ignoring(golden: Dict[str, Any], fresh: Dict[str, Any],
-                           ignore: Tuple[str, ...]) -> None:
-    """Full snapshot equality except the named top-level keys.
-
-    The pre-registered criterion for steps that deliberately change the
-    frozen manifest (the P1b schema switch): every artifact EXCEPT the
-    ignored keys must stay byte-identical, so the step's reviewers can
-    read exactly what changed and trust that nothing else did. Keys are
-    snapshot paths (e.g. ``("manifest.json",)``); a missing key on
-    either side is a difference like any other.
-    """
-    for key in sorted(set(golden) | set(fresh)):
-        if key in ignore:
-            continue
-        if golden.get(key) != fresh.get(key):
-            raise AssertionError(f"artifact drift outside {ignore}: {key}")
-
-
 def _is_crash_row(record: Dict[str, Any]) -> bool:
-    """True for the simulated crash's own bookkeeping rows (the harness's
-    in-process crash gets recorded as a failed attempt; a real process
-    death would record nothing). Usage rows carry the error class under
+    """True for the simulated crash's own bookkeeping rows (the in-process
+    crash gets recorded as a failed attempt; a real process death would
+    record nothing). Usage rows carry the error class under
     ``meta.error``; request dumps carry it at the top level."""
     return (record.get("error") == SimulatedCrash.__name__
             or (record.get("meta") or {}).get("error")
@@ -602,31 +581,23 @@ def _is_crash_row(record: Dict[str, Any]) -> bool:
 
 def assert_resume_equivalent(golden: Dict[str, Any],
                              resumed: Dict[str, Any]) -> None:
-    """The crash+resume comparator (module docstring).
+    """The crash+resume comparator.
 
     Result state -- every snapshot key except the request history -- must
     be identical. The request history may differ only by (a) the
     simulated crash's own error rows and (b) DUPLICATED re-asks of calls
-    whose results were never persisted (README's documented resume
-    semantics: a pair-written unit loses both halves). A missing call or
-    a NOVEL call after resume is a failure.
+    whose results were never persisted. A missing call or a NOVEL call
+    after resume is a failure.
 
-    K1's ``skip_audit.jsonl`` (any directory) is the same class of
-    in-process-injection bookkeeping: a crashing UNIT sets the error-stop
-    gate, which appends one row per still-queued sibling before the
-    exception surfaces -- rows a real process death never writes (the
-    process is gone before the gate runs; the file only ever exists
-    because the injected raise unwinds in-process). The resumed run may
-    therefore carry those gated rows as extras; it may never MISS a row
-    the straight run wrote. Nothing consumes the file as state (the
-    heartbeat counts lines for progress only), so a genuinely skipped
-    unit still fails this check where it matters: its trajectory is
-    missing from the result state.
+    K1's ``skip_audit.jsonl`` is in-process-injection bookkeeping too: a
+    crashing unit sets the error-stop gate, which appends one row per
+    still-queued sibling before the exception surfaces -- rows a real
+    process death never writes. The resumed run may carry those rows as
+    extras; it may never MISS a row the straight run wrote.
     """
     history = (_USAGE, _REQUESTS_DIR + "dumps")
 
     def _skip_audit(key: str) -> bool:
-        # The audit file and its (always empty) flock sidecar.
         return (key == "skip_audit.jsonl"
                 or key.endswith("/skip_audit.jsonl")
                 or key == "skip_audit.jsonl.lock"

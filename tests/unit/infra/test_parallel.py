@@ -6,11 +6,13 @@ import time
 import pytest
 
 from expedistill.infra.parallel import (
-    MAX_WORKERS, ParallelError, UnitSkipped, effective_workers, run_parallel,
+    MAX_WORKERS, ParallelError, UnitSkipped, effective_workers,
+    reraise_by_kind, run_parallel,
     run_units,
 )
 from expedistill.infra.reliability import (
-    CodeBugError, ConfigError, ProviderRefusalError,
+    CodeBugError, ConfigError, InfrastructureError, ModelOutputError,
+    ProviderRefusalError,
 )
 
 
@@ -324,3 +326,33 @@ def test_run_units_clamps_workers_like_run_parallel():
 
 def test_run_units_empty_returns_empty():
     assert run_units(lambda unit: unit, [], workers=8) == []
+
+
+# -- reraise_by_kind ------------------------------------------------------------
+
+def _pool_error(*failures):
+    def one(failure):
+        if failure is not None:
+            raise failure
+        return "ok"
+
+    with pytest.raises(ParallelError) as caught:
+        run_parallel(one, list(failures), workers=2)
+    return caught.value
+
+
+def test_an_all_infrastructure_failure_stays_resumable():
+    error = _pool_error(None, InfrastructureError("a"),
+                        InfrastructureError("b"))
+    with pytest.raises(InfrastructureError, match="the pool") as caught:
+        reraise_by_kind(error, "the pool")
+    assert caught.value.__cause__ is error
+
+
+@pytest.mark.parametrize("kind", [CodeBugError, ModelOutputError, KeyError])
+def test_the_first_other_failure_is_reraised_unchanged(kind):
+    other = kind("first")
+    error = _pool_error(InfrastructureError("a"), other, CodeBugError("b"))
+    with pytest.raises(kind) as caught:
+        reraise_by_kind(error, "the pool")
+    assert caught.value is other

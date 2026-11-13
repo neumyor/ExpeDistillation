@@ -1,13 +1,13 @@
 """Trial-level answer sheets and unit-level summary views (layer 0).
 
 The acceptance module grades ONE trial at a time.  An ``AnswerSheet`` is that
-trial-level envelope: execution facts (the trajectory or exam answer), the
+trial-level envelope: execution facts (the trajectory or external reward), the
 coverage fact (was this trial expected/present/terminal and why), and the
 grading result.  It never carries unit-level counts -- ``UnitSummary`` is the
 separate, pure-function view used by decision/audit/test.
 
-Nothing here is a new persisted object kind: the canonical records remain
-``Trajectory`` / ``Attempt``; an AnswerSheet is their trial-level view and may
+Nothing here is a new persisted object kind: the canonical record remains
+the ``Trajectory``; an AnswerSheet is its trial-level view and may
 also be exported as a derived (JSON + Markdown) artifact under the phase
 directory.
 """
@@ -38,10 +38,9 @@ def _known_kwargs(cls: Any, data: Dict[str, Any]) -> Dict[str, Any]:
 class ExecutionRecord:
     """One trial's execution facts (the answer-sheet payload).
 
-    ``kind`` is ``"trajectory"`` (a ReAct run), ``"attempt"`` (one exam
-    answer) or ``"external"`` (one external-campaign reward).  The payload
-    fields are mutually exclusive by kind: steps for a trajectory, answer for
-    an exam, rewards for an external control.
+    ``kind`` is ``"trajectory"`` (a ReAct run) or ``"external"`` (one
+    external-campaign reward).  The payload fields are mutually exclusive by
+    kind: steps for a trajectory, rewards for an external control.
     """
 
     sheet_id: str
@@ -55,7 +54,6 @@ class ExecutionRecord:
     sample_index: int
     skills_injected: Any = None
     steps: Optional[List[Step]] = None
-    answer: Optional[str] = None
     rewards: Optional[List[float]] = None
     raw_correctness: Optional[bool] = None
     metrics: Dict[str, Any] = field(default_factory=dict)
@@ -179,8 +177,7 @@ class UnitSpec:
     expected_attempts: int
     injected_skills: Any = None
     #: The cause a unit takes when every present trial is invalid (no valid
-    #: sample).  The role supplies it: baseline -> all_holes, live/exam ->
-    #: zero_execution.
+    #: sample).  The phase role supplies it (the baseline: all_holes).
     no_valid_cause: str = "zero_execution"
 
     def to_dict(self) -> Dict[str, Any]:

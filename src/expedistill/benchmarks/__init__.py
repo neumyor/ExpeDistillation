@@ -13,7 +13,6 @@ from expedistill.benchmarks.base import (
     RunOutcome,
     Task,
     ViewRules,
-    environment_call,
 )
 from expedistill.benchmarks.react_loop import render_history, run_react
 from expedistill.benchmarks.registry import (
@@ -28,7 +27,6 @@ __all__ = [
     "RunOutcome",
     "Task",
     "ViewRules",
-    "environment_call",
     "get_plugin",
     "plugin_names",
     "register_plugin",

@@ -19,8 +19,8 @@ aborts: numbers over an unverified join would not be a baseline.
 The numbers are computed TWICE, independently:
 1. hand-rolled counting over the manifest rows (exact Fractions);
 2. through the pipeline's own D3/D4 blocks (blocks.metrics) over Trajectory
-   objects built exactly as the seeding script builds them
-   (scripts/run/seed_tb_stage1.py).
+   objects built from the same manifest rows (SEED_ATTEMPTS ranked
+   attempts per task and role).
 Both must agree, or the script aborts (统计实现自查).
 
 Usage (from the repo root):
@@ -45,7 +45,6 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "src"))
 
 from expedistill.blocks import metrics as metrics_block  # noqa: E402
-from expedistill.blocks.rules import get_task_select  # noqa: E402
 from expedistill.core.ids import make_task_id  # noqa: E402
 from expedistill.core.models import Trajectory  # noqa: E402
 
@@ -147,14 +146,15 @@ def as_trajectories(rows_by_task: dict, role: str, model_name: str) -> list:
 
 
 def pipeline_stats(trajectories: list, n_attempts: int) -> dict:
-    """The stage-1 arm summary, recomputed through the D3/D4 blocks."""
+    """The stage-1 arm summary, recomputed through the D3 block; F is the
+    pre-registered F@3 set (every attempt valid and failed)."""
     expected = {traj.task_id: n_attempts for traj in trajectories}
     task_metrics = metrics_block.compute_task_metrics(trajectories,
                                                       expected=expected)
     summary = metrics_block.summarize(task_metrics, n_attempts)
-    failed = metrics_block.failed_tasks(
-        task_metrics, get_task_select("all_valid_failed"),
-        n_attempts=n_attempts)
+    failed = sorted(task_id for task_id, counts in task_metrics.items()
+                    if counts["valid"] == n_attempts
+                    and counts["success"] == 0)
     return {"metrics": task_metrics, "summary": summary, "F": failed}
 
 

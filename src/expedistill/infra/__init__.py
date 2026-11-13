@@ -9,7 +9,6 @@ from expedistill.infra.manifest import (
     FrozenProtocolChanged,
     freeze,
     load,
-    load_manifest,
     load_or_none,
 )
 from expedistill.infra.parallel import (
@@ -33,7 +32,6 @@ from expedistill.infra.store import (
     KIND_DIRS,
     Store,
     append_jsonl,
-    kind_for,
     object_id,
     read_json,
     read_jsonl,
@@ -60,9 +58,7 @@ __all__ = [
     "append_jsonl",
     "effective_workers",
     "freeze",
-    "kind_for",
     "load",
-    "load_manifest",
     "load_or_none",
     "object_id",
     "read_json",

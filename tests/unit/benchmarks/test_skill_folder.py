@@ -91,11 +91,20 @@ def test_a_task_without_a_manifest_has_no_folder():
     assert SkillFolder.from_task(Task(task_id="t", instruction="q")) is None
 
 
-def test_a_manifest_without_files_runs_bare(tmp_path):
-    manifest = {"files": []}
+def test_a_manifest_without_files_is_an_empty_folder():
+    # The empty bank keeps the folder presentation: no cards, the
+    # playbook, and every read answered as an unknown location.
+    manifest = {"files": [], "playbook_text": "Look first."}
     task = Task(task_id="t", instruction="q",
                 meta={"skill_folder": manifest})
-    assert SkillFolder.from_task(task) is None
+    folder = SkillFolder.from_task(task)
+    assert folder is not None
+    assert folder.cards == ()
+    assert folder.playbook_text == "Look first."
+    assert folder.available_skills_block() == (
+        "<available_skills>\n</available_skills>")
+    text, found = folder.read("type-001-skill/SKILL.md")
+    assert found is False and "Unknown skill location" in text
 
 
 def test_a_manifest_with_files_but_no_directory_is_a_wiring_bug():

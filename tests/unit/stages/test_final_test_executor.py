@@ -32,9 +32,9 @@ from expedistill.stages.phase_execute import resolve
 from tests.unit.stages.test_final_test_folder_wiring import (
     FolderPlugin,
     TASK_IDS,
+    _card,
     _config,
     _ctx,
-    _group_skill,
     _install_plugin,
     _reset_registry,
     _write_bank,
@@ -96,7 +96,7 @@ def _trajectory_files(run_dir, arm):
 
 def test_the_executor_defaults_to_the_weak_model():
     spec = _phase(compare=None).spec
-    assert resolve._test_role(resolve._execution_params(spec)) == "weak"
+    assert resolve.executor_role(resolve.execution_params(spec)) == "weak"
 
 
 def test_a_plain_real_test_phase_always_runs_the_weak_model():
@@ -104,18 +104,18 @@ def test_a_plain_real_test_phase_always_runs_the_weak_model():
         role="test", tasks="test", delivery={"name": "whole_bank"},
         execution={"name": "real"}, compare=None, acceptance=None,
         kind="execute")
-    assert resolve._test_role(resolve._execution_params(spec)) == "weak"
+    assert resolve.executor_role(resolve.execution_params(spec)) == "weak"
 
 
 def test_the_folder_execution_can_name_the_strong_executor():
     spec = _phase(executor="executor_strong", compare=None).spec
-    assert resolve._test_role(resolve._execution_params(spec)) == "strong"
+    assert resolve.executor_role(resolve.execution_params(spec)) == "strong"
 
 
 def test_an_unknown_executor_is_refused_loudly():
     spec = _phase(executor="executor_middle", compare=None).spec
     with pytest.raises(ConfigError, match="executor must be one of"):
-        resolve._execution_params(spec)
+        resolve.execution_params(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ def test_a_strong_test_phase_dispatches_the_strong_handle_at_its_depth(
         monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, RoleRecordingPlugin())
     ctx = _deep_strong_ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1")])
+    _write_bank(ctx, [_card(1)])
 
     result = phase_execute.run(
         ctx, _phase(executor="executor_strong",
@@ -138,7 +138,7 @@ def test_a_strong_test_phase_dispatches_the_strong_handle_at_its_depth(
     assert result["complete"] is True
     expected = sorted(
         object_filename(ids.make_trajectory_id(
-            ids.make_task_id(_FAKE, task), "strong", attempt))
+            "p03:test", ids.make_task_id(_FAKE, task), "strong", attempt))
         for task in TASK_IDS for attempt in range(2))
     for arm in ("with_bank", "control"):
         assert _trajectory_files(ctx.run_dir, arm) == expected
@@ -147,7 +147,7 @@ def test_a_strong_test_phase_dispatches_the_strong_handle_at_its_depth(
 def test_the_default_test_phase_is_unchanged(monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, RoleRecordingPlugin())
     ctx = _deep_strong_ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1")])
+    _write_bank(ctx, [_card(1)])
 
     phase_execute.run(
         ctx, _phase(compare=CompareSpec(against="fresh_bare")))
@@ -156,11 +156,26 @@ def test_the_default_test_phase_is_unchanged(monkeypatch, tmp_path):
     assert plugin.roles == ["executor_weak"] * (2 * len(TASK_IDS))
 
 
+def test_the_folder_test_phase_runs_its_attempts(monkeypatch, tmp_path):
+    # ``attempts`` overrides the executor's global depth in both arms.
+    plugin = _install_plugin(monkeypatch, RoleRecordingPlugin())
+    ctx = _deep_strong_ctx(tmp_path)
+    _write_bank(ctx, [_card(1)])
+    phase = _phase(compare=CompareSpec(against="fresh_bare"))
+    phase = dataclasses.replace(phase, spec=dataclasses.replace(
+        phase.spec, execution={"name": "real_folder", "attempts": 3}))
+
+    result = phase_execute.run(ctx, phase).summary
+
+    assert plugin.roles == ["executor_weak"] * (2 * len(TASK_IDS) * 3)
+    assert result["complete"] is True
+
+
 def test_a_strong_test_phase_reads_the_pinned_campaign_column(
         monkeypatch, tmp_path):
     plugin = _install_plugin(monkeypatch, RoleRecordingPlugin())
     ctx = _deep_strong_ctx(tmp_path)
-    _write_bank(ctx, [_group_skill("t1")])
+    _write_bank(ctx, [_card(1)])
     campaign = tmp_path / "campaign.json"
     campaign.write_text(json.dumps({"tasks": {
         f"dpsk:{task}": {"n": 3, "rewards": [1.0, 0.0, 1.0]}

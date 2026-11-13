@@ -1,82 +1,94 @@
 """Unit tests for the deterministic ID rules."""
 import pytest
 
+from expedistill.core.config import phase_label
 from expedistill.core.ids import (
-    make_attempt_id,
-    make_exam_id,
-    make_merged_skill_id,
+    TrajectoryIdParts,
     make_skill_id,
     make_subtask_id,
     make_task_id,
     make_trajectory_id,
-    parse_attempt_id,
+    make_type_id,
     parse_subtask_id,
     parse_trajectory_id,
+    parse_type_id,
+    phase_tag,
     raw_task_id,
-    task_id_of,
 )
+
+BASELINE = phase_label(0, "baseline")
+PRACTICE = phase_label(2, "practice")
 
 
 def test_task_id():
     assert make_task_id("tb", "task-1") == "tb:task-1"
 
 
+def test_phase_tag_replaces_the_label_colon():
+    assert phase_tag(BASELINE) == "p01_baseline"
+    assert phase_tag("p12:my_phase.v2") == "p12_my_phase.v2"
+
+
+@pytest.mark.parametrize("bad", [
+    "baseline", "p1:baseline", "p01_baseline", "p01:", "p01:a:b",
+    "p01:a/b", "", None])
+def test_phase_tag_rejects_non_labels(bad):
+    with pytest.raises(ValueError):
+        phase_tag(bad)
+
+
 def test_trajectory_id_format():
-    assert (make_trajectory_id("tb:task-1", "strong", 0)
-            == "traj/tb:task-1/strong/00")
-    assert (make_trajectory_id("tb:task-1", "weak", 7)
-            == "traj/tb:task-1/weak/07")
+    assert (make_trajectory_id(BASELINE, "tb:task-1", "strong", 0)
+            == "traj/p01_baseline/tb:task-1/strong/00")
+    assert (make_trajectory_id(PRACTICE, "tb:task-1", "weak", 7)
+            == "traj/p03_practice/tb:task-1/weak/07")
+
+
+def test_one_task_in_two_phases_gets_two_ids():
+    # The reason the id carries the phase: a practice run must never be
+    # mistaken for the baseline run of the same task and attempt.
+    assert make_trajectory_id(BASELINE, "tb:t", "weak", 0) \
+        != make_trajectory_id(PRACTICE, "tb:t", "weak", 0)
 
 
 def test_subtask_id_is_parent_plus_suffix():
-    traj = "traj/tb:task-1/strong/00"
+    traj = make_trajectory_id(BASELINE, "tb:task-1", "strong", 0)
     assert make_subtask_id(traj, 0) == f"{traj}/seg00"
     assert make_subtask_id(traj, 12) == f"{traj}/seg12"
 
 
-def test_skill_and_exam_ids_share_parent():
-    seg = "traj/tb:task-1/strong/00/seg01"
-    skill = make_skill_id(seg)
-    assert skill == f"{seg}/skill"
-    assert make_exam_id(skill, 1) == f"{skill}/v01/exam"
-
-
-def test_attempt_id_serial_is_two_digits():
-    exam = make_exam_id(
-        make_skill_id("traj/tb:task-1/strong/00/seg01"), 1)
-    assert make_attempt_id(exam, 0) == f"{exam}/att00"
-    assert make_attempt_id(exam, 13) == f"{exam}/att13"
-
-
-def test_merged_skill_id():
-    assert make_merged_skill_id(0) == "bank/merge/0000"
-    assert make_merged_skill_id(42) == "bank/merge/0042"
+def test_type_and_skill_ids():
+    assert make_type_id(1) == "type/001"
+    assert make_type_id(42) == "type/042"
+    assert make_type_id(1000) == "type/1000"
+    assert make_skill_id(make_type_id(3)) == "type/003/skill"
 
 
 @pytest.mark.parametrize("make,args", [
-    (make_trajectory_id, ("tb:t", "strong", -1)),
-    (make_trajectory_id, ("tb:t", "medium", 0)),
+    (make_trajectory_id, (BASELINE, "tb:t", "strong", -1)),
+    (make_trajectory_id, (BASELINE, "tb:t", "medium", 0)),
+    (make_trajectory_id, ("baseline", "tb:t", "strong", 0)),
+    (make_trajectory_id, (BASELINE, "", "strong", 0)),
     (make_subtask_id, ("traj/x", -1)),
-    (make_attempt_id, ("e", -1)),
-    (make_merged_skill_id, (-1,)),
+    (make_type_id, (0,)),
+    (make_type_id, (-1,)),
+    (make_type_id, (True,)),
+    (make_skill_id, ("traj/p01_baseline/tb:t/strong/00/seg00",)),
+    (make_skill_id, ("type/1",)),
 ])
-def test_negative_indices_raise(make, args):
+def test_bad_arguments_raise(make, args):
     with pytest.raises(ValueError):
         make(*args)
 
 
 def test_child_id_embeds_parent_id():
     task = make_task_id("tb", "task-1")
-    traj = make_trajectory_id(task, "weak", 3)
+    traj = make_trajectory_id(PRACTICE, task, "weak", 3)
     seg = make_subtask_id(traj, 2)
-    skill = make_skill_id(seg)
-    exam = make_exam_id(skill, 1)
-    att = make_attempt_id(exam, 0)
-    # The trajectory id is the one child that wraps its parent in a prefix.
-    assert traj.startswith(f"traj/{task}/")
-    for parent, child in [(traj, seg), (seg, skill), (skill, exam),
-                          (exam, att)]:
-        assert child.startswith(parent + "/")
+    type_id = make_type_id(5)
+    assert traj.startswith(f"traj/{phase_tag(PRACTICE)}/{task}/")
+    assert seg.startswith(traj + "/")
+    assert make_skill_id(type_id).startswith(type_id + "/")
 
 
 def test_raw_task_id_round_trip():
@@ -99,28 +111,34 @@ def test_raw_task_id_rejects_foreign_and_non_canonical(bad):
         raw_task_id(bad, "tb")
 
 
-def test_parse_trajectory_id_round_trip():
-    task_id = "tb:task-1"
-    assert parse_trajectory_id("traj/tb:task-1/weak/03") == (task_id, "weak", 3)
-    assert task_id_of("traj/tb:task-1/strong/00") == task_id
+@pytest.mark.parametrize("label,task_id,role,attempt", [
+    (BASELINE, "tb:task-1", "weak", 3),
+    (PRACTICE, "alfworld:json_2.1.1/valid/x", "strong", 0),
+    ("p07:a_b", "tb:t", "weak", 100),
+])
+def test_parse_trajectory_id_round_trip(label, task_id, role, attempt):
+    parsed = parse_trajectory_id(
+        make_trajectory_id(label, task_id, role, attempt))
+    assert parsed == TrajectoryIdParts(label, task_id, role, attempt)
+    assert (parsed.phase_label, parsed.task_id, parsed.role,
+            parsed.attempt) == (label, task_id, role, attempt)
 
 
 def test_parse_subtask_id_round_trip():
-    traj = "traj/tb:task-1/strong/00"
+    traj = make_trajectory_id(BASELINE, "tb:task-1", "strong", 0)
     assert parse_subtask_id(f"{traj}/seg04") == (traj, 4)
 
 
-def test_parse_attempt_id_round_trip():
-    exam = "traj/tb:task-1/strong/00/seg01/exam"
-    assert parse_attempt_id(f"{exam}/att02") == (exam, 2)
-
-
 @pytest.mark.parametrize("bad", [
-    "tb:task-1/strong/00",          # missing traj/ prefix
-    "traj/tb:task-1/medium/00",     # unknown role
-    "traj/tb:task-1/strong",       # missing attempt
-    "traj/tb:task-1/strong/0",     # attempt not two digits
-    "traj//strong/00",              # empty task id
+    "traj/tb:task-1/strong/00",                 # schema-2 id: no phase
+    "p01_baseline/tb:task-1/strong/00",         # missing traj/ prefix
+    "traj/p01:baseline/tb:task-1/strong/00",    # label instead of tag
+    "traj/p01_baseline/tb:task-1/medium/00",    # unknown role
+    "traj/p01_baseline/tb:task-1/strong",       # missing attempt
+    "traj/p01_baseline/tb:task-1/strong/0",     # attempt not two digits
+    "traj/p01_baseline//strong/00",             # empty task id
+    "traj/p01_baseline/tb:task-1/strong/007",   # non-canonical attempt
+    "traj/p01_baseline/tb:task-1/strong/²²",    # non-ASCII digits
 ])
 def test_parse_trajectory_id_rejects_malformed(bad):
     with pytest.raises(ValueError):
@@ -128,84 +146,38 @@ def test_parse_trajectory_id_rejects_malformed(bad):
 
 
 @pytest.mark.parametrize("bad", [
-    "traj/tb:task-1/strong/00",       # no suffix
-    "traj/tb:task-1/strong/00/seg",   # no index
-    "traj/tb:task-1/strong/00/xx01",  # wrong marker
-    "traj/tb:task-1/strong/00/seg1",  # index not two digits
+    "traj/p01_baseline/tb:task-1/strong/00",         # no suffix
+    "traj/p01_baseline/tb:task-1/strong/00/seg",     # no index
+    "traj/p01_baseline/tb:task-1/strong/00/xx01",    # wrong marker
+    "traj/p01_baseline/tb:task-1/strong/00/seg1",    # not two digits
+    "traj/p01_baseline/tb:task-1/strong/00/seg007",  # non-canonical
+    "traj/p01_baseline/tb:task-1/strong/00/seg²²",   # non-ASCII digits
 ])
 def test_parse_subtask_id_rejects_malformed(bad):
     with pytest.raises(ValueError):
         parse_subtask_id(bad)
 
 
-@pytest.mark.parametrize("bad", [
-    "traj/tb:task-1/strong/00/seg01/exam",  # no suffix
-    "x/exam/att",                           # no serial
-    "x/exam/att1",                          # serial not two digits
-])
-def test_parse_attempt_id_rejects_malformed(bad):
-    with pytest.raises(ValueError):
-        parse_attempt_id(bad)
-
-
-@pytest.mark.parametrize("serial", [0, 9, 99, 100, 1000, 12345])
-def test_attempt_id_round_trips_past_the_zero_padding(serial):
-    # The formatter pads to two digits but does not cap: the 100th attempt on
-    # one exam is att100, and the parser must accept it (otherwise every later
-    # serial scan over the store raises).
-    exam = "traj/tb:task-1/strong/00/seg01/exam"
-    attempt_id = make_attempt_id(exam, serial)
-    assert parse_attempt_id(attempt_id) == (exam, serial)
-
-
-def test_attempt_id_formatting_unchanged_below_100():
-    exam = "e/exam"
-    assert make_attempt_id(exam, 7) == "e/exam/att07"
-    assert make_attempt_id(exam, 99) == "e/exam/att99"
-    assert make_attempt_id(exam, 100) == "e/exam/att100"
-
-
-@pytest.mark.parametrize("bad", [
-    "x/exam/att",        # no serial
-    "x/exam/att1",       # fewer than two digits
-    "x/exam/att1a",      # non-digit
-    "x/exam/att-1",      # sign
-    "x/exam/att 12",     # whitespace
-    "x/exam/att²²",  # unicode superscript digits (str.isdigit is True)
-    "x/exam/att１２",  # fullwidth digits
-    "x/exam/att007",     # non-canonical padding: 7 is att07
-    "x/exam/att0100",    # non-canonical padding: 100 is att100
-])
-def test_parse_attempt_id_rejects_bad_serials(bad):
-    with pytest.raises(ValueError):
-        parse_attempt_id(bad)
-
-
 @pytest.mark.parametrize("index", [0, 99, 100, 1000])
 def test_subtask_id_round_trips_past_the_zero_padding(index):
-    traj = "traj/tb:task-1/strong/00"
+    traj = make_trajectory_id(BASELINE, "tb:task-1", "strong", 0)
     assert parse_subtask_id(make_subtask_id(traj, index)) == (traj, index)
 
 
-@pytest.mark.parametrize("attempt", [0, 99, 100, 1000])
-def test_trajectory_id_round_trips_past_the_zero_padding(attempt):
-    trajectory_id = make_trajectory_id("tb:task-1", "weak", attempt)
-    assert parse_trajectory_id(trajectory_id) == ("tb:task-1", "weak", attempt)
+@pytest.mark.parametrize("serial", [1, 9, 999, 1000, 12345])
+def test_type_id_round_trips_past_the_zero_padding(serial):
+    assert parse_type_id(make_type_id(serial)) == serial
 
 
 @pytest.mark.parametrize("bad", [
-    "traj/tb:task-1/strong/007",
-    "traj/tb:task-1/strong/²²",
+    "type/000",     # serials start at 1
+    "type/01",      # fewer than three digits
+    "type/0001",    # non-canonical padding: 1 is type/001
+    "type/abc",
+    "type/１２３",   # fullwidth digits
+    "type/001/skill",
+    "001",
 ])
-def test_parse_trajectory_id_rejects_non_canonical_attempt(bad):
+def test_parse_type_id_rejects_malformed(bad):
     with pytest.raises(ValueError):
-        parse_trajectory_id(bad)
-
-
-@pytest.mark.parametrize("bad", [
-    "traj/tb:task-1/strong/00/seg007",
-    "traj/tb:task-1/strong/00/seg²²",
-])
-def test_parse_subtask_id_rejects_non_canonical_index(bad):
-    with pytest.raises(ValueError):
-        parse_subtask_id(bad)
+        parse_type_id(bad)

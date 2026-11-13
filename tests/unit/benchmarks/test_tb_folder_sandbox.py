@@ -24,7 +24,7 @@ from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.benchmarks.tb.plugin import TB_SKILL_FOLDER_GUIDANCE
 from expedistill.composites.skill_materialize import materialize_skill_folder
-from expedistill.core.models import Skill
+from expedistill.core.ids import make_type_id
 from expedistill.llm.call import ModelHandle
 from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 from tests.unit.benchmarks.test_tb_plugin import (
@@ -32,6 +32,8 @@ from tests.unit.benchmarks.test_tb_plugin import (
     _completed_trial_files,
     _make_plugin,
 )
+from expedistill.inject.skill_text import render_card
+from tests.helpers.skills import make_skill
 
 ROOT = "/srv/work/expedistill"
 TRIAL = f"{ROOT}/jobs/ed_train-fasttext_tok/train-fasttext__AbCdEf1"
@@ -40,14 +42,9 @@ HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",
                      client=None)
 
 _BANK = [
-    Skill(skill_id="traj/tb:t1/strong/00/seg00/skill",
-          content="[When to use] The service rejects connections.",
-          subtask_id="st", source_subtasks=["st"], version=1,
-          status="accepted"),
-    Skill(skill_id="bank/merge/0001",
-          content="[When to use] Check the log before restarting.",
-          subtask_id="st", source_subtasks=["st"], version=3,
-          status="accepted"),
+    make_skill(make_type_id(1), "The service rejects connections."),
+    make_skill(make_type_id(2), "Check the log before restarting.",
+               version=3),
 ]
 _MANIFEST = skill_folder_manifest(_BANK)
 _CATALOG = _MANIFEST["catalog_text"]
@@ -86,10 +83,10 @@ _CAT_TRAJECTORY = {
                          "arguments": {"keystrokes":
                                        "cat /opt/openclaw-skills/"
                                        "train-fasttext/"
-                                       "traj-tb-t1-strong-00-seg00-skill/"
+                                       "type-001-skill/"
                                        "SKILL.md\n"}}],
          "observation": {"results": [{"content":
-                                      _BANK[0].content}]}},
+                                      render_card(_BANK[0])}]}},
     ],
     "final_metrics": {"total_prompt_tokens": 100,
                       "total_completion_tokens": 20,
@@ -167,7 +164,7 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
     actions = "\n".join(step["action"] for step in outcome.steps)
     assert "cat /opt/openclaw-skills/train-fasttext/catalog.md" in actions
     assert ("cat /opt/openclaw-skills/train-fasttext/"
-            "traj-tb-t1-strong-00-seg00-skill/SKILL.md") in actions
+            "type-001-skill/SKILL.md") in actions
 
 
 def test_folder_unit_uploads_the_dashed_alias_too(tmp_path):
@@ -230,7 +227,7 @@ def test_folder_unit_refuses_an_unmaterialized_directory(tmp_path):
         plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
 
 
-def test_bare_control_unit_uploads_no_folder_and_no_guidance(tmp_path):
+def test_a_bare_unit_uploads_no_folder_and_no_guidance(tmp_path):
     # The control arm's bare unit: no manifest on the task, an empty
     # skills block, and therefore no upload at all -- the pre-folder
     # behaviour, byte for byte.

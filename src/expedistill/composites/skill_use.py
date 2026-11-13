@@ -1,16 +1,8 @@
-"""Where a skill was used in an attempt (layer 5, pure).
-
-This is the one place that answers three questions:
-
-* was a skill used in this attempt?
-* at which step(s) was it read or injected?
-* which trajectory steps form the context around each use?
+"""Which skill cards an attempt read, and at which steps (layer 5, pure).
 
 Read detection is the folder contract: only a ``cat`` of the skill's
 ``SKILL.md`` counts, and so does the local benchmarks' equivalent, a
-``ReadSkill[<location>]`` action (``benchmarks/skill_folder.py``). Group/whole-bank deliveries have no per-skill read
-event; an injected skill is treated as used for that attempt (the
-decision's definition).
+``ReadSkill[<location>]`` action (``benchmarks/skill_folder.py``).
 
 The module is benchmark-blind: a manifest file name is matched as a
 delimited token, never a mount path.
@@ -18,57 +10,21 @@ delimited token, never a mount path.
 
 import re
 import string
-from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Any, List, Mapping, Optional, Sequence
+from typing import Any, List, Mapping, Optional
 
 from expedistill.benchmarks.skill_folder import canonical_location, read_target
 from expedistill.infra.reliability import CodeBugError
 
 __all__ = [
-    "Invocation",
-    "SkillUse",
-    "all_skill_read_events",
     "skill_files_read",
     "skill_read_events",
-    "skill_used_in_attempt",
-    "window_bounds",
 ]
 
 _CAT_RE = re.compile(r"\bcat\b")
 _SEGMENT_RE = re.compile(r"&&|\|\||[;|]")
 _SKILL_FILENAME = "SKILL.md"
 _NAME_ALPHABET = frozenset(string.ascii_letters + string.digits + "._-")
-
-FOLDER_DELIVERIES = ("folder", "folder_by_task")
-
-
-@dataclass(frozen=True)
-class Invocation:
-    """One actual (folder) or implied (injected) skill use."""
-
-    skill_id: str
-    step_index: Optional[int]
-    command: str = ""
-    filename: str = ""
-
-
-@dataclass(frozen=True)
-class SkillUse:
-    """One skill's use fact in one attempt.
-
-    ``used`` is None when the evidence cannot establish either way
-    (folder delivery without a usage row, or an untrusted delivery).
-    ``invocations`` is empty for non-folder deliveries: their trigger is
-    the attempt itself, not a cat event.
-    """
-
-    used: Optional[bool]
-    reason: str
-    invocations: List[Invocation] = field(default_factory=list)
-    injected: bool = False
-    delivery: str = ""
-
 
 def _as_cat_line(line: str) -> str:
     """A ``ReadSkill[x]`` action as the equivalent ``cat`` line."""
@@ -155,15 +111,9 @@ def _manifest_files(folder: Mapping[str, Any]) -> List[str]:
 
 
 def skill_read_events(trajectory: Any,
-                      folder: Mapping[str, Any],
-                      *, first_only: bool = True) -> List[dict]:
-    """The cat events of the manifest's skills in ``trajectory``.
-
-    ``first_only=True`` is the legacy P03 usage shape (one event per
-    skill); ``False`` returns every cat, which the P04 invocation
-    windows need. Each event is ``{"skill_id", "filename",
-    "step_index", "command"}``.
-    """
+                      folder: Mapping[str, Any]) -> List[dict]:
+    """The first cat event of each manifest skill in ``trajectory``:
+    ``{"skill_id", "filename", "step_index", "command"}``."""
     order = _manifest_files(folder)
     if not order:
         return []
@@ -177,7 +127,7 @@ def skill_read_events(trajectory: Any,
             if not _CAT_RE.search(cat_line):
                 continue
             for filename in order:
-                if first_only and filename in seen:
+                if filename in seen:
                     continue
                 if not _path_matches(cat_line, filename):
                     continue
@@ -191,72 +141,8 @@ def skill_read_events(trajectory: Any,
     return events
 
 
-def all_skill_read_events(trajectory: Any,
-                          folder: Mapping[str, Any]) -> List[dict]:
-    """Every cat event, including repeated reads of one skill."""
-    return skill_read_events(trajectory, folder, first_only=False)
-
-
 def skill_files_read(trajectory: Any,
                      folder: Mapping[str, Any]) -> List[str]:
     """The skill ids actually cat'd, first-read order, each once."""
     return [event["skill_id"]
             for event in skill_read_events(trajectory, folder)]
-
-
-def skill_used_in_attempt(
-    *,
-    skill_id: str,
-    attempt: int,
-    delivery: str,
-    usage_row: Optional[Mapping[str, Any]] = None,
-    injected_skill_ids: Sequence[str] = (),
-    trajectory: Optional[Any] = None,
-    folder: Optional[Mapping[str, Any]] = None,
-) -> SkillUse:
-    """Was ``skill_id`` used in ``attempt``? (module docstring)
-
-    Folder deliveries answer from the usage row and, when a trajectory
-    and folder are supplied, record every actual cat step. Other
-    deliveries answer from the injected set: an injected skill is treated
-    as triggered for that attempt.
-    """
-    if delivery in FOLDER_DELIVERIES:
-        if usage_row is None:
-            return SkillUse(None, "no_usage", [], False, delivery)
-        status = usage_row.get("delivery_status")
-        if status != "ok":
-            return SkillUse(None, f"untrusted_delivery:{status}", [],
-                            False, delivery)
-        read_ids = list(usage_row.get("read_skill_ids") or [])
-        used = skill_id in read_ids
-        invocations: List[Invocation] = []
-        if used and trajectory is not None and folder is not None:
-            invocations = [
-                Invocation(event["skill_id"], event["step_index"],
-                           event["command"], event["filename"])
-                for event in all_skill_read_events(trajectory, folder)
-                if event["skill_id"] == skill_id]
-        elif used and usage_row is not None:
-            invocations = [
-                Invocation(skill_id, event.get("step_index"),
-                           event.get("command", ""), event.get("filename", ""))
-                for event in usage_row.get("reads") or []
-                if event.get("skill_id") == skill_id]
-        return SkillUse(used, "skill_read" if used else "skill_never_read",
-                        invocations, False, delivery)
-
-    injected = skill_id in set(injected_skill_ids)
-    return SkillUse(
-        injected, "injected" if injected else "not_injected", [],
-        injected, delivery)
-
-
-def window_bounds(step_index: int, n_steps: int, *,
-                  before: int, after: int) -> tuple:
-    """The step window around one invocation, clipped to the attempt."""
-    if step_index < 0 or step_index >= n_steps:
-        raise CodeBugError(
-            f"invocation step {step_index} is outside a {n_steps}-step "
-            "trajectory")
-    return max(0, step_index - before), min(n_steps, step_index + after + 1)

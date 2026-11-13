@@ -290,22 +290,20 @@ def test_destination_instance_is_counted_per_numbered_place_not_per_kind():
 
 
 def test_the_prompt_asks_for_the_conditional_destination_rule():
-    template = get_prompt(PLAYBOOK_PROMPT_NAME)
-    assert "applies to the exact numbered place, never to" in template
+    template = " ".join(get_prompt(PLAYBOOK_PROMPT_NAME).split())
+    assert "for the exact numbered place, never for its kind" in template
     # The writer acts on the fact's computed verdict instead of comparing
     # the two rates itself -- comparing them in prose is what produced a
     # spurious exclusion on near-equal rates.
-    assert 'verdict is "clearly higher"' in template
-    assert 'on "similar or lower" or "too few trials", write no' in \
-        " ".join(template.split())
-    assert "do not invent a task type to mark" in template
+    assert 'Only "clearly higher" supports a rule' in template
+    assert "on the other two write no prohibition at all" in template
 
 
 def test_requirements_are_the_six_labelled_parts():
     from expedistill.benchmarks.alfworld.playbook import playbook_requirements
     reqs = playbook_requirements()
     assert [r.name for r in reqs] == [
-        "format", "recipes", "search order", "object identity",
+        "format", "skills", "search order", "object identity",
         "delivering", "prohibitions"]
     text = "\n".join(f"{label}\nbody" for _, label, _ in REQUIRED_LABELS)
     assert [r.name for r in reqs if not r.matches(text)] == ["object identity"]
@@ -331,15 +329,27 @@ def test_the_prompt_asks_for_an_instance_sweep_not_alternation():
     template = " ".join(get_prompt(PLAYBOOK_PROMPT_NAME).split())
     assert "instance sweep within a kind" in template
     assert "class exhaustion" in template
-    assert "Do not alternate between kinds" in template
+    assert "never alternate between kinds" in template
     assert "kind alternation" not in template.lower()
     assert "keeps naming every place for the whole episode" in template
 
 
-def test_every_recipe_must_open_a_closed_container():
+def test_the_playbook_points_at_skills_and_writes_no_recipes():
     template = " ".join(get_prompt(PLAYBOOK_PROMPT_NAME).split())
     assert "arriving at a closed container means opening it" in template
-    assert "in the recipe itself and not only in the search-order part" in template
+    assert "open that card before acting" in template
+    assert "Do not write step-by-step recipes" in template
+
+
+def test_the_update_prompt_fills_the_method_prompts_slots():
+    import string
+
+    def slots(name):
+        return {field for _, field, _, _ in
+                string.Formatter().parse(get_prompt(name))
+                if field is not None}
+
+    assert slots(PLAYBOOK_PROMPT_NAME) == slots("PLAYBOOK_UPDATE")
 
 
 VISITS = ["go to countertop 3", "go to countertop 1",

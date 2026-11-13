@@ -1,6 +1,9 @@
-"""Judge how a finished test phase used its delivered skill cards (layer 7).
+"""Judge how a finished test or practice phase used its delivered skill
+cards (layer 7).
 
-Read-only on the run. For every with-bank trial of the phase:
+Read-only on the run. For every trial of the phase that was delivered a
+skill folder (a test phase's with-bank arm, a practice phase's executor
+arm):
 
 1. one applicability call: of the cards the agent was shown (the delivery
    manifest, described exactly as the agent's card list described them),
@@ -16,9 +19,10 @@ trials that have no line yet. The aggregates are
 
 Where the inputs come from: the trial sheets are the phase's
 ``answer_sheets/``; the delivery manifest is the sheet's own
-``artifacts["skill_folder"]`` when it carries one (live phases) and the
-phase's ``units.jsonl`` row of the same unit otherwise (the test phase does
-not copy the manifest onto its sheets); the card texts are the bank
+``artifacts["skill_folder"]`` when it carries one (a practice phase's
+sheets do) and the phase's ``units.jsonl`` row of the same unit otherwise
+(the test phase does not copy the manifest onto its sheets); the phase's
+role is its ``phase.json`` record; the card texts are the bank
 artifact the phase received -- the latest learn artifact before the phase,
 or ``bank_phase_label``.
 
@@ -36,14 +40,16 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.blocks.adherence import (
-    card_steps,
     judge_adherence,
     judge_applicability,
 )
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites import phase_bank, phase_report
 from expedistill.composites.skill_use import skill_read_events
-from expedistill.composites.trace import instruction_with_initial
+from expedistill.composites.trace import (
+    instruction_with_initial,
+    task_instruction,
+)
 from expedistill.composites.trigger_metrics import trigger_metrics
 from expedistill.core import vocabulary
 from expedistill.core.answer_sheet import AnswerSheet
@@ -67,7 +73,6 @@ from expedistill.inject.skill_text import (
     description_text,
 )
 from expedistill.llm.call import ModelHandle
-from expedistill.methods.review import attribution
 from expedistill.stages.analysis_common import (
     bank_phase_labels,
     phase_number,
@@ -79,9 +84,15 @@ __all__ = ["JUDGMENTS_NAME", "SUMMARY_NAME", "judge_phase"]
 JUDGMENTS_NAME = "judgments.jsonl"
 SUMMARY_NAME = "trigger_metrics.json"
 UNITS_NAME = "units.jsonl"
+PHASE_RECORD_NAME = "phase.json"
+
+#: The roles whose trials can be judged, each with its default arm: the
+#: test phase's with-bank arm, and every trial of a practice phase (it has
+#: the executor's arm only).
+_JUDGED_ROLES = {"test": "with_bank", "practice": None}
 
 #: Calls per judge reply that breaks the output contract: the first ask and
-#: one resample (the exam blocks' repair budget).
+#: one resample.
 _BLOCK_ATTEMPTS = 2
 
 
@@ -91,17 +102,19 @@ def judge_phase(
     out_dir: Union[str, Path],
     judge_handle: ModelHandle,
     *,
-    arm: Optional[str] = "with_bank",
+    arm: Optional[str] = None,
     workers: int = 1,
     usage: Any = None,
     bank_phase_label: Optional[str] = None,
     view_rules: Any = None,
     instruction_for: Optional[Callable[[str], str]] = None,
 ) -> Dict[str, Any]:
-    """Judge every ``arm`` trial of ``phase_label`` and aggregate.
+    """Judge every ``arm`` trial of the test or practice phase
+    ``phase_label`` and aggregate.
 
-    ``arm`` None takes every trajectory trial of the phase (a live phase has
-    no arm). ``view_rules`` and ``instruction_for`` default to the run's
+    ``arm`` None takes the role's arm: ``with_bank`` for a test phase,
+    every trial of a practice phase. ``view_rules`` and
+    ``instruction_for`` default to the run's
     benchmark plugin (read from the manifest); they are parameters so a
     caller can supply them without the benchmark installed. Returns
     ``{"phase_label", "arm", "bank_phase_label", "judge_model",
@@ -110,6 +123,9 @@ def judge_phase(
     """
     run_dir = Path(run_dir)
     phase_dir = phase_bank.phase_bank_dir(run_dir, phase_label)
+    role = _phase_role(phase_dir, phase_label)
+    if arm is None:
+        arm = _JUDGED_ROLES[role]
     bank_label = bank_phase_label or _bank_label_before(run_dir, phase_label)
     out_dir = prepare_out_dir(run_dir, out_dir, {
         "run_dir": str(run_dir.resolve()), "phase_label": phase_label,
@@ -121,7 +137,8 @@ def judge_phase(
     bank = {row["skill_id"]: Skill.from_dict(row)
             for row in phase_bank.load_phase_bank(run_dir, bank_label)}
     unit_manifests = _unit_manifests(phase_dir)
-    sheets = _judgeable_sheets(phase_dir, phase_label, arm, unit_manifests)
+    sheets = _judgeable_sheets(phase_dir, phase_label, role, arm,
+                               unit_manifests)
 
     judgments_path = out_dir / JUDGMENTS_NAME
     done = {row["sheet_id"] for row in read_jsonl(judgments_path)}
@@ -184,6 +201,22 @@ def _bank_label_before(run_dir: Path, phase_label: str) -> str:
     return earlier[-1]
 
 
+def _phase_role(phase_dir: Path, phase_label: str) -> str:
+    """The phase's role from its ``phase.json``; only a test or a practice
+    phase delivers skill folders to judge."""
+    path = phase_dir / PHASE_RECORD_NAME
+    if not path.is_file():
+        raise ConfigError(
+            f"phase {phase_label!r} ({phase_dir}) has no {PHASE_RECORD_NAME};"
+            " it did not run or is not an execute phase")
+    role = read_json(path).get("role")
+    if role not in _JUDGED_ROLES:
+        raise ConfigError(
+            f"phase {phase_label!r} has role {role!r}; judge-skills reads "
+            "a 'test' or a 'practice' phase")
+    return role
+
+
 def _benchmark_hooks(run_dir: Path, view_rules: Any,
                      instruction_for: Optional[Callable[[str], str]]):
     """The run's observation truncation rules and task-instruction lookup,
@@ -200,7 +233,7 @@ def _benchmark_hooks(run_dir: Path, view_rules: Any,
     if instruction_for is None:
         @lru_cache(maxsize=None)
         def instruction_for(task_ref: str) -> str:
-            return attribution.task_instruction_for(benchmark, task_ref)
+            return task_instruction(benchmark, task_ref)
     return (plugin.view_rules if view_rules is None else view_rules,
             instruction_for)
 
@@ -215,12 +248,13 @@ def _unit_manifests(phase_dir: Path) -> Dict[str, Mapping[str, Any]]:
     return manifests
 
 
-def _judgeable_sheets(phase_dir: Path, phase_label: str, arm: Optional[str],
+def _judgeable_sheets(phase_dir: Path, phase_label: str, role: str,
+                      arm: Optional[str],
                       unit_manifests: Mapping[str, Mapping[str, Any]]):
     """``[(sheet, manifest)]``: the arm's present trajectory trials that were
     delivered at least one card, in sheet order."""
     report = phase_report.read_phase_report(
-        phase_dir, phase_kind="test", learning_usable=False)
+        phase_dir, phase_kind=role, learning_usable=role == "practice")
     if report is None:
         raise ConfigError(
             f"phase {phase_label!r} ({phase_dir}) has no trial-level "
@@ -302,14 +336,14 @@ def _judge_trial(sheet: AnswerSheet, manifest: Mapping[str, Any],
     for event in skill_read_events(execution, manifest):
         skill_id, first = event["skill_id"], event["step_index"]
         opened.append(skill_id)
-        content = bank[skill_id].content
-        if not card_steps(content):
+        skill = bank[skill_id]
+        if not skill.steps:
             adherence[skill_id], detail[skill_id] = [], []
             continue
         window = render_steps_view(
             steps[first:], view_rules, start_index=first)
         items = _repaired(lambda: judge_adherence(
-            content, window, handle, usage=usage, run_dir=out_dir))
+            skill, window, handle, usage=usage, run_dir=out_dir))
         detail[skill_id] = items
         adherence[skill_id] = [item["status"] for item in items]
 

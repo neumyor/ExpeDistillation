@@ -46,19 +46,21 @@ alternative here to make a number look better, add a new run instead.
   ``correct`` is None are counted in ``n`` but not in the rate's
   denominator (``n_known``).
 
-``replay_metrics`` aggregates exam-replay rows (one per re-answered exam):
-
-* ``recall`` -- P(target card opened): trials where the exam's own skill was
-  among the opened cards / answered exams.
-* ``misfire`` -- the mean number of non-target cards opened per exam.
-* ``plan_pass_rate`` -- exams whose plan the judge passed / answered exams.
-* ``pass_given_target_opened`` / ``pass_given_target_not_opened`` -- the
-  same pass rate within the exams where the target was / was not opened.
+``card_use_metrics`` describes a practice phase's graded trials (no model
+judge, no significance test): the trial success rate and, per delivered
+card, how many valid trials opened it and how many of those succeeded. A
+card counts as opened when the trial's steps hold a read of its file
+(``composites/skill_use.skill_read_events``: ``cat`` and
+``ReadSkill[...]`` alike). Only valid trials (graded success or failure)
+enter the counts, the same denominators as every success rate here.
 """
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-__all__ = ["GROUPS", "replay_metrics", "trigger_metrics"]
+from expedistill.composites.skill_use import skill_read_events
+from expedistill.core import vocabulary
+
+__all__ = ["GROUPS", "card_use_metrics", "trigger_metrics"]
 
 #: Step score of an adherence status; ``not_reached`` has no score.
 STEP_SCORES = {"followed": 1.0, "partial": 0.5, "skipped": 0.0}
@@ -189,38 +191,50 @@ def trigger_metrics(records: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def replay_metrics(rows: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
-    """The exam-replay aggregates (module docstring).
+def card_use_metrics(sheets: Sequence[Any]) -> Dict[str, Any]:
+    """A practice phase's mechanism metrics (module docstring).
 
-    Each row is one re-answered exam: ``{"target_opened": bool,
-    "other_opened": int, "verdict": "success" | "failure"}``.
+    ``sheets`` are graded AnswerSheets whose executions carry the folder
+    manifest in ``artifacts["skill_folder"]``. Returns::
+
+        {"trials": n, "valid": n, "success": n, "success_rate": r|None,
+         "opened_any": n, "opened_any_success": n,
+         "cards": {skill_id: {"opened": n, "opened_success": n}}}
+
+    ``cards`` lists every card the manifests delivered, opened or not.
     """
-    rows = list(rows)
-    for row in rows:
-        if not isinstance(row.get("target_opened"), bool) \
-                or isinstance(row.get("other_opened"), bool) \
-                or not isinstance(row.get("other_opened"), int) \
-                or row.get("verdict") not in ("success", "failure"):
-            raise ValueError(f"malformed exam-replay row: {dict(row)!r}")
-    opened = [row for row in rows if row["target_opened"]]
-    unopened = [row for row in rows if not row["target_opened"]]
-
-    def passed(group: List[Mapping[str, Any]]) -> int:
-        return sum(row["verdict"] == "success" for row in group)
-
-    def pass_rate(group: List[Mapping[str, Any]]) -> Dict[str, Any]:
-        return {"value": _ratio(passed(group), len(group)),
-                "passed": passed(group), "n": len(group)}
-
+    cards: Dict[str, Dict[str, int]] = {}
+    trials = valid = success = opened_any = opened_any_success = 0
+    for sheet in sheets:
+        execution = sheet.execution
+        if execution is None:
+            continue
+        trials += 1
+        folder = execution.artifacts.get("skill_folder") or {}
+        for entry in folder.get("files") or []:
+            cards.setdefault(entry["skill_id"],
+                             {"opened": 0, "opened_success": 0})
+        grading = sheet.grading
+        if grading is None or grading.verdict not in (
+                vocabulary.RUN_SUCCESS, vocabulary.RUN_FAILURE):
+            continue
+        succeeded = grading.verdict == vocabulary.RUN_SUCCESS
+        valid += 1
+        success += succeeded
+        opened = {event["skill_id"]
+                  for event in skill_read_events(execution, folder)}
+        if opened:
+            opened_any += 1
+            opened_any_success += succeeded
+        for skill_id in opened:
+            cards[skill_id]["opened"] += 1
+            cards[skill_id]["opened_success"] += succeeded
     return {
-        "n": len(rows),
-        "recall": {"value": _ratio(len(opened), len(rows)),
-                   "target_opened": len(opened), "n": len(rows)},
-        "misfire": {"value": _ratio(
-            sum(row["other_opened"] for row in rows), len(rows)),
-            "other_opened": sum(row["other_opened"] for row in rows),
-            "n": len(rows)},
-        "plan_pass_rate": pass_rate(rows),
-        "pass_given_target_opened": pass_rate(opened),
-        "pass_given_target_not_opened": pass_rate(unopened),
+        "trials": trials,
+        "valid": valid,
+        "success": success,
+        "success_rate": _ratio(success, valid),
+        "opened_any": opened_any,
+        "opened_any_success": opened_any_success,
+        "cards": {skill_id: cards[skill_id] for skill_id in sorted(cards)},
     }

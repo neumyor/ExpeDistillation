@@ -1,115 +1,134 @@
-"""The learn phase driver (layer 7): decision -> evidence -> author -> curate.
+"""The learn phase driver (layer 7): the same five steps in every learn phase.
 
-Repair plan R9 item 5 (docs/decisions/execute_learn_repair_plan_20261016.md):
-this module replaces stage4_acceptance.py and stage5_curation.py with ONE
-driver for the learn half of the loop (boundaries doc
-execute_learn_module_boundaries_20261016.md sections 1.2, 2.4-2.7). One call
-is one learn phase of the frozen sequence; the per-target landing lives in
-``stages/learn_add.py / learn_apply.py / learn_exam.py`` (the plan's 400-line split rule).
+The input is the immediately preceding execute phase, a baseline or a
+practice (a test phase never feeds learning): its weak model's failed
+trials. The bank the phase starts from is the previous learn phase's
+artifact (before the first learn phase, the run-level bank).
 
-1. **Decision** (section 2.4): the unit summaries of the nearest
-   preceding execute phase, the control summaries that phase's ``compare``
-   names, the previous learn phase's bank artifact and the checks left
-   after this phase go through ``decision.decide_task_list`` -- one task
-   list. The first learn phase after a baseline runs the baseline-gap
-   path (current summaries empty, the D-phase summaries as the control;
-   the entry implements it, this driver only routes).
-2. **Evidence and author** (sections 2.5/2.6), **the multi-version
-   merge** (one skill can carry several unit summaries when the shared
-   answer store holds attempts of several versions; the highest
-   version's summary decides) and the landing semantics are documented on
-   ``learn_add / learn_apply / learn_exam``; the answer-sheet evidence of an exam
-   revise comes from the evidence family's collector
-   (``methods.review.exam_evidence``).
-3. **Curation** (section 2.7): every learn phase ends with its own bank
-   artifact (R7). The sequence's LAST learn phase runs the configured
-   curation (``methods.curation.phase_bank.produce`` -- agentbrew with
-   its merge_check, or none); every intermediate learn phase writes the
-   as-is artifact (``produce_as_is``). The artifact carries every
-   member, accepted and pending alike -- it is the only currency
-   between phases, and the next execute phase's universe (the pending
-   members) comes out of it. Both entries take the phase's own raw
-   ``curate`` mapping (the v4 config has no single curation slot).
+1. **Diagnose** every failed trial (``methods/diagnose``): the reason, the
+   failing step, the scope and the two notes, one row per trial in
+   ``findings.jsonl``. A diagnosis whose reply stays unusable is a terminal
+   record in ``failed_units.jsonl``: the trial gives neither notes nor
+   evidence.
+2. **Locate** (``composites/locate``): cut every failed trajectory (and, in
+   the first learn phase, the strong baseline trajectories the
+   ``trajectory_select`` rule keeps), then type every new segment into the
+   run's subtask type table. The segment holding the failing step is the
+   failure's segment, its type the failure's type.
+3. **Route the evidence** (``composites/evidence``, pure): gap, trigger,
+   content or none per located failure, in ``evidence.jsonl``.
+4. **Evolve the profile, then the playbook** (``methods/evolve_text``); the
+   playbook's facts are the pack's baseline facts in the first learn phase
+   and the trigger-evidence counts afterwards.
+5. **Evolve the bank** (``methods/cards``, ``methods/revise``): a new card
+   per gap type, a content then a trigger rewrite per card with that
+   evidence, the delete rule in place of a second content rewrite in a
+   row. Receipts in ``outcomes.jsonl``.
 
-**The learn phase touches nothing but the skill store and its own phase
-directory.** Execution, judging, redispatch and shortfall are the execute
-phases' (R4: an execute phase never changes the bank; the reverse holds
-here -- a learn phase never runs a task).
+Steps without a data dependency run in one pool (``--workers``), the groups
+one after the other:
 
-Resume equals an uninterrupted run: a FINISHED phase is skipped whole
-(its summary with the bank entry is the commit point -- re-running it
-would double the outcome receipts and rewrite the artifact from the
-current store), an interrupted one re-derives the decision (a pure
-function of frozen on-disk reports and the previous phase's artifact),
-reads its landed skills off the phase's ledgers and skips them, and
-asks again only the model calls whose results were never persisted. An
-InfrastructureError is recorded per target and raised at the phase end
-AFTER the summary is written but BEFORE the bank artifact is produced
-(an incomplete learn phase must not publish a bank); the resume
-re-enters and finishes it.
+    A  diagnoses || failed-trajectory cuts || strong baseline cuts (first)
+    B  typing (chunk by chunk) || the profile
+    C  evidence routing
+    D  the playbook
+    E  one unit per card or gap type
 
-The phase's files all live in ``phases/<label>/``
-(composites.phase_bank's layout): the bank artifact and summary from
-the curation side, ``task_list.jsonl`` / ``revisions.jsonl`` /
-``outcomes.jsonl`` from the path modules (the outcomes ledger is the
-G10/G11 migration's successor to attributions.jsonl -- Wave 3's audit
-scripts and Wave 4's golden regeneration align to that shape), and
-``learn_summary.json`` mirroring the returned PhaseResult.
+Every ledger is committed in a fixed order (sheet id, subtask id, type id,
+skill id), so a run with one worker and a run with eight write the same
+bytes. Resume equals an uninterrupted run: a FINISHED phase (its summary
+carries the "bank" entry, written last) is skipped whole; an interrupted
+one reads back its findings, segments, types, texts and receipts and asks
+only the model calls whose results were never persisted. Infrastructure
+failures are recorded per unit and stop the phase at the end of their
+group (in group E after the summary, before the bank artifact); a resume
+retries exactly those units.
 """
 
-import dataclasses
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+import threading
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-from expedistill.composites import decision
-from expedistill.composites import live_measurement as lm
-from expedistill.composites import phase_report
+from expedistill.benchmarks.registry import get_plugin
+from expedistill.composites import evidence as routing
+from expedistill.composites import evolving_text, locate, phase_report
+from expedistill.composites import learn_ledger as ledger
 from expedistill.composites.phase_bank import (
     load_phase_bank,
     phase_bank_dir,
+    write_phase_bank,
 )
 from expedistill.composites.provenance import (
     PROVENANCE_NAME,
     check_provenance,
+    find_provenance,
 )
-from expedistill.composites.unit_ids import phase_label_of_unit_id
+from expedistill.composites.sheet_facts import SheetFacts, sheet_facts
+from expedistill.composites.trace import (
+    WRITER_BEFORE_STEPS,
+    render_windows,
+    task_instruction,
+    trace_at,
+    trace_of_trajectory,
+)
+from expedistill.core.answer_sheet import AnswerSheet, PhaseReport
 from expedistill.core.config import (
-    FRESH_BARE,
     PHASE_ROLE_BASELINE,
-    PHASE_ROLE_EXAM,
-    PHASE_ROLE_LIVE,
-    PHASE_ROLE_TEST,
+    PHASE_ROLE_PRACTICE,
     ExecutePhaseSpec,
     LearnPhaseSpec,
     PhaseInstance,
     PhaseResult,
     phase_label,
 )
-from expedistill.core.answer_sheet import PhaseReport
-from expedistill.core.models import Skill
+from expedistill.core.contracts import TaskListRow
+from expedistill.core.ids import make_skill_id, parse_trajectory_id
+from expedistill.core.models import EvolvingText, Skill, Subtask, Trajectory
+from expedistill.core.trace import Provenance, TraceRef
+from expedistill.infra.parallel import run_units
 from expedistill.infra.reliability import (
     CodeBugError,
-    ConfigError,
     InfrastructureError,
+    ModelOutputError,
+    UnitFailureRecorder,
 )
 from expedistill.infra.store import (
-    read_json, read_jsonl, write_json, write_jsonl)
+    append_jsonl, read_json, read_jsonl, write_json, write_jsonl)
 from expedistill.methods import resolve_params
-from expedistill.methods.curation import phase_bank as curation_phase_bank
-from expedistill.methods.review.contracts import ReviewContext, TrialFinding
-from expedistill.methods.review.driver import review
-from expedistill.stages import (
-    learn_add, learn_apply, learn_exam, learn_ledger, learn_playbook,
-    learn_requirement, model_profile)
+from expedistill.methods.cards.material import collect_material
+from expedistill.methods.cards.writer import write_card
+from expedistill.methods.diagnose import Finding, diagnose_trial
+from expedistill.methods.evolve_text import evolve_text
+from expedistill.methods.revise import (
+    apply_revision,
+    diagnosis_text,
+    revise_content,
+    revise_trigger,
+)
 
-__all__ = ["run"]
+__all__ = ["EVIDENCE_NAME", "FINDINGS_NAME", "SUMMARY_NAME", "run"]
 
 #: The phase's summary file (the returned PhaseResult in JSON form).
 SUMMARY_NAME = "learn_summary.json"
+#: One row per diagnosed trial (``methods.diagnose.Finding``).
+FINDINGS_NAME = "findings.jsonl"
+#: One row per located failure (``composites.evidence.Evidence``).
+EVIDENCE_NAME = "evidence.jsonl"
+
+#: How many steps after the failing step a content rewrite reads.
+AFTER_FAILURE_STEPS = 5
+
+#: The ``failed_units.jsonl`` error class of a diagnosed trial that could
+#: not be located (no segment or no type for its failing step).
+UNLOCATED = "Unlocated"
+
+#: The receipt of a gap whose type's one card id is taken by a discarded
+#: card: no new card is written for it.
+SKIPPED_DISCARDED = "skipped_discarded"
 
 
 def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     """Drive one learn phase; return its summary as a PhaseResult."""
-    config = ctx.config
     if not isinstance(phase.spec, LearnPhaseSpec):
         raise CodeBugError(
             f"phase_learn received phase {phase.label!r} whose spec is a "
@@ -123,216 +142,552 @@ def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
     phase_dir = phase_bank_dir(ctx.run_dir, phase.label)
     finished = _finished_summary(phase_dir)
     if finished is not None:
-        # A crash AFTER this phase (or a --until-phase replay) must not
-        # re-run it: the landing's receipts would double in outcomes
-        # .jsonl and the bank artifact would be re-derived from the
-        # CURRENT store (a later learn phase's accepted skills would
-        # leak into this one's snapshot). The summary with its "bank"
-        # entry is the phase's commit point -- it is written last, after
-        # the artifact -- so it is the completion signal.
         return PhaseResult(label=phase.label, summary=finished)
 
-    names, specs = _sequence(config, phase)
+    names, specs = _sequence(ctx.config, phase)
     phase_dir.mkdir(parents=True, exist_ok=True)
-    current_kind, current, control, compare_rule = _review_reports(
-        ctx, names, specs, phase.index)
-    if current_kind is None and learn_playbook.requested(config):
-        # Switch: a delivery asked for ``playbook_source: learned``. The
-        # baseline report this phase reviews is the evidence.
-        learn_playbook.ensure_playbook(
-            ctx, phase, current, config.effective_weak_profile())
-    current_pos = _current_execute_position(names, specs, phase.index)
-    current_spec = specs[names[current_pos]]
-    bank = _previous_bank(ctx, names, specs, phase.index)
-    checks_left = decision.remaining_checks(
-        [specs[name].role for name in names], phase.index)
-    current_round = _live_round(names, specs, current_pos)
-    if current_kind == PHASE_ROLE_LIVE:
-        current.summary["better_by_task"] = _group_better_by_task(
-            ctx, current_round)
-
-    review_params = resolve_params("review", phase.spec.review)
-    if review_params.revise_scope != "both" \
-            and current_kind == PHASE_ROLE_LIVE:
-        raise ConfigError(
-            f"{phase.label}: revise_scope {review_params.revise_scope!r} "
-            "restricts exam revisions only; the live revision path does not "
-            "support it")
-    trial_mode = review_params.decision == "trial_level"
-    if trial_mode and current_kind not in (PHASE_ROLE_LIVE, PHASE_ROLE_EXAM):
-        raise CodeBugError(
-            "review decision 'trial_level' requires a live or exam phase; "
-            f"got phase kind {current_kind!r}")
-    profile_text, profile_version = (
-        model_profile.load_previous_profile(
-            ctx.run_dir, names, specs, phase.index)
-        if trial_mode else ("", 0))
-    context = ReviewContext(
-        phase_kind=current_kind or PHASE_ROLE_BASELINE,
-        phase_label=phase.label,
-        source_phase_label=phase_label(
-            current_pos, names[current_pos]),
-        checks_left=checks_left,
-        round=current_round,
-        delivery=current_spec.delivery.get("name", ""),
-        compare_rule=compare_rule,
-        n_attempts_weak=config.n_attempts_weak,
-        benchmark=config.benchmark,
-        weak_profile=(profile_text if trial_mode
-                      else config.effective_weak_profile()),
-        task_select_rule=config.rules["task_select"],
-        trajectory_select=config.rules["trajectory_select"],
-        segment_select=config.rules["segment_select"],
-        exam_control=bool(current_spec.execution.get("bare_control", True)),
-        workers=max(1, int(getattr(ctx.run_settings, "workers", 1) or 1)),
-    )
-    result = review(
-        current=current,
-        control=control,
-        bank=bank,
-        context=context,
-        params=review_params,
-        store=ctx.store,
-        handles=ctx.handles,
-        usage=ctx.usage,
-        run_dir=ctx.run_dir,
-        skip_evidence=lambda rows: learn_ledger.revision_skip_targets(
-            ctx.store, phase, rows, phase_dir),
-        existing_findings=(_load_trial_findings(phase_dir)
-                           if trial_mode else ()))
-    if trial_mode:
-        _persist_trial_artifacts(phase_dir, result)
-        author_profile = result.profile_update
-        if author_profile is not None:
-            model_profile.write_profile(
-                phase_dir, phase.label, author_profile,
-                [finding.sheet_id for finding in result.trial_findings],
-                profile_version + 1)
-        else:
-            author_profile = profile_text
-    else:
-        author_profile = None
-    effective = [item.row for item in result.items]
-    superseded = result.superseded_units
-    skip_targets = result.failed_targets | result.model_errors
-    if current_kind is None:
-        infra_failed = learn_add.execute_add_rows(
-            ctx, phase, result.items, skip_targets=skip_targets,
-            source_phase_label=context.source_phase_label)
-        if review_params.accept_new and not infra_failed:
-            learn_ledger.accept_written(ctx.store, phase, phase_dir)
-    elif current_kind == PHASE_ROLE_EXAM:
-        infra_failed = learn_exam.execute_exam_rows(
-            ctx, phase, result.items, current.units, superseded,
-            skip_targets=skip_targets,
-            source_phase_label=context.source_phase_label,
-            revise_scope=review_params.revise_scope,
-            weak_profile=author_profile)
-    else:
-        infra_failed = learn_apply.execute_decision_rows(
-            ctx, phase, result.items, current.units,
-            skip_targets=skip_targets, weak_profile=author_profile,
-            source_phase_label=context.source_phase_label)
-    if result.new_skill_requirements:
-        if checks_left == 0:
-            # The last learn phase writes nothing a later phase could test;
-            # the requirement ledger records why, and the bank stays clean.
-            learn_requirement.record_deferred(
-                phase_dir, phase.label, result.new_skill_requirements)
-        elif not review_params.new_skills:
-            learn_requirement.record_deferred(
-                phase_dir, phase.label, result.new_skill_requirements,
-                outcome=learn_requirement.DISABLED_OUTCOME,
-                reason="new_skills is off for this phase")
-        else:
-            requirement_failed = learn_requirement.execute_requirements(
-                ctx, phase, result.new_skill_requirements,
-                weak_profile=(author_profile
-                              if author_profile is not None
-                              else config.effective_weak_profile()),
-                source_phase_label=context.source_phase_label)
-            infra_failed |= requirement_failed
-    infra_failed |= result.failed_targets
-
-    summary = _summary(phase, effective, superseded, phase_dir,
-                       current_phase=names[current_pos],
-                       compare_rule=compare_rule, checks_left=checks_left)
-    if trial_mode:
-        summary["trial_findings"] = len(result.trial_findings)
-        summary["new_skill_requirements"] = len(
-            result.new_skill_requirements)
-        if ((checks_left == 0 or not review_params.new_skills)
-                and result.new_skill_requirements):
-            summary["new_skill_requirements_deferred"] = len(
-                result.new_skill_requirements)
-        summary["profile_updated"] = result.profile_update is not None
-    if infra_failed:
-        summary["infra_failed"] = sorted(infra_failed)
-        write_json(phase_dir / SUMMARY_NAME, summary, indent=2)
-        raise InfrastructureError(
-            f"{phase.label}: {len(infra_failed)} task-list target(s) still "
-            "pending on infrastructure errors "
-            f"({', '.join(sorted(infra_failed))}); see failed_units.jsonl, "
-            "then resume the run to retry them")
-    _check_phase_provenance(ctx, phase, phase_dir)
-    summary["bank"] = _produce_bank(ctx, phase, names, specs)
-    write_json(phase_dir / SUMMARY_NAME, summary, indent=2)
+    learn = _Learn(ctx, phase, phase_dir, names, specs)
+    summary = learn.run()
     return PhaseResult(label=phase.label, summary=summary)
 
 
-def _check_phase_provenance(ctx: Any, phase: PhaseInstance,
-                            phase_dir) -> None:
-    """Refuse to publish a phase whose new versions have a bad origin.
+class _Learn:
+    """One learn phase's run: the inputs read once, then the five groups."""
 
-    Only the versions THIS phase recorded are checked (earlier phases
-    answered for theirs). A scene that does not resolve, points at a paper
-    exam answer, or - for an add - was cut from another attempt than the
-    skill's anchor is caught here, before any exam spends model calls.
-    """
-    path = phase_dir / PROVENANCE_NAME
-    if not path.exists():
-        return
-    skills = []
-    for row in read_jsonl(path):
-        if row.get("phase_label") != phase.label:
-            continue
-        key = (row["skill_id"], row["version"])
-        stored = ctx.store.load("skills", key[0], Skill)
-        if stored.version == key[1]:
-            skills.append(stored)
-    problems = check_provenance(ctx.run_dir, skills)
-    if problems:
-        raise CodeBugError(
-            f"{phase.label}: {len(problems)} new skill version(s) have a "
-            f"bad provenance: {problems[:5]}")
+    def __init__(self, ctx: Any, phase: PhaseInstance, phase_dir: Path,
+                 names: List[str], specs: dict) -> None:
+        self.ctx = ctx
+        self.phase = phase
+        self.phase_dir = phase_dir
+        self.store = ctx.store
+        self.workers = int(ctx.run_settings.workers)
+        self.benchmark = ctx.config.benchmark
+        plugin = get_plugin(self.benchmark)
+        self.pack = plugin.prompt_pack
+        self.view_rules = plugin.view_rules
+        self.review = resolve_params("review", phase.spec.review)
+        self.author = resolve_params("author", phase.spec.author)
+        self.recorder = UnitFailureRecorder(ctx.run_dir)
+        self.lock = threading.Lock()
+        self._instructions: Dict[str, str] = {}
 
+        self.names = names
+        self.specs = specs
+        source = _input_position(names, specs, phase.index)
+        self.source_label = phase_label(source, names[source])
+        self.baseline_label = _baseline_label(names, specs)
+        self.previous_learn = evolving_text.previous_learn_label(
+            names, specs, phase.index)
+        self.first = self.previous_learn is None
+        self.report = _load_report(ctx, names, specs, source)
+        self.bank = _previous_bank(ctx, self.previous_learn)
+        self.failed = sorted(
+            (sheet for sheet in self.report.sheets
+             if sheet.phase_label == self.source_label and _is_failed(sheet)
+             and sheet.execution.model_role == "weak"),
+            key=lambda sheet: sheet.sheet_id)
+        self.sheets = {sheet.sheet_id: sheet for sheet in self.failed}
+        self.facts: Dict[str, SheetFacts] = {
+            sheet.sheet_id: sheet_facts(sheet, self._stored_skill)
+            for sheet in self.failed}
 
-def _load_trial_findings(phase_dir) -> List[TrialFinding]:
-    path = phase_dir / "trial_findings.jsonl"
-    if not path.exists():
-        return []
-    return [TrialFinding.from_dict(row) for row in read_jsonl(path)]
+    # -- small helpers -----------------------------------------------------
 
+    def _stored_skill(self, skill_id: str) -> Optional[Skill]:
+        if not self.store.exists("skills", skill_id):
+            return None
+        return self.store.load("skills", skill_id, Skill)
 
-def _persist_trial_artifacts(phase_dir, result) -> None:
-    write_jsonl(phase_dir / "trial_findings.jsonl",
-                [finding.to_dict() for finding in result.trial_findings])
-    write_jsonl(
-        phase_dir / "new_skill_requirements.jsonl",
-        [dataclasses.asdict(requirement)
-         for requirement in result.new_skill_requirements])
+    def instruction_for(self, task_id: str) -> str:
+        with self.lock:
+            if task_id not in self._instructions:
+                self._instructions[task_id] = task_instruction(
+                    self.benchmark, task_id)
+            return self._instructions[task_id]
+
+    def _terminal_failures(self) -> Set[str]:
+        """Unit ids whose model output failed terminally in this phase."""
+        return {row["unit_id"] for row in self.recorder.list_failures()
+                if row.get("stage") == self.phase.label
+                and row.get("error_class") == ModelOutputError.__name__}
+
+    def _record(self, unit_id: str, exc: Any) -> None:
+        self.recorder.record(unit_id, self.phase.label, exc, exc)
+
+    # -- the phase -----------------------------------------------------------
+
+    def run(self) -> Dict[str, Any]:
+        findings, undiagnosed = self.group_a()
+        profile = self.group_b(findings)
+        evidence, unlocated = self.group_c(findings)
+        playbook = self.group_d(findings, evidence, profile)
+        infra_failed = self.group_e(evidence, findings, profile, playbook)
+        summary = self.summary(findings, undiagnosed, unlocated, evidence,
+                               profile, playbook)
+        if infra_failed:
+            summary["infra_failed"] = sorted(infra_failed)
+            write_json(self.phase_dir / SUMMARY_NAME, summary, indent=2)
+            raise InfrastructureError(
+                f"{self.phase.label}: {len(infra_failed)} card unit(s) "
+                f"still pending on infrastructure errors "
+                f"({', '.join(sorted(infra_failed))}); see "
+                "failed_units.jsonl, then resume the run to retry them")
+        self.check_provenance()
+        summary["bank"] = write_phase_bank(self.store, self.ctx.run_dir,
+                                           self.phase.label)
+        write_json(self.phase_dir / SUMMARY_NAME, summary, indent=2)
+        return summary
+
+    # -- group A: diagnoses and cuts ------------------------------------------
+
+    def _load_findings(self) -> Dict[str, Finding]:
+        path = self.phase_dir / FINDINGS_NAME
+        if not path.exists():
+            return {}
+        return {row["sheet_id"]: Finding.from_dict(row)
+                for row in read_jsonl(path)}
+
+    def group_a(self) -> Tuple[Dict[str, Finding], Set[str]]:
+        findings = self._load_findings()
+        undiagnosed = self._terminal_failures() & set(self.sheets)
+        units: List[Tuple[str, Any]] = [
+            ("diagnose", sheet) for sheet in self.failed
+            if sheet.sheet_id not in findings
+            and sheet.sheet_id not in undiagnosed]
+        units += [("cut", trajectory)
+                  for trajectory in self._failed_trajectories()]
+        if self.first:
+            units += [("cut", trajectory)
+                      for trajectory in locate.strong_trajectories(
+                          self.store, self.baseline_label,
+                          self.ctx.config.rules["trajectory_select"])]
+        handles = {"diagnose": self.ctx.handle("author"),
+                   "cut": self.ctx.handle("segmenter")}
+
+        def work(unit: Tuple[str, Any]) -> Tuple[str, Optional[Exception]]:
+            kind, item = unit
+            unit_id = (item.sheet_id if kind == "diagnose"
+                       else item.trajectory_id)
+            try:
+                if kind == "diagnose":
+                    finding = diagnose_trial(
+                        item, self.facts[item.sheet_id],
+                        handle=handles[kind],
+                        instruction_for=self.instruction_for,
+                        view_rules=self.view_rules, usage=self.ctx.usage,
+                        run_dir=self.ctx.run_dir)
+                    with self.lock:
+                        append_jsonl(self.phase_dir / FINDINGS_NAME,
+                                     finding.to_dict())
+                        findings[item.sheet_id] = finding
+                else:
+                    locate.segment_one(
+                        store=self.store, trajectory=item,
+                        phase_label=self.phase.label, K=self.review.K,
+                        retry_limit=self.review.retry_limit,
+                        view_rules=self.view_rules, handle=handles[kind],
+                        usage=self.ctx.usage, run_dir=self.ctx.run_dir)
+            except (InfrastructureError, ModelOutputError) as exc:
+                self._record(unit_id, exc)
+                return unit_id, exc
+            return unit_id, None
+
+        results = run_units(work, units, self.workers)
+        undiagnosed.update(unit_id for unit_id, exc in results
+                           if isinstance(exc, ModelOutputError))
+        write_jsonl(self.phase_dir / FINDINGS_NAME,
+                    [findings[sheet.sheet_id].to_dict()
+                     for sheet in self.failed
+                     if sheet.sheet_id in findings])
+        infra = sorted(unit_id for unit_id, exc in results
+                       if isinstance(exc, InfrastructureError))
+        if infra:
+            raise InfrastructureError(
+                f"{self.phase.label}: {len(infra)} diagnosis or cut unit(s) "
+                f"failed on infrastructure ({', '.join(infra)}); see "
+                "failed_units.jsonl, then resume the run to retry them")
+        return ({sheet.sheet_id: findings[sheet.sheet_id]
+                 for sheet in self.failed if sheet.sheet_id in findings},
+                undiagnosed & set(self.sheets))
+
+    def _failed_trajectories(self) -> List[Trajectory]:
+        ids = sorted({facts.trajectory_id for facts in self.facts.values()})
+        return [self.store.load("trajectories", trajectory_id, Trajectory)
+                for trajectory_id in ids]
+
+    # -- group B: typing and the profile ----------------------------------------
+
+    def group_b(self, findings: Dict[str, Finding]) -> EvolvingText:
+        """Types the new segments and evolves the profile; returns the
+        profile."""
+        def work(kind: str) -> Optional[EvolvingText]:
+            if kind == "types":
+                locate.type_pending(
+                    store=self.store, run_dir=self.ctx.run_dir,
+                    phase_label=self.phase.label,
+                    chunk_size=self.author.typing_chunk_size,
+                    max_chars=self.author.max_chars_per_segment,
+                    view_rules=self.view_rules,
+                    handle=self.ctx.handle("segmenter"),
+                    usage=self.ctx.usage)
+                return None
+            return self._evolve(
+                evolving_text.PROFILE,
+                [(item.sheet_id, item.model_note)
+                 for item in findings.values()],
+                facts="", seed="", checks=(), profile="")
+
+        return run_units(work, ["types", "profile"], self.workers)[1]
+
+    def _evolve(self, kind: str, notes: Sequence[Tuple[str, str]], *,
+                facts: str, seed: str, checks: Sequence[Any],
+                profile: str) -> EvolvingText:
+        """This phase's ``kind`` text: read back when already written,
+        otherwise evolved from the previous learn phase's version."""
+        existing = evolving_text.read_text(self.ctx.run_dir,
+                                           self.phase.label, kind)
+        if existing is not None:
+            return existing
+        previous = evolving_text.load_previous(
+            self.ctx.run_dir, self.names, self.specs, self.phase.index,
+            kind)
+        old = previous.text if previous is not None else seed
+        text = evolve_text(
+            kind, old, [note for _, note in notes], facts,
+            self.ctx.handle("author"), profile=profile, checks=checks,
+            usage=self.ctx.usage, run_dir=self.ctx.run_dir)
+        item = EvolvingText(
+            kind=kind, text=text,
+            version=(previous.version + 1) if previous is not None else 1,
+            phase_label=self.phase.label,
+            source_sheet_ids=[sheet_id for sheet_id, note in notes
+                              if note.strip()])
+        evolving_text.write_text(self.ctx.run_dir, item)
+        return item
+
+    # -- group C: evidence ------------------------------------------------------
+
+    def group_c(self, findings: Dict[str, Finding]
+                ) -> Tuple[List[routing.Evidence], int]:
+        self.subtasks: Dict[str, Subtask] = {
+            subtask_id: self.store.load("subtasks", subtask_id, Subtask)
+            for subtask_id in self.store.ids("subtasks")}
+        self.assignments = locate.load_assignments(self.ctx.run_dir)
+        self.types = {row.type_id: row
+                      for row in locate.load_type_table(self.ctx.run_dir)}
+        by_trajectory: Dict[str, List[Subtask]] = {}
+        for subtask in self.subtasks.values():
+            by_trajectory.setdefault(subtask.trajectory_id, []).append(
+                subtask)
+        cards = {skill.subtask_type: skill.skill_id for skill in self.bank
+                 if skill.status == "active" and skill.subtask_type}
+        recorded = {row["unit_id"] for row in self.recorder.list_failures()
+                    if row.get("stage") == self.phase.label
+                    and row.get("error_class") == UNLOCATED}
+        rows: List[routing.Evidence] = []
+        unlocated = 0
+        for sheet_id, finding in findings.items():
+            facts = self.facts[sheet_id]
+            segment = routing.error_segment(
+                by_trajectory.get(facts.trajectory_id, []),
+                finding.failing_step)
+            type_id = (self.assignments.get(segment.subtask_id)
+                       if segment is not None else None)
+            if type_id is None:
+                unlocated += 1
+                if sheet_id not in recorded:
+                    self.recorder.record(
+                        sheet_id, self.phase.label, UNLOCATED,
+                        f"no typed segment holds failing step "
+                        f"{finding.failing_step} of "
+                        f"{facts.trajectory_id!r}")
+                continue
+            rows.append(routing.route(
+                sheet_id=sheet_id, failing_step=finding.failing_step,
+                scope=finding.scope, subtask_id=segment.subtask_id,
+                type_id=type_id, card=cards.get(type_id),
+                opened=facts.opened))
+        write_jsonl(self.phase_dir / EVIDENCE_NAME,
+                    [row.to_dict() for row in rows])
+        return rows, unlocated
+
+    # -- group D: the playbook --------------------------------------------------
+
+    def group_d(self, findings: Dict[str, Finding],
+                evidence: Sequence[routing.Evidence],
+                profile: EvolvingText) -> EvolvingText:
+        if self.first:
+            facts = (self.pack.playbook_facts(self.report.sheets)
+                     if self.pack.playbook_facts is not None else "")
+        else:
+            facts = routing.trigger_facts(
+                evidence, {type_id: row.name
+                           for type_id, row in self.types.items()})
+        return self._evolve(
+            evolving_text.PLAYBOOK,
+            [(item.sheet_id, item.playbook_note)
+             for item in findings.values()],
+            facts=facts, seed=self.pack.playbook_seed,
+            checks=self.pack.playbook_checks, profile=profile.text)
+
+    # -- group E: the cards -------------------------------------------------------
+
+    def group_e(self, evidence: Sequence[routing.Evidence],
+                findings: Dict[str, Finding], profile: EvolvingText,
+                playbook: EvolvingText) -> Set[str]:
+        previous: List[routing.Evidence] = []
+        if self.previous_learn is not None:
+            path = phase_bank_dir(self.ctx.run_dir, self.previous_learn) \
+                / EVIDENCE_NAME
+            previous = [routing.Evidence.from_dict(row)
+                        for row in read_jsonl(path)]
+        plans = routing.plan_cards(evidence, previous)
+        self.plans = plans
+        discarded = routing.discarded_types(self.bank)
+
+        def work(plan: routing.CardPlan) -> Optional[str]:
+            target = plan.skill_id or plan.type_id
+            try:
+                if plan.skill_id is None:
+                    self._new_card(plan, profile.text, playbook.text,
+                                   plan.type_id in discarded)
+                else:
+                    self._revise_card(plan, findings, profile.text,
+                                      playbook.text)
+            except InfrastructureError as exc:
+                self._record(target, exc)
+                return target
+            return None
+
+        results = run_units(work, plans, self.workers)
+        ledger.commit_order(self.phase_dir)
+        return {target for target in results if target is not None}
+
+    def _basis(self, items: Sequence[routing.Evidence]) -> str:
+        return self.facts[items[0].sheet_id].unit_id
+
+    def _new_card(self, plan: routing.CardPlan, profile: str, playbook: str,
+                  discarded: bool) -> None:
+        row = TaskListRow(target_kind="type", target_id=plan.type_id,
+                          action="add", reason=routing.GAP,
+                          basis_unit=self._basis(plan.gap))
+        if ledger.receipt_of(self.phase, row, self.phase_dir) is not None:
+            return
+        skill_id = make_skill_id(plan.type_id)
+        if discarded:
+            ledger.append_outcome(self.phase, row, skill_id,
+                                  SKIPPED_DISCARDED, None, self.phase_dir,
+                                  routing.CONTENT_FAILED_TWICE)
+            return
+        if self.store.exists("skills", skill_id):
+            origin = find_provenance(self.ctx.run_dir, skill_id, 1)
+            if origin is None or origin.cause != "add" \
+                    or origin.phase_label != self.phase.label:
+                raise CodeBugError(
+                    f"type {plan.type_id!r} has gap evidence but the store "
+                    f"already holds {skill_id!r} from another phase")
+            # Written here before a crash cut off the receipt.
+            ledger.append_outcome(self.phase, row, skill_id, "written", 1,
+                                  self.phase_dir, row.reason)
+            return
+        material = collect_material(
+            type_id=plan.type_id, subtasks=self.subtasks,
+            assignments=self.assignments,
+            rule_name=self.ctx.config.rules["segment_select"],
+            phase_label=self.phase.label,
+            write_lessons=self.review.write_lessons,
+            gap_tasks={self.facts[item.sheet_id].task_ref
+                       for item in plan.gap},
+            error_segments={item.subtask_id for item in plan.gap},
+            max_segments=self.author.max_segments_per_card,
+            load_trajectory=lambda trajectory_id: self.store.load(
+                "trajectories", trajectory_id, Trajectory),
+            view_rules=self.view_rules)
+        if not material.strong:
+            ledger.append_outcome(self.phase, row, None,
+                                  "skipped_no_material", None,
+                                  self.phase_dir, row.reason)
+            return
+        sources = [trace_of_trajectory(
+            self.ctx.run_dir,
+            parse_trajectory_id(item["subtask"].trajectory_id).phase_label,
+            item["subtask"].trajectory_id, item["subtask"].step_range[0])
+            for item in material.strong]
+        sources += self._failing_refs(plan.gap)
+        try:
+            skill = write_card(
+                self.types[plan.type_id], material, profile=profile,
+                playbook=playbook, handle=self.ctx.handle("author"),
+                params=self.author, usage=self.ctx.usage,
+                run_dir=self.ctx.run_dir)
+        except ModelOutputError as exc:
+            self._record(plan.type_id, exc)
+            ledger.append_outcome(self.phase, row, None, "write_failed",
+                                  None, self.phase_dir, str(exc)[:300])
+            return
+        ledger.record_version(
+            self.store, self.phase_dir, self.ctx.run_dir, skill,
+            Provenance(skill_id=skill.skill_id, version=1,
+                       phase_label=self.phase.label, cause="add",
+                       sources=sources,
+                       note=f"card for {self.types[plan.type_id].name}"))
+        ledger.append_outcome(self.phase, row, skill.skill_id, "written", 1,
+                              self.phase_dir, row.reason)
+
+    def _failing_refs(self, items: Sequence[routing.Evidence]
+                      ) -> List[TraceRef]:
+        return [trace_at(self.sheets[item.sheet_id], item.failing_step)
+                for item in items]
+
+    def _windows(self, items: Sequence[routing.Evidence], side: str
+                 ) -> List[Tuple[TraceRef, int, int]]:
+        windows = []
+        for item, ref in zip(items, self._failing_refs(items)):
+            floor = item.failing_step - WRITER_BEFORE_STEPS
+            if side == "trigger":
+                start = self.subtasks[item.subtask_id].step_range[0]
+                windows.append((ref, max(start, floor),
+                                item.failing_step + 1))
+            else:
+                windows.append((ref, max(item.opened_step, floor),
+                                item.failing_step + 1 + AFTER_FAILURE_STEPS))
+        return windows
+
+    def _revise_card(self, plan: routing.CardPlan,
+                     findings: Dict[str, Finding], profile: str,
+                     playbook: str) -> None:
+        handle = self.ctx.handle("rewriter")
+        if plan.content:
+            if plan.delete:
+                ledger.land_delete(
+                    self.store, self.phase,
+                    TaskListRow(target_kind="skill",
+                                target_id=plan.skill_id, action="delete",
+                                reason=routing.CONTENT_FAILED_TWICE,
+                                basis_unit=self._basis(plan.content)),
+                    self.phase_dir)
+                return
+            self._rewrite(plan.skill_id, plan.content, "content", findings,
+                          lambda skill, steps, diagnosis: revise_content(
+                              skill, evidence_steps=steps,
+                              diagnosis=diagnosis, playbook=playbook,
+                              profile=profile, handle=handle,
+                              usage=self.ctx.usage,
+                              run_dir=self.ctx.run_dir))
+        if plan.trigger:
+            catalog = self.facts[plan.trigger[0].sheet_id].catalog
+            self._rewrite(plan.skill_id, plan.trigger, "trigger", findings,
+                          lambda skill, steps, diagnosis: revise_trigger(
+                              skill, catalog=catalog, evidence_steps=steps,
+                              diagnosis=diagnosis, playbook=playbook,
+                              profile=profile, handle=handle,
+                              usage=self.ctx.usage,
+                              run_dir=self.ctx.run_dir))
+
+    def _rewrite(self, skill_id: str, items: Sequence[routing.Evidence],
+                 side: str, findings: Dict[str, Finding], ask: Any) -> None:
+        row = TaskListRow(target_kind="skill", target_id=skill_id,
+                          action=f"revise_{side}",
+                          reason=f"{side}_evidence",
+                          basis_unit=self._basis(items))
+        windows = self._windows(items, side)
+
+        def write(skill: Skill):
+            steps = render_windows(
+                self.ctx.run_dir, windows,
+                instruction_for=self.instruction_for,
+                view_rules=self.view_rules, label="failed trial")
+            diagnosis = diagnosis_text(
+                [(item.failing_step, findings[item.sheet_id].reason)
+                 for item in items])
+            return ask(skill, steps, diagnosis)
+
+        outcome = apply_revision(
+            store=self.store, phase=self.phase, row=row,
+            phase_dir=self.phase_dir, run_dir=self.ctx.run_dir,
+            sources=[window[0] for window in windows], write=write)
+        if outcome == "revision_failed":
+            self._record(skill_id, ModelOutputError(
+                f"{row.action} of {skill_id!r} produced no valid rewrite"))
+
+    # -- the commit point ----------------------------------------------------------
+
+    def check_provenance(self) -> None:
+        """Refuse to publish a phase whose new versions have a bad origin
+        (only the versions THIS phase recorded are checked)."""
+        path = self.phase_dir / PROVENANCE_NAME
+        if not path.exists():
+            return
+        skills = []
+        for row in read_jsonl(path):
+            if row.get("phase_label") != self.phase.label:
+                continue
+            stored = self.store.load("skills", row["skill_id"], Skill)
+            if stored.version == row["version"]:
+                skills.append(stored)
+        problems = check_provenance(self.ctx.run_dir, skills)
+        if problems:
+            raise CodeBugError(
+                f"{self.phase.label}: {len(problems)} new skill version(s) "
+                f"have a bad provenance: {problems[:5]}")
+
+    def summary(self, findings: Dict[str, Finding], undiagnosed: Set[str],
+                unlocated: int, evidence: Sequence[routing.Evidence],
+                profile: EvolvingText,
+                playbook: EvolvingText) -> Dict[str, Any]:
+        """The phase's JSON-safe summary, read off its ledgers so a resume
+        writes what an uninterrupted run writes."""
+        outcomes: Dict[str, int] = {}
+        path = self.phase_dir / ledger.OUTCOMES_NAME
+        if path.exists():
+            for record in read_jsonl(path):
+                if record.get("phase_label") == self.phase.label:
+                    name = record["outcome"]
+                    outcomes[name] = outcomes.get(name, 0) + 1
+        scopes = {scope: 0 for scope in ("subtask", "general")}
+        for finding in findings.values():
+            scopes[finding.scope] += 1
+        new_types = sum(1 for row in self.types.values()
+                        if row.phase_label == self.phase.label)
+        given_up = (self._terminal_failures()
+                    & {subtask_id for subtask_id, subtask
+                       in self.subtasks.items()
+                       if subtask.phase_label == self.phase.label})
+        return {
+            "role": self.phase.spec.role,
+            "input_phase": self.source_label,
+            "first_learn": self.first,
+            "failed_sheets": len(self.failed),
+            "diagnosed": len(findings),
+            "diagnosis_failed": len(undiagnosed),
+            "scopes": scopes,
+            "segments_cut": sum(1 for subtask in self.subtasks.values()
+                                if subtask.phase_label == self.phase.label),
+            "segments_untyped": len(given_up),
+            "types": {"table": len(self.types), "new": new_types},
+            "located": len(evidence),
+            "unlocated": unlocated,
+            "evidence": dict(sorted(
+                routing.count_categories(evidence).items())),
+            "profile_version": profile.version,
+            "playbook_version": playbook.version,
+            "card_units": len(self.plans),
+            "outcomes": dict(sorted(outcomes.items())),
+        }
 
 
 # ---------------------------------------------------------------------------
-# The completion signal (replay idempotency)
+# The sequence and the inputs
 # ---------------------------------------------------------------------------
 
-def _finished_summary(phase_dir) -> Optional[Dict[str, Any]]:
-    """The phase's stored summary when the phase FINISHED (the summary
-    carries its "bank" entry -- the curation side writes the artifact
-    first and the summary last, so the entry is the commit point);
-    None when the phase never ran or stopped on infra failures (that
-    summary has no "bank" entry and the resume re-enters it)."""
+def _is_failed(sheet: AnswerSheet) -> bool:
+    return (sheet.execution is not None and sheet.grading is not None
+            and sheet.grading.verdict == "failure")
+
+
+def _finished_summary(phase_dir: Path) -> Optional[Dict[str, Any]]:
+    """The stored summary when the phase FINISHED (it carries "bank");
+    None when the phase never ran or stopped before its commit point."""
     path = phase_dir / SUMMARY_NAME
     if not path.exists():
         return None
@@ -341,28 +696,16 @@ def _finished_summary(phase_dir) -> Optional[Dict[str, Any]]:
         else None
 
 
-# ---------------------------------------------------------------------------
-# The sequence and the reports (the decision entry's inputs)
-# ---------------------------------------------------------------------------
-
 def _sequence(config: Any, phase: PhaseInstance) -> Tuple[List[str], dict]:
-    """The frozen sequence and its parsed specs off the v4 config.
-
-    Reads ``config.sequence`` / ``config.phases`` -- the products every
-    loaded schema-4 config carries. A config object without them (or
-    with them empty) bypassed parse_phases: that is a wiring bug, named
-    here before any phase work starts.
-    """
+    """The frozen sequence and its parsed specs."""
     names = config.sequence
     specs = config.phases
     if (not isinstance(names, list) or not names
             or not isinstance(specs, dict)):
         raise CodeBugError(
-            "phase_learn needs the v4 config products "
-            "config.sequence (a list of phase names) and config.phases "
-            "(name -> parsed spec); got "
-            f"sequence={names!r}, phases={specs!r}: a directly "
-            "constructed config bypassed parse_phases")
+            "phase_learn needs config.sequence (a list of phase names) and "
+            f"config.phases (name -> parsed spec); got sequence={names!r}, "
+            f"phases={specs!r}")
     if not 0 <= phase.index < len(names):
         raise CodeBugError(
             f"phase index {phase.index} is outside the sequence of "
@@ -378,315 +721,53 @@ def _sequence(config: Any, phase: PhaseInstance) -> Tuple[List[str], dict]:
     return list(names), specs
 
 
-def _current_execute_position(names: Sequence[str], specs: dict,
-                              index: int) -> int:
-    """The position of the nearest preceding EXECUTE phase.
-
-    A learn phase learns from the measurement that just finished. A
-    test-role phase is refused here (boundary section 3 rule 9: test
-    results never flow into learning) -- the config's checklist already
-    discourages the shape, and the loud refusal is the backstop.
-    """
+def _input_position(names: Sequence[str], specs: dict, index: int) -> int:
+    """The position of the execute phase right before the learn phase; it
+    must be a baseline or a practice (test results never flow into
+    learning)."""
     for position in range(index - 1, -1, -1):
         spec = specs[names[position]]
         if not isinstance(spec, ExecutePhaseSpec):
             continue
-        if spec.role == PHASE_ROLE_TEST:
+        if spec.role not in (PHASE_ROLE_BASELINE, PHASE_ROLE_PRACTICE):
             raise CodeBugError(
-                f"learn phase at index {index} would follow the "
-                f"final-test phase {names[position]!r}: test results do "
-                "not flow into learning (boundary section 3 rule 9)")
+                f"learn phase at index {index} would learn from the "
+                f"{spec.role!r} phase {names[position]!r}: only a baseline "
+                "or a practice phase feeds learning")
         return position
     raise CodeBugError(
         f"learn phase at index {index} has no preceding execute phase to "
-        "learn from: the sequence is "
-        f"{[names[j] for j in range(index)]!r}")
+        f"learn from: the sequence is {[names[j] for j in range(index)]!r}")
 
 
-def _review_reports(ctx: Any, names: Sequence[str], specs: dict,
-                    index: int) -> Tuple[Optional[str],
-                                         PhaseReport,
-                                         Optional[PhaseReport],
-                                         str]:
-    """The current and control phase reports for one review.
-
-    The nearest preceding execute phase is the current measurement.  A
-    baseline there means the first learn phase: the baseline report is
-    the input and there is no separate control.  Otherwise ``compare``
-    names the control phase (or ``fresh_bare``/nothing, which leaves the
-    control empty and lets the decision read the phase's own no-injection
-    rows).
-    """
-    current_pos = _current_execute_position(names, specs, index)
-    name = names[current_pos]
-    spec = specs[name]
-    if spec.role == PHASE_ROLE_BASELINE:
-        baseline = _load_phase_report(ctx, names, specs, current_pos)
-        return (None, baseline, None, decision.DEFAULT_COMPARE_RULE)
-    current = _load_phase_report(ctx, names, specs, current_pos)
-    compare = spec.compare
-    rule = (compare.rule
-            if compare is not None and compare.rule is not None
-            else decision.DEFAULT_COMPARE_RULE)
-    if compare is None or compare.against == FRESH_BARE:
-        return spec.role, current, None, rule
-    earlier = [position for position in range(current_pos)
-               if names[position] == compare.against]
-    if not earlier:
-        raise CodeBugError(
-            f"phase {name!r} compares against {compare.against!r}, which "
-            "never appears before it in the sequence; the config's "
-            "load-time checklist should have refused this")
-    control_pos = earlier[-1]
-    control_spec = specs[compare.against]
-    if control_spec.role != PHASE_ROLE_BASELINE:
-        raise CodeBugError(
-            f"the control phase {compare.against!r} has role "
-            f"{control_spec.role!r}; a control is a baseline phase's "
-            "weak bare arm (the config's load-time checklist should "
-            "have refused this shape)")
-    control = _load_phase_report(ctx, names, specs, control_pos)
-    return spec.role, current, control, rule
+def _baseline_label(names: Sequence[str], specs: dict) -> str:
+    """The label of the sequence's baseline phase (its first entry)."""
+    for position, name in enumerate(names):
+        spec = specs[name]
+        if isinstance(spec, ExecutePhaseSpec) \
+                and spec.role == PHASE_ROLE_BASELINE:
+            return phase_label(position, name)
+    raise CodeBugError(f"the sequence {list(names)!r} has no baseline phase")
 
 
-def _load_phase_report(ctx: Any, names: Sequence[str], specs: dict,
-                       position: int) -> PhaseReport:
-    """One execute phase's trial-level report plus its carried units."""
+def _load_report(ctx: Any, names: Sequence[str], specs: dict,
+                 position: int) -> PhaseReport:
+    """The input execute phase's trial-level report."""
     name = names[position]
-    kind = {PHASE_ROLE_BASELINE: "baseline", PHASE_ROLE_EXAM: "exam",
-            PHASE_ROLE_LIVE: "live"}.get(specs[name].role)
-    if kind is None:
-        raise CodeBugError(
-            f"a report was asked for phase {name!r} of role "
-            f"{specs[name].role!r}; only baseline / exam / live phases "
-            "have one")
     phase_dir = phase_bank_dir(ctx.run_dir, phase_label(position, name))
     report = phase_report.read_phase_report(
-        phase_dir, phase_kind=kind, learning_usable=True)
+        phase_dir, phase_kind=specs[name].role, learning_usable=True)
     if report is None:
         raise CodeBugError(
             f"phase {name!r} has no trial-level artifacts "
-            "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl); "
-            "this run predates the answer-sheet protocol")
-    return PhaseReport(
-        phase_kind=kind,
-        learning_usable=True,
-        sheets=list(report.sheets) + _carried_source_sheets(ctx, phase_dir),
-        units=list(report.units) + phase_report.read_carried_units(phase_dir),
-        summary=dict(report.summary),
-        external=report.external)
-def _live_round(names: Sequence[str], specs: dict, position: int) -> int:
-    """The round a live phase measured in: its 0-based index among the
-    sequence's live phases (the k-th live phase uses round k-1; the
-    upgrade-mapped live sequence has exactly two, matching the pinned
-    round vocabulary). Must agree with the execute driver's live-role
-    round derivation (stages/phase_execute/live.py's _round_of)."""
-    return sum(1 for earlier in range(position)
-               if isinstance(specs[names[earlier]], ExecutePhaseSpec)
-               and specs[names[earlier]].role == PHASE_ROLE_LIVE)
+            "(unit_specs.jsonl / answer_sheets/ / coverage.jsonl)")
+    return report
 
 
-def _previous_bank(ctx: Any, names: Sequence[str], specs: dict,
-                   index: int) -> List[Skill]:
-    """The previous learn phase's bank artifact as Skill objects. The
-    first learn phase of a sequence has no artifact to load, so it falls
-    back to the run-level frozen bank -- the same pre-learn fallback
-    rule :func:`phase_execute.phase_disk._bank_skills` applies to the
-    delivery side. A from-scratch run's run-level bank does not exist
-    at that point (the phase pipeline writes only phase artifacts), so
-    the fallback reads empty and the first learn phase still starts
-    from nothing. An ASSEMBLED run's pre-seeded bank IS the run-level
-    currency, and the decision then knows which tasks the frozen bank
-    already covers -- without the fallback it would re-offer an add for
-    every weak-failed train task the store also has no skill for, and
-    the authored skill could grow the bank the run was assembled to
-    re-measure frozen."""
-    previous = [position for position in range(index)
-                if isinstance(specs[names[position]], LearnPhaseSpec)]
-    if not previous:
-        return _refresh_skills(ctx, ctx.store.bank())
-    position = previous[-1]
-    rows = load_phase_bank(ctx.run_dir,
-                           phase_label(position, names[position]))
-    return _refresh_skills(ctx, rows)
-
-
-def _refresh_skills(ctx: Any, rows: Sequence[dict]) -> List[Skill]:
-    """Read each bank row's CURRENT store object when one exists.
-
-    A phase bank stores a snapshot from the moment the phase ended; the
-    live phase's finalize_group later flips pending winners to accepted.
-    The review decision must see the current status, not the snapshot.
-    """
-    out: List[Skill] = []
-    for row in rows:
-        skill = Skill.from_dict(row)
-        if ctx.store.exists("skills", skill.skill_id):
-            skill = ctx.store.load("skills", skill.skill_id, Skill)
-        out.append(skill)
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Curation: the sequence-position branch (R7 / wiring list item 11)
-# ---------------------------------------------------------------------------
-
-def _produce_bank(ctx: Any, phase: PhaseInstance, names: Sequence[str],
-                  specs: dict) -> Dict[str, Any]:
-    """End the phase with its own bank artifact: the configured
-    curation at the sequence's LAST learn phase, the as-is artifact at
-    every intermediate one (the budget valve stays either way)."""
-    last = not any(
-        isinstance(specs[name], LearnPhaseSpec)
-        for name in names[phase.index + 1:])
-    if last:
-        return curation_phase_bank.produce(ctx, phase.spec.curate,
-                                           phase.label)
-    return curation_phase_bank.produce_as_is(ctx, phase.spec.curate,
-                                             phase.label)
-
-
-# ---------------------------------------------------------------------------
-# The summary
-# ---------------------------------------------------------------------------
-
-def _summary(phase: PhaseInstance, rows: Sequence[Any],
-             superseded: Sequence[str], phase_dir, *,
-             current_phase: str, compare_rule: str,
-             checks_left: int) -> Dict[str, Any]:
-    """The phase's JSON-safe summary: the decision's action counts (one
-    per task-list row, before the rewrite outcome is known), the landed
-    outcomes read back from the ledger (cumulative across resumes), and
-    the decision's provenance. A revise that produced no new version
-    stays counted as ``revise`` here and appears as ``unchanged`` in
-    ``outcomes``; :func:`decision.revise_outcome` is the helper for a
-    caller that needs the effective action instead."""
-    records = _phase_outcomes(phase, phase_dir)
-    outcomes: Dict[str, int] = {}
-    for record in records:
-        outcome = record["outcome"]
-        outcomes[outcome] = outcomes.get(outcome, 0) + 1
-    # cluster_by_trigger keeps its own per-cluster receipts; the task-level
-    # outcomes ledger is absent on that path.  The cluster summary is the
-    # authoritative count there, so merge it without double-counting shared
-    # keys.
-    outcomes.update(_cluster_outcomes(phase_dir))
-    actions: Dict[str, int] = {}
-    for row in rows:
-        actions[row.action] = actions.get(row.action, 0) + 1
-    summary = {
-        "role": phase.spec.role,
-        "current_phase": current_phase,
-        "compare_rule": compare_rule,
-        "checks_left": checks_left,
-        "task_list": {**actions, "superseded_rows": len(superseded)},
-        "outcomes": outcomes,
-    }
-    uncovered = _cluster_uncovered(phase_dir)
-    if uncovered is not None:
-        summary["uncovered_add_tasks"] = uncovered
-    return summary
-
-
-def _cluster_outcomes(phase_dir) -> Dict[str, int]:
-    """The cluster path's terminal counts, or an empty mapping.
-
-    ``learn_add_cluster`` writes ``cluster_outcomes.jsonl`` and a
-    cumulative ``cluster_summary.json``; it does not write the regular
-    task-level ``outcomes.jsonl``.  The summary reader therefore has to
-    include this ledger explicitly.
-    """
-    path = phase_dir / "cluster_summary.json"
-    if not path.exists():
-        return {}
-    payload = read_json(path)
-    raw = payload.get("outcomes") if isinstance(payload, dict) else None
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        str(name): value for name, value in raw.items()
-        if isinstance(value, int) and not isinstance(value, bool)
-    }
-
-
-def _cluster_uncovered(phase_dir) -> Optional[List[dict]]:
-    """The cluster path's add-authorizations without an anchored skill."""
-    path = phase_dir / "cluster_summary.json"
-    if not path.exists():
-        return None
-    payload = read_json(path)
-    raw = payload.get("uncovered_add_tasks") if isinstance(
-        payload, dict) else None
-    return raw if isinstance(raw, list) else []
-
-
-def _carried_source_sheets(ctx: Any, phase_dir) -> List[Any]:
-    """The original sheets behind this phase's reused units.
-
-    A reused unit has no sheets in the current phase, but its usage
-    facts are still what a retry/keep/delete decision needs. The carried
-    summary names the ORIGINAL measured unit, so one lookup into that
-    phase's report recovers the sheets.
-    """
-    out: List[Any] = []
-    seen = set()
-    for unit in phase_report.read_carried_units(phase_dir):
-        source_id = (unit.artifacts or {}).get("reused_from")
-        if not source_id:
-            continue
-        try:
-            source_label = phase_label_of_unit_id(source_id)
-        except ValueError as exc:
-            raise CodeBugError(
-                f"carried unit {unit.unit_id!r} names malformed source "
-                f"unit {source_id!r}") from exc
-        source_dir = phase_bank_dir(ctx.run_dir, source_label)
-        source_report = phase_report.read_phase_report(
-            source_dir, phase_kind="carried", learning_usable=True)
-        if source_report is None:
-            raise CodeBugError(
-                f"carried unit {unit.unit_id!r} names source "
-                f"{source_id!r}, but its phase has no trial-level report")
-        matched = [sheet for sheet in source_report.sheets
-                   if sheet.coverage.unit_id == source_id]
-        if not matched:
-            raise CodeBugError(
-                f"carried unit {unit.unit_id!r} names source "
-                f"{source_id!r}, but that source unit has no sheets")
-        for sheet in matched:
-            if sheet.sheet_id not in seen:
-                seen.add(sheet.sheet_id)
-                out.append(sheet)
-    return out
-
-
-def _group_better_by_task(ctx: Any, round_: int
-                          ) -> Dict[str, Optional[bool]]:
-    """The live phase's group result for this round: task -> better.
-
-    ``verdicts.jsonl`` is the live phase's own commit ledger; ``better``
-    is True for a winning group, False for a miss, and None for a
-    zero-execution terminal. A missing ledger/round returns an empty
-    map, which the decision keeps as unverified instead of guessing.
-    """
-    path = lm.ledger_path(ctx.store, lm.VERDICTS_LEDGER)
-    if not path.exists():
-        return {}
-    out: Dict[str, Optional[bool]] = {}
-    for row in read_jsonl(path):
-        if row.get("round") != round_:
-            continue
-        task_id = row.get("task_id")
-        if isinstance(task_id, str) and task_id not in out:
-            out[task_id] = row.get("better")
-    return out
-
-
-def _phase_outcomes(phase: PhaseInstance, phase_dir) -> List[dict]:
-    """This phase's receipt rows (the outcomes ledger is cumulative:
-    a resumed phase's summary covers both halves)."""
-    path = phase_dir / learn_ledger.OUTCOMES_NAME
-    if not path.exists():
-        return []
-    return [record for record in read_jsonl(path)
-            if record.get("phase_label") == phase.label]
+def _previous_bank(ctx: Any, previous_learn: Optional[str]) -> List[Skill]:
+    """The bank the phase starts from, as the rows were published: the
+    previous learn phase's artifact, or before the first learn phase the
+    run-level bank (empty in a run built from scratch)."""
+    rows = (ctx.store.bank() if previous_learn is None
+            else load_phase_bank(ctx.run_dir, previous_learn))
+    return [Skill.from_dict(row) for row in rows]

@@ -1,9 +1,8 @@
 """Test-only prompt fixtures for the generic B1 call tests.
 
-The production exam prompts are now EXAM_SCENE / EXAM_TRIGGER / EXAM_PLAN /
-EXAM_JUDGE.  The low-level call tests use small named prompts to exercise
-formatting and retries, so register their local names only for the duration
-of each test here instead of keeping retired production prompts alive.
+The low-level call tests use small named prompts to exercise formatting and
+retries, so their local names are registered only for the duration of each
+test here, never as production prompts.
 """
 
 import pytest

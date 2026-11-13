@@ -162,6 +162,56 @@ def test_the_manifest_may_ride_on_the_sheets_instead_of_the_unit_rows(
     assert summary["judged_trials"] == 3
 
 
+def _as_practice(run, bank):
+    """A finished practice phase: the folder trials of ``TRIALS`` with the
+    manifest on their sheets, recorded with the practice role."""
+    label = "p03:practice"
+    write_test_phase(run, bank, TRIALS, label=label, manifest_on_sheets=True)
+    directory = run / "phases" / "p03_practice"
+    (directory / "units.jsonl").unlink()
+    (directory / "phase.json").write_text(
+        json.dumps({"label": label, "role": "practice"}))
+    return label
+
+
+def test_a_practice_phase_is_judged_over_every_delivered_trial(tmp_path):
+    run = tmp_path / "run"
+    bank = make_bank()
+    write_learn_phase(run, "p02:learn", bank)
+    label = _as_practice(run, bank)
+    handle = make_fake_handle("judge", skill_use_judge_script(_applicable))
+
+    summary = judge_skills.judge_phase(
+        run, label, tmp_path / "out", handle, view_rules=ViewRules(),
+        instruction_for=_instruction)
+
+    assert summary["arm"] is None and summary["phase_label"] == label
+    assert summary["bank_phase_label"] == "p02:learn"
+    assert summary["expected_trials"] == summary["judged_trials"] == 3
+
+
+@pytest.mark.parametrize("role", ["learn", "baseline"])
+def test_a_phase_of_another_role_is_refused(tmp_path, role):
+    run = tmp_path / "run"
+    bank = make_bank()
+    write_learn_phase(run, "p02:learn", bank)
+    label = _as_practice(run, bank)
+    (run / "phases" / "p03_practice" / "phase.json").write_text(
+        json.dumps({"label": label, "role": role}))
+
+    with pytest.raises(ConfigError, match=f"has role '{role}'"):
+        judge_skills.judge_phase(
+            run, label, tmp_path / "out", make_fake_handle("judge", ""),
+            view_rules=ViewRules(), instruction_for=_instruction)
+
+
+def test_a_phase_without_its_record_is_refused(run_dir, tmp_path):
+    (run_dir / "phases" / "p03_test" / "phase.json").unlink()
+
+    with pytest.raises(ConfigError, match="no phase.json"):
+        _judge(run_dir, tmp_path / "out")
+
+
 def test_a_resume_after_a_crash_matches_a_straight_run(run_dir, tmp_path):
     straight, _ = _judge(run_dir, tmp_path / "straight")
 
@@ -279,7 +329,8 @@ def test_a_resume_with_another_judge_model_is_refused(run_dir, tmp_path):
 
 def test_the_bank_is_the_latest_artifact_before_the_phase(run_dir, tmp_path):
     later = make_bank()
-    later[0].content = later[0].content.replace("do step 1", "LATER step 1")
+    later[0].steps = [step.replace("do step 1", "LATER step 1")
+                      for step in later[0].steps]
     write_learn_phase(run_dir, "p04:learn", later)
 
     summary, handle = _judge(run_dir, tmp_path / "out")
@@ -301,7 +352,7 @@ def test_a_manifest_the_bank_no_longer_carries_is_refused(tmp_path):
 
 def test_a_phase_that_delivered_no_card_has_nothing_to_judge(tmp_path):
     run = tmp_path / "run"
-    bank = make_bank(status="pending")
+    bank = make_bank(status="discarded")
     write_learn_phase(run, "p02:learn", bank)
     write_test_phase(run, bank, TRIALS)
 
@@ -326,7 +377,7 @@ def test_the_benchmark_supplies_the_view_rules_and_instruction_by_default(
             view_rules=ViewRules(max_obs_chars=30, head_keep=5,
                                  tail_keep=5)))
     monkeypatch.setattr(
-        judge_skills.attribution, "task_instruction_for",
+        judge_skills, "task_instruction",
         lambda benchmark, ref: f"PLUGIN[{benchmark}] {ref}")
     handle = make_fake_handle("judge", skill_use_judge_script(_applicable))
 

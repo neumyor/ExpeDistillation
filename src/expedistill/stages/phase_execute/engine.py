@@ -1,11 +1,11 @@
-"""The real-execution engine: plan, dispatch, judge, re-dispatch.
+"""The real-execution engine: plan, dispatch, re-dispatch.
 
 The shared machinery every K1-driven arm runs on: the delivery rows
-become :class:`_Plan` objects (full frozen unit ids attached), K1
-dispatches them, each attempt is judged under the phase's named rule,
-and a unit whose dispatch died with nothing stored is re-offered up to
-the durable per-unit budget. The baseline and final-test roles go
-through this engine; the exam and live roles run their own protocols.
+become :class:`Plan` objects (full frozen unit ids attached), K1
+dispatches them, and a unit whose dispatch died with nothing stored is
+re-offered up to the durable per-unit budget. The roles grade the stored
+trials themselves. All three execute roles (baseline, practice, test) go
+through this engine.
 """
 
 from dataclasses import dataclass, replace
@@ -15,7 +15,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Mapping,
     Optional,
     Sequence,
     Set,
@@ -24,6 +23,7 @@ from typing import (
 
 from expedistill.benchmarks.base import Task
 from expedistill.blocks import tasks as tasks_block
+from expedistill.composites.batch_execute import batch_execute
 from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core import ids
 from expedistill.core.config import PhaseInstance
@@ -35,34 +35,25 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import Store, read_json, write_json
 from expedistill.stages.context import StageContext
-
-# The K1 seam: the tests wrap the package-level ``batch_execute`` (the
-# entry module re-exports it), so every dispatch in this package goes
-# through the package attribute at call time, never a module-local name.
-import expedistill.stages.phase_execute as _package
-
 from expedistill.stages.phase_execute.phase_disk import (
     REDISPATCH_NAME,
     execute_phase_dir,
+    folder_manifest_of,
 )
 
 __all__ = [
-    "_Plan",
-    "_arm_trajectories",
-    "_dispatch_arm",
-    "_folder_manifest_of",
-    "_plan_units",
-    "_prefixed_task_map",
-    "_redispatch_state",
-    "_missing_attempts",
-    "_run_arm_units",
-    "_save_redispatch_state",
-    "_skills_for_task",
-    "_task_objects",
+    "Plan",
+    "arm_trajectories",
+    "dispatch_arm",
+    "plan_units",
+    "planned_trajectory_ids",
+    "run_arm_units",
+    "task_map",
+    "task_objects",
 ]
 
 
-def _task_objects(ctx: StageContext, raw_ids: Sequence[str]) -> List[Task]:
+def task_objects(ctx: StageContext, raw_ids: Sequence[str]) -> List[Task]:
     """Rebuild the phase's Task objects through D1 (deterministic from
     the frozen config); a plugin answering outside the requested ids is
     a ConfigError before any execution starts (the stage-1 rule)."""
@@ -75,83 +66,62 @@ def _task_objects(ctx: StageContext, raw_ids: Sequence[str]) -> List[Task]:
     return sorted(tasks, key=lambda task: task.task_id)
 
 
-def _prefixed_task_map(ctx: StageContext,
-                       raw_ids: Sequence[str]) -> Dict[str, Task]:
+def task_map(ctx: StageContext,
+             raw_ids: Sequence[str]) -> Dict[str, Task]:
     """``{prefixed task id: Task}`` over the raw id list (the join of
     delivery rows, K1's Task objects and the trajectory ids). An empty
-    list is an empty map WITHOUT a plugin call: a live phase whose
-    pending-group universe is empty (an assembled run with a fully
-    accepted bank) resolves zero tasks, and a plugin may legitimately
-    refuse an empty task list (TB does -- empty means "the whole
-    89-task set by accident" is never allowed)."""
+    list is an empty map WITHOUT a plugin call: a plugin may legitimately
+    refuse an empty task list (TB does -- empty means "the whole 89-task
+    set by accident" is never allowed)."""
     if not raw_ids:
         return {}
     return {ids.make_task_id(ctx.config.benchmark, task.task_id): task
-            for task in _task_objects(ctx, raw_ids)}
+            for task in task_objects(ctx, raw_ids)}
 
 
 @dataclass
-class _Plan:
+class Plan:
     """One real-execution unit: the delivery row with its FULL frozen
     unit id attached, its role and its Task object."""
 
     unit: ExecutionUnitRow
     role: str
-    task: Optional[Task]
+    task: Task
     n_attempts: int
 
 
-def _folder_manifest_of(row: ExecutionUnitRow) -> Optional[Any]:
-    """The row's folder manifest, or None when it carries none (the one
-    folder-row predicate: the folder delivery attaches ONE phase-level
-    manifest to every row, every other delivery's rows carry none, so
-    presence alone is the question -- the engine's attachment, the
-    phase driver's materialization and its read-set pass all ask it
-    here). A manifest with no ``files`` is the empty accepted bank's
-    null state; what that means (no materialization, no attachment, but
-    the summary still reports the read sets) is each caller's frozen
-    rule, not this predicate's."""
-    return row.aux.get("skill_folder")
-
-
-def _plan_units(rows: Sequence[ExecutionUnitRow],
-                tasks: Optional[Dict[str, Task]], *,
-                phase_label: str, benchmark: str, role: str,
-                n_attempts: int,
-                skill_folder_dir: Optional[str] = None,
-                skill_folder_dirs: Optional[Mapping[str, str]] = None,
-                attach_folder: bool = True,
-                ) -> List[_Plan]:
+def plan_units(rows: Sequence[ExecutionUnitRow],
+               tasks: Dict[str, Task], *,
+               phase_label: str, benchmark: str, role: str,
+               n_attempts: int,
+               skill_folder_dir: Optional[str] = None,
+               ) -> List[Plan]:
     """Rebuild each delivery row's full frozen unit id (unit_ids' frozen
     rule; the row's task ref and sha8 already carry the pieces -- the
-    P2 ruling's one rebuild site) and pair it with its Task object when
-    the phase dispatches K1 (the exam role pairs none).
+    P2 ruling's one rebuild site) and pair it with its Task object.
 
     The row's task ref is normalized to the PREFIXED task id: delivery
     answers whatever identity its tasks carried (a Task object's raw
-    id, a prefixed id, an exam ref), while the frozen unit id, the
-    trajectory ids and the reports all speak the prefixed form. Exam
-    refs pass through unchanged (they are not task ids).
+    id or a prefixed id), while the frozen unit id, the trajectory ids
+    and the reports all speak the prefixed form.
 
     A row whose aux carries the folder delivery's manifest (the
-    real_folder execution, M3; presence read through
-    ``_folder_manifest_of``, the one folder-row predicate) gets it
+    real_folder execution; presence read through
+    ``phase_disk.folder_manifest_of``, the one folder-row predicate) gets it
     attached to its plan's Task meta together with ``skill_folder_dir``
     -- the materialized folder's local path, which the CALLER
     materialized before dispatch (the phase driver owns the bank the
-    manifest resolves against). ``skill_folder_dirs`` maps each task ref
-    to its own materialized directory (the live phase's per-task
-    folders); when it is absent, the single phase-level
-    ``skill_folder_dir`` applies (the test phase). The manifest with no
-    files is the delivery's null state (an empty accepted bank): no
-    attachment, the unit runs bare -- the D9 empty-injection lesson,
-    never a guidance claiming skills that do not exist. A manifest with
-    files but no directory is a wiring bug, not a configuration
+    manifest resolves against). A manifest with no files (an empty
+    bank) is attached all the same: the unit runs with the folder prompt
+    and the manifest's ``playbook_text`` in the same place as a with-bank
+    unit, only the catalog is empty -- the bank is the one difference
+    between such a unit and a with-bank one, never the presentation. A
+    folder row without a directory is a wiring bug, not a configuration
     problem."""
-    plans: List[_Plan] = []
+    plans: List[Plan] = []
     for row in rows:
         ref = row.task_ref
-        if tasks is not None and ref not in tasks:
+        if ref not in tasks:
             prefixed = ids.make_task_id(benchmark, ref)
             if prefixed in tasks:
                 ref = prefixed
@@ -160,13 +130,11 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
                     f"delivery resolved unit {row.unit_id!r} outside the "
                     "phase's task set; the driver and the delivery "
                     "disagree")
-        task = tasks[ref] if tasks is not None else None
-        manifest = _folder_manifest_of(row)
-        if attach_folder and manifest is not None and manifest.get("files"):
-            folder_dir = (skill_folder_dirs.get(ref)
-                          if skill_folder_dirs is not None
-                          else skill_folder_dir)
-            if folder_dir is None or task is None:
+        task = tasks[ref]
+        manifest = folder_manifest_of(row)
+        if manifest is not None:
+            folder_dir = skill_folder_dir
+            if folder_dir is None:
                 raise CodeBugError(
                     f"delivery resolved unit {row.unit_id!r} with a skill "
                     "folder but the phase passes no materialized "
@@ -175,7 +143,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
             task = replace(task, meta={**task.meta,
                                        "skill_folder": manifest,
                                        "skill_folder_dir": folder_dir})
-        plans.append(_Plan(
+        plans.append(Plan(
             unit=replace(
                 row,
                 task_ref=ref,
@@ -189,7 +157,7 @@ def _plan_units(rows: Sequence[ExecutionUnitRow],
     return plans
 
 
-def _skills_for_task(plans: Sequence[_Plan]
+def _skills_for_task(plans: Sequence[Plan]
                      ) -> Optional[Callable[[Task], Tuple[Any, str]]]:
     """K1's per-task injection resolver over the planned rows (None when
     every unit is a bare scalar pair -- the frozen whole-bank and bare
@@ -233,25 +201,26 @@ def _save_redispatch_state(path: Path,
     write_json(path, state, indent=2)
 
 
-def _dispatch_arm(ctx: StageContext, phase: PhaseInstance, *,
-                  plans: Sequence[_Plan], store: Store, arm: str,
-                  skip_unit_ids: Set[str],
-                  skills_for_task: Optional[Callable] = None
-                  ) -> None:
-    """One K1 batch over the arm's plans at the arm's frozen depth."""
+def dispatch_arm(ctx: StageContext, phase: PhaseInstance, *,
+                 plans: Sequence[Plan], store: Store, arm: str,
+                 skip_unit_ids: Set[str]) -> None:
+    """One K1 batch over the arm's plans at the arm's frozen depth.
+
+    K1 is called through this module's ``batch_execute`` name, so the
+    tests wrap it at ``engine.batch_execute``."""
     if not plans:
         return
     role = plans[0].role
-    _package.batch_execute(
+    batch_execute(
         store=store,
+        phase_label=phase.label,
         benchmark=ctx.config.benchmark,
         tasks=[plan.task for plan in plans],
         role=role,
         model_name=ctx.config.models[f"executor_{role}"],
         handle=ctx.handle(f"executor_{role}"),
         n_attempts=plans[0].n_attempts,
-        skills_for_task=(skills_for_task if skills_for_task is not None
-                         else _skills_for_task(plans)),
+        skills_for_task=_skills_for_task(plans),
         workdir_root=(Path(ctx.workdir_root)
                       / phase.label.replace(":", "_") / arm),
         usage=ctx.usage,
@@ -262,13 +231,18 @@ def _dispatch_arm(ctx: StageContext, phase: PhaseInstance, *,
     )
 
 
-def _missing_attempts(store: Store, plan: _Plan, *,
+def planned_trajectory_ids(phase_label: str, plan: Plan) -> List[str]:
+    """The trajectory ids one plan expects, in attempt order."""
+    return [ids.make_trajectory_id(phase_label, plan.unit.task_ref,
+                                   plan.role, attempt)
+            for attempt in range(plan.n_attempts)]
+
+
+def _missing_attempts(store: Store, phase_label: str, plan: Plan, *,
                       accepted: Set[str]) -> List[str]:
     """Expected trajectory ids that are neither stored nor accepted holes."""
     missing: List[str] = []
-    for attempt in range(plan.n_attempts):
-        trajectory_id = ids.make_trajectory_id(
-            plan.unit.task_ref, plan.role, attempt)
+    for trajectory_id in planned_trajectory_ids(phase_label, plan):
         if trajectory_id in accepted:
             continue
         if not store.exists("trajectories", trajectory_id):
@@ -276,10 +250,10 @@ def _missing_attempts(store: Store, plan: _Plan, *,
     return missing
 
 
-def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
-                   plans: Sequence[_Plan], store: Store, arm: str,
-                   limit: int, accepted: Set[str]
-                   ) -> Tuple[List[Trajectory], Set[str]]:
+def run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
+                  plans: Sequence[Plan], store: Store, arm: str,
+                  limit: int, accepted: Set[str]
+                  ) -> Tuple[List[Trajectory], Set[str]]:
     """Dispatch and re-dispatch one arm's units; return stored trials.
 
     ``accepted`` is the CALLER's durable accepted-hole set: accepted holes
@@ -297,26 +271,26 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     open_budget = [plan for plan in plans
                    if state.get(plan.unit.unit_id,
                                 {}).get("passes", 0) < limit]
-    _dispatch_arm(ctx, phase, plans=open_budget, store=store, arm=arm,
-                  skip_unit_ids=accepted)
+    dispatch_arm(ctx, phase, plans=open_budget, store=store, arm=arm,
+                 skip_unit_ids=accepted)
     holes: Set[str] = set()
     for plan in plans:
         entry = state.setdefault(plan.unit.unit_id, {"passes": 0})
         while True:
-            missing = _missing_attempts(store, plan, accepted=accepted)
+            missing = _missing_attempts(store, phase.label, plan,
+                                        accepted=accepted)
             if not missing or entry["passes"] >= limit:
                 break  # nothing to re-offer, or the budget is spent
             entry["passes"] += 1  # one more K1 offer of the holes
             _save_redispatch_state(state_path, state)
-            _dispatch_arm(ctx, phase, plans=[plan], store=store, arm=arm,
-                          skip_unit_ids=accepted)
+            dispatch_arm(ctx, phase, plans=[plan], store=store, arm=arm,
+                         skip_unit_ids=accepted)
         _save_redispatch_state(state_path, state)
         holes.update(missing)
 
-    planned_ids = {
-        ids.make_trajectory_id(plan.unit.task_ref, plan.role, attempt)
-        for plan in plans for attempt in range(plan.n_attempts)
-    }
+    planned_ids = {trajectory_id for plan in plans
+                   for trajectory_id in planned_trajectory_ids(
+                       phase.label, plan)}
     trajectories = [
         store.load("trajectories", trajectory_id, Trajectory)
         for trajectory_id in sorted(planned_ids)
@@ -326,7 +300,7 @@ def _run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     return trajectories, holes
 
 
-def _arm_trajectories(store: Store) -> List[Trajectory]:
+def arm_trajectories(store: Store) -> List[Trajectory]:
     """Every trajectory in one arm store, sorted by id."""
     return [store.load("trajectories", trajectory_id, Trajectory)
             for trajectory_id in store.ids("trajectories")]

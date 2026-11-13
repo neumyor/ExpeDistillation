@@ -138,17 +138,13 @@ def render_answer_sheet(sheet: AnswerSheet,
 
     if execution is None:
         lines.append("_No execution record: this trial was missing or "
-                     "terminal before an answer existed._")
+                     "terminal before a run was stored._")
         return "\n".join(lines)
 
     if execution.kind == "trajectory":
         lines.append("## Trajectory")
         lines.append("")
         lines.append(render_steps_view(execution.steps or [], view_rules))
-    elif execution.kind == "attempt":
-        lines.append("## Exam answer")
-        lines.append("")
-        lines.append(execution.answer or "")
     elif execution.kind == "external":
         lines.append("## External campaign reward")
         lines.append("")

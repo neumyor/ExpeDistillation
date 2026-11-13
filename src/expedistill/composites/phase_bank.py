@@ -1,44 +1,34 @@
-"""Per-phase skill bank artifacts (R7): the layout and the loading side.
+"""Per-phase skill bank artifacts: the layout, the writing and the loading.
 
-Decision doc: docs/decisions/execute_learn_repair_plan_20261016.md, item
-R7 (problem G9: the bank used to be produced once by stage 5 and read
-implicitly by stage 6 -- a learn phase ended with no artifact of its
-own). Every learn phase now ends with an explicit bank artifact on disk,
-in the shape the next phase loads directly: the same skill-record rows
-``skill_bank.jsonl`` has always carried, full skill dicts, so each
-member's status and version travel with the row (delivery receives its
-member versions from this artifact, plan item R5).
-
-The five object stores stay run-level and shared (hard constraint 5);
-only this artifact is per-phase:
+Every learn phase ends with an explicit bank artifact on disk, in the shape
+the next phase loads directly: full skill dicts, so each member's status
+and version travel with the row (delivery hands out the ``active``
+members only):
 
     <run_dir>/phases/<phase_label>/skill_bank.jsonl    the bank rows
     <run_dir>/phases/<phase_label>/bank_summary.json   members/size/digest
-    <run_dir>/phases/<phase_label>/curation_log.json   K5 journal (agentbrew)
 
-``phase_label`` is the phase driver's label (plan R9: ``pNN:<name>`` --
-exactly one colon, right after the ``pNN`` head). The colon is the one
-non-directory character allowed and maps to ``_`` (the R9
-phase-directory naming); on the frozen label shape that rewrite is
-injective, and every other character must already be directory-safe, so
+The object stores stay run-level and shared; only this artifact is
+per-phase. The artifact carries EVERY stored skill, ``discarded`` ones
+included, in skill-id order (:func:`write_phase_bank`).
+
+``phase_label`` is the phase driver's label (``pNN:<name>`` -- exactly one
+colon, right after the ``pNN`` head). The colon is the one non-directory
+character allowed and maps to ``_``; on the frozen label shape that rewrite
+is injective, and every other character must already be directory-safe, so
 a label can never escape its phase directory nor collide with another
 label's.
-
-This module owns the layout and the LOADING side only. The producing
-side is the curation drivers (``methods/curation/``): ``agentbrew``
-merges with its merge_check regression exams (K3, through
-composites.curation's dest mode), ``none`` passes the accepted set
-through unchanged, and the sequence-position branch (curation runs only
-at the sequence's last learn phase; the intermediate phases produce the
-as-is artifact) belongs to the phase driver (Wave 2, plan R9).
 """
 
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
+from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError
-from expedistill.infra.store import read_json, read_jsonl
+from expedistill.infra.store import (
+    Store, read_json, read_jsonl, write_json, write_jsonl)
+from expedistill.inject import bank_reference
 
 __all__ = [
     "BANK_NAME",
@@ -49,6 +39,7 @@ __all__ = [
     "phase_bank_dir",
     "phase_bank_path",
     "phase_bank_summary_path",
+    "write_phase_bank",
 ]
 
 #: The per-phase tree inside the run directory (R9's phase layout).
@@ -129,3 +120,27 @@ def load_phase_bank_summary(run_dir: Union[str, Path],
             "the phase did not finish (or never ran) -- a human must look "
             "at this run")
     return read_json(path)
+
+
+def write_phase_bank(store: Store, run_dir: Union[str, Path],
+                     phase_label: str) -> Dict[str, Any]:
+    """Write the learn phase's bank artifact and its summary; return the
+    summary (``members`` / ``size`` / ``bank_reference``).
+
+    The rows are every stored skill, ``discarded`` included, in skill-id
+    order; both files are rewritten whole and atomically, so a repeated
+    call over the same store lands on exactly the same bytes.
+    """
+    skills: List[Skill] = [store.load("skills", skill_id, Skill)
+                           for skill_id in store.ids("skills")]
+    directory = phase_bank_dir(run_dir, phase_label)
+    directory.mkdir(parents=True, exist_ok=True)
+    write_jsonl(directory / BANK_NAME, [skill.to_dict() for skill in skills])
+    summary = {
+        "members": [skill.skill_id for skill in skills],
+        "size": len(skills),
+        "bank_reference": bank_reference(skills),
+    }
+    write_json(phase_bank_summary_path(run_dir, phase_label), summary,
+               indent=2)
+    return summary

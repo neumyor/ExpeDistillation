@@ -119,12 +119,6 @@ def plugin(monkeypatch):
 
 
 def _delivery(name):
-    if name == "retrieval":
-        # min_score 0 and top_k / max_categories at the bank size: the
-        # retrieval reaches every accepted skill for every task.
-        return ({"name": "retrieval", "top_k": len(NOTES),
-                 "max_categories": len(NOTES), "min_score": 0.0},
-                {"name": "real"})
     if name == "folder":
         return {"name": "folder"}, {"name": "real_folder"}
     return {"name": "whole_bank"}, {"name": "real"}
@@ -134,12 +128,11 @@ def _write_config(path: Path, delivery_name: str) -> Path:
     delivery, execution = _delivery(delivery_name)
     path.write_text(json.dumps({
         "benchmark": _FAKE,
-        "mode": "split",
         "models": {"executor_strong": "strong-model",
                    "executor_weak": "weak-model"},
         "n_attempts_strong": 1,
         "n_attempts_weak": 1,
-        "schema_version": 7,
+        "schema_version": 9,
         "sequence": ["test"],
         "phases": {"test": {"kind": "execute", "role": "test",
                             "tasks": "test", "delivery": delivery,
@@ -183,8 +176,7 @@ def _front_matter_and_body(text: str):
 
 
 @pytest.mark.parametrize("source_format", ["notes_jsonl", "skill_folder"])
-@pytest.mark.parametrize("delivery_name",
-                         ["folder", "whole_bank", "retrieval"])
+@pytest.mark.parametrize("delivery_name", ["folder", "whole_bank"])
 def test_the_test_phase_delivers_exactly_the_imported_skills(
         plugin, tmp_path, source_format, delivery_name):
     run_dir = tmp_path / "run"
@@ -200,10 +192,10 @@ def test_the_test_phase_delivers_exactly_the_imported_skills(
     assert (run_dir / BANK_ORIGIN_NAME).exists()
     assert summary["complete"] is True
 
-    # The bank the phase read: every imported skill, all accepted.
+    # The bank the phase read: every imported skill, all active.
     bank = [Skill.from_dict(row) for row in Store(run_dir).bank()]
     assert [skill.skill_id for skill in bank] == result["skill_ids"]
-    assert {skill.status for skill in bank} == {"accepted"}
+    assert {skill.status for skill in bank} == {"active"}
     assert summary["bank_reference"] == bank_reference(bank)
 
     with_bank = [call for call in plugin.calls if call["skills_block"]]
@@ -213,18 +205,6 @@ def test_the_test_phase_delivers_exactly_the_imported_skills(
     if delivery_name == "whole_bank":
         for call in with_bank:
             assert call["skills_block"] == format_skills_block(bank)
-    elif delivery_name == "retrieval":
-        audit = read_jsonl(run_dir / "stage6_test" / "retrieval_audit.jsonl")
-        assert [row["task_id"] for row in audit] == list(TEST_TASKS)
-        for row in audit:
-            assert sorted(entry["skill_id"] for entry in row["scores"]) == \
-                sorted(result["skill_ids"])
-            assert sorted(item["skill_id"] for item in row["selected"]) == \
-                sorted(result["skill_ids"])
-        for call in with_bank:
-            for skill in bank:
-                assert " ".join(skill.content.split()) in \
-                    call["skills_block"]
     else:
         manifest = with_bank[0]["task"].meta["skill_folder"]
         assert [entry["skill_id"] for entry in manifest["files"]] == \
@@ -243,7 +223,7 @@ def test_the_test_phase_delivers_exactly_the_imported_skills(
             # The agent sees the source's own summary as the description
             # and opens the source's own text.
             assert meta["description"] == skill.summary
-            assert body == skill.content
+            assert body == skill.verbatim_text
 
 
 def test_the_bank_reference_of_the_summary_is_that_of_the_imported_skills(

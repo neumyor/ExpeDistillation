@@ -13,7 +13,8 @@ newline inside the keystrokes JSON-escaped.
 
 import pytest
 
-from expedistill.composites.skill_use import skill_files_read
+from expedistill.composites.skill_use import (
+    skill_files_read, skill_read_events)
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError
 
@@ -196,11 +197,10 @@ def test_readskill_and_cat_reads_share_one_first_read_order():
     assert skill_files_read(trajectory, _MANIFEST) == [_SKILL_B, _SKILL_A]
 
 
-def test_every_readskill_event_keeps_its_step_and_original_command():
-    from expedistill.composites.skill_use import all_skill_read_events
+def test_the_first_readskill_event_keeps_its_step_and_original_command():
     trajectory = _trajectory(
-        f"ReadSkill[{_FILE_A}]", "look", f"> ReadSkill[{_FILE_A}]")
-    events = all_skill_read_events(trajectory, _MANIFEST)
+        "look", f"> ReadSkill[{_FILE_A}]", f"ReadSkill[{_FILE_A}]")
+    events = skill_read_events(trajectory, _MANIFEST)
     assert [(event["step_index"], event["command"]) for event in events] \
-        == [(0, f"ReadSkill[{_FILE_A}]"), (2, f"> ReadSkill[{_FILE_A}]")]
+        == [(1, f"> ReadSkill[{_FILE_A}]")]
     assert {event["skill_id"] for event in events} == {_SKILL_A}

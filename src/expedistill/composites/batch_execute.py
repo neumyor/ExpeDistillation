@@ -17,14 +17,14 @@ Pinned design decisions (see the repo docs this was specified against):
 - Remote run identity (docs/decisions/tb_run_namespace_20261011.md): each
   unit's task carries two keys before ``run_one`` is called.
   ``meta["run_namespace"]`` is 10 hex of sha256 over the resolved
-  ``store.run_dir``, ``role``, ``model_name``, the canonical JSON of the
+  ``store.run_dir``, the phase label, ``role``, ``model_name``, the
+  canonical JSON of the
   unit's ``skills_injected`` and the sha256 of its rendered
   ``skills_block`` (a regrouped bank keeps its reference but changes what
   the remote agent reads) -- identical across resumes of the same call,
-  and different for every arm (stage 1 strong vs weak, the stage-6 arm
-  stores) and every experiment, because trajectory ids alone do not carry
-  the arm. The digest is computed PER UNIT (retrieval delivery decision 3):
-  under ``skills_for_task`` two tasks of one batch carry different
+  and different for every arm (baseline strong vs weak, the test arm
+  stores), every phase (two practice phases share the run-level store and
+  may deliver the same bank) and every experiment. The digest is computed PER UNIT: under ``skills_for_task`` two tasks of one batch carry different
   injections, and a batch-level digest would alias them onto one remote
   run id; a task's attempts share their task's inputs, so they share the
   namespace without any memoisation. ``meta["attempt_token"]`` is
@@ -32,7 +32,7 @@ Pinned design decisions (see the repo docs this was specified against):
   The TB plugin builds its remote RUN_ID from both, so arms sharing a
   remote root never read each other's trials. The caller's Task objects
   are never mutated -- K1 works on ``replace`` copies.
-- Per-task skill delivery (retrieval, protocol v2 decision 3): when
+- Per-task skill delivery: when
   ``skills_for_task`` is given, each unit's (``skills_injected``,
   ``skills_block``) are resolved from its Task by that callable -- once
   per unit, at enumeration, BEFORE the stored-unit check, so a stored
@@ -76,7 +76,7 @@ Pinned design decisions (see the repo docs this was specified against):
   ``skills_injected`` differ from the unit's resolved request values (the
   per-task resolution under ``skills_for_task``, the call-level skills
   otherwise) is a ConfigError naming the unit and both values (a
-  re-curated bank or a swapped model must go to a new run directory);
+  changed bank or a swapped model must go to a new run directory);
   stored files are never overwritten.
 - Stopping: once any unit raises (a non-infrastructure error), no further
   unit is started; units already running finish and are stored, and each
@@ -204,9 +204,10 @@ def _canonical(value: Any) -> str:
             f"{type(value).__name__}: {exc}") from None
 
 
-def _run_namespace(store_dir: Union[str, Path], role: str, model_name: str,
+def _run_namespace(store_dir: Union[str, Path], phase_label: str,
+                   role: str, model_name: str,
                    skills_injected: Any, skills_block: str = "") -> str:
-    """Deterministic digest naming one arm of one experiment remotely.
+    """Deterministic digest naming one arm of one phase remotely.
 
     The store dir is resolved (``realpath``) so a symlinked or relative
     path to the same run dir is the same experiment. ``skills_injected``
@@ -220,6 +221,7 @@ def _run_namespace(store_dir: Union[str, Path], role: str, model_name: str,
     payload = json.dumps(
         {
             "store_dir": os.path.realpath(str(store_dir)),
+            "phase_label": phase_label,
             "role": role,
             "model_name": model_name,
             "skills_injected": _canonical(skills_injected),
@@ -308,6 +310,7 @@ def _execute_unit(
     unit: _Unit,
     *,
     store: Store,
+    phase_label: str,
     benchmark: str,
     role: str,
     model_name: str,
@@ -350,6 +353,7 @@ def _execute_unit(
         )
         try:
             return run_one(
+                phase_label=phase_label,
                 benchmark=benchmark,
                 task=task,
                 model_role=role,
@@ -388,6 +392,7 @@ def _execute_unit(
 def batch_execute(
     *,
     store: Store,
+    phase_label: str,
     benchmark: str,
     tasks: Sequence[Task],
     role: str,
@@ -408,6 +413,8 @@ def batch_execute(
 ) -> List[Trajectory]:
     """Execute every (task, attempt) unit, storing each Trajectory as it lands.
 
+    ``phase_label`` is the execute phase that dispatches the batch; it
+    tags every unit's trajectory id (``core.ids.make_trajectory_id``).
     Units are (task, attempt_index) for ``attempt_index in range(n_attempts)``,
     dispatched attempt-major (attempt, then raw task_id), so the same inputs
     always run the same units in the same order across runs. Units whose
@@ -416,7 +423,7 @@ def batch_execute(
     unit runs through its benchmark plugin in its own workdir and is saved
     immediately on completion.
 
-    ``skills_for_task`` (retrieval delivery) optionally resolves each
+    ``skills_for_task`` optionally resolves each
     unit's (``skills_injected``, ``skills_block``) from its Task. It is
     invoked once per unit at enumeration -- before the stored-unit check
     -- so a stored unit is compared against exactly the injection this
@@ -489,7 +496,8 @@ def batch_execute(
             units.append(_Unit(
                 task=task,
                 attempt_index=attempt,
-                trajectory_id=make_trajectory_id(task_id, role, attempt),
+                trajectory_id=make_trajectory_id(
+                    phase_label, task_id, role, attempt),
                 skills_injected=unit_skills,
                 skills_block=unit_block,
             ))
@@ -538,6 +546,7 @@ def batch_execute(
                 traj = _execute_unit(
                     unit,
                     store=store,
+                    phase_label=phase_label,
                     benchmark=benchmark,
                     role=role,
                     model_name=model_name,
@@ -549,7 +558,7 @@ def batch_execute(
                     # at enumeration, so an all-stored resume (nothing
                     # pending) never computes one.
                     run_namespace=_run_namespace(
-                        store.run_dir, role, model_name,
+                        store.run_dir, phase_label, role, model_name,
                         unit.skills_injected, unit.skills_block),
                     skills_injected=unit.skills_injected,
                     skills_block=unit.skills_block,

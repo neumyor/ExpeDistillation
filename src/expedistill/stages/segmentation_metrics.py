@@ -6,19 +6,18 @@ the share of skills that do NOT apply at task start, and the share of test
 trials that opened a skill after the first environment action.
 
 The first two come from artifacts that already exist (test answer sheets via
-``paper_tables`` and each learn phase's ``skill_bank.jsonl`` /
-``bank_summary.json``). The other two are computed here:
+``paper_tables`` and each learn phase's ``skill_bank.jsonl``). The bank size
+counts the ``active`` cards (the ones delivery hands out); the artifact also
+carries the ``discarded`` ones, reported beside it. The other two are
+computed here:
 
-* **anchor** -- every accepted skill names the segments its material came
-  from (``source_subtasks``). Each segment records ``step_range`` in the
-  shared Subtask store, and a segment's start IS the moment the skill
-  applies (the design's construction guarantee). A skill's anchor is the
-  minimum start over its sources; anchor 0 means it applies at task start.
-  Merge products carry no provenance rows but do carry their sources, so
-  this path covers the whole bank (the provenance ledger alone covered only
-  3 of 13 merged skills on the 2026-10-31 reference run). Two id
-  normalizations are needed: trial-level sub-segments embed the origin after
-  ``/skill/``, and trial skill ids carry a leading ``trial/``.
+* **anchor** -- every active card names the segments its material came
+  from (``source_subtasks``, the strong success and weak failure segments
+  of its subtask type). Each segment records ``step_range`` in the shared
+  Subtask store, and a segment's start is where the subtask begins in its
+  trajectory. A card's anchor is the minimum start over its sources;
+  anchor 0 means it applies at task start. An imported card has no
+  sources and stays unknown.
 * **mid-task open** -- a folder trial's stored steps include one step per
   ``ReadSkill[<location>]`` reply. The trial counts as a mid-task open when
   at least one read follows the first environment action.
@@ -46,65 +45,46 @@ __all__ = [
     "run",
     "run_metrics",
     "skill_anchor",
-    "skill_origin",
 ]
 
 _TEST_ROLE = "test"
-
-
-def skill_origin(subtask_id: str) -> str:
-    """The origin segment id named by one ``source_subtasks`` entry.
-
-    A skill written from a segment names it directly. A skill written from a
-    trial/exam sub-segment names
-    ``trial/<origin>/skill/<version>/exam/<attempt>/segNN``; the origin is the
-    part before ``/skill/`` with the leading ``trial/`` removed. Both forms
-    resolve in the run's Subtask store.
-    """
-    origin = str(subtask_id).split("/skill/", 1)[0]
-    if origin.startswith("trial/"):
-        origin = origin[len("trial/"):]
-    return origin
+_ACTIVE = "active"
 
 
 def _segment_start(store: Store, subtask_id: str) -> Optional[int]:
-    origin = skill_origin(subtask_id)
-    if not store.exists("subtasks", origin):
+    if not store.exists("subtasks", subtask_id):
         return None
-    subtask = store.load("subtasks", origin, Subtask)
+    subtask = store.load("subtasks", subtask_id, Subtask)
     return int(subtask.step_range[0])
 
 
 def skill_anchor(skill: Mapping[str, Any], store: Store) -> Optional[int]:
-    """The earliest segment start behind one skill, or None when unresolved.
+    """The earliest segment start behind one card, or None when unresolved.
 
-    The minimum over the sources answers "can this skill apply at task
-    start?": any source at step 0 makes the answer yes. The skill's own
-    subtask is the fallback for a skill with no recorded sources.
+    The minimum over the sources answers "can this card apply at task
+    start?": any source at step 0 makes the answer yes.
     """
     starts = [start for start in (
         _segment_start(store, source)
         for source in skill.get("source_subtasks") or [])
         if start is not None]
-    if not starts:
-        own = skill.get("subtask_id")
-        if isinstance(own, str) and own:
-            start = _segment_start(store, own)
-            if start is not None:
-                starts = [start]
     return min(starts) if starts else None
 
 
 def anchor_distribution(skills: Iterable[Mapping[str, Any]],
                         store: Store) -> Dict[str, Any]:
-    """How many accepted skills apply at task start, mid-task, or unknown."""
+    """How many active cards of a bank artifact apply at task start,
+    mid-task, or unknown; the discarded members are only counted."""
+    rows = list(skills)
+    active = [skill for skill in rows if skill.get("status") == _ACTIVE]
     anchors: List[Optional[int]] = [skill_anchor(skill, store)
-                                    for skill in skills]
+                                    for skill in active]
     known = [anchor for anchor in anchors if anchor is not None]
     at_start = sum(1 for anchor in known if anchor == 0)
     mid_task = sum(1 for anchor in known if anchor > 0)
     return {
         "skills": len(anchors),
+        "discarded": len(rows) - len(active),
         "known": len(known),
         "unknown": len(anchors) - len(known),
         "at_task_start": at_start,
@@ -235,8 +215,11 @@ def render(arms: Sequence[Mapping[str, Any]]) -> Tuple[str, Dict[str, Any]]:
     row("测试 trial 数", [str(arm["trials"]) for arm in arms])
     row("avg@3", [_percent_value(arm["avg_at_n"]) for arm in arms])
     row("pass@3", [_percent_value(arm["pass_at_n"]) for arm in arms])
-    row("初始技能库大小", [str(arm["initial_bank"]["skills"]) for arm in arms])
-    row("最终技能库大小", [str(arm["final_bank"]["skills"]) for arm in arms])
+    row("初始技能库大小（在用）",
+        [str(arm["initial_bank"]["skills"]) for arm in arms])
+    row("最终技能库大小（在用）",
+        [str(arm["final_bank"]["skills"]) for arm in arms])
+    row("最终库·已删除", [str(arm["final_bank"]["discarded"]) for arm in arms])
     row("初始库·不在任务开始适用",
         [_percent(arm["initial_bank"]["mid_task"],
                   arm["initial_bank"]["known"]) for arm in arms])

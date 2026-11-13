@@ -16,6 +16,7 @@ together). Pinned here:
   unregistered name.
 """
 
+import dataclasses
 import importlib
 import importlib.abc
 import importlib.machinery
@@ -150,7 +151,8 @@ def test_a_folder_unit_on_a_plugin_without_the_capability_is_config_error(monkey
     plugin = _install(monkeypatch, _Plugin("fakebench"))
     with pytest.raises(ConfigError, match="does not support skill folders") \
             as caught:
-        run_one(benchmark="fakebench", task=_folder_task(),
+        run_one(phase_label="p03:practice", benchmark="fakebench",
+                task=_folder_task(),
                 model_role="weak", model_name="weak-model",
                 attempt_index=0, skills_injected=None,
                 skills_block="## Skill folder catalog\n",
@@ -164,7 +166,7 @@ def test_a_folder_unit_on_a_plugin_without_the_capability_is_config_error(monkey
 def test_a_bare_unit_passes_the_guard_unchanged(
         monkeypatch, tmp_path, _no_fakebench):
     plugin = _install(monkeypatch, _Plugin("fakebench"))
-    run_one(benchmark="fakebench",
+    run_one(phase_label="p03:practice", benchmark="fakebench",
             task=Task(task_id="t1", instruction="do t1"),
             model_role="weak", model_name="weak-model",
             attempt_index=0, skills_injected=None, skills_block="",
@@ -181,7 +183,7 @@ def test_a_folder_unit_on_a_capable_plugin_reaches_run_unchanged(monkeypatch, tm
 
     plugin = _install(monkeypatch, CapablePlugin("fakebench"))
     task = _folder_task()
-    run_one(benchmark="fakebench", task=task,
+    run_one(phase_label="p03:practice", benchmark="fakebench", task=task,
             model_role="weak", model_name="weak-model",
             attempt_index=0, skills_injected="bank:000000000000",
             skills_block="## Skill folder catalog\n",
@@ -229,5 +231,8 @@ def test_a_plugin_without_the_capability_freezes_no_extra_prompt(
     plugin = ensure_plugin("searchqa")
     monkeypatch.setattr(
         type(plugin), "skill_folder_prompt_name", None, raising=False)
+    monkeypatch.setattr(
+        type(plugin), "prompt_pack", dataclasses.replace(
+            plugin.prompt_pack, executor_prompts=("SEARCHQA_TASK_PROMPT",)))
     digests = _prompt_digests("searchqa")
     assert "SEARCHQA_TASK_PROMPT_FOLDER" not in digests
