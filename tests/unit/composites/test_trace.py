@@ -164,6 +164,39 @@ def test_instruction_with_initial_is_idempotent():
         {"initial_observation": "room"}, "do it\n\nroom") == "do it\n\nroom"
 
 
+class _Execution:
+    def __init__(self, metrics):
+        self.task_ref = "tb:fix-git"
+        self.metrics = metrics
+
+
+def _task_prompt(task_ref):
+    return f"rendered prompt of {task_ref}"
+
+
+@pytest.mark.parametrize("metrics, instruction_for, expected", [
+    # The recorded first message is what the executor read: it wins.
+    ({"initial_prompt": "Task Description:\nfix the repo"}, _task_prompt,
+     "Task Description:\nfix the repo"),
+    # Nothing recorded: the benchmark's rendered task prompt.
+    ({}, _task_prompt, "rendered prompt of tb:fix-git"),
+    ({"initial_prompt": ""}, _task_prompt, "rendered prompt of tb:fix-git"),
+    # Neither: no task text at all.
+    ({}, None, ""),
+])
+def test_execution_instruction_prefers_the_recorded_first_message(
+        metrics, instruction_for, expected):
+    assert trace.execution_instruction(
+        _Execution(metrics), instruction_for) == expected
+
+
+def test_execution_instruction_appends_the_reset_observation():
+    execution = _Execution({"initial_prompt": "go",
+                            "initial_observation": "You are in a room."})
+    assert trace.execution_instruction(execution, _task_prompt) \
+        == "go\n\nYou are in a room."
+
+
 def test_check_ref_fails_on_a_missing_sheet_instead_of_guessing(run_dir):
     with pytest.raises(ModelOutputError):
         trace.check_ref(run_dir, TraceRef(LABEL, "no-such-sheet", 0))

@@ -455,7 +455,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | G2 | 归类 | （现有类型表, 一批段的卡片：label / description / 截断的步骤）→ 每段归入的类型（现有或新增：名字 + 起点状态） | `SUBTASK_TYPING` | `blocks/subtask_types.py` |
 | G3 | 写卡 | 一个子任务类型 + 同类型强模型成功段 + 弱模型失败段 + 画像 + playbook → 一张卡的四个字段 | `CARD_WRITE` | `methods/cards/writer.py`（材料在 `methods/cards/material.py`，字段校验在 `blocks/author.py`） |
 | G4 | 改写 | 卡 + 证据的真实步骤 + 诊断 + 画像 + playbook → 触发条件两个字段，或正文两个字段 | `REVISE_TRIGGER`、`REVISE_CONTENT` | `methods/revise/` |
-| — | 诊断 | 一张失败的摸底或练习答卷（含目录、playbook、打开过的卡）→ 失败原因、出错步、范围、画像笔记、playbook 笔记 | `TRIAL_FAILURE_ANALYSIS` | `methods/diagnose/` |
+| — | 诊断 | 一张失败的摸底或练习答卷（含目录、playbook、打开过的卡）→ 失败原因、出错步、范围、画像笔记、playbook 笔记。任务一节优先用轨迹记录的首轮消息（`metrics.initial_prompt`，目前只有 TB 记录，含完整任务描述），没有记录时才用本地渲染的任务提示词（`composites/trace.execution_instruction`；改写的证据窗口与 `judge-skills` 用同一规则） | `TRIAL_FAILURE_ANALYSIS` | `methods/diagnose/` |
 | — | 演化文本 | 上一版文本 + 笔记 + 事实 + 画像 → 新版画像或 playbook | `PROFILE_UPDATE`、`PLAYBOOK_UPDATE` | `methods/evolve_text/` |
 | — | 技能使用判定 | 一张终测答卷 + 展示过的技能目录 → 每张卡是否适用；被打开的卡的每一步是否被执行 | `SKILL_APPLICABILITY_JUDGE`、`SKILL_ADHERENCE_JUDGE` | `blocks/adherence.py` |
 
@@ -883,7 +883,7 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   库为空时与 5.2 相同：物化一个空的 `skill_folder/`，单元仍挂清单（没有文件）、用文件夹执行
   提示词，playbook 照常显示；
 - **TB 的技能文件夹**：TB 的首轮提示词由 Harbor 组装，依次是 Terminus 自己的模板
-  （`TB_TERMINUS_TEMPLATE` 是它的逐字节副本，只用于冻结 digest 和给诊断渲染任务文本）
+  （`TB_TERMINUS_TEMPLATE` 是它的逐字节副本，只用于冻结 digest；本地只有任务名，诊断读轨迹记录的首轮消息）
   与任务描述、本插件上传的 `SKILL_READ_SUFFIX.md`、Terminus 自己生成的
   `<available_skills>`。技能目录随 skills 上传进沙箱 `/opt/openclaw-skills/<task>/`；
   Terminus 只列出 `<task>/<skill>/SKILL.md`（带 YAML 头），任务级 `SKILL.md` 只是挂载

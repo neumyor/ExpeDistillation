@@ -47,7 +47,7 @@ from expedistill.blocks.view import render_steps_view
 from expedistill.composites import phase_bank, phase_report
 from expedistill.composites.skill_use import skill_read_events
 from expedistill.composites.trace import (
-    instruction_with_initial,
+    execution_instruction,
     task_instruction,
 )
 from expedistill.composites.trigger_metrics import trigger_metrics
@@ -312,11 +312,7 @@ def _judge_trial(sheet: AnswerSheet, manifest: Mapping[str, Any],
     execution = sheet.execution
     steps = list(execution.steps or [])
     cards = _cards(manifest, bank)
-    metrics = execution.metrics or {}
-    instruction = instruction_with_initial(
-        metrics,
-        instruction_for(execution.task_ref) or str(
-            metrics.get("initial_prompt") or ""))
+    instruction = execution_instruction(execution, instruction_for)
 
     applicability = _repaired(lambda: judge_applicability(
         instruction, cards, render_steps_view(steps, view_rules),

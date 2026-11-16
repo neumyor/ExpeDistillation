@@ -56,8 +56,8 @@ TB 的 trial 由 node29 上的 Harbor 运行 Terminus-2 智能体。首轮消息
 
 - TB 的执行与学习提示词 digest 改变，与 11-12 之前的 TB run 不再同口径；
 - ALFWorld、SearchQA 的 26 个提示词 digest 不变，golden 快照逐字节不变；
-- 学习侧给 TB 诊断渲染的任务文本，从 `TB_TASK_PROMPT` 换成 Terminus 模板；两者都只拿到任务名，拿不到任务描述（见下）。
+- 学习侧给 TB 诊断的任务文本改为轨迹记录的首轮消息（见下）。
 
-## 遗留问题
+## 诊断的任务描述（同日后续提交）
 
-TB 的任务描述只在远程数据集里，本地 `load_tasks` 只给任务名，所以学习侧的诊断（`TRIAL_FAILURE_ANALYSIS` 的 TASK 一节）只能看到任务名。每条 TB 轨迹的 `metrics.initial_prompt` 记录了真实的首轮消息（10-28 摸底 120 条里有 119 条），但 `composites/trace.execution_instruction` 优先用渲染出的任务文本，只在它为空时才用记录。这个问题在本次改动之前就存在，本次未修。
+TB 的任务描述只在远程数据集里，本地 `load_tasks` 只给任务名，所以学习侧的诊断（`TRIAL_FAILURE_ANALYSIS` 的 TASK 一节）原先只能看到任务名。每条 TB 轨迹的 `metrics.initial_prompt` 记录了真实的首轮消息（10-28 摸底 120 条里有 119 条）。用户决定：`composites/trace.execution_instruction` 改为优先用这份记录，没有记录时才用渲染出的任务提示词；`judge-skills` 改为调用同一个函数。只有 TB 记录这个字段，ALFWorld、SearchQA 和 golden 不受影响。记录的是完整首轮消息，带技能的 trial 里也含后缀和 `<available_skills>`，与诊断 prompt 单列的 playbook、目录有重复。

@@ -144,17 +144,20 @@ def task_instruction(benchmark: str, task_id: str) -> str:
 def execution_instruction(
         execution: Any,
         instruction_for: Optional[Callable[[str], str]]) -> str:
-    """The task instruction an execution ran under: the benchmark's task
-    prompt (``instruction_for``), else the sheet's recorded initial prompt,
-    plus the recorded reset observation."""
-    instruction = ""
-    if instruction_for is not None:
+    """The task instruction an execution ran under: the first message the
+    executor recorded (``metrics["initial_prompt"]``), else the benchmark's
+    task prompt (``instruction_for``), plus the recorded reset observation.
+
+    The recorded message comes first because it is what the executor
+    actually read: a remote benchmark (TB) loads only task names locally,
+    so its rendered task prompt has no task description."""
+    metrics = execution.metrics or {}
+    instruction = str(metrics.get("initial_prompt") or "")
+    if not instruction and instruction_for is not None:
         try:
             instruction = instruction_for(execution.task_ref)
         except Exception:
             instruction = ""
-    metrics = execution.metrics or {}
-    instruction = instruction or str(metrics.get("initial_prompt") or "")
     return instruction_with_initial(metrics, instruction)
 
 
