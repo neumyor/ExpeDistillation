@@ -4,7 +4,7 @@ import pytest
 
 from expedistill.benchmarks.base import PlaybookRequirement
 from expedistill.infra.reliability import ModelOutputError
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 from expedistill.methods.evolve_text import (
     MAX_PLAYBOOK_CHARS,
     MIN_PLAYBOOK_CHARS,

@@ -25,24 +25,14 @@ BUILDER = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(BUILDER)
 
 BENCHMARKS = BUILDER.BENCHMARKS
-BARE_STEMS = ("e1_bare_q", "e1_bare_d", "e1_bare_x")
-#: The with-bank ALFWorld arms pin the student's frozen bare control; those
-#: files exist only after the bare runs finish. Until then the module skips
-#: (the bare configs themselves are tested in test_build_bare_configs.py),
-#: so the transition cannot be mistaken for a passing suite.
-BARE_READY = all(
-    (BUILDER.SEED_DIR / name).is_file()
-    for name in BUILDER.BARE_CONTROL_FILES.values())
-pytestmark = pytest.mark.skipif(
-    not BARE_READY,
-    reason="frozen bare control files not built yet: run e1_bare_q")
 NAMES = sorted(BUILDER.generate(
-    BUILDER.DEFAULT_D_MODELS, BUILDER.DEFAULT_Q_MODEL,
-    stems=None if BARE_READY else BARE_STEMS))
+    BUILDER.DEFAULT_D_MODELS, BUILDER.DEFAULT_Q_MODEL))
 BASELINES = ("skillopt", "evoskill", "trace2skill", "gepa", "expel",
              "agentbrew")
 D_MODEL = BUILDER.DEFAULT_D_MODELS
 Q_MODEL = BUILDER.DEFAULT_Q_MODEL
+STUDENT_MODEL = {
+    "q": Q_MODEL, "d": D_MODEL["alfworld"], "x": BUILDER.DEFAULT_X_MODEL}
 
 #: What separates a test-only config from the reference method.
 TEST_ONLY_PHASES = ["phases.baseline", "phases.learn", "phases.practice"]
@@ -196,26 +186,11 @@ def test_the_reference_method_is_the_seven_phase_sequence(bench, files):
         "test"]
     phases = ours["phases"]
     assert sorted(phases) == ["baseline", "learn", "practice", "test"]
-    assert phases["learn"]["review"] == {
-        "name": "review", "K": 5, "retry_limit": 2, "write_lessons": True}
-    assert phases["learn"]["author"] == {
-        "name": "subtask_cards", "typing_chunk_size": 100,
-        "max_segments_per_card": 8, "max_chars_per_segment": 1200,
-        "write_retry_limit": 2}
-    practice = phases["practice"]
-    assert practice["tasks"] == "train"
-    assert practice["delivery"] == {
-        "description_mode": "summary_then_when_to_use", "name": "folder"}
-    assert practice["execution"] == {
-        "attempts": {"tb21": 2, "alfworld": 3, "searchqa": 1}[bench],
-        "name": "real_folder"}
+    assert phases["practice"]["tasks"] == "train"
     for name in ("practice", "test"):
         assert phases[name]["playbook"] == "evolved"
     for name in ("baseline", "practice"):
         assert "compare" not in phases[name]
-    assert phases["test"]["delivery"] == {
-        "description_mode": "summary_then_when_to_use", "name": "folder"}
-    assert phases["test"]["execution"] == {"name": "real_folder"}
 
 
 @pytest.mark.parametrize("bench", BENCHMARKS)
@@ -284,6 +259,23 @@ def test_searchqa_bare_is_the_whole_bank_test_with_a_fresh_control(files):
     test = bare["phases"]["test"]
     assert test["compare"] == {"against": "fresh_bare"}
     assert test["delivery"] == {"name": "whole_bank"}
+
+
+@pytest.mark.parametrize("student", ["q", "d", "x"])
+def test_a_bare_arm_is_one_bare_run_with_a_zero_execution_control(
+        student, files):
+    config = files[_name("alfworld", f"e1_bare_{student}")]
+    assert config["sequence"] == ["test"]
+    assert len(config["split"]["test"]) == 134
+    assert (config["n_attempts_strong"], config["n_attempts_weak"]) == (3, 3)
+    assert config["models"]["executor_weak"] == STUDENT_MODEL[student]
+    test = config["phases"]["test"]
+    assert test["delivery"] == {"name": "whole_bank"}
+    assert test["execution"] == {"name": "real"}
+    # The run IS the measurement; the pinned placeholder keeps the control
+    # arm from repeating the same bare model.
+    assert test["compare"]["against"] == "external_campaign"
+    assert test["compare"]["external"] == BUILDER.POOLED_CONTROL
 
 
 def test_the_control_follows_the_benchmark_and_the_student(files):

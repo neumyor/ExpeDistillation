@@ -26,6 +26,7 @@ Example: .venv/bin/python scripts/smoke/gen_searchqa_fake_plan.py \
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 POLICIES = {
@@ -46,7 +47,6 @@ def main() -> int:
                         help="output plan path (default: %(default)s)")
     args = parser.parse_args()
 
-    import os
     eval_dir = args.eval_dir or os.environ.get(
         "EXPEDISTILL_SEARCHQA_EVAL_DIR", "")
     if not eval_dir:

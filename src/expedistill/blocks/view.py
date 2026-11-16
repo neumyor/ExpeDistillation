@@ -3,7 +3,7 @@
 Everything a model ever sees of a trajectory goes through here (G1 sees the
 whole trajectory, G2/G3 see the steps of one segment), so truncation policy
 lives in exactly one place. The stored Trajectory steps are never truncated --
-only this rendered view is (README 1.3, D5 row).
+only this rendered view is (design_spec 3.3, D5).
 
 Rendered format, one block per step, numbered from 0:
 
@@ -48,9 +48,10 @@ def final_status_word(correctness: Optional[bool]) -> str:
     A pure display label, not a data vocabulary: ``correctness`` True /
     False / None render as ``success`` / ``failure`` / ``unknown``. The
     True/False words are byte-identical to the pre-R2b header on purpose --
-    they feed the G1 segmentation prompt and the G10 evidence lines, both
-    pinned call for call by the semantic instrument's E4 -- so this mapping
-    is frozen the same way a prompt is (changing it is a new experiment).
+    they feed the G1 segmentation prompt and the evidence lines of the
+    learn phase, both pinned call for call by the golden matrix -- so this
+    mapping is frozen the same way a prompt is (changing it is a new
+    experiment).
     """
     return {True: "success", False: "failure"}.get(correctness, "unknown")
 
@@ -99,8 +100,7 @@ def render_trajectory_view(traj: Trajectory,
     return header + "\n\n" + steps_view
 
 
-def render_answer_sheet(sheet: AnswerSheet,
-                        view_rules: Optional[ViewRules] = None) -> str:
+def render_answer_sheet(sheet: AnswerSheet) -> str:
     """Render one trial-level answer sheet as Markdown.
 
     The JSON record stays canonical; this renderer is the human-readable
@@ -144,7 +144,7 @@ def render_answer_sheet(sheet: AnswerSheet,
     if execution.kind == "trajectory":
         lines.append("## Trajectory")
         lines.append("")
-        lines.append(render_steps_view(execution.steps or [], view_rules))
+        lines.append(render_steps_view(execution.steps or []))
     elif execution.kind == "external":
         lines.append("## External campaign reward")
         lines.append("")

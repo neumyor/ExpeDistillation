@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Union
 
 from expedistill.llm.call import ModelHandle
 
-__all__ = ["FakeClient", "json_script", "make_fake_handle"]
+__all__ = ["FakeClient", "RecordingUsage", "json_script", "make_fake_handle"]
 
 
 class FakeClient:
@@ -81,3 +81,16 @@ def make_fake_handle(
 def json_script(payload: Union[dict, list]) -> str:
     """Render ``payload`` as a fenced JSON block, the way prompts ask for it."""
     return "```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```"
+
+
+class RecordingUsage:
+    """Test double for the B7 UsageRecorder (same record signature)."""
+
+    def __init__(self):
+        self.records = []
+
+    def record(self, **kwargs):
+        self.records.append(kwargs)
+
+    def totals(self):
+        return {}

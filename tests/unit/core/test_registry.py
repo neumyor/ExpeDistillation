@@ -48,12 +48,3 @@ def test_contains():
     reg.register("x")(None)
     assert "x" in reg
     assert "y" not in reg
-
-
-def test_decorator_returns_the_object():
-    reg = make_registry()
-    @reg.register("f")
-    def f():
-        return 42
-    assert f() == 42
-    assert reg.get("f") is f

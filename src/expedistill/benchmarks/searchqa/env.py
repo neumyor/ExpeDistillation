@@ -23,7 +23,7 @@ What changed, and why:
   ``SEARCH_RESULT_CHAR_BUDGET``. ``Lookup`` is not migrated: it existed to
   drill into a live docstore page, which this data does not have.
 - The gym 5-tuple return collapses to a plain ``str`` observation
-  (foundation-wave decision, benchmarks/base.py): the loop polls
+  (benchmarks/base.py): the loop polls
   ``is_terminated`` / ``is_truncated`` and reads ``success_fn()`` once.
 - Scoring is delegated to the eval repo's evaluator (SQuAD-normalized
   EM / F1 / sub_EM) through the ``import_eval_repo`` seam; ``success_fn`` is

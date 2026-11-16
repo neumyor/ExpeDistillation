@@ -6,7 +6,6 @@ import pytest
 from expedistill.core.models import Skill
 from expedistill.inject.skill_text import (
     DESCRIPTION_MODES,
-    SKILL_MARKERS,
     description_text,
     normalize_step,
     render_card,
@@ -76,9 +75,6 @@ def _skill(**fields):
 # render_card
 # ---------------------------------------------------------------------------
 
-def test_markers_are_pinned():
-    assert SKILL_MARKERS == ("[When to use]", "[Steps]", "[Do not use when]")
-
 
 def test_card_is_the_exact_marker_layout():
     assert render_card(_skill()) == DISTILL_CARD
@@ -135,20 +131,16 @@ def test_the_trigger_line_is_the_when_to_use_field_on_one_line():
     assert when_to_use_line({**_RECORD, "when_to_use": ""}) == ""
 
 
-def test_summary_only_mode():
-    assert description_text(_RECORD, "summary") == \
-        "Restart a stuck service safely."
-
-
-def test_trigger_only_mode():
-    assert description_text(_RECORD, "when_to_use") == (
-        "The service rejects connections. Check the log before restarting.")
-
-
-def test_combined_mode_adds_the_explicit_joiner():
-    assert description_text(_RECORD, "summary_then_when_to_use") == (
-        "Restart a stuck service safely. Use when: The service rejects "
-        "connections. Check the log before restarting.")
+@pytest.mark.parametrize("mode,expected", [
+    ("summary", "Restart a stuck service safely."),
+    ("when_to_use",
+     "The service rejects connections. Check the log before restarting."),
+    ("summary_then_when_to_use",
+     "Restart a stuck service safely. Use when: The service rejects "
+     "connections. Check the log before restarting."),
+])
+def test_each_mode_renders_its_fields_with_the_explicit_joiner(mode, expected):
+    assert description_text(_RECORD, mode) == expected
 
 
 def test_combined_mode_does_not_repeat_a_use_when_prefix():

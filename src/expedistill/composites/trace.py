@@ -6,19 +6,19 @@ The interface:
   ``AnswerSheet`` object and a step and checks ``0 <= step < len(steps)``.
   A caller that holds only a unit or a task cannot build a pointer, so the
   unit-shared-by-three-attempts ambiguity cannot be written.
-* :func:`resolve` -- the only reader of source context. One exact file
-  lookup (``phases/<phase>/answer_sheets/<sheet>.json``), no directory scan,
-  no priority order. It renders the prefix and following steps with the
-  benchmark's view rules.
+* :func:`check_ref` -- the boundary check that a pointer still names a
+  recorded step. One exact file lookup
+  (``phases/<phase>/answer_sheets/<sheet>.json``), no directory scan, no
+  priority order.
 * :func:`trace_of_trajectory` -- the pointer at a step of a stored
   trajectory, found through the sheet's own trajectory id (a card's
   material segments are located this way).
-* :func:`render_scenes` -- the text a skill writer reads about pointers:
-  at most ``WRITER_BEFORE_STEPS`` steps before each cut and ``after_steps``
-  from it. :func:`render_windows` is the same with an explicit window per
-  pointer (a rewrite's evidence: from a segment start or a card read to the
-  failing step). Windows on one execution are merged, so a step is never
-  sent twice when several cuts on one trajectory land in one prompt.
+* :func:`render_windows` -- the text a skill writer reads about pointers,
+  with an explicit window per pointer (a rewrite's evidence: from a segment
+  start or a card read to the failing step; the usual window opens
+  ``WRITER_BEFORE_STEPS`` steps before the cut). Windows on one execution
+  are merged, so a step is never sent twice when several cuts on one
+  trajectory land in one prompt.
 
 The readers take an ``instruction_for`` callable;
 :func:`task_instruction` is the usual one, the benchmark's task prompt of
@@ -36,27 +36,22 @@ from expedistill.composites.phase_bank import phase_bank_dir
 from expedistill.composites.phase_report import ANSWER_SHEETS_DIR
 from expedistill.core import ids
 from expedistill.core.answer_sheet import AnswerSheet
-from expedistill.core.trace import TraceContext, TraceRef
+from expedistill.core.trace import TraceRef
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
 from expedistill.infra.store import object_filename, read_json
 from expedistill.prompts import get as get_prompt
 
 __all__ = [
-    "DEFAULT_AFTER_STEPS",
     "WRITER_BEFORE_STEPS",
+    "check_ref",
     "execution_instruction",
     "instruction_with_initial",
     "load_sheet",
-    "render_scenes",
     "render_windows",
-    "resolve",
     "task_instruction",
     "trace_at",
     "trace_of_trajectory",
 ]
-
-#: How many steps after the cut a resolved context renders.
-DEFAULT_AFTER_STEPS = 30
 
 #: How many steps before the cut a skill writer reads.
 WRITER_BEFORE_STEPS = 15
@@ -161,34 +156,10 @@ def execution_instruction(
     return instruction_with_initial(metrics, instruction)
 
 
-def resolve(run_dir: Union[str, Path], ref: TraceRef, *,
-            instruction_for: Optional[Callable[[str], str]] = None,
-            view_rules: Any = None,
-            after_steps: int = DEFAULT_AFTER_STEPS,
-            before_steps: Optional[int] = None) -> TraceContext:
-    """The text a prompt may read about ``ref``.
-
-    ``before`` is the rendered prefix ``steps[:ref.step]`` and ``after`` the
-    next ``after_steps`` steps; both keep the original step numbers.
-    ``before_steps`` keeps only the last that many prefix steps (``None`` =
-    the whole prefix). ``instruction_for`` maps the execution's
-    ``task_ref`` to the benchmark's task prompt (the stage layer owns that
-    lookup; this layer cannot import it); when it is absent, or raises, the
-    sheet's recorded initial prompt is used.
-    """
-    execution, steps = _real_execution(run_dir, ref)
-    instruction = execution_instruction(execution, instruction_for)
-    end = ref.step + max(0, after_steps)
-    first = 0 if before_steps is None else max(0, ref.step - before_steps)
-    return TraceContext(
-        ref=ref,
-        task_ref=execution.task_ref,
-        task_instruction=instruction,
-        before=render_steps_view(steps[first:ref.step], view_rules,
-                                 start_index=first),
-        after=render_steps_view(steps[ref.step:end], view_rules,
-                                start_index=ref.step),
-        outcome=execution.raw_correctness)
+def check_ref(run_dir: Union[str, Path], ref: TraceRef) -> None:
+    """Raise ModelOutputError unless ``ref`` names a recorded step of a
+    stored execution."""
+    _real_execution(run_dir, ref)
 
 
 def trace_of_trajectory(run_dir: Union[str, Path], phase_label: str,
@@ -220,22 +191,6 @@ def trace_of_trajectory(run_dir: Union[str, Path], phase_label: str,
             f"phase {phase_label!r} has {len(matches)} answer sheets for "
             f"trajectory {trajectory_id!r}; one attempt must have one sheet")
     return trace_at(matches[0], step)
-
-
-def render_scenes(run_dir: Union[str, Path], refs: Sequence[TraceRef], *,
-                  instruction_for: Optional[Callable[[str], str]] = None,
-                  view_rules: Any = None,
-                  after_steps: int = DEFAULT_AFTER_STEPS,
-                  before_steps: int = WRITER_BEFORE_STEPS) -> str:
-    """The prompt text a skill writer reads about one or more locations:
-    ``before_steps`` before each cut and ``after_steps`` from it
-    (:func:`render_windows` with the same window around every cut)."""
-    return render_windows(
-        run_dir,
-        [(ref, ref.step - before_steps, ref.step + after_steps)
-         for ref in refs],
-        instruction_for=instruction_for, view_rules=view_rules,
-        header="STEPS (the skill applies at step {cuts}):")
 
 
 def render_windows(run_dir: Union[str, Path],

@@ -3,7 +3,7 @@
 Usage:
     .venv/bin/python tests/golden/generate.py [--out tests/fixtures/golden]
 
-For every combo (tests/golden/harness.py's COMBOS) this writes
+For every combo (tests/helpers/golden_harness.py's COMBOS) this writes
 ``<out>/<label>.json`` (the normalised artifact snapshot of one straight
 pipeline run) plus ``provenance.json`` (base commit, per-combo model call
 counts, crash points). Each combo additionally runs once with
@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tests.golden.harness import (  # noqa: E402
+from tests.helpers.golden_harness import (  # noqa: E402
     COMBOS,
     CRASH_POINTS,
     GoldenPlugin,

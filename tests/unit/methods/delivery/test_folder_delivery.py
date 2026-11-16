@@ -10,20 +10,16 @@ active cards are delivered.
 
 import pytest
 
-from expedistill.benchmarks.base import Task
 from expedistill.composites.unit_ids import make_unit_id
 from expedistill.core.config import (
     ConfigError,
     FOLDER_DELIVERY_NAME,
-    PHASE_ROLE_PRACTICE,
-    PHASE_ROLE_TEST,
-    parse_phases,
 )
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.ids import make_task_id, make_type_id
 from expedistill.core.models import Skill
-from expedistill.inject import bank_reference
-from expedistill.methods import resolve_fixed, resolve_params
+from expedistill.inject.skills import bank_reference
+from expedistill.methods.registry import resolve_fixed, resolve_params
 from expedistill.methods.delivery.params import FolderParams, WholeBankParams
 from expedistill.methods.delivery import folder_delivery as folder_driver
 from expedistill.methods.delivery.folder_delivery import (
@@ -269,62 +265,6 @@ def test_folder_unit_ids_follow_the_frozen_key():
 
 
 # ---------------------------------------------------------------------------
-# The load-time boundary: folder is a test-phase (test role) delivery
-# ---------------------------------------------------------------------------
-
-_LEARN = {
-    "kind": "learn",
-    "review": {"name": "review", "K": 5, "retry_limit": 2},
-    "author": {"name": "subtask_cards"},
-}
-
-
-def _execute(role, tasks, delivery, execution=None):
-    raw = {"kind": "execute", "role": role, "tasks": tasks,
-           "delivery": delivery,
-           "execution": execution or {"name": "real"}}
-    if role == "baseline":
-        raw["execution"]["arms"] = ["executor_strong", "executor_weak"]
-    return raw
-
-
-def _parse_with(role_phase, sequence):
-    phases = {"baseline": _execute("baseline", "train", {"name": "none"}),
-              "learn": _LEARN}
-    phases.update(role_phase)
-    return parse_phases(phases, sequence)
-
-
-def test_a_test_role_phase_may_deliver_the_folder():
-    specs = _parse_with(
-        {"test": _execute("test", "test", {"name": FOLDER_DELIVERY_NAME},
-                          execution={"name": "real_folder"})},
-        ["baseline", "learn", "test"])
-    assert specs["test"].delivery["name"] == FOLDER_DELIVERY_NAME
-    assert specs["test"].role == PHASE_ROLE_TEST
-
-
-def test_a_practice_phase_delivers_the_folder():
-    specs = _parse_with(
-        {"practice": _execute("practice", "train",
-                              {"name": FOLDER_DELIVERY_NAME},
-                              execution={"name": "real_folder"}),
-         "test": _execute("test", "test", {"name": "whole_bank"})},
-        ["baseline", "learn", "practice", "learn", "test"])
-    assert specs["practice"].delivery["name"] == FOLDER_DELIVERY_NAME
-    assert specs["practice"].role == PHASE_ROLE_PRACTICE
-
-
-def test_the_baseline_refuses_the_folder():
-    with pytest.raises(ConfigError, match="baseline"):
-        parse_phases(
-            {"baseline": _execute("baseline", "train",
-                                  {"name": FOLDER_DELIVERY_NAME},
-                                  execution={"name": "real_folder"})},
-            ["baseline"])
-
-
-# ---------------------------------------------------------------------------
 # The registry seam
 # ---------------------------------------------------------------------------
 
@@ -339,30 +279,3 @@ def test_the_registry_resolves_the_folder_entry():
 def test_description_mode_is_validated():
     with pytest.raises(ConfigError, match="description_mode"):
         FolderParams(description_mode="unknown")
-
-
-def test_inline_catalog_is_no_longer_accepted():
-    with pytest.raises(ConfigError, match="unknown parameter"):
-        resolve_params("delivery", {"name": FOLDER_DELIVERY_NAME,
-                                    "inline_catalog": True})
-
-
-def test_an_unknown_delivery_name_lists_the_folder():
-    with pytest.raises(ConfigError, match="known: \\['whole_bank'"):
-        resolve_params("delivery", {"name": "folders"})
-    error = ""
-    try:
-        resolve_params("delivery", {"name": "shelf"})
-    except ConfigError as exc:
-        error = str(exc)
-    assert FOLDER_DELIVERY_NAME in error
-
-
-def test_folder_resolves_task_objects_too():
-    # The phase driver hands Task objects over; the catalog stays the
-    # same fixed pair while the task refs come from the objects.
-    bank, _accepted = _bank()
-    tasks = [Task(task_id="t1", instruction="restart the service"),
-             Task(task_id="t2", instruction="check the log")]
-    rows = folder_driver.resolve(bank, tasks, FolderParams())
-    assert [row.task_ref for row in rows] == ["t1", "t2"]

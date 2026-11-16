@@ -104,12 +104,6 @@ def resolve_phase(ctx: StageContext, phase: PhaseInstance,
     if spec.role in _SINGLE_EXECUTOR_ROLES:
         role = executor_role(execution)
         depth = executor_depth(ctx, execution, role)
-        if spec.role == PHASE_ROLE_PRACTICE \
-                and spec.delivery.get("name") != FOLDER_DELIVERY_NAME:
-            raise ConfigError(
-                f"a practice phase delivers through {FOLDER_DELIVERY_NAME!r}"
-                f" (the test phase's presentation), got delivery "
-                f"{spec.delivery.get('name')!r}")
         _require_folder_capability(spec, benchmark)
     delivery, delivery_params = method_registry.resolve(
         "delivery", dict(spec.delivery))

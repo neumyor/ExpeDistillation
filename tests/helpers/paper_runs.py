@@ -10,6 +10,7 @@ unit summaries -> task metrics -> ``summarize_metrics`` -> ``final_test_delta``.
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence
 
+from expedistill.blocks.metrics import summarize
 from expedistill.composites import (
     answer_sheets as sheet_io,
     decision,
@@ -134,18 +135,15 @@ def write_test_run(
          if sheet.execution is not None and sheet.execution.source == "external"],
         "external_reward")
     sheet_io.write_answer_sheets(
-        sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR,
-        render_markdown=False)
+        sheets, phase_dir / phase_report.ANSWER_SHEETS_DIR)
     sheet_io.write_coverage(coverage, phase_dir / phase_report.COVERAGE_NAME)
     phase_report.write_unit_specs(specs, phase_dir)
 
-    report = phase_report.build_phase_report(
-        sheets, specs, phase_kind="test", learning_usable=False)
+    report = phase_report.build_phase_report(sheets, specs)
     metrics: Dict[str, dict] = {}
     for arm in arms:
         units = [unit for unit in report.units if unit.arm == arm]
-        metrics[arm] = unit_summary.summarize_metrics(
-            unit_summary.task_metrics(units, 0), 0)
+        metrics[arm] = summarize(unit_summary.task_metrics(units))
     write_json(phase_dir / "phase_summary.json", {
         "role": "test",
         "control_source": control_source or (

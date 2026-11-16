@@ -8,13 +8,6 @@ from expedistill.core.config import ConfigError
 from expedistill.methods.cards import CardAuthoringParams
 
 
-def test_defaults():
-    params = CardAuthoringParams()
-    assert (params.typing_chunk_size, params.max_segments_per_card,
-            params.max_chars_per_segment, params.write_retry_limit) \
-        == (100, 8, 1200, 2)
-
-
 @pytest.mark.parametrize("name", [
     "typing_chunk_size", "max_segments_per_card", "max_chars_per_segment"])
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, "8"])

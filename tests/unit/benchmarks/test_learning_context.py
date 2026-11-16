@@ -8,7 +8,6 @@ context.
 """
 
 import json
-import string
 from pathlib import Path
 
 import pytest
@@ -20,12 +19,9 @@ from expedistill.benchmarks.searchqa.plugin import SearchQAPlugin
 from expedistill.benchmarks.tb.prompt_pack import PROMPT_PACK as TB_PACK
 from expedistill.benchmarks.tb.plugin import TBPlugin
 from expedistill.prompts import METHOD_PROMPT_NAMES, PROMPTS, get
-from expedistill.prompts.learning_context import (
-    GENERIC,
-    LearningContext,
-    slots_for,
-)
+from expedistill.prompts.learning_context import GENERIC
 from expedistill.prompts.profile import profile_section
+from tests.helpers.prompts import placeholders
 
 ALFWORLD_CONTEXT = ALFWORLD_PACK.vocabulary
 SEARCHQA_CONTEXT = SEARCHQA_PACK.vocabulary
@@ -42,11 +38,6 @@ TB_VOCABULARY = ("Terminal Bench", "TB21", "terminal agent", "bash",
                  "keystroke", "mark_task_complete", "tmux")
 
 
-def _placeholders(template):
-    return {field for _, field, _, _ in string.Formatter().parse(template)
-            if field is not None}
-
-
 def _render(name, context, caller_value=None):
     """The template under ``context``; caller variables get a dummy or the
     placeholder itself (``caller_value`` None)."""
@@ -54,7 +45,7 @@ def _render(name, context, caller_value=None):
     slots = {**GENERIC.variables(), **context.variables()}
     return template.format(**{
         field: slots.get(field, caller_value or f"<{field}>")
-        for field in _placeholders(template)})
+        for field in placeholders(template)})
 
 
 def _normalized(text):
@@ -114,7 +105,7 @@ def test_every_context_defines_exactly_the_generic_slots(context):
 def test_every_slot_is_used():
     used = set()
     for spec in PROMPTS.values():
-        used |= _placeholders(spec.template)
+        used |= placeholders(spec.template)
     assert set(GENERIC.slots) <= used
 
 
@@ -124,26 +115,12 @@ def test_every_slot_has_a_nonempty_value():
             assert text.strip(), (context.name, slot)
 
 
-def test_slots_for_overlays_prompt_defaults_on_generic():
-    merged = slots_for({"agent_kind": "household"})
-    assert merged["agent_kind"] == "household"
-    assert merged["task_tag"] == GENERIC.slots["task_tag"]
-    assert slots_for({}) == {"protocol": "", **GENERIC.variables()}
-    assert slots_for({"protocol": "the rules"})["protocol"] == "the rules"
-
-
-def test_the_manifest_form_carries_every_slot():
-    assert TB_CONTEXT.to_dict() == {
-        "name": "tb", "slots": dict(TB_CONTEXT.slots)}
-
-
 # -- the plugins declare their context ---------------------------------------
 
 def test_each_plugin_declares_its_context():
     assert TBPlugin.prompt_pack.vocabulary is TB_CONTEXT
     assert ALFWorldPlugin.prompt_pack.vocabulary is ALFWORLD_CONTEXT
     assert SearchQAPlugin.prompt_pack.vocabulary is SEARCHQA_CONTEXT
-    assert isinstance(GENERIC, LearningContext)
 
 
 # -- the wording is grounded in the plugin prompts ---------------------------

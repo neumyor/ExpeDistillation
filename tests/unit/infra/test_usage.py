@@ -21,21 +21,6 @@ def test_absent_file_totals_zero(tmp_path):
                       "by_role": {}}
 
 
-def test_record_writes_one_json_line(tmp_path):
-    path = tmp_path / "usage.jsonl"
-    recorder = UsageRecorder(path)
-    recorder.record(in_tokens=100, out_tokens=20, status="ok", meta=None,
-                    **PATH_KWARGS)
-    lines = path.read_text().splitlines()
-    assert len(lines) == 1
-    row = json.loads(lines[0])
-    assert row["role"] == "weak"
-    assert row["in_tokens"] == 100
-    assert row["out_tokens"] == 20
-    assert row["status"] == "ok"
-    assert row["request_id"] == "req-1"
-
-
 def test_unknown_tokens_are_null_never_zero(tmp_path):
     path = tmp_path / "usage.jsonl"
     UsageRecorder(path).record(in_tokens=None, out_tokens=None,
@@ -122,12 +107,6 @@ def test_totals_accumulate_across_two_instances(tmp_path):
                                  "request_count": 2}
     # The first instance agrees: totals fold from the file, not memory.
     assert first.totals() == totals
-
-
-def test_recorder_creates_parent_directory(tmp_path):
-    path = tmp_path / "llm_requests" / "usage.jsonl"
-    UsageRecorder(path).record(in_tokens=1, out_tokens=1, **PATH_KWARGS)
-    assert path.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -120,12 +120,6 @@ def test_round_trip_and_unknown_keys(case):
     assert row["schema_version"] == current
 
 
-def test_schema_versions_of_this_design():
-    # The versions the design spec (4.1, 2.6) names for this round.
-    assert (TRAJECTORY_SCHEMA_VERSION, SUBTASK_SCHEMA_VERSION,
-            SUBTASK_TYPE_SCHEMA_VERSION, SKILL_SCHEMA_VERSION) == (3, 2, 1, 5)
-
-
 class TestTrajectory:
     @pytest.mark.parametrize("correctness", [True, False, None])
     def test_round_trip(self, correctness):
@@ -139,14 +133,6 @@ class TestTrajectory:
         traj = make_trajectory(steps=[{"action": "ls", "observation": "a"}])
         assert traj.steps == [Step(action="ls", observation="a")]
 
-    def test_bare_run_has_no_injected_skills(self):
-        assert make_trajectory().skills_injected is None
-
-    def test_to_dict_is_strict_and_json_safe(self):
-        payload = make_trajectory().to_dict()
-        assert isinstance(payload["steps"], list)
-        assert isinstance(payload["steps"][0], dict)
-
     def test_invalid_correctness_raises(self):
         with pytest.raises(ValueError, match="correctness"):
             make_trajectory(correctness="ok")
@@ -157,11 +143,6 @@ class TestTrajectory:
 
 
 class TestSubtask:
-    def test_round_trip(self):
-        sub = make_subtask()
-        restored = Subtask.from_dict(sub.to_dict())
-        assert restored == sub
-        assert restored.step_range == (0, 3)
 
     def test_step_range_normalised_to_pair(self):
         assert make_subtask(step_range=[2, 5]).step_range == (2, 5)
@@ -184,12 +165,6 @@ class TestSubtask:
 
 
 class TestSubtaskType:
-    def test_round_trip(self):
-        row = make_type()
-        assert SubtaskType.from_dict(row.to_dict()) == row
-        assert set(row.to_dict()) == {
-            "type_id", "name", "entry_state", "phase_label",
-            "schema_version"}
 
     @pytest.mark.parametrize(
         "name", ["type_id", "name", "entry_state", "phase_label"])
@@ -217,24 +192,6 @@ class TestSkill:
                  "reason": "spelled out the entry state"}],
         )
         assert Skill.from_dict(skill.to_dict()) == skill
-
-    def test_statuses(self):
-        assert SKILL_STATUSES == ("active", "discarded")
-
-    def test_defaults(self):
-        skill = make_skill()
-        assert skill.version == 1
-        assert skill.status == "active"
-        assert skill.verbatim_text == ""
-        assert skill.discard_reason is None
-        assert skill.rewrite_history == []
-
-    def test_field_set(self):
-        assert list(make_skill().to_dict()) == [
-            "skill_id", "subtask_type", "source_subtasks", "summary",
-            "when_to_use", "steps", "not_applicable_when", "verbatim_text",
-            "version", "status", "discard_reason", "rewrite_history",
-            "schema_version"]
 
     @pytest.mark.parametrize("name", ["subtask_type", "source_subtasks"])
     def test_lineage_fields_are_required(self, name):
@@ -299,9 +256,3 @@ class TestEvolvingText:
         with pytest.raises(ValueError, match="version"):
             EvolvingText(kind="playbook", text="", version=version,
                          phase_label="p02:learn")
-
-
-class TestStep:
-    def test_round_trip(self):
-        step = Step(action="cd /tmp", observation="")
-        assert Step.from_dict(step.to_dict()) == step

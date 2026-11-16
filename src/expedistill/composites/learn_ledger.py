@@ -20,10 +20,8 @@ the units are done, so the files do not depend on the worker count.
 from typing import Any, List, Optional
 
 from expedistill.composites import provenance as _provenance
-from expedistill.composites.skill_status import discard_skill
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
-from expedistill.core.trace import Provenance
 from expedistill.infra.store import (
     Store,
     append_jsonl,
@@ -39,7 +37,6 @@ __all__ = [
     "commit_order",
     "land_delete",
     "receipt_of",
-    "record_version",
     "revision_plan",
     "rows_of",
     "write_revision_plan",
@@ -130,17 +127,12 @@ def land_delete(store: Store, phase: Any, row: TaskListRow,
         return "receipted"
     skill = store.load("skills", row.target_id, Skill)
     if skill.status in ACTABLE_STATUSES:
-        skill = discard_skill(store, skill, row.reason)
+        skill.status = "discarded"
+        skill.discard_reason = row.reason
+        store.save(skill, "skills")
     append_outcome(phase, row, skill.skill_id, "discarded", skill.version,
                    phase_dir, row.reason)
     return "discarded"
-
-
-def record_version(store: Store, phase_dir, run_dir, skill: Skill,
-                   provenance: Provenance) -> None:
-    """Save a new or revised skill version together with its provenance
-    (``composites.provenance.record_version``, the one door)."""
-    _provenance.record_version(store, phase_dir, run_dir, skill, provenance)
 
 
 def commit_order(phase_dir) -> None:

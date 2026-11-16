@@ -57,7 +57,7 @@ class ExecutionUnitRow:
     task_ref: str
 
     #: The injected skills' raw value: ``None`` is no injection, a string
-    #: is the whole-bank digest, a list is the per-skill references.
+    #: is the whole-bank reference.
     skills_injected: Any
 
     #: The rendered injection block, byte-identical to what execution

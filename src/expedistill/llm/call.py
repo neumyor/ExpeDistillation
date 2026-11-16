@@ -30,7 +30,7 @@ from expedistill.infra.reliability import (
     InfrastructureError,
     ModelOutputError,
 )
-from expedistill.inject import estimate_tokens
+from expedistill.inject.skills import estimate_tokens
 
 __all__ = [
     "DEFAULT_SYSTEM",
@@ -171,7 +171,7 @@ def make_handle(role: str, model_name: str, client: Any, **kw: Any) -> ModelHand
 # The quoted-string awareness, trailing-comma repair, "json"-prefix stripping,
 # and literal_eval last resort are kept as-is.
 #
-# 2026-10-13 incident (run tb21_split_v2_20261013_2125, 5/315 stage-3 units):
+# 2026-10-13 incident (run tb21_split_v2_20261013_2125, 5/315 units):
 # the source's unconditional fenced-block preference backfired on an UNFENCED
 # JSON object whose string values embed ``` code blocks (heredoc-shaped steps
 # again). Fence-first scanning dove into the embedded block, its balanced
@@ -530,8 +530,8 @@ def call_model(
 
     Plain-text calls (``output_json=False``) treat a response with
     finish_reason="length" like empty content: a reply cut off at the output
-    limit is never silently accepted (the truncated-merge-in-bank incident
-    put a half merge into the bank); it consumes the same
+    limit is never silently accepted (a truncated reply once put half a skill text
+    into the bank); it consumes the same
     ``max_format_retries`` budget and is re-asked from the original prompt
     with a suffix saying the previous reply was cut off and asking for a
     complete, more concise reply. Exhaustion raises ModelOutputError naming
@@ -721,11 +721,10 @@ def call_model(
 
         if not output_json:
             if finish_reason == "length":
-                # The truncated-merge-in-bank incident: a plain-text reply
-                # cut off at the output limit used to be silently accepted.
-                # It is now treated like empty content -- the SAME format
-                # budget, a re-ask from the original prompt with a suffix
-                # naming the truncation -- so a truncated skill/merge is
+                # A plain-text reply cut off at the output limit was once
+                # silently accepted. It is treated like empty content -- the
+                # SAME format budget, a re-ask from the original prompt with
+                # a suffix naming the truncation -- so a truncated skill is
                 # never quietly kept, and exhaustion raises for the
                 # per-unit dispositions downstream.
                 format_retry = retries_used < max_format_retries

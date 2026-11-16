@@ -1,7 +1,7 @@
 """TerminalBench plugin (layer 3): one remote Harbor rollout per ``run()``.
 
 TB is the remote benchmark: execution happens on the benchmark host via Harbor + the
-Tencent sandbox (README 1.3, TB runner row). This plugin never runs Harbor
+Tencent sandbox (design_spec 3.5). This plugin never runs Harbor
 itself and never steps interactively; it submits one trial, waits for the
 verifier, and rebuilds the stepwise trajectory from the trial directory.
 
@@ -48,7 +48,7 @@ Run ids and remote resume (docs/decisions/tb_run_namespace_20261011.md):
   ``task.meta["run_namespace"]`` is K1's digest of (store dir, role, model,
   injected-skills reference, sha256 of the rendered skills block) and
   ``task.meta["attempt_token"]`` its per-execution
-  token, so two arms (stage 1 strong vs weak, stage 6 vs stage 1) or two
+  token, so two arms (strong vs weak, test vs baseline) or two
   experiments sharing one remote root never share a run id -- the jobs dir
   is shared per root and the poll globs by run id, so a shared id would
   hand one arm the other arm's ``result.json``. Without a namespace (direct
@@ -109,11 +109,6 @@ acceptance judges -- boundaries doc sections 2.2 and 2.3):
   deadline, dead runner, an untrusted pre-existing run id) raise
   ``InfrastructureError`` -- K1's mechanical retry, never a stored record.
 
-``classify_result`` below keeps the pre-R2 classification ONLY as the
-archive validator's historical lens (scripts/analysis/
-tb_archive_validate.py re-derives the status archived trials were
-produced under); ``run`` never calls it.
-
 Token accounting: Harbor's ``final_metrics`` totals are recorded through the
 B7 UsageRecorder (one line per rollout, run_id as request_id); missing
 totals are recorded as null, never 0 (AGENTS.md section 6 rule 5).
@@ -163,7 +158,6 @@ __all__ = [
     "TB_SKILL_FOLDER_GUIDANCE",
     "TB_TASK_PROMPT",
     "TB_TASK_PROMPT_FOLDER",
-    "classify_result",
     "result_facts",
     "retryable_unscored",
     "runner_env",
@@ -335,11 +329,10 @@ _RECORD_DIR = "tb_remote"
 #: Remote twin of the submit record, next to the run's jobs dir.
 _REMOTE_META_SUFFIX = ".ed_meta.json"
 
-#: Verdict vocabulary fixed from the tb21 campaign audit (audit_trials.py),
-#: used ONLY by :func:`classify_result` (the archive validator's historical
-#: lens): exceptions that were counted as the model's own doing vs.
-#: infrastructure. An unknown exception with no reward was infrastructure,
-#: matching the campaign's "unrecognized -> rerun as infra" rule.
+#: Verdict vocabulary fixed from the tb21 campaign audit (audit_trials.py):
+#: exceptions that were counted as the model's own doing vs. infrastructure.
+#: An unknown exception with no reward was infrastructure, matching the
+#: campaign's "unrecognized -> rerun as infra" rule.
 _MODEL_EXCEPTIONS = frozenset({
     "AgentTimeoutError",
     "ContextLengthExceededError",
@@ -348,9 +341,9 @@ _MODEL_EXCEPTIONS = frozenset({
 #: The campaign's tmux rule (audit_trials.py classify_exception): the
 #: exception must BE a RuntimeError whose message shows a broken
 #: tmux/send-keys -- an infra exception that merely mentions tmux stayed
-#: infra. The archive lens keeps the whole class model-side; the live
-#: path additionally retries a capability error (`_TMUX_CAPABILITY_RE`),
-#: where the harness passed a flag the image's tmux does not know.
+#: infra. The live path additionally retries a capability error
+#: (`_TMUX_CAPABILITY_RE`), where the harness passed a flag the image's tmux
+#: does not know.
 _TMUX_ERROR_RE = re.compile(r"tmux|send.{0,20}keys", re.IGNORECASE)
 _TMUX_ERROR_TYPE = "RuntimeError"
 #: A tmux failure the harness itself caused (it passed a flag the image's
@@ -409,8 +402,7 @@ def result_facts(result: Dict[str, Any],
 def retryable_unscored(facts: Dict[str, Any]) -> bool:
     """True when a no-verdict trial failed on infrastructure, not the model.
 
-    The live counterpart of ``classify_result``'s infra branch: a trial
-    that came back without usable verifier evidence is an infrastructure
+    A trial that came back without usable verifier evidence is an infrastructure
     failure even though Harbor returned a result.json. That covers a
     missing reward and a pseudo zero (a reward claimed while pytest never
     collected -- the reward is meaningless without the evidence). Raising
@@ -418,12 +410,10 @@ def retryable_unscored(facts: Dict[str, Any]) -> bool:
     the retry runs the whole trial again. A model-side no-verdict trial
     stays a stored ``correctness=None`` fact for acceptance.
 
-    Keep the model predicates in sync with ``classify_result`` below:
-    that function is frozen for the archive validator and must reproduce
-    the historical campaign, so it cannot call this live policy. The one
-    deliberate divergence is the tmux capability branch: the archive lens
-    keeps every tmux RuntimeError model-side, while the live path retries
-    a harness capability error that never gave the model a fair run.
+    The model predicates follow the campaign audit; the one deliberate
+    divergence is the tmux capability branch: the live path retries a
+    harness capability error that never gave the model a fair run, while
+    every other tmux RuntimeError stays model-side.
     """
     if (facts.get("reward") is not None
             and facts.get("verifier_ran") is True):
@@ -438,50 +428,6 @@ def retryable_unscored(facts: Dict[str, Any]) -> bool:
         # session loss after the model broke tmux stays model-side.
         return bool(_TMUX_CAPABILITY_RE.search(message))
     return True
-
-
-def classify_result(result: Dict[str, Any],
-                    verifier_log: Optional[str]) -> Tuple[str, Optional[float], Dict[str, Any]]:
-    """The pre-R2 verdict classification, kept ONLY as the archive
-    validator's historical lens: scripts/analysis/tb_archive_validate.py
-    re-derives the status an archived trial was produced under and checks
-    it against the campaign audit. ``run`` no longer calls this -- the
-    execution path passes the scorer's verdict through and reports raw
-    facts (:func:`result_facts`); the live infrastructure-retry predicate
-    is :func:`retryable_unscored` above, and pseudo-zero / model-side
-    validity judgments live with acceptance's named rules now.
-    Returns (status, reward, info). Pure.
-    """
-    # The reward/exception parsing below is a FROZEN copy of
-    # result_facts' parsing, on purpose: this lens must reproduce the
-    # parsing as of the archived campaign, not follow the live function.
-    reward: Optional[float] = None
-    verifier_result = result.get("verifier_result") or {}
-    raw_reward = (verifier_result.get("rewards") or {}).get("reward")
-    try:
-        reward = float(raw_reward)
-    except (TypeError, ValueError):
-        reward = None
-    exception = result.get("exception_info") or {}
-    info: Dict[str, Any] = {
-        "exception_type": exception.get("exception_type"),
-        "exception_message": _short(exception.get("exception_message")),
-    }
-    if reward is not None:
-        if verifier_log is None or not _PYTEST_COLLECTED_RE.search(verifier_log):
-            # Pseudo zero: verifier artifacts missing or pytest never ran.
-            return "infra_error", reward, dict(info, verdict_reason="pseudo_zero")
-        return ("success" if reward > 0.0 else "failure"), reward, info
-    exception_type = str(exception.get("exception_type") or "")
-    if not exception_type:
-        return "infra_error", None, dict(info, verdict_reason="no_reward_no_exception")
-    message = str(exception.get("exception_message") or "")
-    if exception_type in _MODEL_EXCEPTIONS:
-        return "failure", None, info
-    if (exception_type == _TMUX_ERROR_TYPE
-            and _TMUX_ERROR_RE.search(message)):
-        return "failure", None, info
-    return "infra_error", None, info
 
 
 def _trial_timing(result: Dict[str, Any]) -> Dict[str, Any]:

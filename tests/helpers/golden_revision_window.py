@@ -21,11 +21,11 @@ from expedistill.cli import run_experiment
 from expedistill.infra.store import KIND_DIRS
 from expedistill.llm.fake_provider import REVISION_MARKER
 
-from tests.golden.harness import (
+from tests.helpers.golden_harness import (
     REVISE_ANCHOR,
-    GoldenClient,
     GoldenPlugin,
     SimulatedCrash,
+    golden_client,
     installed_plugin,
     is_simulated_crash,
 )
@@ -45,7 +45,7 @@ class _RevisionWindow:
 
         class _Client:
             def __init__(self) -> None:
-                self.inner = GoldenClient()
+                self.inner = golden_client()
 
             @property
             def calls(self):

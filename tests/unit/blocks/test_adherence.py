@@ -4,7 +4,6 @@ prompt is given."""
 import pytest
 
 from expedistill.blocks.adherence import (
-    ADHERENCE_STATUSES,
     judge_adherence,
     judge_applicability,
     render_card_listing,
@@ -12,7 +11,7 @@ from expedistill.blocks.adherence import (
 from expedistill.core.ids import make_type_id
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.inject.skill_text import render_card
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 from tests.helpers.skills import make_skill
 
 TYPE_ID = make_type_id(1)
@@ -158,11 +157,6 @@ def test_adherence_returns_one_item_per_numbered_step_in_order():
 def test_adherence_rejects_a_reply_that_breaks_the_contract(steps, fragment):
     with pytest.raises(ModelOutputError, match=fragment):
         _adherence(steps)
-
-
-def test_adherence_statuses_are_the_four_words():
-    assert ADHERENCE_STATUSES == (
-        "followed", "partial", "skipped", "not_reached")
 
 
 def test_a_skill_without_steps_is_not_sent_to_the_model():

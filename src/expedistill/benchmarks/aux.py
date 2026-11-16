@@ -2,7 +2,7 @@
 
 Lives in the benchmarks layer because it is pure plugin wiring: resolve
 the plugin, read its declared metric, and wrap its scorer with the
-contract check. Stage 1 and both stage-4 drivers and stage 6 all read the
+contract check. The baseline, practice and test phases all read the
 auxiliary metric through this one function so the scoring stages agree by
 construction.
 """

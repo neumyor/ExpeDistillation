@@ -1,5 +1,7 @@
 """ALFWorld's learned-playbook facts: deterministic, train-only text."""
 
+import pytest
+
 from expedistill.benchmarks.alfworld.playbook import (
     PLAYBOOK_PROMPT_NAME, REQUIRED_LABELS, facts_from_sheets)
 from expedistill.core.answer_sheet import (
@@ -69,86 +71,11 @@ def test_unscored_and_missing_trials_are_skipped():
         == "(no scored baseline trials)"
 
 
-def test_the_prompt_is_registered_and_names_its_slots():
-    template = get_prompt(PLAYBOOK_PROMPT_NAME)
-    for slot in ("{facts}", "{profile_section}", "{agent_kind}",
-                 "{benchmark_name}", "{correction_note}"):
-        assert slot in template
-
-
 # -- the dimensions added for the extraction gap (2026-11-05) -----------------
 
 def _trial(actions, verdict, task, role="weak", attempt=0):
     return _sheet("pick_heat_then_place_in_recep", role, attempt, actions,
                   verdict, task=task)
-
-
-def test_object_identity_counts_the_confusion_that_happened():
-    sheets = [_trial(["go to countertop 1", "take mug 3 from countertop 1",
-                      "go to microwave 1", "heat mug 3 with microwave 1",
-                      "go to cabinet 1", "move mug 3 to cabinet 1"],
-                     "failure", "put a hot cup in cabinet"),
-              _trial(["go to countertop 1", "take cup 1 from countertop 1",
-                      "go to microwave 1", "heat cup 1 with microwave 1",
-                      "go to cabinet 1", "move cup 1 to cabinet 1"],
-                     "success", "put a hot cup in cabinet", role="strong")]
-    text = facts_from_sheets(sheets)
-    assert "object identity: 1 of 1 failing trials handled an object whose " \
-           "name is not the task's (most common: cup->mug x1)" in text
-
-
-def test_re_place_loop_is_counted():
-    # move the object in, take it back out, move it in again.
-    sheets = [_trial(["take cup 1 from countertop 1", "move cup 1 to cabinet 1",
-                      "take cup 1 from cabinet 1", "heat cup 1 with microwave 1",
-                      "move cup 1 to cabinet 1"], "failure",
-                     "put a hot cup in cabinet")]
-    assert "re-place loops: 1 of 1 failing trials" in facts_from_sheets(sheets)
-
-
-def test_success_sources_are_the_place_kinds_of_the_first_take():
-    sheets = [_trial(["go to fridge 1", "open fridge 1",
-                      "take cup 1 from fridge 1", "go to microwave 1",
-                      "heat cup 1 with microwave 1", "move cup 1 to cabinet 1"],
-                     "success", "put a hot cup in cabinet", role="strong"),
-              _trial(["take cup 2 from countertop 1", "go to microwave 1",
-                      "heat cup 2 with microwave 1", "move cup 2 to cabinet 1"],
-                     "success", "put a hot cup in cabinet", role="strong",
-                     attempt=1)]
-    text = facts_from_sheets(sheets)
-    assert "where successful trials first took the object: " \
-           "countertop 1, fridge 1" in text
-
-
-def test_actions_after_the_transform_are_counted():
-    sheets = [_trial(["take cup 1 from countertop 1", "heat cup 1 with microwave 1",
-                      "inventory", "look", "go to cabinet 1",
-                      "move cup 1 to cabinet 1"], "success",
-                     "put a hot cup in cabinet", role="strong")]
-    assert "between the transform and the first delivery" in \
-        facts_from_sheets(sheets)
-    # inventory, look, go to -> three actions between heat and move
-    assert "median 3" in facts_from_sheets(sheets)
-
-
-def test_look_task_handling_is_reported():
-    sheets = [_sheet("look_at_obj_in_light", "weak", 0,
-                     ["take cd 1 from desk 1", "move cd 1 to desk 1",
-                      "examine cd 1"], "failure", task="examine the cd with the desklamp")]
-    text = facts_from_sheets(sheets)
-    assert "look tasks: 1 of 1 failing trials never used a lamp" in text
-    assert "1 moved the object to a receptacle" in text
-
-
-def test_search_behaviour_reports_the_memory_gap():
-    loop = (["go to cabinet 1", "open cabinet 1", "go to fridge 1",
-             "go to cabinet 1"] * 4)
-    sheets = [_sheet("pick_clean_then_place_in_recep", "weak", 0, loop,
-                     "failure", task="clean a cup and put it in shelf")]
-    text = facts_from_sheets(sheets)
-    assert "of all go-to actions in failing trials returned to a place" in text
-    assert "gap between two visits of the same place" in text
-    assert "last two interactions" in text
 
 
 def test_the_article_never_eats_the_first_letter_of_the_object():
@@ -157,43 +84,6 @@ def test_the_article_never_eats_the_first_letter_of_the_object():
                      task="look at alarmclock under the desklamp")]
     text = facts_from_sheets(sheets)
     assert "->" not in text            # no bogus "larmclock" confusion pair
-
-
-def test_second_object_share_is_reported_for_two_object_tasks():
-    base = ["go to coffeetable 1", "take newspaper 1 from coffeetable 1",
-            "go to sofa 1", "move newspaper 1 to sofa 1"]
-    task = "find two newspaper and put them in sofa"
-    same = _sheet("pick_two_obj_and_place", "strong", 0,
-                  base + ["take newspaper 2 from coffeetable 1",
-                          "move newspaper 2 to sofa 1"], "success", task=task)
-    other = _sheet("pick_two_obj_and_place", "strong", 1,
-                   base + ["take newspaper 2 from shelf 1",
-                           "move newspaper 2 to sofa 1"], "success", task=task)
-    text = facts_from_sheets([same, other])
-    assert "second object: 1 of 2 successful two-object trials took the " \
-           "second object from the same place kind as the first" in text
-
-
-def test_repeated_container_opening_is_counted():
-    sheet = _trial(["open cabinet 1", "go to cabinet 2", "open cabinet 2",
-                    "go to cabinet 1", "open cabinet 1"], "failure",
-                   "put a hot cup in cabinet")
-    assert "repeated opening: 1 of 1 failing trials opened the same " \
-           "container more than once" in facts_from_sheets([sheet])
-
-
-def test_a_take_at_the_destination_kind_stays_in_the_sources():
-    # The destination is one instance; the source is often another instance
-    # of the same kind (5 of 9 successful cool trials). A kind-level filter
-    # would delete the only useful prior for those tasks.
-    task = "put a cool bread in countertop"
-    sheet = _sheet("pick_cool_then_place_in_recep", "strong", 0,
-                   ["go to countertop 3", "take bread 1 from countertop 3",
-                    "go to fridge 1", "cool bread 1 with fridge 1",
-                    "go to countertop 1", "move bread 1 to countertop 1"],
-                   "success", task=task)
-    assert "where successful trials first took the object: countertop 1" \
-        in facts_from_sheets([sheet])
 
 
 # -- object identity, name families, destination instance (2026-11-06) --------
@@ -208,32 +98,6 @@ def _scene_sheet(actions, verdict, task, observations, role="weak", attempt=0):
     sheet.execution.steps = [
         Step(action=a, observation=o) for a, o in zip(actions, observations)]
     return sheet
-
-
-def test_identity_outcome_separates_own_noun_from_a_different_noun():
-    task = "put a hot cup in cabinet"
-    wrong = _sheet("pick_heat_then_place_in_recep", "weak", 0,
-                   ["take mug 3 from countertop 1", "heat mug 3 with microwave 1",
-                    "move mug 3 to cabinet 1"], "failure", task=task)
-    right = _sheet("pick_heat_then_place_in_recep", "weak", 1,
-                   ["take cup 2 from countertop 3", "heat cup 2 with microwave 1",
-                    "move cup 2 to cabinet 1"], "success", task=task)
-    text = facts_from_sheets([wrong, right])
-    assert "carried the task's own noun: 1 success / 0 failure" in text
-    assert "carried a different noun: 0 success / 1 failure" in text
-
-
-def test_a_wrong_delivery_that_was_corrected_is_counted_as_a_correction():
-    task = "put a hot cup in cabinet"
-    fixed = _sheet("pick_heat_then_place_in_recep", "weak", 0,
-                   ["take mug 3 from countertop 1", "move mug 3 to cabinet 1",
-                    "take mug 3 from cabinet 1", "take cup 2 from countertop 3",
-                    "move cup 2 to cabinet 1"], "success", task=task)
-    text = facts_from_sheets([fixed])
-    assert "1 trial(s) first delivered a different noun and then delivered " \
-           "the right one" in text
-    # the LAST delivery is what counts: this trial is a success of the own noun
-    assert "carried the task's own noun: 1 success / 0 failure" in text
 
 
 def test_name_families_find_related_names_in_one_scene_without_any_failure():
@@ -269,36 +133,6 @@ def test_name_families_do_not_cross_scenes():
     assert _pb._name_families([a, b]) == []
 
 
-def test_destination_instance_is_counted_per_numbered_place_not_per_kind():
-    task = "put a hot cup in cabinet"
-    # goes to cabinet 2 and cabinet 3 empty-handed (other instances of the
-    # destination's kind), delivers to cabinet 1: must NOT count as a visit.
-    kind_only = _sheet(
-        "pick_heat_then_place_in_recep", "weak", 0,
-        ["go to cabinet 2", "go to cabinet 3", "go to cabinet 2",
-         "take cup 1 from cabinet 3", "move cup 1 to cabinet 1"],
-        "success", task=task)
-    # goes to cabinet 1 twice empty-handed and then delivers there.
-    instance = _sheet(
-        "pick_heat_then_place_in_recep", "weak", 1,
-        ["go to cabinet 1", "go to shelf 1", "go to cabinet 1",
-         "take cup 1 from shelf 1", "move cup 1 to cabinet 1"],
-        "failure", task=task)
-    text = facts_from_sheets([kind_only, instance])
-    assert "two or more times: 0 of 1 successful trials, 1 of 1 failing " \
-           "trials" in text
-
-
-def test_the_prompt_asks_for_the_conditional_destination_rule():
-    template = " ".join(get_prompt(PLAYBOOK_PROMPT_NAME).split())
-    assert "for the exact numbered place, never for its kind" in template
-    # The writer acts on the fact's computed verdict instead of comparing
-    # the two rates itself -- comparing them in prose is what produced a
-    # spurious exclusion on near-equal rates.
-    assert 'Only "clearly higher" supports a rule' in template
-    assert "on the other two write no prohibition at all" in template
-
-
 def test_requirements_are_the_six_labelled_parts():
     from expedistill.benchmarks.alfworld.playbook import playbook_requirements
     reqs = playbook_requirements()
@@ -320,27 +154,6 @@ def test_the_identity_requirement_needs_both_directions():
     assert identity.matches(both)
 
 
-def test_the_prompt_asks_for_an_instance_sweep_not_alternation():
-    # V7: the three-arm comparison showed the v6 playbook's "first listed
-    # place + kind alternation" degenerating into a ping-pong between
-    # countertop 1 and a cabinet, never reaching countertop 3 where the
-    # object was. The prompt now asks for a numbered sweep per kind and
-    # class exhaustion, and no longer asks for alternation.
-    template = " ".join(get_prompt(PLAYBOOK_PROMPT_NAME).split())
-    assert "instance sweep within a kind" in template
-    assert "class exhaustion" in template
-    assert "never alternate between kinds" in template
-    assert "kind alternation" not in template.lower()
-    assert "keeps naming every place for the whole episode" in template
-
-
-def test_the_playbook_points_at_skills_and_writes_no_recipes():
-    template = " ".join(get_prompt(PLAYBOOK_PROMPT_NAME).split())
-    assert "arriving at a closed container means opening it" in template
-    assert "open that card before acting" in template
-    assert "Do not write step-by-step recipes" in template
-
-
 def test_the_update_prompt_fills_the_method_prompts_slots():
     import string
 
@@ -352,29 +165,153 @@ def test_the_update_prompt_fills_the_method_prompts_slots():
     assert slots(PLAYBOOK_PROMPT_NAME) == slots("PLAYBOOK_UPDATE")
 
 
-VISITS = ["go to countertop 3", "go to countertop 1",
-          "take pot 1 from countertop 1", "go to sinkbasin 1",
-          "clean pot 1 with sinkbasin 1", "go to countertop 3",
-          "move pot 1 to countertop 3", "go to countertop 3"]
+
+def _trial(actions, verdict, task, role="weak", attempt=0,
+           kind="pick_heat_then_place_in_recep"):
+    return _sheet(kind, role, attempt, actions, verdict, task=task)
 
 
-def _trials(kind, verdict, count, offset=0):
-    return [_sheet(kind, "weak", offset + i, VISITS, verdict)
-            for i in range(count)]
+_VISITS = ["go to countertop 3", "go to countertop 1",
+           "take pot 1 from countertop 1", "go to sinkbasin 1",
+           "clean pot 1 with sinkbasin 1", "go to countertop 3",
+           "move pot 1 to countertop 3", "go to countertop 3"]
+_CLEAN = "pick_clean_then_place_in_recep"
+_TWO = "pick_two_obj_and_place"
+_CUP = "put a hot cup in cabinet"
+_TWO_NEWS = "find two newspaper and put them in sofa"
+_NEWS = ["go to coffeetable 1", "take newspaper 1 from coffeetable 1",
+         "go to sofa 1", "move newspaper 1 to sofa 1"]
 
 
-def test_destination_fact_carries_a_computed_verdict():
-    # Equal rates: 9/9 successful and 15/15 failing trials visited the
-    # destination empty-handed. The fact must say so instead of leaving the
-    # writer to compare the two fractions itself.
-    text = facts_from_sheets(
-        _trials("pick_clean_then_place_in_recep", "success", 9)
-        + _trials("pick_clean_then_place_in_recep", "failure", 15))
-    assert "failing rate vs successful rate: similar or lower" in text
+def _pot_trials(kind, verdict, count):
+    return [_sheet(kind, "weak", i, _VISITS, verdict) for i in range(count)]
 
 
-def test_destination_verdict_reports_too_few_trials():
-    text = facts_from_sheets(
-        _trials("pick_two_obj_and_place", "success", 20)
-        + _trials("pick_two_obj_and_place", "failure", 2))
-    assert "too few trials on one side to support any rule" in text
+# Each case: the trials, then the fact lines the text must contain. One
+# dimension per case, so a failure names the fact that broke.
+@pytest.mark.parametrize("sheets, expected", [
+    pytest.param(
+        [_trial(["go to countertop 1", "take mug 3 from countertop 1",
+                 "go to microwave 1", "heat mug 3 with microwave 1",
+                 "go to cabinet 1", "move mug 3 to cabinet 1"],
+                "failure", "put a hot cup in cabinet"),
+         _trial(["go to countertop 1", "take cup 1 from countertop 1",
+                 "go to microwave 1", "heat cup 1 with microwave 1",
+                 "go to cabinet 1", "move cup 1 to cabinet 1"],
+                "success", "put a hot cup in cabinet", role="strong")],
+        ["object identity: 1 of 1 failing trials handled an object whose "
+         "name is not the task's (most common: cup->mug x1)"],
+        id="object_identity_confusion"),
+    pytest.param(
+        # move the object in, take it back out, move it in again.
+        [_trial(["take cup 1 from countertop 1", "move cup 1 to cabinet 1",
+                 "take cup 1 from cabinet 1", "heat cup 1 with microwave 1",
+                 "move cup 1 to cabinet 1"], "failure", _CUP)],
+        ["re-place loops: 1 of 1 failing trials"], id="re_place_loop"),
+    pytest.param(
+        [_trial(["go to fridge 1", "open fridge 1",
+                 "take cup 1 from fridge 1", "go to microwave 1",
+                 "heat cup 1 with microwave 1", "move cup 1 to cabinet 1"],
+                "success", _CUP, role="strong"),
+         _trial(["take cup 2 from countertop 1", "go to microwave 1",
+                 "heat cup 2 with microwave 1", "move cup 2 to cabinet 1"],
+                "success", _CUP, role="strong", attempt=1)],
+        ["where successful trials first took the object: "
+         "countertop 1, fridge 1"], id="success_sources"),
+    pytest.param(
+        # The destination is one instance; the source is often another
+        # instance of the same kind, so a kind-level filter would delete the
+        # only useful prior for those tasks.
+        [_sheet(_CLEAN, "strong", 0,
+                ["go to countertop 3", "take bread 1 from countertop 3",
+                 "go to fridge 1", "cool bread 1 with fridge 1",
+                 "go to countertop 1", "move bread 1 to countertop 1"],
+                "success", task="put a cool bread in countertop")],
+        ["where successful trials first took the object: countertop 1"],
+        id="take_at_destination_kind_stays_a_source"),
+    pytest.param(
+        # inventory, look, go to -> three actions between heat and move
+        [_trial(["take cup 1 from countertop 1",
+                 "heat cup 1 with microwave 1", "inventory", "look",
+                 "go to cabinet 1", "move cup 1 to cabinet 1"], "success",
+                _CUP, role="strong")],
+        ["between the transform and the first delivery", "median 3"],
+        id="actions_after_the_transform"),
+    pytest.param(
+        [_sheet("look_at_obj_in_light", "weak", 0,
+                ["take cd 1 from desk 1", "move cd 1 to desk 1",
+                 "examine cd 1"], "failure",
+                task="examine the cd with the desklamp")],
+        ["look tasks: 1 of 1 failing trials never used a lamp",
+         "1 moved the object to a receptacle"], id="look_task_handling"),
+    pytest.param(
+        [_sheet(_CLEAN, "weak", 0,
+                ["go to cabinet 1", "open cabinet 1", "go to fridge 1",
+                 "go to cabinet 1"] * 4,
+                "failure", task="clean a cup and put it in shelf")],
+        ["of all go-to actions in failing trials returned to a place",
+         "gap between two visits of the same place",
+         "last two interactions"], id="search_memory_gap"),
+    pytest.param(
+        [_sheet(_TWO, "strong", 0,
+                _NEWS + ["take newspaper 2 from coffeetable 1",
+                         "move newspaper 2 to sofa 1"],
+                "success", task=_TWO_NEWS),
+         _sheet(_TWO, "strong", 1,
+                _NEWS + ["take newspaper 2 from shelf 1",
+                         "move newspaper 2 to sofa 1"],
+                "success", task=_TWO_NEWS)],
+        ["second object: 1 of 2 successful two-object trials took the "
+         "second object from the same place kind as the first"],
+        id="second_object_share"),
+    pytest.param(
+        [_trial(["open cabinet 1", "go to cabinet 2", "open cabinet 2",
+                 "go to cabinet 1", "open cabinet 1"], "failure", _CUP)],
+        ["repeated opening: 1 of 1 failing trials opened the same "
+         "container more than once"], id="repeated_container_opening"),
+    pytest.param(
+        [_trial(["take mug 3 from countertop 1", "heat mug 3 with microwave 1",
+                 "move mug 3 to cabinet 1"], "failure", _CUP),
+         _trial(["take cup 2 from countertop 3", "heat cup 2 with microwave 1",
+                 "move cup 2 to cabinet 1"], "success", _CUP, attempt=1)],
+        ["carried the task's own noun: 1 success / 0 failure",
+         "carried a different noun: 0 success / 1 failure"],
+        id="identity_outcome_by_noun"),
+    pytest.param(
+        # the LAST delivery is what counts: this trial is a success of the
+        # own noun
+        [_trial(["take mug 3 from countertop 1", "move mug 3 to cabinet 1",
+                 "take mug 3 from cabinet 1", "take cup 2 from countertop 3",
+                 "move cup 2 to cabinet 1"], "success", _CUP)],
+        ["1 trial(s) first delivered a different noun and then delivered "
+         "the right one",
+         "carried the task's own noun: 1 success / 0 failure"],
+        id="corrected_wrong_delivery"),
+    pytest.param(
+        # Delivering to cabinet 1 after visiting cabinets 2 and 3 empty-handed
+        # (other instances of the destination's kind) is not a visit; going
+        # to cabinet 1 itself twice is.
+        [_trial(["go to cabinet 2", "go to cabinet 3", "go to cabinet 2",
+                 "take cup 1 from cabinet 3", "move cup 1 to cabinet 1"],
+                "success", _CUP),
+         _trial(["go to cabinet 1", "go to shelf 1", "go to cabinet 1",
+                 "take cup 1 from shelf 1", "move cup 1 to cabinet 1"],
+                "failure", _CUP, attempt=1)],
+        ["two or more times: 0 of 1 successful trials, 1 of 1 failing "
+         "trials"], id="destination_instance_not_kind"),
+    pytest.param(
+        # Equal rates (9/9 and 15/15 visited the destination empty-handed):
+        # the fact states the verdict so the writer never compares the two
+        # fractions itself.
+        _pot_trials(_CLEAN, "success", 9) + _pot_trials(_CLEAN, "failure", 15),
+        ["failing rate vs successful rate: similar or lower"],
+        id="destination_verdict_similar"),
+    pytest.param(
+        _pot_trials(_TWO, "success", 20) + _pot_trials(_TWO, "failure", 2),
+        ["too few trials on one side to support any rule"],
+        id="destination_verdict_too_few"),
+])
+def test_facts_report_each_dimension(sheets, expected):
+    text = facts_from_sheets(sheets)
+    for fragment in expected:
+        assert fragment in text

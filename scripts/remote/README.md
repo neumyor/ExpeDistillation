@@ -54,7 +54,7 @@ EXPEDISTILL_TB_ALLOWED_ROOTS=<可选：":" 分隔的绝对前缀>
 - 本机模式下 runner 继承的是干净环境（与 ssh 登录会话一致），driver 的密钥不会传给
   runner。
 
-## 部署（在 driver 原来所在的机器上）
+## 部署（在代码所在的机器上）
 
 ```bash
 scripts/remote/deploy_bench_host.sh          # 部署已提交的 HEAD；有未提交改动时要加 --force
@@ -75,9 +75,8 @@ RUNS_DIR=<runs-dir> WORKERS=128 ROLLOUT_WORKERS=64 scripts/remote/start_run_benc
 ```
 
 - run 名已存在就是续跑；不写则新建 `<配置 stem>_<YYYYMMDD_HHMM>`；
-- 并行度有两个，分开设置：`WORKERS` 管只调用 LLM 端点的步骤（写作、审阅、整理、
-  exam 单元），`ROLLOUT_WORKERS` 管基准主机上的真实 rollout，不设则等于 `WORKERS`。
-  两者都不得低于 32；
+- 并行度有两个，分开设置：`WORKERS` 管只调用 LLM 端点的步骤（诊断、切段、归类、写卡、改写），
+  `ROLLOUT_WORKERS` 管基准主机上的真实 rollout，不设则等于 `WORKERS`。两者都不得低于 32；
 - driver 是独立会话并写 pidfile，ssh 断开不影响它；
 - 只属于某一个 run 的环境设置写在 `<runs-dir>/<run 名>/run.env`（启动脚本在密钥文件之后读它，
   每次续跑都带上），不要写进共用的密钥文件。例如强模型 run 要在 Harbor 里和 campaign 的

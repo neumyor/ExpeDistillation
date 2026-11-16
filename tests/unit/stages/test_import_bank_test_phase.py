@@ -8,12 +8,7 @@ delivery should hand over from the imported skills and compare, so a change
 to a delivery's rendering does not need a test edit.
 """
 
-import importlib
-import importlib.abc
-import importlib.machinery
 import json
-import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -29,20 +24,19 @@ from expedistill.benchmarks.base import (
     Task,
     ViewRules,
 )
-from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.core.models import Skill
 from expedistill.infra.manifest import MANIFEST_NAME
-from expedistill.infra.store import Store, read_json, read_jsonl
-from expedistill.inject import bank_reference, format_skills_block
-from expedistill.llm.fake import FakeClient
+from expedistill.infra.store import Store
+from expedistill.inject.skills import bank_reference, format_skills_block
+from tests.helpers.fake_llm import FakeClient
 from expedistill.methods.delivery.folder_delivery import (
     CATALOG_FILENAME,
     skill_filename,
 )
 from expedistill.stages.import_bank import BANK_ORIGIN_NAME, import_external_bank
+from tests.helpers.fake_plugin import serve_plugin
 
 _FAKE = "importbench"
-_MODULE = f"expedistill.benchmarks.{_FAKE}"
 TEST_TASKS = ("t2", "t3")
 
 NOTES = [
@@ -93,29 +87,9 @@ class RecordingPlugin(BenchmarkPlugin):
 
 
 @pytest.fixture()
-def plugin(monkeypatch):
+def plugin(monkeypatch, clean_registry):
     """The recording plugin, served through the real import machinery."""
-    instance = RecordingPlugin()
-
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            register_plugin(instance)
-
-    class Finder:
-        def find_spec(self, name, path=None, target=None):
-            if name == _MODULE:
-                return importlib.machinery.ModuleSpec(name, Loader())
-            return None
-
-    _reset_registry()
-    sys.modules.pop(_MODULE, None)
-    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
-    yield instance
-    sys.modules.pop(_MODULE, None)
-    _reset_registry()
+    return serve_plugin(monkeypatch, RecordingPlugin())
 
 
 def _delivery(name):
@@ -224,19 +198,3 @@ def test_the_test_phase_delivers_exactly_the_imported_skills(
             # and opens the source's own text.
             assert meta["description"] == skill.summary
             assert body == skill.verbatim_text
-
-
-def test_the_bank_reference_of_the_summary_is_that_of_the_imported_skills(
-        plugin, tmp_path):
-    run_dir = tmp_path / "run"
-    import_external_bank(_make_source(tmp_path, "notes_jsonl"),
-                         "notes_jsonl", run_dir, origin="expel")
-
-    summary = _run(_write_config(tmp_path / "exp.yaml", "whole_bank"),
-                   run_dir)
-
-    rows = read_jsonl(run_dir / "skill_bank.jsonl")
-    assert summary["bank_reference"] == bank_reference(rows)
-    phase_summary = read_json(run_dir / "phases" / "p01_test"
-                              / "phase_summary.json")
-    assert phase_summary["bank_reference"] == summary["bank_reference"]

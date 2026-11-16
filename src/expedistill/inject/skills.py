@@ -1,6 +1,6 @@
 """D9 skill injection (layer 1, pure functions).
 
-This module is the single source of "skills go into the prompt" (README 1.5):
+This module is the single source of "skills go into the prompt" (design_spec 3.3, D9):
 real execution (E1) renders the skills block here whichever phase runs it,
 so the injection is one code path by construction, not by convention. Each
 skill's text comes from ``inject.skill_text.render_card``.
@@ -83,7 +83,7 @@ def format_skills_block(
 
     An empty skill list yields ``""`` -- the bare-run case: the only
     difference between a skilled and a bare prompt is whether the block is
-    empty (README G4).
+    empty.
 
     Output format (pinned; see module docstring): first line
     ``## Skill rules``, then one bullet per skill, ``- <card>`` with the

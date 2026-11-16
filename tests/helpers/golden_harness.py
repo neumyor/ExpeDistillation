@@ -25,7 +25,7 @@ delivers (``GoldenPlugin``): the strong model always succeeds; the weak
 model fails every training task, opening every listed card first on task
 one and none on tasks two and four, and succeeds on the test task only
 with skills in reach. The model side is ``llm/fake_provider.py``'s
-FakeProviderClient with ONE pinned choice (``GoldenClient``): which step a
+FakeProviderClient with ONE pinned choice (``golden_client``): which step a
 diagnosis blames and the diagnosis scope follow the task (task two fails at
 step 0, the search type; task four is ``general``; every other failure is
 a ``subtask`` failure at its last step, the answer type) instead of the
@@ -60,15 +60,11 @@ genuine post-crash difference is a finding, not noise to hide.
 from __future__ import annotations
 
 import hashlib
-import importlib
-import importlib.abc
-import importlib.machinery
 import json
 import sys
-import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import yaml
 
@@ -80,6 +76,7 @@ from expedistill.benchmarks.base import (
 )
 from expedistill.cli import run_experiment
 from expedistill.llm.fake_provider import FakeProviderClient
+from tests.helpers.fake_plugin import plugin_finder
 
 #: The stub benchmark name; served through the real import machinery so
 #: every stage resolves it exactly like a checked-in plugin.
@@ -104,14 +101,14 @@ WEAK_MODEL = "weak-model"
 #: prompt, so no question is planned; ``segment_steps: 1`` cuts every
 #: trajectory into one segment per step (up to the K budget): the last
 #: one is the answer type, the others the search type.
-_PLAN: Dict[str, Any] = {
+PLAN: Dict[str, Any] = {
     "strong_model": STRONG_MODEL,
     "weak_model": WEAK_MODEL,
     "segment_steps": 1,
     "questions": {},
 }
 
-#: The task words ``GoldenClient`` pins its diagnosis on (module
+#: The task words ``golden_client`` pins its diagnosis on (module
 #: docstring): a failure on the first is blamed on step 0, one on the
 #: second is ``general``.
 EARLY_TASK = "task two"
@@ -226,21 +223,8 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
     import machinery (registration happens at import, like a checked-in
     plugin) and register its two prompts, which stage 0 digests into the
     manifest. Usable under pytest and standalone."""
-    from expedistill.benchmarks.registry import _reset_registry, register_plugin
+    from expedistill.benchmarks.registry import _reset_registry
     from expedistill.prompts import PROMPTS, PromptSpec
-
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            register_plugin(plugin)
-
-    class Finder:
-        def find_spec(self, name, path=None, target=None):
-            if name == _MODULE:
-                return importlib.machinery.ModuleSpec(name, Loader())
-            return None
 
     prompts = {
         _TASK_PROMPT: PromptSpec(
@@ -255,7 +239,7 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
             description="golden-matrix stub skill-folder task prompt"),
     }
     sys.modules.pop(_MODULE, None)
-    finder = Finder()
+    finder = plugin_finder(plugin, FAKE_BENCH)
     sys.meta_path.insert(0, finder)
     previous = {name: PROMPTS.get(name) for name in prompts}
     PROMPTS.update(prompts)
@@ -276,24 +260,36 @@ def installed_plugin(plugin: BenchmarkPlugin) -> Iterator[BenchmarkPlugin]:
 # The model side
 # ---------------------------------------------------------------------------
 
-class GoldenClient(FakeProviderClient):
+class PinnedClient(FakeProviderClient):
     """The fake provider with its diagnosis routing pinned to the task
-    (module docstring): a failure on ``EARLY_TASK`` is blamed on step 0,
-    one on ``GENERAL_TASK`` is ``general``, every other one is a
-    ``subtask`` failure at the fake's own step (the last). The reason and
-    the notes stay the fake's own."""
+    instead of the fake's prompt hash: a failure on a task whose text
+    contains one of ``early`` is blamed on step 0 (the fake blames the last
+    step), one containing a word of ``general`` has scope ``general``, and
+    every other diagnosis has scope ``subtask``. The reason and the notes
+    stay the fake's own."""
 
-    def __init__(self) -> None:
-        super().__init__(dict(_PLAN))
+    def __init__(self, plan: Optional[Dict[str, Any]] = None,
+                 early: Sequence[str] = (), general: Sequence[str] = ()):
+        super().__init__(dict(plan or PLAN))
+        self.early = tuple(early)
+        self.general = tuple(general)
 
     def _trial_analysis(self, user: str) -> str:
         fenced = FakeProviderClient._trial_analysis(user)
         reply = json.loads(fenced.split("\n", 1)[1].rsplit("\n", 1)[0])
         task = user.split("TASK:\n", 1)[1].split("\n\n", 1)[0]
-        if EARLY_TASK in task:
+        if any(word in task for word in self.early):
             reply["failing_step"] = 0
-        reply["scope"] = "general" if GENERAL_TASK in task else "subtask"
+        reply["scope"] = ("general" if any(word in task
+                                           for word in self.general)
+                          else "subtask")
         return "```json\n" + json.dumps(reply, ensure_ascii=False) + "\n```"
+
+
+def golden_client() -> PinnedClient:
+    """The matrix's client (module docstring): ``EARLY_TASK`` fails at
+    step 0 and ``GENERAL_TASK`` is ``general``."""
+    return PinnedClient(early=(EARLY_TASK,), general=(GENERAL_TASK,))
 
 
 class _ClientLog:
@@ -305,7 +301,7 @@ class _ClientLog:
         self.calls: List[Dict[str, Any]] = []
 
     def make_client(self, model_name: str) -> FakeProviderClient:
-        client = GoldenClient()
+        client = golden_client()
         client.calls = self.calls
         self.clients.append(client)
         return client
@@ -328,32 +324,58 @@ class SimulatedCrash(RuntimeError):
     """
 
 
-class CrashAfter:
-    """make_client hook crashing before the ``n``-th model call overall."""
+class CrashBefore:
+    """Raises SimulatedCrash before the ``occurrence``-th model call (and
+    every later one), counting only the calls whose prompt starts with
+    ``anchor`` -- all calls when it is empty. Two ways to use it: wrap a
+    client (``CrashBefore(client, anchor, occurrence)``), or hand
+    ``make_client`` to ``run_experiment``, which gives every model a golden
+    client behind the one shared call count."""
 
-    def __init__(self, n: int):
-        self.n = n
+    def __init__(self, inner: Any = None, anchor: str = "",
+                 occurrence: int = 1):
+        self.inner = inner
+        self.anchor = anchor
+        self.occurrence = occurrence
         self.seen = 0
+        self.fired = False
+
+    @property
+    def calls(self) -> List[Dict[str, Any]]:
+        return self.inner.calls
+
+    def _check(self, user: str) -> None:
+        if not user.startswith(self.anchor):
+            return
+        self.seen += 1
+        if self.seen >= self.occurrence:
+            self.fired = True
+            raise SimulatedCrash(
+                f"simulated crash before model call #{self.seen}"
+                + (f" ({self.anchor!r})" if self.anchor else ""))
+
+    def complete(self, model: str, system: str, user: str, **kwargs: Any):
+        self._check(user)
+        return self.inner.complete(model, system, user, **kwargs)
 
     def make_client(self, model_name: str) -> Any:
-        budget = self
+        return _Hooked(self, golden_client())
 
-        class _CrashingClient:
-            def __init__(self):
-                self.inner = GoldenClient()
 
-            @property
-            def calls(self):
-                return self.inner.calls
+class _Hooked:
+    """One model's client under a shared ``CrashBefore`` count."""
 
-            def complete(self, *args, **kwargs):
-                budget.seen += 1
-                if budget.seen >= budget.n:
-                    raise SimulatedCrash(
-                        f"simulated crash before model call #{budget.seen}")
-                return self.inner.complete(*args, **kwargs)
+    def __init__(self, budget: CrashBefore, inner: Any):
+        self.budget = budget
+        self.inner = inner
 
-        return _CrashingClient()
+    @property
+    def calls(self):
+        return self.inner.calls
+
+    def complete(self, model, system, user, **kwargs):
+        self.budget._check(user)
+        return self.inner.complete(model, system, user, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +495,7 @@ def is_simulated_crash(exc: BaseException) -> bool:
 def run_crash_and_resume(config_path: Path, run_dir: Path,
                          crash_at: int) -> None:
     """Crash before call ``crash_at``, then resume with the same command."""
-    budget = CrashAfter(crash_at)
+    budget = CrashBefore(occurrence=crash_at)
     try:
         run_experiment(config_path=Path(config_path), run_dir=Path(run_dir),
                        make_client=budget.make_client)

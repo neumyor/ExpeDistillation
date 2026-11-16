@@ -1,10 +1,7 @@
-# R9: pipeline.py and the stage1-6 fronts are gone -- the CLI
-# (cli.run_experiment) loops the config's phase sequence and calls the
-# phase drivers (phase_execute / phase_learn).
-from expedistill.stages import stage0_freeze  # noqa: F401  (freeze: p00)
-# The two phase drivers are deliberately NOT imported here. The CLI's
-# loop imports them lazily per dispatch (cli._phase_driver), and a
-# sys.modules entry is the tests' injection seam for fake drivers
-# (tests/unit/test_cli_run_loop.py): an eager import binds the real
-# modules as package attributes and routes `from expedistill.stages
-# import phase_execute` around the seam.
+"""Phase world (layer 7): the freeze step and the phase drivers.
+
+The CLI's loop (``cli.run_experiment``) walks the config's phase sequence and
+imports ``phase_execute`` / ``phase_learn`` lazily per dispatch
+(``cli._phase_driver``); a ``sys.modules`` entry is the tests' injection seam
+for fake drivers, so this package must not import them eagerly.
+"""

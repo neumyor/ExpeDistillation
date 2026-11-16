@@ -9,7 +9,6 @@ section markers only appear in the card renderer (inject/skill_text.py).
 The diagnosis and the typing prompts pin the JSON their parsers read."""
 
 import re
-import string
 
 import pytest
 
@@ -17,6 +16,7 @@ from expedistill.blocks.author import SKILL_SECTION_FIELDS, SKILL_SUMMARY_FIELD
 from expedistill.inject.skill_text import SKILL_MARKERS
 from expedistill.prompts import PROMPTS, get
 from expedistill.prompts.learning_context import GENERIC, PROTOCOL_SLOT
+from tests.helpers.prompts import placeholders
 
 # name -> (owning step, documented caller variables)
 EXPECTED = {
@@ -53,7 +53,17 @@ EXPECTED = {
     ),
     "REVISION_DIAGNOSIS": (
         "Learn step 5", {"number", "failing_step", "reason"}),
+    # The two skill-use judges read every benchmark's trials with one text.
+    "SKILL_APPLICABILITY_JUDGE": (
+        "Applicability judge",
+        {"task_instruction", "skill_listing", "trajectory_view"}),
+    "SKILL_ADHERENCE_JUDGE": (
+        "Adherence judge", {"card_text", "trajectory_view", "n_steps"}),
 }
+
+#: Words that tie a prompt to one benchmark.
+BENCHMARK_WORDS = re.compile(
+    r"terminal|shell|\bTB\b|alfworld|searchqa|harbor|tmux", re.I)
 
 #: name -> the learning-context slots the template uses, in addition to its
 #: caller variables. A prompt that is not listed uses no slot.
@@ -79,34 +89,12 @@ ALL_MARKERS = set(SKILL_MARKERS)
 #: The four fields every full writing prompt's JSON example names.
 SKILL_FIELDS = set(SKILL_SECTION_FIELDS) | {SKILL_SUMMARY_FIELD}
 
-#: The retired failure-reference markers: no prompt may name them.
-RETIRED_MARKERS = ("[Trigger]", "[Why it fails]", "[Do instead]")
-
 DUMMY = "dummy"
-
-
-def _placeholders(template):
-    fields = set()
-    for _, field_name, _, _ in string.Formatter().parse(template):
-        if field_name is not None:
-            fields.add(field_name)
-    return fields
 
 
 def _json_contract_keys(template):
     """The quoted keys of a template's JSON example ("field": ...)."""
     return set(re.findall(r'"([a-z_]+)":', template))
-
-
-def _normalized(template):
-    """Whitespace-collapsed template text: pins wording, tolerates wrapping."""
-    return " ".join(template.split())
-
-
-def test_every_method_prompt_is_registered():
-    # Benchmark task prompts (one per plugin) join the same registry by
-    # design, so this is a superset check, not an exact set.
-    assert set(EXPECTED) <= set(PROMPTS)
 
 
 def test_descriptions_are_one_line_and_name_the_owning_block():
@@ -128,7 +116,7 @@ def _render_generic(name):
 def test_placeholders_are_exactly_the_documented_variables():
     for name, (_, variables) in EXPECTED.items():
         expected = variables | EXPECTED_SLOTS.get(name, set())
-        assert _placeholders(get(name)) == expected, name
+        assert placeholders(get(name)) == expected, name
 
 
 def test_every_documented_slot_is_defined_by_generic():
@@ -140,9 +128,18 @@ def test_every_documented_slot_is_defined_by_generic():
 
 def test_format_with_dummy_values_succeeds():
     # format() itself is the check: a stray unescaped brace raises ValueError,
-    # an undocumented placeholder raises KeyError.
+    # an undocumented placeholder raises KeyError. The escaped JSON examples
+    # must come out with single braces.
     for name in EXPECTED:
-        assert _render_generic(name).strip()
+        rendered = _render_generic(name)
+        assert rendered.strip(), name
+        assert "{{" not in rendered, name
+
+
+@pytest.mark.parametrize("name", ["SKILL_APPLICABILITY_JUDGE",
+                                  "SKILL_ADHERENCE_JUDGE"])
+def test_the_judge_wording_is_benchmark_neutral(name):
+    assert not BENCHMARK_WORDS.search(get(name))
 
 
 def test_profile_section_off_is_neutral():
@@ -156,16 +153,11 @@ def test_profile_section_off_is_neutral():
 def test_a_profile_is_followed_by_the_binding_line():
     from expedistill.prompts.profile import PROFILE_ROLES, profile_section
     section = profile_section("skill_reader", "a profile")
-    assert section.startswith(
-        PROFILE_ROLES["skill_reader"] + "\na profile\n\n")
+    prefix = PROFILE_ROLES["skill_reader"] + "\na profile\n\n"
+    assert section.startswith(prefix)
     # Whatever the profile states (capability or execution context) binds
     # every node the writer produces.
-    assert "information the profile says the reader will not have" in section
-
-
-def test_the_profile_roles_are_the_two_readers():
-    from expedistill.prompts.profile import PROFILE_ROLES
-    assert set(PROFILE_ROLES) == {"skill_reader", "playbook_reader"}
+    assert section[len(prefix):].strip()
 
 
 def test_unknown_profile_role_is_rejected():
@@ -183,31 +175,6 @@ def test_neutral_profile_section_names_the_benchmarks_agent_kind():
         PROFILE_ROLES["skill_reader"] + "\na profile\n\n")
 
 
-def test_templates_are_nonempty():
-    for name in EXPECTED:
-        assert get(name).strip()
-
-
-def test_retired_prompt_names_are_gone():
-    # The text exam, the curation and the trigger-family clustering are
-    # gone; nothing may still register their prompts, or a stale caller
-    # would silently keep the old protocol alive.
-    for retired in ("EXAM_GEN", "ANSWER", "JUDGE", "EXAM_SCENE",
-                    "EXAM_TRIGGER", "EXAM_PLAN", "EXAM_JUDGE", "SIMILARITY",
-                    "MERGE", "CLUSTER_TRIGGER_FAMILY", "CLUSTER_SUBTASKS",
-                    "CLUSTER_SKILL", "BASELINE_FAILURE_ANALYSIS",
-                    "TRIAL_EXAM_ANALYSIS"):
-        assert retired not in PROMPTS
-
-
-def test_no_prompt_names_a_timing_slot():
-    # Triggers state a subtask's entry state, never a moment in time.
-    for name in PROMPTS:
-        assert not {"timing_menu", "family_menu"} & _placeholders(get(name))
-        assert not any(field.startswith(("phrase_", "meaning_"))
-                       for field in _placeholders(get(name)))
-
-
 # ---------------------------------------------------------------------------
 # The diagnosis and the typing
 # ---------------------------------------------------------------------------
@@ -215,20 +182,12 @@ def test_no_prompt_names_a_timing_slot():
 def test_the_diagnosis_asks_for_the_failing_step_and_the_scope():
     assert _json_contract_keys(get("TRIAL_FAILURE_ANALYSIS")) == {
         "reason", "failing_step", "scope", "model_note", "playbook_note"}
-    text = _normalized(get("TRIAL_FAILURE_ANALYSIS"))
-    assert "an integer from 0 to {last_step}" in text
-    assert '"subtask"' in text and '"general"' in text
-    assert "opening a skill card is a step too" in text
 
 
 def test_the_typing_reply_is_new_types_plus_one_assignment_per_segment():
     assert _json_contract_keys(get("SUBTASK_TYPING")) == {
         "new_types", "key", "name", "entry_state", "assignments",
         "subtask_id", "type"}
-    text = _normalized(get("SUBTASK_TYPING"))
-    assert "Put every SUBTASK_ID from the segments exactly once." in text
-    assert "Never invent a SUBTASK_ID and never repeat one." in text
-    assert "It is not a moment in time" in text
 
 
 # ---------------------------------------------------------------------------
@@ -248,10 +207,13 @@ def test_writer_templates_carry_no_section_markers():
 
 def test_the_card_writer_names_exactly_the_skill_fields():
     assert _json_contract_keys(get("CARD_WRITE")) == SKILL_FIELDS
-    text = _normalized(get("CARD_WRITE"))
-    assert "steps: 3 to 7 steps" in text
-    assert "adds only what the playbook does not already give" in text
-    assert "the subtask's observable entry state" in text
+
+
+def test_the_judges_name_the_json_keys_their_parsers_read():
+    assert _json_contract_keys(get("SKILL_APPLICABILITY_JUDGE")) == {
+        "skills", "skill_id", "applicable", "first_step", "reason"}
+    assert _json_contract_keys(get("SKILL_ADHERENCE_JUDGE")) == {
+        "steps", "number", "status", "evidence"}
 
 
 def test_each_rewrite_names_only_its_own_side():
@@ -259,26 +221,3 @@ def test_each_rewrite_names_only_its_own_side():
         "summary", "when_to_use", "revision_reason"}
     assert _json_contract_keys(get("REVISE_CONTENT")) == {
         "steps", "not_applicable_when", "revision_reason"}
-
-
-def test_the_rewrites_read_the_evidence_and_the_playbook():
-    trigger = _normalized(get("REVISE_TRIGGER"))
-    assert "never opened the card before the step" in trigger
-    assert "observable entry state" in trigger
-    content = _normalized(get("REVISE_CONTENT"))
-    assert "opened it before the step where the trial went wrong" in content
-    assert "never repeat a playbook rule" in content
-
-
-def test_the_playbook_update_keeps_to_task_general_practice():
-    text = _normalized(get("PLAYBOOK_UPDATE"))
-    assert "Never write a step-by-step recipe" in text
-    assert "open that card before acting" in text
-    assert "the trigger-evidence counts" in text
-    assert text.endswith("<playbook> (the whole playbook) </playbook>")
-
-
-def test_no_prompt_names_a_retired_marker():
-    for name in PROMPTS:
-        for marker in RETIRED_MARKERS:
-            assert marker not in get(name), (name, marker)

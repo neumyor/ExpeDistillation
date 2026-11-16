@@ -13,6 +13,7 @@ injection overflow or unit aggregation: those belong to ``coverage`` and
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
+from expedistill.blocks.view import render_answer_sheet
 from expedistill.composites import verdicts
 from expedistill.composites.unit_ids import make_gap_sheet_id
 from expedistill.core.answer_sheet import (
@@ -165,9 +166,9 @@ def grade_answer_sheets(sheets: Sequence[AnswerSheet],
     return list(sheets)
 
 
-def write_answer_sheets(sheets: Iterable[AnswerSheet], directory: Path,
-                        *, render_markdown: bool = True) -> None:
-    """Write the derived answer sheets atomically (JSON, optionally .md)."""
+def write_answer_sheets(sheets: Iterable[AnswerSheet],
+                        directory: Path) -> None:
+    """Write the derived answer sheets atomically (JSON and Markdown)."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     keep = set()
@@ -175,10 +176,7 @@ def write_answer_sheets(sheets: Iterable[AnswerSheet], directory: Path,
         stem = object_filename(sheet.sheet_id)[:-len(".json")]
         keep.add(stem)
         write_json(directory / f"{stem}.json", sheet.to_dict(), indent=2)
-        if render_markdown:
-            from expedistill.blocks.view import render_answer_sheet
-            text = render_answer_sheet(sheet)
-            _write_text(directory / f"{stem}.md", text)
+        _write_text(directory / f"{stem}.md", render_answer_sheet(sheet))
     # The directory is a derived view of THIS pass; a resumed pass that
     # measures fewer units must not leave an old sheet behind for the
     # summarizer to mistake for a current trial.

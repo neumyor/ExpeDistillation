@@ -28,7 +28,7 @@ from expedistill.composites.provenance import PROVENANCE_NAME
 from expedistill.composites.segment_checked import AUDIT_PATH
 from expedistill.composites.shortfall import stage1_shortfall_path
 from expedistill.core import ids
-from expedistill.core.config import ExperimentConfig, load_config
+from expedistill.core.config import ExperimentConfig
 from expedistill.core.models import Skill, Subtask, SubtaskType, Trajectory
 from expedistill.core.trace import Provenance, TraceRef
 from expedistill.infra.reliability import ConfigError
@@ -40,7 +40,7 @@ from expedistill.infra.store import (
     write_json,
     write_jsonl,
 )
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from expedistill.stages import fork_run as fork_module
 from expedistill.stages import phase_learn
 from expedistill.stages.fork_run import fork_run
@@ -457,14 +457,6 @@ def test_a_stored_skill_not_written_after_the_prefix_is_refused(tmp_path):
 def test_the_completion_record_names_match_the_phase_drivers():
     assert fork_module._EXECUTE_SUMMARY_NAME == phase_disk.SUMMARY_NAME
     assert fork_module._LEARN_SUMMARY_NAME == phase_learn.SUMMARY_NAME
-
-
-def test_the_forked_target_config_still_loads(tmp_path):
-    source = build_source(tmp_path)
-    target = _target(tmp_path, _EXTENDED)
-    assert isinstance(load_config(str(target)), ExperimentConfig)
-    assert _fork(tmp_path, source, target, "p03")["skills"]["from_phase"] \
-        == "p02:learn"
 
 
 def test_the_cli_prints_one_json_line_and_exits_one_on_a_refusal(

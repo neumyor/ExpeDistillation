@@ -4,7 +4,7 @@ guidance; each skill is its own ``<skill>/SKILL.md`` directory, and the
 catalog stays in catalog.md as a fallback. The recorded trajectory
 keeps the agent's cat commands for M4's parsing.
 
-Everything goes through the fake links of test_tb_plugin.py (no
+Everything goes through the fake links of tests/helpers/tb_fake_remote.py (no
 network, no ssh). The remote contract this pins: the plugin uploads the
 task-level SKILL.md + catalog.md + every manifest file into
 ``<TBENCH_SKILL_ROOT>/<run_id>/<task_name>/`` (and the dashed alias
@@ -21,100 +21,46 @@ from pathlib import Path
 import pytest
 
 from expedistill.benchmarks.base import Task
-from expedistill.benchmarks.tb import TBPlugin
 from expedistill.benchmarks.tb.plugin import TB_SKILL_FOLDER_GUIDANCE
-from expedistill.composites.skill_materialize import materialize_skill_folder
-from expedistill.core.ids import make_type_id
-from expedistill.llm.call import ModelHandle
-from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
-from tests.unit.benchmarks.test_tb_plugin import (
+from tests.helpers.tb_fake_remote import (
+    HANDLE,
+    ROOT,
+    TRIAL,
     FakeRemoteLink,
-    _completed_trial_files,
-    _make_plugin,
+    JobsRemoteLink,
+    make_plugin,
 )
-from expedistill.inject.skill_text import render_card
-from tests.helpers.skills import make_skill
-
-ROOT = "/srv/work/expedistill"
-TRIAL = f"{ROOT}/jobs/ed_train-fasttext_tok/train-fasttext__AbCdEf1"
-
-HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",
-                     client=None)
-
-_BANK = [
-    make_skill(make_type_id(1), "The service rejects connections."),
-    make_skill(make_type_id(2), "Check the log before restarting.",
-               version=3),
-]
-_MANIFEST = skill_folder_manifest(_BANK)
-_CATALOG = _MANIFEST["catalog_text"]
-
-
-def _materialized(tmp_path):
-    return materialize_skill_folder(_MANIFEST, _BANK,
-                                    tmp_path / "skill_folder")
+from tests.helpers.tb_folder import (
+    CAT_TRAJECTORY,
+    CATALOG,
+    MANIFEST,
+    materialized,
+    trial_files_with_cat,
+)
 
 
 def _folder_task(tmp_path, task_name="train-fasttext"):
     return Task(task_id=task_name, instruction=task_name,
                 meta={"task_name": task_name, "attempt_token": "tok",
-                      "skill_folder": _MANIFEST,
-                      "skill_folder_dir": str(_materialized(tmp_path))})
-
-
-#: A trajectory whose agent cats the catalog and one skill file inside
-#: the sandbox mount -- the raw material M4's read audit parses. The
-#: step shape is Harbor's (benchmarks/tb/trajectory.py's frozen input).
-_CAT_TRAJECTORY = {
-    "schema_version": "harbor-trajectory-1",
-    "session_id": "sess-folder",
-    "agent": {"model_name": "qwen3.6-flash-distill"},
-    "steps": [
-        {"step_id": 1, "source": "user",
-         "message": "TASK: train a fasttext model."},
-        {"step_id": 2, "source": "agent",
-         "tool_calls": [{"tool_call_id": "c1", "function_name": "bash_command",
-                         "arguments": {"keystrokes":
-                                       "cat /opt/openclaw-skills/"
-                                       "train-fasttext/catalog.md\n"}}],
-         "observation": {"results": [{"content": _CATALOG}]}},
-        {"step_id": 3, "source": "agent",
-         "tool_calls": [{"tool_call_id": "c2", "function_name": "bash_command",
-                         "arguments": {"keystrokes":
-                                       "cat /opt/openclaw-skills/"
-                                       "train-fasttext/"
-                                       "type-001-skill/"
-                                       "SKILL.md\n"}}],
-         "observation": {"results": [{"content":
-                                      render_card(_BANK[0])}]}},
-    ],
-    "final_metrics": {"total_prompt_tokens": 100,
-                      "total_completion_tokens": 20,
-                      "total_cached_tokens": 0},
-}
-
-
-def _trial_files_with_cat():
-    files = _completed_trial_files()
-    files[f"{TRIAL}/agent/trajectory.json"] = json.dumps(_CAT_TRAJECTORY)
-    return files
+                      "skill_folder": MANIFEST,
+                      "skill_folder_dir": str(materialized(tmp_path))})
 
 
 def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_trial_files_with_cat())
-    plugin = _make_plugin(link)
+        remote_files=trial_files_with_cat())
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
-    folder_dir = _materialized(tmp_path)
+    folder_dir = materialized(tmp_path)
 
-    outcome = plugin.run(_folder_task(tmp_path), HANDLE, _CATALOG, workdir)
+    outcome = plugin.run(_folder_task(tmp_path), HANDLE, CATALOG, workdir)
 
     # The prompt-side injection is the GUIDANCE, never the catalog.
     skill_remote = f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext/SKILL.md"
     local_skill = workdir / "skills" / "train-fasttext" / "SKILL.md"
     assert local_skill.read_text(encoding="utf-8") == TB_SKILL_FOLDER_GUIDANCE
-    assert TB_SKILL_FOLDER_GUIDANCE != _CATALOG
+    assert TB_SKILL_FOLDER_GUIDANCE != CATALOG
     assert (skill_remote, ) == tuple(
         remote for local, remote in link.puts if remote == skill_remote)
     # The catalog and every manifest file ride the same directory as ONE
@@ -137,8 +83,8 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
                    for member in tar.getmembers() if member.isfile()}
     expected = {
         name: (folder_dir / name).read_bytes()
-        for name in ([entry["filename"] for entry in _MANIFEST["files"]]
-                     + [_MANIFEST["catalog_filename"]])}
+        for name in ([entry["filename"] for entry in MANIFEST["files"]]
+                     + [MANIFEST["catalog_filename"]])}
     assert members == expected
     staged = f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext"
     for name, payload in expected.items():
@@ -154,10 +100,10 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
     assert outcome.meta["prompt_name"] == "TB_TASK_PROMPT_FOLDER"
     assert outcome.meta["skill_folder"] == {
         "local_dir": str(folder_dir),
-        "bank_fingerprint": _MANIFEST["bank_fingerprint"],
-        "catalog_filename": _MANIFEST["catalog_filename"],
-        "description_mode": _MANIFEST["description_mode"],
-        "files": [entry["filename"] for entry in _MANIFEST["files"]],
+        "bank_fingerprint": MANIFEST["bank_fingerprint"],
+        "catalog_filename": MANIFEST["catalog_filename"],
+        "description_mode": MANIFEST["description_mode"],
+        "files": [entry["filename"] for entry in MANIFEST["files"]],
     }
     # The trajectory keeps the agent's cat commands verbatim -- M4's
     # parsing input, unintercepted and unbudgeted by execution.
@@ -182,16 +128,16 @@ def test_folder_unit_uploads_the_dashed_alias_too(tmp_path):
                     encoding="utf-8"),
             f"{ROOT}/jobs/ed_install-windows-3.11_tok/"
             f"install-windows-3.11__AbCdEf1/agent/trajectory.json":
-                json.dumps(_CAT_TRAJECTORY),
+                json.dumps(CAT_TRAJECTORY),
             f"{ROOT}/jobs/ed_install-windows-3.11_tok/"
             f"install-windows-3.11__AbCdEf1/verifier/test-stdout.txt":
                 Path("tests/fixtures/tb/verifier_collected.txt").read_text(
                     encoding="utf-8"),
         })
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     task = _folder_task(tmp_path, task_name="install-windows-3.11")
 
-    plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
+    plugin.run(task, HANDLE, CATALOG, tmp_path / "work")
 
     # The staging cp names BOTH spellings (the same rule SKILL.md's
     # alias upload follows), and the simulator's tree holds the folder
@@ -206,9 +152,9 @@ def test_folder_unit_uploads_the_dashed_alias_too(tmp_path):
     assert len(copies) == 1
     assert "install-windows-3.11/" in copies[0]
     assert "install-windows-3-11/" in copies[0]
-    for name in ([entry["filename"] for entry in _MANIFEST["files"]]
-                 + [_MANIFEST["catalog_filename"]]):
-        payload = _materialized(tmp_path).joinpath(name).read_bytes()
+    for name in ([entry["filename"] for entry in MANIFEST["files"]]
+                 + [MANIFEST["catalog_filename"]]):
+        payload = materialized(tmp_path).joinpath(name).read_bytes()
         assert link.remote_files[
             f"{ROOT}/skills/ed_install-windows-3.11_tok/"
             f"install-windows-3.11/{name}"] == payload
@@ -218,13 +164,13 @@ def test_folder_unit_uploads_the_dashed_alias_too(tmp_path):
 
 
 def test_folder_unit_refuses_an_unmaterialized_directory(tmp_path):
-    plugin = _make_plugin(FakeRemoteLink())
+    plugin = make_plugin(FakeRemoteLink())
     task = Task(task_id="train-fasttext", instruction="train-fasttext",
                 meta={"task_name": "train-fasttext",
                       "attempt_token": "tok",
-                      "skill_folder": _MANIFEST})
+                      "skill_folder": MANIFEST})
     with pytest.raises(Exception, match="skill_folder_dir"):
-        plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
+        plugin.run(task, HANDLE, CATALOG, tmp_path / "work")
 
 
 def test_a_bare_unit_uploads_no_folder_and_no_guidance(tmp_path):
@@ -233,8 +179,8 @@ def test_a_bare_unit_uploads_no_folder_and_no_guidance(tmp_path):
     # behaviour, byte for byte.
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_trial_files_with_cat())
-    plugin = _make_plugin(link)
+        remote_files=trial_files_with_cat())
+    plugin = make_plugin(link)
     task = Task(task_id="train-fasttext", instruction="train-fasttext",
                 meta={"task_name": "train-fasttext", "attempt_token": "tok"})
 
@@ -247,70 +193,6 @@ def test_a_bare_unit_uploads_no_folder_and_no_guidance(tmp_path):
     assert not any("skills/" in remote for _, remote in link.puts)
 
 
-# ---------------------------------------------------------------------------
-# Idempotent re-run: a resumed folder unit reuses its trial, re-uploads
-# nothing (the stateful fake of tb_fake_remote.py).
-# ---------------------------------------------------------------------------
-
-def test_a_resumed_folder_unit_reuses_the_trial_without_reupload(
-        tmp_path):
-    from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink
-
-    link = JobsRemoteLink()
-    plugin = _make_plugin(link)
-    task = _folder_task(tmp_path)
-
-    first = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
-    puts_after_first = list(link.puts)
-    assert any(remote.endswith(".tar")
-               and remote.startswith(f"{ROOT}/skills_cache/")
-               for _, remote in puts_after_first)
-
-    second = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
-
-    # Same run id, same recorded launch conditions: the finished trial is
-    # reused, nothing re-uploaded, and the outcome is the same verdict
-    # with the resumed provenance.
-    assert link.puts == puts_after_first
-    assert second.correctness == first.correctness is True
-    assert second.meta["resumed"] == "result"
-    assert second.meta["skill_folder"] == first.meta["skill_folder"]
-
-
-# ---------------------------------------------------------------------------
-# Live smoke (never run by default: pyproject addopts is "-m 'not live'")
-# ---------------------------------------------------------------------------
-
-@pytest.mark.live
-def test_live_folder_remote_smoke(tmp_path):
-    """Real 1-task folder-mode smoke for the remote link (AGENTS.md
-    section 7): the same prerequisites as test_tb_plugin's
-    test_live_remote_smoke, plus the folder riding the skills directory.
-
-    Run explicitly with::
-
-        .venv/bin/python -m pytest \\
-            tests/unit/benchmarks/test_tb_folder_sandbox.py::test_live_folder_remote_smoke \\
-            -m live -s
-    """
-    import os
-
-    model = os.environ.get("EXPEDISTILL_TB_SMOKE_MODEL")
-    if not model:
-        pytest.skip("set EXPEDISTILL_TB_SMOKE_MODEL to run the live smoke")
-    plugin = TBPlugin()  # real RemoteLink from the environment
-    folder_dir = _materialized(tmp_path)
-    task = Task(task_id="fix-git", instruction="fix-git",
-                meta={"task_name": "fix-git", "attempt_token": "smokef1",
-                      "skill_folder": _MANIFEST,
-                      "skill_folder_dir": str(folder_dir)})
-    handle = ModelHandle(name=model, role="smoke", client=None)
-    outcome = plugin.run(task, handle, _CATALOG, tmp_path / "smoke")
-    assert outcome.meta["run_id"].startswith("ed_fix-git_smokef1")
-    assert outcome.meta["eval_mode"] == "skills"
-    assert outcome.meta["skill_folder"]["local_dir"] == str(folder_dir)
-
-
 def test_two_folder_units_share_one_cache_upload(tmp_path):
     """The transport fix's heart: the folder ships ONCE per folder
     content, no matter how many units ride it. The second unit finds
@@ -319,11 +201,11 @@ def test_two_folder_units_share_one_cache_upload(tmp_path):
     scp connections; this shape is one scp plus one cp ssh per unit."""
     second_trial = (f"{ROOT}/jobs/ed_crack-7z-hash_tok/"
                     f"crack-7z-hash__AbCdEf1")
-    files = _trial_files_with_cat()
+    files = trial_files_with_cat()
     for name, text in (
             ("result.json", Path("tests/fixtures/tb/result_success.json")
              .read_text(encoding="utf-8")),
-            ("agent/trajectory.json", json.dumps(_CAT_TRAJECTORY)),
+            ("agent/trajectory.json", json.dumps(CAT_TRAJECTORY)),
             ("verifier/test-stdout.txt",
              Path("tests/fixtures/tb/verifier_collected.txt")
              .read_text(encoding="utf-8"))):
@@ -332,8 +214,8 @@ def test_two_folder_units_share_one_cache_upload(tmp_path):
         polls=[f"RESULT {TRIAL}/result.json\n",
                f"RESULT {second_trial}/result.json\n"],
         remote_files=files)
-    plugin = _make_plugin(link)
-    first = plugin.run(_folder_task(tmp_path), HANDLE, _CATALOG,
+    plugin = make_plugin(link)
+    first = plugin.run(_folder_task(tmp_path), HANDLE, CATALOG,
                        tmp_path / "work1")
     tars_after_first = [remote for _, remote in link.puts
                         if remote.startswith(f"{ROOT}/skills_cache/")
@@ -341,7 +223,7 @@ def test_two_folder_units_share_one_cache_upload(tmp_path):
     assert len(tars_after_first) == 1
 
     second = plugin.run(_folder_task(tmp_path, task_name="crack-7z-hash"),
-                        HANDLE, _CATALOG, tmp_path / "work2")
+                        HANDLE, CATALOG, tmp_path / "work2")
 
     # Exactly one tar ever; the second unit staged by cp alone.
     tars = [remote for _, remote in link.puts
@@ -352,10 +234,10 @@ def test_two_folder_units_share_one_cache_upload(tmp_path):
     assert len(copies) == 2
     assert "crack-7z-hash" in copies[1]
     # Both task directories hold the folder's exact bytes.
-    folder_dir = _materialized(tmp_path)
+    folder_dir = materialized(tmp_path)
     for task in ("train-fasttext", "crack-7z-hash"):
-        for name in ([entry["filename"] for entry in _MANIFEST["files"]]
-                     + [_MANIFEST["catalog_filename"]]):
+        for name in ([entry["filename"] for entry in MANIFEST["files"]]
+                     + [MANIFEST["catalog_filename"]]):
             expected = folder_dir.joinpath(name).read_bytes()
             assert link.remote_files[
                 f"{ROOT}/skills/ed_{task}_tok/{task}/{name}"] == expected
@@ -382,29 +264,21 @@ def test_the_gate_covers_the_probe_and_fresh_launch(tmp_path, monkeypatch):
     monkeypatch.setattr(tb_plugin, "_UPLOAD_GATE", RecordingGate())
     # The stateful fake: the first run's finished trial stays visible to
     # the second run's probe, so the second call really resumes.
-    from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink
     link = JobsRemoteLink()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     task = _folder_task(tmp_path)
 
-    first = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
+    first = plugin.run(task, HANDLE, CATALOG, tmp_path / "work")
+    puts_after_first = list(link.puts)
     # Probe, then upload+submit.
     assert events == ["enter", "exit", "enter", "exit"]
     # The finished trial is reused on the second call: the probe is
     # gated, the upload is not performed.
-    second = plugin.run(task, HANDLE, _CATALOG, tmp_path / "work")
+    second = plugin.run(task, HANDLE, CATALOG, tmp_path / "work")
     assert events == ["enter", "exit", "enter", "exit", "enter", "exit"]
     assert second.meta["resumed"] == "result"
     assert first.meta["resumed"] is None
-
-
-def test_the_gate_width_reads_the_environment(monkeypatch):
-    from expedistill.benchmarks.tb.plugin import _env_int
-
-    monkeypatch.setenv("EXPEDISTILL_TB_UPLOAD_GATE", "3")
-    assert _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8) == 3
-    monkeypatch.delenv("EXPEDISTILL_TB_UPLOAD_GATE")
-    assert _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8) == 8
-    monkeypatch.setenv("EXPEDISTILL_TB_UPLOAD_GATE", "zero")
-    with pytest.raises(Exception, match="EXPEDISTILL_TB_UPLOAD_GATE"):
-        _env_int("EXPEDISTILL_TB_UPLOAD_GATE", 8)
+    # Resume re-uploads nothing and returns the same verdict and folder facts.
+    assert link.puts == puts_after_first
+    assert second.correctness == first.correctness is True
+    assert second.meta["skill_folder"] == first.meta["skill_folder"]

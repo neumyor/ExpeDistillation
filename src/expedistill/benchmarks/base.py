@@ -1,6 +1,6 @@
 """Benchmark plugin interface (layer 3): Task, RunOutcome, ViewRules, BaseEnv.
 
-README 1.1 rule 3: everything benchmark-specific lives in one plugin directory
+Layering rule 3 (AGENTS.md): everything benchmark-specific lives in one plugin directory
 (runner, task loading, view rules, task prompt); this module defines the shared
 vocabulary those plugins speak, so ``blocks/`` and above stay benchmark-blind.
 
@@ -146,7 +146,7 @@ class ViewRules:
     rollout stays in budget without the stored steps ever losing content.
     ``truncation_marker`` may contain the ``{omitted}`` placeholder, filled
     with the number of dropped characters -- truncation must be clearly
-    marked (README 1.3, D5 row), never silent.
+    marked (design_spec 3.3, D5), never silent.
     """
 
     max_obs_chars: int = 4000
@@ -237,7 +237,7 @@ class BenchmarkPlugin(abc.ABC):
       plugin's. Unknown ids in a list are a ConfigError.
     - ``run(task, handle, skills_block, workdir)``: one task, one attempt.
       ``skills_block`` is the D9 block verbatim and may be empty -- bare and
-      skills runs use the SAME prompt template (README 1.1 rule 4 / G4 rule),
+      skills runs use the SAME prompt template (building-block rule 4 in AGENTS.md),
       so the template must contain a ``{skills_block}`` slot that renders to
       nothing when empty. All model calls go through ``llm.call.call_model``
       (local runners: via ``benchmarks.react_loop.run_react``; the TB runner's
@@ -306,9 +306,8 @@ class BenchmarkPlugin(abc.ABC):
     #: auxiliary metric is part of the experiment identity. It is CODE,
     #: not config: changing the scorer is a plugin code change that does
     #: NOT change any prompt digest, so an old run directory will not
-    #: refuse a resume across it (README's auxiliary-metric contract
-    #: records this limitation; compare against run directories, not
-    #: across scorer versions).
+    #: refuse a resume across it (a known limitation: compare against run
+    #: directories, not across scorer versions).
     aux_metric_name: Optional[str] = None
 
     #: Skill-folder capability (the ``real_folder`` execution,

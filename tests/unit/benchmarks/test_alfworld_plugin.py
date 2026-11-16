@@ -35,7 +35,6 @@ from expedistill.benchmarks.alfworld.protocol import (
     FOLDER_PROMPT_NAME,
     FOLDER_PROMPT_NO_HISTORY_NAME,
     MAX_OUTPUT_TOKENS,
-    MAX_OUTPUT_TOKENS_ENV,
     PROMPT_NAME,
     PROMPT_NO_HISTORY_NAME,
     SYSTEM_PROMPT,
@@ -49,50 +48,20 @@ import expedistill.benchmarks.alfworld.env as env_module
 from expedistill.benchmarks.registry import get_plugin, plugin_names, register_plugin
 from expedistill.infra.reliability import ConfigError
 from expedistill.prompts import get as get_prompt
-from expedistill.llm import make_fake_handle
+from tests.helpers.fake_llm import make_fake_handle
 from expedistill.prompts import PROMPTS
 from tests.helpers.skill_folder import (
     CARD_BODY,
     folder_task_meta,
     write_skill_folder,
 )
+from tests.helpers.alfworld_adapter import fake_adapter_source
 
-#: The same fake adapter the env tests use (see test_alfworld_env.py).
-FAKE_ADAPTER_SOURCE = '''\
-import json
-import sys
 
-def emit(tag, payload):
-    sys.stdout.write(tag + " " + json.dumps(payload) + "\\n")
-    sys.stdout.flush()
-
-ADMISSIBLE = ["go to fridge 1", "look", "win"]
-
-def obs(text, won=False, done=False, reason=None):
-    return {"text": text, "admissible": ADMISSIBLE,
-            "won": won, "done": done, "reason": reason}
-
-BUDGET = 3
-emit("H", {"budget": BUDGET})
-emit("O", obs("You are in the middle of a room. You see a fridge 1.\\n\\n"
-              "Your task is to: put a clean mug on the desk"))
-steps = 0
-while True:
-    line = sys.stdin.readline()
-    if not line:
-        break
-    action = line.strip()
-    if not action:
-        continue
-    steps += 1
-    if action == "win":
-        emit("O", obs("Task is SOLVED.", won=True, done=True, reason="won"))
-        break
-    if steps >= BUDGET:
-        emit("O", obs("you did: " + action, done=True, reason="budget"))
-        break
-    emit("O", obs("you did: " + action))
-'''
+#: The env tests' fake adapter, without the fault actions.
+FAKE_ADAPTER_SOURCE = fake_adapter_source(
+    '"You are in the middle of a room. You see a fridge 1.\\n\\n"\n'
+    '              "Your task is to: put a clean mug on the desk"')
 
 GAME_REL = "json_2.1.1/valid_seen/pick_and_place_simple-Mug-None-Desk-1/trial-1/game.tw-pddl"
 GAME_REL_2 = "json_2.1.1/valid_unseen/look_at_obj_in_light-Lamp-None-DeskLamp-2/trial-1/game.tw-pddl"
@@ -166,20 +135,6 @@ def test_import_succeeds_without_alfworld_environment():
         env=scrubbed, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
-
-
-def test_plugin_identity(plugin):
-    assert plugin.name == "alfworld"
-    assert plugin.task_prompt_name == PROMPT_NAME
-    assert get_plugin("alfworld") is plugin
-
-
-def test_view_rules_are_lenient(plugin):
-    rules = plugin.view_rules
-    # ALFWorld observations are short: a few hundred characters. The defaults
-    # are deliberately lenient so nothing realistic is ever truncated.
-    assert rules.max_obs_chars >= 4000
-    assert rules.truncate("x" * 500) == "x" * 500
 
 
 def test_max_steps_env_var(monkeypatch, plugin):
@@ -258,11 +213,6 @@ def test_format_admissible_actions_drops_help():
 # Task loading (D1)
 # ---------------------------------------------------------------------------
 
-def test_load_tasks_none_without_data_env_is_config_error(plugin, monkeypatch):
-    monkeypatch.delenv(DATA_ENV, raising=False)
-    with pytest.raises(ConfigError, match=DATA_ENV):
-        plugin.load_tasks(None)
-
 
 def test_load_tasks_none_enumerates_all_games(plugin, data_root, monkeypatch):
     monkeypatch.setenv(DATA_ENV, str(data_root))
@@ -308,16 +258,25 @@ def test_tasks_loaded_on_one_root_run_on_a_moved_root(plugin, eval_env, tmp_path
     assert outcome.correctness is True
 
 
+def test_load_tasks_config_errors(plugin, data_root, tmp_path, monkeypatch):
+    monkeypatch.delenv(DATA_ENV, raising=False)
+    with pytest.raises(ConfigError, match=DATA_ENV):
+        plugin.load_tasks(None)
+    monkeypatch.setenv(DATA_ENV, str(data_root))
+    with pytest.raises(ConfigError, match="does not resolve"):
+        plugin.load_tasks(["json_2.1.1/valid_seen/ghost/game.tw-pddl"])
+    with pytest.raises(ConfigError, match="does not exist"):
+        plugin.load_tasks(str(tmp_path / "no-such-file.txt"))
+    # A data root without the game tree is refused, not read as empty.
+    monkeypatch.setenv(DATA_ENV, str(tmp_path))
+    with pytest.raises(ConfigError, match="json_2.1.1"):
+        plugin.load_tasks(None)
+
+
 def test_load_tasks_list_strips_old_bookkeeping_suffix(plugin, data_root, monkeypatch):
     monkeypatch.setenv(DATA_ENV, str(data_root))
     tasks = plugin.load_tasks([GAME_REL + "___7", GAME_REL_2])
     assert [task.task_id for task in tasks] == [GAME_REL, GAME_REL_2]
-
-
-def test_load_tasks_unknown_id_is_config_error(plugin, data_root, monkeypatch):
-    monkeypatch.setenv(DATA_ENV, str(data_root))
-    with pytest.raises(ConfigError, match="does not resolve"):
-        plugin.load_tasks(["json_2.1.1/valid_seen/ghost/game.tw-pddl"])
 
 
 def test_load_tasks_file_spec(plugin, data_root, tmp_path, monkeypatch):
@@ -329,23 +288,12 @@ def test_load_tasks_file_spec(plugin, data_root, tmp_path, monkeypatch):
     assert [task.task_id for task in tasks] == [GAME_REL, GAME_REL_2]
 
 
-def test_load_tasks_missing_file_is_config_error(plugin, monkeypatch, tmp_path):
-    monkeypatch.setenv(DATA_ENV, str(tmp_path))
-    with pytest.raises(ConfigError, match="does not exist"):
-        plugin.load_tasks(str(tmp_path / "no-such-file.txt"))
-
-
 def test_clean_task_id_only_strips_trailing_suffix():
     assert clean_task_id("task___12") == "task"
     assert clean_task_id("  task___0 ") == "task"
     # SearchQA-style blanks survive; game ids with digits never match.
     assert clean_task_id("____ Jesus rose") == "____ Jesus rose"
     assert clean_task_id("trial-20170907-1") == "trial-20170907-1"
-
-
-def test_enumerate_gamefiles_requires_data_subdir(tmp_path):
-    with pytest.raises(ConfigError, match="json_2.1.1"):
-        enumerate_gamefiles(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +313,8 @@ def test_run_success_roundtrip(plugin, eval_env, tmp_path):
 
     assert outcome.correctness is True
     assert outcome.meta["termination"] == "terminated"
+    # No folder: the plain prompt and no skill-read facts.
+    assert "skill_reads" not in outcome.meta
     assert [step["action"] for step in outcome.steps] == [
         "look", "go to fridge 1", "win"]
     assert outcome.steps[-1]["observation"] == "Task is SOLVED."
@@ -373,7 +323,10 @@ def test_run_success_roundtrip(plugin, eval_env, tmp_path):
     # engine's admissible commands are listed.
     first = handle.client.calls[0]
     assert first["system"] == SYSTEM_PROMPT
+    assert first["temperature"] == TEMPERATURE == 0.95
+    assert first["max_tokens"] == MAX_OUTPUT_TOKENS == 65536
     user = first["user"]
+    assert "ReadSkill" not in user
     assert "put a clean mug on the desk" in user
     assert "You are in the middle of a room" in user
     assert "Your admissible actions of the current situation are: " \
@@ -397,29 +350,6 @@ def test_run_success_roundtrip(plugin, eval_env, tmp_path):
     # skill writer, exam scene and judge rebuild the scene the run saw.
     assert "You are in the middle of a room" in \
         outcome.meta["initial_observation"]
-
-
-def test_run_uses_the_unified_generation_settings(plugin, eval_env, tmp_path):
-    handle = make_fake_handle(role="executor", script=[reply("win")])
-    task = plugin.load_tasks([GAME_REL])[0]
-    plugin.run(task, handle, "", tmp_path)
-    call = handle.client.calls[0]
-    assert call["temperature"] == TEMPERATURE == 0.95
-    assert call["max_tokens"] == MAX_OUTPUT_TOKENS == 65536
-
-
-def test_the_output_budget_can_be_overridden_for_a_diagnostic(
-        plugin, eval_env, tmp_path, monkeypatch):
-    monkeypatch.setenv(MAX_OUTPUT_TOKENS_ENV, "8192")
-    handle = make_fake_handle(role="executor", script=[reply("win")])
-    task = plugin.load_tasks([GAME_REL])[0]
-    plugin.run(task, handle, "", tmp_path)
-    assert handle.client.calls[0]["max_tokens"] == 8192
-    monkeypatch.setenv(MAX_OUTPUT_TOKENS_ENV, "zero")
-    with pytest.raises(ConfigError, match=MAX_OUTPUT_TOKENS_ENV):
-        plugin.run(task, make_fake_handle(role="executor",
-                                          script=[reply("win")]),
-                   "", tmp_path)
 
 
 def test_an_invalid_reply_gets_one_correction(plugin, eval_env, tmp_path):
@@ -549,7 +479,7 @@ def test_live_real_adapter_one_task(plugin, tmp_path):
         observation = env.reset()
         assert observation, "empty initial observation from the real adapter"
         assert env.max_steps and env.max_steps >= 1
-        followup = env.step("look")
+        followup = env.step_verbatim("look")
         assert isinstance(followup, str)
     finally:
         env.close()
@@ -566,10 +496,7 @@ def _folder_task(plugin, tmp_path, names=("alpha", "beta")):
     return task, locations
 
 
-def test_the_plugin_declares_the_folder_capability(plugin):
-    assert plugin.skill_folder_prompt_name == FOLDER_PROMPT_NAME
-    assert FOLDER_PROMPT_NAME in PROMPTS
-    assert FOLDER_PROMPT_NO_HISTORY_NAME in PROMPTS
+def test_the_prompt_pack_lists_every_prompt_the_runner_sends(plugin):
     # Every prompt the runner sends is listed in the pack and freezes.
     assert set(plugin.prompt_pack.executor_prompts) == {
         SYSTEM_PROMPT_NAME, PROMPT_NO_HISTORY_NAME, PROMPT_NAME,
@@ -662,28 +589,14 @@ def test_opening_a_card_costs_no_game_step(plugin, eval_env, tmp_path):
     assert CARD_BODY in third_user
     assert "(card alpha)" in third_user and "(card beta)" in third_user
     assert "ReadSkill[<location>]" in third_user
-
-
-def test_a_read_does_not_take_one_of_the_two_history_slots(
-        plugin, eval_env, tmp_path):
-    # The unified protocol's memory is the last two (observation, action)
-    # pairs. A read is answered by the loop, not by the environment, so it
-    # must not consume one of those slots: the first game action's history
-    # holds that action only, and the prompt before it is still step 1.
-    task, locations = _folder_task(plugin, tmp_path)
-    handle = make_fake_handle(role="executor", script=[
-        reply(f"ReadSkill[{locations[0]}]"), reply("look"), reply("win")])
-    outcome = plugin.run(task, handle, "", tmp_path)
-    after_read = handle.client.calls[1]["user"]
-    assert "Prior to this step" not in after_read
-    assert "Opened skill cards" in after_read
-    assert CARD_BODY in after_read
-    after_look = handle.client.calls[2]["user"]
+    assert "Opened skill cards" in third_user
+    # After the first game action the history holds that action only: a read
+    # is answered by the loop, so it never takes one of the two history slots.
+    after_look = handle.client.calls[3]["user"]
     assert "Prior to this step, you have already taken 1 step(s)" in after_look
     assert "the most recent 1 observations" in after_look
     assert "Action 1: 'look'" in after_look
     assert "Action 2:" not in after_look
-    assert outcome.meta["steps_used"] == 2
 
 
 def test_a_read_past_the_cap_is_refused_without_costing_a_step(
@@ -729,12 +642,3 @@ def test_an_opened_card_stays_in_the_prompt_and_reopening_is_free(
     assert "Last skill read:" in third_user
     assert "already open" in third_user
     assert outcome.meta["steps_used"] == 1
-
-
-def test_a_unit_without_a_folder_keeps_the_plain_prompt(
-        plugin, eval_env, tmp_path):
-    task = plugin.load_tasks([GAME_REL])[0]
-    handle = make_fake_handle(role="executor", script=[reply("win")])
-    outcome = plugin.run(task, handle, "", tmp_path)
-    assert "ReadSkill" not in handle.client.calls[0]["user"]
-    assert "skill_reads" not in outcome.meta

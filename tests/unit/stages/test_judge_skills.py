@@ -19,7 +19,7 @@ from expedistill.infra.reliability import (
     ProviderRefusalError,
 )
 from expedistill.infra.store import read_json, read_jsonl
-from expedistill.llm.fake import make_fake_handle
+from tests.helpers.fake_llm import make_fake_handle
 from expedistill.stages import judge_skills
 from expedistill.stages.analysis_common import PINNED_NAME
 from tests.helpers.skill_use_runs import (
@@ -81,9 +81,14 @@ def _rows(out_dir):
 
 def test_every_with_bank_trial_is_judged_and_the_control_is_not(
         run_dir, tmp_path):
-    summary, _ = _judge(run_dir, tmp_path / "out")
+    calls = []
+    summary, _ = _judge(run_dir, tmp_path / "out",
+                        skill_use_judge_script(_applicable, calls=calls))
 
     assert summary["expected_trials"] == summary["judged_trials"] == 3
+    # One applicability call per judged trial, one adherence call per
+    # opened card; the control trial costs nothing.
+    assert sorted(calls) == ["adherence"] * 3 + ["applicability"] * 3
     assert summary["failed_trials"] == []
     rows = _rows(tmp_path / "out")
     assert [(row["task"], row["attempt"]) for row in rows] == [
@@ -119,15 +124,6 @@ def test_the_aggregates_are_the_registered_metrics_over_the_rows(
     assert read_json(tmp_path / "out" / judge_skills.SUMMARY_NAME) == summary
 
 
-def test_calls_are_one_applicability_plus_one_adherence_per_opened_card(
-        run_dir, tmp_path):
-    calls = []
-    _judge(run_dir, tmp_path / "out",
-           skill_use_judge_script(_applicable, calls=calls))
-
-    assert sorted(calls) == ["adherence"] * 3 + ["applicability"] * 3
-
-
 def test_the_judge_reads_the_card_list_and_the_trajectory_from_the_read(
         run_dir, tmp_path):
     _, handle = _judge(run_dir, tmp_path / "out")
@@ -147,19 +143,6 @@ def test_the_judge_reads_the_card_list_and_the_trajectory_from_the_read(
     assert "step 0\naction: ls" not in first
     assert "step 2\naction: do alpha step 1" in first
     assert "1. do step 1 of alpha" in first
-
-
-def test_the_manifest_may_ride_on_the_sheets_instead_of_the_unit_rows(
-        tmp_path):
-    run = tmp_path / "run"
-    bank = make_bank()
-    write_learn_phase(run, "p02:learn", bank)
-    write_test_phase(run, bank, TRIALS, manifest_on_sheets=True)
-    (run / "phases" / "p03_test" / "units.jsonl").unlink()
-
-    summary, _ = _judge(run, tmp_path / "out")
-
-    assert summary["judged_trials"] == 3
 
 
 def _as_practice(run, bank):

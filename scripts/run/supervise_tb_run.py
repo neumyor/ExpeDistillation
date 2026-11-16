@@ -66,15 +66,18 @@ def relaunch_driver(run_dir: Path, cmd: list, log) -> "int | None":
     return proc.pid
 
 
+def _phase_dir(run_dir: Path, phase_label: str) -> Path:
+    """The phase directory (``p07:test`` -> ``phases/p07_test``)."""
+    return run_dir / "phases" / phase_label.replace(":", "_")
+
+
 def _traj_dir(run_dir: Path, phase_label: str) -> Path:
-    directory = phase_label.replace(":", "_")
-    return (run_dir / "phases" / directory / "with_bank" / "store"
+    return (_phase_dir(run_dir, phase_label) / "with_bank" / "store"
             / "stage1_baseline" / "trajectories")
 
 
 def _ledger_path(run_dir: Path, phase_label: str) -> Path:
-    directory = phase_label.replace(":", "_")
-    return (run_dir / "phases" / directory / "with_bank" / "store"
+    return (_phase_dir(run_dir, phase_label) / "with_bank" / "store"
             / "failed_units.jsonl")
 
 
@@ -113,8 +116,7 @@ def main() -> int:
     config = sys.argv[2]
     phase_label = sys.argv[3] if len(sys.argv) > 3 else "p07:test"
     cmd = cli_command(config, run_dir)
-    summary_path = (run_dir / "phases" / phase_label.replace(":", "_")
-                    / "phase_summary.json")
+    summary_path = _phase_dir(run_dir, phase_label) / "phase_summary.json"
     ssh_host = os.environ["EXPEDISTILL_TB_HOST"]
     ssh_key = os.environ["EXPEDISTILL_TB_KEY"]
 

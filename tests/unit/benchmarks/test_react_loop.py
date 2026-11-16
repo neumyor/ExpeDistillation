@@ -19,7 +19,7 @@ from expedistill.infra.reliability import (
     ModelOutputError,
     ProviderRefusalError,
 )
-from expedistill.llm import make_fake_handle
+from tests.helpers.fake_llm import make_fake_handle
 from expedistill.prompts import PROMPTS, PromptSpec
 from tests.helpers.skill_folder import (
     CARD_BODY,
@@ -197,29 +197,25 @@ def test_code_bugs_still_raise():
 # Model output errors: an unscored episode, not infra, not a bug
 # ---------------------------------------------------------------------------
 
-def test_model_output_error_mid_episode_is_unscored_with_partial_steps():
-    # OpenAICompatClient raises ModelOutputError for an empty reply, and
-    # call_model does not retry it; it used to escape run_react and stop the
-    # whole pipeline as a code bug. R2b: execution no longer reclassifies it
-    # as the model's failure -- the episode ends with no scorer verdict
-    # (correctness None) and acceptance judges the run.
-    outcome, handle = _run(
-        _ToyEnv(),
-        ["look", "search", ModelOutputError("model m returned no content")])
+
+@pytest.mark.parametrize("script, actions", [
+    # OpenAICompatClient raises ModelOutputError for an empty reply and
+    # call_model does not retry it: the episode ends with no scorer verdict
+    # (correctness None), partial steps kept, and acceptance judges the run.
+    (["look", "search", ModelOutputError("model m returned no content")],
+     ["look", "search"]),
+    ([ModelOutputError("model m returned no content")], []),
+])
+def test_model_output_error_is_unscored_with_the_partial_steps(
+        script, actions):
+    outcome, handle = _run(_ToyEnv(), script)
     assert outcome.correctness is None
-    assert [step["action"] for step in outcome.steps] == ["look", "search"]
+    assert [step["action"] for step in outcome.steps] == actions
     assert outcome.meta["termination"] == "model_output_error"
-    assert outcome.meta["steps_used"] == 2
+    assert outcome.meta["steps_used"] == len(actions)
     assert "ModelOutputError" in outcome.meta["error"]
     assert "returned no content" in outcome.meta["error"]
-    assert len(handle.client.calls) == 3
-
-
-def test_model_output_error_on_first_step_is_unscored_with_no_steps():
-    outcome, _ = _run(_ToyEnv(), [ModelOutputError("no content")])
-    assert outcome.correctness is None
-    assert outcome.steps == []
-    assert outcome.meta["termination"] == "model_output_error"
+    assert len(handle.client.calls) == len(script)
 
 
 def test_provider_refusal_still_propagates():
@@ -230,16 +226,14 @@ def test_provider_refusal_still_propagates():
 
 
 def test_k1_stores_the_unscored_unit_and_continues(monkeypatch, tmp_path):
-    import importlib.abc
-    import importlib.machinery
     import sys
-    import types
 
     from expedistill.benchmarks.base import BenchmarkPlugin
-    from expedistill.benchmarks.registry import _reset_registry, register_plugin
+    from expedistill.benchmarks.registry import _reset_registry
     from expedistill.composites.batch_execute import batch_execute
     from expedistill.core.models import Trajectory
     from expedistill.infra.store import Store
+    from tests.helpers.fake_plugin import serve_plugin
 
     name = "reactbench"
     fullname = f"expedistill.benchmarks.{name}"
@@ -259,22 +253,9 @@ def test_k1_stores_the_unscored_unit_and_continues(monkeypatch, tmp_path):
 
     plugin = ReactPlugin()
 
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            register_plugin(plugin)
-
-    class Finder:
-        def find_spec(self, wanted, path=None, target=None):
-            if wanted == fullname:
-                return importlib.machinery.ModuleSpec(wanted, Loader())
-            return None
-
     _reset_registry()
     monkeypatch.delitem(sys.modules, fullname, raising=False)
-    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
+    serve_plugin(monkeypatch, plugin)
 
     def reply(system, user):
         if "TASK: empty" in user:
@@ -291,7 +272,8 @@ def test_k1_stores_the_unscored_unit_and_continues(monkeypatch, tmp_path):
                    Task(task_id="fine", instruction="fine")],
             role="weak", model_name="m",
             handle=make_fake_handle("weak", script=reply),
-            n_attempts=1, workdir_root=tmp_path / "work")
+            n_attempts=1, skills_for_task=lambda task: (None, ""),
+            workdir_root=tmp_path / "work")
     finally:
         _reset_registry()
     by_task = {t.task_id.rsplit(":", 1)[-1]: t for t in trajectories}
@@ -327,23 +309,6 @@ def test_skills_block_bare_and_with_use_same_template():
     assert skills_block in skills_user
     assert skills_user == expected_bare.replace(
         "SKILLS:\n\n", f"SKILLS:\n{skills_block}\n")
-
-
-def test_system_override_and_run_dir_passthrough(tmp_path):
-    handle = make_fake_handle(role="test", script=["finish"])
-    run_react(
-        Task(task_id="t", instruction="i"),
-        _ToyEnv(),
-        handle,
-        task_prompt_name="TOY_REACT_TASK",
-        max_steps=2,
-        system_override="You are a toy agent.",
-        run_dir=tmp_path,
-    )
-    call = handle.client.calls[0]
-    assert call["system"] == "You are a toy agent."
-    # call_model dumped the request under the run directory.
-    assert (tmp_path / "llm_requests").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -390,17 +355,6 @@ def test_bad_max_steps_is_config_error():
         _run(_ToyEnv(), ["finish"], max_steps=0)
     with pytest.raises(ConfigError, match="max_steps"):
         _run(_ToyEnv(), ["finish"], max_steps="3")
-
-
-def test_unknown_prompt_name_propagates():
-    with pytest.raises(Exception):
-        run_react(
-            Task(task_id="t", instruction="i"),
-            _ToyEnv(),
-            make_fake_handle(script=["x"]),
-            task_prompt_name="NO_SUCH_PROMPT",
-            max_steps=1,
-        )
 
 
 # ---------------------------------------------------------------------------

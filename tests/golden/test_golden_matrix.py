@@ -26,7 +26,7 @@ from expedistill.core.ids import make_skill_id
 from expedistill.infra.store import KIND_DIRS
 from expedistill.methods.revise import OUTCOME_OF_SIDE
 
-from tests.golden.harness import (
+from tests.helpers.golden_harness import (
     COMBOS,
     CRASH_POINTS,
     SEQUENCE,
@@ -39,7 +39,7 @@ from tests.golden.harness import (
     snapshot,
     write_config,
 )
-from tests.golden.revision_window import crash_in_revision_window
+from tests.helpers.golden_revision_window import crash_in_revision_window
 
 GOLDEN_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "golden"
 

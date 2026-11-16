@@ -95,10 +95,3 @@ def test_double_acquire_in_same_process_raises(tmp_path):
 def test_run_locked_error_is_config_error():
     assert issubclass(RunLockedError, ConfigError)
     assert issubclass(RunLockedError, RuntimeError)
-
-
-def test_lock_roundtrip_survives_rapid_reacquire(tmp_path):
-    for _ in range(3):
-        lock = RunLock(tmp_path / "run")
-        lock.acquire()
-        lock.release()

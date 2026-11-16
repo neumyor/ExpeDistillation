@@ -268,7 +268,7 @@ phases:
 |---|---|---|
 | `review.K` | 正整数 | 切段预算。`K: 1` 让每条轨迹只出一段，整条轨迹成为学习单元 |
 | `review.write_lessons` | `true` / `false` | 弱模型失败段是否进入写卡材料；关闭时材料只有强模型段 |
-| `rules.trajectory_select` | `all` / `strong1_weak1` / `strong2_weak2` | 摸底里每个任务挑哪些强模型轨迹切段作写卡材料 |
+| `rules.trajectory_select` | `all` / `strong1_weak1` | 摸底里每个任务挑哪些强模型轨迹切段作写卡材料 |
 | `rules.segment_select` | `strong_success_weak_failed` / `strong_all_weak_failed` / `all` | 哪些段进入写卡材料；`all` 与 `trajectory_select: all` 一起构成覆盖消融 |
 | 练习相位 `tasks` | `train` / `val` | 在训练集还是验证集上练习 |
 | 执行相位 `playbook` | `off` / `evolved` | 练习与终测分别配置；学习相位总是演化 playbook |
@@ -385,7 +385,7 @@ TB 的终测对照是外部 campaign 成绩文件（`model_key` 跟随学生模�
 **B1 的采样温度**：所有方法侧模型调用固定使用 `temperature = 1.0`，配置文件不能覆盖。
 思考型模型在 `temperature = 0` 下容易反复输出同一段推理、把输出预算耗尽后返回空内容；
 固定 `1.0` 避开这一退化。温度是解码设置，不属于实验身份，不进入配置与 manifest。
-ALFWorld 的执行协议原本沿用外层统一 runner 的 `temperature 0`，2026-11-13 改为 `temperature 0.95`：自建 vLLM 上的学生在贪心解码下，20 条复放的摸底提示词里有 2 条思考陷入重复、写到 65536 上限，采样解码避开了这一退化（见 3.3 的 runner 表）。
+ALFWorld 的执行协议用 `temperature 0.95`（外层统一 runner 用 `temperature 0`）：自建 vLLM 上的学生在贪心解码下，20 条复放的摸底提示词里有 2 条思考陷入重复、写到 65536 上限，采样解码避开了这一退化（见 3.3 的 runner 表）。
 
 ### 3.3 功能积木
 
@@ -405,7 +405,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 |---|---|---|
 | TB runner | TerminalBench | 委托 Harbor + 沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹（`benchmarks/tb/trajectory.py`）。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地共用 ReAct 循环（`benchmarks/react_loop.py`）一步一步执行到结束，环境与判分来自外层 `benchmark/searchqa-eval/` |
-| ALFWorld runner | ALFWorld | 本地执行，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0.95、50 步预算）；环境在外层 venv 的子进程里运行，需要 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
+| ALFWorld runner | ALFWorld | 本地执行，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0.95、固定的输出上限 65536、50 步预算）；环境在外层 venv 的子进程里运行，需要 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
 
 两套本地 runner 的每局步数上限用环境变量配：SearchQA 是
 `EXPEDISTILL_SEARCHQA_MAX_STEPS`（默认 6），ALFWorld 是
@@ -437,7 +437,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | D2 | 划分 | （任务列表, 冻结的划分）→ train / val / test / reserved | `blocks/tasks.py` |
 | D3 | 成绩统计 | （Trajectory 列表, 应有单元集合, 辅助打分器）→ 每题有效次数 / 成功次数，两种口径的 avg@N、pass@N（声明辅助指标时另有同分母的辅助 avg@N） | `blocks/metrics.py` |
 | D5 | 轨迹视图 | （Trajectory 或段内步骤, 视图配置）→ 给模型看的文本；超长观察按规则截断，截断处明确标注 | `blocks/view.py` |
-| D6 | 段筛选 | （Subtask 列表, 段筛选规则）→ 进入写卡材料的 Subtask；规则名由调用方在 `blocks/rules.py` 解析 | `blocks/select.py`、`blocks/rules.py` |
+| D6 | 段筛选 | （Subtask 列表, 段筛选规则）→ 进入写卡材料的 Subtask；规则名在 `blocks/rules.py` 的注册表里取用，写卡材料（`methods/cards/material.py`）调用 | `blocks/rules.py` |
 | D7 | 切段校验 | （Trajectory, Subtask 列表, K）→ 通过 / 错误清单 | `blocks/segment.py` |
 | D9 | 技能注入 | （技能列表）→ 插入 prompt 的技能块；每条技能的文本由 `render_card` 渲染 | `inject/skills.py`、`inject/skill_text.py` |
 
@@ -484,16 +484,15 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | 相位报告 | 读 `unit_specs.jsonl` + `answer_sheets/` + `coverage.jsonl`，现算 UnitSummary | `composites/phase_report.py` |
 | 单元身份 | `make_unit_id` / 注入技能的规范形 / 空洞答卷 id | `composites/unit_ids.py` |
 | 证据分配 | 按 1.5 的表把每条定位成功的失败分给缺口 / 触发 / 正文 / 无卡证据（`route`）；每个类型或每张卡一个单元（`plan_cards`）；删除规则（`content_failed_twice`）；触发证据计数（`trigger_facts`） | `composites/evidence.py` |
-| 单元编号与终测差值 | `parse_unit_id`、`final_test_delta`、`control_arm_source` | `composites/decision.py` |
-| 学习账本 | `revisions.jsonl` / `outcomes.jsonl`、删除的落盘、版本记录入口、按目标排序提交（`commit_order`） | `composites/learn_ledger.py` |
+| 终测差值 | `final_test_delta`、`control_arm_source` | `composites/decision.py` |
+| 学习账本 | `revisions.jsonl` / `outcomes.jsonl`、删除的落盘（`land_delete`）、按目标排序提交（`commit_order`） | `composites/learn_ledger.py` |
 | 演化文本存取 | 每个学习相位的 `profile.json` / `playbook.json`；读取紧邻上一个学习相位的版本；playbook 显示能力检查 | `composites/evolving_text.py` |
 | 执行事实 | 从一张摸底或练习答卷读出执行者看到的目录与 playbook、打开过的卡及其步号 | `composites/sheet_facts.py` |
-| 来源指针 | `trace_at` / `resolve` / `trace_of_trajectory` / `render_scenes` / `render_windows`（改写者读到的显式窗口）；`task_instruction`（按任务 id 取 benchmark 的任务说明） | `composites/trace.py` |
+| 来源指针 | `trace_at`（唯一构造 `TraceRef`）/ `check_ref`（边界检查）/ `trace_of_trajectory` / `render_windows`（改写者读到的显式窗口）；`task_instruction`（按任务 id 取 benchmark 的任务说明） | `composites/trace.py` |
 | 来源账本 | 每个技能版本一条 Provenance：`record_version`（唯一写入口）、`find_provenance`、`check_provenance` | `composites/provenance.py` |
-| 相位库 | 相位技能库工件的布局、写出与读取：工件列出对象存储里的全部技能（含 `discarded`），按技能 id 排序 | `composites/phase_bank.py` |
+| 相位库 | 相位技能库工件的布局、写出与读取：工件列出对象存储里的全部技能（含 `discarded`），按技能 id 排序；相位标签与相位目录名的互相映射（`phase_bank_dir`、`label_of_dir`）只在这里实现 | `composites/phase_bank.py` |
 | 技能文件夹物化 | 按清单的库指纹核对相位库，把每条技能写成 `<skill>/SKILL.md`（YAML 头 + `render_card` 全文），另写 `catalog.md` 兜底；内容不变不重写 | `composites/skill_materialize.py` |
 | 技能读取解析 | 从轨迹解析打开了哪些技能、在哪些步骤 | `composites/skill_use.py` |
-| 技能状态提交 | `discard_skill`（丢弃的唯一入口） | `composites/skill_status.py` |
 | 空洞记录 | 已接受基础设施空洞的读取与写入 | `composites/shortfall.py` |
 | 外部对照 | 外部冻结成绩文件的加载与校验 | `composites/external_control.py` |
 | 配对统计 | 按任务自助法的置信区间、胜负平、McNemar 精确检验、单臂噪声底 | `composites/paired_stats.py` |
@@ -616,6 +615,8 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 基础件在 `core/`、`llm/`、`prompts/`、`infra/`、`inject/`；benchmark 插件
 在 `benchmarks/`；功能积木在 `blocks/`；组合积木在 `composites/`；
 方法驱动与参数契约在 `methods/`；相位流程与分析工具在 `stages/`；入口是 `cli.py`。
+顶层包的 `__init__.py` 只有文档字符串，使用方 import 具体子模块；`prompts/__init__.py`
+是例外，它按 import 清单登记全部方法 prompt。
 
 ### 3.9 论文分析与准备工具
 
@@ -654,7 +655,7 @@ Trajectory（轨迹，schema 3）
                   （phase_tag 是产生它的摸底或练习相位标签，冒号换成下划线，如 p01_baseline、p03_practice；
                   `ids.parse_trajectory_id` 返回 (phase_label, task_id, role, attempt)，相位标签在最前）
   task_id, benchmark, model_role(strong/weak), model_name, attempt_index,
-  skills_injected(null = 裸跑；否则为 skill_id+version 列表或整库 digest),
+  skills_injected(null = 裸跑；否则为整库引用 `bank:<12 位十六进制>`，由整库每张卡的 id、版本和文本算出),
   steps[ {action, observation} ... ],
   correctness(判分器结果：true / false / null), meta(终止原因等自由数据)
 
@@ -1013,12 +1014,12 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
 
 - `TraceRef` 只能由 `trace_at(sheet, step)` 构造：参数必须是一张摸底或练习答卷，
   校验 `0 <= step < len(steps)`；
-- `resolve(run, ref)` 是读取来源上下文的唯一出口，返回 `TraceContext`
-  （任务说明、切点前后的渲染步骤、源执行自己的判分）；找不到答卷或越界直接报错；
-- `render_scenes(run, refs)` 渲染切点前最近 `WRITER_BEFORE_STEPS`（15）步与切点后 30 步；
-  改写用 `render_windows(run, windows)`，每个切点带显式窗口（见上表）。两者都把同一次执行上的
-  多个窗口合并成步号的并集，空隙用 `[steps a-b are not shown]` 标出；
-- 技能版本统一经 `ledger.record_version(skill, provenance)` 落盘，先写 Provenance 行
+- `check_ref(run, ref)` 是边界检查：指针必须指向一张已存答卷的某一步，答卷按
+  `phases/<相位>/answer_sheets/<答卷 id>.json` 精确查找，找不到或越界直接报错；
+- 改写读到的真实步骤由 `render_windows(run, windows)` 渲染，每个切点带显式窗口（见上表，
+  窗口起点至多在出错步之前 `WRITER_BEFORE_STEPS`（15）步）。同一次执行上的多个窗口合并成
+  步号的并集，空隙用 `[steps a-b are not shown]` 标出；
+- 技能版本统一经 `provenance.record_version(store, phase_dir, run_dir, skill, provenance)` 落盘，先写 Provenance 行
   再存技能：两步之间崩溃时续跑重做这一版本，`record_version` 找到已有行后只补存技能，
   不会出现没有来源的已存版本。`sources` 是证据位置：新卡 = 材料段起点与缺口失败的出错步；
   改写 = 各条证据的出错步；
@@ -1092,14 +1093,17 @@ tests/
   composites/    组合测试：多模块协作与崩溃续跑验证
   golden/        回归测试：2 组合端到端矩阵 + 修订窗口探针
   fixtures/      测试数据：benchmark 原始输出录像、提示词渲染样例、golden 矩阵快照
-  helpers/       共用工具：插件注册、模型回复样例、技能构造器、来源指针
+  helpers/       共用工具：假模型 `fake_llm.py`、假插件的唯一安装器 `fake_plugin.py`、
+                 golden 的剧本与崩溃工具、TB 远程与技能文件夹的假环境、技能构造器、来源指针
+  conftest.py    共用的 pytest fixture
   test_layering.py   分层静态检查
 ```
 
-全量约 130 个测试文件、约 2400 个用例，约 50 秒；标记 `live` 的用例需要真实服务，默认不跑。
+全量约 105 个测试文件、约 2050 个用例，约 16 秒；标记 `live` 的用例需要真实服务，默认不跑。
+测试文件之间不互相 import，共用代码都在 `tests/helpers/`。
 
 **单元测试**（`tests/unit/`）：每个积木（block、composite、method、stage、prompt）至少
-一个测试文件；调模型的用 `llm/fake.py`，不发真实请求；测试数据从 `tests/fixtures/` 读取，
+一个测试文件；调模型的用 `tests/helpers/fake_llm.py` 的 `FakeClient`，不发真实请求；测试数据从 `tests/fixtures/` 读取，
 不直接读 `runs/`。
 
 **组合测试**（`tests/composites/`）：用假模型 + 临时 run 目录验证多模块协作，必须包含
@@ -1118,11 +1122,11 @@ tests/
 - 剧本固定：三个学习相位依次覆盖两张缺口新卡、一次正文改写与一次触发改写、删除规则与一次
   触发改写（`test_golden_matrix.py` 从回执账本核对）；每个组合一次跑完共 35 次模型调用
   （`tests/fixtures/golden/provenance.json` 记录调用数与崩溃点的调用序号）；
-- 每个组合在三个崩溃点上做崩溃续跑验证（`harness.CRASH_POINTS`：`diagnosis` 两次诊断之间、
+- 每个组合在三个崩溃点上做崩溃续跑验证（`tests/helpers/golden_harness.py` 的 `CRASH_POINTS`：`diagnosis` 两次诊断之间、
   `revise` 改写调用前、`new_cards` 两张新卡之间），续跑结果必须与一次跑完的快照相同；
 - `--workers 1` 与 `--workers 8` 的快照逐字节相同（`test_eight_workers_write_the_same_snapshot_as_one`，
   `generate.py` 生成时也核对）；
-- `revision_window.py`：在"改写已落盘、下一个 practice 还没执行"处崩溃再续跑。
+- `tests/helpers/golden_revision_window.py`：在"改写已落盘、下一个 practice 还没执行"处崩溃再续跑。
 
 ### 6.2 契约测试原则
 

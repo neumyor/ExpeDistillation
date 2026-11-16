@@ -1,7 +1,4 @@
-"""D5 view unit tests: numbering, format, truncation, and None-rules.
-
-Pure functions, so every test is direct computation; determinism is asserted
-explicitly (same inputs, same output across calls)."""
+"""D5 view unit tests: numbering, format, truncation, and None-rules."""
 
 from expedistill.benchmarks.base import ViewRules
 from expedistill.blocks.view import render_steps_view, render_trajectory_view
@@ -23,9 +20,7 @@ def make_traj(n_steps=2, correctness=False):
 def test_numbering_starts_at_zero_and_format_is_exact():
     view = render_steps_view([Step(action="ls -la", observation="file.txt")])
     assert view == "step 0\naction: ls -la\nobservation: file.txt"
-
-
-def test_blank_line_between_steps_and_sequential_numbering():
+    # Steps are numbered sequentially and separated by one blank line.
     view = render_steps_view([
         Step(action="a0", observation="o0"),
         Step(action="a1", observation="o1"),
@@ -66,18 +61,6 @@ def test_actions_are_truncated_with_the_same_rule():
     omitted = len(long_command) - TIGHT_RULES.head_keep - TIGHT_RULES.tail_keep
     assert f"[... {omitted} characters omitted ...]" in view
     assert long_command not in view
-
-
-def test_short_texts_pass_through_unchanged_under_rules():
-    view = render_steps_view([Step(action="ls", observation="done")], TIGHT_RULES)
-    assert view == "step 0\naction: ls\nobservation: done"
-
-
-def test_render_is_deterministic():
-    traj = make_traj()
-    first = render_trajectory_view(traj, TIGHT_RULES)
-    second = render_trajectory_view(traj, TIGHT_RULES)
-    assert first == second
 
 
 def test_trajectory_view_header_and_steps():

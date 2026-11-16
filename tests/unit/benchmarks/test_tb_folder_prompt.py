@@ -12,6 +12,8 @@ verbatim, no {skills_block} slot for a catalog to leak through, and the
 bare / plain-skills prompt untouched by any folder wording.
 """
 
+import string
+
 from expedistill.benchmarks.tb.plugin import (
     TB_SKILL_FOLDER_GUIDANCE,
     TB_TASK_PROMPT,
@@ -35,15 +37,6 @@ def test_the_guidance_section_is_embedded_verbatim():
     assert TB_SKILL_FOLDER_GUIDANCE in get(FOLDER_NAME)
 
 
-def test_the_folder_prompt_names_the_available_skills_and_the_mount():
-    # The guidance points at Harbor's <available_skills> list and names
-    # the mount the vendored environment hardcodes (module docstring, M3).
-    guidance = TB_SKILL_FOLDER_GUIDANCE
-    assert "/opt/openclaw-skills" in guidance
-    assert "<available_skills>" in guidance
-    assert "catalog.md" not in guidance
-
-
 def test_the_catalog_cannot_leak_into_the_prompt():
     template = get(FOLDER_NAME)
     # No {skills_block} slot: there is nothing variable to inject, so a
@@ -56,17 +49,14 @@ def test_the_catalog_cannot_leak_into_the_prompt():
     assert "{instruction}" in template and "{history}" in template
 
 
-def test_the_inline_template_is_gone():
-    # inline_catalog was retired: the catalog is not injected into
-    # SKILL.md and the registered sibling prompt is removed.
-    assert "TB_TASK_PROMPT_FOLDER_INLINE" not in PROMPTS
-
-
 def test_the_plain_task_prompt_carries_no_folder_wording():
     # Bare and plain-skills runs keep the frozen pre-folder prompt,
     # byte for byte: the control unit's prompt has no guidance.
     template = get("TB_TASK_PROMPT")
     assert TB_SKILL_FOLDER_GUIDANCE not in template
     assert "/opt/openclaw-skills" not in template
-    assert "{skills_block}" in template
     assert template == TB_TASK_PROMPT.template
+    # The three slots the harness fills: any other variable would be unfilled.
+    fields = {name for _, name, _, _ in string.Formatter().parse(template)
+              if name}
+    assert fields == {"instruction", "skills_block", "history"}

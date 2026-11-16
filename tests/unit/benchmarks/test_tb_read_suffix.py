@@ -8,11 +8,11 @@ from expedistill.benchmarks.tb.skill_read import (
     READ_SUFFIX_FILENAME, render_read_suffix)
 from expedistill.methods.delivery.folder_delivery import skill_folder_manifest
 from expedistill.methods.delivery.units import make_row, with_playbook
-from expedistill.prompts import digest, get as get_prompt
-from tests.unit.benchmarks.test_tb_folder_sandbox import (
-    HANDLE, ROOT, TRIAL, _BANK, _CATALOG, _materialized,
-    _trial_files_with_cat)
-from tests.unit.benchmarks.test_tb_plugin import FakeRemoteLink, _make_plugin
+from expedistill.prompts import get as get_prompt
+from tests.helpers.tb_fake_remote import (
+    HANDLE, ROOT, TRIAL, FakeRemoteLink, make_plugin)
+from tests.helpers.tb_folder import (
+    BANK, CATALOG, materialized, trial_files_with_cat)
 from expedistill.benchmarks.base import Task
 
 PLAYBOOK = "## orientation\nLook before you type.\n"
@@ -26,19 +26,19 @@ VENDOR_DEFAULT_SHA256 = (
 def _task(tmp_path, playbook=""):
     # The phase's playbook switch puts the playbook into the manifest.
     row = make_row("tb:train-fasttext", None, "",
-                   {"skill_folder": skill_folder_manifest(_BANK)})
+                   {"skill_folder": skill_folder_manifest(BANK)})
     manifest = with_playbook([row], playbook)[0].aux["skill_folder"]
     return Task(task_id="train-fasttext", instruction="train-fasttext",
                 meta={"task_name": "train-fasttext", "attempt_token": "tok",
                       "skill_folder": manifest,
-                      "skill_folder_dir": str(_materialized(tmp_path))})
+                      "skill_folder_dir": str(materialized(tmp_path))})
 
 
 def _run(tmp_path, playbook=""):
     link = FakeRemoteLink(polls=[f"RESULT {TRIAL}/result.json\n"],
-                          remote_files=_trial_files_with_cat())
-    plugin = _make_plugin(link)
-    plugin.run(_task(tmp_path, playbook), HANDLE, _CATALOG, tmp_path / "work")
+                          remote_files=trial_files_with_cat())
+    plugin = make_plugin(link)
+    plugin.run(_task(tmp_path, playbook), HANDLE, CATALOG, tmp_path / "work")
     return link
 
 
@@ -55,11 +55,6 @@ def test_a_playbook_goes_in_front_of_the_skill_read_text():
     assert suffix.startswith("Global playbook")
     assert PLAYBOOK.strip() in suffix
     assert suffix.endswith(get_prompt("TB_TASK_PROMPT_READ"))
-
-
-def test_both_suffix_prompts_have_digests():
-    assert digest("TB_TASK_PROMPT_READ")
-    assert digest("TB_TASK_PROMPT_READ_PLAYBOOK")
 
 
 def test_a_playbook_unit_uploads_the_suffix_file(tmp_path):
@@ -80,7 +75,7 @@ def test_a_unit_without_a_playbook_uploads_the_plain_skill_read_text(
 
 
 def test_the_playbook_changes_the_launch_conditions(tmp_path):
-    plugin = _make_plugin(FakeRemoteLink(polls=[], remote_files={}))
+    plugin = make_plugin(FakeRemoteLink(polls=[], remote_files={}))
     task = _task(tmp_path, PLAYBOOK)
     folder = (task.meta["skill_folder"], tmp_path / "skill_folder")
     args = ("run", "skills", "guidance", folder, 131072)
@@ -89,15 +84,6 @@ def test_the_playbook_changes_the_launch_conditions(tmp_path):
     other = plugin._conditions(*args, render_read_suffix(PLAYBOOK + "more"))
     assert plain["skill_sha256"] != with_playbook["skill_sha256"]
     assert with_playbook["skill_sha256"] != other["skill_sha256"]
-
-
-def test_stage0_freezes_the_suffix_prompts_and_the_playbook_update():
-    from expedistill.stages.stage0_freeze import _prompt_digests
-
-    frozen = _prompt_digests("tb")
-    assert frozen["TB_TASK_PROMPT_READ"] == digest("TB_TASK_PROMPT_READ")
-    assert frozen["TB_TASK_PROMPT_READ_PLAYBOOK"]
-    assert frozen["TB_PLAYBOOK_UPDATE"] == digest("TB_PLAYBOOK_UPDATE")
 
 
 def test_an_empty_bank_still_uploads_the_guidance_and_the_suffix(tmp_path):
@@ -114,9 +100,9 @@ def test_an_empty_bank_still_uploads_the_guidance_and_the_suffix(tmp_path):
                       "skill_folder": manifest,
                       "skill_folder_dir": str(folder_dir)})
     link = FakeRemoteLink(polls=[f"RESULT {TRIAL}/result.json\n"],
-                          remote_files=_trial_files_with_cat())
+                          remote_files=trial_files_with_cat())
 
-    outcome = _make_plugin(link).run(task, HANDLE, "", tmp_path / "work")
+    outcome = make_plugin(link).run(task, HANDLE, "", tmp_path / "work")
 
     task_dir = f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext"
     assert link.remote_files[f"{task_dir}/SKILL.md"].decode("utf-8") \

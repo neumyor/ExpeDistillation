@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from expedistill.benchmarks.aux import aux_wiring
+from expedistill.blocks.metrics import summarize
 from expedistill.composites import answer_sheets as sheet_io
 from expedistill.composites import coverage as coverage_io
 from expedistill.composites import decision, shortfall
@@ -62,7 +63,7 @@ from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import Store, write_json
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
@@ -163,13 +164,12 @@ def run_test(ctx: StageContext, phase: PhaseInstance,
         coverage, phase_directory / phase_report.COVERAGE_NAME)
     phase_report.write_unit_specs(specs, phase_directory)
 
-    report = phase_report.build_phase_report(
-        sheets, specs, phase_kind="test", learning_usable=False)
+    report = phase_report.build_phase_report(sheets, specs)
     summary = {
         "role": PHASE_ROLE_TEST,
         "bank_reference": reference,
         "control_source": control_source,
-        **_arm_summaries(report.units, n_attempts, aux_metric,
+        **_arm_summaries(report.units, aux_metric,
                          external_control_arm=external is not None),
         "infra_missing": missing,
         "infra_accepted": {arm: sorted(accepted[arm]) for arm in _ARMS},
@@ -330,26 +330,24 @@ def _graded_sheets(phase_label: str, benchmark: str,
     return coverage, sheets
 
 
-def _arm_summaries(units: Sequence[Any], n_attempts: int,
-                   aux_metric: Optional[str], *,
+def _arm_summaries(units: Sequence[Any], aux_metric: Optional[str], *,
                    external_control_arm: bool) -> Dict[str, Any]:
     """The summary's ``with_bank`` / ``control`` / ``delta`` entries."""
     with_bank_metrics = unit_summary.task_metrics(
-        [unit for unit in units if unit.arm == "with_bank"], n_attempts)
+        [unit for unit in units if unit.arm == "with_bank"])
     control_metrics = unit_summary.task_metrics(
-        [unit for unit in units if unit.arm == "control"], n_attempts)
+        [unit for unit in units if unit.arm == "control"])
     if set(with_bank_metrics) != set(control_metrics):
         raise CodeBugError(
             "test phase arms cover different task sets: with-bank "
             f"{sorted(with_bank_metrics)} vs control "
             f"{sorted(control_metrics)}")
 
-    with_bank = unit_summary.summarize_metrics(
-        with_bank_metrics, n_attempts, aux_metric=aux_metric)
+    with_bank = summarize(with_bank_metrics, aux_metric=aux_metric)
     # An external control carries campaign rewards, never the plugin's
     # auxiliary scorer, so its auxiliary column is absent by construction.
-    control = unit_summary.summarize_metrics(
-        control_metrics, n_attempts,
+    control = summarize(
+        control_metrics,
         aux_metric=None if external_control_arm else aux_metric)
     return {"with_bank": with_bank, "control": control,
             "delta": decision.final_test_delta(with_bank, control)}

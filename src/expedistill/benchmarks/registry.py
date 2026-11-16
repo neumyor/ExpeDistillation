@@ -2,13 +2,13 @@
 
 Built on the generic core registry (``core/registry.make_registry``): names
 are identity, duplicates are programming errors, and the config picks runners
-by name (README 1.1 rule 3). A plugin registers itself at import of its
+by name. A plugin registers itself at import of its
 package -- the plugin's ``__init__`` constructs the plugin and calls
 ``register_plugin``; whoever resolves plugins (E1) imports the plugin packages
-first so registration runs. The tb/searchqa/alfworld packages arrive in a
-later wave and are deliberately not imported from here: importing them from
-the foundation would make every consumer pay for benchmark-specific
-dependencies (the ALFWorld plugin needs its own venv).
+first so registration runs. The tb/searchqa/alfworld packages are deliberately
+not imported from here: importing them from the foundation would make every
+consumer pay for benchmark-specific dependencies (the ALFWorld plugin needs
+its own venv).
 
 Failure taxonomy: a duplicate name is a code bug (two plugins claiming one
 identity -> CodeBugError); an unknown name is a configuration problem (the
@@ -23,8 +23,7 @@ from expedistill.core.registry import make_registry
 from expedistill.infra.reliability import CodeBugError, ConfigError
 from expedistill.benchmarks.base import BenchmarkPlugin
 
-__all__ = ["register_plugin", "get_plugin", "plugin_names",
-           "resolve_plugin", "_reset_registry"]
+__all__ = ["register_plugin", "get_plugin", "plugin_names", "resolve_plugin"]
 
 _KIND = "benchmark plugin"
 

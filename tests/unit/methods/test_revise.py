@@ -12,7 +12,7 @@ from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
 from expedistill.infra.store import Store, read_jsonl
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 from expedistill.methods import revise
 from tests.helpers.skills import make_skill
 from tests.helpers.traces import execution_sheet, write_sheets

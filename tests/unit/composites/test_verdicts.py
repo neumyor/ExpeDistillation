@@ -74,19 +74,6 @@ def test_a_duplicate_rule_name_is_rejected():
 
 
 # ---------------------------------------------------------------------------
-# The old run-record entries are gone
-# ---------------------------------------------------------------------------
-
-def test_the_old_grading_entries_are_gone():
-    # ``grade_sheet`` is the only per-trial grading entry; the R2b bridges
-    # and the RunRecord-shaped entry were removed with the answer-sheet
-    # refactor.
-    assert not hasattr(verdicts, "verdict_from_trajectory")
-    assert not hasattr(verdicts, "verdict_from_attempt")
-    assert not hasattr(verdicts, "verdict_from_run")
-
-
-# ---------------------------------------------------------------------------
 # R4, acceptance side: the verdict core never touches the skill bank
 # ---------------------------------------------------------------------------
 

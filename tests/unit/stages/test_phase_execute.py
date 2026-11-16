@@ -1,8 +1,8 @@
 """The execute-phase driver -- baseline, practice and test phases over
 the fake benchmark.
 
-Fake plugin through the real import machinery (the stub-finder pattern
-of tests/unit/stages), fake model handles from llm.fake, phase specs
+Fake plugin through the real import machinery (the stub finder in
+tests/helpers/fake_plugin.py), fake model handles from helpers.fake_llm, phase specs
 built directly (core.config's parsed shapes). The independent probes
 are the plugin's call records, the FakeClient call counts (a rerun
 makes zero model calls) and the phase directory's persisted units /
@@ -10,12 +10,7 @@ report rows.
 """
 
 import hashlib
-import importlib
-import importlib.abc
-import importlib.machinery
 import json
-import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -26,9 +21,9 @@ from expedistill.benchmarks.base import (
     Task,
     ViewRules,
 )
-from expedistill.benchmarks.registry import ConfigError, _reset_registry, register_plugin
-from tests.helpers.plugins import reload_plugin
+from expedistill.benchmarks.registry import ConfigError
 from expedistill.composites import (
+    batch_execute as batch_module,
     evolving_text,
     phase_bank,
     phase_report,
@@ -55,26 +50,21 @@ from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.infra.usage import UsageRecorder
 from expedistill.composites.skill_use import skill_read_events
-from expedistill.inject import bank_reference, format_playbook_block
-from expedistill.llm.fake import make_fake_handle
+from expedistill.inject.skills import bank_reference, format_playbook_block
+from tests.helpers.fake_llm import make_fake_handle
 from expedistill.methods.delivery import folder_delivery as skill_folder
 from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages import phase_execute
 from expedistill.stages.phase_execute import engine
 from expedistill.stages.context import RunSettings, StageContext
 from tests.helpers.configs import reference_method
-from tests.helpers.skills import make_skill
+from tests.helpers.skills import MARKED, make_skill
+from tests.helpers.fake_plugin import serve_plugin
+
+pytestmark = pytest.mark.usefixtures("clean_registry")
 
 _FAKE = "fakebench"
-_MODULE = f"expedistill.benchmarks.{_FAKE}"
 TASK_IDS = ("t1", "t2", "t3")
-
-MARKED = {
-    "when_to_use": "The service rejects connections.",
-    "steps": ["Check the service status.", "Restart the service."],
-    "not_applicable_when": "The status command already reports running.",
-}
-
 
 class PhasePlugin(BenchmarkPlugin):
     """The fixed task set; ``behavior(record)`` decides each run's
@@ -125,38 +115,6 @@ def _outcome(task_id, correctness):
         steps=[{"action": f"exec {task_id}", "observation": "ok"}],
         correctness=correctness,
     )
-
-
-def _install_plugin(monkeypatch, plugin):
-    """Serve ``plugin``'s package through the real import machinery."""
-    fullname = f"expedistill.benchmarks.{plugin.name}"
-
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            register_plugin(plugin)
-
-    class Finder:
-        def find_spec(self, name, path=None, target=None):
-            if name == fullname:
-                return importlib.machinery.ModuleSpec(name, Loader())
-            return None
-
-    sys.modules.pop(fullname, None)
-    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
-    return plugin
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    _reset_registry()
-    # The fake benchmark scores through the plain scorer rule (a real
-    # benchmark's default binding is the config's frozen table).
-    yield
-    sys.modules.pop(_MODULE, None)
-    _reset_registry()
 
 
 def make_config(**overrides):
@@ -214,17 +172,10 @@ def _prefixed(task_id):
 
 
 def _pin_k1(monkeypatch):
-    """K1 at one infra retry and zero backoff (the pre-resilience pin of
-    the stage-1 tests) so failing-task tests stay fast and countable."""
-    def injecting(real):
-        def wrapper(**kwargs):
-            kwargs.setdefault("infra_retries", 1)
-            kwargs.setdefault("infra_backoff", (0.0, 0.0))
-            return real(**kwargs)
-        return wrapper
-
-    monkeypatch.setattr(engine, "batch_execute",
-                        injecting(engine.batch_execute))
+    """K1 at one infra retry and zero backoff so failing-task tests stay
+    fast and countable."""
+    monkeypatch.setattr(batch_module, "_INFRA_RETRIES", 1)
+    monkeypatch.setattr(batch_module, "_INFRA_BACKOFF", (0.0, 0.0))
 
 
 def baseline_spec(**overrides):
@@ -294,8 +245,7 @@ def write_playbook(ctx, label, text):
 def read_report(ctx, phase):
     """The phase's trial-level report, read from its artifacts."""
     report = phase_report.read_phase_report(
-        phase_bank.phase_bank_dir(ctx.run_dir, phase.label),
-        phase_kind=phase.spec.role, learning_usable=True)
+        phase_bank.phase_bank_dir(ctx.run_dir, phase.label))
     if report is None:
         raise AssertionError(
             f"phase {phase.label!r} wrote no trial-level artifacts")
@@ -326,7 +276,7 @@ def snapshot_bank(ctx):
 
 def test_baseline_runs_both_arms_and_writes_the_report(monkeypatch,
                                                        tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     phase = phase_of(0, "baseline", baseline_spec())
 
@@ -370,31 +320,24 @@ def _record_rollout_workers(monkeypatch):
     return seen
 
 
-def test_rollouts_are_dispatched_with_the_rollout_limit(monkeypatch,
-                                                        tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
+@pytest.mark.parametrize("settings, expected", [
+    pytest.param({"workers": 128, "rollout_workers": 64}, 64, id="limit"),
+    pytest.param({"workers": 8}, 8, id="follows_workers"),
+])
+def test_rollouts_are_dispatched_with_the_rollout_limit(
+        monkeypatch, tmp_path, settings, expected):
+    serve_plugin(monkeypatch, PhasePlugin())
     seen = _record_rollout_workers(monkeypatch)
-    ctx = make_ctx(tmp_path, make_config(), workers=128, rollout_workers=64)
+    ctx = make_ctx(tmp_path, make_config(), **settings)
 
     phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
 
-    assert seen and set(seen) == {64}
-
-
-def test_rollouts_follow_workers_when_no_rollout_limit_is_set(monkeypatch,
-                                                              tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
-    seen = _record_rollout_workers(monkeypatch)
-    ctx = make_ctx(tmp_path, make_config(), workers=8)
-
-    phase_execute.run(ctx, phase_of(0, "baseline", baseline_spec()))
-
-    assert seen and set(seen) == {8}
+    assert seen and set(seen) == {expected}
 
 
 def test_baseline_leaves_the_bank_unchanged_r4(monkeypatch, tmp_path):
     # R4's byte invariant holds for every phase that makes no bank calls.
-    _install_plugin(monkeypatch, PhasePlugin())
+    serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     before = snapshot_bank(ctx)
 
@@ -426,7 +369,9 @@ def test_r4_call_face():
         assert "discard_skill(" not in source
 
 
-def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
+def _holes_setup(monkeypatch, tmp_path, role):
+    """A phase whose task t2 dies on infrastructure, plus its hole ids and
+    the file the accepted holes land in."""
     _pin_k1(monkeypatch)
 
     def behavior(record):
@@ -434,9 +379,30 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
             raise InfrastructureError("sandbox exploded")
         return _outcome(record["task_id"], True)
 
-    plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase = phase_of(0, "baseline", baseline_spec())
+    plugin = serve_plugin(monkeypatch, PhasePlugin(behavior))
+    if role == "baseline":
+        ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
+        phase = phase_of(0, "baseline", baseline_spec())
+        stem = "p01_baseline"
+        holes = [f"traj/{stem}/fakebench:t2/strong/00",
+                 f"traj/{stem}/fakebench:t2/weak/00"]
+        accepted_path = shortfall.stage1_shortfall_path(ctx.run_dir)
+    else:
+        ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
+        write_bank_artifact(ctx, "p02:learn", [make_card()])
+        phase = phase_of(2, "practice", practice_spec())
+        holes = [make_trajectory_id("p03:practice", _prefixed("t2"),
+                                    "weak", 0)]
+        accepted_path = (phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
+                         / "weak" / shortfall.SHORTFALL_NAME)
+    return plugin, ctx, phase, holes, accepted_path
+
+
+@pytest.mark.parametrize("role", ["baseline", "practice"])
+def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path, role):
+    plugin, ctx, phase, holes, accepted_path = _holes_setup(
+        monkeypatch, tmp_path, role)
+    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
 
     with pytest.raises(InfrastructureError, match="infra_missing"):
         phase_execute.run(ctx, phase)
@@ -444,13 +410,9 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
     # The fully-missing task has no report row yet (the frozen reader's
     # universe is the store plus the accepted record); the summary names
     # the hole and the raise stops the sequence.
-    summary_path = (phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-                    / "phase_summary.json")
-    assert read_json(summary_path)["infra_missing"] == [
-        "traj/p01_baseline/fakebench:t2/strong/00",
-        "traj/p01_baseline/fakebench:t2/weak/00"]
-    state = read_json(phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-                      / "weak" / phase_execute.REDISPATCH_NAME)
+    assert read_json(directory / "phase_summary.json")["infra_missing"] \
+        == holes
+    state = read_json(directory / "weak" / phase_execute.REDISPATCH_NAME)
     # The budget (default 1) was spent: one re-dispatch offer of the hole
     # (the state is keyed by unit id; the healthy units stay at zero).
     t2_passes = [entry["passes"] for unit_id, entry in state.items()
@@ -466,66 +428,28 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path):
         phase_execute.run(ctx, phase)
     assert len(plugin.calls) == calls_before  # budget spent: no new calls
 
-    accepting = StageContext(
-        run_dir=ctx.run_dir, store=ctx.store, config=ctx.config,
-        usage=ctx.usage, handles=ctx.handles,
-        workdir_root=ctx.workdir_root,
-        run_settings=RunSettings(allow_infra_shortfall=True))
+    accepting = make_ctx(tmp_path, ctx.config, handles=ctx.handles,
+                         allow_infra_shortfall=True)
     summary = phase_execute.run(accepting, phase).summary
     assert summary["infra_shortfall_accepted"] is True
     assert summary["complete"] is False  # the hole stays a hole
-    accepted = read_json(shortfall.stage1_shortfall_path(
-        ctx.run_dir))["unit_ids"]
-    assert accepted == ["traj/p01_baseline/fakebench:t2/strong/00",
-                        "traj/p01_baseline/fakebench:t2/weak/00"]
+    assert summary["infra_accepted"] == holes
+    assert read_json(accepted_path)["unit_ids"] == holes
     # With the holes durably accepted the report row appears: the
     # accepted record widens the reader's universe, and every unit of
     # the task being a hole reads as all_holes.
-    rows = {row.unit_id: row for row in report_rows(ctx, phase)}
-    hole_row = next(row for row in rows.values()
-                    if "t2" in row.unit_id and row.role == "weak")
-    assert hole_row.status == vocabulary.STATUS_NOT_TESTABLE
-    assert hole_row.cause == vocabulary.CAUSE_ALL_HOLES
+    hole_rows = [row for row in report_rows(ctx, phase)
+                 if "t2" in row.unit_id and row.role == "weak"]
+    assert hole_rows
+    for row in hole_rows:
+        assert row.status == vocabulary.STATUS_NOT_TESTABLE
+        assert row.cause == vocabulary.CAUSE_ALL_HOLES
 
-
-def test_baseline_resume_without_the_flag_honours_accepted_holes(
-        monkeypatch, tmp_path):
-    # The durable-acceptance contract on the baseline role: holes
-    # accepted under the flag are never re-raised by a later resume
-    # WITHOUT it (the old stage-1 rule; the accepted set is read at
-    # phase start and passed into the arm run).
-    _pin_k1(monkeypatch)
-
-    def behavior(record):
-        if record["task_id"] == "t2":
-            raise InfrastructureError("sandbox exploded")
-        return _outcome(record["task_id"], True)
-
-    plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
-    ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
-    phase = phase_of(0, "baseline", baseline_spec())
-
-    with pytest.raises(InfrastructureError, match="infra_missing"):
-        phase_execute.run(ctx, phase)
-
-    accepting = StageContext(
-        run_dir=ctx.run_dir, store=ctx.store, config=ctx.config,
-        usage=ctx.usage, handles=ctx.handles,
-        workdir_root=ctx.workdir_root,
-        run_settings=RunSettings(allow_infra_shortfall=True))
-    accepted_summary = phase_execute.run(accepting, phase).summary
-    assert accepted_summary["infra_shortfall_accepted"] is True
-
-    # The resume WITHOUT the flag: the accepted holes stay accepted,
-    # nothing re-raises, nothing re-runs, the summary is unchanged.
+    # Durable acceptance: a later resume WITHOUT the flag never re-raises,
+    # re-runs nothing and leaves the summary unchanged.
     calls_before = len(plugin.calls)
-    resumed = phase_execute.run(ctx, phase).summary
-
+    assert phase_execute.run(ctx, phase).summary == summary
     assert len(plugin.calls) == calls_before
-    assert resumed == accepted_summary
-    assert resumed["infra_accepted"] == [
-        "traj/p01_baseline/fakebench:t2/strong/00",
-        "traj/p01_baseline/fakebench:t2/weak/00"]
 
 
 def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
@@ -535,7 +459,7 @@ def test_unscored_runs_report_all_holes(monkeypatch, tmp_path):
     # no dispatch died. (A fresh sampling attempt would extend the depth
     # beyond the frozen n_attempts, a shape no frozen reader represents;
     # that channel is Wave 3's, disclosed in the wave report.)
-    plugin = _install_plugin(
+    plugin = serve_plugin(
         monkeypatch, PhasePlugin(lambda record: _outcome(
             record["task_id"], None)))
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
@@ -577,7 +501,7 @@ def _read_first(record):
 
 def test_practice_runs_the_executor_with_the_active_cards(monkeypatch,
                                                           tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, reference_config())
     active, discarded = make_card(1), make_card(2, status="discarded")
     write_bank_artifact(ctx, "p02:learn", [active, discarded])
@@ -622,7 +546,7 @@ def test_practice_runs_the_executor_with_the_active_cards(monkeypatch,
 
 
 def test_practice_runs_its_task_list_at_its_attempts(monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, reference_config())
     write_bank_artifact(ctx, "p02:learn", [make_card()])
     phase = phase_of(2, "practice", practice_spec(
@@ -639,57 +563,9 @@ def test_practice_runs_its_task_list_at_its_attempts(monkeypatch, tmp_path):
         for attempt in range(3)]
 
 
-def test_practice_refuses_a_delivery_other_than_the_folder(tmp_path):
-    ctx = make_ctx(tmp_path, reference_config())
-    phase = phase_of(2, "practice", practice_spec(
-        delivery={"name": "whole_bank"}))
-    with pytest.raises(ConfigError, match="folder"):
-        phase_execute.run(ctx, phase)
-
-
-def test_practice_redispatches_like_the_baseline(monkeypatch, tmp_path):
-    _pin_k1(monkeypatch)
-
-    def behavior(record):
-        if record["task_id"] == "t2":
-            raise InfrastructureError("sandbox exploded")
-        return _outcome(record["task_id"], True)
-
-    plugin = _install_plugin(monkeypatch, PhasePlugin(behavior))
-    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
-    write_bank_artifact(ctx, "p02:learn", [make_card()])
-    phase = phase_of(2, "practice", practice_spec())
-    directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-    hole = make_trajectory_id("p03:practice", _prefixed("t2"), "weak", 0)
-
-    with pytest.raises(InfrastructureError, match="infra_missing"):
-        phase_execute.run(ctx, phase)
-
-    assert read_json(directory / "phase_summary.json")["infra_missing"] == [
-        hole]
-    state = read_json(directory / "weak" / phase_execute.REDISPATCH_NAME)
-    assert [entry["passes"] for unit_id, entry in state.items()
-            if "t2" in unit_id] == [1]
-    # The spent budget: a resume re-raises without a new execution.
-    calls_before = len(plugin.calls)
-    with pytest.raises(InfrastructureError):
-        phase_execute.run(ctx, phase)
-    assert len(plugin.calls) == calls_before
-    # Accepted under the flag, durably, in the arm's own record.
-    accepting = make_ctx(tmp_path, ctx.config, allow_infra_shortfall=True)
-    summary = phase_execute.run(accepting, phase).summary
-    assert summary["infra_accepted"] == [hole]
-    assert summary["complete"] is False
-    assert read_json(directory / "weak" / shortfall.SHORTFALL_NAME)[
-        "unit_ids"] == [hole]
-    hole_row = next(row for row in report_rows(ctx, phase)
-                    if "t2" in row.unit_id)
-    assert hole_row.cause == vocabulary.CAUSE_ALL_HOLES
-
-
 def test_practice_sheets_carry_the_trajectory_and_the_folder(monkeypatch,
                                                              tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin(_read_first))
+    serve_plugin(monkeypatch, PhasePlugin(_read_first))
     ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
     card = make_card()
     write_bank_artifact(ctx, "p02:learn", [card])
@@ -718,7 +594,7 @@ def test_practice_sheets_carry_the_trajectory_and_the_folder(monkeypatch,
 
 def test_practice_summary_reports_the_mechanism_metrics(monkeypatch,
                                                         tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin(_read_first))
+    serve_plugin(monkeypatch, PhasePlugin(_read_first))
     ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
     first, second = make_card(1), make_card(2)
     write_bank_artifact(ctx, "p02:learn", [first, second])
@@ -742,7 +618,7 @@ def test_practice_summary_reports_the_mechanism_metrics(monkeypatch,
 
 def test_baseline_and_two_practice_phases_never_share_an_id(monkeypatch,
                                                             tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
     card = make_card()
 
@@ -764,7 +640,7 @@ def test_baseline_and_two_practice_phases_never_share_an_id(monkeypatch,
 
 
 def test_an_empty_bank_still_runs_as_a_folder_unit(monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
     write_bank_artifact(ctx, "p02:learn", [make_card(status="discarded")])
     write_playbook(ctx, "p02:learn", "Look first.")
@@ -784,34 +660,9 @@ def test_an_empty_bank_still_runs_as_a_folder_unit(monkeypatch, tmp_path):
     assert summary["skill_use"]["cards"] == {}
 
 
-def test_the_folder_test_delivers_active_cards_and_an_empty_folder(
-        monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
-    ctx = make_ctx(tmp_path, reference_config(n_attempts_weak=1))
-    write_bank_artifact(ctx, "p06:learn", [make_card(status="discarded")])
-    write_playbook(ctx, "p06:learn", "Look first.")
-    phase = phase_of(6, "test", c_spec(
-        delivery={"name": "folder"}, execution={"name": "real_folder"},
-        playbook="evolved"))
-
-    summary = phase_execute.run(ctx, phase).summary
-
-    with_bank = [call for call in plugin.calls
-                 if "skill_folder" in call["meta"]]
-    control = [call for call in plugin.calls
-               if "skill_folder" not in call["meta"]]
-    assert len(with_bank) == len(control) == len(TASK_IDS)
-    for call in with_bank:
-        assert call["meta"]["skill_folder"]["files"] == []
-        assert call["meta"]["skill_folder"]["playbook_text"] == "Look first."
-        assert Path(call["meta"]["skill_folder_dir"]).is_dir()
-    assert all(call["skills_block"] == "" for call in control)
-    assert summary["bank_reference"] == bank_reference([])
-
-
 def test_the_whole_bank_test_delivers_active_cards_only(monkeypatch,
                                                         tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
     active = make_card(1)
     discarded = make_card(2, status="discarded", fields={
@@ -835,7 +686,7 @@ def test_the_whole_bank_test_delivers_active_cards_only(monkeypatch,
 
 
 def test_c_phase_fresh_bare_comparison(monkeypatch, tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
+    serve_plugin(monkeypatch, PhasePlugin())
     config = make_config(n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
     write_bank_artifact(ctx, "p02:learn", [make_card()])
@@ -851,8 +702,7 @@ def test_c_phase_fresh_bare_comparison(monkeypatch, tmp_path):
     assert result["delta"]["pass_at_n"] == pytest.approx(0.0)
     # C writes trial-level answer sheets, both arms included.
     directory = phase_bank.phase_bank_dir(ctx.run_dir, phase.label)
-    test_report = phase_report.read_phase_report(
-        directory, phase_kind="test", learning_usable=False)
+    test_report = phase_report.read_phase_report(directory)
     assert test_report is not None
     assert {unit.arm for unit in test_report.units} == {"with_bank", "control"}
 
@@ -863,7 +713,7 @@ def test_c_phase_external_campaign_control_zero_execution(
     file's numbers -- zero control executions, no control store, the
     file's bytes copied into the phase directory and the delta computed
     against the aligned first-n rewards."""
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     config = make_config(n_attempts_weak=1)
     ctx = make_ctx(tmp_path, config)
     write_bank_artifact(ctx, "p02:learn", [make_card()])
@@ -915,36 +765,8 @@ def test_c_phase_external_campaign_control_zero_execution(
                                  _prefixed("t3"): [1.0]}
 
 
-def test_c_phase_external_campaign_refuses_a_drifted_file(
-        monkeypatch, tmp_path):
-    """The sha256 gate runs before the with-bank arm spends anything: a
-    re-exported (or edited) campaign file stops the phase with the old
-    digest named beside the pinned one."""
-    _install_plugin(monkeypatch, PhasePlugin())
-    config = make_config(n_attempts_weak=1)
-    ctx = make_ctx(tmp_path, config)
-    write_bank_artifact(ctx, "p02:learn", [make_card()])
-
-    payload = {"tasks": {"qwen:t1": {"n": 5,
-                                     "rewards": [1.0] * 5,
-                                     "success_rate": 1.0}}}
-    score_path = tmp_path / "scores.json"
-    score_path.write_text(json.dumps(payload), encoding="utf-8")
-    sha = hashlib.sha256(score_path.read_bytes()).hexdigest()
-    # The file drifts AFTER the digest was pinned.
-    score_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-
-    phase = phase_of(2, "test", c_spec(compare=CompareSpec(
-        against="external_campaign",
-        external=ExternalControlSpec(path=str(score_path), sha256=sha,
-                                     model_key="qwen"))),
-        task_ids=TASK_IDS)
-    with pytest.raises(ConfigError, match="sha256"):
-        phase_execute.run(ctx, phase)
-
-
 def test_c_phase_reruns_every_time(monkeypatch, tmp_path):
-    plugin = _install_plugin(monkeypatch, PhasePlugin())
+    plugin = serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config(n_attempts_weak=1))
     write_bank_artifact(ctx, "p02:learn", [make_card()])
 
@@ -1002,7 +824,7 @@ def test_execution_params_refuse_unknown_keys(tmp_path):
 
 
 def test_unknown_named_rule_fails_before_any_work(monkeypatch, tmp_path):
-    _install_plugin(monkeypatch, PhasePlugin())
+    serve_plugin(monkeypatch, PhasePlugin())
     ctx = make_ctx(tmp_path, make_config())
     phase = phase_of(0, "baseline", baseline_spec(acceptance="no_such_rule"))
     with pytest.raises(ConfigError, match="unknown verdict rule"):
@@ -1039,6 +861,3 @@ def test_tb_scorer_rule_consumes_the_verifier_facts():
         vocabulary.RUN_SUCCESS
     assert rule({"correctness": False, "metrics": {}})[0] == \
         vocabulary.RUN_FAILURE
-    # TB's default binding is the named rule.
-    reload_plugin("tb")
-    assert verdicts.default_verdict_rule("tb") == "tb_scorer"

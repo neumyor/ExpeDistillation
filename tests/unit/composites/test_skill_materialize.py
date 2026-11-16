@@ -78,26 +78,17 @@ def test_the_folder_writes_each_skill_directory_and_the_catalog(tmp_path):
     for entry in manifest["files"]:
         text = (folder / entry["filename"]).read_text(encoding="utf-8")
         front, body = _split_frontmatter(text)
-        assert front["name"] == entry["filename"].split("/", 1)[0]
-        assert front["description"]
+        name = front["name"]
+        assert name == entry["filename"].split("/", 1)[0]
+        # A valid Agent Skills header.
+        assert 1 <= len(name) <= 64 and name == name.lower()
+        assert all(ch.isalnum() or ch == "-" for ch in name)
+        assert "anthropic" not in name and "claude" not in name
+        assert front["description"].strip()
+        assert len(front["description"]) <= 1024
         assert body == bodies[entry["skill_id"]]
         # The rev-1 shape: no content travels with the manifest.
         assert "content" not in entry
-
-
-def test_the_frontmatter_is_a_valid_agent_skill_header(tmp_path):
-    manifest, bank, folder = _manifest(tmp_path)
-    for entry in manifest["files"]:
-        text = (folder / entry["filename"]).read_text(encoding="utf-8")
-        front, _body = _split_frontmatter(text)
-        name = front["name"]
-        assert name == entry["filename"].split("/", 1)[0]
-        assert 1 <= len(name) <= 64
-        assert name == name.lower()
-        assert all(ch.isalnum() or ch == "-" for ch in name)
-        assert front["description"].strip()
-        assert len(front["description"]) <= 1024
-        assert "anthropic" not in name and "claude" not in name
 
 
 def test_the_three_description_modes_reach_the_frontmatter(tmp_path):
@@ -204,38 +195,28 @@ def test_a_manifest_skill_missing_from_the_bank_is_refused(tmp_path):
         materialize_skill_folder(trimmed, bank[1:], tmp_path / "y")
 
 
-def test_an_unsafe_file_name_is_refused(tmp_path):
+@pytest.mark.parametrize("mutate, message", [
+    pytest.param(
+        lambda m: m["files"][0].update(filename="../escape/SKILL.md"),
+        "exactly one normalized", id="unsafe_file_name"),
+    pytest.param(
+        lambda m: m["files"][1].update(filename=m["files"][0]["filename"]),
+        "twice", id="duplicate_file_name"),
+    pytest.param(
+        lambda m: m["files"][0].update(filename="SKILL.md"),
+        "exactly one normalized", id="root_level_file_name"),
+    pytest.param(
+        lambda m: m["files"].__setitem__(
+            0, {"skill_id": "s", "filename": "s.md"}),
+        "must carry exactly", id="entry_with_missing_fields"),
+    pytest.param(
+        lambda m: m.pop("catalog_filename"),
+        "non-empty 'catalog_filename'", id="manifest_without_a_catalog_name"),
+])
+def test_a_malformed_manifest_is_refused(tmp_path, mutate, message):
     manifest, bank, _folder = _manifest(tmp_path)
-    manifest["files"][0]["filename"] = "../escape/SKILL.md"
-    with pytest.raises(CodeBugError, match="exactly one normalized"):
-        materialize_skill_folder(manifest, bank, tmp_path / "x")
-
-
-def test_a_duplicate_file_name_is_refused(tmp_path):
-    manifest, bank, _folder = _manifest(tmp_path)
-    manifest["files"][1]["filename"] = manifest["files"][0]["filename"]
-    with pytest.raises(CodeBugError, match="twice"):
-        materialize_skill_folder(manifest, bank, tmp_path / "x")
-
-
-def test_a_root_level_file_name_is_refused(tmp_path):
-    manifest, bank, _folder = _manifest(tmp_path)
-    manifest["files"][0]["filename"] = "SKILL.md"
-    with pytest.raises(CodeBugError, match="exactly one normalized"):
-        materialize_skill_folder(manifest, bank, tmp_path / "x")
-
-
-def test_an_entry_with_missing_fields_is_refused(tmp_path):
-    manifest, bank, _folder = _manifest(tmp_path)
-    manifest["files"][0] = {"skill_id": "s", "filename": "s.md"}
-    with pytest.raises(CodeBugError, match="must carry exactly"):
-        materialize_skill_folder(manifest, bank, tmp_path / "x")
-
-
-def test_a_manifest_without_a_catalog_name_is_refused(tmp_path):
-    manifest, bank, _folder = _manifest(tmp_path)
-    del manifest["catalog_filename"]
-    with pytest.raises(CodeBugError, match="non-empty 'catalog_filename'"):
+    mutate(manifest)
+    with pytest.raises(CodeBugError, match=message):
         materialize_skill_folder(manifest, bank, tmp_path / "x")
 
 

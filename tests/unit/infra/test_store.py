@@ -52,12 +52,6 @@ EXAMPLES = [
 ]
 
 
-def test_the_store_kinds():
-    # Trajectories, segments and skills are per-object JSON; the subtask
-    # type table and the segment-to-type assignments are JSONL ledgers.
-    assert set(KIND_DIRS) == {"trajectories", "subtasks", "skills"}
-
-
 def test_init_creates_full_layout(tmp_path):
     Store(tmp_path / "run")
     # Every leaf directory plus its stage parents must exist.
@@ -90,6 +84,17 @@ def test_ids_are_decoded_and_sorted(tmp_path):
         s.save(obj, "trajectories")
     assert s.ids("trajectories") == [object_id(obj) for obj in
                                       sorted(objs, key=object_id)]
+
+
+def test_two_segments_of_one_trajectory_do_not_collide(tmp_path):
+    # A Subtask carries its trajectory_id as a foreign key: stored under it
+    # instead of its own id, every segment of one trajectory would overwrite
+    # the others.
+    s = Store(tmp_path)
+    s.save(a_subtask(index=1), "subtasks")
+    s.save(a_subtask(index=2), "subtasks")
+    assert s.ids("subtasks") == [make_subtask_id(TRAJECTORY, 1),
+                                 make_subtask_id(TRAJECTORY, 2)]
 
 
 def test_filenames_are_percent_encoded(tmp_path):

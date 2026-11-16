@@ -43,6 +43,16 @@ def _sheet(attempt, n_steps):
         grading=GradingRecord(verdict="failure", basis="b", rule_name="r"))
 
 
+def _scenes(run_dir, refs, *, before_steps=trace.WRITER_BEFORE_STEPS,
+            after_steps=30):
+    """The usual writer window around every cut."""
+    return trace.render_windows(
+        run_dir,
+        [(ref, ref.step - before_steps, ref.step + after_steps)
+         for ref in refs],
+        header="STEPS (the skill applies at step {cuts}):")
+
+
 def _write(run_dir, sheets):
     dest = run_dir / "phases" / "p01_baseline" / "answer_sheets"
     for sheet in sheets:
@@ -68,38 +78,11 @@ def test_trace_at_rejects_a_step_outside_the_execution(step):
         trace.trace_at(_sheet(2, 3), step)
 
 
-def test_resolve_returns_the_text_around_the_exact_attempt(run_dir):
-    ref = trace.trace_at(_sheet(1, 9), 4)
-
-    context = trace.resolve(run_dir, ref, after_steps=2)
-
-    assert context.ref == ref
-    assert "a1-3" in context.before and "a1-4" not in context.before
-    assert "a1-4" in context.after and "a1-5" in context.after
-    assert "a1-6" not in context.after
-    assert "a0-" not in context.before + context.after
-    assert "a2-" not in context.before + context.after
-    assert context.outcome is False
-    assert context.task_ref == "tb:t1"
-
-
-def test_resolve_before_steps_keeps_only_the_last_prefix_steps(run_dir):
-    ref = trace.trace_at(_sheet(1, 9), 6)
-
-    bounded = trace.resolve(run_dir, ref, before_steps=2)
-    whole = trace.resolve(run_dir, ref)
-
-    assert "a1-3" not in bounded.before
-    assert "step 4" in bounded.before and "step 5" in bounded.before
-    assert "a1-0" in whole.before
-    assert bounded.after == whole.after
-
-
-def test_render_scenes_shows_a_step_once_when_cuts_overlap(run_dir):
+def test_render_windows_around_cuts_shows_a_step_once_when_cuts_overlap(run_dir):
     sheet = _sheet(1, 9)
     refs = [trace.trace_at(sheet, 2), trace.trace_at(sheet, 4)]
 
-    text = trace.render_scenes(run_dir, refs, before_steps=2, after_steps=3)
+    text = _scenes(run_dir, refs, before_steps=2, after_steps=3)
 
     # Cuts 2 and 4 cover steps 0-4 and 2-6: one run 0-6, each step once.
     assert text.count("action: a1-3") == 1
@@ -110,11 +93,11 @@ def test_render_scenes_shows_a_step_once_when_cuts_overlap(run_dir):
     assert text.count("failed.") == 1
 
 
-def test_render_scenes_marks_the_steps_a_gap_skips(run_dir):
+def test_render_windows_around_cuts_marks_the_steps_a_gap_skips(run_dir):
     sheet = _sheet(1, 9)
     refs = [trace.trace_at(sheet, 0), trace.trace_at(sheet, 8)]
 
-    text = trace.render_scenes(run_dir, refs, before_steps=0, after_steps=2)
+    text = _scenes(run_dir, refs, before_steps=0, after_steps=2)
 
     assert "action: a1-0" in text and "action: a1-1" in text
     assert "action: a1-8" in text
@@ -122,18 +105,18 @@ def test_render_scenes_marks_the_steps_a_gap_skips(run_dir):
     assert "[steps 2-7 are not shown]" in text
 
 
-def test_render_scenes_keeps_separate_executions_apart(run_dir):
+def test_render_windows_around_cuts_keeps_separate_executions_apart(run_dir):
     refs = [trace.trace_at(_sheet(0, 5), 1), trace.trace_at(_sheet(1, 9), 1)]
 
-    text = trace.render_scenes(run_dir, refs, before_steps=1, after_steps=1)
+    text = _scenes(run_dir, refs, before_steps=1, after_steps=1)
 
     assert "[execution 1]" in text and "[execution 2]" in text
     assert text.count("action: a0-1") == 1 and text.count("action: a1-1") == 1
     assert "succeeded." in text and "failed." in text
 
 
-def test_render_scenes_of_one_location_has_no_execution_label(run_dir):
-    text = trace.render_scenes(
+def test_render_windows_around_cuts_of_one_location_has_no_execution_label(run_dir):
+    text = _scenes(
         run_dir, [trace.trace_at(_sheet(0, 5), 1)], after_steps=2)
 
     assert "[execution" not in text
@@ -168,30 +151,9 @@ def test_render_windows_numbers_executions_with_the_label(run_dir):
     assert text.index("a0-0") < text.index("a1-0")
 
 
-def test_render_scenes_refuses_a_missing_sheet(run_dir):
+def test_render_windows_around_cuts_refuses_a_missing_sheet(run_dir):
     with pytest.raises(ModelOutputError):
-        trace.render_scenes(run_dir, [TraceRef(LABEL, "nope", 0)])
-
-
-def test_resolve_uses_the_injected_instruction_lookup(run_dir):
-    ref = trace.trace_at(_sheet(0, 5), 1)
-
-    context = trace.resolve(
-        run_dir, ref, instruction_for=lambda task: f"do {task}")
-
-    assert context.task_instruction == "do tb:t1"
-
-
-def test_resolve_appends_the_initial_observation_the_executor_saw(tmp_path):
-    sheet = _sheet(0, 3)
-    sheet.execution.metrics["initial_observation"] = "You are in a kitchen."
-    _write(tmp_path, [sheet])
-    ref = trace.trace_at(sheet, 1)
-
-    context = trace.resolve(tmp_path, ref,
-                            instruction_for=lambda task: "do the task")
-
-    assert context.task_instruction == "do the task\n\nYou are in a kitchen."
+        _scenes(run_dir, [TraceRef(LABEL, "nope", 0)])
 
 
 def test_instruction_with_initial_is_idempotent():
@@ -202,25 +164,15 @@ def test_instruction_with_initial_is_idempotent():
         {"initial_observation": "room"}, "do it\n\nroom") == "do it\n\nroom"
 
 
-def test_resolve_survives_a_failing_instruction_lookup(run_dir):
-    ref = trace.trace_at(_sheet(0, 5), 1)
-
-    def broken(task):
-        raise RuntimeError("no plugin")
-
-    assert trace.resolve(
-        run_dir, ref, instruction_for=broken).task_instruction == ""
-
-
-def test_resolve_fails_on_a_missing_sheet_instead_of_guessing(run_dir):
+def test_check_ref_fails_on_a_missing_sheet_instead_of_guessing(run_dir):
     with pytest.raises(ModelOutputError):
-        trace.resolve(run_dir, TraceRef(LABEL, "no-such-sheet", 0))
+        trace.check_ref(run_dir, TraceRef(LABEL, "no-such-sheet", 0))
 
 
-def test_resolve_fails_on_an_out_of_range_step(run_dir):
+def test_check_ref_fails_on_an_out_of_range_step(run_dir):
     ref = TraceRef(LABEL, _sheet(2, 3).sheet_id, 7)
     with pytest.raises(ModelOutputError):
-        trace.resolve(run_dir, ref)
+        trace.check_ref(run_dir, ref)
 
 
 def test_trace_ref_rejects_a_malformed_shape():
@@ -257,7 +209,8 @@ def test_trace_of_trajectory_picks_the_named_attempt(run_dir):
     ref = trace.trace_of_trajectory(run_dir, LABEL, _trajectory(1), 4)
 
     assert ref.sheet_id == _sheet(1, 9).sheet_id
-    assert trace.resolve(run_dir, ref).before.count("a1-") == 4
+    trace.check_ref(run_dir, ref)
+    assert ref.step == 4
 
 
 def test_trace_of_trajectory_rejects_an_unknown_trajectory(run_dir):

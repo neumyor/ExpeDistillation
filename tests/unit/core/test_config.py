@@ -1,25 +1,44 @@
-"""Unit tests for ExperimentConfig and its YAML round trip (schema v9)."""
+"""Unit tests for ExperimentConfig, its YAML round trip and the load-time
+phase-sequence checklist (design spec 2.3, schema v9)."""
 import copy
 import dataclasses
+from pathlib import Path
 
 import pytest
 
 from expedistill.core.config import (
     CONFIG_SCHEMA_VERSION,
     DEFAULT_RULES,
+    EXECUTE_PHASE_ROLES,
+    FRESH_BARE,
+    FREEZE_LABEL,
+    PHASE_ROLE_BASELINE,
+    PHASE_ROLE_LEARN,
+    PHASE_ROLE_PRACTICE,
+    PHASE_ROLE_TEST,
     ROLE_DEFAULTS,
-    RULE_KEYS,
     SPLIT_LIST_KEYS,
+    CompareSpec,
     ConfigError,
+    ExecutePhaseSpec,
     ExperimentConfig,
+    ExternalControlSpec,
+    LearnPhaseSpec,
     load_config,
+    parse_phases,
+    phase_label,
+    phase_spec_to_raw,
 )
-from tests.helpers.configs import minimal_method, reference_method
+from expedistill.core.ids import phase_tag
+from tests.helpers.configs import (
+    REFERENCE_SEQUENCE,
+    minimal_method,
+    reference_method,
+)
 
-#: The minimal method the fixtures carry: a two-arm baseline, one learn
-#: phase, one final test. Small on purpose -- the sequence/phase-shape
-#: checklist has its own file (tests/unit/core/test_config_v4.py); here it
-#: only needs to be legal.
+_ROOT = Path(__file__).resolve().parents[3]
+_CONFIG_DIR = _ROOT / "configs" / "experiments"
+
 MIN_SEQUENCE = minimal_method()["sequence"]
 
 MIN_PHASES = minimal_method()["phases"]
@@ -55,7 +74,6 @@ rules:
   trajectory_select: all_attempts
 """
 
-
 #: The version gate's refusal: every schema but the current one.
 _ONLY_CURRENT = f"reads schema {CONFIG_SCHEMA_VERSION} only"
 
@@ -71,6 +89,19 @@ def make_config(**overrides):
     return ExperimentConfig(**base)
 
 
+def write_yaml(tmp_path, tail="", *, method=YAML_METHOD,
+               version=CONFIG_SCHEMA_VERSION, name="exp.yaml"):
+    """A minimal config file; ``version=None`` leaves schema_version out."""
+    version_line = "" if version is None else f"schema_version: {version}\n"
+    path = tmp_path / name
+    path.write_text(
+        "benchmark: tb\n"
+        "models: {executor_strong: s, executor_weak: w}\n"
+        + version_line + method + tail,
+        encoding="utf-8")
+    return path
+
+
 class TestRoleTable:
     def test_roles_default_to_strong_except_the_weak_executor(self):
         cfg = make_config()
@@ -78,29 +109,19 @@ class TestRoleTable:
             expected = "model-w" if role == "executor_weak" else "model-s"
             assert cfg.models[role] == expected, role
 
-    def test_the_role_table(self):
-        assert set(ROLE_DEFAULTS) == {
-            "executor_strong", "executor_weak", "segmenter", "author",
-            "rewriter", "judge"}
-
-    @pytest.mark.parametrize("role", ["examiner", "answerer", "curator"])
-    def test_the_exam_and_curation_roles_are_gone(self, role):
-        with pytest.raises(ValueError, match=role):
-            make_config(models={"executor_strong": "model-s",
-                                "executor_weak": "model-w",
-                                role: "model-s"})
-
     def test_user_override_wins(self):
         cfg = make_config(models={"executor_strong": "model-s",
                                   "executor_weak": "model-w",
                                   "judge": "model-w"})
         assert cfg.models["judge"] == "model-w"
 
-    def test_unknown_role_rejected(self):
-        with pytest.raises(ValueError, match="oracle"):
+    @pytest.mark.parametrize("role", ["oracle", "examiner", "answerer",
+                                      "curator"])
+    def test_unknown_role_rejected(self, role):
+        with pytest.raises(ValueError, match=role):
             make_config(models={"executor_strong": "model-s",
                                 "executor_weak": "model-w",
-                                "oracle": "model-o"})
+                                role: "model-o"})
 
     def test_missing_anchor_roles_rejected(self):
         with pytest.raises(ValueError, match="executor_strong"):
@@ -108,47 +129,10 @@ class TestRoleTable:
 
 
 class TestValidation:
-    def test_leak_threshold_field_is_gone(self):
-        with pytest.raises(TypeError):
-            make_config(leak_threshold=0.3)
-
-    def test_methods_field_is_gone(self):
-        # R9: the v3 five-slot mapping is not a valid constructor argument
-        # any more -- the method lives in the phase definitions.
-        with pytest.raises(TypeError):
-            make_config(methods={"delivery": {"name": "whole_bank"}})
-
-    def test_unknown_top_level_key_in_file_rejected(self, tmp_path):
-        # A config FILE with an unknown top-level key used to load with
-        # the stray key ignored, which let "new config + old code" fall
-        # back to dead defaults with no trace. A typo must stop the run.
-        cfg_file = tmp_path / "old.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            "leak_threshold: 0.3\n",
-            encoding="utf-8")
-        with pytest.raises(ConfigError, match="leak_threshold"):
-            load_config(str(cfg_file))
-
     @pytest.mark.parametrize("attempts", [0, -1, True, 1.5, "2"])
     def test_attempts_must_be_positive(self, attempts):
         with pytest.raises(ValueError, match="n_attempts"):
             make_config(n_attempts_weak=attempts)
-
-    @pytest.mark.parametrize("split", [
-        {"train": None, "test": ["a"]},
-        {"train": ["a"], "test": None},
-    ])
-    def test_split_train_and_test_lists_are_required(self, split):
-        # Only the optional val and reserved lists may be null.
-        with pytest.raises(ValueError, match="must be a list"):
-            make_config(split=split)
-
-    @pytest.mark.parametrize("key", ["val", "reserved"])
-    def test_split_optional_lists_may_be_null(self, key):
-        make_config(split={"train": ["a"], "test": ["b"], key: None})
 
     @pytest.mark.parametrize("sequence", ["DLC", None, []])
     def test_sequence_must_be_a_list_before_parsing(self, sequence):
@@ -162,35 +146,8 @@ class TestValidation:
         with pytest.raises(ConfigError, match="phases must be"):
             make_config(phases=phases)
 
-    def test_the_exam_execution_is_gone(self):
-        phases = copy.deepcopy(MIN_PHASES)
-        phases["test"]["execution"] = {"name": "exam"}
-        with pytest.raises(ConfigError,
-                           match="execution name 'exam' is not one of"):
-            make_config(phases=phases)
-
-    def test_split_explicit_lists(self):
-        cfg = make_config(split={"train": ["tb:1"], "test": ["tb:2"]})
-        assert cfg.split == {"train": ["tb:1"], "test": ["tb:2"]}
-
-    def test_split_ratio_and_seed(self):
-        cfg = make_config(split={"ratio": 0.75, "seed": 3})
-        assert cfg.split == {"ratio": 0.75, "seed": 3}
-
-    def test_split_rejects_mixed_shape(self):
-        with pytest.raises(ValueError, match="mixes ratio"):
-            make_config(split={"ratio": 0.5, "train": ["tb:1"]})
-
-    def test_split_rejects_unknown_shape(self):
-        with pytest.raises(ValueError, match="split"):
-            make_config(split={"folds": 4})
-
-    def test_split_ratio_bounds(self):
-        with pytest.raises(ValueError, match="ratio"):
-            make_config(split={"ratio": 1.0})
-
     def test_unknown_rule_key_rejected(self):
-        with pytest.raises(ValueError, match="rule keys"):
+        with pytest.raises(ValueError, match="unknown rule keys"):
             make_config(rules={"pick": "x"})
 
     def test_defaults(self):
@@ -205,10 +162,10 @@ class TestValidation:
         assert cfg.tasks is None
         assert cfg.token_budgets == {}
 
-    def test_invalid_redispatch_limit_must_be_a_positive_int(self):
-        for bad in (0, -1, True, "1", 1.5, None):
-            with pytest.raises(ConfigError, match="invalid_redispatch"):
-                make_config(invalid_redispatch_limit=bad)
+    @pytest.mark.parametrize("bad", [0, -1, True, "1", 1.5, None])
+    def test_invalid_redispatch_limit_must_be_a_positive_int(self, bad):
+        with pytest.raises(ConfigError, match="invalid_redispatch"):
+            make_config(invalid_redispatch_limit=bad)
 
 
 class TestModelOptions:
@@ -218,11 +175,11 @@ class TestModelOptions:
 
     def test_valid_options_frozen_into_to_dict(self):
         cfg = make_config(model_options={
-            "model-s": {"reasoning_effort": "max"}})
-        assert cfg.model_options == {"model-s": {"reasoning_effort": "max"}}
+            "model-s": {"reasoning_effort": "max", "top_p": 0.9}})
+        assert cfg.model_options == {
+            "model-s": {"reasoning_effort": "max", "top_p": 0.9}}
         # Part of the frozen manifest: to_dict carries it verbatim.
-        assert cfg.to_dict()["model_options"] == {
-            "model-s": {"reasoning_effort": "max"}}
+        assert cfg.to_dict()["model_options"] == cfg.model_options
 
     def test_options_keyed_by_overridden_role_model(self):
         # Any model name reachable through the role table is valid, including
@@ -233,80 +190,40 @@ class TestModelOptions:
                           model_options={"model-j": {"top_p": 0.9}})
         assert cfg.to_dict()["model_options"] == {"model-j": {"top_p": 0.9}}
 
-    def test_unknown_model_name_rejected(self):
+    @pytest.mark.parametrize("options", [
+        {"no-such-model": {"reasoning_effort": "max"}},
+        {"model-s": "max"},
+        {"model-s": {}},
+        {"model-s": {"effort": object()}},
+    ], ids=["unknown-model", "non-dict-value", "empty-dict-value",
+            "non-json-value"])
+    def test_malformed_options_rejected(self, options):
         with pytest.raises(ValueError, match="model_options"):
-            make_config(model_options={"no-such-model": {"reasoning_effort": "max"}})
-
-    def test_non_dict_value_rejected(self):
-        with pytest.raises(ValueError, match="model_options"):
-            make_config(model_options={"model-s": "max"})
-
-    def test_empty_dict_value_rejected(self):
-        with pytest.raises(ValueError, match="model_options"):
-            make_config(model_options={"model-s": {}})
-
-    def test_non_json_serialisable_value_rejected(self):
-        with pytest.raises(ValueError, match="model_options"):
-            make_config(model_options={"model-s": {"effort": object()}})
-
-    def test_options_not_shared_with_caller_mapping(self):
-        given = {"model-s": {"reasoning_effort": "max"}}
-        cfg = make_config(model_options=given)
-        given["model-s"]["reasoning_effort"] = "mutated"
-        assert cfg.model_options == {"model-s": {"reasoning_effort": "max"}}
+            make_config(model_options=options)
 
     def test_yaml_round_trip_carries_model_options(self, tmp_path):
-        cfg_file = tmp_path / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "model_options:\n"
-            "  s:\n"
-            "    reasoning_effort: max\n",
-            encoding="utf-8")
-        cfg = load_config(str(cfg_file))
+        path = write_yaml(tmp_path, "model_options:\n"
+                                    "  s:\n"
+                                    "    reasoning_effort: max\n")
+        cfg = load_config(str(path))
         assert cfg.model_options == {"s": {"reasoning_effort": "max"}}
-        assert cfg.to_dict()["model_options"] == {"s": {
-            "reasoning_effort": "max"}}
+        assert cfg.to_dict()["model_options"] == cfg.model_options
 
-
-class TestModelOptionsReservedKeys:
     # ``max_tokens`` is owned by ``token_budgets`` -- a second source
     # silently won or lost against the real one depending on merge order --
     # and the rest are not provider knobs: ``model``/``messages``/``stream``
-    # ARE the request, and ``temperature`` belongs to the client. Only
-    # per-model sampling knobs (reasoning_effort) are forwarded.
-    @pytest.mark.parametrize("key", ["max_tokens", "model", "messages",
-                                     "stream", "temperature"])
-    def test_reserved_keys_rejected(self, key):
-        with pytest.raises(ConfigError, match="reserved key"):
-            make_config(model_options={"model-s": {key: 1}})
-
-    def test_max_tokens_rejected_with_migration_guidance(self):
-        with pytest.raises(ConfigError, match="token_budgets"):
-            make_config(model_options={"model-s": {"max_tokens": 512}})
-
-    def test_max_tokens_alone_rejected(self):
-        with pytest.raises(ConfigError, match="max_tokens lives"):
-            make_config(model_options={"model-s": {"max_tokens": 512}})
-
-    @pytest.mark.parametrize("key,value", [
-        ("model", "other-model"),
-        ("messages", []),
-        ("stream", True),
-        ("temperature", 0.7),
+    # ARE the request, and ``temperature`` belongs to the client.
+    @pytest.mark.parametrize("key,value,guidance", [
+        ("max_tokens", 512, "max_tokens lives in token_budgets"),
+        ("model", "other-model", "not provider knobs"),
+        ("messages", [], "not provider knobs"),
+        ("stream", True, "not provider knobs"),
+        ("temperature", 0.7, "not provider knobs"),
     ])
-    def test_non_provider_knobs_rejected(self, key, value):
-        with pytest.raises(ConfigError, match="not provider knobs"):
+    def test_reserved_keys_rejected_with_guidance(self, key, value, guidance):
+        with pytest.raises(ConfigError, match="reserved key") as excinfo:
             make_config(model_options={"model-s": {key: value}})
-
-    def test_clean_options_still_pass(self):
-        cfg = make_config(model_options={"model-s": {
-            "reasoning_effort": "max", "top_p": 0.9}})
-        assert cfg.model_options == {"model-s": {
-            "reasoning_effort": "max", "top_p": 0.9}}
+        assert guidance in str(excinfo.value)
 
 
 #: The pinned token-budget shape with every role explicit. 65536 is the
@@ -327,6 +244,48 @@ FULL_BUDGETS = {
 }
 
 
+def _budgets(**overrides):
+    return {"default_max_output_tokens": 65536, **overrides}
+
+
+def _role_budget(**entry):
+    return _budgets(roles={"segmenter": entry})
+
+
+#: (token_budgets, expected error substring): every malformed shape.
+BAD_BUDGETS = [
+    pytest.param({"roles": {"segmenter": {"max_output_tokens": 5120}}},
+                 "default_max_output_tokens", id="default-missing"),
+    pytest.param({"max_input_tokens": 100000},
+                 "default_max_output_tokens", id="default-missing-input-only"),
+    *[pytest.param({"default_max_output_tokens": bad},
+                   "default_max_output_tokens", id=f"default-{bad!r}")
+      for bad in (0, -1, True, None, "65536", 65536.5)],
+    pytest.param(_budgets(max_output=512), "unknown keys",
+                 id="unknown-budget-key"),
+    pytest.param(_budgets(roles={"oracle": {"max_output_tokens": 1}}),
+                 "oracle", id="unknown-role"),
+    pytest.param(_role_budget(max_input_tokens=4096), "max_output_tokens",
+                 id="role-entry-without-output"),
+    *[pytest.param(_role_budget(max_output_tokens=bad), "max_output_tokens",
+                   id=f"role-output-{bad!r}")
+      for bad in (0, -5, True, None, "5120", 5120.5)],
+    *[pytest.param(_budgets(max_input_tokens=bad), "max_input_tokens",
+                   id=f"global-input-{bad!r}")
+      for bad in (0, -1, True, "x", 1.5)],
+    pytest.param(_role_budget(max_output_tokens=5120, max_input_tokens=0),
+                 "max_input_tokens", id="role-input-zero"),
+    pytest.param(_role_budget(max_output_tokens=5120, temperature=0),
+                 "unknown keys", id="role-entry-unknown-key"),
+    *[pytest.param(bad, "mapping", id=f"budgets-{bad!r}")
+      for bad in (None, [], "big")],
+    *[pytest.param(_budgets(roles=bad), "roles", id=f"roles-{bad!r}")
+      for bad in (None, [], "big")],
+    pytest.param(_budgets(roles={"segmenter": 5120}), "mapping",
+                 id="role-entry-not-a-mapping"),
+]
+
+
 class TestTokenBudgets:
     def test_full_schema_all_roles_explicit_loads(self):
         cfg = make_config(token_budgets=FULL_BUDGETS)
@@ -334,34 +293,22 @@ class TestTokenBudgets:
             assert cfg.max_output_tokens_for(role) == entry["max_output_tokens"]
 
     def test_roles_fall_back_to_default(self):
-        cfg = make_config(token_budgets={
-            "default_max_output_tokens": 65536,
-            "roles": {"segmenter": {"max_output_tokens": 5120}}})
+        cfg = make_config(token_budgets=_role_budget(max_output_tokens=5120))
         assert cfg.max_output_tokens_for("segmenter") == 5120
         for role in ROLE_DEFAULTS:
             if role != "segmenter":
                 assert cfg.max_output_tokens_for(role) == 65536, role
 
-    def test_default_only_budgets_cover_every_role(self):
-        cfg = make_config(token_budgets={"default_max_output_tokens": 65536})
-        for role in ROLE_DEFAULTS:
-            assert cfg.max_output_tokens_for(role) == 65536, role
-
     def test_yaml_pinned_shape_loads(self, tmp_path):
-        cfg_file = tmp_path / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
+        path = write_yaml(
+            tmp_path,
             "token_budgets:\n"
             "  default_max_output_tokens: 65536\n"
             "  max_input_tokens: null\n"
             "  roles:\n"
             "    executor_strong: {max_output_tokens: 65536}\n"
-            "    segmenter: {max_output_tokens: 5120}\n",
-            encoding="utf-8")
-        cfg = load_config(str(cfg_file))
+            "    segmenter: {max_output_tokens: 5120}\n")
+        cfg = load_config(str(path))
         assert cfg.max_output_tokens_for("executor_strong") == 65536
         assert cfg.max_output_tokens_for("segmenter") == 5120
         assert cfg.token_budgets["max_input_tokens"] is None
@@ -369,16 +316,13 @@ class TestTokenBudgets:
             if role not in ("executor_strong", "segmenter"):
                 assert cfg.max_output_tokens_for(role) == 65536, role
 
-    def test_absent_budgets_leave_helper_fail_closed(self):
-        cfg = make_config()
+    @pytest.mark.parametrize("budgets", [None, {}], ids=["absent", "empty"])
+    def test_unconfigured_budgets_leave_helper_fail_closed(self, budgets):
+        cfg = make_config() if budgets is None else make_config(
+            token_budgets=budgets)
         assert cfg.token_budgets == {}
         with pytest.raises(ConfigError, match="token_budgets not configured"):
             cfg.max_output_tokens_for("executor_strong")
-
-    def test_empty_budgets_are_unconfigured(self):
-        cfg = make_config(token_budgets={})
-        with pytest.raises(ConfigError, match="token_budgets not configured"):
-            cfg.max_output_tokens_for("judge")
 
     def test_unknown_helper_role_is_a_caller_bug(self):
         # A typo'd role silently falling back to the default cap would make
@@ -387,127 +331,40 @@ class TestTokenBudgets:
         with pytest.raises(KeyError, match="known"):
             cfg.max_output_tokens_for("juge")
 
-    def test_missing_default_rejected(self):
-        with pytest.raises(ConfigError, match="default_max_output_tokens"):
-            make_config(token_budgets={
-                "roles": {"segmenter": {"max_output_tokens": 5120}}})
-        with pytest.raises(ConfigError, match="default_max_output_tokens"):
-            make_config(token_budgets={"max_input_tokens": 100000})
+    @pytest.mark.parametrize("budgets,match", BAD_BUDGETS)
+    def test_malformed_budgets_rejected(self, budgets, match):
+        with pytest.raises(ConfigError, match=match):
+            make_config(token_budgets=budgets)
 
-    @pytest.mark.parametrize("bad", [0, -1, True, None, "65536", 65536.5])
-    def test_default_must_be_positive_int(self, bad):
-        with pytest.raises(ConfigError, match="default_max_output_tokens"):
-            make_config(token_budgets={"default_max_output_tokens": bad})
-
-    def test_unknown_budget_key_rejected(self):
-        with pytest.raises(ConfigError, match="unknown keys"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536, "max_output": 512})
-
-    def test_unknown_role_rejected_with_valid_roles_listed(self):
+    def test_unknown_role_error_lists_the_valid_roles(self):
         with pytest.raises(ConfigError, match="oracle") as excinfo:
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536,
-                "roles": {"oracle": {"max_output_tokens": 1}}})
+            make_config(token_budgets=_budgets(
+                roles={"oracle": {"max_output_tokens": 1}}))
         assert "executor_strong" in str(excinfo.value)
 
-    def test_role_entry_requires_max_output_tokens(self):
-        with pytest.raises(ConfigError, match="max_output_tokens"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536,
-                "roles": {"segmenter": {"max_input_tokens": 4096}}})
-
-    @pytest.mark.parametrize("bad", [0, -5, True, None, "5120", 5120.5])
-    def test_role_output_must_be_positive_int(self, bad):
-        with pytest.raises(ConfigError, match="max_output_tokens"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536,
-                "roles": {"segmenter": {"max_output_tokens": bad}}})
-
-    def test_global_max_input_tokens_null_or_positive_int(self):
-        for value in (None, 131072):
-            cfg = make_config(token_budgets={
-                "default_max_output_tokens": 65536, "max_input_tokens": value})
-            assert cfg.token_budgets["max_input_tokens"] == value
-
-    @pytest.mark.parametrize("bad", [0, -1, True, "x", 1.5])
-    def test_global_max_input_tokens_positive_int_or_null(self, bad):
-        with pytest.raises(ConfigError, match="max_input_tokens"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536, "max_input_tokens": bad})
+    @pytest.mark.parametrize("value", [None, 131072])
+    def test_global_max_input_tokens_null_or_positive_int(self, value):
+        cfg = make_config(token_budgets=_budgets(max_input_tokens=value))
+        assert cfg.token_budgets["max_input_tokens"] == value
 
     def test_role_max_input_tokens_optional(self):
-        cfg = make_config(token_budgets={
-            "default_max_output_tokens": 65536,
-            "roles": {"segmenter": {"max_output_tokens": 5120,
-                                   "max_input_tokens": None}}})
+        cfg = make_config(token_budgets=_role_budget(
+            max_output_tokens=5120, max_input_tokens=None))
         assert cfg.token_budgets["roles"]["segmenter"]["max_input_tokens"] is None
 
-    def test_role_max_input_tokens_invalid_rejected(self):
-        with pytest.raises(ConfigError, match="max_input_tokens"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536,
-                "roles": {"segmenter": {"max_output_tokens": 5120,
-                                        "max_input_tokens": 0}}})
-
-    def test_role_entry_unknown_key_rejected(self):
-        with pytest.raises(ConfigError, match="unknown keys"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536,
-                "roles": {"segmenter": {"max_output_tokens": 5120,
-                                        "temperature": 0}}})
-
-    @pytest.mark.parametrize("bad", [None, [], "big"])
-    def test_token_budgets_must_be_a_mapping(self, bad):
-        with pytest.raises(ConfigError, match="mapping"):
-            make_config(token_budgets=bad)
-
-    @pytest.mark.parametrize("bad", [None, [], "big"])
-    def test_roles_must_be_a_mapping(self, bad):
-        with pytest.raises(ConfigError, match="roles"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536, "roles": bad})
-
-    def test_role_entry_must_be_a_mapping(self):
-        with pytest.raises(ConfigError, match="mapping"):
-            make_config(token_budgets={
-                "default_max_output_tokens": 65536,
-                "roles": {"segmenter": 5120}})
-
-    def test_budgets_not_shared_with_caller_mapping(self):
-        given = {"default_max_output_tokens": 65536,
-                 "roles": {"segmenter": {"max_output_tokens": 5120}}}
-        cfg = make_config(token_budgets=given)
-        given["roles"]["segmenter"]["max_output_tokens"] = 1
-        assert cfg.max_output_tokens_for("segmenter") == 5120
-
-    def test_to_dict_carries_budgets_verbatim(self):
-        # Stage 0 freezes config.to_dict() into the manifest, so the frozen
-        # copy must carry exactly what the config file said.
+    def test_budgets_survive_to_dict_from_dict_and_replace(self):
+        # Stage 0 freezes config.to_dict() into the manifest, and via
+        # dataclasses.replace(config, prompts_digests=..): the copies must
+        # keep exactly what the config file said.
         cfg = make_config(token_budgets=FULL_BUDGETS)
         assert cfg.to_dict()["token_budgets"] == FULL_BUDGETS
-
-    def test_from_dict_round_trip_with_budgets(self):
-        cfg = make_config(token_budgets=FULL_BUDGETS)
         assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
-
-    def test_dataclasses_replace_keeps_budgets(self):
-        # Stage 0 freezes via dataclasses.replace(config, prompts_digests=..):
-        # the copy must keep the budgets (and re-validate them harmlessly).
-        cfg = make_config(token_budgets=FULL_BUDGETS)
         frozen = dataclasses.replace(cfg, prompts_digests={"p": "d"})
         assert frozen.token_budgets == FULL_BUDGETS
         assert frozen.max_output_tokens_for("rewriter") == 5120
 
 
 class TestRuleDefaults:
-    def test_default_rules_cover_every_rule_key(self):
-        assert set(DEFAULT_RULES) == set(RULE_KEYS)
-        assert DEFAULT_RULES == {
-            "segment_select": "strong_success_weak_failed",
-            "trajectory_select": "all",
-        }
-
     def test_missing_rule_keys_filled_explicit_ones_kept(self):
         cfg = make_config(rules={"trajectory_select": "custom"})
         assert cfg.rules == {
@@ -530,62 +387,39 @@ class TestRuleDefaults:
         with pytest.raises(ValueError, match="segment_select"):
             make_config(rules={"segment_select": ""})
 
-    def test_an_unknown_rule_key_is_refused(self):
-        with pytest.raises(ValueError, match="unknown rule keys"):
-            make_config(rules={"task_select": "any_weak_failed"})
 
-
-class TestPhaseFields:
-    """The v4 method surface on ExperimentConfig: the constructor accepts
-    raw mappings OR already-parsed specs, everything re-parsed through
-    the checklist, and the parsed phases never alias the caller's
-    mappings. The checklist itself lives in
-    tests/unit/core/test_config_v4.py."""
-
-    def test_parsed_specs_are_the_dataclasses(self):
-        from expedistill.core.config import (
-            ExecutePhaseSpec,
-            LearnPhaseSpec,
-        )
-        cfg = make_config()
-        assert isinstance(cfg.phases["baseline"], ExecutePhaseSpec)
-        assert isinstance(cfg.phases["learn"], LearnPhaseSpec)
-
+class TestConstructorOwnsItsInputs:
     def test_parsed_specs_accepted_back(self):
         # dataclasses.replace on a loaded config re-parses harmlessly.
         cfg = make_config()
-        cfg2 = ExperimentConfig(**cfg.to_dict())
-        assert cfg2 == cfg
+        assert ExperimentConfig(**cfg.to_dict()) == cfg
 
-    def test_not_shared_with_caller_mapping(self):
-        given = copy.deepcopy(MIN_PHASES)
-        cfg = make_config(phases=given)
-        given["learn"]["review"]["K"] = 99
-        assert cfg.phases["learn"].review["K"] == 5
-
-    def test_from_dict_round_trip(self):
-        cfg = make_config()
-        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
-        # The raw (freezable) form of the phases re-parses to the same
-        # specs -- B4's resume comparison depends on that equality.
-        assert ExperimentConfig.from_dict(cfg.to_dict()).to_dict() == \
-            cfg.to_dict()
-
-    def test_yaml_round_trip(self, tmp_path):
-        cfg_file = tmp_path / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD,
-            encoding="utf-8")
-        cfg = load_config(str(cfg_file))
-        assert cfg.sequence == ["baseline", "learn", "test"]
-        assert cfg.phases["test"].delivery == {"name": "whole_bank"}
-        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+    @pytest.mark.parametrize("field,given,mutate,observe,expected", [
+        ("model_options",
+         lambda: {"model-s": {"reasoning_effort": "max"}},
+         lambda g: g["model-s"].update(reasoning_effort="mutated"),
+         lambda cfg: cfg.model_options,
+         {"model-s": {"reasoning_effort": "max"}}),
+        ("token_budgets",
+         lambda: _role_budget(max_output_tokens=5120),
+         lambda g: g["roles"]["segmenter"].update(max_output_tokens=1),
+         lambda cfg: cfg.max_output_tokens_for("segmenter"),
+         5120),
+        ("phases",
+         lambda: copy.deepcopy(MIN_PHASES),
+         lambda g: g["learn"]["review"].update(K=99),
+         lambda cfg: cfg.phases["learn"].review["K"],
+         5),
+    ])
+    def test_config_does_not_alias_the_callers_mapping(
+            self, field, given, mutate, observe, expected):
+        mapping = given()
+        cfg = make_config(**{field: mapping})
+        mutate(mapping)
+        assert observe(cfg) == expected
 
 
-class TestSplitKeySpec:
+class TestSplit:
     """The explicit-list ``split``: ``train`` and ``test`` required, ``val``
     and ``reserved`` optional, the four lists pairwise disjoint (same
     contract as D2 in blocks/tasks.py, one layer up: core validates the
@@ -601,24 +435,32 @@ class TestSplitKeySpec:
         assert make_config(split=split).split == split
         assert tuple(split) == SPLIT_LIST_KEYS
 
-    def test_extra_key_rejected(self):
-        with pytest.raises(ValueError, match="split"):
-            make_config(split={"train": ["tb:1"], "test": ["tb:2"],
-                              "dev": ["tb:3"]})
-
-    def test_missing_train_rejected(self):
-        with pytest.raises(ValueError, match="split"):
-            make_config(split={"test": ["tb:2"]})
-
-    def test_missing_test_rejected(self):
-        with pytest.raises(ValueError, match="split"):
-            make_config(split={"train": ["tb:1"]})
+    def test_split_ratio_and_seed(self):
+        cfg = make_config(split={"ratio": 0.75, "seed": 3})
+        assert cfg.split == {"ratio": 0.75, "seed": 3}
 
     @pytest.mark.parametrize("key", ["val", "reserved"])
-    def test_optional_lists_must_be_task_id_lists(self, key):
-        with pytest.raises(ValueError, match=key):
-            make_config(split={"train": ["tb:1"], "test": ["tb:2"],
-                              key: "tb:3"})
+    def test_optional_lists_may_be_null(self, key):
+        make_config(split={"train": ["a"], "test": ["b"], key: None})
+
+    @pytest.mark.parametrize("split,match", [
+        ({"train": None, "test": ["a"]}, "must be a list"),
+        ({"train": ["a"], "test": None}, "must be a list"),
+        ({"ratio": 0.5, "train": ["tb:1"]}, "mixes ratio"),
+        ({"folds": 4}, "split"),
+        ({"ratio": 1.0}, "ratio"),
+        ({"train": ["tb:1"], "test": ["tb:2"], "dev": ["tb:3"]}, "split"),
+        ({"test": ["tb:2"]}, "split"),
+        ({"train": ["tb:1"]}, "split"),
+        ({"train": ["tb:1"], "test": ["tb:2"], "val": "tb:3"}, "val"),
+        ({"train": ["tb:1"], "test": ["tb:2"], "reserved": "tb:3"},
+         "reserved"),
+    ], ids=["train-null", "test-null", "mixed-shape", "unknown-shape",
+            "ratio-bound", "extra-key", "train-missing", "test-missing",
+            "val-not-a-list", "reserved-not-a-list"])
+    def test_malformed_splits_rejected(self, split, match):
+        with pytest.raises(ValueError, match=match):
+            make_config(split=split)
 
     @pytest.mark.parametrize("first,second", [
         ("train", "val"), ("train", "test"), ("train", "reserved"),
@@ -685,11 +527,11 @@ class TestTaskSet:
 
 class TestSerialisation:
     def test_to_dict_covers_every_field(self):
-        # v4: every field freezes, always -- there is no optional-field
-        # whitelist to keep an in-flight run's key set stable.
-        from dataclasses import fields
+        # Every field freezes, always -- a None must not be filtered out,
+        # or a resumed run would compare against a different key set.
         payload = make_config().to_dict()
-        assert set(payload) == {f.name for f in fields(ExperimentConfig)}
+        assert set(payload) == {
+            f.name for f in dataclasses.fields(ExperimentConfig)}
         assert set(payload["phases"]) == set(MIN_SEQUENCE)
 
     def test_from_dict_rejects_unknown_keys(self):
@@ -702,88 +544,43 @@ class TestSerialisation:
         with pytest.raises(ConfigError, match="future_field"):
             ExperimentConfig.from_dict(payload)
 
-    def test_schema_version_is_nine(self):
-        assert CONFIG_SCHEMA_VERSION == 9
-
-    def test_future_schema_version_rejected_by_load_config(self, tmp_path):
-        cfg_file = tmp_path / "future.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            "schema_version: %d\n" % (CONFIG_SCHEMA_VERSION + 1),
-            encoding="utf-8")
-        with pytest.raises(ConfigError, match=_ONLY_CURRENT):
-            load_config(str(cfg_file))
-
-    def test_future_schema_version_rejected_by_from_dict(self):
-        payload = make_config().to_dict()
-        payload["schema_version"] = CONFIG_SCHEMA_VERSION + 1
-        with pytest.raises(ConfigError, match=_ONLY_CURRENT):
-            ExperimentConfig.from_dict(payload)
-
-    def test_explicit_current_schema_version_loads(self, tmp_path):
-        cfg_file = tmp_path / "current.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD,
-            encoding="utf-8")
-        assert load_config(str(cfg_file)).schema_version == CONFIG_SCHEMA_VERSION
-
-    @pytest.mark.parametrize("version", [2, 3, 4, 5, 6, 7, 8])
-    def test_older_payload_rejected_with_the_generator_pointer(self, version):
+    @pytest.mark.parametrize("version,match", [
+        (CONFIG_SCHEMA_VERSION + 1, _ONLY_CURRENT),
+        *[(older, _ONLY_CURRENT) for older in range(2, CONFIG_SCHEMA_VERSION)],
+        (str(CONFIG_SCHEMA_VERSION), "schema_version"),
+    ])
+    def test_from_dict_refuses_every_other_schema_version(self, version, match):
         payload = make_config().to_dict()
         payload["schema_version"] = version
-        with pytest.raises(ConfigError, match=_ONLY_CURRENT) as excinfo:
+        with pytest.raises(ConfigError, match=match) as excinfo:
             ExperimentConfig.from_dict(payload)
-        assert "build_paper_configs" in str(excinfo.value)
+        if isinstance(version, int):
+            assert "build_paper_configs" in str(excinfo.value)
 
-    @pytest.mark.parametrize("version", [3, 8])
-    def test_older_file_rejected_with_the_generator_pointer(self, tmp_path,
-                                                            version):
-        cfg_file = tmp_path / "old.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {version}\n"
-            + YAML_METHOD,
-            encoding="utf-8")
+    @pytest.mark.parametrize("version,method", [
+        (CONFIG_SCHEMA_VERSION + 1, ""),
+        (3, YAML_METHOD),
+        (CONFIG_SCHEMA_VERSION - 1, YAML_METHOD),
+        (None, YAML_METHOD),
+    ], ids=["future", "old", "previous", "unversioned"])
+    def test_load_config_refuses_every_other_schema_version(
+            self, tmp_path, version, method):
+        # The gate runs before any other parsing, so the future file need
+        # carry no method at all.
+        path = write_yaml(tmp_path, method=method, version=version)
         with pytest.raises(ConfigError, match=_ONLY_CURRENT) as excinfo:
-            load_config(str(cfg_file))
+            load_config(str(path))
         assert "build_paper_configs" in str(excinfo.value)
-
-    def test_file_without_schema_version_rejected(self, tmp_path):
-        cfg_file = tmp_path / "unversioned.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            + YAML_METHOD,
-            encoding="utf-8")
-        with pytest.raises(ConfigError, match=_ONLY_CURRENT):
-            load_config(str(cfg_file))
-
-    def test_non_int_schema_version_rejected(self):
-        payload = make_config().to_dict()
-        payload["schema_version"] = str(CONFIG_SCHEMA_VERSION)
-        with pytest.raises(ConfigError, match="schema_version"):
-            ExperimentConfig.from_dict(payload)
 
     def test_unknown_key_error_lists_unknown_and_known_keys(self, tmp_path):
         # The exact trap the loud loader closes: "token_budget" (missing
         # the s) silently vanished under v1 leniency and the run continued
         # uncapped at the dead 5120 default. The error must name the
         # unknown key and list what a config file accepts.
-        cfg_file = tmp_path / "typo.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "token_budget: {default_max_output_tokens: 65536}\n",
-            encoding="utf-8")
+        path = write_yaml(
+            tmp_path, "token_budget: {default_max_output_tokens: 65536}\n")
         with pytest.raises(ConfigError) as excinfo:
-            load_config(str(cfg_file))
+            load_config(str(path))
         message = str(excinfo.value)
         assert "token_budget" in message
         assert "token_budgets" in message
@@ -794,28 +591,25 @@ class TestSerialisation:
         cfg = load_config(str(path))
         assert cfg.benchmark == "tb"
         assert cfg.split == {"ratio": 0.8, "seed": 7}
+        assert cfg.sequence == ["baseline", "learn", "test"]
         assert cfg.phases["learn"].review["K"] == 5
+        assert cfg.phases["test"].delivery == {"name": "whole_bank"}
         assert cfg.rules["segment_select"] == "strong_all_weak_fail"
         assert cfg.models["judge"] == "model-s"
         assert set(cfg.models) == set(ROLE_DEFAULTS)
 
-        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+        reloaded = ExperimentConfig.from_dict(cfg.to_dict())
+        assert reloaded == cfg
+        # B4's resume comparison is on the raw dict, not on the objects.
+        assert reloaded.to_dict() == cfg.to_dict()
 
     def test_relative_tasks_path_resolved_against_config_dir(
             self, tmp_path, monkeypatch):
         conf_dir = tmp_path / "configs" / "experiments"
-        conf_dir.mkdir(parents=True)
-        (conf_dir / "tasks").mkdir()
+        (conf_dir / "tasks").mkdir(parents=True)
         task_file = conf_dir / "tasks" / "tb_subset.txt"
         task_file.write_text("task-a\n", encoding="utf-8")
-        cfg_file = conf_dir / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "tasks: tasks/tb_subset.txt\n",
-            encoding="utf-8")
+        write_yaml(conf_dir, "tasks: tasks/tb_subset.txt\n")
         # Load through a relative config path from an unrelated cwd: the
         # result must still point at the file next to the config, and be
         # absolute so a resume from another cwd freezes the same value.
@@ -826,50 +620,17 @@ class TestSerialisation:
         assert cfg.tasks == str(task_file.resolve())
 
     def test_absolute_tasks_path_and_id_list_untouched(self, tmp_path):
-        cfg_file = tmp_path / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "tasks: /data/tb/tasks.txt\n",
-            encoding="utf-8")
-        assert load_config(str(cfg_file)).tasks == "/data/tb/tasks.txt"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "tasks: [task-a, task-b]\n",
-            encoding="utf-8")
-        assert load_config(str(cfg_file)).tasks == ["task-a", "task-b"]
-
-    def test_tasks_path_round_trips_through_save(self, tmp_path):
-        (tmp_path / "t.txt").write_text("task-a\n", encoding="utf-8")
-        cfg_file = tmp_path / "exp.yaml"
-        cfg_file.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "tasks: t.txt\n",
-            encoding="utf-8")
-        cfg = load_config(str(cfg_file))
-        assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg
+        path = write_yaml(tmp_path, "tasks: /data/tb/tasks.txt\n")
+        assert load_config(str(path)).tasks == "/data/tb/tasks.txt"
+        write_yaml(tmp_path, "tasks: [task-a, task-b]\n")
+        assert load_config(str(path)).tasks == ["task-a", "task-b"]
 
     def test_relative_paths_resolve_against_real_config_through_symlink(
             self, tmp_path):
         real_dir = tmp_path / "real"
         (real_dir / "tasks").mkdir(parents=True)
         (real_dir / "tasks" / "t.txt").write_text("a\n", encoding="utf-8")
-        real_cfg = real_dir / "exp.yaml"
-        real_cfg.write_text(
-            "benchmark: tb\n"
-            "models: {executor_strong: s, executor_weak: w}\n"
-            f"schema_version: {CONFIG_SCHEMA_VERSION}\n"
-            + YAML_METHOD +
-            "tasks: tasks/t.txt\n",
-            encoding="utf-8")
+        real_cfg = write_yaml(real_dir, "tasks: tasks/t.txt\n")
         # A decoy next to the symlink: it must NOT be picked up.
         link_dir = tmp_path / "links"
         (link_dir / "tasks").mkdir(parents=True)
@@ -884,128 +645,6 @@ class TestSerialisation:
         cfg_file.write_text("- just\n- a\n- list\n", encoding="utf-8")
         with pytest.raises(ValueError, match="mapping"):
             load_config(str(cfg_file))
-
-
-#: Golden baselines for the to_dict payload, hardcoded as literals --
-#: never regenerated at run time, or the test would bless whatever the new
-#: code produces. Key set, key order and every value must stay
-#: byte-identical: this is the frozen-manifest surface, and a resumed
-#: in-flight run compares against it. Two shapes, because the trap is
-#: shape-specific: in the default form split/tasks are None (a generic None
-#: filter would delete them and kill the resume); the split shape pins the
-#: explicit-list form.
-GOLDEN_TO_DICT_KEY_ORDER = [
-    "benchmark", "models",
-    "n_attempts_strong", "n_attempts_weak", "split", "tasks",
-    "sequence", "phases", "invalid_redispatch_limit",
-    "rules", "prompts_digests",
-    "model_options", "token_budgets", "schema_version",
-]
-
-#: The canonical (parsed, all-keys) form of the fixture's phases.
-GOLDEN_PHASES = {
-    "baseline": {"role": "baseline", "tasks": "train",
-          "delivery": {"name": "none"},
-          "execution": {"name": "real",
-                        "arms": ["executor_strong", "executor_weak"]},
-          "compare": None, "acceptance": None, "playbook": "off",
-          "kind": "execute"},
-    "learn": {"review": {"name": "review", "K": 5, "retry_limit": 2},
-          "author": {"name": "subtask_cards"},
-          "kind": "learn", "role": "learn"},
-    "test": {"role": "test", "tasks": "test",
-          "delivery": {"name": "whole_bank"},
-          "execution": {"name": "real"},
-          "compare": {"against": "fresh_bare", "external": None},
-          "acceptance": None, "playbook": "off", "kind": "execute"},
-}
-
-GOLDEN_TO_DICT_DEFAULT_FORM = {
-    "benchmark": "tb",
-    "models": {
-        "executor_strong": "model-s",
-        "executor_weak": "model-w",
-        "segmenter": "model-s",
-        "author": "model-s",
-        "rewriter": "model-s",
-        "judge": "model-s",
-    },
-    "n_attempts_strong": 1,
-    "n_attempts_weak": 1,
-    "split": None,
-    "tasks": None,
-    "sequence": ["baseline", "learn", "test"],
-    "phases": GOLDEN_PHASES,
-    "invalid_redispatch_limit": 1,
-    "rules": {
-        "segment_select": "strong_success_weak_failed",
-        "trajectory_select": "all",
-    },
-    "prompts_digests": {},
-    "model_options": {},
-    "token_budgets": {},
-    "schema_version": 9,
-}
-
-GOLDEN_TO_DICT_SPLIT_FORM = {
-    "benchmark": "tb",
-    "models": {
-        "executor_strong": "model-s",
-        "executor_weak": "model-w",
-        "segmenter": "model-s",
-        "author": "model-s",
-        "rewriter": "model-s",
-        "judge": "model-s",
-    },
-    "n_attempts_strong": 3,
-    "n_attempts_weak": 5,
-    "split": {"train": ["tb:1"], "val": ["tb:4"], "test": ["tb:2"],
-              "reserved": ["tb:3"]},
-    "tasks": ["tb:1", "tb:2", "tb:3", "tb:4"],
-    "sequence": ["baseline", "learn", "test"],
-    "phases": {
-        **GOLDEN_PHASES,
-        # A GIVEN phase freezes verbatim -- no per-key merge with any
-        # default (a merge would smuggle one method's params into
-        # another's phase).
-        "learn": {"review": {"name": "review", "K": 6, "retry_limit": 2},
-              "author": {"name": "subtask_cards"},
-              "kind": "learn", "role": "learn"},
-    },
-    "invalid_redispatch_limit": 1,
-    "rules": {
-        "segment_select": "strong_success_weak_failed",
-        "trajectory_select": "custom",
-    },
-    "prompts_digests": {},
-    "model_options": {},
-    "token_budgets": {"default_max_output_tokens": 65536},
-    "schema_version": 9,
-}
-
-
-class TestToDictGolden:
-    def test_default_form_freezes_byte_identically(self):
-        payload = make_config().to_dict()
-        assert payload == GOLDEN_TO_DICT_DEFAULT_FORM
-        assert list(payload) == GOLDEN_TO_DICT_KEY_ORDER
-
-    def test_split_form_freezes_byte_identically(self):
-        phases = copy.deepcopy(MIN_PHASES)
-        phases["learn"]["review"]["K"] = 6
-        cfg = make_config(
-            n_attempts_strong=3,
-            n_attempts_weak=5,
-            phases=phases,
-            split={"train": ["tb:1"], "val": ["tb:4"], "test": ["tb:2"],
-                   "reserved": ["tb:3"]},
-            tasks=["tb:1", "tb:2", "tb:3", "tb:4"],
-            rules={"trajectory_select": "custom"},
-            token_budgets={"default_max_output_tokens": 65536},
-        )
-        payload = cfg.to_dict()
-        assert payload == GOLDEN_TO_DICT_SPLIT_FORM
-        assert list(payload) == GOLDEN_TO_DICT_KEY_ORDER
 
 
 class TestExternalCampaignCompare:
@@ -1025,7 +664,6 @@ class TestExternalCampaignCompare:
         return make_config(phases=self._raw_phases(compare))
 
     def test_parses_on_a_test_phase(self):
-        from expedistill.core.config import ExternalControlSpec
         cfg = self._config({
             "against": "external_campaign",
             "external": {"path": "/tmp/scores.json",
@@ -1086,28 +724,271 @@ class TestExternalCampaignCompare:
         seed = tmp_path / "seed" / "scores.json"
         seed.parent.mkdir()
         seed.write_text("{}", encoding="utf-8")
-        config_file = tmp_path / "configs" / "exp.yaml"
-        config_file.parent.mkdir()
-        config_file.write_text(f"""
-benchmark: tb
-models:
-  executor_strong: model-s
-  executor_weak: model-w
-schema_version: {CONFIG_SCHEMA_VERSION}
-sequence: [baseline, learn, test]
-phases:
-  baseline: {{kind: execute, role: baseline, tasks: train,
-       delivery: {{name: none}},
-       execution: {{name: real, arms: [executor_strong, executor_weak]}}}}
-  learn: {{kind: learn, review: {{name: review, K: 5}},
-       author: {{name: subtask_cards}}}}
-  test: {{kind: execute, role: test, tasks: test,
-       delivery: {{name: whole_bank}}, execution: {{name: real}},
-       compare: {{against: external_campaign,
-                  external: {{path: ../seed/scores.json,
-                             sha256: {self.SHA},
-                             model_key: qwen}}}}}}
-""", encoding="utf-8")
-        cfg = load_config(str(config_file))
+        compare = ("compare: {against: external_campaign, external: "
+                   f"{{path: ../seed/scores.json, sha256: {self.SHA}, "
+                   "model_key: qwen}}")
+        method = YAML_METHOD.replace("compare: {against: fresh_bare}", compare)
+        (tmp_path / "configs").mkdir()
+        path = write_yaml(tmp_path / "configs", method=method)
+        cfg = load_config(str(path))
         assert cfg.phases["test"].compare.external.path == str(
             (tmp_path / "seed" / "scores.json").resolve())
+
+
+# ---------------------------------------------------------------------------
+# parse_phases: labels, parsed shapes and the load-time checklist
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def method():
+    return reference_method()
+
+
+def _parse(method):
+    return parse_phases(method["phases"], method["sequence"])
+
+
+_DEL = object()
+
+
+def _edit(method, edits):
+    """Apply ``(path, value)`` edits to the method; ``_DEL`` deletes."""
+    for path, value in edits:
+        node = method
+        for key in path[:-1]:
+            node = node[key]
+        if value is _DEL:
+            del node[path[-1]]
+        else:
+            node[path[-1]] = copy.deepcopy(value)
+
+
+class TestPhaseLabels:
+    def test_the_label_shape_is_what_the_id_rules_accept(self):
+        label = phase_label(0, "baseline")
+        assert label == "p01:baseline"
+        assert phase_tag(label) == "p01_baseline"
+        assert phase_tag(FREEZE_LABEL) == "p00_freeze"
+        assert phase_label(11, "a_late.phase") == "p12:a_late.phase"
+
+
+class TestParsedShapes:
+    def test_execute_phase_fields(self, method):
+        specs = _parse(method)
+        baseline = specs["baseline"]
+        assert isinstance(baseline, ExecutePhaseSpec)
+        assert baseline.kind == "execute"
+        assert baseline.role == PHASE_ROLE_BASELINE
+        assert baseline.tasks == "train"
+        assert baseline.delivery == {"name": "none"}
+        assert baseline.execution == {
+            "name": "real", "arms": ["executor_strong", "executor_weak"]}
+        assert baseline.compare is None and baseline.acceptance is None
+        assert baseline.playbook == "off"
+        practice = specs["practice"]
+        assert practice.role == PHASE_ROLE_PRACTICE
+        assert practice.delivery == {"name": "folder"}
+        assert practice.execution == {"name": "real_folder", "attempts": 3}
+        assert practice.playbook == "evolved"
+        assert practice.compare is None
+        test = specs["test"]
+        assert test.role == PHASE_ROLE_TEST
+        assert test.tasks == "test"
+        assert test.compare == CompareSpec(against="fresh_bare")
+
+    def test_learn_phase_fields(self, method):
+        learn = _parse(method)["learn"]
+        assert isinstance(learn, LearnPhaseSpec)
+        assert learn.kind == "learn"
+        assert learn.role == PHASE_ROLE_LEARN
+        assert learn.review == {"name": "review", "K": 5, "retry_limit": 2}
+        assert learn.author == {"name": "subtask_cards"}
+        assert set(phase_spec_to_raw(learn)) == {
+            "review", "author", "kind", "role"}
+
+    def test_round_trip_through_the_freezable_form(self, method):
+        # The raw form of a parsed spec re-parses to the same spec (the
+        # manifest comparison needs it).
+        specs = _parse(method)
+        raw = {name: phase_spec_to_raw(spec)
+               for name, spec in specs.items()}
+        assert parse_phases(raw, method["sequence"]) == specs
+
+
+#: Every load-time refusal of design spec 2.3 as (edits, expected message):
+#: one negative case per checklist item, ids name the item.
+REFUSED_METHODS = [
+    # 1. sequence
+    pytest.param([(("sequence",), [])], "sequence must be a",
+                 id="1-empty-sequence"),
+    # The hard prerequisite of the pNN:<name> label: no colons.
+    pytest.param([(("sequence",), ["baseline:", "learn"])], "never a colon",
+                 id="1-colon-in-a-name"),
+    pytest.param([(("sequence",), ["baseline", "X"])], "no definition",
+                 id="1-name-without-definition"),
+    # 2. field sets
+    pytest.param([(("phases", "baseline", "kind"), "study")],
+                 "'execute' or 'learn'", id="2-unknown-kind"),
+    pytest.param([(("phases", "learn", "delivery"), {"name": "none"})],
+                 "kind 'learn' but carries", id="2-execute-key-on-learn"),
+    pytest.param([(("phases", "baseline", "review"), {"name": "review"})],
+                 "kind 'execute' but carries", id="2-learn-key-on-execute"),
+    pytest.param([(("phases", "baseline", "delivery"), {"arms": 1})],
+                 r"phases.baseline.delivery needs a non-empty",
+                 id="2-nested-mapping-needs-a-name"),
+    pytest.param([(("phases", "learn", "author"), "subtask_cards")],
+                 "phases.learn.author must be a mapping",
+                 id="2-nested-method-is-not-a-mapping"),
+    # 3. role consistency
+    pytest.param([(("phases", "baseline", "role"), "exam")],
+                 "declared, never inferred", id="3-unknown-role"),
+    pytest.param([(("phases", "test", "tasks"), "train")],
+                 "role 'test' with tasks 'train'",
+                 id="3-test-role-runs-the-test-list"),
+    pytest.param([(("phases", "baseline", "tasks"), "test")],
+                 "role 'baseline' with tasks 'test'",
+                 id="3-baseline-never-runs-the-test-list"),
+    pytest.param([(("phases", "practice", "tasks"), "test")],
+                 "role 'practice' with tasks 'test'",
+                 id="3-practice-never-runs-the-test-list"),
+    pytest.param([(("phases", "baseline", "tasks"), "val")],
+                 "role 'baseline' with tasks 'val'",
+                 id="3-baseline-runs-train-only"),
+    pytest.param([(("phases", "practice", "tasks"), "reserved")],
+                 "tasks must be one of", id="3-unknown-task-set"),
+    pytest.param([(("phases", "baseline", "delivery"), {"name": "whole_bank"})],
+                 "the baseline is the bare run", id="3-baseline-delivery"),
+    pytest.param([(("phases", "baseline", "delivery"), {"name": "folder"}),
+                  (("phases", "baseline", "execution"),
+                   {"name": "real_folder",
+                    "arms": ["executor_strong", "executor_weak"]})],
+                 "the baseline is the bare run", id="3-baseline-execution"),
+    pytest.param([(("phases", "baseline", "playbook"), "evolved")],
+                 "baseline phase runs without", id="3-baseline-no-playbook"),
+    pytest.param([(("phases", "baseline", "execution", "arms"),
+                   ["executor_weak"])],
+                 "must be exactly", id="3-baseline-arms-fixed"),
+    pytest.param([(("phases", "baseline", "execution", "arms"), _DEL)],
+                 "must be exactly", id="3-baseline-arms-required"),
+    pytest.param([(("phases", "practice", "execution", "arms"),
+                   ["executor_weak"])],
+                 "only a baseline", id="3-practice-is-single-armed"),
+    pytest.param([(("phases", "test", "execution", "arms"),
+                   ["executor_weak"])],
+                 "only a baseline", id="3-test-is-single-armed"),
+    pytest.param([(("phases", "practice", "delivery"), {"name": "whole_bank"}),
+                  (("phases", "practice", "execution"), {"name": "real"})],
+                 "a practice phase runs the way the final test",
+                 id="3-practice-uses-the-folder-delivery"),
+    pytest.param([(("phases", "test", "execution"), {"name": "exam"})],
+                 "execution name 'exam' is not one of",
+                 id="3-unknown-execution-name"),
+    pytest.param([(("phases", "practice", "acceptance"), "")],
+                 "verdict rule", id="3-empty-acceptance-rule"),
+    # 4. baseline first
+    pytest.param([(("sequence",), ["practice", "baseline", "learn", "test"])],
+                 "must start with the 'baseline'", id="4-practice-first"),
+    pytest.param([(("sequence",), ["learn", *REFERENCE_SEQUENCE])],
+                 "must start with the 'baseline'", id="4-learn-first"),
+    pytest.param([(("sequence",), ["test", "baseline"]),
+                  (("phases", "practice"), _DEL), (("phases", "learn"), _DEL),
+                  (("phases", "test", "playbook"), _DEL)],
+                 "only the first entry may be the baseline",
+                 id="4-baseline-after-a-test"),
+    pytest.param([(("sequence",), ["baseline", "learn", "practice",
+                                   "baseline", "learn", "test"])],
+                 "only the first entry may be the baseline",
+                 id="4-baseline-twice"),
+    # 5. compare
+    pytest.param([(("phases", "baseline", "compare"), {"against": FRESH_BARE})],
+                 "only a 'test' phase", id="5-baseline-has-no-control"),
+    pytest.param([(("phases", "practice", "compare"), {"against": FRESH_BARE})],
+                 "only a 'test' phase", id="5-practice-has-no-control"),
+    *[pytest.param([(("phases", "test", "compare"), {"against": against})],
+                   "against must be one of",
+                   id=f"5-compare-against-{against}")
+      for against in ("baseline", "learn", "test", None)],
+    pytest.param([(("phases", "test", "compare"),
+                   {"against": FRESH_BARE, "rule": "x"})],
+                 "unknown key", id="5-compare-unknown-key"),
+    # 6. learn reads learnable phases
+    pytest.param([(("sequence",), [*REFERENCE_SEQUENCE, "learn"])],
+                 "role 'test'", id="6-learn-after-the-test"),
+    # 7. folder pairing
+    pytest.param([(("phases", "test", "execution"), {"name": "real"})],
+                 "pairs with the 'real_folder' execution",
+                 id="7-folder-delivery-needs-real-folder"),
+    pytest.param([(("phases", "test", "delivery"), {"name": "whole_bank"})],
+                 "pairs with the 'real_folder' execution",
+                 id="7-real-folder-needs-folder-delivery"),
+    # 8. playbook switch
+    pytest.param([(("phases", "test", "playbook"), "learned")],
+                 "playbook must be one of", id="8-unknown-switch-value"),
+    pytest.param([(("sequence",), ["baseline", "test"]),
+                  (("phases", "learn"), _DEL), (("phases", "practice"), _DEL)],
+                 "no learn phase runs before",
+                 id="8-evolved-playbook-needs-a-learn-phase"),
+]
+
+
+class TestParsePhasesChecklist:
+    @pytest.mark.parametrize("edits,match", REFUSED_METHODS)
+    def test_a_violation_is_a_loud_config_error(self, method, edits, match):
+        _edit(method, edits)
+        with pytest.raises(ConfigError, match=match):
+            _parse(method)
+
+    def test_an_unused_definition_is_refused(self, method):
+        method["phases"]["X"] = copy.deepcopy(method["phases"]["practice"])
+        with pytest.raises(ConfigError, match="never runs"):
+            _parse(method)
+
+    def test_acceptance_names_a_rule_or_stays_absent(self, method):
+        method["phases"]["practice"]["acceptance"] = "scorer"
+        assert _parse(method)["practice"].acceptance == "scorer"
+
+    def test_a_test_only_sequence_needs_no_baseline(self, method):
+        method["sequence"] = ["test"]
+        method["phases"] = {"test": method["phases"]["test"]}
+        del method["phases"]["test"]["playbook"]
+        assert set(_parse(method)) == {"test"}
+
+    def test_learn_right_after_the_baseline_is_legal(self, method):
+        del method["phases"]["practice"]
+        method["sequence"] = ["baseline", "learn", "test"]
+        assert set(_parse(method)) == {"baseline", "learn", "test"}
+
+    def test_a_test_phase_may_run_whole_bank_with_real(self, method):
+        method["phases"]["test"]["delivery"] = {"name": "whole_bank"}
+        method["phases"]["test"]["execution"] = {"name": "real"}
+        assert _parse(method)["test"].execution == {"name": "real"}
+
+    def test_the_playbook_switch_defaults_to_off(self, method):
+        for name in ("practice", "test"):
+            del method["phases"][name]["playbook"]
+        specs = _parse(method)
+        assert {specs[name].playbook
+                for name in ("baseline", "practice", "test")} == {"off"}
+
+    def test_practice_and_test_may_show_the_evolved_playbook(self, method):
+        specs = _parse(method)
+        assert specs["practice"].playbook == specs["test"].playbook \
+            == "evolved"
+        assert phase_spec_to_raw(specs["test"])["playbook"] == "evolved"
+
+
+class TestCheckedInConfigs:
+    def test_every_config_loads_and_round_trips(self):
+        paths = sorted(_CONFIG_DIR.glob("*.yaml"))
+        assert paths, f"no experiment configs under {_CONFIG_DIR}"
+        for path in paths:
+            cfg = load_config(str(path))
+            assert cfg.schema_version == CONFIG_SCHEMA_VERSION, path.name
+            assert set(cfg.phases) == set(cfg.sequence), path.name
+            for spec in cfg.phases.values():
+                assert spec.role in EXECUTE_PHASE_ROLES + (
+                    PHASE_ROLE_LEARN,)
+            # The canonical (all-keys) to_dict round-trips: the frozen
+            # manifest compares equal on resume.
+            assert ExperimentConfig.from_dict(cfg.to_dict()) == cfg, \
+                path.name

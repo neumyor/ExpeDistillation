@@ -1,7 +1,7 @@
 """Internal protocol prompts used by B1 (llm.call).
 
 They are registered in the B2 registry like every other model-facing text so
-their digests are frozen into the manifest (README 1.6): changing either one
+their digests are frozen into the manifest: changing either one
 is a new experiment, not a no-op.
 """
 from expedistill.prompts.registry import PromptSpec, register

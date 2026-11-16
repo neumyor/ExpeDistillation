@@ -1,4 +1,4 @@
-"""K2 segment_checked composite tests: llm.fake scripts + a temporary run dir.
+"""K2 segment_checked composite tests: helpers.fake_llm scripts + a temporary run dir.
 
 Covers the composite's own responsibilities (resume, retry wiring, audit on
 exhaustion), not the blocks it wires (those have their own unit tests):
@@ -8,10 +8,13 @@ ModelOutputError as a failed attempt, and the K cap. AGENTS.md section 8
 rule 2 (interrupt-then-resume equals one uninterrupted run) is the resume
 test: the stored result of the first call is re-returned identically."""
 
+import pytest
+
 from expedistill.composites.segment_checked import segment_checked
 from expedistill.core.models import Step, Subtask, Trajectory
+from expedistill.infra.reliability import InfrastructureError
 from expedistill.infra.store import Store, read_jsonl
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 
 TRAJ_ID = "traj/p01_baseline/tb:t1/strong/00"
 LEARN = "p02:learn"
@@ -89,18 +92,6 @@ def test_happy_path_builds_and_stores_subtasks_with_correct_fields(tmp_path):
         assert loaded == subtask
 
 
-def test_source_and_trajectory_success_follow_the_trajectory(tmp_path):
-    store = Store(tmp_path)
-    handle = make_fake_handle(script=json_script(valid_payload()))
-    result = segment_checked(
-        store=store, phase_label=LEARN,
-        trajectory=make_trajectory(role="weak", correctness=True),
-        K=4, view_rules=None, handle=handle, segment_retry_limit=0,
-        run_dir=tmp_path)
-    assert result[0].source == "weak"
-    assert result[0].trajectory_success is True
-
-
 # ---------------------------------------------------------------------------
 # Retry then success
 # ---------------------------------------------------------------------------
@@ -150,16 +141,21 @@ def test_context_summary_is_capped_at_500_chars(tmp_path):
 # Exhaustion: skip + audit
 # ---------------------------------------------------------------------------
 
-def test_exhaustion_returns_none_and_writes_the_audit_record(tmp_path):
+@pytest.mark.parametrize("retry_limit, with_run_dir", [
+    pytest.param(1, True, id="one_retry"),
+    # Without a run_dir argument the audit lands in the store's run dir.
+    pytest.param(0, False, id="no_retry_no_run_dir"),
+])
+def test_exhaustion_returns_none_and_writes_the_audit_record(
+        tmp_path, retry_limit, with_run_dir):
     store = Store(tmp_path)
     handle = make_fake_handle(script=[
-        json_script(gap_payload()),
-        json_script(gap_payload()),
-    ])
+        json_script(gap_payload()) for _ in range(retry_limit + 1)])
+    extra = {"run_dir": tmp_path} if with_run_dir else {}
     result = segment_checked(
         store=store, phase_label=LEARN,
         trajectory=make_trajectory(), K=4, view_rules=None,
-        handle=handle, segment_retry_limit=1, run_dir=tmp_path)
+        handle=handle, segment_retry_limit=retry_limit, **extra)
 
     assert result is None
     assert store.ids("subtasks") == []
@@ -167,22 +163,9 @@ def test_exhaustion_returns_none_and_writes_the_audit_record(tmp_path):
     assert len(records) == 1
     record = records[0]
     assert record["trajectory_id"] == TRAJ_ID
-    assert record["attempts"] == 2
+    assert record["attempts"] == retry_limit + 1
     assert record["status"] == "skipped"
     assert any("gap or overlap" in error for error in record["last_errors"])
-
-
-def test_exhaustion_with_run_dir_none_audits_into_the_store_run_dir(tmp_path):
-    store = Store(tmp_path)
-    handle = make_fake_handle(script=[json_script(gap_payload())])
-    result = segment_checked(
-        store=store, phase_label=LEARN,
-        trajectory=make_trajectory(), K=4, view_rules=None,
-        handle=handle, segment_retry_limit=0)  # no run_dir argument
-    assert result is None
-    records = read_jsonl(tmp_path / "stage2_segments" / "segmentation_audit.jsonl")
-    assert len(records) == 1
-    assert records[0]["attempts"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +203,7 @@ def test_resume_ignores_other_trajectories_subtasks(tmp_path):
         handle=handle, segment_retry_limit=0, run_dir=tmp_path)
 
     other = make_trajectory(
-        correctness=False, role="weak",
+        correctness=True, role="weak",
         trajectory_id="traj/p01_baseline/tb:t1/weak/00")
     other_handle = make_fake_handle(script=json_script(valid_payload()))
     result = segment_checked(
@@ -229,7 +212,9 @@ def test_resume_ignores_other_trajectories_subtasks(tmp_path):
         handle=other_handle, segment_retry_limit=0, run_dir=tmp_path)
     assert len(result) == 2
     assert result[0].subtask_id == "traj/p01_baseline/tb:t1/weak/00/seg00"
+    # Source and trajectory success follow the trajectory.
     assert result[0].source == "weak"
+    assert result[0].trajectory_success is True
     assert len(other_handle.client.calls) == 1
 
 
@@ -308,10 +293,6 @@ def test_exactly_k_segments_is_accepted(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_infrastructure_error_propagates_without_audit_record(tmp_path):
-    import pytest
-
-    from expedistill.infra.reliability import InfrastructureError
-
     store = Store(tmp_path)
     # First round: invalid output (a failed attempt K2 owns); second round:
     # the service goes down. The outage must surface, not be counted as

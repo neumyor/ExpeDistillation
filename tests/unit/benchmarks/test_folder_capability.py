@@ -17,26 +17,18 @@ together). Pinned here:
 """
 
 import dataclasses
-import importlib
-import importlib.abc
-import importlib.machinery
-import sys
-import types
 
 import pytest
 
-from expedistill.benchmarks.base import (
-    BenchmarkPlugin,
-    RunOutcome,
-    Task,
-    ViewRules,
-)
+from expedistill.benchmarks.base import Task
 from expedistill.blocks.execute import run_one
 from expedistill.infra.reliability import ConfigError
 from expedistill.llm.call import ModelHandle
 from expedistill.prompts.registry import PROMPTS, digest
 from expedistill.stages.stage0_freeze import _prompt_digests
 from tests.helpers.plugins import ensure_plugin
+from tests.helpers.fake_plugin import serve_plugin
+from tests.helpers.stub_plugin import StubPlugin
 
 
 _FOLDER_MANIFEST = {
@@ -53,17 +45,15 @@ _FOLDER_MANIFEST = {
 # The real plugins' declarations
 # ---------------------------------------------------------------------------
 
-def test_tb_declares_the_capability_and_its_prompt_is_registered():
-    plugin = ensure_plugin("tb")
-    assert plugin.skill_folder_prompt_name == "TB_TASK_PROMPT_FOLDER"
-    assert plugin.skill_folder_prompt_name in PROMPTS
-
-
-@pytest.mark.parametrize("benchmark, prompt_name", [
+_FOLDER_PROMPTS = [
+    ("tb", "TB_TASK_PROMPT_FOLDER"),
     ("searchqa", "SEARCHQA_TASK_PROMPT_FOLDER"),
     ("alfworld", "ALFWORLD_TASK_PROMPT_FOLDER"),
-])
-def test_the_local_plugins_declare_it_and_their_prompt_is_registered(
+]
+
+
+@pytest.mark.parametrize("benchmark, prompt_name", _FOLDER_PROMPTS)
+def test_the_plugin_declares_it_and_its_prompt_is_registered(
         benchmark, prompt_name):
     plugin = ensure_plugin(benchmark)
     assert plugin.skill_folder_prompt_name == prompt_name
@@ -73,54 +63,6 @@ def test_the_local_plugins_declare_it_and_their_prompt_is_registered(
 # ---------------------------------------------------------------------------
 # E1's unit-level guard (the fake-plugin route of test_execute.py)
 # ---------------------------------------------------------------------------
-
-class _Plugin(BenchmarkPlugin):
-
-    def __init__(self, name):
-        self._name = name
-        self.calls = []
-
-    @property
-    def name(self):
-        return self._name
-
-    def load_tasks(self, tasks_spec):
-        return []
-
-    def run(self, task, handle, skills_block, workdir):
-        self.calls.append((task, skills_block))
-        return RunOutcome()
-
-    @property
-    def view_rules(self):
-        return ViewRules()
-
-    @property
-    def task_prompt_name(self):
-        return "FAKE_TASK"
-
-
-def _install(monkeypatch, plugin):
-    fullname = f"expedistill.benchmarks.{plugin.name}"
-
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            from expedistill.benchmarks.registry import register_plugin
-            register_plugin(plugin)
-
-    class Finder:
-        def find_spec(self, name, path=None, target=None):
-            if name == fullname:
-                return importlib.machinery.ModuleSpec(name, Loader())
-            return None
-
-    sys.modules.pop(fullname, None)
-    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
-    return plugin
-
 
 @pytest.fixture()
 def _no_fakebench():
@@ -148,7 +90,7 @@ def _folder_task():
 
 
 def test_a_folder_unit_on_a_plugin_without_the_capability_is_config_error(monkeypatch, tmp_path, _no_fakebench):
-    plugin = _install(monkeypatch, _Plugin("fakebench"))
+    plugin = serve_plugin(monkeypatch, StubPlugin())
     with pytest.raises(ConfigError, match="does not support skill folders") \
             as caught:
         run_one(phase_label="p03:practice", benchmark="fakebench",
@@ -165,7 +107,7 @@ def test_a_folder_unit_on_a_plugin_without_the_capability_is_config_error(monkey
 
 def test_a_bare_unit_passes_the_guard_unchanged(
         monkeypatch, tmp_path, _no_fakebench):
-    plugin = _install(monkeypatch, _Plugin("fakebench"))
+    plugin = serve_plugin(monkeypatch, StubPlugin())
     run_one(phase_label="p03:practice", benchmark="fakebench",
             task=Task(task_id="t1", instruction="do t1"),
             model_role="weak", model_name="weak-model",
@@ -178,29 +120,38 @@ def test_a_folder_unit_on_a_capable_plugin_reaches_run_unchanged(monkeypatch, tm
     # E1 adds no folder behaviour: a capable plugin receives the unit
     # exactly as a normal one (manifest and path ride the task's meta,
     # which is the plugin's own channel).
-    class CapablePlugin(_Plugin):
-        skill_folder_prompt_name = "TB_TASK_PROMPT_FOLDER"
-
-    plugin = _install(monkeypatch, CapablePlugin("fakebench"))
+    plugin = serve_plugin(monkeypatch, StubPlugin(
+        skill_folder_prompt_name="TB_TASK_PROMPT_FOLDER"))
     task = _folder_task()
     run_one(phase_label="p03:practice", benchmark="fakebench", task=task,
             model_role="weak", model_name="weak-model",
             attempt_index=0, skills_injected="bank:000000000000",
             skills_block="## Skill folder catalog\n",
             handle=HANDLE, workdir=tmp_path)
-    assert plugin.calls == [(task, "## Skill folder catalog\n")]
+    assert [(c["task"], c["skills_block"]) for c in plugin.calls] == [
+        (task, "## Skill folder catalog\n")]
 
 
 # ---------------------------------------------------------------------------
 # The stage-0 freeze of the declared folder prompt
 # ---------------------------------------------------------------------------
 
-def test_stage0_freezes_the_folder_prompt_digest():
+@pytest.mark.parametrize("benchmark, prompt_name", _FOLDER_PROMPTS)
+def test_stage0_freezes_the_folder_prompt_digest(benchmark, prompt_name):
+    ensure_plugin(benchmark)
+    digests = _prompt_digests(benchmark)
+    assert digests[prompt_name] == digest(prompt_name)
+    # Only the declaring plugin's folder prompt is frozen with its run.
+    assert {name for _, name in _FOLDER_PROMPTS if name in digests} \
+        == {prompt_name}
+
+
+def test_stage0_freezes_the_tb_prompts_beside_the_folder_prompt():
     ensure_plugin("tb")
     digests = _prompt_digests("tb")
-    assert digests["TB_TASK_PROMPT_FOLDER"] == digest("TB_TASK_PROMPT_FOLDER")
-    # And the plain task prompt still freezes beside it.
-    assert digests["TB_TASK_PROMPT"] == digest("TB_TASK_PROMPT")
+    for name in ("TB_TASK_PROMPT", "TB_TASK_PROMPT_READ",
+                 "TB_TASK_PROMPT_READ_PLAYBOOK", "TB_PLAYBOOK_UPDATE"):
+        assert digests[name] == digest(name)
 
 
 def test_stage0_refuses_an_unregistered_folder_prompt_name(
@@ -212,18 +163,6 @@ def test_stage0_refuses_an_unregistered_folder_prompt_name(
     with pytest.raises(ConfigError,
                        match="skill_folder_prompt_name"):
         _prompt_digests("tb")
-
-
-@pytest.mark.parametrize("benchmark, prompt_name", [
-    ("searchqa", "SEARCHQA_TASK_PROMPT_FOLDER"),
-    ("alfworld", "ALFWORLD_TASK_PROMPT_FOLDER"),
-])
-def test_the_local_plugins_freeze_their_folder_prompt_digest(
-        benchmark, prompt_name):
-    ensure_plugin(benchmark)
-    digests = _prompt_digests(benchmark)
-    assert digests[prompt_name] == digest(prompt_name)
-    assert "TB_TASK_PROMPT_FOLDER" not in digests
 
 
 def test_a_plugin_without_the_capability_freezes_no_extra_prompt(

@@ -1,6 +1,6 @@
 """G1 segment and D7 validation unit tests.
 
-G1 is tested against llm.fake (json_script / FakeClient), D7 against
+G1 is tested against helpers.fake_llm (json_script / FakeClient), D7 against
 hand-built segment lists. Success VALUES are never judged -- only presence
 and type -- and that is asserted explicitly (README stage 2)."""
 
@@ -8,7 +8,7 @@ import pytest
 
 from expedistill.infra.reliability import ModelOutputError
 from expedistill.blocks.segment import segment, validate_segments
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 
 VIEW = "task: t (final status: failure)\n\nstep 0\naction: a\nobservation: o"
 
@@ -123,49 +123,36 @@ def test_empty_list_is_an_error():
     assert "empty" in errors[0]
 
 
-def test_more_than_k_segments_is_an_error():
-    segs = [good_segment(0, 1), good_segment(1, 2), good_segment(2, 3)]
-    errors = validate_segments(3, segs, K=2)
-    assert any("exceed" in e and "K=2" in e for e in errors)
-
-
-def test_out_of_range_boundaries_are_errors():
-    below = [good_segment(-1, 2), good_segment(2, 5)]
-    errors = validate_segments(5, below, K=3)
-    assert any("outside" in e for e in errors)
-
-    above = [good_segment(0, 2), good_segment(2, 6)]
-    errors = validate_segments(5, above, K=3)
-    assert any("outside" in e for e in errors)
-
-
-def test_empty_range_is_an_error():
-    errors = validate_segments(4, [good_segment(0, 2), good_segment(2, 2),
-                                  good_segment(2, 4)], K=3)
-    assert any("empty range" in e for e in errors)
-
-
-def test_gap_is_an_error():
-    segs = [good_segment(0, 2), good_segment(3, 5)]
-    errors = validate_segments(5, segs, K=3)
-    assert any("gap or overlap" in e for e in errors)
-    assert any("coverage error" in e for e in errors)
-
-
-def test_overlap_is_an_error():
-    segs = [good_segment(0, 3), good_segment(2, 5)]
-    errors = validate_segments(5, segs, K=3)
-    assert any("gap or overlap" in e for e in errors)
-
-
-def test_first_segment_must_start_at_zero():
-    errors = validate_segments(5, [good_segment(1, 5)], K=3)
-    assert any("starts at step 1, expected 0" in e for e in errors)
-
-
-def test_last_segment_must_end_at_total_steps():
-    errors = validate_segments(5, [good_segment(0, 4)], K=3)
-    assert any("ends at step 4" in e and "expected 5" in e for e in errors)
+# Each case: (total steps, segments, K) and the fragments the errors must
+# contain; the fragments of one tuple must appear in the same error line.
+@pytest.mark.parametrize("total, segs, k, expected", [
+    pytest.param(3, [good_segment(0, 1), good_segment(1, 2),
+                     good_segment(2, 3)], 2, [("exceed", "K=2")],
+                 id="more_than_k"),
+    pytest.param(5, [good_segment(-1, 2), good_segment(2, 5)], 3,
+                 [("outside",)], id="below_range"),
+    pytest.param(5, [good_segment(0, 2), good_segment(2, 6)], 3,
+                 [("outside",)], id="above_range"),
+    pytest.param(4, [good_segment(0, 2), good_segment(2, 2),
+                     good_segment(2, 4)], 3, [("empty range",)],
+                 id="empty_range"),
+    pytest.param(5, [good_segment(0, 2), good_segment(3, 5)], 3,
+                 [("gap or overlap",), ("coverage error",)], id="gap"),
+    pytest.param(5, [good_segment(0, 3), good_segment(2, 5)], 3,
+                 [("gap or overlap",)], id="overlap"),
+    pytest.param(5, [good_segment(1, 5)], 3,
+                 [("starts at step 1, expected 0",)], id="first_start"),
+    pytest.param(5, [good_segment(0, 4)], 3,
+                 [("ends at step 4", "expected 5")], id="last_end"),
+    pytest.param(4, [{"start": 0, "end": 2, "description": "d",
+                      "success": True}, good_segment(2, 4)], 3,
+                 [("segment 0", "label")], id="missing_label"),
+    pytest.param(4, ["nope"], 3, [("must be an object",)], id="non_dict"),
+])
+def test_invalid_segment_lists_are_errors(total, segs, k, expected):
+    errors = validate_segments(total, segs, K=k)
+    for fragments in expected:
+        assert any(all(f in e for f in fragments) for e in errors)
 
 
 def test_segments_out_of_order_still_cover_validly():
@@ -173,18 +160,6 @@ def test_segments_out_of_order_still_cover_validly():
     # that covers exactly is valid.
     segs = [good_segment(4, 6), good_segment(0, 2), good_segment(2, 4)]
     assert validate_segments(6, segs, K=3) == []
-
-
-def test_missing_or_invalid_fields_are_errors():
-    segs = [{"start": 0, "end": 2, "description": "d", "success": True},  # no label
-            good_segment(2, 4)]
-    errors = validate_segments(4, segs, K=3)
-    assert any("segment 0" in e and "label" in e for e in errors)
-
-
-def test_non_dict_segment_is_an_error():
-    errors = validate_segments(4, ["nope"], K=3)
-    assert any("must be an object" in e for e in errors)
 
 
 def test_validation_never_judges_success_values():

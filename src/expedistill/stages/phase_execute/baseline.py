@@ -128,9 +128,7 @@ def run_baseline(ctx: StageContext, phase: PhaseInstance,
         "complete": not every_hole,
         "infra_shortfall_accepted": bool(stage1_holes),
     }
-    report = phase_report.build_phase_report(
-        sheets, specs, phase_kind=PHASE_ROLE_BASELINE,
-        learning_usable=True, summary=summary)
+    report = phase_report.build_phase_report(sheets, specs)
 
     phase_dir = phase_disk.execute_phase_dir(ctx, phase)
     answer_sheets.write_answer_sheets(

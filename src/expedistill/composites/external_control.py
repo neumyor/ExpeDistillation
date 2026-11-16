@@ -1,6 +1,6 @@
 """The external-campaign control: frozen per-task scores read from a
-pinned score file, zero execution (the v4 image of the old stage-6
-``control_source: external_campaign`` ruling).
+pinned score file, zero execution (``control_source:
+external_campaign``).
 
 The old system's rule (TB-dev, user ruling 2026-10-16): the bare
 control arm of the final test is NEVER re-run; the comparison reads the
@@ -38,7 +38,7 @@ with-bank arm spends anything):
   reward exactly 0 or 1 (anything else is not a success-rate archive).
 
 The metrics use the SAME shape as
-:func:`expedistill.blocks.metrics.compute_task_metrics` (attempts /
+:func:`expedistill.composites.unit_summary.task_metrics` (attempts /
 valid / success / infra per task, keyed by the STORED prefixed task
 id), so the C summary's delta goes through the same
 ``summarize``/``final_test_delta`` pair every other control uses. An
@@ -114,7 +114,7 @@ def load_external_control(
     ``tasks`` are the test phase's Task objects (any object with a
     ``task_id``); the returned metrics are keyed by the STORED prefixed
     id (``make_task_id(benchmark, task_id)``), the same key
-    ``compute_task_metrics`` uses, so the arms' task sets compare
+    ``task_metrics`` uses, so the arms' task sets compare
     directly. The second return value is ``{prefixed id: [rewards the
     control consumed]}``, for the summary's audit record.
 

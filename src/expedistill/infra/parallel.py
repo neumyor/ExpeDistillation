@@ -2,10 +2,9 @@
 
 Adapted from the SkillExpand repo's runtime/parallel.py (ExpeToSkill-merged
 @ TB-eval 4f436af). Kept from there: the MAX_WORKERS clamp (a typo cannot ask
-for 640 workers), the serial shortcut for a single worker, the spawn process
-context on every platform (macOS defaults to it, other platforms may not),
-and "cancel nothing, gather everything" so a slow first item cannot lose the
-results of completed ones. Not migrated: benchmark-aware worker routing,
+for 640 workers), the serial shortcut for a single worker, and "cancel
+nothing, gather everything" so a slow first item cannot lose the results of
+completed ones. Not migrated: benchmark-aware worker routing,
 per-process config caching and the per-result worker timeout -- those are
 owned by callers here, which wrap their ``fn`` if they need a deadline.
 
@@ -13,27 +12,20 @@ owned by callers here, which wrap their ``fn`` if they need a deadline.
 stop-on-fatal batch semantics instead of one per stage. Its fatal-error
 rule: the first failure by unit order is re-raised unwrapped whatever its
 kind, with a ParallelError carrying every failure chained as ``__cause__``.
-(K1 batch_execute still has its own ``_reraise`` with the old
-config/refusal-vs-bug split; unifying it onto run_units' rule is future
-work.) Its results are in input order, but with ``workers > 1`` the order
+(K1 batch_execute has its own ``_reraise`` with a config/refusal-vs-bug
+split.) Its results are in input order, but with ``workers > 1`` the order
 in which workers append to LEDGER or audit files varies run to run:
 callers must sort their summary lists or derive them from the store, never
 from append order.
 """
 
-import multiprocessing
 import threading
-from concurrent.futures import (
-    BrokenExecutor, Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor,
-)
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import (
-    Any, Callable, Dict, List, NoReturn, Optional, Sequence, Tuple, TypeVar,
-    Union,
+    Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union,
 )
 
-from expedistill.infra.reliability import (
-    InfrastructureError, ReliabilityError,
-)
+from expedistill.infra.reliability import ReliabilityError
 
 #: Hard ceiling, kept explicit so a config typo cannot ask for 640 workers.
 MAX_WORKERS = 256
@@ -81,8 +73,8 @@ def effective_workers(requested: int, n_items: int) -> int:
 
 
 def run_parallel(fn: Callable[[Any], Any], items: Sequence[Any],
-                 workers: int = 1, *, thread: bool = True) -> List[Any]:
-    """Apply ``fn`` to every item with a bounded pool, in input order.
+                 workers: int = 1) -> List[Any]:
+    """Apply ``fn`` to every item with a bounded thread pool, in input order.
 
     Results are returned in input order regardless of completion order; a
     resumed run that persists in submission order is therefore reproducible
@@ -90,30 +82,20 @@ def run_parallel(fn: Callable[[Any], Any], items: Sequence[Any],
 
     Per-item exceptions are gathered, not racing: if any item fails, every
     item still runs and a ParallelError is raised afterwards carrying all
-    failures by index. A broken pool (a worker process died) is reported as
-    an InfrastructureError: it is retryable by resuming, not a code bug.
-
-    With ``thread=False`` the pool spawns processes, so ``fn`` and the items
-    must be picklable module-level objects (closures cannot cross the
-    boundary); prefer threads unless the unit holds the GIL.
+    failures by index.
     """
     items = list(items)
     if not items:
         return []
     n = effective_workers(workers, len(items))
-    if n == 1 and thread:
+    if n == 1:
         # Serial shortcut: same order, same error handling, no pool overhead.
         return _serial(fn, items)
 
-    if thread:
-        executor: Executor = ThreadPoolExecutor(
-            max_workers=n, thread_name_prefix="run-parallel")
-    else:
-        executor = ProcessPoolExecutor(
-            max_workers=n, mp_context=multiprocessing.get_context("spawn"))
-    with executor:
+    with ThreadPoolExecutor(
+            max_workers=n, thread_name_prefix="run-parallel") as executor:
         futures = [executor.submit(fn, item) for item in items]
-        return _collect(futures, items)
+        return _collect(futures)
 
 
 def _serial(fn: Callable[[Any], Any],
@@ -129,37 +111,16 @@ def _serial(fn: Callable[[Any], Any],
     return results
 
 
-def _collect(futures: List[Future], items: List[Any]) -> List[Any]:
+def _collect(futures: List[Future]) -> List[Any]:
     results: List[Any] = []
     failures: Dict[int, BaseException] = {}
     for index, future in enumerate(futures):
         try:
             results.append(future.result())
-        except BrokenExecutor as exc:
-            error = InfrastructureError(
-                f"worker pool broke before item {index + 1}/{len(items)} "
-                "completed; resume retries unfinished units")
-            error.__cause__ = exc
-            failures[index] = error
         except Exception as exc:  # noqa: BLE001 - reported per item below
             failures[index] = exc
-    _raise_if_failed(failures, len(items))
+    _raise_if_failed(failures, len(futures))
     return results
-
-
-def reraise_by_kind(error: ParallelError, what: str) -> NoReturn:
-    """Re-raise a run_parallel failure by its kind.
-
-    When every failed item raised an InfrastructureError the pool's failure
-    is one InfrastructureError (resumable); otherwise the first other
-    failure by item order is re-raised unchanged, so a code bug or a model
-    output error is never disguised as a retryable machine failure.
-    """
-    for index in sorted(error.failures):
-        failure = error.failures[index]
-        if not isinstance(failure, InfrastructureError):
-            raise failure
-    raise InfrastructureError(f"{what}: {error}") from error
 
 
 def _raise_if_failed(failures: Dict[int, BaseException],
@@ -200,9 +161,9 @@ def run_units(worker: Callable[[_UnitType], _OutcomeType],
     fatal error.
 
     The unit pool the stages share: one implementation of the stop/failure
-    semantics (K1 batch_execute has its own stop flag now; the surfacing
-    rule below is run_units' own, every caller gets it identically)
-    instead of one per stage.
+    semantics (K1 batch_execute has its own stop flag; the surfacing rule
+    below is run_units' own, every caller gets it identically) instead of
+    one per stage.
 
     - ``worker`` runs ONE unit and returns its outcome, whatever the caller
       wants collected. Expected-failure dispositions (ModelOutputError,
@@ -226,8 +187,7 @@ def run_units(worker: Callable[[_UnitType], _OutcomeType],
       and the outcomes -- stays chained as ``__cause__``: the first fatal
       is the actionable error regardless of kind, and the full-failure
       context belongs in the cause chain, not on top of it. (K1
-      batch_execute's ``_reraise`` still splits config/refusal from bugs;
-      unifying it onto this rule is future work.)
+      batch_execute's ``_reraise`` splits config/refusal from bugs.)
     - Whatever is raised carries the outcomes in ``.outcomes`` (read it
       with ``getattr(exc, "outcomes", None)``): the input-ordered list,
       with UnitSkipped in every slot whose unit produced no outcome --
@@ -258,8 +218,7 @@ def run_units(worker: Callable[[_UnitType], _OutcomeType],
             state.record_failure(index, exc)
             return UnitSkipped
 
-    outcomes = run_parallel(wrapped, list(enumerate(items)), workers,
-                            thread=True)
+    outcomes = run_parallel(wrapped, list(enumerate(items)), workers)
     _surface_failures(state.failures, outcomes, len(items))
     return outcomes
 

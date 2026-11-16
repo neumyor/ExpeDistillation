@@ -14,7 +14,6 @@ makes one trial in four ``general``), so every scenario routes its
 failures by the step facts alone.
 """
 
-import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -40,72 +39,19 @@ from expedistill.infra.store import (
     Store, object_filename, read_json, write_json, write_jsonl)
 from expedistill.inject.skill_text import description_text
 from expedistill.llm.call import make_handle
-from expedistill.llm.fake_provider import FakeProviderClient
 from expedistill.prompts.learning_context import default_slots
 from expedistill.stages import phase_learn
 from expedistill.stages.context import RunSettings, StageContext
-from tests.golden.harness import (
+from tests.helpers.golden_harness import (
     FAKE_BENCH,
     STRONG_MODEL,
     WEAK_MODEL,
-    GoldenPlugin,
-    installed_plugin,
+    PinnedClient,
 )
 from tests.helpers.configs import reference_method
 
-__all__ = ["WORK", "CrashBefore", "GoldenPlugin", "LearnRun",
-           "PinnedClient", "baseline_trials", "installed_plugin",
-           "read_skill", "run_through", "snapshot", "trial"]
-
-PLAN: Dict[str, Any] = {"strong_model": STRONG_MODEL,
-                        "weak_model": WEAK_MODEL, "segment_steps": 1,
-                        "questions": {}}
-
-
-class PinnedClient(FakeProviderClient):
-    """The fake provider with every diagnosis in scope ``subtask``; a trial
-    whose task text contains one of ``early`` fails at step 0 instead of
-    its last step (the stub's tasks read "... for task one" / "... for
-    task two")."""
-
-    def __init__(self, plan: Optional[Dict[str, Any]] = None,
-                 early: Sequence[str] = ()):
-        super().__init__(dict(plan or PLAN))
-        self.early = tuple(early)
-
-    def _trial_analysis(self, user: str) -> str:
-        reply = FakeProviderClient._trial_analysis(user)
-        reply = reply.replace('"scope": "general"', '"scope": "subtask"')
-        task = user.split("TASK:\n", 1)[1].split("\n\n", 1)[0]
-        if any(word in task for word in self.early):
-            reply = re.sub(r'"failing_step": \d+', '"failing_step": 0',
-                           reply)
-        return reply
-
-
-class CrashBefore:
-    """Wraps a client; raises before the ``occurrence``-th call whose
-    prompt starts with ``anchor`` (a plain RuntimeError: no stage retries
-    it, so it escapes like a process death)."""
-
-    def __init__(self, inner: Any, anchor: str, occurrence: int = 1):
-        self.inner = inner
-        self.anchor = anchor
-        self.left = occurrence
-        self.fired = False
-
-    @property
-    def calls(self) -> List[Dict[str, Any]]:
-        return self.inner.calls
-
-    def complete(self, model: str, system: str, user: str, **kwargs: Any):
-        if user.startswith(self.anchor) and not self.fired:
-            self.left -= 1
-            if self.left == 0:
-                self.fired = True
-                raise RuntimeError(f"simulated crash before {self.anchor!r}")
-        return self.inner.complete(model, system, user, **kwargs)
-
+__all__ = ["WORK", "LearnRun", "baseline_trials", "read_skill",
+           "run_through", "snapshot", "trial"]
 
 def trial(task: str, role: str, actions: Sequence[str], *,
           correct: bool, attempt: int = 0) -> Dict[str, Any]:

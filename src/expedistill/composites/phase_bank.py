@@ -22,30 +22,31 @@ label's.
 
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import (
-    Store, read_json, read_jsonl, write_json, write_jsonl)
-from expedistill.inject import bank_reference
+    BANK_NAME, Store, read_json, read_jsonl, write_json, write_jsonl)
+from expedistill.inject.skills import bank_reference
 
 __all__ = [
-    "BANK_NAME",
     "PHASES_DIR",
     "SUMMARY_NAME",
+    "bank_phase_labels",
+    "label_of_dir",
     "load_phase_bank",
     "load_phase_bank_summary",
     "phase_bank_dir",
     "phase_bank_path",
     "phase_bank_summary_path",
+    "phase_dir_number",
+    "phase_number",
     "write_phase_bank",
 ]
 
 #: The per-phase tree inside the run directory (R9's phase layout).
 PHASES_DIR = "phases"
-#: The bank artifact: same rows, same name as the run-level bank.
-BANK_NAME = "skill_bank.jsonl"
 #: The small digest file the drivers write beside the artifact.
 SUMMARY_NAME = "bank_summary.json"
 
@@ -58,7 +59,10 @@ _COLON = str.maketrans({":": "_"})
 #: so two labels can never collide on one directory (``p1:a`` and the
 #: colonless ``p1_a`` are different labels, and only the first is
 #: legal -- D3).
-_PHASE_LABEL_RE = re.compile(r"p[0-9]+:[A-Za-z0-9._-]+")
+_PHASE_LABEL_RE = re.compile(r"p([0-9]+):[A-Za-z0-9._-]+")
+
+#: A phase directory's name: the label with its colon mapped to ``_``.
+_PHASE_DIR_RE = re.compile(r"p([0-9]+)_([A-Za-z0-9._-]+)")
 
 
 def phase_bank_dir(run_dir: Union[str, Path], phase_label: str) -> Path:
@@ -78,6 +82,46 @@ def phase_bank_dir(run_dir: Union[str, Path], phase_label: str) -> Path:
             "allowed name characters are letters, digits, '.', '_', '-')")
     name = phase_label.translate(_COLON)
     return Path(run_dir) / PHASES_DIR / name
+
+
+def label_of_dir(dir_name: str) -> Optional[str]:
+    """The phase label a directory name under ``phases/`` stands for
+    (the inverse of :func:`phase_bank_dir`'s colon mapping), or None for a
+    name that is not a phase directory."""
+    match = _PHASE_DIR_RE.fullmatch(dir_name)
+    return None if match is None else f"p{match.group(1)}:{match.group(2)}"
+
+
+def phase_number(phase_label: str) -> int:
+    """The ``NN`` of a ``pNN:<name>`` phase label."""
+    match = _PHASE_LABEL_RE.fullmatch(phase_label)
+    if match is None:
+        raise ConfigError(
+            f"{phase_label!r} is not a 'pNN:<name>' phase label")
+    return int(match.group(1))
+
+
+def phase_dir_number(dir_name: str) -> int:
+    """The ``NN`` of a phase directory name, ``-1`` for any other name."""
+    label = label_of_dir(dir_name)
+    return -1 if label is None else phase_number(label)
+
+
+def bank_phase_labels(run_dir: Union[str, Path]) -> List[str]:
+    """The labels of the phases that left a bank artifact, oldest first.
+
+    A phase counts by the artifact's presence -- a learn phase ends with
+    one by contract, whatever else it writes beside it.
+    """
+    phases_dir = Path(run_dir) / PHASES_DIR
+    if not phases_dir.is_dir():
+        return []
+    labels = []
+    for entry in phases_dir.iterdir():
+        label = label_of_dir(entry.name)
+        if label is not None and (entry / BANK_NAME).exists():
+            labels.append(label)
+    return sorted(labels, key=lambda label: (phase_number(label), label))
 
 
 def phase_bank_path(run_dir: Union[str, Path],

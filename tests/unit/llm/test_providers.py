@@ -3,8 +3,7 @@ environment names the provider, unknown names are loud."""
 
 import pytest
 
-from expedistill.core.config import ConfigError  # noqa: F401 -- see below
-from expedistill.infra.reliability import ConfigError as InfraError
+from expedistill.infra.reliability import ConfigError
 import expedistill.llm.providers as providers_mod
 from expedistill.llm.providers import PROVIDERS, default_client
 
@@ -38,7 +37,7 @@ def test_the_builder_receives_the_model_name(monkeypatch):
 
 def test_unknown_provider_is_a_config_error(monkeypatch):
     monkeypatch.setenv("EXPEDISTILL_LLM_PROVIDER", "quantum")
-    with pytest.raises(InfraError, match="quantum"):
+    with pytest.raises(ConfigError, match="quantum"):
         default_client()
 
 

@@ -10,7 +10,6 @@ consume them, none owns them.
 
 from dataclasses import asdict
 from pathlib import Path
-import re
 from typing import Any, List, Optional, Sequence
 
 from expedistill.composites import phase_bank
@@ -45,9 +44,6 @@ REDISPATCH_NAME = "redispatch.json"
 SUMMARY_NAME = "phase_summary.json"
 SKILL_FOLDER_DIR = "skill_folder"
 
-#: A phase directory's name: ``pNN_<name>`` (phase_bank's colon mapping).
-_PHASE_DIR_RE = re.compile(r"p([0-9]+)_(.+)")
-
 
 def execute_phase_dir(ctx: StageContext, phase: PhaseInstance,
                       arm: str = "") -> Path:
@@ -63,25 +59,6 @@ def arm_dir(ctx: StageContext, phase: PhaseInstance, arm: str) -> Path:
     return directory
 
 
-def _earlier_bank_labels(ctx: StageContext,
-                         phase: PhaseInstance) -> List[str]:
-    """The labels of the earlier phases that left a bank artifact, in
-    sequence order. The artifact's PRESENCE is the signal -- a learn
-    phase ends with one by contract, whatever else it writes beside it."""
-    phases_dir = Path(ctx.run_dir) / phase_bank.PHASES_DIR
-    if not phases_dir.exists():
-        return []
-    found = []
-    for entry in phases_dir.iterdir():
-        match = _PHASE_DIR_RE.fullmatch(entry.name)
-        if match is None or int(match.group(1)) - 1 >= phase.index:
-            continue
-        if (entry / phase_bank.BANK_NAME).exists():
-            found.append((int(match.group(1)),
-                          f"p{int(match.group(1)):02d}:{match.group(2)}"))
-    return [label for _, label in sorted(found)]
-
-
 def _load_bank(ctx: StageContext, label: str) -> List[Skill]:
     return [Skill.from_dict(row)
             for row in phase_bank.load_phase_bank(ctx.run_dir, label)]
@@ -95,7 +72,8 @@ def bank_skills(ctx: StageContext, phase: PhaseInstance) -> List[Skill]:
     """The bank delivery receives: the previous learn phase's artifact
     (R7's cross-phase load), else the run-level frozen bank (before the
     first learn phase there is no artifact to load)."""
-    labels = _earlier_bank_labels(ctx, phase)
+    labels = [label for label in phase_bank.bank_phase_labels(ctx.run_dir)
+              if phase_bank.phase_number(label) <= phase.index]
     if labels:
         return _load_bank(ctx, labels[-1])
     return _run_level_bank(ctx)

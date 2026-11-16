@@ -6,7 +6,6 @@ steps, external reward table), and a missing/terminal trial
 renders the coverage section alone.
 """
 
-from expedistill.benchmarks.base import ViewRules
 from expedistill.blocks.view import render_answer_sheet
 from expedistill.composites.answer_sheets import (
     execution_from_external,
@@ -59,44 +58,19 @@ def test_trajectory_sheet_renders_headers_and_the_numbered_steps():
 
     assert text.startswith(
         f"# Answer sheet `unit-1::att{trajectory.attempt_index:02d}`")
-    assert "- phase: `p03:live`" in text
-    assert "- unit: `unit-1`" in text
-    assert "- attempt: `0`" in text
+    # Golden stores the plain rendering byte for byte; here the fields it
+    # cannot reach: arm, skills, raw correctness and the grading record.
+    for line in ("- phase: `p03:live`", "- arm: `with_bank`",
+                 "- role/model: `weak` / `model-a`",
+                 "- skills: `[{'skill_id': 's1', 'version': 2}]`",
+                 "- raw correctness: `True`", "- verdict: `success`",
+                 "- basis: scorer: the benchmark's own scorer",
+                 "- rule: `scorer`"):
+        assert line in text.splitlines()
     assert "- coverage: `present`" in text.splitlines()
-    assert f"- task: `{TASK}`" in text
-    assert "- arm: `with_bank`" in text
-    assert "- role/model: `weak` / `model-a`" in text
-    assert "- skills: `[{'skill_id': 's1', 'version': 2}]`" in text
-    assert "- raw correctness: `True`" in text
-    assert "- verdict: `success`" in text
-    assert "- basis: scorer: the benchmark's own scorer" in text
-    assert "- rule: `scorer`" in text
     assert "## Trajectory" in text
     assert "step 0\naction: ls\nobservation: a.txt" in text
     assert "step 1\naction: cat a.txt\nobservation: hello" in text
-
-
-def test_trajectory_sheet_honours_the_view_rules():
-    rules = ViewRules(
-        max_obs_chars=20, head_keep=5, tail_keep=5,
-        truncation_marker="[... {omitted} characters omitted ...]")
-    trajectory = Trajectory(
-        trajectory_id=make_trajectory_id("p03:practice", TASK, "weak", 0),
-        task_id=TASK,
-        benchmark="tb",
-        model_role="weak",
-        model_name="model-a",
-        attempt_index=0,
-        steps=[Step(action="ls", observation="x" * 100)],
-        correctness=False,
-    )
-    execution = execution_from_trajectory(
-        trajectory, unit_id="unit-1", phase_label="p03:live")
-
-    text = render_answer_sheet(_sheet(execution), rules)
-
-    assert "... 90 characters omitted ..." in text
-    assert "x" * 50 not in text
 
 
 def test_external_sheet_renders_the_reward_table_and_provenance():

@@ -2,9 +2,9 @@
 
 The single "run a model on one task" entry the whole pipeline uses (K1 fans
 it out over tasks and attempts). E1 is deliberately a thin assembler: the
-benchmark knowledge is the plugin's (README 1.1 rule 3), retries are K1's
-(B6 policy), and persistence is K1's -- this block runs one attempt, builds
-the durable record around it, and touches nothing else.
+benchmark knowledge is the plugin's (AGENTS.md layering rule 3), retries
+are K1's (B6 policy), and persistence is K1's -- this block runs one
+attempt, builds the durable record around it, and touches nothing else.
 
 Division of labour per the design review:
 
@@ -30,7 +30,7 @@ that system's method, not this design's).
 """
 
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from expedistill.benchmarks.base import RunOutcome, Task
 from expedistill.benchmarks.registry import resolve_plugin
@@ -38,9 +38,9 @@ from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError
 
-__all__ = ["run_one", "make_task_id"]
+__all__ = ["run_one"]
 
-#: Plugin packages live directly under this prefix; one benchmark = one
+
 def run_one(
     *,
     phase_label: str,
@@ -53,8 +53,6 @@ def run_one(
     skills_block: str,
     handle: Any,
     workdir: Union[str, Path],
-    usage: Any = None,
-    run_dir: Optional[Union[str, Path]] = None,
 ) -> Trajectory:
     """Execute one task once through its benchmark plugin; return the record.
 
@@ -66,16 +64,12 @@ def run_one(
     nothing).
 
     ``skills_injected`` is recorded verbatim and never interpreted here:
-    ``None`` for a bare run, a list of skill references for selected-skill
-    runs, or the bank digest string for stage-6 whole-bank runs.
+    ``None`` for a bare run or the bank reference string for bank runs.
 
-    ``usage`` and ``run_dir`` are accepted for call-site uniformity with the
-    other model-calling blocks (K1 threads the same account objects through
-    every block it drives). E1 itself uses neither: it never writes disk
-    (K1 stores every Trajectory), and per-attempt usage accounting is owned
-    by the runner's model-call wiring (local runners account inside
-    ``call_model``; the TB runner's usage is read back from the Harbor
-    trial by K1).
+    E1 never writes disk (K1 stores every Trajectory), and per-attempt usage
+    accounting is owned by the runner's model-call wiring (local runners
+    account inside ``call_model``; the TB runner's usage is read back from
+    the Harbor trial by K1).
 
     ``phase_label`` is the execute phase that runs the unit; it tags the
     trajectory id, so the same task run by the baseline and by every

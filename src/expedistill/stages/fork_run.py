@@ -75,19 +75,20 @@ from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import LOCK_NAME, RunLock
 from expedistill.infra.store import (
+    BANK_NAME,
     Store,
     object_id_of_file,
     read_json,
     read_jsonl,
     write_jsonl,
 )
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 
 __all__ = ["fork_run"]
 
 #: Run-root files carried over as they are: the run-level bank an import
 #: wrote and the records of where the source's inputs came from.
-_ROOT_FILES = ("skill_bank.jsonl", "BANK_ORIGIN.md", "BASELINE_ORIGIN.md")
+_ROOT_FILES = (BANK_NAME, "BANK_ORIGIN.md", "BASELINE_ORIGIN.md")
 
 #: The run-root unit-failure ledger (infra.reliability.UnitFailureRecorder).
 _FAILED_UNITS_NAME = "failed_units.jsonl"

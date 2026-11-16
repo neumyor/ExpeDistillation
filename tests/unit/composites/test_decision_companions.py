@@ -1,26 +1,11 @@
-"""The decision layer's unit-id parser and the final-test statistics:
+"""The decision layer's final-test statistics:
 the final-test summary delta and the control-arm source label."""
 
 import pytest
 
 from expedistill.composites.decision import (
-    control_arm_source,
     final_test_delta,
-    parse_unit_id,
 )
-from expedistill.infra.reliability import CodeBugError
-
-
-def test_a_unit_id_parses_into_its_task_and_role():
-    assert parse_unit_id("p03:practice:tb:tb:t1:weak:11111111") == (
-        "tb:t1", "weak")
-
-
-def test_malformed_unit_ids_fail_loudly():
-    for bad in ("no-colons-at-all", "p01:live:tb:t1:weak:ZZZZZZZZ",
-                "xx:B:tb:t1:weak:11111111"):
-        with pytest.raises(CodeBugError, match="malformed unit id"):
-            parse_unit_id(bad)
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +57,3 @@ def test_final_test_delta_aux_conditional_none_when_an_arm_has_no_trial():
     assert delta["aux"]["metric"] == "fake_aux"
     assert delta["aux"]["avg_at_n"] is None
     assert delta["aux"]["avg_at_n_conservative"] == pytest.approx(0.5)
-
-
-def test_control_arm_source_keeps_the_summary_vocabulary():
-    assert control_arm_source(external_campaign=True) == "external_campaign"
-    assert control_arm_source(external_campaign=False) == "fresh_bare_run"

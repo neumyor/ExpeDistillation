@@ -6,6 +6,8 @@ without an execution); grading fills only present trials; the writers
 produce the derived JSON + Markdown artifacts and the coverage JSONL.
 """
 
+import pytest
+
 from expedistill.composites import answer_sheets
 from expedistill.composites.unit_ids import make_gap_sheet_id, make_unit_id
 from expedistill.core.answer_sheet import CoverageRecord
@@ -53,29 +55,17 @@ def test_the_sheet_filename_fits_a_long_alfworld_game_path():
     assert len(name.encode()) + len(".json") + 10 <= 255
 
 
-def test_execution_from_trajectory_reads_every_trial_fact():
+def test_execution_from_trajectory_carries_the_arm_and_the_aux_verdict():
+    # Golden snapshots the sheet JSON; the arm and the aux verdict are the
+    # fields it cannot reach.
     trajectory = _trajectory()
     record = answer_sheets.execution_from_trajectory(
         trajectory, unit_id="unit-1", phase_label="p03:live",
         arm="with_bank", aux_success=True)
-
     assert record.sheet_id == f"unit-1::att{trajectory.attempt_index:02d}"
-    assert record.unit_id == "unit-1"
-    assert record.phase_label == "p03:live"
-    assert record.task_ref == TASK
-    assert record.role == "weak"
-    assert record.arm == "with_bank"
-    assert record.model_role == "weak"
-    assert record.model_name == "model-a"
-    assert record.sample_index == 0
-    assert record.skills_injected == [{"skill_id": "s1", "version": 2}]
-    assert record.steps == [Step(action="ls", observation="a.txt")]
-    assert record.raw_correctness is True
-    assert record.metrics == {"reward": 1.0, "verifier_ran": True}
+    assert (record.arm, record.aux_success) == ("with_bank", True)
+    assert (record.kind, record.source) == ("trajectory", "local")
     assert record.artifacts == {"trajectory_id": trajectory.trajectory_id}
-    assert record.aux_success is True
-    assert record.kind == "trajectory"
-    assert record.source == "local"
 
 
 def test_execution_from_trajectory_carries_the_folder_manifest():
@@ -101,37 +91,27 @@ def test_execution_from_trajectory_adds_no_scorer_verdict_of_its_own():
     assert record.arm is None
 
 
-def test_execution_from_external_marks_a_positive_reward_as_correct():
+@pytest.mark.parametrize("reward, correct, sample_index",
+                         [(1.0, True, 2), (0.0, False, 0)])
+def test_execution_from_external_reads_the_reward_as_correctness(
+        reward, correct, sample_index):
     record = answer_sheets.execution_from_external(
         task_ref=TASK, unit_id="unit-3", phase_label="p06:test",
-        reward=1.0, sample_index=2, source="campaign.csv",
+        reward=reward, sample_index=sample_index, source="campaign.csv",
         sha256="deadbeef", role="weak")
 
-    assert record.sheet_id == "external:unit-3:2"
-    assert record.unit_id == "unit-3"
-    assert record.phase_label == "p06:test"
-    assert record.task_ref == TASK
-    assert record.role == "weak"
-    assert record.arm == "control"
-    assert record.model_role == "weak"
-    assert record.model_name == "external_campaign"
-    assert record.sample_index == 2
-    assert record.rewards == [1.0]
-    assert record.raw_correctness is True
-    assert record.metrics == {"reward": 1.0}
+    assert record.sheet_id == f"external:unit-3:{sample_index}"
+    assert (record.unit_id, record.phase_label, record.task_ref) \
+        == ("unit-3", "p06:test", TASK)
+    assert (record.role, record.arm, record.model_role, record.model_name) \
+        == ("weak", "control", "weak", "external_campaign")
+    assert record.sample_index == sample_index
+    assert record.rewards == [reward]
+    assert record.raw_correctness is correct
+    assert record.metrics == {"reward": reward}
     assert record.artifacts == {"source": "campaign.csv",
                                 "sha256": "deadbeef"}
-    assert record.source == "external"
-    assert record.kind == "external"
-
-
-def test_execution_from_external_marks_a_zero_reward_as_incorrect():
-    record = answer_sheets.execution_from_external(
-        task_ref=TASK, unit_id="unit-3", phase_label="p06:test",
-        reward=0.0, sample_index=0, source="campaign.csv",
-        sha256="deadbeef", role="weak")
-    assert record.raw_correctness is False
-    assert record.rewards == [0.0]
+    assert (record.source, record.kind) == ("external", "external")
 
 
 def _sheets_for_assembly():
@@ -255,20 +235,6 @@ def test_write_answer_sheets_writes_json_and_markdown(tmp_path):
             assert payload["execution"]["steps"] == expected_steps
         md_text = md_path.read_text(encoding="utf-8")
         assert md_text.startswith(f"# Answer sheet `{sheet.sheet_id}`")
-
-
-def test_write_answer_sheets_can_skip_the_markdown_render(tmp_path):
-    executions, coverage, _ = _sheets_for_assembly()
-    sheets = answer_sheets.assemble_answer_sheets(
-        executions, coverage, phase_label="p03:live")
-    directory = tmp_path / "json-only"
-
-    answer_sheets.write_answer_sheets(
-        sheets, directory, render_markdown=False)
-
-    expected = {object_filename(sheet.sheet_id)[:-len(".json")] + ".json"
-                for sheet in sheets}
-    assert {path.name for path in directory.iterdir()} == expected
 
 
 def test_write_coverage_writes_one_json_object_per_line(tmp_path):

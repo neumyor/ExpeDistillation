@@ -62,6 +62,7 @@ from expedistill.composites.provenance import (
     PROVENANCE_NAME,
     check_provenance,
     find_provenance,
+    record_version,
 )
 from expedistill.composites.sheet_facts import SheetFacts, sheet_facts
 from expedistill.composites.trace import (
@@ -94,7 +95,7 @@ from expedistill.infra.reliability import (
 )
 from expedistill.infra.store import (
     append_jsonl, read_json, read_jsonl, write_json, write_jsonl)
-from expedistill.methods import resolve_params
+from expedistill.methods.registry import resolve_params
 from expedistill.methods.cards.material import collect_material
 from expedistill.methods.cards.writer import write_card
 from expedistill.methods.diagnose import Finding, diagnose_trial
@@ -179,7 +180,7 @@ class _Learn:
         self.previous_learn = evolving_text.previous_learn_label(
             names, specs, phase.index)
         self.first = self.previous_learn is None
-        self.report = _load_report(ctx, names, specs, source)
+        self.report = _load_report(ctx, names, source)
         self.bank = _previous_bank(ctx, self.previous_learn)
         self.failed = sorted(
             (sheet for sheet in self.report.sheets
@@ -525,7 +526,7 @@ class _Learn:
             ledger.append_outcome(self.phase, row, None, "write_failed",
                                   None, self.phase_dir, str(exc)[:300])
             return
-        ledger.record_version(
+        record_version(
             self.store, self.phase_dir, self.ctx.run_dir, skill,
             Provenance(skill_id=skill.skill_id, version=1,
                        phase_label=self.phase.label, cause="add",
@@ -750,13 +751,12 @@ def _baseline_label(names: Sequence[str], specs: dict) -> str:
     raise CodeBugError(f"the sequence {list(names)!r} has no baseline phase")
 
 
-def _load_report(ctx: Any, names: Sequence[str], specs: dict,
+def _load_report(ctx: Any, names: Sequence[str],
                  position: int) -> PhaseReport:
     """The input execute phase's trial-level report."""
     name = names[position]
     phase_dir = phase_bank_dir(ctx.run_dir, phase_label(position, name))
-    report = phase_report.read_phase_report(
-        phase_dir, phase_kind=specs[name].role, learning_usable=True)
+    report = phase_report.read_phase_report(phase_dir)
     if report is None:
         raise CodeBugError(
             f"phase {name!r} has no trial-level artifacts "

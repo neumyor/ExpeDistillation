@@ -1,12 +1,12 @@
 """The execute phase's trial-level report envelope (layer 5).
 
-The acceptance module produces answer sheets; this module turns them into
+``answer_sheets`` produces the trial sheets; this module turns them into
 the phase's derived unit summaries.  It is not a persisted report card and
 it is not called by grading.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 from expedistill.composites import unit_summary
 from expedistill.core.answer_sheet import (
@@ -32,21 +32,12 @@ COVERAGE_NAME = "coverage.jsonl"
 ANSWER_SHEETS_DIR = "answer_sheets"
 
 
-def build_phase_report(
-        sheets: Sequence[AnswerSheet], specs: Sequence[UnitSpec], *,
-        phase_kind: str, learning_usable: bool,
-        summary: Optional[Dict[str, Any]] = None,
-        external: Any = None) -> PhaseReport:
+def build_phase_report(sheets: Sequence[AnswerSheet],
+                       specs: Sequence[UnitSpec]) -> PhaseReport:
     """Derive unit summaries from trial sheets and build the envelope."""
-    units = unit_summary.summarize_phase(sheets, specs)
     return PhaseReport(
-        phase_kind=phase_kind,
-        learning_usable=learning_usable,
         sheets=list(sheets),
-        units=units,
-        summary=dict(summary or {}),
-        external=external,
-    )
+        units=unit_summary.summarize_phase(sheets, specs))
 
 
 def write_unit_specs(specs: Sequence[UnitSpec], phase_dir: Path) -> None:
@@ -59,10 +50,7 @@ def write_unit_specs(specs: Sequence[UnitSpec], phase_dir: Path) -> None:
                 [spec.to_dict() for spec in specs])
 
 
-def read_phase_report(phase_dir: Path, *, phase_kind: str,
-                      learning_usable: bool,
-                      summary: Optional[Dict[str, Any]] = None
-                      ) -> Optional[PhaseReport]:
+def read_phase_report(phase_dir: Path) -> Optional[PhaseReport]:
     """Read a completed execute phase's trial-level artifacts.
 
     Returns None when the phase directory carries no trial-level
@@ -93,7 +81,4 @@ def read_phase_report(phase_dir: Path, *, phase_kind: str,
             "coverage records without a corresponding answer sheet: "
             f"{sorted(missing)[:10]}"
             f"{'...' if len(missing) > 10 else ''}")
-    report = build_phase_report(
-        sheets, specs, phase_kind=phase_kind,
-        learning_usable=learning_usable, summary=summary)
-    return report
+    return build_phase_report(sheets, specs)

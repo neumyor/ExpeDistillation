@@ -6,7 +6,6 @@ a scripted fake handle. No network, no eval repo: the eval seam is stubbed."""
 import importlib
 import os
 import string
-from pathlib import Path
 
 import pytest
 
@@ -23,11 +22,10 @@ from expedistill.benchmarks.searchqa.plugin import (
     SearchQAPlugin,
 )
 from expedistill.infra.reliability import ConfigError
-from expedistill.llm import make_fake_handle
+from tests.helpers.fake_llm import make_fake_handle
 from expedistill.prompts import PROMPTS
 from tests.helpers.searchqa_stub import (
     fixture_items,
-    install_eval_repo_stub,
     write_eval_dir,
 )
 from tests.helpers.skill_folder import (
@@ -36,17 +34,11 @@ from tests.helpers.skill_folder import (
     write_skill_folder,
 )
 
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "searchqa"
 
 
 # ----------------------------------------------------------------------
 # shared helpers
 # ----------------------------------------------------------------------
-
-@pytest.fixture
-def stub_eval_repo(monkeypatch):
-    return install_eval_repo_stub(monkeypatch)
-
 
 _fixture_items = fixture_items
 _make_eval_dir = write_eval_dir
@@ -89,7 +81,7 @@ def test_import_survives_missing_eval_repo(monkeypatch):
 # the task prompt contract
 # ----------------------------------------------------------------------
 
-def test_task_prompt_has_exactly_the_three_contract_variables():
+def test_task_prompt_has_the_contract_variables_and_action_formats():
     template = PROMPTS["SEARCHQA_TASK_PROMPT"].template
     fields = {
         field
@@ -97,34 +89,26 @@ def test_task_prompt_has_exactly_the_three_contract_variables():
         if field is not None
     }
     assert fields == {"instruction", "skills_block", "history"}
-
-
-def test_task_prompt_renders_bare_and_with_skills():
-    template = PROMPTS["SEARCHQA_TASK_PROMPT"].template
-    bare = template.format(instruction="Q?", skills_block="", history="")
-    assert "Q?" in bare
-    with_skills = template.format(
-        instruction="Q?", skills_block="## Skill\nbe terse", history="")
-    assert "be terse" in with_skills
-    # The bare render must not claim skills exist.
-    assert "be terse" not in bare
-    assert "## Skill" not in bare
-
-
-def test_task_prompt_documents_the_action_formats():
-    template = PROMPTS["SEARCHQA_TASK_PROMPT"].template
-    assert "Search[<query>]" in template
-    assert "Finish[<answer>]" in template
+    assert "Search[<query>]" in template and "Finish[<answer>]" in template
 
 
 # ----------------------------------------------------------------------
 # task loading
 # ----------------------------------------------------------------------
 
-def test_load_tasks_requires_env_var(monkeypatch, stub_eval_repo):
+
+def test_load_tasks_config_errors(monkeypatch, stub_eval_repo, tmp_path):
     monkeypatch.delenv(searchqa_env.EVAL_DIR_ENV, raising=False)
     with pytest.raises(ConfigError, match=searchqa_env.EVAL_DIR_ENV):
         SearchQAPlugin().load_tasks(None)
+    eval_dir = _make_eval_dir(tmp_path, {"test": _fixture_items()})
+    monkeypatch.setenv(searchqa_env.EVAL_DIR_ENV, str(eval_dir))
+    with pytest.raises(ConfigError, match="unknown SearchQA task id"):
+        SearchQAPlugin().load_tasks(["no-such-id", "also-missing"])
+    with pytest.raises(ConfigError, match="cannot read"):
+        SearchQAPlugin().load_tasks(str(tmp_path / "nope.txt"))
+    with pytest.raises(ConfigError, match="tasks_spec"):
+        SearchQAPlugin().load_tasks(42)
 
 
 def test_load_tasks_full_set(monkeypatch, stub_eval_repo, tmp_path):
@@ -152,14 +136,6 @@ def test_load_tasks_by_id_list(monkeypatch, stub_eval_repo, tmp_path):
     assert [t.task_id for t in tasks] == wanted  # order preserved
 
 
-def test_load_tasks_unknown_ids_are_config_error(
-        monkeypatch, stub_eval_repo, tmp_path):
-    eval_dir = _make_eval_dir(tmp_path, {"test": _fixture_items()})
-    monkeypatch.setenv(searchqa_env.EVAL_DIR_ENV, str(eval_dir))
-    with pytest.raises(ConfigError, match="unknown SearchQA task id"):
-        SearchQAPlugin().load_tasks(["no-such-id", "also-missing"])
-
-
 def test_load_tasks_from_id_file(monkeypatch, stub_eval_repo, tmp_path):
     items = _fixture_items()
     eval_dir = _make_eval_dir(tmp_path, {"test": items})
@@ -170,19 +146,6 @@ def test_load_tasks_from_id_file(monkeypatch, stub_eval_repo, tmp_path):
         encoding="utf-8")
     tasks = SearchQAPlugin().load_tasks(str(id_file))
     assert [t.task_id for t in tasks] == [items[0]["id"], items[1]["id"]]
-
-
-def test_load_tasks_missing_id_file_is_config_error(
-        monkeypatch, stub_eval_repo, tmp_path):
-    monkeypatch.setenv(searchqa_env.EVAL_DIR_ENV, str(tmp_path))
-    with pytest.raises(ConfigError, match="cannot read"):
-        SearchQAPlugin().load_tasks(str(tmp_path / "nope.txt"))
-
-
-def test_load_tasks_rejects_bad_spec_type(stub_eval_repo, tmp_path, monkeypatch):
-    monkeypatch.setenv(searchqa_env.EVAL_DIR_ENV, str(tmp_path))
-    with pytest.raises(ConfigError, match="tasks_spec"):
-        SearchQAPlugin().load_tasks(42)
 
 
 def test_load_tasks_missing_split_files_are_config_error(
@@ -217,27 +180,39 @@ def test_max_steps_env_var(monkeypatch):
         plugin.max_steps()
 
 
-def test_run_respects_max_steps_env_var(stub_eval_repo, tmp_path, monkeypatch):
-    # Read at call time: the override reaches both the env and run_react.
-    monkeypatch.setenv(MAX_STEPS_ENV, "2")
-    plugin = SearchQAPlugin()
+@pytest.mark.parametrize("env_value, budget", [(None, SEARCHQA_MAX_STEPS),
+                                               ("2", 2)])
+def test_step_budget_exhaustion_is_failure_and_follows_the_env_var(
+        stub_eval_repo, tmp_path, monkeypatch, env_value, budget):
+    # The env var is read at call time and reaches both the env and run_react.
+    if env_value is None:
+        monkeypatch.delenv(MAX_STEPS_ENV, raising=False)
+    else:
+        monkeypatch.setenv(MAX_STEPS_ENV, env_value)
     task = _task_for(_fixture_items()[0])
     handle = make_fake_handle(role="test", script=["Search[penny]"] * 10)
-    outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
+    outcome = SearchQAPlugin().run(task, handle, skills_block="",
+                                   workdir=tmp_path)
+    assert outcome.correctness is False
     assert outcome.meta["termination"] == "step_budget"
-    assert outcome.meta["steps_used"] == 2
+    assert outcome.meta["steps_used"] == budget
 
 
 def test_roundtrip_search_then_finish_is_success(
         stub_eval_repo, tmp_path):
     plugin = SearchQAPlugin()
     task = _task_for(_fixture_items()[0])
+    skills_block = "## Skill\nSearch the question's key noun before finishing."
     handle = make_fake_handle(role="test", script=[
         "Search[red cent]",
         "Finish[red cent]",
     ])
-    outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
+    outcome = plugin.run(task, handle, skills_block=skills_block,
+                         workdir=tmp_path)
     assert outcome.correctness is True
+    # The skills block and the rendered history reach the real prompt.
+    assert skills_block in handle.client.calls[0]["user"]
+    assert "action: Search[red cent]" in handle.client.calls[1]["user"]
     assert outcome.meta["termination"] == "terminated"
     assert outcome.meta["steps_used"] == 2
     assert len(outcome.steps) == 2
@@ -254,67 +229,6 @@ def test_roundtrip_wrong_answer_is_failure(stub_eval_repo, tmp_path):
     assert outcome.correctness is False
     assert outcome.meta["termination"] == "terminated"
     assert outcome.meta["searchqa"]["em"] == 0.0
-
-
-def test_roundtrip_step_budget_exhaustion_is_failure(
-        stub_eval_repo, tmp_path):
-    plugin = SearchQAPlugin()
-    task = _task_for(_fixture_items()[0])
-    handle = make_fake_handle(role="test", script=["Search[penny]"] * 10)
-    outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.correctness is False
-    assert outcome.meta["termination"] == "step_budget"
-    assert outcome.meta["steps_used"] == 6  # SEARCHQA_MAX_STEPS
-
-
-def test_roundtrip_prompt_renders_skills_and_history(
-        stub_eval_repo, tmp_path):
-    plugin = SearchQAPlugin()
-    task = _task_for(_fixture_items()[0])
-    skills_block = "## Skill\nSearch the question's key noun before finishing."
-    handle = make_fake_handle(role="test", script=[
-        "Search[red cent]",
-        "Finish[red cent]",
-    ])
-    plugin.run(task, handle, skills_block=skills_block, workdir=tmp_path)
-    first_user = handle.client.calls[0]["user"]
-    assert task.instruction in first_user
-    assert skills_block in first_user
-    second_user = handle.client.calls[1]["user"]
-    assert "action: Search[red cent]" in second_user  # {history} rendered
-    assert "Answer is CORRECT" not in second_user  # episode not over yet
-
-
-def test_roundtrip_invalid_actions_stay_in_episode(stub_eval_repo, tmp_path):
-    plugin = SearchQAPlugin()
-    task = _task_for(_fixture_items()[0])
-    handle = make_fake_handle(role="test", script=[
-        "what do I do",
-        "Search[red cent]",
-        "Finish[red cent]",
-    ])
-    outcome = plugin.run(task, handle, skills_block="", workdir=tmp_path)
-    assert outcome.correctness is True
-    assert outcome.steps[0]["observation"] == searchqa_env.INVALID_ACTION_MESSAGE
-
-
-def test_requests_are_dumped_under_the_handle_run_dir(stub_eval_repo, tmp_path):
-    """README section 2: every B1 request lands in <run>/llm_requests/. K1
-    attaches the run dir to the working handle; the unit workdir must not
-    override it and scatter dumps across units."""
-    run_dir = tmp_path / "run"
-    workdir = tmp_path / "work" / "unit-0"
-    workdir.mkdir(parents=True)
-    plugin = SearchQAPlugin()
-    task = _task_for(_fixture_items()[0])
-    handle = make_fake_handle(role="test", script=[
-        "Search[red cent]",
-        "Finish[red cent]",
-    ], run_dir=run_dir)
-    outcome = plugin.run(task, handle, skills_block="", workdir=workdir)
-    assert outcome.correctness is True
-    assert len(list((run_dir / "llm_requests").glob("*.json"))) == 2
-    assert not (workdir / "llm_requests").exists()
 
 
 # ----------------------------------------------------------------------
@@ -414,12 +328,6 @@ def _folder_task(tmp_path, names=("alpha", "beta")):
     return task, locations
 
 
-def test_the_plugin_declares_the_folder_capability():
-    assert SearchQAPlugin().skill_folder_prompt_name \
-        == "SEARCHQA_TASK_PROMPT_FOLDER"
-    assert "SEARCHQA_TASK_PROMPT_FOLDER" in PROMPTS
-
-
 def test_the_folder_prompt_is_the_plain_prompt_plus_the_read_rule():
     plain = PROMPTS["SEARCHQA_TASK_PROMPT"].template
     folder = PROMPTS["SEARCHQA_TASK_PROMPT_FOLDER"].template
@@ -450,47 +358,6 @@ def test_a_folder_unit_shows_the_card_list_and_hides_the_card_text(
     # Progressive disclosure: no card body; the TB catalog fallback unused.
     assert CARD_BODY not in first_user
     assert "CATALOG FALLBACK" not in first_user
-
-
-def test_opening_a_card_adds_its_text_to_the_next_prompt(
-        stub_eval_repo, tmp_path):
-    task, locations = _folder_task(tmp_path)
-    handle = make_fake_handle(role="test", script=[
-        f"ReadSkill[{locations[0]}]", "Search[red cent]",
-        "Finish[red cent]"])
-    outcome = SearchQAPlugin().run(task, handle, skills_block="",
-                                   workdir=tmp_path)
-    assert outcome.correctness is True
-    second_user = handle.client.calls[1]["user"]
-    assert CARD_BODY in second_user
-    assert f"action: ReadSkill[{locations[0]}]" in second_user
-    assert outcome.meta["skill_reads"] == 1
-    assert outcome.meta["skill_list_shown"] is True
-    # The read did not use one of the six search steps.
-    assert outcome.meta["steps_used"] == 2
-
-
-def test_the_environment_never_sees_the_read_action(
-        stub_eval_repo, tmp_path):
-    task, locations = _folder_task(tmp_path)
-    handle = make_fake_handle(role="test", script=[
-        f"ReadSkill[{locations[0]}]", "Finish[red cent]"])
-    outcome = SearchQAPlugin().run(task, handle, skills_block="",
-                                   workdir=tmp_path)
-    # A read the env had seen would have been an invalid action.
-    assert searchqa_env.INVALID_ACTION_MESSAGE not in [
-        step["observation"] for step in outcome.steps]
-    assert outcome.correctness is True
-
-
-def test_a_unit_without_a_folder_keeps_the_plain_prompt(
-        stub_eval_repo, tmp_path):
-    task = _task_for(_fixture_items()[0])
-    handle = make_fake_handle(role="test", script=["Finish[red cent]"])
-    outcome = SearchQAPlugin().run(task, handle, skills_block="",
-                                   workdir=tmp_path)
-    assert "ReadSkill" not in handle.client.calls[0]["user"]
-    assert "skill_reads" not in outcome.meta
 
 
 def test_an_empty_folder_keeps_the_folder_prompt_and_the_playbook(

@@ -27,12 +27,12 @@ STAGE1_DIR = "stage1_baseline"
 
 
 def stage1_shortfall_path(run_dir) -> Path:
-    """Where stage 1's accepted holes are recorded."""
+    """Where the baseline's accepted holes are recorded."""
     return Path(run_dir) / STAGE1_DIR / SHORTFALL_NAME
 
 
 def stage1_accepted_unit_ids(run_dir) -> List[str]:
-    """Stage 1's accepted hole unit ids (sorted; empty when none)."""
+    """The baseline's accepted hole unit ids (sorted; empty when none)."""
     return read_unit_ids(stage1_shortfall_path(run_dir))
 
 

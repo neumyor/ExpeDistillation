@@ -1,7 +1,7 @@
 """A stateful fake of the TB remote host, shared by the TB plugin tests and
 the K1 composite tests.
 
-Unlike the scripted ``FakeRemoteLink`` in test_tb_plugin.py, this fake keeps
+Unlike the scripted ``FakeRemoteLink`` below, ``JobsRemoteLink`` keeps
 a remote file tree and a process table and answers the plugin's probe/poll
 commands from that state, so a result left under one run id is visible to
 exactly the commands that name that run id -- which is what the run-id
@@ -14,11 +14,17 @@ import shlex
 import tarfile
 from pathlib import Path
 
+from expedistill.benchmarks.tb import TBPlugin
 from expedistill.infra.reliability import InfrastructureError
+from expedistill.llm.call import ModelHandle
 
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "tb"
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "tb"
 ROOT = "/srv/work/expedistill"
 JOBS = f"{ROOT}/jobs"
+TRIAL = f"{JOBS}/ed_train-fasttext_tok/train-fasttext__AbCdEf1"
+
+HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",
+                     client=None)
 
 _RUN_ID_IN_JOBS_RE = re.compile(r"/jobs/([A-Za-z0-9._-]+)/")
 #: The plugin's identity check: /proc/<pid>/environ must hold RUN_ID=<id>.
@@ -306,3 +312,81 @@ class JobsRemoteLink(RemoteShellSim):
             return False
         pid, run_id = int(match.group(1)), match.group(2)
         return pid in self.alive and self.owner.get(pid) == run_id
+
+
+class FakeRemoteLink(RemoteShellSim):
+    """Test double for RemoteLink: scripted poll outcomes plus a remote file
+    store. Command routing mirrors the plugin's call patterns; the shell
+    simulator (RemoteShellSim) answers the folder-cache
+    transport commands against a real directory/file model."""
+
+    def __init__(self, polls=None, remote_files=None, home="/home/bench",
+                 probe="ABSENT\n"):
+        self.host = "user@bench-host"
+        self.key_path = "/tmp/fake-key"
+        self.root = ROOT
+        self.home = home
+        self.polls = list(polls or [])
+        self.remote_files = dict(remote_files or {})
+        self.commands = []
+        self.puts = []
+        self.uploads = []
+        self.pid = 4242
+        self.probe = probe
+        self.dirs = set()
+
+    def run(self, cmd, timeout=None):
+        self.commands.append(cmd)
+        simulated = self.shell_run(cmd, timeout=timeout)
+        if simulated is not None:
+            return simulated
+        if "$HOME" in cmd:
+            return self.home, "", 0
+        if "nohup" in cmd:  # the submit call
+            return f"{self.pid}\n", "", 0
+        if "ABSENT" in cmd:  # the pre-submit resume probe
+            return self.probe, "", 0
+        if "result.json" in cmd:  # a poll check
+            if self.polls:
+                return self.polls.pop(0), "", 0
+            return "PENDING\n", "", 0
+        if "tail -c" in cmd:
+            return self.remote_files.get("__log__", ""), "", 0
+        return "", "", 0  # mkdir, partial-trajectory lookup, ...
+
+    def get(self, remote, local, timeout=None):
+        try:
+            content = self.remote_files[str(remote)]
+        except KeyError:
+            raise InfrastructureError(
+                f"scp failed (rc=1) get {remote} -> {local}")
+        Path(local).write_text(content, encoding="utf-8")
+
+    def put(self, local, remote, timeout=None):
+        self.puts.append((local, str(remote)))
+        payload = Path(local).read_bytes()
+        # The put-time snapshot: the ship's cleanup rm removes the tar
+        # from the tree, but what LEFT the machine stays assertable.
+        self.uploads.append((str(remote), payload))
+        # Bytes, not text: the folder cache ships a tar, and the
+        # shell simulator's tar -xf reads whatever put stored.
+        self.remote_files[str(remote)] = payload
+
+    @property
+    def files(self):
+        # The shell simulator's name for the file map.
+        return self.remote_files
+
+
+def completed_trial_files(result="result_success.json",
+                           verifier_log="verifier_collected.txt"):
+    return {
+        f"{TRIAL}/result.json": fixture_text(result),
+        f"{TRIAL}/agent/trajectory.json": fixture_text("trajectory.json"),
+        f"{TRIAL}/verifier/test-stdout.txt": fixture_text(verifier_log),
+    }
+
+
+def make_plugin(link, usage_recorder=None):
+    return TBPlugin(link=link, usage_recorder=usage_recorder,
+                    poll_seconds=0.0, deadline_seconds=10.0)

@@ -28,9 +28,9 @@ from expedistill.core.config import ExperimentConfig
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.models import Skill, Step, Trajectory
 from expedistill.infra.store import write_json, write_jsonl
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from expedistill.inject.skill_text import render_card
-from expedistill.llm.fake import json_script
+from tests.helpers.fake_llm import json_script
 from expedistill.methods.delivery.folder_delivery import (
     skill_filename,
     skill_folder_manifest,
@@ -161,8 +161,7 @@ def write_test_phase(
         executions, [], phase_label=label)
     answer_sheets.grade_answer_sheets(sheets, "scorer")
     answer_sheets.write_answer_sheets(
-        sheets, directory / phase_report.ANSWER_SHEETS_DIR,
-        render_markdown=False)
+        sheets, directory / phase_report.ANSWER_SHEETS_DIR)
     answer_sheets.write_coverage(
         [sheet.coverage for sheet in sheets],
         directory / phase_report.COVERAGE_NAME)

@@ -20,7 +20,7 @@ from expedistill.core import ids
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import ConfigError as InfraConfigError
 from expedistill.infra.store import Store, read_jsonl, write_jsonl
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from tests.helpers.skills import make_skill
 
 
@@ -42,6 +42,9 @@ def test_phase_dir_maps_the_label_to_a_directory(tmp_path):
                                                       / "p00_freeze")
     assert phase_bank_path(tmp_path, "p02:x") == (tmp_path / "phases" / "p02_x"
                                                  / "skill_bank.jsonl")
+    # The colon rewrite cannot make two legal labels collide.
+    assert phase_bank_dir(tmp_path, "p1:a") != phase_bank_dir(tmp_path, "p1:a_a")
+    assert phase_bank_dir(tmp_path, "p2:a") != phase_bank_dir(tmp_path, "p1:a")
 
 
 @pytest.mark.parametrize("label", ["", "..", ".", "a/b", "a b", "p1:name!",
@@ -53,14 +56,6 @@ def test_unsafe_phase_labels_are_refused(tmp_path, label):
     # colon is mapped, so both are refused up front.
     with pytest.raises(InfraConfigError, match="pNN:<name>"):
         phase_bank_dir(tmp_path, label)
-
-
-def test_the_colon_rewrite_cannot_collide_two_labels(tmp_path):
-    assert phase_bank_dir(tmp_path, "p1:a") == tmp_path / "phases" / "p1_a"
-    assert phase_bank_dir(tmp_path, "p1:a_a") == (tmp_path / "phases"
-                                                  / "p1_a_a")
-    assert phase_bank_dir(tmp_path, "p2:a") != phase_bank_dir(tmp_path,
-                                                              "p1:a")
 
 
 def test_loading_a_missing_artifact_names_the_phase(tmp_path):

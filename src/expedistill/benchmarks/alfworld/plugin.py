@@ -243,7 +243,6 @@ class ALFWorldPlugin(BenchmarkPlugin):
             # text in ``skills_block`` is the TB fallback and is not used.
             folder = SkillFolder.from_task(task)
             return run_unified(
-                task,
                 env,
                 protocol_handle(handle),
                 skill_folder=folder,

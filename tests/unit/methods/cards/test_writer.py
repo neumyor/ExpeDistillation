@@ -5,7 +5,7 @@ import pytest
 from expedistill.core.ids import make_subtask_id, make_trajectory_id
 from expedistill.core.models import Step, Subtask, SubtaskType, Trajectory
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 from expedistill.methods.cards import CardAuthoringParams
 from expedistill.methods.cards.material import Material, collect_material
 from expedistill.methods.cards.writer import MAX_STEPS, MIN_STEPS, write_card

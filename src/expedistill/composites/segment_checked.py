@@ -1,6 +1,6 @@
 """K2: segment one trajectory into Subtasks, with D7 validation and retries.
 
-Composite wiring (README 1.4): D5 renders the view -> G1 segments it -> D7
+Composite wiring: D5 renders the view -> G1 segments it -> D7
 validates the result against the real trajectory. Unlike the blocks it wires,
 this function owns disk IO, resume and retries (AGENTS.md block rule 3):
 
@@ -16,7 +16,7 @@ this function owns disk IO, resume and retries (AGENTS.md block rule 3):
 * EXHAUSTION: the trajectory is skipped and one record is appended to
   ``<run_dir>/stage2_segments/segmentation_audit.jsonl`` (trajectory_id,
   attempts, last_errors, status "skipped"); the function returns None so the
-  stage can move on (README 1.4 K2 row). When ``run_dir`` is None the audit
+  stage can move on. When ``run_dir`` is None the audit
   still must not be lost, so it falls back to ``store.run_dir`` -- the same
   run directory the store already writes to.
 * EXHAUSTION IS TERMINAL within a run directory: a run is one frozen
@@ -64,7 +64,7 @@ from expedistill.infra.store import Store, append_jsonl, read_jsonl
 
 __all__ = ["segment_checked"]
 
-#: Relative to the run directory (README section 2 layout).
+#: Relative to the run directory.
 _AUDIT_PATH = Path("stage2_segments") / "segmentation_audit.jsonl"
 
 #: Public spelling of the audit channel's path for the learn phase's

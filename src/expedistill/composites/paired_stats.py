@@ -2,7 +2,7 @@
 
 Standard library only, deterministic for a fixed seed, never reads a run.
 The pre-registered metric definitions are the ones ``blocks/metrics.py``
-freezes (README 5.5); this module applies them to per-task trial scores:
+freezes; this module applies them to per-task trial scores:
 
 * ``avg@N`` -- per task, the mean of that task's SCORED trials, then the
   mean over tasks.  A task with no scored trial has no mean: the

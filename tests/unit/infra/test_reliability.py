@@ -129,3 +129,11 @@ def test_failure_recorder_accumulates_across_instances(tmp_path):
     UnitFailureRecorder(tmp_path).record("u2", "stage1", "ConfigError", "b")
     rows = UnitFailureRecorder(tmp_path).list_failures()
     assert [row["unit_id"] for row in rows] == ["u1", "u2"]
+
+
+def test_model_output_error_defaults_carry_no_usage():
+    # The single-message constructor keeps working: raise sites other than
+    # the client's empty-content one (e.g. extract_json) carry no usage.
+    exc = ModelOutputError("response did not contain JSON")
+    assert exc.usage is None
+    assert exc.finish_reason is None

@@ -4,83 +4,21 @@ register-at-import side effect -- is exercised without any benchmark
 dependency), plus the frozen-list split validation.
 """
 
-import importlib
-import importlib.abc
-import importlib.machinery
 import sys
 
 import pytest
 
-from expedistill.benchmarks.base import BenchmarkPlugin, Task, ViewRules
+from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import get_plugin
 from expedistill.blocks.tasks import load_tasks, split_tasks
 from expedistill.infra.reliability import ConfigError
-
-
-class _FakePlugin(BenchmarkPlugin):
-    """Minimal plugin: enough of the interface for load_tasks to be real."""
-
-    def __init__(self, name, tasks):
-        self._name = name
-        self._tasks = tasks
-
-    @property
-    def name(self):
-        return self._name
-
-    def load_tasks(self, tasks_spec):
-        if tasks_spec is None:
-            return list(self._tasks)
-        return [t for t in self._tasks if t.task_id in tasks_spec]
-
-    def run(self, task, handle, skills_block, workdir):
-        raise NotImplementedError
-
-    @property
-    def view_rules(self):
-        return ViewRules()
-
-    @property
-    def task_prompt_name(self):
-        return "TEST_TASK"
-
-
-class _RegisteringLoader(importlib.abc.Loader):
-    """Executes a stub plugin package whose import side effect registers it."""
-
-    def __init__(self, plugin):
-        self._plugin = plugin
-
-    def create_module(self, spec):
-        return None  # default module object
-
-    def exec_module(self, module):
-        from expedistill.benchmarks.registry import register_plugin
-        register_plugin(self._plugin)
-
-
-class _SilentLoader(importlib.abc.Loader):
-    """Imports cleanly but never registers (broken plugin)."""
-
-    def create_module(self, spec):
-        return None
-
-    def exec_module(self, module):
-        pass
-
-
-class _StubFinder(importlib.abc.MetaPathFinder):
-    def __init__(self, plugin_name, loader):
-        self._fullname = "expedistill.benchmarks." + plugin_name
-        self._spec = importlib.machinery.ModuleSpec(self._fullname, loader)
-
-    def find_spec(self, fullname, path=None, target=None):
-        return self._spec if fullname == self._fullname else None
+from tests.helpers.fake_plugin import serve_plugin
+from tests.helpers.stub_plugin import StubPlugin
 
 
 @pytest.fixture
-def stub_plugin():
-    """Install a meta-path finder that serves one stub plugin package.
+def stub_plugin(monkeypatch):
+    """Serve stub plugin packages through the real import machinery.
 
     Yields an installer; each test picks a unique plugin name so leftover
     registry entries cannot collide across tests.
@@ -88,13 +26,9 @@ def stub_plugin():
     installed = []
 
     def install(plugin_name, tasks, register=True):
-        loader = _RegisteringLoader(_FakePlugin(plugin_name, tasks))
-        if not register:
-            loader = _SilentLoader()
-        finder = _StubFinder(plugin_name, loader)
-        sys.meta_path.insert(0, finder)
+        plugin = StubPlugin(plugin_name, tasks=tasks) if register else None
+        serve_plugin(monkeypatch, plugin, name=plugin_name)
         installed.append(plugin_name)
-        return finder
 
     yield install
     for plugin_name in installed:
@@ -179,16 +113,17 @@ def test_split_explicit_lists():
     assert val == [] and reserved == []
 
 
-def test_split_four_keys_returns_every_list():
+def test_split_four_keys_returns_every_list_in_input_task_order():
+    # The frozen lists carry membership, not ordering.
     tasks = _tasks("a", "b", "c", "d", "e")
     train, val, test, reserved = split_tasks(
         tasks,
-        {"train": ["a"], "val": ["e"], "test": ["b"],
-         "reserved": ["c", "d"]})
-    assert _ids(train) == ["a"]
+        {"train": ["c", "a"], "val": ["e"], "test": ["b"],
+         "reserved": ["d"]})
+    assert _ids(train) == ["a", "c"]
     assert _ids(val) == ["e"]
     assert _ids(test) == ["b"]
-    assert _ids(reserved) == ["c", "d"]
+    assert _ids(reserved) == ["d"]
 
 
 @pytest.mark.parametrize("key", ["val", "reserved"])
@@ -196,18 +131,6 @@ def test_split_null_optional_list_is_empty(key):
     divided = split_tasks(_tasks("a", "b"),
                           {"train": ["a"], "test": ["b"], key: None})
     assert [_ids(part) for part in divided] == [["a"], [], ["b"], []]
-
-
-def test_split_output_follows_input_task_order():
-    # The frozen lists carry membership, not ordering.
-    tasks = _tasks("a", "b", "c", "d", "e")
-    train, val, _, reserved = split_tasks(
-        tasks,
-        {"train": ["c", "a"], "val": ["e"], "test": ["b"],
-         "reserved": ["d"]})
-    assert _ids(train) == ["a", "c"]
-    assert _ids(val) == ["e"]
-    assert _ids(reserved) == ["d"]
 
 
 @pytest.mark.parametrize("key", ["test", "val", "reserved"])

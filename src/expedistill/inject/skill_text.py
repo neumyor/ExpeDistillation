@@ -30,6 +30,7 @@ __all__ = [
     "SKILL_DESCRIPTION_MAX_CHARS",
     "SKILL_MARKERS",
     "description_text",
+    "field",
     "normalize_newlines",
     "normalize_step",
     "one_line",
@@ -85,7 +86,7 @@ def normalize_step(item: str) -> str:
     return _SELF_NUMBERING_RE.sub("", normalize_newlines(item)).strip()
 
 
-def _field(record: Union[Any, Mapping[str, Any]], name: str,
+def field(record: Union[Any, Mapping[str, Any]], name: str,
            default: Any = None) -> Any:
     """Read one field from a Skill-like object or a bank row mapping."""
     if isinstance(record, Mapping):
@@ -108,15 +109,15 @@ def render_card(record: Union[Any, Mapping[str, Any]]) -> str:
     A multi-line step keeps its continuation lines at column 0. Accepts a
     Skill or a bank row mapping.
     """
-    verbatim = _field(record, "verbatim_text", "") or ""
+    verbatim = field(record, "verbatim_text", "") or ""
     if verbatim:
         return verbatim
     (use_marker, steps_marker, close_marker) = SKILL_MARKERS
     items = [f"{index}. {normalize_step(item)}"
-             for index, item in enumerate(_field(record, "steps", ()), 1)]
-    when_to_use = normalize_newlines(_field(record, "when_to_use", "")).strip()
+             for index, item in enumerate(field(record, "steps", ()), 1)]
+    when_to_use = normalize_newlines(field(record, "when_to_use", "")).strip()
     not_applicable = normalize_newlines(
-        _field(record, "not_applicable_when", "")).strip()
+        field(record, "not_applicable_when", "")).strip()
     return "\n".join([
         f"{use_marker} {when_to_use}",
         steps_marker,
@@ -127,7 +128,7 @@ def render_card(record: Union[Any, Mapping[str, Any]]) -> str:
 
 def when_to_use_line(record: Union[Any, Mapping[str, Any]]) -> str:
     """The skill's ``when_to_use`` field as one line, '' when empty."""
-    return one_line(_field(record, "when_to_use", "") or "")
+    return one_line(field(record, "when_to_use", "") or "")
 
 
 def validate_description_mode(mode: str) -> str:
@@ -148,8 +149,8 @@ def description_text(record: Union[Any, Mapping[str, Any]],
     is one line, non-empty, and clipped to the Agent Skills ceiling.
     """
     validate_description_mode(mode)
-    skill_id = str(_field(record, "skill_id", "") or "unknown")
-    summary = one_line(_field(record, "summary", "") or "")
+    skill_id = str(field(record, "skill_id", "") or "unknown")
+    summary = one_line(field(record, "summary", "") or "")
     trigger = when_to_use_line(record)
 
     if mode == "summary":

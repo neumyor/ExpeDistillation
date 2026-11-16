@@ -21,7 +21,7 @@ ExpeDistillation/
   configs/           实验配置（进 git）
   src/expedistill/   全部方法代码（见第四节）
   tests/             测试（见第八节）
-  scripts/           运行、远程、分析脚本（见第五节）
+  scripts/           运行、远程、冒烟、审计脚本（见第五节）
   docs/              过程中产出的文档工件（见第三节）
   runs/              本地实验产物（不进 git，见第六节）
   tmp/               临时草稿、一次性调试输出（不进 git，随时可删）
@@ -78,7 +78,7 @@ docs/
 规定：
 
 1. **文件名**：`<主题>_<YYYYMMDD>.md`，主题用英文小写加下划线，例如
-   `docs/reviews/design_review_20261010.md`。同一主题同一天有多份时加
+   `docs/reviews/config_curation_redundancy_review_20261018.md`。同一主题同一天有多份时加
    `_v2`；
 2. **文件开头**写三行：日期、一句话说明这份文档是什么、它对应 log.md 的哪一条；
 3. `docs/design_spec.md` 是设计正本，docs 下的其他文档是过程记录。决定一旦实现，
@@ -95,7 +95,7 @@ src/expedistill/
                           （schema 2，带 phase_label）/ SubtaskType / Skill（schema 5，
                           一个子任务类型一张卡，状态 active / discarded）/ EvolvingText；
                           技能的触发条件字段与正文字段（TRIGGER_FIELDS / CONTENT_FIELDS）
-    trace.py              值对象 TraceRef / Provenance / TraceContext（只做形状校验）
+    trace.py              值对象 TraceRef / Provenance（只做形状校验）
     ids.py                确定性 ID 规则：轨迹 traj/<相位>/<任务>/<角色>/<序号>
                           （parse_trajectory_id 先返回相位标签）、段、类型 type/NNN、
                           技能 <type_id>/skill（make_skill_id 只接受类型 id）
@@ -108,14 +108,16 @@ src/expedistill/
                           answer_sheet.py 的 ExecutionRecord
     answer_sheet.py       trial 级 AnswerSheet / ExecutionRecord / CoverageRecord /
                           GradingRecord，以及 unit 级 UnitSpec / UnitSummary /
-                          PhaseReport 的接口形状
+                          PhaseReport（只有 sheets 与 units）的接口形状
     vocabulary.py         success/failure/invalid、normal/not_testable 与 cause 词的
                           唯一定义处
     registry.py           通用具名注册表（prompt、规则、benchmark 插件共用）
   infra/                  第 1 层：与业务无关的运行支撑
-    store.py              B3 对象存储（原子写、按 ID 读、判断单元是否完成、JSONL 账本）
+    store.py              B3 对象存储（原子写、按 ID 读、判断单元是否完成、JSONL 账本）；
+                          相位库工件的文件名 BANK_NAME 定义在这里
     manifest.py           B4 冻结
-    parallel.py           B5 并行池
+    parallel.py           B5 线程池：run_parallel（按序返回）、run_units（遇到致命错误
+                          即停批，各阶段共用）
     reliability.py        B6 异常分类、重试策略、单元失败记录
     runlock.py            B7 run 目录排他锁
     usage.py              B7 用量跨进程累加
@@ -145,7 +147,6 @@ src/expedistill/
     providers.py          provider 注册表（纯数据表：名字 → builder；环境变量选择）
     call.py               ModelHandle（含 prompt_defaults / prompt_aliases）与
                           call_model：取 prompt → 请求 → 解析 → 格式错误重试 → 记账落盘
-    fake.py               测试用假模型（按脚本返回固定内容）
     fake_provider.py      注册进 providers 表的 `fake` provider：按计划文件返回，
                           让整条相位序列在真实 benchmark 插件上零网络运行（smoke）
   benchmarks/             第 3 层：benchmark 插件
@@ -178,10 +179,10 @@ src/expedistill/
     execute.py            E1：按 benchmark 取插件执行
     tasks.py              D1 任务加载、D2 划分
     metrics.py            D3 成绩统计
-    rules.py              D6 段筛选与轨迹挑选的具名规则
+    rules.py              D6 段筛选（segment_select）与轨迹挑选（trajectory_select）的
+                          具名规则；写卡材料与定位按名字取用
     view.py               D5 轨迹视图、答卷的 Markdown 视图
     segment.py            G1 切段、D7 切段校验
-    select.py             D6 段筛选
     subtask_types.py      G2 归类：段卡片、类型表渲染、一块段的 SUBTASK_TYPING 调用与
                           校验（新类型按段编号顺序第一次被用到时编号）
     author.py             写作 prompt 返回字段的校验：触发条件两字段、正文两字段、
@@ -199,10 +200,9 @@ src/expedistill/
                           删除规则 content_failed_twice、trigger_facts、discarded_types
     sheet_facts.py        从一张摸底或练习答卷读出执行者看到的目录与 playbook、打开过的
                           卡（第一次打开的步号与当时交付的版本全文）
-    decision.py           纯函数：parse_unit_id、终测的 final_test_delta、
-                          control_arm_source
-    learn_ledger.py       学习账本：revisions.jsonl / outcomes.jsonl、删除的落盘、
-                          版本记录入口 record_version、按目标排序提交 commit_order
+    decision.py           终测的纯函数：final_test_delta、control_arm_source
+    learn_ledger.py       学习账本：revisions.jsonl / outcomes.jsonl、删除的落盘
+                          land_delete、按目标排序提交 commit_order
     evolving_text.py      每个学习相位的 profile.json / playbook.json 存取；读取紧邻
                           上一个学习相位的版本；playbook 显示能力检查
     unit_ids.py           unit id / 注入技能规范形 / 空洞答卷 id 的身份规则
@@ -222,20 +222,20 @@ src/expedistill/
                           （card_use_metrics）
     skill_use.py          判断一次执行打开了哪些技能、在哪些步骤
                           （cat 与 ReadSkill[...] 同等看待）
-    skill_status.py       discard_skill（丢弃的唯一入口）
     shortfall.py          已接受基础设施空洞的落盘记录
     external_control.py   外部冻结成绩文件的加载与校验（sha256、任务覆盖、
                           按采样深度截取奖励）；test 相位 against: external_campaign
                           时对照臂由此取数，零执行
     phase_bank.py         每个学习相位的技能库工件布局、写出与读取（全部已存技能，
-                          含 discarded，按技能 id 排序）
+                          含 discarded，按技能 id 排序）；相位标签与相位目录名的互相
+                          映射只在这里实现（phase_bank_dir、label_of_dir）
     skill_materialize.py  folder 单元清单的幂等物化：按清单的库指纹从相位库读技能，
                           写成 `<skill>/SKILL.md`（带 YAML 头）并写 catalog.md 兜底
     trace.py              来源指针的函数：trace_at（唯一构造 TraceRef，只接受摸底或
-                          练习答卷与范围内的步号）、resolve（唯一还原来源上下文）、
-                          trace_of_trajectory、render_scenes 与 render_windows（改写者
-                          读到的真实步骤，同一次执行的多个窗口合并后只渲染一次）；
-                          task_instruction 按任务 id 取 benchmark 的任务说明
+                          练习答卷与范围内的步号）、check_ref（边界检查：指针仍指向
+                          一条已存执行的某一步）、trace_of_trajectory、render_windows
+                          （写作者读到的真实步骤，同一次执行的多个窗口合并后只渲染
+                          一次）；task_instruction 按任务 id 取 benchmark 的任务说明
     provenance.py         每个技能版本一条 Provenance 的账本：record_version（唯一
                           写入口，技能与来源一起落盘）、find_provenance、
                           check_provenance（学习相位末的边界检查）
@@ -299,6 +299,10 @@ src/expedistill/
                           run / summary / fork-run / import-baseline / import-bank /
                           judge-skills / paper-tables / segmentation-metrics
 ```
+
+九个顶层包（`core`、`infra`、`llm`、`inject`、`blocks`、`benchmarks`、`composites`、
+`methods`、`stages`）的 `__init__.py` 只有文档字符串，使用方 import 具体子模块。
+`prompts/__init__.py` 例外：它按 import 清单登记全部方法 prompt。
 
 积木编号与文件的对应以设计正本第三节为准；新增积木时两处同时更新。
 
@@ -371,20 +375,13 @@ scripts/
               paper_splits.py：论文配置共用的划分（含 ALFWorld 的 val 列表）、TB 任务表
                                   与外部对照文件信息
               build_bare_control.py：把一次 ALFWorld 裸跑写成该学生模型的冻结成绩文件
-              build_pooled_control.py：汇总多个 run 的裸跑对照，写成冻结成绩文件
   remote/     在基准主机上运行实验：deploy_bench_host.sh（rsync 部署，一个提交一个目录；未提交的改动加 `--force`，目录名带时间戳、永不覆盖）、
               start_run_bench_host.sh（在基准主机上起/续跑 run）、README.md（运维手册）；
               driver 与 Harbor 同机，run 目录、分析、审计都留在基准主机
-  analysis/   读 run 目录或归档产出统计，只读不写 run 目录，结果写到 docs/reports/ 或 tmp/
-              paper_tables.py：`paper-tables` 子命令的薄入口
-              tb21_f3_baseline.py：从 campaign 归档离线计算 TB 摸底基准数字
-              tb_archive_sample.py / tb_archive_validate.py：从基准主机归档抽样，
-                                  并用它校验 TB 轨迹重建
   audit/      scan_private.py：提交前扫描已跟踪文件里的私有部署信息
   smoke/      冒烟与启动工具：gen_searchqa_fake_plan.py（SearchQA 假模型冒烟的计划文件）、
               launch_detached.py（start_new_session 启动长命令并写 pidfile）、
-              smoke_tb_dryrun.py / smoke_tb_live.py（TB 提交链路的 DRY_RUN 与单题真实冒烟）、
-              tb_g1_segment_smoke.py（一次真实的 G1 切段调用）
+              smoke_tb_dryrun.py / smoke_tb_live.py（TB 提交链路的 DRY_RUN 与单题真实冒烟）
 ```
 
 规定：
@@ -484,7 +481,7 @@ configs/
 
 1. 先在设计正本第三节的积木表里登记编号、输入输出；
 2. 放进对应目录的文件；调模型的话同时在 `prompts/` 登记 prompt；
-3. 写单元测试（调模型的用 `llm/fake.py`）；
+3. 写单元测试（调模型的用 `tests/helpers/fake_llm.py` 的 `FakeClient`）；
 4. 在设计正本 3.6 的"相位 → 积木组装"表里写明哪个相位用它。
 
 ### 新增或修改 prompt
@@ -514,11 +511,21 @@ configs/
 tests/
   unit/          每块积木的单元测试，目录与 src/expedistill/ 对应
   composites/    组合积木测试（假模型 + 临时 run 目录，含中断续跑）
-  golden/        回归测试（2 组合 golden 矩阵 + 崩溃续跑验证 + 修订窗口探针）
+  golden/        回归测试（2 组合 golden 矩阵 + 崩溃续跑验证 + 修订窗口探针）：
+                 generate.py 重新生成快照，test_golden_matrix.py 核对
   fixtures/      benchmark 原始输出录像（tb / alfworld / searchqa）、学习提示词
                  渲染样例（prompts/）、golden 矩阵的 2 组合快照（golden/）
-  helpers/       多个测试文件共用的测试工具（插件重新注册、模型回复样例、
-                 造 skill），一处定义，契约变了只改这里
+  helpers/       多个测试文件共用的测试工具，一处定义，契约变了只改这里：
+                 fake_llm.py（假模型 FakeClient）、fake_plugin.py（经导入机制
+                 提供假 benchmark 插件的唯一实现）、stub_plugin.py、plugins.py、
+                 golden_harness.py 与 golden_revision_window.py（golden 的剧本、
+                 快照与崩溃工具）、tb_fake_remote.py / tb_folder.py（TB 远程与
+                 技能文件夹）、final_test_folder.py、alfworld_adapter.py、
+                 searchqa_stub.py、skill_folder.py、skill_use_runs.py、
+                 learn_runs.py、paper_runs.py、traces.py、skills.py、configs.py、
+                 prompts.py
+  conftest.py    共用的 pytest fixture（TB runner 环境变量、插件注册表清理、
+                 golden 假插件）
   test_layering.py
 ```
 
@@ -530,13 +537,13 @@ tests/
    - 不按开发批次命名（不用 `test_w1a_*`、`test_folder_m3_*` 这类名字）
 
 2. **测试实现**：
-   - 调模型的用 `llm/fake.py`，不发真实请求
+   - 调模型的用 `tests/helpers/fake_llm.py` 的 `FakeClient`，不发真实请求
    - 不连远程服务
    - 测试数据从 `tests/fixtures/` 读取，不得从 `runs/` 里直接读
 
 3. **共用代码**：
    - 两个以上测试文件要用的辅助代码放进 `tests/helpers/`
-   - 不在各文件里各复制一份
+   - 不在各文件里各复制一份，测试文件之间不互相 import
 
 ### 8.3 组合测试规范
 
@@ -560,11 +567,11 @@ tests/
 - 两个组合都跑论文的七相位序列 `baseline, learn, practice, learn, practice, learn, test`
   （一个 `learn` 定义复用三次），每个组合一次跑完 35 次模型调用
 - 三个学习相位依次覆盖：两张缺口新卡；一次正文改写与一次触发改写；删除规则与一次触发改写
-- 两个组合都在三个崩溃点上做崩溃续跑验证（`harness.CRASH_POINTS`：`diagnosis` 两次诊断
+- 两个组合都在三个崩溃点上做崩溃续跑验证（`golden_harness.CRASH_POINTS`：`diagnosis` 两次诊断
   之间、`revise` 改写调用前、`new_cards` 两张新卡之间）
 - `--workers 1` 与 `--workers 8` 的快照逐字节相同
   （`test_eight_workers_write_the_same_snapshot_as_one`，`generate.py` 生成时也核对）
-- `revision_window.py`：覆盖"改写已落盘、下一个 practice 还没执行"的崩溃点
+- `tests/helpers/golden_revision_window.py`：覆盖"改写已落盘、下一个 practice 还没执行"的崩溃点
 
 **何时重新生成**：
 - 修改提示词后
@@ -640,9 +647,9 @@ def test_render_card_numbers_the_steps():
 
 1. 在 `tests/composites/` 创建测试
 2. 必须包含崩溃续跑用例：在某次模型调用前模拟崩溃，用同一条命令续跑，比较续跑结果与
-   一次跑完的结果。端到端的写法用 `tests/golden/harness.py` 的现成工具：
+   一次跑完的结果。端到端的写法用 `tests/helpers/golden_harness.py` 的现成工具：
 ```python
-from tests.golden.harness import (
+from tests.helpers.golden_harness import (
     GoldenPlugin, assert_resume_equivalent, installed_plugin,
     run_crash_and_resume, run_straight, snapshot, write_config)
 
@@ -698,7 +705,7 @@ pytest tests/golden -q
 
 **本地开发**：
 ```bash
-# 全量测试（约 50 秒，约 2400 个用例）
+# 全量测试（约 16 秒，约 2050 个用例）
 pytest tests -q
 
 # 只跑单元测试
@@ -750,7 +757,7 @@ ruff check src tests scripts --select E9,F
    - 正常路径（正确输入 → 正确输出）
    - 边界情况（空输入、极大/极小值）
    - 错误处理（非法输入 → 明确报错）
-3. 调模型的用 `FakeClient`
+3. 调模型的用 `tests/helpers/fake_llm.py` 的 `FakeClient`
 
 **改动已有模块时**：
 1. 先跑该模块的测试：`pytest tests/unit/<path> -v`

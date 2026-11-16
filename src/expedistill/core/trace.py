@@ -10,19 +10,16 @@ cannot be written; this module only validates the shape.
 
 ``Provenance`` is one row per skill version: which learn phase produced it,
 why (``cause``), and the evidence positions behind it (``sources``).
-``TraceContext`` is what ``resolve`` returns: the rendered text a prompt may
-read about a ``TraceRef``.
 
 Standard library only (layer 0).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 __all__ = [
     "PROVENANCE_CAUSES",
     "Provenance",
-    "TraceContext",
     "TraceRef",
 ]
 
@@ -119,15 +116,3 @@ class Provenance:
             sources=[TraceRef.from_dict(item)
                      for item in data.get("sources") or []],
             note=data.get("note", ""))
-
-
-@dataclass(frozen=True)
-class TraceContext:
-    """The text a prompt may read about a ``TraceRef`` (from ``resolve``)."""
-
-    ref: TraceRef
-    task_ref: str
-    task_instruction: str
-    before: str
-    after: str
-    outcome: Optional[bool]

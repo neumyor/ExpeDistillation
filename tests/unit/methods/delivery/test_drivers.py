@@ -9,8 +9,8 @@ the active cards are delivered.
 
 from expedistill.core.ids import make_task_id, make_type_id
 from expedistill.core.models import Skill
-from expedistill.inject import bank_reference, format_skills_block
-from expedistill.methods import resolve_fixed
+from expedistill.inject.skills import bank_reference, format_skills_block
+from expedistill.methods.registry import resolve_fixed
 from tests.helpers.skills import make_skill
 
 BENCHMARK = "tb"
@@ -68,28 +68,6 @@ def test_folder_lists_the_active_members_only():
     assert manifest["bank_fingerprint"] == bank_reference(bank)
 
 
-def test_folder_rows_of_an_empty_bank_still_carry_the_manifest():
-    delivery, params = resolve_fixed("delivery", "folder")
-    rows = delivery.resolve([_card(1, status="discarded")], ["t1", "t2"],
-                            params)
-    for row in rows:
-        manifest = row.aux["skill_folder"]
-        assert manifest["files"] == []
-        assert manifest["catalog_text"] == ""
-        assert row.skills_block == ""
-
-
-def test_none_supplies_the_bare_rows():
-    # The bank and tasks are the family's operands and the bank is
-    # ignored: there is nothing to select from. skills_injected is None
-    # (the bare control's record), never []; one row per task.
-    delivery, params = resolve_fixed("delivery", "none")
-    rows = delivery.resolve(None, ["task-a", "task-b"], params)
-    assert [(row.task_ref, row.skills_injected, row.skills_block)
-            for row in rows] == [
-        ("task-a", None, ""), ("task-b", None, "")]
-
-
 # ---------------------------------------------------------------------------
 # whole_bank verbatim
 # ---------------------------------------------------------------------------
@@ -113,7 +91,7 @@ def test_whole_bank_verbatim_injects_the_imported_text_as_is():
 def test_whole_bank_verbatim_must_be_a_bool():
     import pytest
     from expedistill.core.config import ConfigError
-    from expedistill.methods import resolve_params
+    from expedistill.methods.registry import resolve_params
     with pytest.raises(ConfigError, match="verbatim"):
         resolve_params("delivery", {"name": "whole_bank", "verbatim": "yes"})
     assert resolve_params(

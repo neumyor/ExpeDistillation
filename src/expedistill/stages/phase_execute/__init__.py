@@ -50,7 +50,7 @@ Wired here:
   ``verifier_ran`` / ``exception_type`` facts).
 
 R4 (the invariant this driver must not break): an execute phase makes
-no bank calls -- no ``discard_skill`` anywhere in it; every phase leaves
+no bank writes; every phase leaves
 the bank byte-identical, pinned by tests/unit/stages/test_phase_execute.py.
 
 Phase directory layout (this driver owns the execute-phase half; the
@@ -173,8 +173,8 @@ def run(ctx: StageContext, phase: PhaseInstance) -> PhaseResult:
     Raises ConfigError for a learn phase (``stages/phase_learn.py``
     owns those) and InfrastructureError AFTER the summary and report
     are written when units are still missing outside the accepted-hole
-    set (the old stages' disposition: a resume retries only the holes,
-    the ``allow_infra_shortfall`` run setting accepts them durably).
+    set (a resume retries only the holes, the ``allow_infra_shortfall`` run
+    setting accepts them durably).
     """
     spec = phase.spec
     if not isinstance(spec, ExecutePhaseSpec):

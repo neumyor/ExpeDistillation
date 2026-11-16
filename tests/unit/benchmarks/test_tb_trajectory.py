@@ -42,13 +42,6 @@ def test_malformed_steps_are_skipped_and_counted():
     assert len(steps) == 2
 
 
-def test_instruction_step_is_neither_kept_nor_counted():
-    # The leading source:"user" step carries the task instruction; it has no
-    # tool calls and no observation, so it is not a "skipped" step.
-    _, skipped = reconstruct(_traj())
-    assert skipped == 2
-
-
 def test_reconstruct_never_crashes_on_garbage():
     assert reconstruct_steps({}) == []
     assert reconstruct_steps({"steps": "not-a-list"}) == []

@@ -1,12 +1,10 @@
 """The registry's ``fake`` provider: a plan-scripted client for smokes.
 
-A checked-in counterpart of ``llm/fake.py``'s test double that the
-PROVIDERS table can name: setting ``EXPEDISTILL_LLM_PROVIDER=fake``
-builds this client instead of the real endpoint, so a whole phase
-sequence (freeze -> D -> L -> A -> ... -> C) runs against REAL benchmark
-plugins with zero network. The golden matrix drives a stub benchmark
-with it; smokes drive the real plugins (SearchQA/ALFWorld/TB's local
-seam) under the fake model.
+Setting ``EXPEDISTILL_LLM_PROVIDER=fake`` builds this client instead of
+the real endpoint, so a whole phase sequence (freeze -> D -> L -> A ->
+... -> C) runs against REAL benchmark plugins with zero network. The golden
+matrix drives a stub benchmark with it; smokes drive the real plugins
+(SearchQA/ALFWorld/TB's local seam) under the fake model.
 
 The script is a JSON PLAN loaded from the path named by
 ``EXPEDISTILL_FAKE_PROVIDER_PLAN`` (operational, like every endpoint

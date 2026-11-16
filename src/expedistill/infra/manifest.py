@@ -2,7 +2,7 @@
 
 The manifest records the frozen identity of the experiment: task data,
 split, model role table, weak-model profile, sampling counts, named rules
-and all prompt digests (README section 3, stage 0). It is written once when
+and all prompt digests (design_spec 5.1, stage 0). It is written once when
 the run starts; every later start of the same run directory must match it
 field by field or the run refuses to continue, because mixing protocols
 silently would produce numbers that answer no question (outer AGENTS.md
@@ -11,7 +11,7 @@ section 2, the fixed-metric incident).
 Adapted from SkillExpand's persistence/io.py ``freeze``: same write-once
 semantics, with the differing keys listed in the error so the mismatch can
 be diagnosed from the traceback alone. Here it also lives in the run
-directory layout (manifest.json at the run root, README section 2).
+directory layout (manifest.json at the run root, design_spec 4.3).
 """
 
 from pathlib import Path

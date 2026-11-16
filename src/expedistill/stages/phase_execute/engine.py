@@ -56,7 +56,7 @@ __all__ = [
 def task_objects(ctx: StageContext, raw_ids: Sequence[str]) -> List[Task]:
     """Rebuild the phase's Task objects through D1 (deterministic from
     the frozen config); a plugin answering outside the requested ids is
-    a ConfigError before any execution starts (the stage-1 rule)."""
+    a ConfigError before any execution starts."""
     tasks = tasks_block.load_tasks(ctx.config.benchmark, sorted(raw_ids))
     unexpected = sorted({task.task_id for task in tasks} - set(raw_ids))
     if unexpected:
@@ -158,12 +158,12 @@ def plan_units(rows: Sequence[ExecutionUnitRow],
 
 
 def _skills_for_task(plans: Sequence[Plan]
-                     ) -> Optional[Callable[[Task], Tuple[Any, str]]]:
-    """K1's per-task injection resolver over the planned rows (None when
-    every unit is a bare scalar pair -- the frozen whole-bank and bare
-    paths, so K1 records the same scalar bookkeeping it always did)."""
+                     ) -> Callable[[Task], Tuple[Any, str]]:
+    """K1's per-task injection resolver over the planned rows. When every
+    unit is bare (``skills_injected`` None) every task resolves to the
+    empty pair, whatever block its row carries."""
     if all(plan.unit.skills_injected is None for plan in plans):
-        return None
+        return lambda task: (None, "")
     by_task = {plan.task.task_id: (plan.unit.skills_injected,
                                    plan.unit.skills_block)
                for plan in plans}
@@ -222,7 +222,7 @@ def dispatch_arm(ctx: StageContext, phase: PhaseInstance, *,
         n_attempts=plans[0].n_attempts,
         skills_for_task=_skills_for_task(plans),
         workdir_root=(Path(ctx.workdir_root)
-                      / phase.label.replace(":", "_") / arm),
+                      / ids.phase_tag(phase.label) / arm),
         usage=ctx.usage,
         run_dir=ctx.run_dir,
         workers=ctx.run_settings.rollout,

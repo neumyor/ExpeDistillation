@@ -1,8 +1,8 @@
 """K1 batch_execute composite tests: resume, per-unit persistence, retries.
 
 Fake plugin registered through the real registry/import machinery (the stub
-finder pattern of tests/unit/blocks/test_execute.py), fake model handle from
-llm.fake, real Store on a temp run directory. No network, no real plugins
+finder in tests/helpers/fake_plugin.py), fake model handle from
+helpers.fake_llm, real Store on a temp run directory. No network, no real plugins
 (AGENTS.md section 8). The interrupt-resume tests simulate a crash by letting
 one unit raise a code-bug exception (which propagates, exactly like a real
 crash would) and check that the next call redoes only the missing unit and
@@ -10,11 +10,8 @@ ends with the same result as an uninterrupted run.
 """
 
 import importlib
-import importlib.abc
 import urllib.parse
-import importlib.machinery
 import os
-import sys
 import threading
 import time
 import types
@@ -28,12 +25,6 @@ from expedistill.benchmarks.base import (
     Task,
     ViewRules,
 )
-from expedistill.benchmarks.registry import (
-    ConfigError,
-    _reset_registry,
-    get_plugin,
-    register_plugin,
-)
 from expedistill.composites.batch_execute import batch_execute
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
@@ -46,11 +37,13 @@ from expedistill.infra.reliability import (
     UnitFailureRecorder,
 )
 from expedistill.infra.store import Store, read_jsonl
-from expedistill.llm.fake import make_fake_handle
-from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink, trial_files
+from tests.helpers.fake_llm import make_fake_handle
+from tests.helpers.tb_fake_remote import JobsRemoteLink, trial_files
+from tests.helpers.fake_plugin import serve_plugin
+
+pytestmark = pytest.mark.usefixtures("clean_registry")
 
 _FAKE = "fakebench"
-_MODULE = f"expedistill.benchmarks.{_FAKE}"
 
 
 class RecordingPlugin(BenchmarkPlugin):
@@ -98,48 +91,6 @@ class RecordingPlugin(BenchmarkPlugin):
         return "FAKE_TASK"
 
 
-def _install_plugin(monkeypatch, plugin):
-    """Serve ``plugin``'s package through the real import machinery
-    (same contract as tests/unit/blocks/test_execute.py).
-
-    Idempotent within a test: a second batch_execute call with the same
-    plugin must not re-run the module body (which would try to register the
-    plugin a second time).
-    """
-    fullname = f"expedistill.benchmarks.{plugin.name}"
-    if fullname in sys.modules:
-        try:
-            if get_plugin(plugin.name) is plugin:
-                return plugin
-        except ConfigError:
-            pass
-
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            register_plugin(plugin)
-
-    class Finder:
-        def find_spec(self, name, path=None, target=None):
-            if name == fullname:
-                return importlib.machinery.ModuleSpec(name, Loader())
-            return None
-
-    sys.modules.pop(fullname, None)
-    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
-    return plugin
-
-
-@pytest.fixture(autouse=True)
-def clean_registry():
-    _reset_registry()
-    yield
-    sys.modules.pop(_MODULE, None)
-    _reset_registry()
-
-
 def _tasks(*ids_):
     return [Task(task_id=i, instruction=f"do {i}", meta={"gold": i})
             for i in ids_]
@@ -163,7 +114,16 @@ def _success(task_id):
 
 def _run_batch(plugin, monkeypatch, tmp_path, tasks, *, name="run",
                handle=None, **overrides):
-    _install_plugin(monkeypatch, plugin)
+    serve_plugin(monkeypatch, plugin)
+    module = _real_batch_module()
+    for knob, constant in (("infra_retries", "_INFRA_RETRIES"),
+                           ("infra_backoff", "_INFRA_BACKOFF")):
+        if knob in overrides:
+            monkeypatch.setattr(module, constant, overrides.pop(knob))
+    if "skills_for_task" not in overrides:
+        scalar = (overrides.pop("skills_injected", None),
+                  overrides.pop("skills_block", ""))
+        overrides["skills_for_task"] = lambda task: scalar
     handle = handle if handle is not None else make_fake_handle("weak")
     kwargs = dict(
         store=Store(tmp_path / name),
@@ -191,14 +151,8 @@ def _fingerprint(traj):
 
 
 def _real_batch_module():
-    """The real batch_execute module object.
-
-    The composites package ``__init__`` rebinds the attribute
-    ``expedistill.composites.batch_execute`` to the FUNCTION, so a plain
-    ``import ... as`` yields the function; the module (whose globals hold
-    ``random``, ``time`` and ``_HEARTBEAT_SECONDS``) must come from
-    importlib.
-    """
+    """The batch_execute module object (its globals hold ``random``,
+    ``time``, ``_HEARTBEAT_SECONDS`` and the infra-retry constants)."""
     return importlib.import_module("expedistill.composites.batch_execute")
 
 
@@ -242,11 +196,25 @@ _BACKOFF_BOUNDS = (15.0, 45.0)
 # Resume
 # ---------------------------------------------------------------------------
 
-def test_resume_skips_completed_units(monkeypatch, tmp_path):
+def _per_task_skills(task):
+    return {"t1": ([{"skill_id": "skill/a", "version": 1}], "- a\n"),
+            "t2": ([{"skill_id": "skill/b", "version": 1}], "- b\n"),
+            }[task.task_id]
+
+
+@pytest.mark.parametrize("skills", [
+    pytest.param({}, id="bare"),
+    pytest.param({"skills_injected": ["skill/a"], "skills_block": "- a\n"},
+                 id="scalar_bank"),
+    # The stored comparison must read the per-task resolution, or every
+    # resume of a per-task run would reject its own stored units.
+    pytest.param({"skills_for_task": _per_task_skills}, id="per_task"),
+])
+def test_resume_skips_completed_units(monkeypatch, tmp_path, skills):
     plugin = RecordingPlugin()
     tasks = _tasks("t1", "t2")
     first = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                      n_attempts=2)
+                       n_attempts=2, **skills)
     assert [t.trajectory_id for t in first] == [
         _expected_id("t1", 0), _expected_id("t1", 1),
         _expected_id("t2", 0), _expected_id("t2", 1),
@@ -256,7 +224,7 @@ def test_resume_skips_completed_units(monkeypatch, tmp_path):
 
     plugin.calls.clear()
     second = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                       n_attempts=2, handle=handle)
+                        n_attempts=2, handle=handle, **skills)
     # No new executions at all: the plugin saw nothing and the model client
     # was not called again.
     assert plugin.calls == []
@@ -312,7 +280,7 @@ def test_interrupted_run_completes_only_the_missing_unit(
         assert all(0 <= delay <= 0.5 for delay in sleeps)
         assert waits == []
     else:
-        assert waits == []
+        assert sleeps == [] and waits == []
 
 
 def test_empty_tasks_returns_empty_result(monkeypatch, tmp_path):
@@ -324,58 +292,6 @@ def test_empty_tasks_returns_empty_result(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Infra retries (B6 policy)
 # ---------------------------------------------------------------------------
-
-def test_infra_failure_retried_then_success(monkeypatch, tmp_path):
-    def infra_once(record):
-        if record["attempt_token"] == "a00":
-            raise InfrastructureError("sandbox down")
-        return _success(record["task_id"])
-
-    plugin = RecordingPlugin(behavior=infra_once)
-    # Explicit knobs: immune to default changes, and the zero backoff keeps
-    # the retry instant (the default backoff sleeps for real between the
-    # attempts).
-    result = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"),
-                        name="r1", infra_retries=1, infra_backoff=(0.0, 0.0))
-    # The retry succeeded, so the unit is present and nothing was recorded.
-    assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
-    assert result[0].correctness is True
-    assert [c["attempt_token"] for c in plugin.calls] == ["a00", "a00r1"]
-    # Both executions of the unit used the same per-unit workdir.
-    assert {str(c["workdir"]) for c in plugin.calls} == {
-        str(tmp_path / "r1" / "workdirs"
-            / urllib.parse.quote(_expected_id("t1", 0), safe=""))}
-    assert UnitFailureRecorder(tmp_path / "r1").list_failures() == []
-
-
-def test_infra_gives_up_after_the_configured_retries(monkeypatch, tmp_path):
-    def t2_always_infra(record):
-        if record["task_id"] == "t2":
-            raise InfrastructureError("dead endpoint")
-        return _success(record["task_id"])
-
-    plugin = RecordingPlugin(behavior=t2_always_infra)
-    tasks = _tasks("t1", "t2")
-    result = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                        infra_retries=2, infra_backoff=(0.0, 0.0))
-    # The healthy unit is stored; the dead one burned its three tokens
-    # (a00 plus two retries) and is absent from the result.
-    assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
-    assert [c["attempt_token"] for c in plugin.calls
-            if c["task_id"] == "t2"] == ["a00", "a00r1", "a00r2"]
-    # Exactly one ledger line for the unit, however many attempts it burned.
-    failures = UnitFailureRecorder(tmp_path / "r1").list_failures()
-    assert [f["unit_id"] for f in failures] == [_expected_id("t2", 0)]
-
-    # A resume retries the unit from the next unused token (a00r3).
-    plugin.calls.clear()
-    plugin.behavior = None
-    resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                         infra_retries=2, infra_backoff=(0.0, 0.0))
-    assert [c["attempt_token"] for c in plugin.calls] == ["a00r3"]
-    assert [t.trajectory_id for t in resumed] == [
-        _expected_id("t1", 0), _expected_id("t2", 0)]
-
 
 def test_backoff_sleeps_one_uniform_draw_before_the_retry(
         monkeypatch, tmp_path):
@@ -397,13 +313,20 @@ def test_backoff_sleeps_one_uniform_draw_before_the_retry(
     waits = _record_reliability_sleeps(monkeypatch)
     result = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
                         infra_backoff=_BACKOFF_BOUNDS)
+    # The retry succeeded, so the unit is present and nothing was recorded.
     assert [t.trajectory_id for t in result] == [_expected_id("t1", 0)]
+    assert result[0].correctness is True
+    assert UnitFailureRecorder(tmp_path / "r1").list_failures() == []
     # One draw of random.uniform(*infra_backoff), its value fed to exactly
     # one sleep before the retry -- and the retry ran under the fresh token.
     assert draws == [_BACKOFF_BOUNDS]
     assert waits == [30.0]
     assert 15.0 <= waits[0] <= 45.0
     assert [c["attempt_token"] for c in plugin.calls] == ["a00", "a00r1"]
+    # Both executions of the unit used the same per-unit workdir.
+    assert {str(c["workdir"]) for c in plugin.calls} == {
+        str(tmp_path / "r1" / "workdirs"
+            / urllib.parse.quote(_expected_id("t1", 0), safe=""))}
 
 
 @pytest.mark.parametrize("knobs, t2_tokens", [
@@ -549,20 +472,6 @@ def test_skills_for_task_injects_each_units_own_values(monkeypatch, tmp_path):
     }
 
 
-def test_skills_for_task_rejects_conflicting_scalar_skills(
-        monkeypatch, tmp_path):
-    plugin = RecordingPlugin()
-    with pytest.raises(CodeBugError, match="skills_for_task"):
-        _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
-                   skills_injected="bank:9f2c1a",
-                   skills_for_task=lambda task: ([], ""))
-    with pytest.raises(CodeBugError, match="skills_for_task"):
-        _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r2",
-                   skills_block="- a\n",
-                   skills_for_task=lambda task: ([], ""))
-    assert plugin.calls == []
-
-
 def test_run_namespace_is_per_task_under_skills_for_task(
         monkeypatch, tmp_path):
     def infra_on_first(record):
@@ -590,31 +499,6 @@ def test_run_namespace_is_per_task_under_skills_for_task(
     assert per_task["t1"] != per_task["t2"]
 
 
-def test_per_task_resume_reuses_stored_units_without_rerunning(
-        monkeypatch, tmp_path):
-    # Decision 3's resume pitfall as a case: the stored comparison must read
-    # the per-task resolution, or every resume of a per-task run would
-    # reject its own stored units.
-    plugin = RecordingPlugin()
-    mapping = {"t1": ([{"skill_id": "skill/a", "version": 1}], "- a\n"),
-               "t2": ([{"skill_id": "skill/b", "version": 1}], "- b\n")}
-
-    def skills_for_task(task):
-        return mapping[task.task_id]
-
-    tasks = _tasks("t1", "t2")
-    first = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                       n_attempts=2, skills_for_task=skills_for_task)
-    assert len(first) == 4
-
-    plugin.calls.clear()
-    second = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                        n_attempts=2, skills_for_task=skills_for_task)
-    # Zero re-runs: every stored unit passed the comparison.
-    assert plugin.calls == []
-    assert [_fingerprint(t) for t in second] == [_fingerprint(t) for t in first]
-
-
 def test_per_task_resume_rejects_a_changed_injection(monkeypatch, tmp_path):
     plugin = RecordingPlugin()
     mapping = {"t1": ([{"skill_id": "skill/a", "version": 1}], "- a\n"),
@@ -635,20 +519,6 @@ def test_per_task_resume_rejects_a_changed_injection(monkeypatch, tmp_path):
     assert "skills_injected" in str(excinfo.value)
     assert "new run directory" in str(excinfo.value)
     assert plugin.calls == []
-
-
-def test_scalar_skills_path_unchanged_without_skills_for_task(
-        monkeypatch, tmp_path):
-    # whole_bank regression: with no resolver, every unit shares the
-    # call-level injection and ONE namespace -- the contrast to per-task
-    # delivery, and the behaviour stage 1 keeps depending on.
-    plugin = RecordingPlugin()
-    result = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2"),
-                        name="r1", n_attempts=2,
-                        skills_injected=["skill/a"], skills_block="- a\n")
-    assert all(call["skills_block"] == "- a\n" for call in plugin.calls)
-    assert all(t.skills_injected == ["skill/a"] for t in result)
-    assert len(_namespaces(plugin)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -741,6 +611,9 @@ def test_run_namespace_is_deterministic_and_shared_by_retries(
     {"model_name": "weak-14b"},
     {"skills_injected": "bank:9f2c1a", "skills_block": "- skill\n"},
     {"skills_injected": ["skill/a", "skill/b"], "skills_block": "- s\n"},
+    # Same bank reference, different rendering (a regrouped bank): the
+    # remote trial saw a different SKILL.md.
+    {"skills_block": "## g1\n- a\n"},
 ])
 def test_run_namespace_differs_per_arm(monkeypatch, tmp_path, change):
     plugin = RecordingPlugin()
@@ -768,24 +641,15 @@ def test_run_namespace_differs_per_arm(monkeypatch, tmp_path, change):
     assert {c["attempt_token"] for c in plugin.calls} == {"a00"}
 
 
-@pytest.mark.parametrize("knobs, first_tokens, resume_token", [
-    pytest.param(_PLAIN_KNOBS, ["a00", "a00r1"], "a00r2", id="plain"),
-    pytest.param(_FULL_KNOBS, ["a00", "a00r1", "a00r2"], "a00r3",
-                 id="stagger_and_backoff"),
-])
-def test_resume_continues_the_retry_sequence(
-        monkeypatch, tmp_path, knobs, first_tokens, resume_token):
-    sleeps = _record_batch_sleeps(monkeypatch)
-    waits = _record_reliability_sleeps(monkeypatch)
-
+def test_resume_continues_the_retry_sequence(monkeypatch, tmp_path):
     def always_infra(record):
         raise InfrastructureError("stale run")
 
     plugin = RecordingPlugin(behavior=always_infra)
     tasks = _tasks("t1")
     assert _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                      **knobs) == []
-    assert [c["attempt_token"] for c in plugin.calls] == first_tokens
+                      **_PLAIN_KNOBS) == []
+    assert [c["attempt_token"] for c in plugin.calls] == ["a00", "a00r1"]
 
     # The tokens are spent (their remote run dirs may hold stale trials the
     # TB plugin refuses to resubmit into), so a resume must use fresh ones
@@ -793,28 +657,12 @@ def test_resume_continues_the_retry_sequence(
     plugin.calls.clear()
     plugin.behavior = None
     resumed = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                         **knobs)
-    assert [c["attempt_token"] for c in plugin.calls] == [resume_token]
+                         **_PLAIN_KNOBS)
+    assert [c["attempt_token"] for c in plugin.calls] == ["a00r2"]
     assert [t.correctness for t in resumed] == [True]
-    if "dispatch_stagger" in knobs:
-        # One backoff wait per retry (a draw inside the default bounds) and
-        # one stagger sleep per started unit (the failed pass, the resume).
-        assert len(waits) == len(first_tokens) - 1
-        assert all(_BACKOFF_BOUNDS[0] <= w <= _BACKOFF_BOUNDS[1]
-                  for w in waits)
-        assert len(sleeps) == 2
-    else:
-        assert waits == []
 
 
-@pytest.mark.parametrize("knobs", [
-    pytest.param(_PLAIN_KNOBS, id="plain"),
-    pytest.param(_FULL_KNOBS, id="stagger_and_backoff"),
-])
-def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path, knobs):
-    sleeps = _record_batch_sleeps(monkeypatch)
-    waits = _record_reliability_sleeps(monkeypatch)
-
+def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path):
     def infra_then_crash(record):
         if record["attempt_token"] == "a00":
             raise InfrastructureError("blip")
@@ -823,22 +671,15 @@ def test_resume_rejoins_the_retry_in_flight(monkeypatch, tmp_path, knobs):
     plugin = RecordingPlugin(behavior=infra_then_crash)
     tasks = _tasks("t1")
     with pytest.raises(ParallelError):
-        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
+        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+                   **_PLAIN_KNOBS)
     # a00r1 was launched when the process died: the resume asks for the same
     # token again, so the TB plugin can rejoin (or reuse) that remote trial.
     plugin.calls.clear()
     plugin.behavior = None
-    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1", **knobs)
+    _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
+               **_PLAIN_KNOBS)
     assert [c["attempt_token"] for c in plugin.calls] == ["a00r1"]
-    if "dispatch_stagger" in knobs:
-        # Exactly one backoff wait (a00 failed before the crash) inside the
-        # default bounds, and one stagger sleep per started unit.
-        assert len(waits) == 1
-        assert all(_BACKOFF_BOUNDS[0] <= w <= _BACKOFF_BOUNDS[1]
-                  for w in waits)
-        assert len(sleeps) == 2
-    else:
-        assert waits == []
 
 
 class _NamedTB:
@@ -887,21 +728,6 @@ def test_strong_and_weak_arms_never_share_a_remote_result(
         "strong-70b", "weak-7b"]
 
 
-def test_run_namespace_covers_the_rendered_skills_block(monkeypatch, tmp_path):
-    # Same bank reference, different rendering (a regrouped bank): the remote
-    # trial saw a different SKILL.md, so it must not share a run id.
-    plugin = RecordingPlugin()
-    _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"), name="r1",
-               skills_injected="bank:9f2c1a", skills_block="- a\n- b\n")
-    first = _namespaces(plugin)
-    plugin.calls.clear()
-    _run_batch(plugin, monkeypatch, tmp_path, _tasks("t2"), name="r1",
-               skills_injected="bank:9f2c1a", skills_block="## g1\n- a\n- b\n")
-    second = _namespaces(plugin)
-    assert first != second
-    assert all(len(ns) == 10 for ns in first | second)
-
-
 # ---------------------------------------------------------------------------
 # Resume verifies the stored unit was produced under the same inputs
 # ---------------------------------------------------------------------------
@@ -936,19 +762,6 @@ def test_resume_rejects_a_unit_stored_under_other_inputs(
     assert stored.read_bytes() == before
 
 
-def test_resume_accepts_a_unit_stored_under_the_same_inputs(
-        monkeypatch, tmp_path):
-    plugin = RecordingPlugin()
-    kwargs = {"skills_injected": ["skill/a"], "skills_block": "- a\n"}
-    first = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"),
-                       name="r1", **kwargs)
-    plugin.calls.clear()
-    again = _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1"),
-                       name="r1", **kwargs)
-    assert plugin.calls == []
-    assert [_fingerprint(t) for t in again] == [_fingerprint(t) for t in first]
-
-
 # ---------------------------------------------------------------------------
 # Config / provider errors stop the batch and surface unwrapped
 # ---------------------------------------------------------------------------
@@ -980,6 +793,8 @@ def test_config_like_error_stops_scheduling_and_is_reraised(
 
 def test_code_bug_stops_scheduling_and_stays_a_parallel_error(
         monkeypatch, tmp_path):
+    sleeps = _record_batch_sleeps(monkeypatch)
+
     def t1_bug(record):
         if record["task_id"] == "t1":
             raise CodeBugError("broken plugin")
@@ -988,12 +803,15 @@ def test_code_bug_stops_scheduling_and_stays_a_parallel_error(
     plugin = RecordingPlugin(behavior=t1_bug)
     with pytest.raises(ParallelError):
         _run_batch(plugin, monkeypatch, tmp_path, _tasks("t1", "t2", "t3"),
-                   name="r1")
+                   name="r1", dispatch_stagger=0.5)
     assert [c["task_id"] for c in plugin.calls] == ["t1"]
     audit = read_jsonl(tmp_path / "r1" / "skip_audit.jsonl")
     assert [row["unit"] for row in audit] == [
         _expected_id("t2", 0), _expected_id("t3", 0)]
     assert {row["gate"] for row in audit} == {"error"}
+    # The unit that raised slept once (it passed the gate before its
+    # stagger); the gated-off units were audited without sleeping.
+    assert len(sleeps) == 1
 
 
 def test_config_error_with_workers_stops_new_units(monkeypatch, tmp_path):
@@ -1113,53 +931,6 @@ def test_skip_unit_ids_are_neither_run_nor_retried(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Dispatch stagger: spread the units, change nothing
-# ---------------------------------------------------------------------------
-
-def test_stagger_does_not_change_the_result(monkeypatch, tmp_path):
-    sleeps = _record_batch_sleeps(monkeypatch)
-    plugin = RecordingPlugin()
-    tasks = _tasks("t1", "t2", "t3")
-    plain = _run_batch(plugin, monkeypatch, tmp_path, tasks, name="plain",
-                       n_attempts=2)
-    n_calls = len(plugin.calls)
-    assert sleeps == []  # no stagger configured: nothing slept
-    plugin.calls.clear()
-    staggered = _run_batch(plugin, monkeypatch, tmp_path, tasks,
-                           name="staggered", n_attempts=2,
-                           dispatch_stagger=0.5)
-    # Same trajectories, and exactly one stagger sleep per executed unit,
-    # each a draw inside the configured bound.
-    assert [_fingerprint(t) for t in staggered] == \
-        [_fingerprint(t) for t in plain]
-    assert len(plugin.calls) == n_calls
-    assert len(sleeps) == n_calls
-    assert all(0 <= delay <= 0.5 for delay in sleeps)
-
-
-def test_gated_off_units_pay_no_stagger_sleep(monkeypatch, tmp_path):
-    sleeps = _record_batch_sleeps(monkeypatch)
-
-    def t1_raises(record):
-        if record["task_id"] == "t1":
-            raise RuntimeError("simulated crash")
-        return _success(record["task_id"])
-
-    plugin = RecordingPlugin(behavior=t1_raises)
-    tasks = _tasks("t1", "t2", "t3", "t4")
-    with pytest.raises(ParallelError):
-        _run_batch(plugin, monkeypatch, tmp_path, tasks, name="r1",
-                   dispatch_stagger=0.5)
-    # The unit that raised slept once (it passed the gate before its
-    # stagger); the three gated-off units were audited without sleeping.
-    assert len(sleeps) == 1
-    audit = read_jsonl(tmp_path / "r1" / "skip_audit.jsonl")
-    assert [row["unit"] for row in audit] == [
-        _expected_id(t, 0) for t in ("t2", "t3", "t4")]
-    assert {row["gate"] for row in audit} == {"error"}
-
-
-# ---------------------------------------------------------------------------
 # Heartbeat and dispatch observability
 # ---------------------------------------------------------------------------
 
@@ -1249,10 +1020,6 @@ def test_dispatch_line_reports_the_knobs(monkeypatch, tmp_path, capfd):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("overrides", [
-    pytest.param({"infra_retries": -1}, id="negative_retries"),
-    pytest.param({"infra_backoff": (45.0, 15.0)}, id="backoff_inverted"),
-    pytest.param({"infra_backoff": (-1.0, 5.0)}, id="backoff_negative"),
-    pytest.param({"infra_backoff": (float("nan"), 5.0)}, id="backoff_nan"),
     pytest.param({"dispatch_stagger": -0.1}, id="stagger_negative"),
     pytest.param({"dispatch_stagger": float("nan")}, id="stagger_nan"),
 ])

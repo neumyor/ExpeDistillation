@@ -26,63 +26,16 @@ from expedistill.core.config import (
     parse_phases,
 )
 from expedistill.infra.reliability import ConfigError as RunConfigError
-from expedistill.methods import resolve_params
 from expedistill.methods.execution import (
-    RealExecutionParams,
     RealFolderExecutionParams,
 )
 from expedistill.stages.phase_execute.resolve import execution_params
-
-
-# ---------------------------------------------------------------------------
-# The registry entry and its params class
-# ---------------------------------------------------------------------------
-
-def test_real_folder_resolves_its_params():
-    assert resolve_params("execution", {"name": "real_folder"}) == \
-        RealFolderExecutionParams()
-    for key in ("n_attempts", "max_injection_tokens"):
-        with pytest.raises(ConfigError, match="unknown"):
-            resolve_params("execution", {"name": "real_folder", key: 1})
-
-
-def test_real_folder_params_carry_the_executor_and_the_attempts():
-    assert list(RealFolderExecutionParams.__dataclass_fields__) == [
-        "executor", "attempts"]
-    assert RealFolderExecutionParams().executor == "executor_weak"
-    assert RealFolderExecutionParams().attempts is None
-    assert resolve_params(
-        "execution", {"name": "real_folder", "executor": "executor_strong",
-                      "attempts": 3}
-    ) == RealFolderExecutionParams(executor="executor_strong", attempts=3)
-    # The execution params classes stay distinct types.
-    assert RealFolderExecutionParams() != RealExecutionParams()
-    assert not isinstance(RealFolderExecutionParams(),
-                          RealExecutionParams)
-
-
-@pytest.mark.parametrize("attempts", [0, -1, True, "3"])
-def test_real_folder_refuses_a_bad_attempts(attempts):
-    with pytest.raises(ConfigError, match="attempts"):
-        resolve_params("execution", {"name": "real_folder",
-                                     "attempts": attempts})
-
-
-def test_real_folder_refuses_unknown_keys():
-    with pytest.raises(ConfigError, match="unknown"):
-        resolve_params("execution", {"name": "real_folder",
-                                     "arms": ["executor_weak"]})
+from tests.helpers.configs import BASELINE
 
 
 # ---------------------------------------------------------------------------
 # parse_phases: the folder <-> real_folder pairing
 # ---------------------------------------------------------------------------
-
-_BASELINE = {"kind": "execute", "role": "baseline", "tasks": "train",
-             "delivery": {"name": "none"},
-             "execution": {"name": "real",
-                           "arms": ["executor_strong", "executor_weak"]}}
-
 
 def _parse_pair(delivery, execution, role="test", tasks="test"):
     """The baseline plus one execute phase over the given pair (a practice
@@ -91,7 +44,7 @@ def _parse_pair(delivery, execution, role="test", tasks="test"):
              "delivery": {"name": delivery}, "execution": dict(execution)}
     if role == "practice":
         phases = {
-            "baseline": _BASELINE,
+            "baseline": BASELINE,
             "learn": {"kind": "learn",
                       "review": {"name": "review", "K": 5,
                                  "retry_limit": 2},
@@ -103,7 +56,7 @@ def _parse_pair(delivery, execution, role="test", tasks="test"):
         }
         sequence = ["baseline", "learn", "practice", "learn", "test"]
         return parse_phases(phases, sequence)["practice"]
-    return parse_phases({"baseline": _BASELINE, "test": phase},
+    return parse_phases({"baseline": BASELINE, "test": phase},
                         ["baseline", "test"])["test"]
 
 
@@ -146,7 +99,7 @@ def test_a_practice_phase_without_the_folder_is_refused():
 def test_real_folder_on_a_baseline_role_is_refused():
     # A baseline phase is two-armed and runs the bare real execution.
     with pytest.raises(ConfigError):
-        parse_phases({"baseline": {**_BASELINE,
+        parse_phases({"baseline": {**BASELINE,
                                    "delivery": {"name": "folder"},
                                    "execution": {"name": "real_folder"}}},
                      ["baseline"])

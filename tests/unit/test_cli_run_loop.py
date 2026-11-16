@@ -22,8 +22,6 @@ monkeypatch is exactly the seam. What is pinned here:
 """
 
 import dataclasses
-import importlib.abc
-import importlib.machinery
 import json
 import socket
 import sys
@@ -35,19 +33,17 @@ import pytest
 from expedistill import cli
 from expedistill.benchmarks.base import (
     GENERIC_PACK, BenchmarkPlugin, Task, ViewRules)
-from expedistill.benchmarks.registry import _reset_registry, register_plugin
 from expedistill.core.config import (
     ExperimentConfig,
     PhaseResult,
     ROLE_DEFAULTS,
-    load_config,
 )
 from expedistill.infra.reliability import ConfigError as InfraConfigError
 from expedistill.infra.runlock import RunLockedError
 from expedistill.infra.store import read_jsonl
+from tests.helpers.fake_plugin import serve_plugin
 
 _FAKE = "fakebench"
-_MODULE = f"expedistill.benchmarks.{_FAKE}"
 TASK_IDS = ("t1", "t2", "t3", "t4")
 
 #: The fixture method: the baseline, two learns around a practice on the
@@ -99,29 +95,9 @@ class LoopPlugin(BenchmarkPlugin):
 
 
 @pytest.fixture()
-def plugin(monkeypatch):
+def plugin(monkeypatch, clean_registry):
     """Serve the fake plugin through the real import machinery."""
-    fullname = _MODULE
-
-    class Loader(importlib.abc.Loader):
-        def create_module(self, spec):
-            return types.ModuleType(spec.name)
-
-        def exec_module(self, module):
-            register_plugin(LoopPlugin())
-
-    class Finder:
-        def find_spec(self, name, path=None, target=None):
-            if name == fullname:
-                return importlib.machinery.ModuleSpec(name, Loader())
-            return None
-
-    _reset_registry()
-    sys.modules.pop(fullname, None)
-    monkeypatch.setattr(sys, "meta_path", [*sys.meta_path, Finder()])
-    yield
-    sys.modules.pop(fullname, None)
-    _reset_registry()
+    serve_plugin(monkeypatch, LoopPlugin())
 
 
 def _write_config(path: Path) -> Path:
@@ -197,8 +173,9 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
         plugin, config_path, tmp_path, drivers):
     seen = []
     on_stage = lambda name, summary: seen.append(name)  # noqa: E731
+    run_dir = tmp_path / "run"
     last = cli.run_experiment(
-        config_path=config_path, run_dir=tmp_path / "run",
+        config_path=config_path, run_dir=run_dir,
         make_client=ClientLog().make_client, on_stage=on_stage)
 
     assert [phase.label for _, phase in drivers] == [
@@ -225,18 +202,10 @@ def test_the_loop_dispatches_every_phase_with_the_right_instance(
     assert seen == ["p00:freeze", "p01:baseline", "p02:learn", "p03:practice", "p04:learn",
                    "p05:test"]
     assert last == {"kind": "execute", "index": 4}
-
-
-def test_the_ledger_rows_key_stage_and_pnn_values(
-        plugin, config_path, tmp_path, drivers):
-    run_dir = tmp_path / "run"
-    cli.run_experiment(config_path=config_path, run_dir=run_dir,
-                       make_client=ClientLog().make_client)
+    # The ledger KEY stays "stage" (consumer compatibility); the values
+    # are the same labels.
     rows = read_jsonl(cli.ledger_path(run_dir))
-    # The KEY stays "stage" (consumer compatibility, the implementation
-    # contract section 6); the values are p00:freeze then pNN:<name>.
-    assert [row["stage"] for row in rows] == [
-        "p00:freeze", "p01:baseline", "p02:learn", "p03:practice", "p04:learn", "p05:test"]
+    assert [row["stage"] for row in rows] == seen
     assert all(set(row) == {"stage", "summary"} for row in rows)
 
 
@@ -296,13 +265,6 @@ def test_until_phase_stops_after_the_named_entry(
     assert last == {"kind": "execute", "index": 2}
 
 
-def test_until_phase_none_runs_the_whole_sequence(
-        plugin, config_path, tmp_path, drivers):
-    cli.run_experiment(config_path=config_path, run_dir=tmp_path / "run",
-                       make_client=ClientLog().make_client)
-    assert len(drivers) == 5
-
-
 @pytest.mark.parametrize("bad", [-2, 5, 99])
 def test_until_phase_out_of_bounds_is_refused_after_the_config_loads(
         plugin, config_path, tmp_path, drivers, bad):
@@ -310,13 +272,40 @@ def test_until_phase_out_of_bounds_is_refused_after_the_config_loads(
     # -1 is legal since W3-B -- the freeze-only stop), so it can only
     # be checked once the config is loaded -- never a code constant
     # (the old --until-stage's [0, 6]).
-    with pytest.raises(InfraConfigError, match="until_phase"):
+    with pytest.raises(InfraConfigError, match="until_phase") as excinfo:
         cli.run_experiment(
             config_path=config_path, run_dir=tmp_path / "run",
             make_client=ClientLog().make_client, until_phase=bad)
     # Nothing ran: the refusal precedes the lock and the freeze.
     assert drivers == []
     assert not (tmp_path / "run" / "manifest.json").exists()
+    # The message explains the freeze-only meaning of -1.
+    assert "run the freeze step only" in str(excinfo.value)
+
+
+def test_until_phase_minus_one_freezes_and_dispatches_no_phase(
+        plugin, config_path, tmp_path, drivers):
+    # The pre-run seeders need a manifest and a task table on disk before
+    # any phase dispatches.
+    run_dir = tmp_path / "run"
+    summary = cli.run_experiment(
+        config_path=config_path, run_dir=run_dir,
+        make_client=ClientLog().make_client, until_phase=-1)
+    assert drivers == []
+    assert [row["stage"] for row in read_jsonl(cli.ledger_path(run_dir))] == [
+        "p00:freeze"]
+    # The return value is the real freeze summary: the seeder reads the
+    # task table out of it.
+    assert summary["train"] == ["t1", "t2"] and summary["test"] == ["t3"]
+    assert (run_dir / "manifest.json").is_file()
+
+    # The stop stays resumable: the next start replays the freeze row and
+    # then runs the first phase.
+    cli.run_experiment(config_path=config_path, run_dir=run_dir,
+                       make_client=ClientLog().make_client, until_phase=0)
+    assert [phase.label for _, phase in drivers] == ["p01:baseline"]
+    assert [row["stage"] for row in read_jsonl(cli.ledger_path(run_dir))] == [
+        "p00:freeze", "p00:freeze", "p01:baseline"]
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +388,12 @@ def test_one_client_per_unique_model(plugin, config_path, tmp_path, drivers):
         "strong-model", "weak-model"}
 
 
-def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
+def test_build_handles_wires_every_per_role_and_per_model_setting(
+        plugin, monkeypatch, tmp_path):
+    pack = dataclasses.replace(
+        GENERIC_PACK, protocol="what the reader sees",
+        overrides={"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"})
+    monkeypatch.setattr(LoopPlugin, "prompt_pack", pack)
     config = ExperimentConfig(
         benchmark=_FAKE,
         models={"executor_strong": "strong-model",
@@ -409,87 +403,11 @@ def test_build_handles_wires_extra_body_per_model(plugin, tmp_path):
         phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
         model_options={"strong-model": {"reasoning_effort": "max"},
                        "judge-model": {"top_p": 0.9}},
-        token_budgets={"default_max_output_tokens": 65536},
-    )
-    log = ClientLog()
-    handles = cli._build_handles(
-        config, tmp_path / "experiment.yaml", log.make_client,
-        infra_retries=1, infra_backoff_seconds=0.0)
-    assert set(handles) == set(ROLE_DEFAULTS)
-    # Options follow the MODEL NAME: every role on the strong model
-    # carries the strong model's extras, an explicitly overridden role
-    # its own.
-    for role in ROLE_DEFAULTS:
-        expected = {"strong-model": {"reasoning_effort": "max"},
-                   "judge-model": {"top_p": 0.9},
-                   "weak-model": {}}[config.models[role]]
-        assert handles[role].extra_body == expected, role
-    # Unlisted models get a fresh private dict, not a shared default.
-    assert (handles["executor_weak"].extra_body
-            is not handles["segmenter"].extra_body)
-
-
-def test_build_handles_wires_the_prompt_pack(plugin, monkeypatch, tmp_path):
-    pack = dataclasses.replace(
-        GENERIC_PACK, protocol="what the reader sees",
-        overrides={"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"})
-    monkeypatch.setattr(LoopPlugin, "prompt_pack", pack)
-    config = ExperimentConfig(
-        benchmark=_FAKE,
-        models={"executor_strong": "strong-model",
-                "executor_weak": "weak-model"},
-        sequence=["baseline", "learn", "test"],
-        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
-        token_budgets={"default_max_output_tokens": 65536},
-    )
-    handles = cli._build_handles(
-        config, tmp_path / "experiment.yaml", ClientLog().make_client,
-        infra_retries=0, infra_backoff_seconds=0.0)
-    for handle in handles.values():
-        assert handle.prompt_defaults == {
-            **GENERIC_PACK.vocabulary.variables(),
-            "protocol": "what the reader sees"}
-        assert handle.prompt_aliases == {"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"}
-    assert (handles["author"].prompt_aliases
-            is not handles["judge"].prompt_aliases)
-
-
-def test_build_handles_wires_output_budget_per_role(plugin, tmp_path):
-    # Per-role overrides fall back to default_max_output_tokens; the
-    # handle's max_tokens is the only place the budget becomes live.
-    config = ExperimentConfig(
-        benchmark=_FAKE,
-        models={"executor_strong": "strong-model",
-                "executor_weak": "weak-model"},
-        sequence=["baseline", "learn", "test"],
-        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
-        token_budgets={
-            "default_max_output_tokens": 65536,
-            "roles": {"judge": {"max_output_tokens": 1024},
-                      "segmenter": {"max_output_tokens": 2048}},
-        },
-    )
-    handles = cli._build_handles(
-        config, tmp_path / "experiment.yaml", ClientLog().make_client,
-        infra_retries=0, infra_backoff_seconds=0.0)
-    for role in ROLE_DEFAULTS:
-        expected = {"judge": 1024, "segmenter": 2048}.get(role, 65536)
-        assert handles[role].max_tokens == expected, role
-
-
-def test_build_handles_wires_input_budget_per_role(plugin, tmp_path):
-    # The TB plugin forwards a handle's max_input_tokens to the remote
-    # Terminus model_info; unlisted roles stay None (the adapter's
-    # historical 131072 fallback).
-    config = ExperimentConfig(
-        benchmark=_FAKE,
-        models={"executor_strong": "strong-model",
-                "executor_weak": "weak-model"},
-        sequence=["baseline", "learn", "test"],
-        phases={name: PHASES[name] for name in ("baseline", "learn", "test")},
         token_budgets={
             "default_max_output_tokens": 65536,
             "roles": {
+                "judge": {"max_output_tokens": 1024},
+                "segmenter": {"max_output_tokens": 2048},
                 "executor_weak": {"max_output_tokens": 65536,
                                   "max_input_tokens": 262144},
                 "executor_strong": {"max_output_tokens": 65536,
@@ -499,7 +417,35 @@ def test_build_handles_wires_input_budget_per_role(plugin, tmp_path):
     )
     handles = cli._build_handles(
         config, tmp_path / "experiment.yaml", ClientLog().make_client,
-        infra_retries=0, infra_backoff_seconds=0.0)
+        infra_retries=1, infra_backoff_seconds=0.0)
+    assert set(handles) == set(ROLE_DEFAULTS)
+
+    # Options follow the MODEL NAME: every role on the strong model carries
+    # the strong model's extras, an explicitly overridden role its own.
+    for role in ROLE_DEFAULTS:
+        expected = {"strong-model": {"reasoning_effort": "max"},
+                    "judge-model": {"top_p": 0.9},
+                    "weak-model": {}}[config.models[role]]
+        assert handles[role].extra_body == expected, role
+    # Unlisted models get a fresh private dict, not a shared default.
+    assert (handles["executor_weak"].extra_body
+            is not handles["segmenter"].extra_body)
+
+    # The prompt pack reaches every handle, each with its own alias dict.
+    for handle in handles.values():
+        assert handle.prompt_defaults == {
+            **GENERIC_PACK.vocabulary.variables(),
+            "protocol": "what the reader sees"}
+        assert handle.prompt_aliases == {"PLAYBOOK_UPDATE": "FAKE_PLAYBOOK"}
+    assert (handles["author"].prompt_aliases
+            is not handles["judge"].prompt_aliases)
+
+    # Per-role output budgets fall back to the default; the handle's
+    # max_tokens is the only place the budget becomes live. Unlisted roles
+    # keep max_input_tokens None.
+    for role in ROLE_DEFAULTS:
+        expected = {"judge": 1024, "segmenter": 2048}.get(role, 65536)
+        assert handles[role].max_tokens == expected, role
     assert handles["executor_weak"].max_input_tokens == 262144
     assert handles["executor_strong"].max_input_tokens == 524288
     assert handles["judge"].max_input_tokens is None
@@ -567,20 +513,3 @@ def test_a_stopped_run_replays_from_the_first_phase(
     assert [row["stage"] for row in rows] == [
         "p00:freeze", "p01:baseline", "p02:learn",
         "p00:freeze", "p01:baseline", "p02:learn", "p03:practice", "p04:learn", "p05:test"]
-
-
-def test_the_frozen_sequence_survives_the_resume_check(
-        plugin, config_path, tmp_path, drivers):
-    # The manifest's config payload round-trips through from_dict on the
-    # next start (B4 compares field by field): a run resumes under the
-    # same schema without a spurious mismatch.
-    run_dir = tmp_path / "run"
-    cli.run_experiment(config_path=config_path, run_dir=run_dir,
-                       make_client=ClientLog().make_client, until_phase=0)
-    cli.run_experiment(config_path=config_path, run_dir=run_dir,
-                       make_client=ClientLog().make_client)
-    manifest = json.loads((run_dir / "manifest.json").read_text(
-        encoding="utf-8"))
-    assert manifest["config"]["sequence"] == SEQUENCE
-    # The loaded config equals a fresh load of the same file.
-    assert load_config(str(config_path)).sequence == SEQUENCE

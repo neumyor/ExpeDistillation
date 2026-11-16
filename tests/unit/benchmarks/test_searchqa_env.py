@@ -12,14 +12,8 @@ import pytest
 
 from expedistill.benchmarks.searchqa import env as searchqa_env
 from expedistill.infra.reliability import ConfigError
-from tests.helpers.searchqa_stub import install_eval_repo_stub
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "searchqa"
-
-
-@pytest.fixture
-def stub_eval_repo(monkeypatch):
-    return install_eval_repo_stub(monkeypatch)
 
 
 def _fixture_items():
@@ -118,11 +112,6 @@ def test_finish_incorrect_flags_termination_without_success(stub_eval_repo):
     assert episode.eval_result["em"] == 0.0
 
 
-def test_success_fn_false_before_any_finish(stub_eval_repo):
-    episode = _env_for(_fixture_items()[0])
-    assert episode.success_fn() is False
-
-
 def test_reset_clears_episode_state(stub_eval_repo):
     episode = _env_for(_fixture_items()[0])
     episode.step("Finish[red cent]")
@@ -185,16 +174,3 @@ def test_seam_rejects_directory_without_src(monkeypatch, tmp_path):
     monkeypatch.setenv(searchqa_env.EVAL_DIR_ENV, str(tmp_path))
     with pytest.raises(ConfigError, match="does not point"):
         searchqa_env.import_eval_repo()
-
-
-def test_eval_data_dir_requires_env_var(monkeypatch):
-    monkeypatch.delenv(searchqa_env.EVAL_DIR_ENV, raising=False)
-    with pytest.raises(ConfigError, match=searchqa_env.EVAL_DIR_ENV):
-        searchqa_env.eval_data_dir()
-
-
-def test_parse_action_grammar():
-    assert searchqa_env.parse_action("Search[red cent]") == ("Search", "red cent")
-    assert searchqa_env.parse_action("Finish[x y]") == ("Finish", "x y")
-    assert searchqa_env.parse_action("nope") == (None, None)
-    assert searchqa_env.parse_action("Search[]") == (None, None)

@@ -12,7 +12,7 @@ from expedistill.core.models import Step, Subtask, Trajectory
 from expedistill.infra.reliability import (
     InfrastructureError, ModelOutputError, UnitFailureRecorder)
 from expedistill.infra.store import Store, read_jsonl
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 
 LEARN = "p02:learn"
 

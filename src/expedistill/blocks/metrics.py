@@ -1,8 +1,10 @@
 """D3 score statistics (layer 4).
 
-Pure counting over Trajectory objects; no model, no disk. The metric
-definitions follow the TB campaign's ``scripts/tb21/tb_stats.py`` so stage-1
-and stage-6 numbers stay comparable with the reference pipeline:
+Pure aggregation over per-task counts (``attempts`` / ``valid`` / ``success`` /
+``infra``, built by ``composites/unit_summary.task_metrics``); no model, no
+disk. The metric definitions follow the TB campaign's
+``scripts/tb21/tb_stats.py`` so baseline and test numbers stay comparable with
+the reference pipeline:
 
 * ``avg@N`` -- per task, average over that task's SCORED trials first
   (success / valid), then average over tasks. Tasks whose trials were all
@@ -18,113 +20,34 @@ and stage-6 numbers stay comparable with the reference pipeline:
   notion (e.g. SearchQA's sub_EM substring match beside the strict-EM
   primary) reported ALWAYS alongside the primary under both avg@N
   disciplines, never swapped in or chosen between after seeing results.
-  The metric stays benchmark-blind here: the caller passes the scorer as a
-  callable and the metric's frozen NAME; the plugin contract
+  The metric stays benchmark-blind here: the caller supplies the per-task
+  ``aux_success`` counts and the metric's frozen NAME; the plugin contract
   (``benchmarks/base.py``) maps trajectories to auxiliary success. An
   unscored/missing unit is never an auxiliary success, and the auxiliary
   averages use the same denominators as the primary.
 
-An attempt without a scorer verdict is never a model failure (README 1.3,
-E1 row): ``correctness=None`` (a run that came back with no scorer verdict)
-and an absent unit (a run that never came back -- K1 never stores a unit
-whose infrastructure retries ran out) both count as ``infra``, separately
-from valid/success everywhere.
-
-The expected unit set: on real data an infrastructure failure usually shows
-up as a MISSING trajectory. Counting only what came back would let a task
-whose every attempt exhausted infra vanish from all denominators (the
-conservative avg@N would equal the conditional one, ``infra_tasks`` would
-always be empty, and two arms could be compared over different task sets).
-Callers that know which units they asked for pass ``expected`` (task_id ->
-n_attempts) and every expected unit without a trajectory is counted as one
-infra attempt.
+An attempt without a scorer verdict is never a model failure:
+``correctness=None`` (a run that came back with no scorer verdict) and an
+absent unit (a run that never came back) both count as ``infra``, separately
+from valid/success everywhere. The caller counts every expected unit, so a
+task whose every attempt exhausted infra still appears in the denominators
+instead of vanishing.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set
+from typing import Any, Dict, Optional
 
-from expedistill.core.models import Trajectory
-
-__all__ = ["compute_task_metrics", "summarize"]
-
-
-def compute_task_metrics(
-    trajectories: List[Trajectory],
-    expected: Optional[Mapping[str, int]] = None,
-    aux_scorer: Optional[Callable[[Trajectory], bool]] = None,
-) -> Dict[str, Dict[str, int]]:
-    """Count per-task attempts / valid / success / infra, keyed by raw task_id.
-
-    Uses the task_id exactly as given on each Trajectory (benchmark-native,
-    no prefixing). The four counts satisfy ``attempts == valid + infra``: a
-    stored trajectory counts as valid when its scorer verdict came back
-    (``correctness`` is True / False) and as infra when it did not
-    (``correctness`` is None -- module docstring), and an absent expected
-    unit is one infra attempt.
-
-    ``expected`` (task_id -> n_attempts) is the unit set the caller asked
-    for: every expected task gets an entry, and each of its attempts with no
-    trajectory counts as ``infra`` (module docstring). A trajectory of a task
-    outside ``expected`` is a ValueError -- the caller's unit set and its
-    trajectories disagree, and silently widening the denominator would hide
-    it. ``expected=None`` counts exactly the given trajectories.
-
-    ``aux_scorer`` (plugin-declared auxiliary metric, module docstring)
-    adds an ``aux_success`` count per task: scored trajectories the scorer
-    accepts. An unscored trajectory and an absent expected unit are never
-    auxiliary successes. Without a scorer no key is added, so the per-task
-    dicts keep their exact four-field shape.
-    """
-    if expected is not None:
-        unexpected = sorted({traj.task_id for traj in trajectories}
-                            - set(expected))
-        if unexpected:
-            raise ValueError(
-                f"trajectories for tasks outside the expected unit set: "
-                f"{unexpected}")
-    metrics: Dict[str, Dict[str, int]] = {}
-
-    def new_counts() -> Dict[str, int]:
-        counts = {"attempts": 0, "valid": 0, "success": 0, "infra": 0}
-        if aux_scorer is not None:
-            counts["aux_success"] = 0
-        return counts
-
-    seen: Dict[str, Set[int]] = {}
-    for traj in trajectories:
-        seen.setdefault(traj.task_id, set()).add(traj.attempt_index)
-        per_task = metrics.setdefault(traj.task_id, new_counts())
-        per_task["attempts"] += 1
-        if traj.correctness is not None:
-            per_task["valid"] += 1
-            if aux_scorer is not None and aux_scorer(traj):
-                per_task["aux_success"] += 1
-        if traj.correctness is True:
-            per_task["success"] += 1
-        if traj.correctness is None:
-            per_task["infra"] += 1
-    for task_id, n_attempts in (expected or {}).items():
-        per_task = metrics.setdefault(task_id, new_counts())
-        present = {i for i in seen.get(task_id, ()) if 0 <= i < n_attempts}
-        missing = n_attempts - len(present)
-        per_task["attempts"] += missing
-        per_task["infra"] += missing
-    return metrics
+__all__ = ["summarize"]
 
 
 def summarize(
     task_metrics: Dict[str, Dict[str, int]],
-    n_attempts: int,
     aux_metric: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Aggregate per-task metrics into avg@N / pass@N (definitions above).
 
-    ``n_attempts`` is the frozen sampling depth of the run. It is not used by
-    the two aggregate definitions themselves; it is part of the signature so
-    callers pass the frozen value alongside the metrics and future aggregates
-    that depend on it (e.g. "share of tasks with a full valid sample") need no
-    signature change. ``avg_at_n`` is None when no task has a valid trial.
+    ``avg_at_n`` is None when no task has a valid trial.
 
     Two avg@N disciplines are reported side by side (pre-registered, never
     picked between after seeing results):
@@ -135,13 +58,12 @@ def summarize(
       one when comparing against the TB21 campaign numbers; report both.
 
     ``aux_metric`` names the plugin-declared auxiliary metric whose per-task
-    ``aux_success`` counts ``task_metrics`` carries (pass the same plugin's
-    scorer to ``compute_task_metrics``); the summary then reports ``aux`` =
+    ``aux_success`` counts ``task_metrics`` carries; the summary then reports ``aux`` =
     ``{"metric": <name>, "avg_at_n": ..., "avg_at_n_conservative": ...}``
     under the SAME two disciplines as the primary. Without a name ``aux`` is
     None -- the field is always present, never silently dropped, and a name
     over counts without ``aux_success`` is a ValueError (the wiring forgot
-    the scorer, and a silent zero would fake a measured number).
+    the counts, and a silent zero would fake a measured number).
     """
     n_tasks = len(task_metrics)
     rates = [
@@ -163,7 +85,7 @@ def summarize(
             raise ValueError(
                 f"summarize(aux_metric={aux_metric!r}) got task metrics "
                 f"without aux_success counts for {without_counts}; pass the "
-                "plugin's auxiliary scorer to compute_task_metrics")
+                "auxiliary success counts")
         aux_rates = [
             per_task["aux_success"] / per_task["valid"]
             for per_task in task_metrics.values()

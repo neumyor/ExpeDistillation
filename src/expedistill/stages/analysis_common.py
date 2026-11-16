@@ -17,21 +17,15 @@ of an earlier phase.
 """
 
 import json
-import re
 from pathlib import Path
-from typing import Any, List, Mapping, Union
+from typing import Any, Mapping, Union
 
-from expedistill.composites import phase_bank
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import read_json, write_json
 
-__all__ = ["PINNED_NAME", "bank_phase_labels", "phase_number",
-           "prepare_out_dir"]
+__all__ = ["PINNED_NAME", "prepare_out_dir"]
 
 PINNED_NAME = "analysis_config.json"
-
-_PHASE_DIR_RE = re.compile(r"p([0-9]+)_(.+)")
-_PHASE_LABEL_RE = re.compile(r"p([0-9]+):.+")
 
 
 def prepare_out_dir(run_dir: Union[str, Path], out_dir: Union[str, Path],
@@ -60,30 +54,3 @@ def prepare_out_dir(run_dir: Union[str, Path], out_dir: Union[str, Path],
     else:
         write_json(path, wanted, indent=2)
     return out
-
-
-def phase_number(phase_label: str) -> int:
-    """The ``NN`` of a ``pNN:<name>`` phase label."""
-    match = _PHASE_LABEL_RE.fullmatch(phase_label)
-    if match is None:
-        raise ConfigError(
-            f"{phase_label!r} is not a 'pNN:<name>' phase label")
-    return int(match.group(1))
-
-
-def bank_phase_labels(run_dir: Union[str, Path]) -> List[str]:
-    """The labels of the phases that left a bank artifact, oldest first.
-
-    A phase counts by the artifact's presence (the same signal the phase
-    drivers use to find the bank an execute phase receives).
-    """
-    phases_dir = Path(run_dir) / phase_bank.PHASES_DIR
-    if not phases_dir.is_dir():
-        return []
-    found = []
-    for entry in phases_dir.iterdir():
-        match = _PHASE_DIR_RE.fullmatch(entry.name)
-        if match is not None and (entry / phase_bank.BANK_NAME).exists():
-            found.append((int(match.group(1)),
-                          f"p{match.group(1)}:{match.group(2)}"))
-    return [label for _, label in sorted(found)]

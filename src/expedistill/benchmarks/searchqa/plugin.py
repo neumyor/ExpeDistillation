@@ -1,7 +1,7 @@
 """SearchQA benchmark plugin (layer 3): E1's local stepwise runner.
 
 The plugin is a thin adapter over the outer benchmark/searchqa-eval repo
-(README 1.3: environment, task table and scoring come from that repo; the
+(environment, task table and scoring come from that repo; the
 runner only adapts). Task data, the pre-retrieved context passages and the
 EM/F1/sub_EM scoring are all delegated at run time through the
 ``env.import_eval_repo`` seam; this module owns only loading, the prompt and
@@ -11,7 +11,7 @@ Design choices pinned here:
 
 - ``Task.instruction`` is the bare question. The eval repo's own protocol is
   single-turn (it stuffs the truncated context into one prompt); this runner
-  is stepwise instead (README 1.3: SearchQA runs locally, step by step), so
+  is stepwise instead (SearchQA runs locally, step by step), so
   the context enters through the env's ``Search`` actions rather than the
   instruction.
 - ``load_tasks(None)`` loads the full materialized task set: the train, val
@@ -46,7 +46,7 @@ from expedistill.benchmarks.skill_folder import (
 )
 from expedistill.core.models import Trajectory
 from expedistill.infra.reliability import CodeBugError, ConfigError
-from expedistill.inject import format_playbook_block
+from expedistill.inject.skills import format_playbook_block
 from expedistill.prompts import PromptSpec, register
 
 # Same-package import through the module object (not ``from .env import``)
@@ -253,7 +253,7 @@ class SearchQAPlugin(BenchmarkPlugin):
     # ------------------------------------------------------------------
 
     def run(self, task: Task, handle: Any, skills_block: str,
-            workdir: Optional[Union[str, Path]], usage: Any = None) -> RunOutcome:
+            workdir: Optional[Union[str, Path]]) -> RunOutcome:
         """Run one task once, stepwise, through the shared ReAct loop."""
         max_steps = self.max_steps()
         episode_env = _env.SearchQAEnv(
@@ -280,9 +280,8 @@ class SearchQAPlugin(BenchmarkPlugin):
             task_prompt_name=prompt_name,
             skills_block=skills_block,
             max_steps=max_steps,
-            usage=usage,
-            # No run_dir: request dumps follow the handle's run_dir (K1
-            # attaches <run>), not the per-unit workdir (README section 2).
+            # Request dumps follow the handle's run_dir (K1 attaches <run>),
+            # not the per-unit workdir (design_spec 4.3).
             view_rules=self.view_rules,
             skill_folder=folder,
         )

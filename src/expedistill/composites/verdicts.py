@@ -1,32 +1,18 @@
-"""The acceptance module's per-run grading core (layer 5, pure functions).
+"""The per-run grading core (layer 5, pure functions).
 
-R1 (docs/decisions/execute_learn_repair_plan_20261016.md): one module
-answers "did this run make it" for the whole loop.  The answer-sheet path
-grades ONE trial at a time (``grade_sheet``) and leaves coverage and unit
-aggregation to ``composites/coverage.py`` and
+One module answers "did this run make it" for the whole loop.  The
+answer-sheet path grades ONE trial at a time (``grade_sheet``) and leaves
+coverage and unit aggregation to ``composites/coverage.py`` and
 ``composites/unit_summary.py``.
-
-The acceptance module system (boundaries doc §2.3 / §3.4 -- everything
-that needs a model to judge belongs to acceptance):
 
 * this file: the named per-run verdict rules and ``grade_sheet``;
 * ``composites/answer_sheets.py`` / ``coverage.py`` / ``unit_summary.py``:
   the trial-level envelope, coverage and pure unit aggregation.
 
-Where G1's sites stand after this module:
-
-1. ``benchmarks/tb/plugin.py``'s ``classify_result`` -- RETIRED from the
-   execution path since R2b: the plugin reports facts (score, errors)
-   and this module's named rules draw the conclusion, and
-   ``classify_result`` survives only as the archive validator's
-   historical lens (its one remaining consumer,
-   scripts/analysis/tb_archive_validate.py);
-2. ``batch_execute.py``'s infra retry -- W1-B / Wave 2: an invalid run is
-   acceptance's verdict; the re-dispatch is the phase driver's.
-
-R4 (acceptance side): nothing in this module writes the skill bank --
-no ``discard_skill``, no status commit. Acceptance produces facts; the
-actions are the decision module's.
+The plugin reports facts (score, errors) and this module's named rules
+draw the conclusion; an invalid run is this module's verdict, and the
+re-dispatch is the phase driver's. Nothing in this module writes the
+skill bank: grading produces facts, the actions are the learn phases'.
 """
 
 from typing import Any, Mapping, Tuple

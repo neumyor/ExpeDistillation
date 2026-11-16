@@ -35,7 +35,7 @@ trap this closes: a new config run by old code dropped ``token_budgets``
 without a trace and fell back to the dead 5120 default.
 
 Deviation from the layer rule "core depends on stdlib only": ``load_config``
-needs YAML, and the wave spec places it here. The ``yaml``
+needs YAML, and the design places it here. The ``yaml``
 import is function-local so that importing the data model never pulls the
 dependency in.
 """
@@ -116,8 +116,7 @@ class ConfigError(ValueError):
 # reference method's three learn phases share one definition). Local names
 # are restricted to a colon-free charset because the pipeline_log stage
 # value and every per-phase path key off the label ``pNN:<local name>``
-# (composites.decision.parse_unit_id, composites.phase_bank and
-# ids.phase_tag all refuse anything else).
+# (composites.phase_bank and ids.phase_tag both refuse anything else).
 #
 # Phase specs are DATACLASSES, not TypedDicts, for the same reason the
 # rest of core's records are: ``__post_init__`` is where the load-time
@@ -179,10 +178,9 @@ FRESH_BARE = "fresh_bare"
 
 #: The other control source a ``compare`` may name: the control numbers
 #: come from an EXTERNAL campaign's frozen score file (the AgentBrew
-#: bare-run archive) instead of any execution this run owns -- the v4
-#: image of the old stage-6 ``control_source: external_campaign``
-#: ruling (the bare control arm is never re-run; the comparison reads
-#: the byte-identical campaign harness's numbers). It REQUIRES the
+#: bare-run archive) instead of any execution this run owns -- the
+#: bare control arm is never re-run; the comparison reads the
+#: byte-identical campaign harness's numbers. It REQUIRES the
 #: ``external`` block naming the score file (path + sha256 + the campaign's
 #: model key for this run's weak executor), so the control's identity is
 #: pinned in the frozen config exactly like every other method input.
@@ -211,7 +209,7 @@ DEFAULT_INVALID_REDISPATCH_LIMIT = 1
 
 #: Phase local names: colon-free and directory-safe. The colon is the
 #: label separator, so it is the one character a name can never carry
-#: (decision.parse_unit_id splits on it; phase_bank maps it to ``_``).
+#: (ids.parse_trajectory_id re-splits on it; phase_bank maps it to ``_``).
 PHASE_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 #: The pipeline_log stage value of the freeze step: freeze is always

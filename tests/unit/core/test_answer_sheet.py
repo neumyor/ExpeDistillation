@@ -1,9 +1,10 @@
-"""Trial-level answer-sheet dataclasses' serialization unit tests.
+"""Trial-level answer-sheet serialization unit tests.
 
-``to_dict`` is the derived-artifact surface (the JSON export), so each
-record kind is checked for its exact payload shape: a trajectory's steps
-become plain dicts, an external trial carries its rewards, and the trial envelope nests coverage,
-execution and grading without inventing fields.
+``to_dict`` is the derived-artifact surface (the JSON export). The golden
+answer sheets pin the per-field payloads; these tests keep the three
+structural behaviours: steps flatten to plain dicts, the envelope nests
+coverage, execution and grading, and a gap sheet keeps execution and
+grading as None.
 """
 
 from dataclasses import fields
@@ -13,7 +14,6 @@ from expedistill.core.answer_sheet import (
     CoverageRecord,
     ExecutionRecord,
     GradingRecord,
-    UnitSummary,
 )
 from expedistill.core.models import Step
 
@@ -57,76 +57,6 @@ def test_execution_record_to_dict_serializes_steps_as_plain_dicts():
     assert payload["raw_correctness"] is True
 
 
-def test_execution_record_to_dict_keeps_an_absent_step_list_none():
-    payload = _execution(steps=None, kind="external").to_dict()
-    assert payload["steps"] is None
-
-
-def test_execution_record_has_no_exam_answer_payload():
-    # The text exam is gone: a trial is a trajectory or an external reward.
-    assert "answer" not in {field.name for field in fields(ExecutionRecord)}
-
-
-def test_execution_record_to_dict_carries_the_injected_skills():
-    record = _execution(
-        skills_injected=[{"skill_id": "type/001/skill", "version": 2}],
-        aux={"note": "kept"},
-        raw_correctness=None,
-    )
-    payload = record.to_dict()
-    assert payload["skills_injected"] == [
-        {"skill_id": "type/001/skill", "version": 2}]
-    assert payload["aux"] == {"note": "kept"}
-    assert payload["raw_correctness"] is None
-
-
-def test_execution_record_to_dict_carries_external_rewards():
-    record = _execution(
-        sheet_id="external:unit-1:0",
-        kind="external",
-        source="external",
-        rewards=[1.0],
-        metrics={"reward": 1.0},
-        raw_correctness=True,
-        artifacts={"source": "campaign", "sha256": "abc"},
-    )
-    payload = record.to_dict()
-    assert payload["kind"] == "external"
-    assert payload["source"] == "external"
-    assert payload["rewards"] == [1.0]
-    assert payload["artifacts"] == {"source": "campaign", "sha256": "abc"}
-
-
-def test_coverage_and_grading_records_serialize_every_field():
-    coverage = CoverageRecord(
-        unit_id="unit-1",
-        attempt_index=1,
-        present=False,
-        status="terminal",
-        cause="leak",
-        artifacts={"skill_id": "s1"},
-    )
-    assert coverage.to_dict() == {
-        "unit_id": "unit-1",
-        "attempt_index": 1,
-        "present": False,
-        "status": "terminal",
-        "cause": "leak",
-        "artifacts": {"skill_id": "s1"},
-    }
-
-    grading = GradingRecord(
-        verdict="success",
-        basis="scorer: the benchmark's own scorer",
-        rule_name="scorer",
-    )
-    assert grading.to_dict() == {
-        "verdict": "success",
-        "basis": "scorer: the benchmark's own scorer",
-        "rule_name": "scorer",
-    }
-
-
 def test_answer_sheet_to_dict_nests_execution_coverage_and_grading():
     coverage = CoverageRecord(
         unit_id="unit-1", attempt_index=0, present=True, status="present")
@@ -165,31 +95,3 @@ def test_answer_sheet_to_dict_keeps_a_gap_sheet_execution_and_grading_none():
     assert payload["execution"] is None
     assert payload["grading"] is None
     assert payload["coverage"]["cause"] == "accepted_hole"
-
-
-def test_unit_summary_to_dict_is_its_whole_declared_state():
-    summary = UnitSummary(
-        unit_id="unit-1",
-        phase_label="p03:live",
-        task_ref="tb:task-1",
-        role="weak",
-        arm="with_bank",
-        expected_attempts=2,
-        injected_skills=[{"skill_id": "s1", "version": 1}],
-        valid_count=1,
-        success_count=1,
-        status="normal",
-        cause="",
-        sheet_ids=["sheet-0"],
-        artifacts={"sheet_ids": ["sheet-0", "gap:unit-1:1"]},
-        aux_success_count=1,
-    )
-    payload = summary.to_dict()
-    assert set(payload) == {field.name for field in fields(UnitSummary)}
-    assert payload["valid_count"] == 1
-    assert payload["success_count"] == 1
-    assert payload["status"] == "normal"
-    assert payload["cause"] == ""
-    assert payload["sheet_ids"] == ["sheet-0"]
-    assert payload["aux_success_count"] == 1
-    assert payload["injected_skills"] == [{"skill_id": "s1", "version": 1}]

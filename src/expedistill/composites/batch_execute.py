@@ -1,6 +1,6 @@
 """K1: run E1 over every (task, attempt) unit, with resume and retries.
 
-Layer 5 composite (README 1.4 K1 row): E1 executes one task once, K1 owns
+Layer 5 composite: E1 executes one task once, K1 owns
 everything around that -- unit enumeration, disk persistence, resume by
 deterministic ID, and the B6 retry policy for infrastructure failures. Every
 finished execution is stored the moment it comes back (one unit = one file,
@@ -12,8 +12,7 @@ Pinned design decisions (see the repo docs this was specified against):
 - Accounting reaches the local plugin runners through the HANDLE: K1 builds
   its working handle with ``dataclasses.replace(handle, usage=usage,
   run_dir=run_dir)`` so ``call_model``'s fallback records everything the
-  runner calls through it. E1's own ``usage`` / ``run_dir`` parameters stay
-  unused.
+  runner calls through it; ``run_one`` takes neither.
 - Remote run identity (docs/decisions/tb_run_namespace_20261011.md): each
   unit's task carries two keys before ``run_one`` is called.
   ``meta["run_namespace"]`` is 10 hex of sha256 over the resolved
@@ -32,17 +31,13 @@ Pinned design decisions (see the repo docs this was specified against):
   The TB plugin builds its remote RUN_ID from both, so arms sharing a
   remote root never read each other's trials. The caller's Task objects
   are never mutated -- K1 works on ``replace`` copies.
-- Per-task skill delivery: when
-  ``skills_for_task`` is given, each unit's (``skills_injected``,
-  ``skills_block``) are resolved from its Task by that callable -- once
-  per unit, at enumeration, BEFORE the stored-unit check, so a stored
+- Per-task skill delivery: each unit's (``skills_injected``,
+  ``skills_block``) are resolved from its Task by ``skills_for_task`` --
+  once per unit, at enumeration, BEFORE the stored-unit check, so a stored
   unit is compared against exactly the injection this call would render
   for it and the executor renders the same values the comparison
   validated (resolving twice could disagree, and a resume would then
   trust a unit that was never produced under what it is about to run).
-  The scalar ``skills_injected`` / ``skills_block`` path
-  (``skills_for_task=None``) resolves every unit to the call-level
-  values -- the frozen whole-bank behaviour, byte for byte.
 - Resume of remote trials is the plugin's half of the contract: given the
   same (namespace, token) a resumed unit asks for the same run id, and the
   TB plugin reuses its ``result.json`` or rejoins its live runner instead of
@@ -50,10 +45,10 @@ Pinned design decisions (see the repo docs this was specified against):
   ``InfrastructureError`` and is retried under the next token.
 - Infra retries: an ``InfrastructureError`` raised by the plugin (R2b:
   infrastructure failures travel as exceptions, never as stored statuses)
-  is retried up to ``infra_retries``
-  times per call (default 2 = 3 attempts; next attempt_token suffix per
-  retry, same workdir), sleeping ``random.uniform(*infra_backoff)`` seconds
-  between attempts -- the fix for the 2026-10-13 stage-6 driver meltdown,
+  is retried up to ``_INFRA_RETRIES``
+  times per call (2 = 3 attempts; next attempt_token suffix per
+  retry, same workdir), sleeping ``random.uniform(*_INFRA_BACKOFF)`` seconds
+  between attempts -- the fix for the 2026-10-13 test-phase driver meltdown,
   where 32 workers' ssh submissions tripped sshd rate limiting at dispatch
   and every worker's single zero-backoff retry burned out inside the same
   5-second storm window: a 15-45s random wait carries a retry past the
@@ -102,7 +97,7 @@ Pinned design decisions (see the repo docs this was specified against):
   ``in_flight`` is a difference (pending minus the three finished
   dispositions), so units a raise left unfinalized still count as in
   flight; next to the per-unit exception print that makes a stalled pass
-  locatable, which the 2026-10-13 stage-6 stalls were not (a normally
+  locatable, which the 2026-10-13 test-phase stalls were not (a normally
   slow pass and a dead one looked the same from the logs).
 - ``skip_unit_ids``: trajectory ids the caller has declared terminal (an
   accepted infra shortfall). They are excluded from pending -- never
@@ -112,7 +107,7 @@ Pinned design decisions (see the repo docs this was specified against):
   R2b infra-failure channel and is retried (see Infra retries); anything
   else is a code bug and propagates (see Stopping).
 
-K1 does not compute metrics or select F; the stages do (README 1.5). The
+K1 does not compute metrics; the stages do. The
 return value is the whole unit set as it stands in the store after this call,
 sorted by trajectory_id, including trajectories a previous call stored.
 """
@@ -134,8 +129,8 @@ from typing import (
 )
 
 from expedistill.benchmarks.base import Task
-from expedistill.blocks.execute import make_task_id, run_one
-from expedistill.core.ids import make_trajectory_id
+from expedistill.blocks.execute import run_one
+from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
 from expedistill.infra.parallel import ParallelError, run_parallel
 from expedistill.infra.reliability import (
@@ -151,8 +146,8 @@ from expedistill.infra.store import Store, append_jsonl, read_json, write_json
 __all__ = ["batch_execute"]
 
 #: Stage label written into the unit-failure ledger. K1 itself does not know
-#: which pipeline stage is running (it is stage 1's executor and stage 6's
-#: tester alike), so the label names the composite, not the stage.
+#: which phase is running (it executes every execute phase alike), so the
+#: label names the composite, not the phase.
 _FAILURE_STAGE = "k1"
 
 #: Hex digits of the run namespace: 40 bits keeps run ids short while making
@@ -162,6 +157,12 @@ _NAMESPACE_HEX = 10
 
 #: Per-unit record of the next unused infra-retry index (module docstring).
 _RETRY_CURSOR = "k1_retry_cursor.json"
+
+#: Infra retries per call and the random wait (seconds) between attempts
+#: (module docstring). Module constants the unit executor re-reads on every
+#: retry, so tests can monkeypatch them.
+_INFRA_RETRIES = 2
+_INFRA_BACKOFF = (15.0, 45.0)
 
 #: Seconds between heartbeat log lines while units are pending. A module
 #: constant the loop re-reads every round, so tests can monkeypatch it.
@@ -315,20 +316,16 @@ def _execute_unit(
     role: str,
     model_name: str,
     run_namespace: str,
-    skills_injected: Any,
-    skills_block: str,
     workdir_root: Path,
     handle: Any,
     recorder: UnitFailureRecorder,
-    infra_retries: int,
-    infra_backoff: Tuple[float, float],
 ) -> Optional[Trajectory]:
     """Run one unit with B6 infra retries; save it or record its failure.
 
     An ``InfrastructureError`` raised by the plugin (R2b: infrastructure
     failures travel as exceptions) advances the retry cursor -- the failed
     token is spent -- and is retried by :func:`with_retries`, sleeping
-    ``random.uniform(*infra_backoff)`` seconds between attempts. Returns
+    ``random.uniform(*_INFRA_BACKOFF)`` seconds between attempts. Returns
     the stored Trajectory, or None when the unit exhausted its infra
     retries (recorded in the ledger; a later resume retries it because
     nothing was stored under its trajectory_id).
@@ -359,8 +356,8 @@ def _execute_unit(
                 model_role=role,
                 model_name=model_name,
                 attempt_index=unit.attempt_index,
-                skills_injected=skills_injected,
-                skills_block=skills_block,
+                skills_injected=unit.skills_injected,
+                skills_block=unit.skills_block,
                 handle=handle,
                 workdir=workdir,
             )
@@ -374,12 +371,12 @@ def _execute_unit(
     try:
         traj = with_retries(
             once,
-            attempts=infra_retries + 1,
+            attempts=_INFRA_RETRIES + 1,
             retry_on=InfrastructureError,
             # A random draw per retry: two workers retrying at once must
             # not land on the same second (module docstring, infra
-            # retries). (0.0, 0.0) keeps the old zero-backoff behaviour.
-            backoff=lambda failures: random.uniform(*infra_backoff),
+            # retries).
+            backoff=lambda failures: random.uniform(*_INFRA_BACKOFF),
             on_give_up=lambda exc: recorder.record(
                 unit.trajectory_id, _FAILURE_STAGE, exc, str(exc)),
         )
@@ -399,15 +396,11 @@ def batch_execute(
     model_name: str,
     handle: Any,
     n_attempts: int,
-    skills_injected: Any = None,
-    skills_block: str = "",
-    skills_for_task: Optional[Callable[[Task], Tuple[Any, str]]] = None,
+    skills_for_task: Callable[[Task], Tuple[Any, str]],
     workdir_root: Union[str, Path],
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
     workers: int = 1,
-    infra_retries: int = 2,
-    infra_backoff: Tuple[float, float] = (15.0, 45.0),
     dispatch_stagger: float = 0.0,
     skip_unit_ids: Collection[str] = (),
 ) -> List[Trajectory]:
@@ -423,25 +416,23 @@ def batch_execute(
     unit runs through its benchmark plugin in its own workdir and is saved
     immediately on completion.
 
-    ``skills_for_task`` optionally resolves each
-    unit's (``skills_injected``, ``skills_block``) from its Task. It is
-    invoked once per unit at enumeration -- before the stored-unit check
-    -- so a stored unit is compared against exactly the injection this
-    call would render for it, and the unit's run namespace (module
-    docstring) is the digest of those same values. Without it the scalar
-    ``skills_injected`` / ``skills_block`` apply to every unit (the frozen
-    whole-bank path); giving both is a CodeBugError.
+    ``skills_for_task`` resolves each unit's (``skills_injected``,
+    ``skills_block``) from its Task. It is invoked once per unit at
+    enumeration -- before the stored-unit check -- so a stored unit is
+    compared against exactly the injection this call would render for it,
+    and the unit's run namespace (module docstring) is the digest of those
+    same values.
 
     ``handle`` is the model handle the plugin's runner calls through; the
     working handle handed to the runners is a copy carrying ``usage`` and
     ``run_dir`` so per-attempt accounting works without E1 knowing about it.
-    ``workers`` threads the units through B5 (``thread=True``); once a
+    ``workers`` threads the units through B5; once a
     unit raises, no new unit starts, and the error propagates after the
     running ones finish (ConfigError / ProviderRefusalError unwrapped, code
     bugs as ParallelError), leaving the units that finished safely stored.
     Stored units are verified against the request's per-unit skills (module
     docstring).
-    Infra retries sleep ``random.uniform(*infra_backoff)`` seconds between
+    Infra retries sleep ``random.uniform(*_INFRA_BACKOFF)`` seconds between
     attempts, and each worker sleeps ``random.uniform(0,
     dispatch_stagger)`` seconds before starting a unit, so a burst of
     units -- and their retries -- cannot collide on the same seconds;
@@ -454,14 +445,6 @@ def batch_execute(
     infra retries ran out are absent: they are recorded in
     ``<store.run_dir>/failed_units.jsonl`` and retried by the next call.
     """
-    if infra_retries < 0:
-        raise ValueError(f"infra_retries must be >= 0, got {infra_retries}")
-    backoff_lo, backoff_hi = infra_backoff
-    if not (math.isfinite(backoff_lo) and math.isfinite(backoff_hi)
-            and 0 <= backoff_lo <= backoff_hi):
-        raise ValueError(f"infra_backoff must be a (min, max) seconds pair "
-                         f"with 0 <= min <= max and finite bounds, got "
-                         f"{infra_backoff!r}")
     if not (math.isfinite(dispatch_stagger) and dispatch_stagger >= 0):
         raise ValueError(f"dispatch_stagger must be >= 0 (seconds) and "
                          f"finite, got {dispatch_stagger!r}")
@@ -469,16 +452,6 @@ def batch_execute(
         raise CodeBugError(
             "skip_unit_ids must be a collection of trajectory ids, got a "
             f"bare string {skip_unit_ids!r}")
-    if skills_for_task is not None and (skills_injected is not None
-                                        or skills_block):
-        # Half-wired call: the scalar values would be silently ignored under
-        # skills_for_task, and a reader of the code (or of a stored
-        # trajectory) would believe an injection that never ran.
-        raise CodeBugError(
-            "batch_execute got both skills_for_task and the scalar "
-            "skills (skills_injected / skills_block); under skills_for_task "
-            "the scalar values are ignored -- pass skills_for_task=None for "
-            "the whole-bank scalar path")
     skipped = frozenset(skip_unit_ids)
     units: List[_Unit] = []
     for task in sorted(tasks, key=lambda t: t.task_id):
@@ -486,13 +459,9 @@ def batch_execute(
         for attempt in range(n_attempts):
             # Per-unit skill resolution (module docstring, per-task
             # delivery): resolved here, once, so the stored-unit check and
-            # the executor share one value. The scalar path resolves to the
-            # call-level skills for every unit; a task's attempts share
-            # their resolution, and hence their run namespace.
-            if skills_for_task is None:
-                unit_skills, unit_block = skills_injected, skills_block
-            else:
-                unit_skills, unit_block = skills_for_task(task)
+            # the executor share one value; a task's attempts share their
+            # resolution, and hence their run namespace.
+            unit_skills, unit_block = skills_for_task(task)
             units.append(_Unit(
                 task=task,
                 attempt_index=attempt,
@@ -522,7 +491,7 @@ def batch_execute(
     print(f"K1 dispatch[{role}]: {len(pending)} pending units "
           f"({skipped_actual} skipped, {len(units)} total), "
           f"workers={workers}, stagger={dispatch_stagger}s, "
-          f"backoff={backoff_lo}-{backoff_hi}s",
+          f"backoff={_INFRA_BACKOFF[0]}-{_INFRA_BACKOFF[1]}s",
           file=sys.stderr, flush=True)
     if pending:
         working_handle = dataclasses.replace(handle, usage=usage, run_dir=run_dir)
@@ -560,19 +529,15 @@ def batch_execute(
                     run_namespace=_run_namespace(
                         store.run_dir, phase_label, role, model_name,
                         unit.skills_injected, unit.skills_block),
-                    skills_injected=unit.skills_injected,
-                    skills_block=unit.skills_block,
                     workdir_root=Path(workdir_root),
                     handle=working_handle,
                     recorder=recorder,
-                    infra_retries=infra_retries,
-                    infra_backoff=infra_backoff,
                 )
             except Exception:
                 stop.set()
                 # The pool holds the exception until every future drains, which
                 # can be hours (remote pollers with 4.5h deadlines) -- during
-                # the 2026-10-13 stage-6 stalls each pass silently skipped the
+                # the 2026-10-13 test-phase stalls each pass silently skipped the
                 # whole queue and the real error only surfaced (if ever) much
                 # later. Print it the moment it happens so the pass is
                 # diagnosable while it is still running.
@@ -617,7 +582,7 @@ def batch_execute(
         threading.Thread(target=_heartbeat, daemon=True,
                          name="k1-heartbeat").start()
         try:
-            run_parallel(run, pending, workers, thread=True)
+            run_parallel(run, pending, workers)
         except ParallelError as error:
             _reraise(error, pending)
         finally:

@@ -26,6 +26,7 @@ opened (``composites/skill_use.skill_read_events``).
 from typing import Any, Dict, List, Set
 
 from expedistill.benchmarks.aux import aux_wiring
+from expedistill.blocks.metrics import summarize
 from expedistill.composites import (
     answer_sheets,
     coverage,
@@ -45,7 +46,7 @@ from expedistill.core.config import (
 )
 from expedistill.infra.reliability import CodeBugError, InfrastructureError
 from expedistill.infra.store import write_json
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from expedistill.methods.delivery import units as delivery_units
 from expedistill.stages.context import StageContext
 from expedistill.stages.phase_execute import engine, phase_disk, resolve
@@ -138,8 +139,7 @@ def run_practice(ctx: StageContext, phase: PhaseInstance,
     # ========================================================================
     # 5. WRITE SUMMARY AND CHECK HOLES
     # ========================================================================
-    report = phase_report.build_phase_report(
-        sheets, specs, phase_kind=PHASE_ROLE_PRACTICE, learning_usable=True)
+    report = phase_report.build_phase_report(sheets, specs)
     every_hole = sorted(set(accepted) | holes)
     summary: Dict[str, Any] = {
         "role": PHASE_ROLE_PRACTICE,
@@ -149,9 +149,9 @@ def run_practice(ctx: StageContext, phase: PhaseInstance,
         "bank_reference": bank_reference(
             delivery_units.active_bank(bank)),
         "playbook_shown": bool(resolved.playbook),
-        "metrics": unit_summary.summarize_metrics(
-            unit_summary.task_metrics(report.units, n_attempts),
-            n_attempts, aux_metric=aux_metric),
+        "metrics": summarize(
+            unit_summary.task_metrics(report.units),
+            aux_metric=aux_metric),
         "skill_use": trigger_metrics.card_use_metrics(report.sheets),
         "skill_files_read": _read_sets(trajectories, manifest),
         "infra_missing": every_hole,

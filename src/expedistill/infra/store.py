@@ -1,4 +1,4 @@
-"""B3: object storage over a run directory (README section 2 layout).
+"""B3: object storage over a run directory (run layout: design_spec 4.3).
 
 Every stage writes its units here as they finish, one JSON file per object,
 named by the object ID. Atomic writes (a temp file in the destination
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Sequence, Any, Dict, Iterator, List, Optional
 
 
-#: Object kinds and their directories in the README run layout.
+#: Object kinds and their directories in the run layout (design_spec 4.3).
 KIND_DIRS: Dict[str, str] = {
     "trajectories": "stage1_baseline/trajectories",
     "subtasks": "stage2_segments/subtasks",
@@ -34,6 +34,10 @@ KIND_DIRS: Dict[str, str] = {
 #: Every directory of the run layout, created by Store on demand. The three
 #: kind directories plus llm_requests/ (B1 writes its raw request log there).
 LAYOUT_DIRS: List[str] = list(KIND_DIRS.values()) + ["llm_requests"]
+
+#: The skill-bank file name, shared by the run-level bank (an imported
+#: bank) and every learn phase's bank artifact.
+BANK_NAME = "skill_bank.jsonl"
 
 #: ID attribute of each object kind. Objects also carry parent ids as foreign
 #: keys (Subtask has trajectory_id), so the persisted ID must always be
@@ -374,4 +378,4 @@ class Store:
     def bank(self) -> List[Dict[str, Any]]:
         """The run-level bank (an imported bank, read before the first
         learn phase), in file order."""
-        return read_jsonl(self.run_dir / "skill_bank.jsonl")
+        return read_jsonl(self.run_dir / BANK_NAME)

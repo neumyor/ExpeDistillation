@@ -1,4 +1,4 @@
-"""Stage 0: load tasks, derive the split, freeze the run manifest (README 3).
+"""Stage 0: load tasks, derive the split, freeze the run manifest.
 
 Wiring only (layer 6): D1 loads the tasks, D2 divides them, B4 freezes the
 result. The one derivation this stage owns is turning a ratio+seed split
@@ -9,7 +9,7 @@ that derivation belongs to the run start by design, not to a block.
 Order of checks: the named rules are validated against the rule registries
 first (``blocks/rules.py``; an unknown name is a ConfigError), before any
 task is loaded or anything is written, so a typo in ``rules.segment_select``
-stops the run here instead of after stage 1's executions. ``config.rules``
+stops the run here instead of after the baseline's executions. ``config.rules``
 is complete by construction (core.config fills ``DEFAULT_RULES``), so the
 names frozen below are the effective ones.
 
@@ -64,10 +64,8 @@ never whatever other plugins a process happened to import. A task prompt that is
 real plugins register theirs at import, so only test fakes hit that case
 (and a later registration still trips the comparison). Since schema v3
 the freeze is FULL: every registered method prompt's digest is frozen on
-every run (the two G10/G11 prompts included -- they register at
-``prompts/__init__`` import like every other), so the name set is the
-same for every acceptance mode; a manifest listing digests this run never
-calls is noise, not risk. Two static tests (tests/unit/prompts/
+every run, so the name set is the same for every run; a manifest listing
+digests this run never calls is noise, not risk. Two static tests (tests/unit/prompts/
 test_freeze.py) pin that nothing registers outside the frozen surface.
 
 Resume: the manifest is the unit of this stage, and B4's ``freeze`` IS the
@@ -110,7 +108,7 @@ from expedistill.core.config import (
     LearnPhaseSpec,
     split_lists,
 )
-from expedistill.methods import resolve_params
+from expedistill.methods.registry import resolve_params
 from expedistill.infra.manifest import freeze
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import write_json

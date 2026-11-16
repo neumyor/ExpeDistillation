@@ -7,7 +7,7 @@ model opens one card, and the read lands in the phase summary's
 ``skill_files_read``. The control arm runs the plain prompt.
 
 The fake-plugin wiring (materialize once, attach, refuse) is
-test_final_test_folder_wiring.py's business; this file holds the part
+test_final_test.py's business; this file holds the part
 that needs a plugin which really executes a folder unit.
 """
 
@@ -28,7 +28,7 @@ from expedistill.core.config import (
 from expedistill.core.ids import make_type_id
 from expedistill.infra.store import Store
 from expedistill.infra.usage import UsageRecorder
-from expedistill.llm.fake import make_fake_handle
+from tests.helpers.fake_llm import make_fake_handle
 from expedistill.stages import phase_execute
 from expedistill.stages.context import RunSettings, StageContext
 from tests.helpers.plugins import ensure_plugin
@@ -120,7 +120,7 @@ def setup(monkeypatch, tmp_path):
     return ctx, _phase([item["id"]]), skill
 
 
-def test_a_local_folder_unit_reads_a_card_and_the_read_reaches_the_summary(
+def test_a_local_folder_unit_reads_a_card_and_is_scored_by_the_eval_repo(
         setup):
     ctx, phase, skill = setup
 
@@ -142,12 +142,6 @@ def test_a_local_folder_unit_reads_a_card_and_the_read_reaches_the_summary(
     assert any(path.name == "SKILL.md" for path in folder_dir.rglob("*"))
     # The read fact is the same one the TB folder play reports.
     assert list(summary["skill_files_read"].values()) == [[skill.skill_id]]
-
-
-def test_the_local_folder_unit_is_scored_by_the_eval_repo(setup):
-    ctx, phase, _ = setup
-
-    summary = phase_execute.run(ctx, phase).summary
-
+    # Both arms are scored by the eval repo's own scorer.
     assert summary["with_bank"]["pass_at_n"] == 1.0
     assert summary["control"]["pass_at_n"] == 1.0

@@ -1,6 +1,7 @@
 """Tests for the B1 OpenAI-compatible client. No network: the SDK call is
 replaced by an in-process stub, and only env parsing and error mapping run."""
 
+import threading
 from types import SimpleNamespace
 
 import httpx2 as httpx
@@ -19,7 +20,9 @@ from expedistill.llm.client import (
     ENDPOINTS_ENV,
     ENDPOINT_ENV,
     THINK_IN_CONTENT_ENV,
+    AliasPool,
     OpenAICompatClient,
+    parse_aliases,
     parse_model_overrides,
 )
 
@@ -121,6 +124,13 @@ class StubSDKClient:
         return iter(self.response)
 
 
+@pytest.fixture(autouse=True)
+def endpoint_env(monkeypatch):
+    """The default endpoint/key pair every client test starts from."""
+    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
+    monkeypatch.setenv(API_KEY_ENV, "k")
+
+
 @pytest.fixture
 def stub_sdk(monkeypatch):
     """Patch openai.OpenAI so constructing a client builds a StubSDKClient.
@@ -144,28 +154,27 @@ def stub_sdk(monkeypatch):
     return install
 
 
-def test_from_env_missing_variables_raise_config_error(monkeypatch):
-    monkeypatch.delenv(ENDPOINT_ENV, raising=False)
-    monkeypatch.delenv(API_KEY_ENV, raising=False)
-    with pytest.raises(ConfigError, match=r"\.env\.example"):
+@pytest.mark.parametrize("endpoint,key,match", [
+    (None, None, r"\.env\.example"),
+    ("http://endpoint/v1", "   ", API_KEY_ENV),
+], ids=["missing", "blank-key"])
+def test_from_env_missing_or_blank_variables_raise_config_error(
+        monkeypatch, endpoint, key, match):
+    for name, value in ((ENDPOINT_ENV, endpoint), (API_KEY_ENV, key)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError, match=match):
         OpenAICompatClient.from_env()
 
 
-def test_from_env_passes_timeout_sec_to_sdk(monkeypatch, stub_sdk):
+def test_from_env_passes_timeout_sec_to_sdk(stub_sdk):
     # The client timeout is a run setting threaded from the CLI/CLI tests
     # through the pipeline into from_env; the default stays 300.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk()
     OpenAICompatClient.from_env(timeout_sec=120.5)
     assert StubSDKClient.last.init_kwargs["timeout"] == 120.5
-
-
-def test_from_env_blank_value_counts_as_missing(monkeypatch):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "   ")
-    with pytest.raises(ConfigError, match=API_KEY_ENV):
-        OpenAICompatClient.from_env()
 
 
 def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
@@ -182,7 +191,7 @@ def test_from_env_builds_client_with_env_values(monkeypatch, stub_sdk):
     assert not hasattr(client, "api_key")
 
 
-def test_parse_model_overrides_reads_pairs(monkeypatch):
+def test_parse_model_overrides_reads_pairs():
     assert parse_model_overrides("", ENDPOINTS_ENV) == {}
     assert parse_model_overrides(
         "qwen=http://host:8010/v1; other = http://b/v1 ",
@@ -196,7 +205,7 @@ def test_parse_model_overrides_reads_pairs(monkeypatch):
 
 @pytest.mark.parametrize("raw", ["qwen", "=http://h/v1", "qwen=",
                                  "a=1;a=2"])
-def test_parse_model_overrides_rejects_malformed(monkeypatch, raw):
+def test_parse_model_overrides_rejects_malformed(raw):
     with pytest.raises(ConfigError, match=ENDPOINTS_ENV):
         parse_model_overrides(raw, ENDPOINTS_ENV)
 
@@ -226,8 +235,6 @@ def test_reasoning_channel_is_reported_but_not_merged_by_default(
         monkeypatch, stub_sdk):
     # A server that splits the thinking out leaves it out of the text; the
     # caller still sees it on the result, and text is exactly what arrived.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     monkeypatch.delenv(THINK_IN_CONTENT_ENV, raising=False)
     stub_sdk(response=chat_response("<action>go to desk 1</action>",
                                     reasoning="I should check the desk."))
@@ -240,8 +247,6 @@ def test_think_in_content_puts_the_reasoning_back(monkeypatch, stub_sdk):
     # vLLM's qwen3 reasoning parser streams the thinking out of band; the
     # ALFWorld protocol requires <think>...</think> in the reply, so a
     # listed model gets its own thinking reunited with its answer.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     monkeypatch.setenv(THINK_IN_CONTENT_ENV, "weak, other")
     stub_sdk(response=chat_response("\n<action>go to desk 1</action>",
                                     reasoning="  I should check the desk.  "))
@@ -251,8 +256,6 @@ def test_think_in_content_puts_the_reasoning_back(monkeypatch, stub_sdk):
 
 
 def test_think_in_content_leaves_an_unlisted_model_alone(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     monkeypatch.setenv(THINK_IN_CONTENT_ENV, "other")
     stub_sdk(response=chat_response("<action>x</action>", reasoning="r"))
     result = OpenAICompatClient.from_env(model="weak").complete("weak", "s", "u")
@@ -263,8 +266,6 @@ def test_think_in_content_does_not_duplicate_an_existing_block(
         monkeypatch, stub_sdk):
     # The gate can stay on when a gateway folds the thinking into content
     # itself: the guard is what keeps that from doubling the block.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     monkeypatch.setenv(THINK_IN_CONTENT_ENV, "weak")
     stub_sdk(response=chat_response(
         "<think>already here</think><action>x</action>", reasoning="already here"))
@@ -272,7 +273,7 @@ def test_think_in_content_does_not_duplicate_an_existing_block(
     assert result.text == "<think>already here</think><action>x</action>"
 
 
-def test_complete_uses_streaming_transport(monkeypatch, stub_sdk):
+def test_complete_uses_streaming_transport(stub_sdk):
     # Regression for the 2026-10-12 incident: the campaign gateway
     # (llm.example.com) kills NON-streaming chat requests at ~300.3s
     # server-side (APIConnectionError at 300.2-300.4s, runs/
@@ -283,8 +284,6 @@ def test_complete_uses_streaming_transport(monkeypatch, stub_sdk):
     # this test pins the DECISION: every call must open a stream and ask for
     # usage in the stream options (the assembly itself is covered by the
     # other tests below).
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     client.complete("model-a", "s", "u")
@@ -293,12 +292,10 @@ def test_complete_uses_streaming_transport(monkeypatch, stub_sdk):
     assert kwargs["stream_options"] == {"include_usage": True}
 
 
-def test_complete_assembles_unicode_split_across_chunks(monkeypatch, stub_sdk):
+def test_complete_assembles_unicode_split_across_chunks(stub_sdk):
     # The wire splits content at arbitrary token boundaries: multi-byte
     # characters and even ZWJ graphemes can straddle chunk edges. The
     # assembled text must be the exact original string.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     pieces = ["héllo ", "世", "界 ", "👨‍", "👩"]
     chunks = [_chunk(delta_content=p) for p in pieces]
     chunks.append(_chunk(finish_reason="stop"))
@@ -307,15 +304,12 @@ def test_complete_assembles_unicode_split_across_chunks(monkeypatch, stub_sdk):
     assert client.complete("model-a", "s", "u").text == "héllo 世界 👨‍👩"
 
 
-def test_complete_captures_usage_and_finish_from_final_chunks(
-        monkeypatch, stub_sdk):
+def test_complete_captures_usage_and_finish_from_final_chunks(stub_sdk):
     # With stream_options include_usage the gateway sends usage on a final,
     # choice-less chunk and finish_reason on the last choice chunk (verified
     # against the 2026-10-12 capture: the 414s reasoning call reported
     # usage=(13387, 32768) with finish_reason="length"). Both must land in
     # the assembled result.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     chunks = [
         _chunk(delta_content="answer"),
         _chunk(finish_reason="length"),
@@ -330,11 +324,9 @@ def test_complete_captures_usage_and_finish_from_final_chunks(
     assert result.raw_usage["total_tokens"] == 46155
 
 
-def test_complete_refusal_accumulated_across_chunks(monkeypatch, stub_sdk):
+def test_complete_refusal_accumulated_across_chunks(stub_sdk):
     # delta.refusal streams exactly like content; the assembled refusal
     # string must end up in the ProviderRefusalError.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     chunks = [
         _chunk(delta_refusal="I cannot "),
         _chunk(delta_refusal="help with that."),
@@ -346,14 +338,11 @@ def test_complete_refusal_accumulated_across_chunks(monkeypatch, stub_sdk):
         client.complete("model-a", "s", "u")
 
 
-def test_complete_mid_stream_failure_maps_to_infrastructure(
-        monkeypatch, stub_sdk):
+def test_complete_mid_stream_failure_maps_to_infrastructure(stub_sdk):
     # A stream that dies partway is the same endpoint failure as one that
     # never opens: the iteration runs inside the create() protection, so a
     # mid-stream APIConnectionError maps to InfrastructureError instead of
     # surfacing partial content or crashing the pipeline.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     request = httpx.Request("POST", "http://endpoint/v1/chat/completions")
 
     def failing_stream():
@@ -367,14 +356,11 @@ def test_complete_mid_stream_failure_maps_to_infrastructure(
         client.complete("model-a", "s", "u")
 
 
-def test_complete_mid_stream_base_api_error_is_infrastructure(
-        monkeypatch, stub_sdk):
+def test_complete_mid_stream_base_api_error_is_infrastructure(stub_sdk):
     # The gateway's 503 "Too many requests" arrives from the stream iterator
     # as the SDK's base APIError (no HTTP status object on it), not as
     # APIStatusError. It is still the endpoint's failure and must reach the
     # retry budget instead of stopping the batch as a code bug.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     request = httpx.Request("POST", "http://endpoint/v1/chat/completions")
 
     def failing_stream():
@@ -388,21 +374,7 @@ def test_complete_mid_stream_base_api_error_is_infrastructure(
         client.complete("model-a", "s", "u")
 
 
-def test_complete_roundtrip_with_usage(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("hello", usage=sdk_usage(10, 4, 14)))
-    client = OpenAICompatClient.from_env()
-    result = client.complete("model-a", "be brief", "hi")
-    assert result.text == "hello"
-    assert result.in_tokens == 10
-    assert result.out_tokens == 4
-    assert result.raw_usage["total_tokens"] == 14
-
-
-def test_complete_sends_expected_payload(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_complete_sends_expected_payload(stub_sdk):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     client.complete(
@@ -424,12 +396,10 @@ def test_complete_sends_expected_payload(monkeypatch, stub_sdk):
     assert kwargs["top_p"] == 0.9
 
 
-def test_explicit_cache_marks_the_stable_prefix(monkeypatch, stub_sdk):
+def test_explicit_cache_marks_the_stable_prefix(stub_sdk):
     # 2026-11-04: the generic client splits the user message at the
     # configured token budget and marks the first block. 1200 tokens at the
     # repo's 4-chars/token estimate = 4800 characters.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     user = "A" * 10_000
@@ -447,9 +417,7 @@ def test_explicit_cache_marks_the_stable_prefix(monkeypatch, stub_sdk):
     assert "cache_prefix_tokens" not in kwargs
 
 
-def test_explicit_cache_marks_a_short_prompt_whole(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_explicit_cache_marks_a_short_prompt_whole(stub_sdk):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     client.complete("qwen", "sys", "short prompt",
@@ -459,9 +427,7 @@ def test_explicit_cache_marks_a_short_prompt_whole(monkeypatch, stub_sdk):
                         "cache_control": {"type": "ephemeral"}}]
 
 
-def test_implicit_cache_keeps_string_content(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_implicit_cache_keeps_string_content(stub_sdk):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     client.complete("qwen", "sys", "user text",
@@ -470,9 +436,7 @@ def test_implicit_cache_keeps_string_content(monkeypatch, stub_sdk):
         "user text"
 
 
-def test_cache_options_do_not_mutate_the_handle_options(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_cache_options_do_not_mutate_the_handle_options(stub_sdk):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     extra = {"cache_mode": "explicit", "cache_prefix_tokens": 1200}
@@ -480,9 +444,7 @@ def test_cache_options_do_not_mutate_the_handle_options(monkeypatch, stub_sdk):
     assert extra == {"cache_mode": "explicit", "cache_prefix_tokens": 1200}
 
 
-def test_unknown_cache_mode_is_a_config_error(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_unknown_cache_mode_is_a_config_error(stub_sdk):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ConfigError, match="cache_mode"):
@@ -490,10 +452,7 @@ def test_unknown_cache_mode_is_a_config_error(monkeypatch, stub_sdk):
 
 
 @pytest.mark.parametrize("bad", [0, -1, True, "1200"])
-def test_invalid_cache_prefix_tokens_is_a_config_error(
-        monkeypatch, stub_sdk, bad):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_invalid_cache_prefix_tokens_is_a_config_error(stub_sdk, bad):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ConfigError, match="cache_prefix_tokens"):
@@ -502,34 +461,7 @@ def test_invalid_cache_prefix_tokens_is_a_config_error(
                                "cache_prefix_tokens": bad})
 
 
-def test_complete_merges_string_valued_extra(monkeypatch, stub_sdk):
-    # model_options entries (e.g. reasoning_effort) are merged into the
-    # top-level payload, exactly like the numeric case above.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("ok"))
-    client = OpenAICompatClient.from_env()
-    client.complete("deepseek", "s", "u", extra={"reasoning_effort": "max"})
-    kwargs = StubSDKClient.last.create_kwargs
-    assert kwargs["reasoning_effort"] == "max"
-
-
-def test_complete_extra_body_max_tokens_overrides_explicit_value(
-        monkeypatch, stub_sdk):
-    # The per-model override path (model_options -> extra_body): the extra
-    # merge runs after the handle-level max_tokens, so extra wins.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("ok"))
-    client = OpenAICompatClient.from_env()
-    client.complete("model-a", "s", "u", max_tokens=5120,
-                    extra={"max_tokens": 128})
-    assert StubSDKClient.last.create_kwargs["max_tokens"] == 128
-
-
-def test_complete_omits_empty_system_message(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_complete_omits_empty_system_message(stub_sdk):
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
     client.complete("model-a", "", "user text")
@@ -538,18 +470,17 @@ def test_complete_omits_empty_system_message(monkeypatch, stub_sdk):
     ]
 
 
-def test_complete_content_filter_maps_to_refusal(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("I can't", finish_reason="content_filter"))
+@pytest.mark.parametrize("content", ["I can't", ""], ids=["text", "empty"])
+def test_complete_content_filter_maps_to_refusal(stub_sdk, content):
+    # A refusal finish_reason is a ProviderRefusal even when the content is
+    # empty: the refusal check stays in front of the empty-content check.
+    stub_sdk(response=chat_response(content, finish_reason="content_filter"))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ProviderRefusalError, match="content_filter"):
         client.complete("model-a", "s", "u")
 
 
-def test_complete_refusal_field_maps_to_refusal(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_complete_refusal_field_maps_to_refusal(stub_sdk):
     stub_sdk(
         response=chat_response(
             None, refusal="I cannot help with that."
@@ -560,40 +491,33 @@ def test_complete_refusal_field_maps_to_refusal(monkeypatch, stub_sdk):
         client.complete("model-a", "s", "u")
 
 
-def test_complete_none_content_maps_to_model_output_error(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response(None, finish_reason="length"))
-    client = OpenAICompatClient.from_env()
-    with pytest.raises(ModelOutputError, match="no content"):
-        client.complete("model-a", "s", "u")
-
-
-@pytest.mark.parametrize("empty", ["", "   ", "\n\t "])
+@pytest.mark.parametrize("content,why", [
+    ("", "empty or whitespace-only content"),
+    ("   ", "empty or whitespace-only content"),
+    ("\n\t ", "empty or whitespace-only content"),
+    (None, "no content"),
+])
 def test_complete_empty_content_maps_to_model_output_error(
-        monkeypatch, stub_sdk, empty):
+        stub_sdk, content, why):
     # Smoke finding: with reasoning_effort=max the strong model burns its
     # whole output budget on reasoning and returns "" with
     # finish_reason=length; that must not be recorded as status=ok.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response(empty, finish_reason="length"))
+    stub_sdk(response=chat_response(content, finish_reason="length"))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ModelOutputError) as info:
         client.complete("model-a", "s", "u")
     # The message must name the model and the finish_reason so operators can
     # tell "budget burned on reasoning" from "model chose silence".
+    assert why in str(info.value)
     assert "model-a" in str(info.value)
     assert "length" in str(info.value)
 
 
-def test_complete_empty_content_error_carries_usage(monkeypatch, stub_sdk):
+def test_complete_empty_content_error_carries_usage(stub_sdk):
     # Real-data finding: with finish_reason=length the model burned ~40k
     # input + 5120 output tokens on reasoning and returned nothing; the
     # empty-content error must carry that usage so the ledger does not
     # record a real spend as null.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(response=chat_response(
         "", finish_reason="length", usage=sdk_usage(40000, 5120, 45120)))
     client = OpenAICompatClient.from_env()
@@ -607,10 +531,7 @@ def test_complete_empty_content_error_carries_usage(monkeypatch, stub_sdk):
     assert info.value.finish_reason == "length"
 
 
-def test_complete_empty_content_without_usage_carries_none(
-        monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_complete_empty_content_without_usage_carries_none(stub_sdk):
     stub_sdk(response=chat_response(None, usage=None))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ModelOutputError) as info:
@@ -621,76 +542,16 @@ def test_complete_empty_content_without_usage_carries_none(
     assert info.value.finish_reason == "stop"
 
 
-def test_model_output_error_defaults_carry_no_usage():
-    # Backward compatibility: the single-message constructor keeps working
-    # and other raise sites (e.g. extract_json) carry no usage attribute
-    # value; a successful response must not leave attributes behind either.
-    exc = ModelOutputError("response did not contain JSON")
-    assert exc.usage is None
-    assert exc.finish_reason is None
-
-
-def test_complete_content_filter_check_precedes_empty_check(monkeypatch, stub_sdk):
-    # A refusal finish_reason is a ProviderRefusal even when content is
-    # empty: the existing refusal check must stay in front, unchanged.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("", finish_reason="content_filter"))
-    client = OpenAICompatClient.from_env()
-    with pytest.raises(ProviderRefusalError, match="content_filter"):
-        client.complete("model-a", "s", "u")
-
-
-def test_complete_result_carries_finish_reason(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("hi", finish_reason="stop"))
-    client = OpenAICompatClient.from_env()
-    result = client.complete("model-a", "s", "u")
-    assert result.finish_reason == "stop"
-
-
-def test_complete_result_finish_reason_defaults_to_none(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("hi", finish_reason=None))
-    client = OpenAICompatClient.from_env()
-    assert client.complete("model-a", "s", "u").finish_reason is None
-
-
-def test_complete_extracts_cached_tokens_from_usage_details(monkeypatch, stub_sdk):
+def test_complete_extracts_cached_tokens_from_usage_details(stub_sdk):
     # Real observation: the gateway cache template reported a 20-token prompt
     # as 3927 prompt tokens, 3712 of them cached; without recording
     # cached_tokens the strong model's prompt costs look ~300x too high.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(response=chat_response(
         "hi", usage=sdk_usage(3927, 4, 3931, cached_tokens=3712)))
     client = OpenAICompatClient.from_env()
     result = client.complete("model-a", "s", "u")
     assert result.cached_tokens == 3712
     assert result.in_tokens == 3927
-
-
-def test_complete_cached_tokens_none_without_usage_details(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    stub_sdk(response=chat_response("hi", usage=sdk_usage()))
-    client = OpenAICompatClient.from_env()
-    assert client.complete("model-a", "s", "u").cached_tokens is None
-
-
-def test_complete_http_error_maps_to_infrastructure_error(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    request = httpx.Request("POST", "http://endpoint/v1/chat/completions")
-    error = openai.APIStatusError(
-        "boom", response=httpx.Response(500, request=request), body=None
-    )
-    stub_sdk(error=error)
-    client = OpenAICompatClient.from_env()
-    with pytest.raises(InfrastructureError, match="500"):
-        client.complete("model-a", "s", "u")
 
 
 def _status_error(status, message="boom"):
@@ -702,10 +563,8 @@ def _status_error(status, message="boom"):
 
 @pytest.mark.parametrize("status", [408, 409, 429, 500, 502, 503, 504])
 def test_complete_transient_http_status_maps_to_infrastructure_error(
-    monkeypatch, stub_sdk, status
+    stub_sdk, status
 ):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(error=_status_error(status))
     client = OpenAICompatClient.from_env()
     with pytest.raises(InfrastructureError, match=str(status)):
@@ -714,12 +573,10 @@ def test_complete_transient_http_status_maps_to_infrastructure_error(
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])
 def test_complete_permanent_http_status_maps_to_refusal(
-    monkeypatch, stub_sdk, status
+    stub_sdk, status
 ):
     # A wrong key / unknown model / oversized context cannot succeed on
     # resend: it must stop the phase, not burn call- and unit-level retries.
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(error=_status_error(status))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ProviderRefusalError, match=f"status={status}") as info:
@@ -747,10 +604,8 @@ def test_http_error_message_never_echoes_key_or_request_body(
 
 
 def test_complete_timeout_and_connection_map_to_infrastructure_error(
-    monkeypatch, stub_sdk
+    stub_sdk
 ):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     request = httpx.Request("POST", "http://endpoint/v1/chat/completions")
 
     stub_sdk(error=openai.APITimeoutError(request=request))
@@ -764,18 +619,14 @@ def test_complete_timeout_and_connection_map_to_infrastructure_error(
         client.complete("model-a", "s", "u")
 
 
-def test_complete_unexpected_error_propagates_unwrapped(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_complete_unexpected_error_propagates_unwrapped(stub_sdk):
     stub_sdk(error=ValueError("not an SDK error"))
     client = OpenAICompatClient.from_env()
     with pytest.raises(ValueError):
         client.complete("model-a", "s", "u")
 
 
-def test_complete_no_usage_reports_none_tokens(monkeypatch, stub_sdk):
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
+def test_complete_no_usage_reports_none_tokens(stub_sdk):
     stub_sdk(response=chat_response("text", usage=None))
     client = OpenAICompatClient.from_env()
     result = client.complete("model-a", "s", "u")
@@ -784,7 +635,7 @@ def test_complete_no_usage_reports_none_tokens(monkeypatch, stub_sdk):
     assert result.raw_usage is None
 
 
-def test_malformed_endpoint_body_is_infrastructure(monkeypatch, stub_sdk):
+def test_malformed_endpoint_body_is_infrastructure(stub_sdk):
     # 2026-10-12 campaign crash: the gateway returned an empty/invalid body on
     # a 200 and the openai SDK surfaced a bare JSONDecodeError from inside
     # create(), which slipped past the APIStatusError/APIConnectionError
@@ -792,20 +643,16 @@ def test_malformed_endpoint_body_is_infrastructure(monkeypatch, stub_sdk):
     # protocol-level failures into InfrastructureError so the retry budget
     # (not the process) absorbs them.
     import json as _json
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     stub_sdk(error=_json.JSONDecodeError("Expecting value", "", 0))
     client = OpenAICompatClient.from_env()
     with pytest.raises(InfrastructureError, match="non-JSON body"):
         client.complete("model-a", "s", "u")
 
 
-def test_schema_invalid_response_is_infrastructure(monkeypatch, stub_sdk):
+def test_schema_invalid_response_is_infrastructure(stub_sdk):
     # APIResponseValidationError (the SDK's own wrapper for responses that
     # fail its schema) is also an endpoint-protocol failure, not our bug.
     import openai as _openai
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     import httpx2 as _httpx  # openai>=3 depends on httpx2
     _req = _httpx.Request("POST", "http://endpoint/v1/chat/completions")
     _resp = _httpx.Response(200, request=_req)
@@ -819,8 +666,6 @@ def test_schema_invalid_response_is_infrastructure(monkeypatch, stub_sdk):
 def test_aliases_change_only_the_wire_model_and_rotate(monkeypatch, stub_sdk):
     from expedistill.llm.client import ALIASES_ENV
 
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     monkeypatch.setenv(ALIASES_ENV, "model-a=wire-1,wire-2")
     stub_sdk(response=chat_response("ok"))
     client = OpenAICompatClient.from_env()
@@ -836,26 +681,10 @@ def test_aliases_change_only_the_wire_model_and_rotate(monkeypatch, stub_sdk):
     assert wires == {"wire-1", "wire-2"}
 
 
-def test_a_model_not_in_the_alias_table_is_sent_unchanged(
-        monkeypatch, stub_sdk):
-    from expedistill.llm.client import ALIASES_ENV
-
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    monkeypatch.setenv(ALIASES_ENV, "model-a=wire-1")
-    stub_sdk(response=chat_response("ok"))
-
-    OpenAICompatClient.from_env().complete("model-b", "s", "u")
-
-    assert StubSDKClient.last.create_kwargs["model"] == "model-b"
-
-
 def test_a_429_rests_that_wire_id_and_the_error_names_the_logical_model(
         monkeypatch, stub_sdk):
     from expedistill.llm.client import ALIASES_ENV
 
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
     monkeypatch.setenv(ALIASES_ENV, "model-a=wire-1,wire-2")
     stub_sdk(error=_status_error(429))
     client = OpenAICompatClient.from_env()
@@ -870,14 +699,97 @@ def test_a_429_rests_that_wire_id_and_the_error_names_the_logical_model(
     assert picks == other
 
 
-def test_a_malformed_alias_table_stops_the_run_at_client_build(
-        monkeypatch, stub_sdk):
-    from expedistill.llm.client import ALIASES_ENV
+# ---------------------------------------------------------------------------
+# Wire-id rotation for a gateway that rate-limits per request id
+# ---------------------------------------------------------------------------
 
-    monkeypatch.setenv(ENDPOINT_ENV, "http://endpoint/v1")
-    monkeypatch.setenv(API_KEY_ENV, "k")
-    monkeypatch.setenv(ALIASES_ENV, "model-a")
-    stub_sdk()
 
-    with pytest.raises(ConfigError, match=ALIASES_ENV):
-        OpenAICompatClient.from_env()
+class Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_parse_reads_several_models_and_drops_duplicates():
+    table = parse_aliases("a=x,y,x; b=z")
+
+    assert table == {"a": ["x", "y"], "b": ["z"]}
+
+
+@pytest.mark.parametrize("raw", ["a", "a=", "=x", "a=x;a=y"])
+def test_a_malformed_table_is_a_config_error_without_echoing_values(raw):
+    with pytest.raises(ConfigError) as excinfo:
+        parse_aliases(raw)
+
+    assert "EXPEDISTILL_LLM_MODEL_ALIASES" in str(excinfo.value)
+    assert "=x" not in str(excinfo.value)
+
+
+def test_an_empty_table_is_no_aliases():
+    assert parse_aliases("") == {} and parse_aliases(" ; ") == {}
+
+
+def test_a_model_without_aliases_goes_out_unchanged():
+    pool = AliasPool({"a": ["x"]})
+
+    assert pool.pick("other") == "other"
+    assert AliasPool().pick("a") == "a"
+
+
+def test_requests_rotate_evenly_over_the_aliases():
+    pool = AliasPool({"a": ["x", "y", "z"]})
+
+    picks = [pool.pick("a") for _ in range(9)]
+
+    assert picks == ["x", "y", "z"] * 3
+
+
+def test_a_rate_limited_alias_rests_until_its_cooldown_ends():
+    clock = Clock()
+    pool = AliasPool({"a": ["x", "y", "z"]}, cooldown_seconds=20, clock=clock)
+    pool.rate_limited("y")
+
+    during = [pool.pick("a") for _ in range(6)]
+    clock.now += 21
+    after = [pool.pick("a") for _ in range(6)]
+
+    assert "y" not in during and {"x", "z"} <= set(during)
+    assert set(after) == {"x", "y", "z"}
+
+
+def test_when_every_alias_rests_the_earliest_to_recover_is_used():
+    clock = Clock()
+    pool = AliasPool({"a": ["x", "y"]}, cooldown_seconds=20, clock=clock)
+    pool.rate_limited("x")
+    clock.now += 5
+    pool.rate_limited("y")
+
+    assert pool.pick("a") == "x"
+
+
+def test_rotation_is_per_logical_model():
+    pool = AliasPool({"a": ["a1", "a2"], "b": ["b1", "b2"]})
+
+    assert [pool.pick("a"), pool.pick("b"), pool.pick("a"), pool.pick("b")] \
+        == ["a1", "b1", "a2", "b2"]
+
+
+def test_concurrent_picks_stay_balanced():
+    pool = AliasPool({"a": ["x", "y", "z", "w"]})
+    seen = []
+    lock = threading.Lock()
+
+    def work():
+        for _ in range(100):
+            alias = pool.pick("a")
+            with lock:
+                seen.append(alias)
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    assert {alias: seen.count(alias) for alias in "xyzw"} == {
+        "x": 200, "y": 200, "z": 200, "w": 200}

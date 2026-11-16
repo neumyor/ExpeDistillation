@@ -24,8 +24,7 @@ bank it resolves against (``bank_fingerprint`` -- the same digest
 ``composites.phase_bank``'s bank summary writes, ``bank_reference``
 over the phase artifact's full member list, never a new counter); the
 skill contents' only source is the phase bank, and the composite
-materialization reads them from it (with the fingerprint checked) --
-the unit row stays as light as the old top-k one.
+materialization reads them from it (with the fingerprint checked).
 
 Frozen signature (R5): ``resolve(bank, tasks, params)`` with ``bank``
 the phase skill bank, ``tasks`` the phase's tasks, ``params`` the
@@ -45,12 +44,12 @@ from typing import Any, Dict, List, Sequence, Union
 
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import Skill
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from expedistill.inject.skill_text import (
     DEFAULT_DESCRIPTION_MODE,
     description_text,
+    field,
     one_line,
-    validate_description_mode,
     when_to_use_line,
 )
 from expedistill.methods.delivery.params import FolderParams
@@ -106,15 +105,6 @@ _HEADER = "\n".join([
 ])
 
 
-def _field(record: Union[Skill, Mapping[str, Any]], name: str,
-           default: Any = None) -> Any:
-    """Read one field from a Skill object or a bank row mapping (the
-    same both-shapes contract the rest of the delivery family holds)."""
-    if isinstance(record, Mapping):
-        return record.get(name, default)
-    return getattr(record, name, default)
-
-
 def skill_dirname(skill_id: str) -> str:
     """One skill's directory name under the Agent Skills rule.
 
@@ -165,7 +155,7 @@ def _description(record: Union[Skill, Mapping[str, Any]],
     uses a non-empty generic fallback instead, because the Agent Skills
     format rejects an empty description.
     """
-    summary = one_line(_field(record, "summary", "") or "")
+    summary = one_line(field(record, "summary", "") or "")
     trigger = when_to_use_line(record)
     if not summary and not trigger:
         return _NO_DESCRIPTION
@@ -178,10 +168,9 @@ def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],
     line per skill, ``<skill id> | <file to cat> | <one-line
     description>``, in the given (bank artifact) order, one trailing
     newline."""
-    validate_description_mode(description_mode)
     lines = [_HEADER]
     for record in skills:
-        skill_id = _field(record, "skill_id")
+        skill_id = field(record, "skill_id")
         lines.append("{} | {} | {}".format(
             skill_id, skill_filename(skill_id),
             _description(record, description_mode)))
@@ -215,12 +204,11 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
     empty member set renders NO catalog at all (the D9 null-state
     lesson: an empty injection is the empty string, never a header
     claiming experience exists)."""
-    validate_description_mode(description_mode)
     active = units.active_bank(bank)
     files: List[Dict[str, Any]] = []
     owner_of: Dict[str, str] = {}
     for record in active:
-        skill_id = _field(record, "skill_id")
+        skill_id = field(record, "skill_id")
         filename = skill_filename(skill_id)
         if filename in owner_of:
             raise ValueError(
@@ -230,7 +218,7 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
         owner_of[filename] = skill_id
         files.append({
             "skill_id": skill_id,
-            "version": _field(record, "version", 1),
+            "version": field(record, "version", 1),
             "filename": filename,
         })
     manifest = {

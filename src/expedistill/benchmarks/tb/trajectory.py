@@ -2,7 +2,7 @@
 
 The remote link never gives us stepwise interaction: one ``run()`` call is a
 whole Harbor rollout, and the per-step view is rebuilt afterwards from the
-trial's ``agent/trajectory.json`` (README 1.3, TB runner row). This module
+trial's ``agent/trajectory.json`` (design_spec 3.5). This module
 knows that file's shape and nothing else.
 
 Recorded shape (Harbor trials, e.g. the tb21 campaign and the local

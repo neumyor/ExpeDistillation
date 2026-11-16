@@ -19,10 +19,6 @@ _PROMPTS = {
         "Judge the answer.\n\nQUESTION:\n{question_text}\n\n"
         "REFERENCE:\n{reference_answer}\n\nANSWER:\n{weak_answer}",
         "test-only generic judge prompt"),
-    "EXAM_GEN": (
-        "Write an exam.\n\nLABEL:\n{label}\n\nDESCRIPTION:\n{description}"
-        "\n\nSTEPS:\n{steps_view}",
-        "test-only generic exam-generation prompt"),
 }
 
 

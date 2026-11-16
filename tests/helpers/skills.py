@@ -8,13 +8,22 @@ here once; each suite keeps its own thin, scenario-shaped builder on top
 from expedistill.core import ids
 from expedistill.core.models import Skill
 
-__all__ = ["SKILL_FIELDS", "make_skill", "text_fields"]
+__all__ = ["MARKED", "SKILL_FIELDS", "make_skill", "text_fields"]
 
 #: Default text fields of a test skill.
 SKILL_FIELDS = {
     "summary": "Check the state before acting.",
     "steps": ["Look at the current state.", "Act on what you saw."],
     "not_applicable_when": "the state is already known.",
+}
+
+
+#: Text fields of a card whose three sections are all filled in (the
+#: ``when_to_use`` of the card is passed separately).
+MARKED = {
+    "when_to_use": "The service rejects connections.",
+    "steps": ["Check the service status.", "Restart the service."],
+    "not_applicable_when": "The status command already reports running.",
 }
 
 

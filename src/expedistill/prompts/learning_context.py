@@ -12,9 +12,7 @@ slot a template uses from, in increasing priority: :data:`GENERIC`, the
 handle's ``prompt_defaults`` (wired from the benchmark's prompt pack when the
 pipeline builds its handles), the caller's own variables. A plugin's
 context therefore only has to list the slots it wants to differ from
-GENERIC; the three benchmarks of the paper list all of them. Code that
-sends text to a model outside ``call_model`` (the neutral profile section)
-merges the same way through :func:`slots_for`.
+GENERIC; the three benchmarks of the paper list all of them.
 
 The context is part of the experiment protocol like the prompt text:
 stage 0 writes it into the manifest (:meth:`LearningContext.to_dict`), so a
@@ -29,7 +27,6 @@ __all__ = [
     "PROTOCOL_SLOT",
     "LearningContext",
     "default_slots",
-    "slots_for",
 ]
 
 
@@ -91,12 +88,3 @@ def default_slots() -> Dict[str, str]:
     """The values every template slot falls back to: GENERIC's words and
     an empty protocol."""
     return {PROTOCOL_SLOT: "", **GENERIC.variables()}
-
-
-def slots_for(prompt_defaults: Mapping[str, str]) -> Dict[str, str]:
-    """The default slots overlaid with a handle's ``prompt_defaults``.
-
-    The same merge ``call_model`` applies (minus the caller's variables),
-    for code that needs a slot's text outside a prompt template.
-    """
-    return {**default_slots(), **prompt_defaults}

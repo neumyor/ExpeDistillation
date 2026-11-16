@@ -5,7 +5,7 @@ decision, audit and the final test; the acceptance module never calls it and
 never writes its result as a report card.
 """
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 from expedistill.core.answer_sheet import (
     AnswerSheet,
@@ -16,7 +16,6 @@ from expedistill.infra.reliability import CodeBugError
 from expedistill.core import vocabulary
 
 __all__ = [
-    "summarize_metrics",
     "summarize_phase",
     "summarize_unit",
     "task_metrics",
@@ -103,8 +102,8 @@ def summarize_phase(sheets: Sequence[AnswerSheet],
     return [summarize_unit(sheets, spec) for spec in specs]
 
 
-def task_metrics(summaries: Iterable[UnitSummary],
-                 n_attempts: int) -> Dict[str, Dict[str, int]]:
+def task_metrics(summaries: Iterable[UnitSummary]
+                 ) -> Dict[str, Dict[str, int]]:
     """D3-shaped task metrics derived from unit summaries.
 
     One task's summaries are summed (a phase has one summary per
@@ -141,14 +140,6 @@ def task_metrics(summaries: Iterable[UnitSummary],
         if not complete:
             metrics[task_id].pop("aux_success", None)
     return metrics
-
-
-def summarize_metrics(metrics: Dict[str, Dict[str, int]], n_attempts: int,
-                      aux_metric: Optional[str] = None) -> Dict[str, Any]:
-    """The D3 summary over ``task_metrics`` (same definitions as before)."""
-    from expedistill.blocks import metrics as metrics_block
-    return metrics_block.summarize(
-        metrics, n_attempts, aux_metric=aux_metric)
 
 
 def _unit_cause(causes: set, expected_attempts: int,

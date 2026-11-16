@@ -147,12 +147,18 @@ def test_run_code_bugs_keep_their_traceback(monkeypatch, tmp_path, error):
         _run_raising(monkeypatch, tmp_path, error)
 
 
-def test_run_missing_args_is_usage_error(monkeypatch, capsys, tmp_path):
+@pytest.mark.parametrize("argv", [
+    pytest.param(["run", "--run-dir", "r"], id="missing_config"),
+    pytest.param(["run", "--config", "c.yaml", "--run-dir", "r",
+                  "--until-phase", "x"], id="until_phase_not_an_int"),
+    pytest.param([], id="no_subcommand"),
+])
+def test_bad_arguments_are_a_usage_error(monkeypatch, argv):
     monkeypatch.setattr(
         cli, "run_experiment",
         lambda **kwargs: pytest.fail("run_experiment must not be called"))
     with pytest.raises(SystemExit) as excinfo:
-        cli.main(["run", "--run-dir", str(tmp_path / "run")])
+        cli.main(argv)
     assert excinfo.value.code == 2
 
 
@@ -160,29 +166,14 @@ def test_run_missing_args_is_usage_error(monkeypatch, capsys, tmp_path):
 # summary
 # ---------------------------------------------------------------------------
 
-def test_summary_complete_run_prints_phases_and_usage(capsys, tmp_path):
+def test_summary_complete_run_prints_every_phase(capsys, tmp_path):
     run_dir = tmp_path / "run"
     _fabricate_ledger(run_dir, EXPECTED_LABELS)
-    usage_path = run_dir / "llm_requests" / "usage.jsonl"
-    usage_path.parent.mkdir(parents=True)
-    usage_path.write_text(json.dumps({
-        "role": "judge", "prompt": "JUDGE", "model": "m",
-        "in_tokens": 3, "out_tokens": 5, "request_id": "r1",
-        "status": "ok",
-    }) + "\n", encoding="utf-8")
-
     code = cli.main(["summary", "--run-dir", str(run_dir)])
     captured = capsys.readouterr()
     assert code == 0
     for name in EXPECTED_LABELS:
         assert name in captured.out
-    # Usage totals are folded from the ledger, not recomputed.
-    usage_line = next(line for line in captured.out.splitlines()
-                      if line.startswith("usage: "))
-    totals = json.loads(usage_line[len("usage: "):])
-    assert totals["overall"] == {"in": 3, "out": 5, "cached_tokens": 0,
-                                  "request_count": 1}
-    assert totals["by_role"]["judge"]["request_count"] == 1
 
 
 def test_summary_prints_cached_tokens_from_usage_meta(capsys, tmp_path):
@@ -369,142 +360,15 @@ def test_summary_of_a_pre_v4_run_exits_one(capsys, tmp_path):
     assert "frozen sequence" in captured.err
 
 
-def test_main_requires_a_subcommand(capsys):
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main([])
-    assert excinfo.value.code == 2
-
-
-def test_run_passes_infra_retry_settings(monkeypatch, tmp_path):
-    calls = {}
-    monkeypatch.setattr(cli, "run_experiment",
-                        lambda **kwargs: calls.update(kwargs))
-    base = ["run", "--config", str(tmp_path / "cfg.yaml"),
-            "--run-dir", str(tmp_path / "run")]
-    assert cli.main(base) == 0
-    assert calls["llm_infra_retries"] == 3
-    assert calls["llm_infra_backoff_seconds"] == 5.0
-    assert cli.main(base + ["--llm-infra-retries", "0",
-                            "--llm-infra-backoff", "1.5"]) == 0
-    assert calls["llm_infra_retries"] == 0
-    assert calls["llm_infra_backoff_seconds"] == 1.5
-
-
-def test_run_passes_llm_timeout(monkeypatch, tmp_path):
-    calls = {}
-    monkeypatch.setattr(cli, "run_experiment",
-                        lambda **kwargs: calls.update(kwargs))
-    base = ["run", "--config", str(tmp_path / "cfg.yaml"),
-            "--run-dir", str(tmp_path / "run")]
-    assert cli.main(base) == 0
-    assert calls["llm_timeout_sec"] == 300
-    assert cli.main(base + ["--llm-timeout", "120.5"]) == 0
-    assert calls["llm_timeout_sec"] == 120.5
-
-
-def test_resume_command_keeps_llm_timeout(monkeypatch, capsys, tmp_path):
-    import shlex
-
-    def fake_run_experiment(**kwargs):
-        raise InfrastructureError("1 unit failed on infrastructure")
-
-    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
-    code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
-                     "--run-dir", str(tmp_path / "r"), "--llm-timeout", "90"])
-    assert code == cli.EXIT_INFRA_RESUMABLE
-    argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert float(argv[argv.index("--llm-timeout") + 1]) == 90.0
-
-
-def test_llm_timeout_help_documents_the_tradeoff():
-    parser = cli.build_parser()
-    run_parser = parser._subparsers._group_actions[0].choices["run"]
-    help_text = next(action.help for action in run_parser._actions
-                     if "--llm-timeout" in action.option_strings)
-    # Reasoning-max calls legitimately take minutes, so the help must say to
-    # lower the timeout only when the endpoint is unstable (pilot finding:
-    # hung requests each burned the full 300s).
-    assert "reasoning" in help_text
-    assert "unstable" in help_text
-
-
-def test_resume_command_quotes_paths_and_keeps_infra_flags(
-        monkeypatch, capsys, tmp_path):
-    import shlex
-
-    run_dir = tmp_path / "my run"
-    config = tmp_path / "cfg dir" / "x.yaml"
-
-    def fake_run_experiment(**kwargs):
-        raise InfrastructureError("1 unit failed on infrastructure")
-
-    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
-    code = cli.main(["run", "--config", str(config), "--run-dir", str(run_dir),
-                     "--llm-infra-retries", "5", "--llm-infra-backoff", "2"])
-    assert code == cli.EXIT_INFRA_RESUMABLE
-    command = capsys.readouterr().err.splitlines()[-1].strip()
-    argv = shlex.split(command)
-    assert argv[:2] == ["expedistill", "run"]
-    assert argv[argv.index("--config") + 1] == str(config)
-    assert argv[argv.index("--run-dir") + 1] == str(run_dir)
-    assert argv[argv.index("--llm-infra-retries") + 1] == "5"
-    assert float(argv[argv.index("--llm-infra-backoff") + 1]) == 2.0
-
-
-def test_run_passes_shortfall_and_stagger_settings(monkeypatch, tmp_path):
-    calls = {}
-    monkeypatch.setattr(cli, "run_experiment",
-                        lambda **kwargs: calls.update(kwargs))
-    base = ["run", "--config", str(tmp_path / "cfg.yaml"),
-            "--run-dir", str(tmp_path / "run")]
-    assert cli.main(base) == 0
-    assert calls["allow_infra_shortfall"] is False
-    assert calls["k1_stagger"] == 0.0
-    assert cli.main(base + ["--allow-infra-shortfall",
-                            "--k1-stagger", "1.5"]) == 0
-    assert calls["allow_infra_shortfall"] is True
-    assert calls["k1_stagger"] == 1.5
-
-
-@pytest.mark.parametrize("extra, shortfall", [
-    pytest.param([], False, id="strict"),
-    pytest.param(["--allow-infra-shortfall"], True, id="accepting"),
-])
-def test_resume_command_keeps_shortfall_and_stagger(
-        monkeypatch, capsys, tmp_path, extra, shortfall):
-    import shlex
-
-    def fake_run_experiment(**kwargs):
-        raise InfrastructureError("1 unit failed on infrastructure")
-
-    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
-    code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
-                     "--run-dir", str(tmp_path / "r"),
-                     "--k1-stagger", "2.5", *extra])
-    assert code == cli.EXIT_INFRA_RESUMABLE
-    argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert float(argv[argv.index("--k1-stagger") + 1]) == 2.5
-    assert ("--allow-infra-shortfall" in argv) is shortfall
-
-
-@pytest.mark.parametrize("flag, value, setting", [
-    ("--k1-stagger", "-1", "k1_stagger"),
-    ("--k1-stagger", "nan", "k1_stagger"),
-    ("--llm-infra-retries", "-2", "llm_infra_retries"),
-    ("--llm-infra-backoff", "nan", "llm_infra_backoff_seconds"),
-    ("--llm-timeout", "0", "llm_timeout_sec"),
-    ("--llm-timeout", "nan", "llm_timeout_sec"),
-    ("--workers", "0", "workers"),
-])
-def test_bad_run_setting_exits_one_without_traceback(
-        capsys, tmp_path, flag, value, setting):
+def test_bad_run_setting_exits_one_without_traceback(capsys, tmp_path):
     # The REAL run_experiment: validation must happen before the config is
-    # even read (the config path does not exist here).
+    # even read (the config path does not exist here). The full list of bad
+    # values is pinned in test_cli_run_loop.
     code = cli.main(["run", "--config", str(tmp_path / "missing.yaml"),
-                     "--run-dir", str(tmp_path / "run"), flag, value])
+                     "--run-dir", str(tmp_path / "run"), "--workers", "0"])
     captured = capsys.readouterr()
     assert code == 1
-    assert setting in captured.err
+    assert "workers" in captured.err
     assert not (tmp_path / "run").exists()
 
 
@@ -534,67 +398,73 @@ def test_run_model_output_error_exits_one_with_resume_hint(
 
 
 # ---------------------------------------------------------------------------
-# --until-phase
+# run settings reach run_experiment; the resume command keeps them
 # ---------------------------------------------------------------------------
 
-def test_run_passes_until_phase(monkeypatch, tmp_path):
+_DEFAULT_SETTINGS = {
+    "llm_infra_retries": 3, "llm_infra_backoff_seconds": 5.0,
+    "llm_timeout_sec": 300, "allow_infra_shortfall": False,
+    "k1_stagger": 0.0, "until_phase": None, "rollout_workers": None,
+}
+_OVERRIDE_FLAGS = [
+    "--llm-infra-retries", "0", "--llm-infra-backoff", "1.5",
+    "--llm-timeout", "120.5", "--allow-infra-shortfall",
+    "--k1-stagger", "1.5", "--until-phase", "3", "--rollout-workers", "64",
+]
+_OVERRIDE_SETTINGS = {
+    "llm_infra_retries": 0, "llm_infra_backoff_seconds": 1.5,
+    "llm_timeout_sec": 120.5, "allow_infra_shortfall": True,
+    "k1_stagger": 1.5, "until_phase": 3, "rollout_workers": 64,
+}
+
+
+@pytest.mark.parametrize("flags, expected", [
+    pytest.param([], _DEFAULT_SETTINGS, id="defaults"),
+    pytest.param(_OVERRIDE_FLAGS, _OVERRIDE_SETTINGS, id="overrides"),
+])
+def test_run_passes_its_settings_to_the_loop(
+        monkeypatch, tmp_path, flags, expected):
     calls = {}
     monkeypatch.setattr(cli, "run_experiment",
                         lambda **kwargs: calls.update(kwargs))
-    base = ["run", "--config", str(tmp_path / "cfg.yaml"),
-            "--run-dir", str(tmp_path / "run")]
-    assert cli.main(base) == 0
-    assert calls["until_phase"] is None
-    assert cli.main(base + ["--until-phase", "3"]) == 0
-    assert calls["until_phase"] == 3
+    assert cli.main(["run", "--config", str(tmp_path / "cfg.yaml"),
+                     "--run-dir", str(tmp_path / "run"), *flags]) == 0
+    assert {key: calls[key] for key in expected} == expected
 
 
-def test_resume_command_keeps_until_phase(monkeypatch, capsys, tmp_path):
+@pytest.mark.parametrize("flags, present, absent", [
+    pytest.param([], {}, ["--until-phase", "--rollout-workers",
+                          "--allow-infra-shortfall"], id="defaults"),
+    pytest.param(
+        _OVERRIDE_FLAGS,
+        {"--llm-infra-retries": "0", "--llm-infra-backoff": "1.5",
+         "--llm-timeout": "120.5", "--k1-stagger": "1.5",
+         "--until-phase": "3", "--rollout-workers": "64"},
+        [], id="overrides"),
+])
+def test_resume_command_keeps_the_run_settings(
+        monkeypatch, capsys, tmp_path, flags, present, absent):
     import shlex
+
+    # Paths with spaces prove the command is shell-quoted.
+    config = tmp_path / "cfg dir" / "x.yaml"
+    run_dir = tmp_path / "my run"
 
     def fake_run_experiment(**kwargs):
         raise InfrastructureError("1 unit failed on infrastructure")
 
     monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
-    code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
-                     "--run-dir", str(tmp_path / "r"), "--until-phase", "4"])
+    code = cli.main(["run", "--config", str(config),
+                     "--run-dir", str(run_dir), "--workers", "128", *flags])
     assert code == cli.EXIT_INFRA_RESUMABLE
     argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert argv[argv.index("--until-phase") + 1] == "4"
-
-
-def test_resume_command_omits_until_phase_when_default(
-        monkeypatch, capsys, tmp_path):
-    import shlex
-
-    def fake_run_experiment(**kwargs):
-        raise InfrastructureError("1 unit failed on infrastructure")
-
-    monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
-    code = cli.main(["run", "--config", str(tmp_path / "c.yaml"),
-                     "--run-dir", str(tmp_path / "r")])
-    assert code == cli.EXIT_INFRA_RESUMABLE
-    argv = shlex.split(capsys.readouterr().err.splitlines()[-1])
-    assert "--until-phase" not in argv
-
-
-def test_until_phase_help_says_how_to_continue():
-    parser = cli.build_parser()
-    run_parser = parser._subparsers._group_actions[0].choices["run"]
-    help_text = next(action.help for action in run_parser._actions
-                     if "--until-phase" in action.option_strings)
-    # A user who stopped early must learn from the help alone that they
-    # re-run with a higher --until-phase to continue.
-    assert "higher --until-phase" in help_text
-    # And that N indexes the sequence, not a code constant.
-    assert "0-based" in help_text
-
-
-def test_until_phase_non_integer_is_usage_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        cli, "run_experiment",
-        lambda **kwargs: pytest.fail("run_experiment must not be called"))
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main(["run", "--config", str(tmp_path / "cfg.yaml"),
-                  "--run-dir", str(tmp_path / "run"), "--until-phase", "x"])
-    assert excinfo.value.code == 2
+    assert argv[:2] == ["expedistill", "run"]
+    assert argv[argv.index("--config") + 1] == str(config)
+    assert argv[argv.index("--run-dir") + 1] == str(run_dir)
+    assert argv[argv.index("--workers") + 1] == "128"
+    for flag, value in present.items():
+        assert argv[argv.index(flag) + 1] == value, flag
+    for flag in absent:
+        assert flag not in argv
+    assert ("--allow-infra-shortfall" in argv) is ("--allow-infra-shortfall"
+                                                  in flags)

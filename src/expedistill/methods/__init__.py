@@ -9,11 +9,3 @@ imports nothing, and a name the config asks for that is not in the table
 fails loudly. Resolving a family validates its params (the family's
 dataclass) before any driver is imported.
 """
-
-from expedistill.methods.registry import (
-    resolve,
-    resolve_fixed,
-    resolve_params,
-)
-
-__all__ = ["resolve", "resolve_fixed", "resolve_params"]

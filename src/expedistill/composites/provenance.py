@@ -21,34 +21,23 @@ evidence; a rewrite's failing steps).
 Writes go through ``infra.store.append_jsonl`` (torn tails repaired).
 """
 
-import re
 from pathlib import Path
 from typing import Iterable, List, Optional, Union
 
-from expedistill.composites import trace
+from expedistill.composites import phase_bank, trace
 from expedistill.core.models import Skill
 from expedistill.core.trace import Provenance
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
 from expedistill.infra.store import Store, append_jsonl, read_jsonl
 
 __all__ = [
-    "PHASES_DIR",
     "PROVENANCE_NAME",
     "check_provenance",
     "find_provenance",
     "record_version",
 ]
 
-PHASES_DIR = "phases"
 PROVENANCE_NAME = "provenance.jsonl"
-
-_PHASE_DIR_NUMBER_RE = re.compile(r"^p([0-9]+)_")
-
-
-def _phase_dir_number(path: Path) -> int:
-    match = _PHASE_DIR_NUMBER_RE.match(path.parent.name)
-    return int(match.group(1)) if match else -1
-
 
 def record_version(store: Store, phase_dir: Union[str, Path], run_dir:
                    Union[str, Path], skill: Skill,
@@ -72,7 +61,7 @@ def record_version(store: Store, phase_dir: Union[str, Path], run_dir:
             f"provenance of {skill.skill_id!r} v{skill.version} names no "
             "source: every version comes from evidence")
     for ref in provenance.sources:
-        trace.resolve(run_dir, ref)
+        trace.check_ref(run_dir, ref)
     phase_dir = Path(phase_dir)
     path = phase_dir / PROVENANCE_NAME
     for row in read_jsonl(path):
@@ -89,8 +78,9 @@ def find_provenance(run_dir: Union[str, Path], skill_id: str,
                     version: int) -> Optional[Provenance]:
     """The recorded origin of ``(skill_id, version)``, newest phase first."""
     paths = sorted(
-        (Path(run_dir) / PHASES_DIR).glob(f"*/{PROVENANCE_NAME}"),
-        key=_phase_dir_number, reverse=True)
+        (Path(run_dir) / phase_bank.PHASES_DIR).glob(f"*/{PROVENANCE_NAME}"),
+        key=lambda path: phase_bank.phase_dir_number(path.parent.name),
+        reverse=True)
     for path in paths:
         for row in read_jsonl(path):
             if (row.get("skill_id") == skill_id
@@ -115,7 +105,7 @@ def check_provenance(run_dir: Union[str, Path],
             problems.append(f"{label}: the provenance row names no source")
         for ref in row.sources:
             try:
-                trace.resolve(run_dir, ref)
+                trace.check_ref(run_dir, ref)
             except (CodeBugError, ModelOutputError) as exc:
                 problems.append(f"{label}: {exc}")
     return problems

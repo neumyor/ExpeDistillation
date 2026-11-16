@@ -20,10 +20,6 @@ BASELINE = phase_label(0, "baseline")
 PRACTICE = phase_label(2, "practice")
 
 
-def test_task_id():
-    assert make_task_id("tb", "task-1") == "tb:task-1"
-
-
 def test_phase_tag_replaces_the_label_colon():
     assert phase_tag(BASELINE) == "p01_baseline"
     assert phase_tag("p12:my_phase.v2") == "p12_my_phase.v2"
@@ -79,16 +75,6 @@ def test_type_and_skill_ids():
 def test_bad_arguments_raise(make, args):
     with pytest.raises(ValueError):
         make(*args)
-
-
-def test_child_id_embeds_parent_id():
-    task = make_task_id("tb", "task-1")
-    traj = make_trajectory_id(PRACTICE, task, "weak", 3)
-    seg = make_subtask_id(traj, 2)
-    type_id = make_type_id(5)
-    assert traj.startswith(f"traj/{phase_tag(PRACTICE)}/{task}/")
-    assert seg.startswith(traj + "/")
-    assert make_skill_id(type_id).startswith(type_id + "/")
 
 
 def test_raw_task_id_round_trip():

@@ -10,7 +10,7 @@ Two blocks in one file (AGENTS.md layer-4 layout):
 - ``validate_segments`` (D7): pure structural validation of a segment list
   against a step count and K -- no gaps, no overlaps, exact coverage, field
   existence/type only. It NEVER judges whether a ``success`` value is
-  semantically correct (README stage 2: only field presence is checked).
+  semantically correct (only field presence is checked).
 
 Layer 4; depends on llm (call_model) and infra (ModelOutputError) only.
 """

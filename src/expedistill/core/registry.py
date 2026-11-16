@@ -1,13 +1,14 @@
-"""Generic named registry for prompts (B2), named rules and benchmark plugins.
+"""Generic named registry for named rules and benchmark plugins.
 
-README 1.1 rule 7: replaceable behaviour is selected by *name* -- the config
-names a rule, the manifest freezes the name, and swapping behaviour means
-registering a new name, never editing an existing entry. This module provides
-the one mechanism all three registries share; each subsystem calls
+Building-block rule 7 (AGENTS.md): replaceable behaviour is selected by *name*
+-- the config names a rule, the manifest freezes the name, and swapping
+behaviour means registering a new name, never editing an existing entry. This
+module provides the one mechanism the rule and plugin registries share; each
+subsystem calls
 :func:`make_registry` with its own ``kind`` label so error messages say
 "unknown rule 'x'" rather than "unknown entry 'x'".
 
-Entries are plain values (usually functions or prompt constants); the registry
+Entries are plain values (usually functions); the registry
 knows nothing about what they do.
 """
 

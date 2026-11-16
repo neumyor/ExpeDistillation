@@ -1,5 +1,5 @@
 """Layer 8: the command-line entry point (the only method entry, AGENTS.md 5)
-and, since R9 deleted stages/pipeline.py, the sequence loop itself.
+and the sequence loop itself.
 
 The subcommands:
 
@@ -14,8 +14,8 @@ The subcommands:
   ``NN = i + 1`` -- the frozen phase numbering.
   ``--until-phase N`` stops after sequence entry N (0-based) for smoke
   tests and pilots; ``-1`` stops right after the freeze step (the task
-  table and the manifest on disk, no phase dispatched -- the pre-run
-  seeders' entry point); the run stays resumable (see the flag's help).
+  table and the manifest on disk, no phase dispatched); the run stays
+  resumable (see the flag's help).
   Expected stops print a clear message instead of a traceback:
 
   - FrozenProtocolChanged / RunLockedError / ConfigError /
@@ -118,8 +118,8 @@ EXIT_INFRA_RESUMABLE = 3
 _LINE_LIMIT = 240
 
 #: The progress ledger, one appended line per completed step (freeze or
-#: phase). The KEY stays ``"stage"`` for consumer compatibility (the
-#: implementation contract, section 6); the VALUE is the pNN label.
+#: phase). The KEY stays ``"stage"`` for consumer compatibility; the VALUE
+#: is the pNN label.
 LOG_NAME = "pipeline_log.jsonl"
 
 #: B7 usage ledger (llm_requests/usage.jsonl, the same path the K-composite
@@ -193,11 +193,11 @@ def _build_handles(
     ``cfg.max_output_tokens_for(role)`` answers a per-role
     ``max_output_tokens`` override, else the config's
     ``default_max_output_tokens`` -- role granularity, one budget per role,
-    and never the ModelHandle's built-in default (the dead 5120 is gone
-    from this path). The helper raises ConfigError when the config carries
-    no ``token_budgets``; the failure era that produces is deliberate: the
-    run stops while handles are being built, before the freeze step locks
-    anything and before any client is built. Budget boundary: only
+    and never the ModelHandle's built-in default. The helper raises
+    ConfigError when the config carries no ``token_budgets``; the failure
+    era that produces is deliberate: the run stops while handles are being
+    built, before the freeze step locks anything and before any client is
+    built. Budget boundary: only
     requests through call_model are capped. TB's remote execution arm
     does NOT go through call_model (the sandbox runs the model behind the
     TBENCH_* env knobs), so executor output budgets do not apply to that
@@ -285,8 +285,7 @@ def _check_run_settings(*, workers: Any, llm_infra_retries: Any,
     step had already locked the run -- or, for ``workers``, not at all.
     ``until_phase`` is NOT checked here: its bound is the frozen
     sequence's length, which only exists after the config loads, so the
-    loop checks it right after load_config (the implementation contract
-    section 6, T3).
+    loop checks it right after load_config.
     """
     def is_int(value: Any) -> bool:
         return isinstance(value, int) and not isinstance(value, bool)
@@ -426,10 +425,9 @@ def run_experiment(
         raise ConfigError(
             f"invalid config {config_path}: {exc}") from exc
     # The bound is the frozen sequence's length, so this check can only
-    # run after the config loads (the implementation contract, T3). -1
-    # is the freeze-only stop (W3-B): the freeze step is p00 and the
-    # sequence starts at p01, so "before the first phase" is -1 -- the
-    # pre-run seeders need a manifest on disk before any phase dispatches.
+    # run after the config loads. -1 is the freeze-only stop: the freeze
+    # step is p00 and the sequence starts at p01, so "before the first
+    # phase" is -1.
     if until_phase is not None \
             and not -1 <= until_phase < len(cfg.sequence):
         raise ConfigError(
@@ -846,8 +844,7 @@ def build_parser() -> argparse.ArgumentParser:
                           "through N, inclusive -- N is the sequence's "
                           "0-based index (default: the whole sequence); "
                           "N=-1 runs the freeze step ONLY: the task table "
-                          "and manifest land on disk and no phase runs "
-                          "(the pre-run seeders' entry point). "
+                          "and manifest land on disk and no phase runs. "
                           "Operational, not frozen: a stopped run simply "
                           "replays from the first phase next time and each "
                           "phase skips its finished units, so continue by "

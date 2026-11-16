@@ -1,145 +1,45 @@
 """Tests for benchmarks/tb: RemoteLink env validation, the TBPlugin end to end
-against a FakeRemoteLink (scripted poll sequence + recorded fixtures),
-load_tasks, result fact reporting (R2), the archive validator's historical
-classification, and the task prompt contract.
+against the fake links (scripted poll sequence + recorded fixtures),
+load_tasks, result fact reporting, and package registration.
 
 No network, no ssh: every remote interaction goes through the fake. The one
-``live``-marked smoke documents (and, when run explicitly with ``-m live``,
-performs) the real manual smoke command.
+``live``-marked smoke is run explicitly with ``-m live``.
 """
 
 import json
-import string
-from pathlib import Path
 
 import pytest
 
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import _reset_registry, get_plugin
 from expedistill.benchmarks.tb import TBPlugin
-from expedistill.benchmarks.tb.plugin import (
-    TB_SKILL_FOLDER_GUIDANCE,
-    classify_result,
-    result_facts,
-    retryable_unscored,
-)
+from expedistill.benchmarks.tb.plugin import result_facts, retryable_unscored
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
 from expedistill.infra.reliability import ConfigError, InfrastructureError
 from expedistill.infra.usage import UsageRecorder
 from expedistill.llm.call import ModelHandle
-from expedistill.prompts.registry import PROMPTS, get as get_prompt
+from expedistill.prompts.registry import PROMPTS
 from tests.helpers.plugins import reload_plugin
-from tests.unit.benchmarks.tb_fake_remote import (
+from tests.helpers.tb_fake_remote import (
+    HANDLE,
+    ROOT,
+    TRIAL,
+    FakeRemoteLink,
     JobsRemoteLink,
-    RemoteShellSim,
     SimulatedCrash,
+    completed_trial_files,
+    fixture_text,
+    make_plugin,
     trial_files,
 )
 
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "tb"
-
-ROOT = "/srv/work/expedistill"
-TRIAL = f"{ROOT}/jobs/ed_train-fasttext_tok/train-fasttext__AbCdEf1"
-
-HANDLE = ModelHandle(name="qwen3.6-flash-distill", role="executor_weak",
-                     client=None)
 TASK = Task(task_id="train-fasttext", instruction="train-fasttext",
             meta={"task_name": "train-fasttext", "attempt_token": "tok"})
-
-
-def _fixture_text(name):
-    return (FIXTURES / name).read_text(encoding="utf-8")
-
-
-class FakeRemoteLink(RemoteShellSim):
-    """Test double for RemoteLink: scripted poll outcomes plus a remote file
-    store. Command routing mirrors the plugin's call patterns; the shell
-    simulator (tb_fake_remote.RemoteShellSim) answers the folder-cache
-    transport commands against a real directory/file model."""
-
-    def __init__(self, polls=None, remote_files=None, home="/home/bench",
-                 probe="ABSENT\n"):
-        self.host = "user@bench-host"
-        self.key_path = "/tmp/fake-key"
-        self.root = ROOT
-        self.home = home
-        self.polls = list(polls or [])
-        self.remote_files = dict(remote_files or {})
-        self.commands = []
-        self.puts = []
-        self.uploads = []
-        self.pid = 4242
-        self.probe = probe
-        self.dirs = set()
-
-    def run(self, cmd, timeout=None):
-        self.commands.append(cmd)
-        simulated = self.shell_run(cmd, timeout=timeout)
-        if simulated is not None:
-            return simulated
-        if "$HOME" in cmd:
-            return self.home, "", 0
-        if "nohup" in cmd:  # the submit call
-            return f"{self.pid}\n", "", 0
-        if "ABSENT" in cmd:  # the pre-submit resume probe
-            return self.probe, "", 0
-        if "result.json" in cmd:  # a poll check
-            if self.polls:
-                return self.polls.pop(0), "", 0
-            return "PENDING\n", "", 0
-        if "tail -c" in cmd:
-            return self.remote_files.get("__log__", ""), "", 0
-        return "", "", 0  # mkdir, partial-trajectory lookup, ...
-
-    def get(self, remote, local, timeout=None):
-        try:
-            content = self.remote_files[str(remote)]
-        except KeyError:
-            raise InfrastructureError(
-                f"scp failed (rc=1) get {remote} -> {local}")
-        Path(local).write_text(content, encoding="utf-8")
-
-    def put(self, local, remote, timeout=None):
-        self.puts.append((local, str(remote)))
-        payload = Path(local).read_bytes()
-        # The put-time snapshot: the ship's cleanup rm removes the tar
-        # from the tree, but what LEFT the machine stays assertable.
-        self.uploads.append((str(remote), payload))
-        # Bytes, not text: the folder cache ships a tar, and the
-        # shell simulator's tar -xf reads whatever put stored.
-        self.remote_files[str(remote)] = payload
-
-    @property
-    def files(self):
-        # The shell simulator's name for the file map.
-        return self.remote_files
-
-
-def _completed_trial_files(result="result_success.json",
-                           verifier_log="verifier_collected.txt"):
-    return {
-        f"{TRIAL}/result.json": _fixture_text(result),
-        f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
-        f"{TRIAL}/verifier/test-stdout.txt": _fixture_text(verifier_log),
-    }
-
-
-def _make_plugin(link, usage_recorder=None):
-    return TBPlugin(link=link, usage_recorder=usage_recorder,
-                    poll_seconds=0.0, deadline_seconds=10.0)
 
 
 # ---------------------------------------------------------------------------
 # RemoteLink configuration
 # ---------------------------------------------------------------------------
-
-def test_remote_link_reads_env_and_reports_missing_vars(monkeypatch):
-    monkeypatch.setenv(ENV_HOST, "user@bench-host")
-    monkeypatch.setenv(ENV_KEY, "/keys/id_tb")
-    monkeypatch.setenv(ENV_ROOT, "/srv/work/expedistill")
-    link = RemoteLink()
-    assert link.host == "user@bench-host"
-    assert link.root == "/srv/work/expedistill"
 
 
 def test_remote_link_missing_env_is_config_error(monkeypatch):
@@ -157,6 +57,10 @@ def test_remote_link_missing_env_is_config_error(monkeypatch):
     monkeypatch.setenv(ENV_ROOT, "expedistill")
     with pytest.raises(ConfigError, match="absolute"):
         RemoteLink()
+    monkeypatch.setenv(ENV_ROOT, "/srv/work/expedistill")
+    link = RemoteLink()
+    assert (link.host, link.root) == ("user@bench-host",
+                                      "/srv/work/expedistill")
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +101,8 @@ def test_load_tasks_none_or_empty_is_config_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _facts(result_name, verifier_log_name):
-    result = json.loads(_fixture_text(result_name))
-    log = _fixture_text(verifier_log_name) if verifier_log_name else None
+    result = json.loads(fixture_text(result_name))
+    log = fixture_text(verifier_log_name) if verifier_log_name else None
     return result_facts(result, log)
 
 
@@ -246,119 +150,34 @@ def test_result_facts_report_exception_verbatim():
     assert facts["verifier_ran"] is None
 
 
-def test_retryable_unscored_includes_pseudo_zero():
-    # No usable verifier evidence (missing reward or a pseudo zero) plus
-    # no model-side exception: K1 gets a fresh attempt. Model-side
-    # exceptions and tmux breakage stay stored facts.
-    assert retryable_unscored(_facts("result_infra.json", None)) is True
-    assert retryable_unscored(
-        result_facts({"verifier_result": None,
-                      "exception_info": {
-                          "exception_type": "TimeoutException",
-                          "exception_message": "context deadline exceeded"}},
-                     None)) is True
-    assert retryable_unscored(
-        result_facts({"verifier_result": None, "exception_info": None},
-                     None)) is True
-    assert retryable_unscored(
-        _facts("result_failure.json", "verifier_not_collected.txt")) is True
-    assert retryable_unscored(
-        _facts("result_success.json", "verifier_not_collected.txt")) is True
-    assert retryable_unscored(_facts("result_model_fail.json", None)) is False
-    assert retryable_unscored(
-        result_facts({"verifier_result": None,
-                      "exception_info": {
-                          "exception_type": "ContextLengthExceededError",
-                          "exception_message": "too long"}},
-                     None)) is False
-    assert retryable_unscored(
-        result_facts({"verifier_result": None,
-                      "exception_info": {
-                          "exception_type": "RuntimeError",
-                          "exception_message": "tmux: send keys failed"}},
-                     None)) is False
-    # A harness capability error (an unsupported send-keys flag) never gave
-    # the model a fair run: infra, so K1 retries under a fresh token.
-    assert retryable_unscored(
-        result_facts({"verifier_result": None,
-                      "exception_info": {
-                          "exception_type": "RuntimeError",
-                          "exception_message": (
-                              "failed to send non-blocking keys: command "
-                              "send-keys: unknown flag -e")}},
-                     None)) is True
-    # Session loss after the model broke tmux stays model-side.
-    assert retryable_unscored(
-        result_facts({"verifier_result": None,
-                      "exception_info": {
-                          "exception_type": "RuntimeError",
-                          "exception_message": (
-                              "failed to send non-blocking keys: "
-                              "no server running on /tmp/tmux-0/default")}},
-                     None)) is False
+def _exception_facts(kind, message):
+    info = {"exception_type": kind, "exception_message": message}
+    return result_facts({"verifier_result": None, "exception_info": info},
+                        None)
 
 
-# ---------------------------------------------------------------------------
-# classify_result (pure): the archive validator's historical lens
-# ---------------------------------------------------------------------------
-
-def _classify(result_name, verifier_log_name):
-    result = json.loads(_fixture_text(result_name))
-    log = _fixture_text(verifier_log_name) if verifier_log_name else None
-    return classify_result(result, log)
-
-
-def test_classify_is_only_the_archive_validators_historical_lens():
-    # R2: run() no longer calls classify_result. It stays importable for
-    # scripts/analysis/tb_archive_validate.py, which re-derives the status
-    # PRE-R2 archived trials were produced under; these assertions pin that
-    # historical classification, not any execution behaviour.
-    status, reward, _ = _classify("result_success.json",
-                                  "verifier_collected.txt")
-    assert (status, reward) == ("success", 1.0)
-    status, reward, _ = _classify("result_failure.json",
-                                  "verifier_collected.txt")
-    assert (status, reward) == ("failure", 0.0)
-    status, _, info = _classify("result_failure.json",
-                               "verifier_not_collected.txt")
-    assert status == "infra_error"
-    assert info["verdict_reason"] == "pseudo_zero"
-    status, _, info = _classify("result_failure.json", None)
-    assert status == "infra_error"
-    assert info["verdict_reason"] == "pseudo_zero"
-
-
-def test_classify_exceptions_split_model_vs_infra():
-    status, _, info = _classify("result_infra.json", None)
-    assert status == "infra_error"
-    assert info["exception_type"] == "AgentSetupTimeoutError"
-    status, _, info = _classify("result_model_fail.json", None)
-    assert status == "failure"
-    assert info["exception_type"] == "AgentTimeoutError"
-    status, _, info = classify_result(
-        {"verifier_result": None, "exception_info": None}, None)
-    assert status == "infra_error"
-    assert info["verdict_reason"] == "no_reward_no_exception"
-
-
-def test_classify_tmux_rule_matches_only_runtime_error():
-    def _result(etype, message):
-        return {"verifier_result": None,
-                "exception_info": {"exception_type": etype,
-                                   "exception_message": message}}
-
-    status, _, _ = classify_result(
-        _result("RuntimeError", "tmux: command not found"), None)
-    assert status == "failure"
-    status, _, _ = classify_result(
-        _result("RuntimeError", "RuntimeError: send keys failed"), None)
-    assert status == "failure"
-    status, _, _ = classify_result(
-        _result("SandboxException", "tmux session died during run"), None)
-    assert status == "infra_error"
-    status, _, _ = classify_result(
-        _result("AgentTimeoutError", "stuck waiting on tmux"), None)
-    assert status == "failure"  # model exception set wins outright
+@pytest.mark.parametrize("facts, retryable", [
+    # No usable verifier evidence and no model-side exception: K1 gets a
+    # fresh attempt.
+    (_facts("result_infra.json", None), True),
+    (_exception_facts("TimeoutException", "context deadline exceeded"), True),
+    (result_facts({"verifier_result": None, "exception_info": None}, None),
+     True),
+    (_facts("result_failure.json", "verifier_not_collected.txt"), True),
+    (_facts("result_success.json", "verifier_not_collected.txt"), True),
+    # A harness capability error never gave the model a fair run.
+    (_exception_facts("RuntimeError", "failed to send non-blocking keys: "
+                      "command send-keys: unknown flag -e"), True),
+    # Model-side exceptions and tmux breakage stay stored facts, including
+    # a session lost after the model broke tmux.
+    (_facts("result_model_fail.json", None), False),
+    (_exception_facts("ContextLengthExceededError", "too long"), False),
+    (_exception_facts("RuntimeError", "tmux: send keys failed"), False),
+    (_exception_facts("RuntimeError", "failed to send non-blocking keys: "
+                      "no server running on /tmp/tmux-0/default"), False),
+])
+def test_retryable_unscored(facts, retryable):
+    assert retryable_unscored(facts) is retryable
 
 
 def test_default_deadline_covers_one_trials_worst_case():
@@ -406,27 +225,13 @@ def test_runner_env_is_the_submission_contract(monkeypatch):
 # run(): end to end against the fake link
 # ---------------------------------------------------------------------------
 
-def test_run_forwards_the_handle_context_limit(tmp_path):
-    link = FakeRemoteLink(
-        polls=["PENDING\n", f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files())
-    handle = ModelHandle(name="weak-model", role="executor_weak",
-                         client=None, max_input_tokens=262144)
-    plugin = _make_plugin(link)
-    outcome = plugin.run(TASK, handle, "", tmp_path / "work")
-
-    submit = [cmd for cmd in link.commands if "nohup" in cmd]
-    assert len(submit) == 1
-    assert "TBENCH_MAX_INPUT_TOKENS=262144" in submit[0]
-    assert outcome.meta["max_input_tokens"] == 262144
-
 
 def test_run_success_end_to_end(tmp_path):
     link = FakeRemoteLink(
         polls=["PENDING\n", f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files())
+        remote_files=completed_trial_files())
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    plugin = _make_plugin(link, recorder)
+    plugin = make_plugin(link, recorder)
     outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
     assert outcome.correctness is True
@@ -436,7 +241,11 @@ def test_run_success_end_to_end(tmp_path):
     assert meta["eval_mode"] == "bare"
     assert meta["skills_injected"] is False
     assert meta["reward"] == 1.0
+    # The fixture's two unmapped steps both carry tool_calls: category "other".
     assert meta["skipped_steps"] == 2
+    assert meta["skipped_other"] == 2
+    assert meta["skipped_parse_failures"] == meta["skipped_handoffs"] == 0
+    assert meta["verifier_ran"] is True
     assert meta["remote"]["result"] == f"{TRIAL}/result.json"
     assert meta["timing"]["duration_s"] >= 0
     # One submit command with the runner, detached, echoing the pid.
@@ -445,6 +254,7 @@ def test_run_success_end_to_end(tmp_path):
     assert "RUN_ID=ed_train-fasttext_tok" in submit[0]
     assert "TBENCH_EVAL_MODE=bare" in submit[0]
     assert "TBENCH_N_ATTEMPTS=1" in submit[0]
+    assert "TBENCH_MAX_INPUT_TOKENS=131072" in submit[0]
     assert "MODEL_NAME=qwen3.6-flash-distill" in submit[0]
     assert "echo $!" in submit[0]
     assert "TBENCH_SKILL_ROOT" not in submit[0]
@@ -455,32 +265,15 @@ def test_run_success_end_to_end(tmp_path):
     assert totals["overall"]["out"] == 1224
 
 
-def test_run_reports_categorized_skip_counts_in_meta(tmp_path):
-    # The reconstruct-level skip categories flow into RunOutcome.meta (E1
-    # copies meta wholesale into Trajectory.meta), additively to the
-    # pre-existing skipped_steps count.
-    link = FakeRemoteLink(
-        polls=["PENDING\n", f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files())
-    plugin = _make_plugin(link)
-    outcome = plugin.run(TASK, HANDLE, "", tmp_path / "work")
-
-    assert outcome.correctness is True
-    # The fixture's two unmapped steps both carry tool_calls, so they land
-    # in "other" (see test_skip_counts_of_fixture_malformed_steps_are_other).
-    assert outcome.meta["skipped_steps"] == 2
-    assert outcome.meta["skipped_parse_failures"] == 0
-    assert outcome.meta["skipped_handoffs"] == 0
-    assert outcome.meta["skipped_other"] == 2
-
-
 def test_run_with_skills_uploads_skill_md(tmp_path):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files())
-    plugin = _make_plugin(link)
+        remote_files=completed_trial_files())
+    plugin = make_plugin(link)
     skills_block = "## Skill rules\n- check pip mirrors before installing"
-    outcome = plugin.run(TASK, HANDLE, skills_block, tmp_path / "work")
+    handle = ModelHandle(name="weak-model", role="executor_weak",
+                         client=None, max_input_tokens=262144)
+    outcome = plugin.run(TASK, handle, skills_block, tmp_path / "work")
 
     assert outcome.correctness is True
     assert outcome.meta["eval_mode"] == "skills"
@@ -501,13 +294,16 @@ def test_run_with_skills_uploads_skill_md(tmp_path):
     assert "TBENCH_EVAL_MODE=skills" in submit
     assert (f"TBENCH_SKILL_ROOT={ROOT}/skills/ed_train-fasttext_tok"
             in submit)
+    # The handle's context limit, not the default, reaches the runner.
+    assert "TBENCH_MAX_INPUT_TOKENS=262144" in submit
+    assert outcome.meta["max_input_tokens"] == 262144
 
 
 def test_run_dead_runner_raises_with_partial_evidence(tmp_path):
     link = FakeRemoteLink(
         polls=["PENDING\n", "DEAD\n"],
-        remote_files={"__log__": _fixture_text("runner_log.txt")})
-    plugin = _make_plugin(link)
+        remote_files={"__log__": fixture_text("runner_log.txt")})
+    plugin = make_plugin(link)
     with pytest.raises(InfrastructureError) as raised:
         plugin.run(TASK, HANDLE, "", tmp_path / "work")
     message = str(raised.value)
@@ -515,7 +311,7 @@ def test_run_dead_runner_raises_with_partial_evidence(tmp_path):
     assert "ConfigValidationError" in message  # the runner log tail rides in
     # A failure ledger row would be K1's business; usage here is null, not 0.
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    plugin = _make_plugin(FakeRemoteLink(
+    plugin = make_plugin(FakeRemoteLink(
         polls=["DEAD\n"], remote_files={}), recorder)
     with pytest.raises(InfrastructureError):
         plugin.run(TASK, HANDLE, "", tmp_path / "work2")
@@ -541,10 +337,10 @@ def test_run_infra_exception_result_raises_for_k1_retry(tmp_path):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
-            f"{TRIAL}/result.json": _fixture_text("result_infra.json"),
+            f"{TRIAL}/result.json": fixture_text("result_infra.json"),
         })
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    plugin = _make_plugin(link, recorder)
+    plugin = make_plugin(link, recorder)
     with pytest.raises(InfrastructureError, match="no scorer verdict"):
         plugin.run(TASK, HANDLE, "", tmp_path / "work")
 
@@ -563,43 +359,14 @@ def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
-            f"{TRIAL}/result.json": _fixture_text("result_model_fail.json"),
-            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
+            f"{TRIAL}/result.json": fixture_text("result_model_fail.json"),
+            f"{TRIAL}/agent/trajectory.json": fixture_text("trajectory.json"),
         })
-    outcome = _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
+    outcome = make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
     assert outcome.correctness is None
     assert outcome.meta["exception_type"] == "AgentTimeoutError"
+    assert outcome.meta["exception_message"]
     assert outcome.meta["reward"] is None
-
-
-def test_run_pseudo_zero_raises_for_k1_retry(tmp_path):
-    # A reward claimed without pytest ever collecting anything (the
-    # campaign's "fake zero") is not usable verifier evidence: the plugin
-    # raises so K1 retries the unit under a fresh token.
-    link = FakeRemoteLink(
-        polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files(result="result_failure.json",
-                                            verifier_log="verifier_not_collected.txt"))
-    recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    with pytest.raises(InfrastructureError, match="no scorer verdict"):
-        _make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
-    rows = [json.loads(line) for line in
-            (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert [row["status"] for row in rows] == ["infra"]
-    assert rows[0]["in_tokens"] is None
-
-
-def test_run_pseudo_zero_positive_direction_raises_for_k1_retry(tmp_path):
-    # The historically dangerous direction (2026-10-16 review D2): a
-    # POSITIVE reward claimed without pytest ever collecting anything
-    # must not score as a success either -- the retry guard is symmetric
-    # in the reward value.
-    link = FakeRemoteLink(
-        polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files(result="result_success.json",
-                                            verifier_log="verifier_not_collected.txt"))
-    with pytest.raises(InfrastructureError, match="no scorer verdict"):
-        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
 
 
 def test_run_verifier_log_fetch_failure_is_infra_and_retried(tmp_path):
@@ -612,53 +379,55 @@ def test_run_verifier_log_fetch_failure_is_infra_and_retried(tmp_path):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
-            f"{TRIAL}/result.json": _fixture_text("result_success.json"),
-            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
+            f"{TRIAL}/result.json": fixture_text("result_success.json"),
+            f"{TRIAL}/agent/trajectory.json": fixture_text("trajectory.json"),
         })
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
     with pytest.raises(InfrastructureError,
                        match="verifier log fetch failed"):
-        _make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
+        make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
     # The failed attempt is one non-ok usage row (the "infra" label).
     rows = [json.loads(line) for line in
             (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [row["status"] for row in rows] == ["infra"]
 
 
-def test_run_truncated_result_json_is_infra_error(tmp_path):
-    # A fetch racing Harbor's non-atomic result.json write lands a truncated
-    # file: transport-grade, so the unit refetches on retry instead of the
-    # ValueError stopping the whole K1 pass (2026-10-13 review).
+@pytest.mark.parametrize("reward_file", ["result_failure.json",
+                                         "result_success.json"])
+def test_run_pseudo_zero_raises_for_k1_retry(tmp_path, reward_file):
+    # A reward claimed without pytest ever collecting anything (the
+    # campaign's "fake zero") is not verifier evidence in EITHER direction:
+    # a positive reward must not score as a success either. The plugin
+    # raises so K1 retries the unit under a fresh token.
+    link = FakeRemoteLink(
+        polls=[f"RESULT {TRIAL}/result.json\n"],
+        remote_files=completed_trial_files(
+            result=reward_file, verifier_log="verifier_not_collected.txt"))
+    recorder = UsageRecorder(tmp_path / "usage.jsonl")
+    with pytest.raises(InfrastructureError, match="no scorer verdict"):
+        make_plugin(link, recorder).run(TASK, HANDLE, "", tmp_path / "work")
+    rows = [json.loads(line) for line in
+            (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["status"] for row in rows] == ["infra"]
+    assert rows[0]["in_tokens"] is None
+
+
+@pytest.mark.parametrize("body, message", [
+    # A fetch racing Harbor's non-atomic write lands a truncated file.
+    ('{"verifier_result": {"rewar', "unreadable result.json"),
+    # Valid JSON that is not an object must not become an AttributeError on
+    # the code-bug path.
+    ("[1, 2, 3]", "not a JSON object"),
+])
+def test_run_bad_result_json_is_infra_error(tmp_path, body, message):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files={
-            f"{TRIAL}/result.json": '{"verifier_result": {"rewar',
-            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
+            f"{TRIAL}/result.json": body,
+            f"{TRIAL}/agent/trajectory.json": fixture_text("trajectory.json"),
         })
-    with pytest.raises(InfrastructureError, match="unreadable result.json"):
-        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-
-
-def test_run_non_object_result_json_is_infra_error(tmp_path):
-    # Valid JSON that is not an object (a truncated write can still parse)
-    # must be infra as well, not an AttributeError on the code-bug path.
-    link = FakeRemoteLink(
-        polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files={
-            f"{TRIAL}/result.json": "[1, 2, 3]",
-            f"{TRIAL}/agent/trajectory.json": _fixture_text("trajectory.json"),
-        })
-    with pytest.raises(InfrastructureError, match="not a JSON object"):
-        _make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
-
-
-def test_run_transport_failure_propagates(tmp_path):
-    class BrokenLink(FakeRemoteLink):
-        def run(self, cmd, timeout=None):
-            raise InfrastructureError("ssh to user@bench-host timed out")
-
-    with pytest.raises(InfrastructureError, match="timed out"):
-        _make_plugin(BrokenLink()).run(TASK, HANDLE, "", tmp_path / "work")
+    with pytest.raises(InfrastructureError, match=message):
+        make_plugin(link).run(TASK, HANDLE, "", tmp_path / "work")
 
 
 def test_run_transport_failure_carries_host_load(tmp_path):
@@ -676,7 +445,7 @@ def test_run_transport_failure_carries_host_load(tmp_path):
             return "272.10 255.00 240.00 3/5256 12345\n12\n", "", 0
 
     with pytest.raises(InfrastructureError, match="bench-host loadavg=272.10"):
-        _make_plugin(BrokenThenProbe()).run(
+        make_plugin(BrokenThenProbe()).run(
             TASK, HANDLE, "", tmp_path / "work")
 
 
@@ -685,23 +454,24 @@ def test_run_transport_failure_reports_a_failed_load_probe(tmp_path):
         def run(self, cmd, timeout=None):
             raise InfrastructureError("ssh to user@bench-host timed out")
 
-    with pytest.raises(InfrastructureError, match="bench-host probe failed"):
-        _make_plugin(AlwaysBroken()).run(TASK, HANDLE, "", tmp_path / "work")
+    # The original failure is kept; the failed probe never masks it.
+    with pytest.raises(InfrastructureError,
+                       match="timed out.*bench-host probe failed"):
+        make_plugin(AlwaysBroken()).run(TASK, HANDLE, "", tmp_path / "work")
 
 
-def test_run_rejects_invalid_task_name(tmp_path):
+@pytest.mark.parametrize("meta, message", [
+    ({"task_name": "x; rm"}, "invalid TB task name"),
+    ({"task_name": "fix-git", "attempt_token": "a b/c"}, "attempt_token"),
+    ({"task_name": "fix-git", "run_namespace": "a b/../c"}, "run_namespace"),
+])
+def test_run_rejects_unsafe_task_meta(tmp_path, meta, message):
+    # Both reach a remote shell command line: refused before any I/O.
     link = FakeRemoteLink()
-    bad = Task(task_id="x; rm", instruction="x", meta={"task_name": "x; rm"})
-    with pytest.raises(ConfigError, match="invalid TB task name"):
-        _make_plugin(link).run(bad, HANDLE, "", tmp_path / "work")
-
-
-def test_run_rejects_bad_attempt_token(tmp_path):
-    link = FakeRemoteLink()
-    bad = Task(task_id="fix-git", instruction="fix-git",
-               meta={"task_name": "fix-git", "attempt_token": "a b/c"})
-    with pytest.raises(ConfigError, match="attempt_token"):
-        _make_plugin(link).run(bad, HANDLE, "", tmp_path / "work")
+    bad = Task(task_id=meta["task_name"], instruction="x", meta=meta)
+    with pytest.raises(ConfigError, match=message):
+        make_plugin(link).run(bad, HANDLE, "", tmp_path / "work")
+    assert link.commands == []
 
 
 # ---------------------------------------------------------------------------
@@ -717,17 +487,11 @@ def _task(token="a00", namespace=None, name="train-fasttext"):
 
 def test_run_id_carries_the_namespace(tmp_path):
     link = JobsRemoteLink()
-    outcome = _make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
+    outcome = make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
                                      "", tmp_path / "work")
     assert outcome.correctness is True
     assert outcome.meta["run_id"] == "ed_train-fasttext_0123abcdef_a00"
     assert "RUN_ID=ed_train-fasttext_0123abcdef_a00" in link.submits()[0]
-
-
-def test_run_rejects_bad_namespace(tmp_path):
-    with pytest.raises(ConfigError, match="run_namespace"):
-        _make_plugin(JobsRemoteLink()).run(
-            _task(namespace="a b/../c"), HANDLE, "", tmp_path / "work")
 
 
 def test_weak_arm_never_reads_the_strong_arms_result(tmp_path):
@@ -740,7 +504,7 @@ def test_weak_arm_never_reads_the_strong_arms_result(tmp_path):
         files=trial_files(strong_id, "train-fasttext"),
         on_submit=lambda run_id, task, model: trial_files(
             run_id, task, result="result_failure.json", trial="WeAk001"))
-    weak = _make_plugin(link).run(_task(namespace="eaeaeaeaea"), HANDLE, "",
+    weak = make_plugin(link).run(_task(namespace="eaeaeaeaea"), HANDLE, "",
                                   tmp_path / "weak")
     assert weak.meta["run_id"] == "ed_train-fasttext_eaeaeaeaea_a00"
     assert weak.meta["run_id"] != strong_id
@@ -772,7 +536,7 @@ def _running_link(**kwargs):
 
 def test_crashed_unit_reuses_its_finished_result_without_submit(tmp_path):
     link = _running_link()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
     skills = "## Skill rules\n- one"
     _crashed_launch(link, plugin, workdir, skills)
@@ -780,7 +544,7 @@ def test_crashed_unit_reuses_its_finished_result_without_submit(tmp_path):
     link.finish(NS_TASK_RUN_ID)
 
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
-    plugin = _make_plugin(link, recorder)
+    plugin = make_plugin(link, recorder)
     outcome = plugin.run(_task(namespace="0123abcdef"), HANDLE, skills,
                          workdir)
     assert outcome.correctness is True
@@ -801,7 +565,7 @@ def test_crashed_unit_reuses_its_finished_result_without_submit(tmp_path):
 
 def test_reused_result_without_timing_fields_marks_duration_unknown(tmp_path):
     link = _running_link()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
     _crashed_launch(link, plugin, workdir)
     link.finish(NS_TASK_RUN_ID)
@@ -824,7 +588,7 @@ def test_remote_result_without_local_submit_record_is_never_reused(tmp_path):
     link = JobsRemoteLink(files=files)
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
     with pytest.raises(InfrastructureError) as raised:
-        _make_plugin(link, recorder).run(
+        make_plugin(link, recorder).run(
             _task(namespace="0123abcdef"), HANDLE, "", tmp_path / "work")
     assert "no local submit record" in str(raised.value)
     assert link.submits() == []
@@ -836,7 +600,7 @@ def test_remote_result_without_local_submit_record_is_never_reused(tmp_path):
 def test_submit_conditions_mismatch_is_stale(tmp_path, monkeypatch, tamper):
     monkeypatch.setenv("TBENCH_PYPI_MIRROR", "http://mirror-a/simple")
     link = _running_link()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
     _crashed_launch(link, plugin, workdir, "- skill A")
     link.finish(NS_TASK_RUN_ID)
@@ -860,7 +624,7 @@ def test_submit_writes_local_record_and_remote_meta(tmp_path, monkeypatch):
     monkeypatch.setenv("TBENCH_PYPI_MIRROR", "http://mirror-a/simple")
     link = _running_link()
     workdir = tmp_path / "work"
-    pid = _crashed_launch(link, _make_plugin(link), workdir, "- skill A")
+    pid = _crashed_launch(link, make_plugin(link), workdir, "- skill A")
     record = json.loads((workdir / "tb_remote" / f"{NS_TASK_RUN_ID}.json")
                         .read_text(encoding="utf-8"))
     remote = json.loads(link.files[f"{ROOT}/jobs/{NS_TASK_RUN_ID}.ed_meta.json"])
@@ -878,13 +642,13 @@ def test_submit_writes_local_record_and_remote_meta(tmp_path, monkeypatch):
 def test_existing_run_dir_with_dead_pid_is_infra_error_without_submit(
         tmp_path):
     link = _running_link()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
     pid = _crashed_launch(link, plugin, workdir)
     link.alive.discard(pid)  # the runner died without a result
     recorder = UsageRecorder(tmp_path / "usage.jsonl")
     with pytest.raises(InfrastructureError) as raised:
-        _make_plugin(link, recorder).run(
+        make_plugin(link, recorder).run(
             _task(namespace="0123abcdef"), HANDLE, "", workdir)
     assert f"recorded pid {pid} is not alive" in str(raised.value)
     assert len(link.submits()) == 1
@@ -900,14 +664,14 @@ def test_existing_run_dir_without_pid_file_is_infra_error_without_submit(
     # id is taken; resubmitting could start a second runner into it.
     link = JobsRemoteLink(files={f"{ROOT}/logs/{NS_TASK_RUN_ID}.log": ""})
     with pytest.raises(InfrastructureError, match="already exists remotely"):
-        _make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
+        make_plugin(link).run(_task(namespace="0123abcdef"), HANDLE,
                                "", tmp_path / "work")
     assert link.submits() == []
 
 
 def test_existing_run_dir_with_alive_pid_polls_without_submit(tmp_path):
     link = _running_link()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
     pid = _crashed_launch(link, plugin, workdir)
     polls = {"n": 0}
@@ -962,7 +726,7 @@ def test_reused_pid_of_a_foreign_process_is_not_rejoined(tmp_path):
     # The runner died and an unrelated process got its pid: alive, but its
     # environment carries no RUN_ID of ours -> stale, never rejoined.
     link = _running_link()
-    plugin = _make_plugin(link)
+    plugin = make_plugin(link)
     workdir = tmp_path / "work"
     pid = _crashed_launch(link, plugin, workdir)
     link.owner.pop(pid)  # same pid, somebody else's process now
@@ -1025,91 +789,6 @@ def test_identity_check_command_runs_in_real_bash(tmp_path):
 # Prompt contract and package registration
 # ---------------------------------------------------------------------------
 
-def test_task_prompt_registered_with_exactly_three_variables():
-    template = get_prompt("TB_TASK_PROMPT")
-    fields = {fname for _, fname, _, _ in string.Formatter().parse(template)
-              if fname}
-    assert fields == {"instruction", "skills_block", "history"}
-    # Renders both ways: bare (empty block) and with skills.
-    bare = template.format(instruction="do the thing", skills_block="",
-                           history="")
-    assert "do the thing" in bare
-    with_skills = template.format(instruction="do the thing",
-                                  skills_block="## Skill rules\n- be careful",
-                                  history="")
-    assert "## Skill rules" in with_skills
-
-
-def _folder_task(tmp_path):
-    """One folder unit: a materialized Agent Skills folder plus manifest."""
-    folder_dir = tmp_path / "folder"
-    skill_dir = folder_dir / "x"
-    skill_dir.mkdir(parents=True)
-    catalog = "## Skill folder catalog (fallback)\n\nbank/x | x/SKILL.md | example\n"
-    (folder_dir / "catalog.md").write_text(catalog, encoding="utf-8")
-    (skill_dir / "SKILL.md").write_text(
-        "---\nname: x\ndescription: example\n---\n\n"
-        "[When to use] example\n[Steps]\n1. do it\n"
-        "[Do not use when] never\n",
-        encoding="utf-8")
-    manifest = {
-        "bank_fingerprint": "bank:test",
-        "catalog_filename": "catalog.md",
-        "catalog_text": catalog,
-        "description_mode": "summary_then_when_to_use",
-        "files": [{"skill_id": "bank/x", "version": 1,
-                   "filename": "x/SKILL.md"}],
-    }
-    task = Task(task_id="train-fasttext", instruction="train-fasttext",
-                meta={"task_name": "train-fasttext",
-                      "attempt_token": "tok",
-                      "skill_folder": manifest,
-                      "skill_folder_dir": str(folder_dir)})
-    return task, catalog
-
-
-def _run_folder(tmp_path):
-    task, catalog = _folder_task(tmp_path)
-    link = FakeRemoteLink(
-        polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files())
-    outcome = _make_plugin(link).run(
-        task, HANDLE, catalog, tmp_path / "work")
-    uploads = [(remote, payload) for remote, payload in link.uploads
-               if remote.endswith("/SKILL.md")]
-    assert len(uploads) == 1
-    return uploads[0][1].decode("utf-8"), catalog, outcome
-
-
-def test_folder_skill_md_is_guidance_only(tmp_path):
-    # The task-level SKILL.md is guidance only. Harbor's Terminus agent
-    # supplies the <available_skills> list; the catalog is not injected.
-    text, catalog, outcome = _run_folder(tmp_path)
-    assert text == TB_SKILL_FOLDER_GUIDANCE
-    assert "<available_skills>" in text
-    assert "## Skill folder catalog" not in text
-    assert "bank/x | x/SKILL.md | example" not in text
-    assert outcome.meta["prompt_name"] == "TB_TASK_PROMPT_FOLDER"
-
-
-def test_folder_upload_keeps_the_skill_subdirectory(tmp_path):
-    task, catalog = _folder_task(tmp_path)
-    link = FakeRemoteLink(
-        polls=[f"RESULT {TRIAL}/result.json\n"],
-        remote_files=_completed_trial_files())
-    _make_plugin(link).run(task, HANDLE, catalog, tmp_path / "work")
-    tar_puts = [(local, remote) for local, remote in link.puts
-                if remote.startswith(f"{ROOT}/skills_cache/")
-                and remote.endswith(".tar")]
-    assert len(tar_puts) == 1
-    import io
-    import tarfile as _tarfile
-    shipped = dict(link.uploads)[tar_puts[0][1]]
-    with _tarfile.open(fileobj=io.BytesIO(shipped)) as tar:
-        names = sorted(member.name for member in tar.getmembers()
-                       if member.isfile())
-    assert names == ["catalog.md", "x/SKILL.md"]
-
 
 def test_import_registers_plugin_and_prompt():
     # Reload the package against a clean registry to prove the import side
@@ -1119,7 +798,6 @@ def test_import_registers_plugin_and_prompt():
     assert get_plugin("tb").name == "tb"
     assert "TB_TASK_PROMPT" in PROMPTS
     assert "TB_TASK_PROMPT_FOLDER" in PROMPTS
-    assert "TB_TASK_PROMPT_FOLDER_INLINE" not in PROMPTS
     # The registered instance resolves the standard interface names and
     # its skill-folder capability prompt (M3).
     plugin = get_plugin("tb")
@@ -1132,88 +810,30 @@ def test_import_registers_plugin_and_prompt():
 # Live smoke (never run by default: pyproject addopts is "-m 'not live'")
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.live
-def test_live_remote_smoke(tmp_path):
-    """Real 1-task execution smoke for the remote link (AGENTS.md section 7).
-
-    Run explicitly with::
-
-        .venv/bin/python -m pytest \\
-            tests/unit/benchmarks/test_tb_plugin.py::test_live_remote_smoke \\
-            -m live -s
-
-    Prerequisites (all in .env / the shell): EXPEDISTILL_TB_HOST / _KEY /
-    _ROOT, plus a remote ``env.sh`` at the root loading the Harbor venv and
-    the E2B/OpenAI credentials, and the network-fix knobs from the tb21
-    campaign (TBENCH_PYPI_MIRROR, TBENCH_VPC_DNS,
-    TBENCH_APT_SNAPSHOT_BULLSEYE). The equivalent manual command is the one
-    this plugin submits:
-
-        ssh $EXPEDISTILL_TB_HOST 'cd $EXPEDISTILL_TB_ROOT \\
-          && [ -f env.sh ] && . ./env.sh \\
-          && RUN_ID=ed_smoke_manual TBENCH_RUN_MODE=selected \\
-             TBENCH_TASK_NAMES=fix-git TBENCH_EVAL_MODE=bare \\
-             TBENCH_N_ATTEMPTS=1 TBENCH_N_CONCURRENT=1 \\
-             TBENCH_MAX_TRIAL_RETRIES=0 MODEL_NAME=<model> \\
-             nohup setsid bash \\
-             /srv/work/scripts/run_tb21_runner.sh \\
-             > logs/ed_smoke_manual.log 2>&1 & echo $!'
-
-    and the audit afterwards checks logs/ed_smoke_manual.log plus the trial's
-    verifier output for "collected N items" before its reward is trusted.
-    """
+@pytest.mark.parametrize("mode", ["bare", "folder"])
+def test_live_remote_smoke(tmp_path, mode):
+    """Real 1-task execution smoke for the remote link. Needs the
+    EXPEDISTILL_TB_* variables of .env.example and a remote env.sh; run
+    explicitly with ``pytest tests/unit/benchmarks/test_tb_plugin.py -m live -s``."""
     import os
 
     model = os.environ.get("EXPEDISTILL_TB_SMOKE_MODEL")
     if not model:
         pytest.skip("set EXPEDISTILL_TB_SMOKE_MODEL to run the live smoke")
-    plugin = TBPlugin()  # real RemoteLink from the environment
-    task = Task(task_id="fix-git", instruction="fix-git",
-                meta={"task_name": "fix-git", "attempt_token": "smoke1"})
+    meta = {"task_name": "fix-git", "attempt_token": f"smoke_{mode}"}
+    skills_block = ""
+    if mode == "folder":
+        from tests.helpers.tb_folder import CATALOG, MANIFEST, materialized
+        meta.update(skill_folder=MANIFEST,
+                    skill_folder_dir=str(materialized(tmp_path)))
+        skills_block = CATALOG
+    task = Task(task_id="fix-git", instruction="fix-git", meta=meta)
     handle = ModelHandle(name=model, role="smoke", client=None)
-    outcome = plugin.run(task, handle, "", tmp_path / "smoke")
-    # The smoke asserts only that the link works end to end; a model failure
-    # (reward 0) is still a successful smoke of the plumbing, and an
-    # infra failure raises (never reaching this assert).
-    assert outcome.meta["run_id"].startswith("ed_fix-git_smoke1")
-
-
-def test_deliver_skills_uploads_dash_variant_for_dotted_tasks(tmp_path):
-    """The E2B skill env looks the skill dir up by the environment name, whose
-    authoring export normalizes dots to dashes (the tb21 bundle's
-    _TASK_SKILL_DIRECTORY_OVERRIDES: "install-windows-3.11" ->
-    "install-windows-3-11"). Uploading only the dotted dir made every
-    skills-mode trial of install-windows-3.11 die in env setup (observed on
-    the TB v3 run, 2026-10-13). The plugin must upload BOTH spellings.
-    """
-    plugin = TBPlugin()
-    link = FakeRemoteLink()
-    mode, meta = plugin._skill_plan(ROOT, "ed_t_a00", "install-windows-3.11",
-                                    "## Skill rules\n- test", None)
-    assert mode == "skills"
-    assert meta["remote_skill_alias_file"].endswith(
-        "/install-windows-3-11/SKILL.md")
-    # a fresh launch uploads BOTH spellings through _upload_launch_files
-    link.pid = 4242
-    plugin._upload_launch_files(
-        link, ROOT, "ed_t_a00", meta, "install-windows-3.11",
-        "## Skill rules\n- test", tmp_path,
-        {"run_id": "ed_t_a00", "env_sha256": "x", "skill_sha256": "y"},
-        None)
-    dotted = [c[1] for c in link.puts
-              if c[1].endswith("/install-windows-3.11/SKILL.md")]
-    dashed = [c[1] for c in link.puts
-              if c[1].endswith("/install-windows-3-11/SKILL.md")]
-    assert dotted and dashed, "both spellings must be uploaded"
-    # non-dotted names have no alias and upload exactly one SKILL.md
-    mode2, meta2 = plugin._skill_plan(ROOT, "ed_t_a00", "fix-git",
-                                      "## Skill rules\n- x", None)
-    assert meta2["remote_skill_alias_file"] is None
-    link2 = FakeRemoteLink()
-    plugin._upload_launch_files(
-        link2, ROOT, "ed_t_a00", meta2, "fix-git",
-        "## Skill rules\n- x", tmp_path,
-        {"run_id": "ed_t_a00", "env_sha256": "x", "skill_sha256": "y"},
-        None)
-    skills_puts = [c[1] for c in link2.puts if c[1].endswith("/SKILL.md")]
-    assert len(skills_puts) == 1
+    outcome = TBPlugin().run(task, handle, skills_block, tmp_path / "smoke")
+    # Only the plumbing is under test: a model failure (reward 0) still
+    # passes, and an infra failure raises before this assert.
+    assert outcome.meta["run_id"].startswith(f"ed_fix-git_smoke_{mode}")
+    assert outcome.meta["eval_mode"] == ("skills" if mode == "folder"
+                                         else "bare")

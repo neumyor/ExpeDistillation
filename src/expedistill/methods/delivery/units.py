@@ -4,9 +4,8 @@ R5 (docs/decisions/execute_learn_repair_plan_20261016.md) freezes ONE
 driver signature, ``resolve(bank, tasks, params) -> ExecutionUnitList``.
 The drivers differ in what ``bank`` and ``tasks`` mean (each
 module's docstring owns its operands' contract) but build their rows
-the same way, so the row plumbing lives here once. The Wave 1 call-form
-dispatch is gone: the phase drivers (stages/phase_execute.py) call the
-frozen form only.
+the same way, so the row plumbing lives here once; the phase drivers
+(``stages/phase_execute``) call the frozen form only.
 
 ``unit_id`` is the DELIVERY-side view of the join key. The frozen
 construction rule (core/contracts.py) needs phase_label, benchmark and
@@ -26,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from expedistill.composites import unit_ids
 from expedistill.core.contracts import ExecutionUnitRow
-from expedistill.inject import format_playbook_block
+from expedistill.inject.skills import format_playbook_block
 
 __all__ = ["active_bank", "make_row", "task_ref", "unit_id",
            "with_playbook"]

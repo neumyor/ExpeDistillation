@@ -13,7 +13,8 @@ import pytest
 
 from expedistill.core.config import ConfigError
 from expedistill.methods import registry
-from expedistill.methods import resolve, resolve_fixed, resolve_params
+from expedistill.methods.registry import (
+    _ENTRIES, resolve, resolve_fixed, resolve_params)
 from expedistill.methods.cards import CardAuthoringParams
 from expedistill.methods.execution import RealFolderExecutionParams
 from expedistill.methods.params import build_params
@@ -36,12 +37,6 @@ class TestDeliveryParams:
             resolve_params("delivery", {"name": "whole_bench"})
         for name in ("none", "folder"):
             assert repr(name) in str(excinfo.value)
-        assert "exam_folder" not in str(excinfo.value)
-
-    def test_the_exam_catalog_delivery_is_gone(self):
-        with pytest.raises(ConfigError, match="unknown methods.delivery"):
-            resolve_params("delivery", {"name": "exam_folder"})
-
 
 class TestRealExecutionParams:
     """The execution family's ``real`` entry: what an execute phase's
@@ -61,17 +56,12 @@ class TestRealExecutionParams:
         params = resolve_params("execution", {"name": "real"})
         assert params.arms is None
 
-    @pytest.mark.parametrize("bad", ["both", 5, [], [""], ["a", 5]])
+    # A tuple would not compare equal through the JSON manifest.
+    @pytest.mark.parametrize("bad", ["both", 5, [], [""], ["a", 5],
+                                     ("executor_strong", "executor_weak")])
     def test_arms_must_be_a_list_of_role_names(self, bad):
         with pytest.raises(ConfigError, match="arms"):
             resolve_params("execution", {"name": "real", "arms": bad})
-
-    def test_tuple_arms_rejected(self):
-        # A tuple would not compare equal through the JSON manifest.
-        with pytest.raises(ConfigError, match="arms"):
-            resolve_params("execution", {
-                "name": "real",
-                "arms": ("executor_strong", "executor_weak")})
 
     @pytest.mark.parametrize("key", ["depth", "n_attempts",
                                      "max_injection_tokens"])
@@ -94,6 +84,9 @@ class TestRealFolderExecutionParams:
             "name": "real_folder", "executor": "executor_strong",
             "attempts": 3})
         assert (params.executor, params.attempts) == ("executor_strong", 3)
+        # The lower bound is inclusive.
+        assert resolve_params("execution", {
+            "name": "real_folder", "attempts": 1}).attempts == 1
 
     @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "3"])
     def test_attempts_must_be_an_int_at_least_one(self, bad):
@@ -101,24 +94,16 @@ class TestRealFolderExecutionParams:
             resolve_params("execution", {"name": "real_folder",
                                          "attempts": bad})
 
-    def test_attempts_bound_is_inclusive_one(self):
-        assert resolve_params("execution", {
-            "name": "real_folder", "attempts": 1}).attempts == 1
-
     def test_an_unknown_executor_is_refused(self):
         with pytest.raises(ConfigError, match="executor"):
             resolve_params("execution", {"name": "real_folder",
                                          "executor": "judge"})
 
-    @pytest.mark.parametrize("key", ["n_attempts", "max_injection_tokens"])
+    @pytest.mark.parametrize("key", ["n_attempts", "max_injection_tokens",
+                                     "arms"])
     def test_unknown_key_rejected(self, key):
         with pytest.raises(ConfigError, match="unknown parameter"):
             resolve_params("execution", {"name": "real_folder", key: 1})
-
-    def test_the_exam_execution_is_gone(self):
-        with pytest.raises(ConfigError, match="unknown methods.execution"):
-            resolve_params("execution", {"name": "exam"})
-
 
 class TestReviewAndAuthorParams:
     def test_review_params(self):
@@ -128,28 +113,11 @@ class TestReviewAndAuthorParams:
         with pytest.raises(ConfigError, match="K"):
             resolve_params("review", {"name": "review", "K": 0})
 
-    def test_review_drops_the_deferred_revise_scope(self):
-        with pytest.raises(ConfigError, match="revise_scope"):
-            resolve_params("review", {"name": "review",
-                                      "revise_scope": "auto"})
-
-    def test_author_params(self):
-        # subtask_cards is the author family's one method.
-        params = resolve_params("author", {"name": "subtask_cards"})
-        assert params == CardAuthoringParams()
-
     def test_review_and_author_have_no_driver(self):
         for family, raw in (("review", {"name": "review"}),
                             ("author", {"name": "subtask_cards"})):
             with pytest.raises(ConfigError, match="no driver"):
                 resolve(family, raw)
-
-
-class TestCurationIsGone:
-    @pytest.mark.parametrize("name", ["agentbrew", "none"])
-    def test_the_curation_family_offers_nothing(self, name):
-        with pytest.raises(ConfigError, match=r"known: \[\]"):
-            resolve_params("curation", {"name": name, "token_budget": 1})
 
 
 @pytest.fixture()
@@ -227,3 +195,85 @@ class TestBuildParams:
 
         with pytest.raises(ConfigError, match="unsupported"):
             build_params(_Bad, {"tags": {"a": 1}}, "x", "y")
+
+
+# ---------------------------------------------------------------------------
+# The registry table
+# ---------------------------------------------------------------------------
+
+def test_the_table_is_organised_by_the_method_families():
+    by_family = {}
+    for (family, name) in _ENTRIES:
+        by_family.setdefault(family, []).append(name)
+    assert set(by_family) == {"delivery", "execution", "review", "author"}
+    assert sorted(by_family["delivery"]) == sorted([
+        "whole_bank", "none", "folder"])
+    assert sorted(by_family["execution"]) == ["real", "real_folder"]
+    assert by_family["review"] == ["review"]
+    assert by_family["author"] == ["subtask_cards"]
+
+
+def test_the_config_literals_name_registry_entries():
+    # core.config cannot import the registry, so it spells the delivery
+    # and execution names it checks; they must be the table's names.
+    from expedistill.core.config import (
+        EXECUTION_NAMES,
+        FOLDER_DELIVERY_NAME,
+        NONE_DELIVERY_NAME,
+    )
+    assert ("delivery", NONE_DELIVERY_NAME) in _ENTRIES
+    assert ("delivery", FOLDER_DELIVERY_NAME) in _ENTRIES
+    assert {name for family, name in _ENTRIES
+            if family == "execution"} == set(EXECUTION_NAMES)
+
+
+def test_a_family_outside_the_table_is_refused():
+    for family, name in (("segmentation", "llm"),
+                         ("acceptance", "exam"),
+                         ("curation", "agentbrew")):
+        with pytest.raises(ConfigError, match="unknown methods"):
+            resolve_params(family, {"name": name})
+
+
+def test_unknown_name_lists_the_known_ones():
+    with pytest.raises(
+            ConfigError,
+            match=r"known: \['review'\]"):
+        resolve_params("review", {"name": "windows"})
+    with pytest.raises(
+            ConfigError,
+            match=r"known: \['subtask_cards'\]"):
+        resolve_params("author", {"name": "solo"})
+    with pytest.raises(ConfigError, match="known:"):
+        resolve_params("execution", {"name": "live_run"})
+
+
+def test_the_card_authoring_family_resolves_its_params():
+
+    assert resolve_params("author", {"name": "subtask_cards"}) == \
+        CardAuthoringParams()
+    assert resolve_params(
+        "author", {"name": "subtask_cards",
+                   "typing_chunk_size": 50,
+                   "max_segments_per_card": 4,
+                   "max_chars_per_segment": 700,
+                   "write_retry_limit": 0}) == CardAuthoringParams(
+        typing_chunk_size=50, max_segments_per_card=4,
+        max_chars_per_segment=700, write_retry_limit=0)
+    with pytest.raises(ConfigError, match="must be <class 'int'>"):
+        resolve_params(
+            "author", {"name": "subtask_cards", "typing_chunk_size": "many"})
+    with pytest.raises(ConfigError, match="unknown parameter"):
+        resolve_params(
+            "author", {"name": "subtask_cards", "min_cluster_size": 1})
+
+
+def test_the_review_family_resolves_its_defaults_and_types():
+    from expedistill.methods.review import ReviewParams
+
+    assert resolve_params("review", {"name": "review"}) == ReviewParams()
+    assert resolve_params(
+        "review", {"name": "review", "write_lessons": False}) == \
+        ReviewParams(write_lessons=False)
+    with pytest.raises(ConfigError, match="must be <class 'int'>"):
+        resolve_params("review", {"name": "review", "K": "wide"})

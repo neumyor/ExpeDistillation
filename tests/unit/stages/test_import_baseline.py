@@ -23,7 +23,7 @@ from expedistill.stages.import_baseline import (
     BASELINE_ORIGIN_NAME,
     import_baseline,
 )
-from tests.golden.harness import (
+from tests.helpers.golden_harness import (
     FAKE_BENCH,
     STRONG_MODEL,
     WEAK_MODEL,

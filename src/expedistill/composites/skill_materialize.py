@@ -59,12 +59,11 @@ import yaml
 
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import CodeBugError
-from expedistill.inject import bank_reference
+from expedistill.inject.skills import bank_reference
 from expedistill.inject.skill_text import (
     DEFAULT_DESCRIPTION_MODE,
     description_text,
     render_card,
-    validate_description_mode,
 )
 
 __all__ = ["materialize_skill_folder"]
@@ -235,12 +234,6 @@ def materialize_skill_folder(folder: Mapping[str, Any],
             f"{type(catalog_text).__name__}")
     description_mode = folder.get("description_mode",
                                   DEFAULT_DESCRIPTION_MODE)
-    try:
-        validate_description_mode(description_mode)
-    except ValueError as exc:
-        raise CodeBugError(
-            f"the folder manifest carries an invalid description_mode: "
-            f"{exc}") from exc
 
     entries: List[Mapping[str, Any]] = list(folder.get("files", []))
     owner_of: Dict[str, str] = {}

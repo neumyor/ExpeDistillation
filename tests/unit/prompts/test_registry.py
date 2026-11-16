@@ -1,7 +1,5 @@
 """Unit tests for the B2 prompt registry (register / get / digest)."""
 
-import hashlib
-
 import pytest
 
 from expedistill.prompts import (
@@ -42,13 +40,6 @@ def test_get_unknown_lists_known_names():
     assert "NO_SUCH_PROMPT" in message
     for name in PROMPTS:
         assert name in message
-
-
-def test_digest_is_sha256_of_template_and_stable():
-    for name in PROMPTS:
-        expected = hashlib.sha256(PROMPTS[name].template.encode("utf-8")).hexdigest()
-        assert digest(name) == expected
-        assert digest(name) == digest(name)  # stable across calls
 
 
 def test_digest_sensitive_to_text_change():

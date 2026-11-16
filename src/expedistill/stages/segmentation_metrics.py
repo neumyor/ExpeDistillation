@@ -35,7 +35,6 @@ from expedistill.core.models import Subtask
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.store import Store, read_json, read_jsonl
 from expedistill.stages import paper_tables
-from expedistill.stages.analysis_common import bank_phase_labels
 
 __all__ = [
     "anchor_distribution",
@@ -47,7 +46,6 @@ __all__ = [
     "skill_anchor",
 ]
 
-_TEST_ROLE = "test"
 _ACTIVE = "active"
 
 
@@ -139,15 +137,6 @@ def _bank(run_dir: Path, label: str) -> List[Dict[str, Any]]:
     return read_jsonl(path)
 
 
-def _test_phase(run_dir: Path) -> Tuple[str, Path]:
-    phases_dir = run_dir / phase_bank.PHASES_DIR
-    for entry in sorted(phases_dir.iterdir(), reverse=True):
-        summary = entry / "phase_summary.json"
-        if summary.is_file() and read_json(summary).get("role") == _TEST_ROLE:
-            return f"{entry.name.split('_', 1)[0]}:{entry.name.split('_', 1)[1]}", entry
-    raise ConfigError(f"{run_dir}: no test phase summary found")
-
-
 def _trial_steps(phase_dir: Path) -> List[List[Dict[str, Any]]]:
     """The with-bank trials' stored steps, in answer-sheet order."""
     trials = []
@@ -168,12 +157,13 @@ def run_metrics(label: str, run_dir: Any) -> Dict[str, Any]:
     with_bank = arm["with_bank"]
     trials = sum(len(scores) for scores in with_bank.values())
     store = Store(run)
-    bank_labels = bank_phase_labels(run)
+    bank_labels = phase_bank.bank_phase_labels(run)
     if not bank_labels:
         raise ConfigError(f"{run}: no learn phase left a skill bank")
     initial = _bank(run, bank_labels[0])
     final = _bank(run, bank_labels[-1])
-    label_name, phase_dir = _test_phase(run)
+    label_name = summary["phase_label"]
+    phase_dir = phase_bank.phase_bank_dir(run, label_name)
     metrics = paired_stats.arm_metrics(with_bank)
     return {
         "label": label,

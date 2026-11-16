@@ -9,8 +9,8 @@ included.
 import pytest
 
 from expedistill.core import ids
-from expedistill.inject import format_playbook_block
-from expedistill.methods import resolve_fixed
+from expedistill.inject.skills import format_playbook_block
+from expedistill.methods.registry import resolve_fixed
 from expedistill.methods.delivery import units
 from tests.helpers.skills import make_skill
 

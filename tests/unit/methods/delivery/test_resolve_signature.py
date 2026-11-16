@@ -16,22 +16,15 @@ from expedistill.benchmarks.base import Task
 from expedistill.core.contracts import ExecutionUnitRow
 from expedistill.core.ids import make_type_id
 from expedistill.core.models import Skill
-from expedistill.inject import bank_reference, format_skills_block
-from expedistill.methods import resolve_fixed
+from expedistill.inject.skills import bank_reference, format_skills_block
+from expedistill.methods.registry import resolve_fixed
 from expedistill.methods.delivery.params import (
     FolderParams,
     NoneParams,
     WholeBankParams,
 )
 from expedistill.methods.delivery import units
-from tests.helpers.skills import make_skill
-
-
-MARKED = {
-    "when_to_use": "The service rejects connections.",
-    "steps": ["Check the service status.", "Restart the service."],
-    "not_applicable_when": "The status command already reports running.",
-}
+from tests.helpers.skills import MARKED, make_skill
 
 
 def _skill(serial: int, status: str = "active") -> Skill:
@@ -99,16 +92,6 @@ def test_whole_bank_rows_carry_the_bank_digest():
                and row.skills_block == format_skills_block(bank)
                for row in rows)
     assert [row.task_ref for row in rows] == ["t1", "t2"]
-
-
-def test_folder_renders_an_empty_catalog_for_an_empty_bank():
-    # An empty bank renders no catalog at all (the D9 null-state rule),
-    # but every row still carries the folder manifest.
-    driver = _driver("folder")
-    rows = driver.resolve([], ["whatever"], FolderParams())
-    assert [row.task_ref for row in rows] == ["whatever"]
-    assert rows[0].skills_block == ""
-    assert rows[0].aux["skill_folder"]["files"] == []
 
 
 def test_unit_id_digest_rules():

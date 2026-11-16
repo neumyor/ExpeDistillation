@@ -227,7 +227,7 @@ def test_task_metrics_groups_by_task_and_counts_every_column():
                  valid_count=1, success_count=1, status="normal"),
     ]
 
-    metrics = unit_summary.task_metrics(summaries, n_attempts=2)
+    metrics = unit_summary.task_metrics(summaries)
 
     assert metrics == {
         "tb:t1": {"attempts": 4, "valid": 3, "success": 1, "infra": 1,
@@ -244,7 +244,7 @@ def test_task_metrics_counts_a_not_testable_unit_as_infra():
                  success_count=1),
     ]
 
-    metrics = unit_summary.task_metrics(summaries, n_attempts=2)
+    metrics = unit_summary.task_metrics(summaries)
 
     assert metrics["tb:t1"] == {
         "attempts": 3, "valid": 1, "success": 1, "infra": 2}
@@ -260,6 +260,6 @@ def test_task_metrics_drops_a_partial_aux_column():
                  success_count=1, aux_success_count=None),
     ]
 
-    metrics = unit_summary.task_metrics(summaries, n_attempts=2)
+    metrics = unit_summary.task_metrics(summaries)
 
     assert "aux_success" not in metrics["tb:t1"]

@@ -119,7 +119,7 @@ def test_a_detached_command_survives_its_launcher(link, tmp_path):
 
 def test_the_plugin_needs_a_runner_script_named_by_the_environment(
         monkeypatch, tmp_path):
-    from tests.unit.benchmarks.tb_fake_remote import JobsRemoteLink
+    from tests.helpers.tb_fake_remote import JobsRemoteLink
 
     from expedistill.benchmarks.base import Task
     from expedistill.benchmarks.tb.plugin import RUNNER_ENV, TBPlugin

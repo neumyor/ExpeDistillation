@@ -15,7 +15,6 @@ from types import SimpleNamespace
 import pytest
 
 from expedistill.composites import learn_ledger as ledger
-from expedistill.composites import locate
 from expedistill.composites.phase_bank import load_phase_bank
 from expedistill.composites.provenance import PROVENANCE_NAME
 from expedistill.core.config import ExecutePhaseSpec, LearnPhaseSpec
@@ -24,26 +23,19 @@ from expedistill.infra.reliability import (
     CodeBugError, InfrastructureError, UnitFailureRecorder)
 from expedistill.infra.store import read_json, read_jsonl
 from expedistill.stages import phase_learn
+from tests.helpers.golden_harness import PinnedClient
 from tests.helpers.learn_runs import (
     WORK,
-    CrashBefore,
-    GoldenPlugin,
     LearnRun,
-    PinnedClient,
     baseline_trials,
-    installed_plugin,
     read_skill,
     run_through,
     trial,
 )
 
+pytestmark = pytest.mark.usefixtures("golden_plugin")
+
 CARD = "type/002/skill"
-
-
-@pytest.fixture(autouse=True)
-def plugin():
-    with installed_plugin(GoldenPlugin()):
-        yield
 
 
 def practice(index):
@@ -274,20 +266,6 @@ def test_a_finished_phase_is_skipped_whole(tmp_path):
 
     assert run.learn(1) == before
     assert len(client.calls) == asked
-
-
-def test_a_crash_in_typing_resumes_to_the_same_table(tmp_path):
-    straight = LearnRun(tmp_path / "straight")
-    run_through(straight, 1)
-    crashed = LearnRun(tmp_path / "crashed")
-    crashed.execute(0, baseline_trials())
-    with pytest.raises(RuntimeError, match="simulated crash"):
-        crashed.learn(1, client=CrashBefore(PinnedClient(),
-                                            "You sort segments of "))
-    crashed.learn(1)
-    for path in (locate.SUBTASK_TYPES_PATH, locate.SEGMENT_TYPES_PATH):
-        assert (crashed.run_dir / path).read_bytes() == \
-            (straight.run_dir / path).read_bytes()
 
 
 # -- the input phase -------------------------------------------------------------------

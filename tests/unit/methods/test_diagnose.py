@@ -6,7 +6,7 @@ import pytest
 
 from expedistill.composites.sheet_facts import SheetFacts, sheet_facts
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 from expedistill.methods.diagnose import REPAIRS, Finding, diagnose_trial
 from tests.helpers.traces import execution_sheet
 

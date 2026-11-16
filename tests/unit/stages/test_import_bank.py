@@ -71,25 +71,20 @@ def test_a_markdown_file_is_one_skill_summarised_by_its_first_heading(
     assert result["skill_ids"] == [row["skill_id"]]
 
 
-def test_a_markdown_file_without_a_heading_uses_its_first_sentence(tmp_path):
-    source = _write(tmp_path / "doc.md",
-                    "Always read the task twice. Then act.\nMore.\n")
+@pytest.mark.parametrize("text, summary", [
+    pytest.param("Always read the task twice. Then act.\nMore.\n",
+                 "Always read the task twice.", id="first_sentence"),
+    pytest.param("Run it.\n\n```\n# not a heading\n```\n", "Run it.",
+                 id="hash_in_a_code_fence"),
+])
+def test_a_markdown_file_without_a_heading_is_summarised_by_its_first_sentence(
+        tmp_path, text, summary):
+    source = _write(tmp_path / "doc.md", text)
 
     import_external_bank(source, "markdown_file", tmp_path / "run",
                          origin="gepa")
 
-    assert _bank_rows(tmp_path / "run")[0]["summary"] == \
-        "Always read the task twice."
-
-
-def test_a_hash_line_inside_a_code_fence_is_not_a_heading(tmp_path):
-    source = _write(tmp_path / "doc.md",
-                    "Run it.\n\n```\n# not a heading\n```\n")
-
-    import_external_bank(source, "markdown_file", tmp_path / "run",
-                         origin="gepa")
-
-    assert _bank_rows(tmp_path / "run")[0]["summary"] == "Run it."
+    assert _bank_rows(tmp_path / "run")[0]["summary"] == summary
 
 
 def test_a_markdown_file_with_front_matter_keeps_its_description(tmp_path):
@@ -167,41 +162,24 @@ def test_the_directory_name_keys_a_skill_whatever_its_front_matter_name(
                                    "import/trace2skill/xlsx-35b"]
 
 
-def test_a_skill_without_a_description_is_refused(tmp_path):
-    root = tmp_path / "skills"
-    _write(root / "a" / "SKILL.md", "---\nname: a\n---\nText.\n")
-
-    with pytest.raises(ConfigError, match="no description"):
-        import_external_bank(root, "skill_folder", tmp_path / "run",
-                             origin="evoskill")
-
-
-def test_a_folder_without_any_skill_is_refused(tmp_path):
+@pytest.mark.parametrize("skills, match", [
+    pytest.param({"a": "---\nname: a\n---\nText.\n"}, "no description",
+                 id="no_description"),
+    pytest.param({}, "holds no", id="no_skill"),
+    pytest.param({"a-b": "---\ndescription: d\n---\nText.\n",
+                  "a_b": "---\ndescription: d\n---\nText.\n"},
+                 "same key|skill key", id="one_key_twice"),
+    pytest.param({"claude-tips": "---\nname: claude-tips\ndescription: d\n"
+                                 "---\nText.\n"},
+                 "reserved word", id="reserved_word"),
+])
+def test_a_bad_skill_folder_is_refused(tmp_path, skills, match):
     root = tmp_path / "skills"
     root.mkdir()
+    for directory, text in skills.items():
+        _write(root / directory / "SKILL.md", text)
 
-    with pytest.raises(ConfigError, match="holds no"):
-        import_external_bank(root, "skill_folder", tmp_path / "run",
-                             origin="evoskill")
-
-
-def test_two_skills_with_one_key_are_refused(tmp_path):
-    root = tmp_path / "skills"
-    for directory in ("a-b", "a_b"):
-        _write(root / directory / "SKILL.md",
-               "---\ndescription: d\n---\nText.\n")
-
-    with pytest.raises(ConfigError, match="same key|skill key"):
-        import_external_bank(root, "skill_folder", tmp_path / "run",
-                             origin="evoskill")
-
-
-def test_a_skill_named_with_a_reserved_word_is_refused(tmp_path):
-    root = tmp_path / "skills"
-    _write(root / "claude-tips" / "SKILL.md",
-           "---\nname: claude-tips\ndescription: d\n---\nText.\n")
-
-    with pytest.raises(ConfigError, match="reserved word"):
+    with pytest.raises(ConfigError, match=match):
         import_external_bank(root, "skill_folder", tmp_path / "run",
                              origin="evoskill")
 

@@ -22,7 +22,7 @@ pair.
 from typing import Any, Sequence
 
 from expedistill.core.contracts import ExecutionUnitList
-from expedistill.inject import bank_reference, format_skills_block
+from expedistill.inject.skills import bank_reference, format_skills_block
 from expedistill.methods.delivery.params import WholeBankParams
 from expedistill.methods.delivery import units
 

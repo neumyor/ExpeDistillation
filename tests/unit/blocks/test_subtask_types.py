@@ -11,7 +11,7 @@ from expedistill.blocks.subtask_types import (
 )
 from expedistill.core.models import Subtask, SubtaskType
 from expedistill.infra.reliability import ModelOutputError
-from expedistill.llm.fake import json_script, make_fake_handle
+from tests.helpers.fake_llm import json_script, make_fake_handle
 
 TABLE = [SubtaskType(type_id="type/001", name="find the object",
                      entry_state="The object is not in view.",

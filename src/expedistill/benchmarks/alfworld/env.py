@@ -679,13 +679,12 @@ class ALFWorldEnv(BaseEnv):
         """Terminate and reap the child by its own PID; idempotent."""
         proc, self._proc = self._proc, None
         if proc is not None:
-            for stream in (proc.stdin, proc.stdout, proc.stderr):
-                try:
-                    stream.close()
-                except Exception:
-                    pass
+            try:  # EOF on stdin lets a well-behaved child exit on its own
+                proc.stdin.close()
+            except Exception:
+                pass
             if proc.poll() is None:
-                try:  # closing stdin lets a well-behaved child exit on EOF
+                try:
                     proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     pass
@@ -705,6 +704,14 @@ class ALFWorldEnv(BaseEnv):
                             proc.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             pass
+            # Closing stdout while the reader thread is blocked in readline()
+            # waits for the child to exit, so it must come after the child is
+            # gone or a hung adapter would outlive the read deadline.
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
         for thread in self._threads:
             thread.join(timeout=5)
         self._threads = []

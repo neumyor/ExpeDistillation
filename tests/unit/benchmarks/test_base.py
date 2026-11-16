@@ -1,41 +1,24 @@
-"""Tests for benchmarks/base.py: Task/RunOutcome dataclasses, ViewRules,
-BaseEnv contract and the BenchmarkPlugin abstract interface. No network,
-no real benchmark."""
+"""Tests for benchmarks/base.py: RunOutcome validation, ViewRules, the BaseEnv
+default flags and the plugin's auxiliary-metric default. No network, no real
+benchmark."""
 
 
 import pytest
 
-from expedistill.benchmarks.base import (
-    BaseEnv,
-    BenchmarkPlugin,
-    RunOutcome,
-    Task,
-    ViewRules,
-)
+from expedistill.benchmarks.base import BaseEnv, RunOutcome, ViewRules
 from expedistill.infra.reliability import CodeBugError, ConfigError
-from expedistill.llm import ModelHandle
+from tests.helpers.stub_plugin import StubPlugin
 
 
 # ---------------------------------------------------------------------------
 # Task / RunOutcome
 # ---------------------------------------------------------------------------
 
-def test_task_defaults():
-    task = Task(task_id="t-1", instruction="do the thing")
-    assert task.meta == {}
 
-
-def test_runoutcome_defaults_and_correctness_values():
-    outcome = RunOutcome()
-    assert outcome.steps == []
-    assert outcome.correctness is None
-    assert outcome.meta == {}
+def test_runoutcome_correctness_is_true_false_or_none():
     for correctness in (True, False, None):
         assert RunOutcome(correctness=correctness).correctness \
             is correctness
-
-
-def test_runoutcome_rejects_a_non_boolean_correctness():
     with pytest.raises(CodeBugError):
         RunOutcome(correctness="crashed")
 
@@ -93,11 +76,6 @@ class _CountingEnv(BaseEnv):
         return True
 
 
-def test_baseenv_cannot_be_instantiated():
-    with pytest.raises(TypeError):
-        BaseEnv()  # pylint: disable=abstract-class-instantiated
-
-
 def test_baseenv_default_flags():
     env = _CountingEnv()
     env.reset()
@@ -135,53 +113,13 @@ def test_baseenv_defaults_without_state_attributes():
 # BenchmarkPlugin interface
 # ---------------------------------------------------------------------------
 
-class _ToyPlugin(BenchmarkPlugin):
-    """Minimal concrete plugin used by the registry tests too."""
-
-    def __init__(self, name="toy"):
-        self._name = name
-
-    @property
-    def name(self):
-        return self._name
-
-    def load_tasks(self, tasks_spec):
-        return [Task(task_id="t-1", instruction="do it")]
-
-    def run(self, task, handle, skills_block, workdir):
-        return RunOutcome(correctness=True)
-
-    @property
-    def view_rules(self):
-        return ViewRules()
-
-    @property
-    def task_prompt_name(self):
-        return "TOY_TASK"
-
-
-def test_benchmarkplugin_cannot_be_instantiated():
-    with pytest.raises(TypeError):
-        BenchmarkPlugin()  # pylint: disable=abstract-class-instantiated
-
-
-def test_toy_plugin_satisfies_interface():
-    plugin = _ToyPlugin()
-    tasks = plugin.load_tasks(None)
-    assert tasks[0].task_id == "t-1"
-    outcome = plugin.run(tasks[0], ModelHandle(name="m", role="r", client=None),
-                         "", "/tmp/nowhere")
-    assert outcome.correctness is True
-    assert plugin.view_rules.max_obs_chars == ViewRules().max_obs_chars
-    assert plugin.task_prompt_name == "TOY_TASK"
-
 
 def test_plugin_defaults_declare_no_auxiliary_metric():
     # A plugin that does nothing declares no auxiliary metric: the name is
     # None (what stage 0 freezes as manifest "aux_metric": null) and the
     # scorer answers None, so stages never call it and no extra work
     # happens (benchmarks/base.py contract).
-    plugin = _ToyPlugin()
+    plugin = StubPlugin()
     assert plugin.aux_metric_name is None
     from expedistill.core.models import Trajectory
     traj = Trajectory(trajectory_id="traj/t:1/weak/00", task_id="t:1",

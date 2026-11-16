@@ -1,2 +1,2 @@
-"""Golden-matrix harness package (P-1 prime; decision doc 2026-10-15).
-"""
+"""The golden-matrix gate: the test and the generator (the harness lives in
+tests/helpers/golden_harness.py)."""

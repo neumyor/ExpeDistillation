@@ -73,11 +73,7 @@ from expedistill.inject.skill_text import (
     description_text,
 )
 from expedistill.llm.call import ModelHandle
-from expedistill.stages.analysis_common import (
-    bank_phase_labels,
-    phase_number,
-    prepare_out_dir,
-)
+from expedistill.stages.analysis_common import prepare_out_dir
 
 __all__ = ["JUDGMENTS_NAME", "SUMMARY_NAME", "judge_phase"]
 
@@ -104,7 +100,6 @@ def judge_phase(
     *,
     arm: Optional[str] = None,
     workers: int = 1,
-    usage: Any = None,
     bank_phase_label: Optional[str] = None,
     view_rules: Any = None,
     instruction_for: Optional[Callable[[str], str]] = None,
@@ -137,8 +132,7 @@ def judge_phase(
     bank = {row["skill_id"]: Skill.from_dict(row)
             for row in phase_bank.load_phase_bank(run_dir, bank_label)}
     unit_manifests = _unit_manifests(phase_dir)
-    sheets = _judgeable_sheets(phase_dir, phase_label, role, arm,
-                               unit_manifests)
+    sheets = _judgeable_sheets(phase_dir, phase_label, arm, unit_manifests)
 
     judgments_path = out_dir / JUDGMENTS_NAME
     done = {row["sheet_id"] for row in read_jsonl(judgments_path)}
@@ -151,7 +145,7 @@ def judge_phase(
             row = _judge_trial(
                 sheet, manifest, bank, view_rules=view_rules,
                 instruction_for=instruction_for, handle=judge_handle,
-                usage=usage, out_dir=out_dir)
+                out_dir=out_dir)
         except InfrastructureError:
             infra_failed.append(sheet.sheet_id)
             return
@@ -191,9 +185,9 @@ def judge_phase(
 
 def _bank_label_before(run_dir: Path, phase_label: str) -> str:
     """The bank the phase received: the latest artifact of an earlier phase."""
-    number = phase_number(phase_label)
-    earlier = [label for label in bank_phase_labels(run_dir)
-               if phase_number(label) < number]
+    number = phase_bank.phase_number(phase_label)
+    earlier = [label for label in phase_bank.bank_phase_labels(run_dir)
+               if phase_bank.phase_number(label) < number]
     if not earlier:
         raise ConfigError(
             f"no phase before {phase_label!r} left a skill bank artifact "
@@ -248,13 +242,12 @@ def _unit_manifests(phase_dir: Path) -> Dict[str, Mapping[str, Any]]:
     return manifests
 
 
-def _judgeable_sheets(phase_dir: Path, phase_label: str, role: str,
+def _judgeable_sheets(phase_dir: Path, phase_label: str,
                       arm: Optional[str],
                       unit_manifests: Mapping[str, Mapping[str, Any]]):
     """``[(sheet, manifest)]``: the arm's present trajectory trials that were
     delivered at least one card, in sheet order."""
-    report = phase_report.read_phase_report(
-        phase_dir, phase_kind=role, learning_usable=role == "practice")
+    report = phase_report.read_phase_report(phase_dir)
     if report is None:
         raise ConfigError(
             f"phase {phase_label!r} ({phase_dir}) has no trial-level "
@@ -314,8 +307,7 @@ def _outcome(sheet: AnswerSheet) -> Optional[bool]:
 def _judge_trial(sheet: AnswerSheet, manifest: Mapping[str, Any],
                  bank: Mapping[str, Skill], *, view_rules: Any,
                  instruction_for: Callable[[str], str],
-                 handle: ModelHandle, usage: Any,
-                 out_dir: Path) -> Dict[str, Any]:
+                 handle: ModelHandle, out_dir: Path) -> Dict[str, Any]:
     """One trial's judgment row; every model call must succeed."""
     execution = sheet.execution
     steps = list(execution.steps or [])
@@ -328,7 +320,7 @@ def _judge_trial(sheet: AnswerSheet, manifest: Mapping[str, Any],
 
     applicability = _repaired(lambda: judge_applicability(
         instruction, cards, render_steps_view(steps, view_rules),
-        len(steps), handle, usage=usage, run_dir=out_dir))
+        len(steps), handle, run_dir=out_dir))
 
     opened: List[str] = []
     adherence: Dict[str, List[str]] = {}
@@ -343,7 +335,7 @@ def _judge_trial(sheet: AnswerSheet, manifest: Mapping[str, Any],
         window = render_steps_view(
             steps[first:], view_rules, start_index=first)
         items = _repaired(lambda: judge_adherence(
-            skill, window, handle, usage=usage, run_dir=out_dir))
+            skill, window, handle, run_dir=out_dir))
         detail[skill_id] = items
         adherence[skill_id] = [item["status"] for item in items]
 

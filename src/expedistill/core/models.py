@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # and practice runs never share an id.
 # Subtask v2: ``phase_label`` names the learn phase that cut the segment.
 # Skill v5: one skill per subtask type (``subtask_type``), the status is
-# ``active`` / ``discarded``, and the merge fields are gone.
+# ``active`` / ``discarded``.
 TRAJECTORY_SCHEMA_VERSION = 3
 SUBTASK_SCHEMA_VERSION = 2
 SUBTASK_TYPE_SCHEMA_VERSION = 1
@@ -154,8 +154,8 @@ class Trajectory(_Record):
     model_role: str
     model_name: str
     attempt_index: int
-    #: None = bare run; otherwise a list of {skill_id, version} entries, or the
-    #: digest of the whole skill bank for bank-injected runs.
+    #: None = bare run; otherwise the reference of the whole skill bank for
+    #: bank-injected runs.
     skills_injected: Optional[Any] = None
     steps: List[Step] = field(default_factory=list)
     #: The scorer verdict (class docstring); True / False / None.

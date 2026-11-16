@@ -8,7 +8,6 @@ names one execution of that slot.
 """
 
 import hashlib
-import json
 import urllib.parse
 from typing import Any
 
@@ -21,19 +20,11 @@ __all__ = [
 
 
 def canonical_skills(skills_injected: Any) -> str:
-    """The canonical text of a unit's ``skills_injected`` raw value.
-
-    The raw shapes stay distinguishable: ``None`` (no injection) is not
-    a string (the whole-bank digest); a list (per-skill references) is
-    canonical JSON so member order and key order cannot change the id.
-    """
+    """The canonical text of a unit's ``skills_injected`` raw value:
+    ``None`` (no injection) or a bank reference string, kept distinct."""
     if skills_injected is None:
         return "none"
-    if isinstance(skills_injected, str):
-        return f"bank:{skills_injected}"
-    return ("list:" + json.dumps(skills_injected, sort_keys=True,
-                                 ensure_ascii=False,
-                                 separators=(",", ":")))
+    return f"bank:{skills_injected}"
 
 
 def make_unit_id(*, phase_label: str, benchmark: str, task_ref: str,

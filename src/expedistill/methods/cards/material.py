@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Collection, Dict, List, Mapping
 
 from expedistill.blocks.rules import get_segment_select
-from expedistill.blocks.select import select_subtasks
 from expedistill.blocks.view import render_steps_view
 from expedistill.core.models import Subtask, Trajectory
 
@@ -43,10 +42,10 @@ def collect_material(*, type_id: str, subtasks: Mapping[str, Subtask],
     """The material of ``type_id``; ``subtasks`` holds every stored
     segment, ``assignments`` every segment's type."""
     rule = get_segment_select(rule_name)
-    of_type = select_subtasks(
-        [subtasks[subtask_id] for subtask_id in sorted(assignments)
-         if assignments[subtask_id] == type_id and subtask_id in subtasks],
-        rule)
+    of_type = [subtasks[subtask_id] for subtask_id in sorted(assignments)
+               if assignments[subtask_id] == type_id
+               and subtask_id in subtasks
+               and rule(subtasks[subtask_id])]
     strong = sorted((sub for sub in of_type if sub.source == "strong"),
                     key=lambda sub: (sub.task_id not in gap_tasks,
                                      sub.subtask_id))[:max(0, max_segments)]

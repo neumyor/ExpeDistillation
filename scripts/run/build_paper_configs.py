@@ -108,7 +108,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "configs" / "experiments"
 
 BENCHMARKS = ("tb21", "alfworld", "searchqa")
-LOCAL_BENCHMARKS = ("alfworld", "searchqa")
 #: Benchmark prefix in the file name -> the plugin name in the config.
 BENCHMARK_NAMES = {"tb21": "tb", "alfworld": "alfworld",
                    "searchqa": "searchqa"}

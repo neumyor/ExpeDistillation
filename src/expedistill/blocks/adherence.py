@@ -92,7 +92,6 @@ def judge_applicability(
     n_steps: int,
     handle: ModelHandle,
     *,
-    usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Which listed cards' triggers arose in one trial.
@@ -114,7 +113,7 @@ def judge_applicability(
         {"task_instruction": task_instruction,
          "skill_listing": render_card_listing(cards),
          "trajectory_view": trajectory_view},
-        output_json=True, usage=usage, run_dir=run_dir))
+        output_json=True, run_dir=run_dir))
 
     result: Dict[str, Dict[str, Any]] = {}
     for entry in _entries(prompt, parsed, "skills"):
@@ -166,7 +165,6 @@ def judge_adherence(
     trajectory_view: str,
     handle: ModelHandle,
     *,
-    usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
 ) -> List[Dict[str, Any]]:
     """How far one opened skill's steps were carried out.
@@ -190,7 +188,7 @@ def judge_adherence(
         {"card_text": render_card(skill),
          "trajectory_view": trajectory_view,
          "n_steps": str(n_steps)},
-        output_json=True, usage=usage, run_dir=run_dir))
+        output_json=True, run_dir=run_dir))
 
     by_number: Dict[int, Dict[str, Any]] = {}
     for entry in _entries(prompt, parsed, "steps"):

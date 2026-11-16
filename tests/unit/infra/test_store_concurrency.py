@@ -1,6 +1,6 @@
 """append_jsonl is safe for concurrent writers (threads and processes):
 the torn-tail repair must never truncate away a record another writer
-committed in the meantime."""
+committed in the meantime, and usage.jsonl loses no line either."""
 
 import multiprocessing
 import threading
@@ -9,6 +9,7 @@ import time
 from expedistill.infra import store as store_mod
 from expedistill.infra.reliability import UnitFailureRecorder
 from expedistill.infra.store import append_jsonl, read_jsonl
+from expedistill.infra.usage import UsageRecorder
 
 TORN = b'{"n": 0}\n{"n": "torn", "pa'
 
@@ -27,7 +28,7 @@ def test_repair_cannot_truncate_a_record_committed_meanwhile(tmp_path,
             b_in_window.set()
             # Unlocked: A commits within this window. Locked: A cannot get
             # in, so the wait times out and B finishes first.
-            a_done.wait(1.0)
+            a_done.wait(0.2)
 
     monkeypatch.setattr(store_mod, "_repair_hook", widen)
 
@@ -77,7 +78,7 @@ def test_many_threads_with_torn_start_lose_nothing(tmp_path, monkeypatch):
 def _stalled_child_append(path, marker):
     def widen(_path):
         open(marker, "w").close()
-        time.sleep(1.0)
+        time.sleep(0.2)
 
     store_mod._repair_hook = widen
     append_jsonl(path, {"n": "child"})
@@ -99,3 +100,25 @@ def test_repair_is_serialised_across_processes(tmp_path):
     assert child.exitcode == 0
     rows = read_jsonl(path)
     assert sorted(str(r["n"]) for r in rows) == ["0", "child", "parent"]
+
+
+def _record_usage(path, worker, count):
+    recorder = UsageRecorder(path)
+    for index in range(count):
+        recorder.record("weak", "p", "m", index, 1, f"{worker}-{index}")
+
+
+def test_concurrent_usage_processes_lose_no_lines(tmp_path):
+    path = tmp_path / "usage.jsonl"
+    context = multiprocessing.get_context("spawn")
+    procs = [context.Process(target=_record_usage, args=(path, w, 40))
+             for w in range(4)]
+    for proc in procs:
+        proc.start()
+    for proc in procs:
+        proc.join(60)
+        assert proc.exitcode == 0
+    rows = read_jsonl(path)
+    assert len(rows) == 160
+    assert len({r["request_id"] for r in rows}) == 160
+    assert UsageRecorder(path).totals()["overall"]["request_count"] == 160

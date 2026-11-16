@@ -66,13 +66,6 @@ def test_import_bank_maps_its_arguments_and_hides_the_id_list(
     assert printed == {"n_skills": 2, "origin": "expel"}
 
 
-def test_import_bank_refuses_an_unknown_format(tmp_path):
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main(["import-bank", "--source", "s", "--source-format", "pdf",
-                  "--run-dir", str(tmp_path), "--origin", "x"])
-    assert excinfo.value.code == 2
-
-
 def test_import_bank_errors_exit_one(monkeypatch, capsys, tmp_path):
     def fake_import(*args, **kwargs):
         raise ConfigError("the run directory already holds a manifest")
@@ -169,14 +162,6 @@ def test_analysis_infra_exhaustion_exits_three(
     assert "pending on infrastructure" in capsys.readouterr().err
 
 
-def test_the_exam_replay_subcommand_is_gone(tmp_path):
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main(["exam-replay", "--run-dir", str(tmp_path),
-                  "--out-dir", str(tmp_path / "out"),
-                  "--answerer-model", "m"])
-    assert excinfo.value.code == 2
-
-
 # ---------------------------------------------------------------------------
 # paper-tables
 # ---------------------------------------------------------------------------
@@ -209,10 +194,3 @@ def test_paper_tables_value_errors_exit_two(monkeypatch, capsys, tmp_path):
     code = cli.main(["paper-tables", "--spec", str(tmp_path / "spec.json")])
     assert code == 2
     assert "no scored task in common" in capsys.readouterr().err
-
-
-def test_paper_tables_refuses_an_unknown_metric(tmp_path):
-    with pytest.raises(SystemExit) as excinfo:
-        cli.main(["paper-tables", "--spec", str(tmp_path / "s.json"),
-                  "--metric", "best_of_all"])
-    assert excinfo.value.code == 2

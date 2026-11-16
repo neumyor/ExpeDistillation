@@ -6,18 +6,16 @@ import time
 import pytest
 
 from expedistill.infra.parallel import (
-    MAX_WORKERS, ParallelError, UnitSkipped, effective_workers,
-    reraise_by_kind, run_parallel,
+    ParallelError, UnitSkipped, effective_workers,
+    run_parallel,
     run_units,
 )
 from expedistill.infra.reliability import (
-    CodeBugError, ConfigError, InfrastructureError, ModelOutputError,
-    ProviderRefusalError,
+    CodeBugError, ConfigError, ProviderRefusalError,
 )
 
 
 def _double(x):
-    # Module-level: must be importable in spawn worker processes.
     return 2 * x
 
 
@@ -43,13 +41,12 @@ def test_single_worker_runs_serially():
     assert order == [1, 2, 3]
 
 
-def test_empty_items_return_empty():
-    assert run_parallel(_double, [], workers=4) == []
-
-
-def test_process_pool_preserves_order():
-    assert run_parallel(_double, [1, 2, 3, 4], workers=2, thread=False) == \
-        [2, 4, 6, 8]
+@pytest.mark.parametrize("pool", [
+    lambda items: run_parallel(_double, items, workers=4),
+    lambda items: run_units(_double, items, workers=8),
+], ids=["run_parallel", "run_units"])
+def test_empty_items_return_empty(pool):
+    assert pool([]) == []
 
 
 def test_failure_raises_parallel_error_with_all_items_run():
@@ -83,7 +80,6 @@ def test_effective_workers_clamps():
     assert effective_workers(0, 10) == 1
     assert effective_workers(-3, 10) == 1
     assert effective_workers(2, 0) == 1
-    assert MAX_WORKERS == 256
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +134,7 @@ def test_run_units_fatal_config_error_stops_scheduling_and_surfaces_unwrapped():
             three_started.set()
             # Already in flight when unit 2 fails: runs to completion.
             assert two_raising.wait(5)
-            time.sleep(0.2)
+            time.sleep(0.05)
             return "outcome-3"
         return f"outcome-{unit}"
 
@@ -256,36 +252,6 @@ def test_run_units_first_failure_by_unit_order_not_by_time():
     assert all(outcome is UnitSkipped for outcome in error.outcomes)
 
 
-def test_run_units_mixed_config_and_bug_failures_surface_the_first():
-    one_failed = threading.Event()
-
-    def worker(unit):
-        if unit == 0:
-            assert one_failed.wait(5)
-            raise ConfigError("late config problem")
-        if unit == 1:
-            one_failed.set()
-            raise CodeBugError("early bug")
-        return f"outcome-{unit}"
-
-    with pytest.raises(ConfigError) as excinfo:
-        run_units(worker, [0, 1, 2, 3], workers=2)
-    error = excinfo.value
-    # The first failure by unit order surfaces, bug among the failures or
-    # not: the kind split is gone.
-    assert type(error) is ConfigError
-    assert "late config problem" in str(error)
-    assert "2 unit(s) failed" in str(error)
-    assert "first unit index 0" in str(error)
-    # Every failure -- including the bug -- stays in the chained cause.
-    cause = error.__cause__
-    assert isinstance(cause, ParallelError)
-    assert set(cause.failures) == {0, 1}
-    assert isinstance(cause.failures[0], ConfigError)
-    assert isinstance(cause.failures[1], CodeBugError)
-    assert all(outcome is UnitSkipped for outcome in error.outcomes)
-
-
 def test_run_units_serial_fatal_refusal_matches_parallel_semantics():
     started = []
 
@@ -322,37 +288,3 @@ def test_run_units_clamps_workers_like_run_parallel():
     # A huge count is capped by the unit count, not rejected.
     assert run_units(lambda unit: unit * 2, [1, 2, 3], workers=1000) == \
         [2, 4, 6]
-
-
-def test_run_units_empty_returns_empty():
-    assert run_units(lambda unit: unit, [], workers=8) == []
-
-
-# -- reraise_by_kind ------------------------------------------------------------
-
-def _pool_error(*failures):
-    def one(failure):
-        if failure is not None:
-            raise failure
-        return "ok"
-
-    with pytest.raises(ParallelError) as caught:
-        run_parallel(one, list(failures), workers=2)
-    return caught.value
-
-
-def test_an_all_infrastructure_failure_stays_resumable():
-    error = _pool_error(None, InfrastructureError("a"),
-                        InfrastructureError("b"))
-    with pytest.raises(InfrastructureError, match="the pool") as caught:
-        reraise_by_kind(error, "the pool")
-    assert caught.value.__cause__ is error
-
-
-@pytest.mark.parametrize("kind", [CodeBugError, ModelOutputError, KeyError])
-def test_the_first_other_failure_is_reraised_unchanged(kind):
-    other = kind("first")
-    error = _pool_error(InfrastructureError("a"), other, CodeBugError("b"))
-    with pytest.raises(kind) as caught:
-        reraise_by_kind(error, "the pool")
-    assert caught.value is other

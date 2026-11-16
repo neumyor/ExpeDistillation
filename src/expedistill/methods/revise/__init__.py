@@ -27,6 +27,7 @@ from expedistill.blocks.author import (
     parse_trigger_fields,
 )
 from expedistill.composites import learn_ledger as ledger
+from expedistill.composites.provenance import record_version
 from expedistill.core.contracts import TaskListRow
 from expedistill.core.models import SKILL_SIDES, Skill
 from expedistill.core.trace import Provenance, TraceRef
@@ -208,7 +209,7 @@ def apply_revision(*, store: Any, phase: Any, row: TaskListRow,
     for name, value in revision.fields.items():
         setattr(skill, name, value)
     skill.version += 1
-    ledger.record_version(
+    record_version(
         store, phase_dir, run_dir, skill,
         Provenance(skill_id=skill.skill_id, version=skill.version,
                    phase_label=phase.label, cause=row.action,

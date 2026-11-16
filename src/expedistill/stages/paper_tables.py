@@ -128,8 +128,7 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
             f"{run_dir}: the test phase {label} has no {_SUMMARY_NAME}; "
             "it has not finished")
     summary = read_json(summary_path)
-    report = phase_report.read_phase_report(
-        phase_dir, phase_kind="test", learning_usable=False)
+    report = phase_report.read_phase_report(phase_dir)
     if report is None:
         raise ValueError(
             f"{run_dir}: the test phase {label} has no trial-level "

@@ -1,6 +1,6 @@
 """Unit tests for D9 skill injection."""
 from expedistill.core.models import Skill
-from expedistill.inject.skill_text import SKILL_MARKERS, render_card
+from expedistill.inject.skill_text import SKILL_MARKERS
 from expedistill.inject.skills import (
     bank_reference,
     estimate_tokens,
@@ -33,6 +33,7 @@ def imported(skill_id, text):
 def test_empty_skill_list_is_bare_empty_string():
     # A bare run inserts nothing: never a header with no bullets.
     assert format_skills_block([]) == ""
+    assert format_skills_block([], verbatim=True) == ""
 
 
 def test_single_skill_is_its_card_on_one_bullet():
@@ -129,10 +130,6 @@ def test_bank_reference_accepts_dicts():
 _DOCUMENT = "# Playbook\n\n## Step 1\n- check the fridge\n- open it\n\n## Step 2\nclose it"
 
 
-def test_an_imported_skill_renders_its_document():
-    assert render_card(imported("doc", _DOCUMENT)) == _DOCUMENT
-
-
 def test_verbatim_keeps_the_document_layout_byte_for_byte():
     block = format_skills_block([imported("doc", _DOCUMENT)], verbatim=True)
     assert block == "## Skill rules\n\n" + _DOCUMENT
@@ -149,8 +146,3 @@ def test_verbatim_separates_several_skills_by_one_blank_line():
         [imported("a", "first\nline"), imported("b", "second")],
         verbatim=True)
     assert block == "## Skill rules\n\nfirst\nline\n\nsecond"
-
-
-def test_an_empty_list_is_empty_in_both_modes():
-    assert format_skills_block([], verbatim=True) == ""
-    assert format_skills_block([]) == ""

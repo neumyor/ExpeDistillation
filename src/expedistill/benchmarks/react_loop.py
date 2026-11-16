@@ -11,8 +11,7 @@ step loop inside l1/agent.py:execute_trial). What was kept, and why:
 - Character discipline: observations fed back into the history can be
   truncated through the plugin's ViewRules so long rollouts stay in budget;
   the stored steps keep full observations, so D5 can render later with any
-  rules without re-running anything (README measurement rule 4: keep raw
-  unit-level evidence).
+  rules without re-running anything (keep raw unit-level evidence).
 - The scorer discipline: ``correctness`` comes from the env's own
   ``success_fn`` plus its termination flags; a step-budget exhaustion is
   ``False`` (the env's contract: an unfinished episode has not achieved the
@@ -52,8 +51,7 @@ What was dropped, and why:
 The loop is benchmark-agnostic and testable with FakeClient + a toy BaseEnv.
 """
 
-from pathlib import Path
-from typing import Any, Collection, Dict, List, Optional, Union
+from typing import Any, Collection, Dict, List, Optional
 
 from expedistill.benchmarks.base import BaseEnv, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.skill_folder import (
@@ -101,9 +99,6 @@ def run_react(
     task_prompt_name: str,
     skills_block: str = "",
     max_steps: int,
-    usage: Any = None,
-    run_dir: Optional[Union[str, Path]] = None,
-    system_override: Optional[str] = None,
     view_rules: Optional[ViewRules] = None,
     skill_folder: Optional[SkillFolder] = None,
 ) -> RunOutcome:
@@ -111,7 +106,7 @@ def run_react(
 
     Per step: rebuild the user message from the task prompt template
     (``{instruction}``, ``{skills_block}`` verbatim -- same template bare and
-    with skills, README G4 rule -- and ``{history}``), call the model through
+    with skills -- and ``{history}``), call the model through
     ``call_model``, feed the stripped reply to ``env.step``, append the
     action/observation pair.
 
@@ -168,9 +163,6 @@ def run_react(
                 {"instruction": task.instruction,
                  "skills_block": skills_block,
                  "history": history},
-                usage=usage,
-                run_dir=run_dir,
-                system_override=system_override,
             )
         except ModelOutputError as exc:
             return RunOutcome(

@@ -4,9 +4,8 @@ Every prompt sent to a model is a named constant registered here. Prompt text is
 part of the experiment protocol: its sha256 digest goes into the run manifest
 (B4), and any text change after a run started means a new experiment.
 
-The generic core registry (``core/registry.py``) is intentionally not used yet:
-this module only needs a plain dict plus digest helpers, and keeping it
-self-contained lets the prompts layer land independently.
+The generic core registry (``core/registry.py``) is not used here: this module
+only needs a plain dict plus digest helpers.
 """
 
 import hashlib

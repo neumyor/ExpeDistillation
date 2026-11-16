@@ -47,11 +47,10 @@ their own byte-exact constants because the two projects are separate
 repositories; a test pins the shared text so drift is caught.
 """
 
-import os
 import re
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from expedistill.benchmarks.base import BaseEnv, RunOutcome, Task
+from expedistill.benchmarks.base import BaseEnv, RunOutcome
 from expedistill.benchmarks.skill_folder import (
     MAX_READS,
     SkillFolder,
@@ -60,7 +59,7 @@ from expedistill.benchmarks.skill_folder import (
     read_target,
 )
 from expedistill.infra.reliability import ConfigError, ModelOutputError
-from expedistill.inject import format_playbook_block
+from expedistill.inject.skills import format_playbook_block
 from expedistill.llm.call import ModelHandle, call_model
 from expedistill.prompts import PromptSpec, register
 
@@ -69,7 +68,6 @@ __all__ = [
     "FOLDER_PROMPT_NAME",
     "FOLDER_PROMPT_NO_HISTORY_NAME",
     "MAX_OUTPUT_TOKENS",
-    "MAX_OUTPUT_TOKENS_ENV",
     "PROMPT_NAME",
     "PROMPT_NO_HISTORY_NAME",
     "SYSTEM_PROMPT",
@@ -104,9 +102,6 @@ CORRECTION_PROMPT_NAME = "ALFWORLD_TASK_PROMPT_CORRECTION"
 #: not prompt changes.
 TEMPERATURE = 0.95
 MAX_OUTPUT_TOKENS = 65536
-#: Diagnostic override; a run at another budget is not comparable with the
-#: 65536 runs and must be reported separately.
-MAX_OUTPUT_TOKENS_ENV = "EXPEDISTILL_ALFWORLD_MAX_OUTPUT_TOKENS"
 SEED = 0
 
 #: Re-reads of an already-opened card are served again for free, up to this
@@ -289,7 +284,7 @@ def _diagnose(model_response: str,
     }
 
 
-def _correction_variables(original_prompt: str, model_response: str,
+def _correction_variables(original_prompt: str,
                           diagnostic: Mapping[str, Any],
                           *, truncated: bool) -> Dict[str, str]:
     """The unified correction request, as template fields."""
@@ -310,50 +305,31 @@ def _correction_variables(original_prompt: str, model_response: str,
 
 
 def protocol_handle(handle: ModelHandle) -> ModelHandle:
-    """The handle's protocol slice: temperature 0.95, output budget, seed 0.
+    """The handle's protocol slice: temperature 0.95, output budget 65536, seed 0.
 
     Built per episode (dataclasses.replace) so the run's accounting and
     request dumps stay on the same handle. The config's model options are
     kept; its generation knobs are not (the config owns budgets for the
     method's own calls, the ALFWorld protocol owns the ones it measures).
 
-    The output budget defaults to 65536 (the config-level budget; at the
-    unified runner's 4096 the reasoning teacher truncated 19.3% of its
-    baseline replies). ``EXPEDISTILL_ALFWORLD_MAX_OUTPUT_TOKENS`` overrides
-    it for a diagnostic arm; a run at another budget is NOT comparable with
-    the 65536 runs and must be reported separately.
+    The output budget is 65536 (the config-level budget; at the unified
+    runner's 4096 the reasoning teacher truncated 19.3% of its baseline
+    replies).
     """
     from dataclasses import replace
     extra = dict(handle.extra_body)
     extra.setdefault("seed", SEED)
     return replace(handle, temperature=TEMPERATURE,
-                   max_tokens=_output_budget(), extra_body=extra)
-
-
-def _output_budget() -> int:
-    raw = os.environ.get(MAX_OUTPUT_TOKENS_ENV, "")
-    if not str(raw).strip():
-        return MAX_OUTPUT_TOKENS
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ConfigError(
-            f"{MAX_OUTPUT_TOKENS_ENV} must be an integer, got {raw!r}") from None
-    if value < 1:
-        raise ConfigError(f"{MAX_OUTPUT_TOKENS_ENV} must be >= 1, got {value}")
-    return value
+                   max_tokens=MAX_OUTPUT_TOKENS, extra_body=extra)
 
 
 def run_unified(
-    task: Task,
     env: BaseEnv,
     handle: ModelHandle,
     *,
     skill_folder: Optional[SkillFolder] = None,
     skills_block: str = "",
     max_steps: int,
-    usage: Any = None,
-    run_dir: Any = None,
 ) -> RunOutcome:
     """One episode under the unified protocol; return a uniform RunOutcome.
 
@@ -443,7 +419,7 @@ def run_unified(
         truncated = False
         try:
             response = str(call_model(
-                handle, prompt_name, variables, usage=usage, run_dir=run_dir,
+                handle, prompt_name, variables,
                 system_override=system, max_format_retries=0))
         except ModelOutputError as exc:
             # The unified agent turns an empty or length-cut reply into an
@@ -521,13 +497,12 @@ def run_unified(
             invalid_actions += 1
             corrections += 1
             correction_variables = _correction_variables(
-                _render(prompt_name, variables), response, diagnostic,
+                _render(prompt_name, variables), diagnostic,
                 truncated=truncated)
             try:
                 corrected = str(call_model(
                     handle, CORRECTION_PROMPT_NAME, correction_variables,
-                    usage=usage, run_dir=run_dir, system_override=system,
-                    max_format_retries=0))
+                    system_override=system, max_format_retries=0))
             except ModelOutputError:
                 corrected = ""
             second = _diagnose(corrected, commands)

@@ -57,7 +57,7 @@ from expedistill.core.models import Skill
 from expedistill.infra.manifest import MANIFEST_NAME
 from expedistill.infra.reliability import ConfigError
 from expedistill.infra.runlock import RunLock
-from expedistill.infra.store import KIND_DIRS, Store, write_jsonl
+from expedistill.infra.store import BANK_NAME, KIND_DIRS, Store, write_jsonl
 from expedistill.inject.skill_text import one_line
 from expedistill.methods.delivery.folder_delivery import skill_dirname
 
@@ -75,9 +75,6 @@ BANK_ORIGIN_NAME = "BANK_ORIGIN.md"
 
 #: First segment of every imported skill id.
 SKILL_ID_NAMESPACE = "import"
-
-#: The bank file the test phase falls back to (``Store.bank``).
-_BANK_NAME = "skill_bank.jsonl"
 
 #: Origin names are one Agent Skills style slug.
 _ORIGIN_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -325,7 +322,7 @@ def _build_skills(origin: str, items: List[_Item]) -> List[Skill]:
 def _require_fresh_run_dir(run_dir: Path) -> None:
     """Refuse a directory that already carries a manifest, a bank or skills:
     an import writes the bank once, before the first run freezes anything."""
-    taken = [name for name in (MANIFEST_NAME, _BANK_NAME, BANK_ORIGIN_NAME)
+    taken = [name for name in (MANIFEST_NAME, BANK_NAME, BANK_ORIGIN_NAME)
              if (run_dir / name).exists()]
     skills_dir = run_dir / KIND_DIRS["skills"]
     if skills_dir.is_dir() and any(skills_dir.glob("*.json")):
@@ -384,7 +381,7 @@ def import_external_bank(source: Any, source_format: str, run_dir: Any, *,
         store = Store(run_path)
         for skill in skills:
             store.save(skill, "skills")
-        write_jsonl(run_path / _BANK_NAME,
+        write_jsonl(run_path / BANK_NAME,
                     [skill.to_dict() for skill in skills])
         (run_path / BANK_ORIGIN_NAME).write_text(
             _render_origin(source=source_path, source_format=source_format,

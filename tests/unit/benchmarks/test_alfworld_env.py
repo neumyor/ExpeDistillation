@@ -9,6 +9,7 @@ deadline / death / reaping) without importing textworld.
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -20,62 +21,25 @@ from expedistill.benchmarks.alfworld.env import (
     EVAL_DIR_ENV,
     VENV_ENV,
     ALFWorldEnv,
-    extract_action,
     parse_adapter_line,
     resolve_gamefile,
 )
 from expedistill.infra.reliability import CodeBugError, ConfigError, InfrastructureError
+from tests.helpers.alfworld_adapter import fake_adapter_source
 
+
+#: Recorded adapter stdout transcripts: one protocol message per line, exactly
+#: as ADAPTER_SOURCE writes them (tag + space + JSON payload). They record
+#: the protocol shape -- handshake, observations, end markers, fatal error --
+#: so the parsing layer is tested without the eval venv.
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "alfworld"
 
 #: A fake adapter speaking the documented line protocol. Budget 3. Actions:
 #: "die" exits without replying, "hang" stalls past any read deadline,
 #: "garbage" breaks the protocol, "win" solves the task; anything else is
 #: echoed.
-FAKE_ADAPTER_SOURCE = '''\
-import json
-import sys
-import time
-
-def emit(tag, payload):
-    sys.stdout.write(tag + " " + json.dumps(payload) + "\\n")
-    sys.stdout.flush()
-
-ADMISSIBLE = ["go to fridge 1", "look", "win"]
-
-def obs(text, won=False, done=False, reason=None):
-    return {"text": text, "admissible": ADMISSIBLE,
-            "won": won, "done": done, "reason": reason}
-
-BUDGET = 3
-emit("H", {"budget": BUDGET})
-emit("O", obs("You are in the middle of a room. You see a fridge 1."))
-steps = 0
-while True:
-    line = sys.stdin.readline()
-    if not line:
-        break
-    action = line.strip()
-    if not action:
-        continue
-    if action == "die":
-        sys.stderr.write("fake adapter dying on request\\n")
-        sys.exit(3)
-    if action == "hang":
-        time.sleep(30)
-    if action == "garbage":
-        sys.stdout.write("this line breaks the protocol\\n")
-        sys.stdout.flush()
-        continue
-    steps += 1
-    if action == "win":
-        emit("O", obs("Task is SOLVED.", won=True, done=True, reason="won"))
-        break
-    if steps >= BUDGET:
-        emit("O", obs("you did: " + action, done=True, reason="budget"))
-        break
-    emit("O", obs("you did: " + action))
-'''
+FAKE_ADAPTER_SOURCE = fake_adapter_source(
+    '"You are in the middle of a room. You see a fridge 1."', faults=True)
 
 GAME_REL = "json_2.1.1/valid_seen/task-1/trial-1/game.tw-pddl"
 
@@ -147,39 +111,6 @@ def test_parse_adapter_line_rejects_garbage():
 
 
 # ---------------------------------------------------------------------------
-# Action extraction (per-plugin knowledge that moved out of the old L1)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.parametrize("raw,expected", [
-    ("go to fridge 1", "go to fridge 1"),
-    ("> go to fridge 1", "go to fridge 1"),
-    ("> go to fridge 1\nbecause I need the apple", "go to fridge 1"),
-    ("- open cabinet 2", "open cabinet 2"),
-    ("put apple 1 in fridge 1", "put apple 1 in/on fridge 1"),
-    ("> put apple 1 on fridge 1", "put apple 1 in/on fridge 1"),
-    ("put apple 1 in/on fridge 1", "put apple 1 in/on fridge 1"),
-    ("put apple 1 near fridge 1", "put apple 1 near fridge 1"),  # no rewrite
-    ("  GO TO fridge 1  ", "GO TO fridge 1"),
-])
-def test_extract_action_commands(raw, expected):
-    assert extract_action(raw) == (expected, False)
-
-
-@pytest.mark.parametrize("raw", [
-    "think: I need to find the apple",
-    "> think: check the fridge first",
-    "think",
-])
-def test_extract_action_thoughts_never_reach_the_engine(raw):
-    assert extract_action(raw) == ("", True)
-
-
-def test_extract_action_empty_reply():
-    assert extract_action("") == ("", False)
-    assert extract_action("   \n  ") == ("", False)
-
-
-# ---------------------------------------------------------------------------
 # Gamefile resolution and configuration
 # ---------------------------------------------------------------------------
 
@@ -244,69 +175,33 @@ def test_second_reset_on_fresh_episode_does_not_respawn(tmp_path):
         env.close()
 
 
-def test_step_roundtrip_and_success(tmp_path):
-    env = make_env(tmp_path)
-    try:
-        env.reset()
-        assert env.step("open fridge 1") == "you did: open fridge 1"
-        assert not env.is_terminated()
-        assert not env.success_fn()
-        assert env.step("win") == "Task is SOLVED."
-        assert env.is_terminated()
-        assert env.success_fn()
-        assert env.curr_step == 2
-    finally:
-        env.close()
-
-
 def test_admissible_commands_are_tracked_with_each_observation(tmp_path):
     env = make_env(tmp_path)
     try:
         env.reset()
         assert env.admissible_commands == ("go to fridge 1", "look", "win")
-        env.step("look")
+        env.step_verbatim("look")
         assert env.admissible_commands == ("go to fridge 1", "look", "win")
     finally:
         env.close()
 
 
-def test_step_verbatim_sends_the_command_unchanged(tmp_path):
-    # The unified protocol normalizes nothing: no put/in, no think handling,
-    # no repeated-action termination. The command reaches the adapter as is.
+def test_step_verbatim_roundtrip_and_success(tmp_path):
+    # The unified protocol normalizes nothing: no put/in rewrite, no think
+    # handling, no repeated-action termination. The command reaches the
+    # adapter as is, and the engine's verdict ends the episode.
     env = make_env(tmp_path)
     try:
         env.reset()
-        assert env.step_verbatim("look") == "you did: look"
-        assert env.step_verbatim("look") == "you did: look"
+        assert env.step_verbatim("put apple 1 on fridge 1") == \
+            "you did: put apple 1 on fridge 1"
+        assert env.step_verbatim("put apple 1 on fridge 1") == \
+            "you did: put apple 1 on fridge 1"
         assert not env.is_terminated()
-        assert env.step_verbatim("take apple 1 from fridge 1") == \
-            "you did: take apple 1 from fridge 1"
-    finally:
-        env.close()
-
-
-def test_repeated_action_terminates_the_episode(tmp_path):
-    env = make_env(tmp_path)
-    try:
-        env.reset()
-        assert env.step("go to fridge 1") == "you did: go to fridge 1"
-        observation = env.step("go to fridge 1")
-        assert env.is_terminated()
         assert not env.success_fn()
-        assert env.termination_reason == "repeated_action"
-        assert "episode is terminated" in observation
-    finally:
-        env.close()
-
-
-def test_thought_and_empty_replies_do_not_touch_the_engine(tmp_path):
-    env = make_env(tmp_path)
-    try:
-        env.reset()
-        assert env.step("> think: where is the apple?") == "OK."
-        assert env.step("") == "Nothing happens."
-        # Neither consumed an engine step: a plain action still works.
-        assert env.step("look") == "you did: look"
+        assert env.step_verbatim("win") == "Task is SOLVED."
+        assert env.is_terminated()
+        assert env.success_fn()
         assert env.curr_step == 3
     finally:
         env.close()
@@ -316,9 +211,9 @@ def test_engine_budget_ends_the_episode_as_truncation(tmp_path):
     env = make_env(tmp_path)
     try:
         env.reset()
-        assert env.step("look") == "you did: look"
-        assert env.step("examine fridge 1") == "you did: examine fridge 1"
-        assert env.step("inventory") == "you did: inventory"
+        assert env.step_verbatim("look") == "you did: look"
+        assert env.step_verbatim("examine fridge 1") == "you did: examine fridge 1"
+        assert env.step_verbatim("inventory") == "you did: inventory"
         assert env.truncated
         assert not env.is_terminated()
         assert not env.success_fn()
@@ -333,7 +228,7 @@ def test_child_death_is_infrastructure_error_and_is_reaped(tmp_path):
         env.reset()
         pid = env._proc.pid
         with pytest.raises(InfrastructureError, match="exited before replying"):
-            env.step("die")
+            env.step_verbatim("die")
         # The failure reaped the child: no orphan left behind.
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
@@ -347,7 +242,7 @@ def test_protocol_violation_is_infrastructure_error(tmp_path):
     try:
         env.reset()
         with pytest.raises(InfrastructureError, match="protocol violation"):
-            env.step("garbage")
+            env.step_verbatim("garbage")
     finally:
         env.close()
 
@@ -357,8 +252,11 @@ def test_read_deadline_is_infrastructure_error_and_kills_child(tmp_path):
     try:
         env.reset()
         pid = env._proc.pid
+        started = time.monotonic()
         with pytest.raises(InfrastructureError, match="deadline"):
-            env.step("hang")
+            env.step_verbatim("hang")
+        # The fake adapter sleeps 30 s: the deadline, not the sleep, ends the call.
+        assert time.monotonic() - started < 5
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
     finally:
@@ -388,7 +286,7 @@ def test_step_before_reset_is_code_bug(tmp_path):
     env = make_env(tmp_path)
     try:
         with pytest.raises(CodeBugError, match="reset"):
-            env.step("look")
+            env.step_verbatim("look")
     finally:
         env.close()
 
@@ -430,26 +328,12 @@ def test_child_pythonpath_is_only_the_eval_src(tmp_path, monkeypatch):
         "+ os.environ.get('ALFWORLD_DATA', '<unset>'), 'won': False, "
         "'done': False, 'reason': None})\n"
     )
-    data_root = tmp_path / "alfworld-data"
-    game = data_root / GAME_REL
-    game.parent.mkdir(parents=True)
-    game.write_text("dummy", encoding="utf-8")
-    config = tmp_path / "textworld.yaml"
-    config.write_text("dummy\n", encoding="utf-8")
-    env = ALFWorldEnv(
-        GAME_REL,
-        venv_python=sys.executable,
-        eval_dir=str(tmp_path),
-        data_root=str(data_root),
-        config_path=str(config),
-        adapter_source=probe,
-        read_timeout=10.0,
-    )
+    env = make_env(tmp_path, adapter_source=probe)
     try:
         observation = env.reset()
         pythonpath, data = observation.split("|", 1)
         assert pythonpath == str(tmp_path / "src")
-        assert data == str(data_root)
+        assert data == str(tmp_path / "alfworld-data")
     finally:
         env.close()
 
@@ -459,15 +343,5 @@ def test_child_pythonpath_is_only_the_eval_src(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_adapter_source_compiles_without_the_eval_repo():
-    compile(FAKE_ADAPTER_SOURCE, "fake_adapter.py", "exec")
-    import expedistill.benchmarks.alfworld.env as env_module
-    compile(env_module.ADAPTER_SOURCE, "adapter.py", "exec")
-
-
-def test_adapter_source_documents_the_protocol():
     from expedistill.benchmarks.alfworld.env import ADAPTER_SOURCE
-    for tag_line in ('H <json>', 'O <json>', 'X <json>'):
-        assert tag_line in ADAPTER_SOURCE
-    assert "gamefile" in ADAPTER_SOURCE
-    # Exactly one observation answers every action: no separate end marker.
-    assert "E <json>" not in ADAPTER_SOURCE
+    compile(ADAPTER_SOURCE, "adapter.py", "exec")

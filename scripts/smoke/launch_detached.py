@@ -54,7 +54,7 @@ def main() -> int:
     # process group, immune to the launcher's death (outer AGENTS.md rule 7).
     with open(args.log, "ab") as log_fh:
         # Console log must be live: the child's stdout is block-buffered
-        # otherwise, and during the 2026-10-13 stage-6 stall the buffer hid
+        # otherwise, and during the 2026-10-13 test-phase stall the buffer hid
         # the current restart's progress entirely (the log showed only old
         # restarts' lines), which sent the diagnosis down wrong paths.
         env = dict(os.environ, PYTHONUNBUFFERED="1")
@@ -86,12 +86,8 @@ def main() -> int:
     # so the child is never a zombie while we live. If THIS supervisor is
     # killed, the child (a session leader) survives, is reparented to init
     # and keeps running; its status is then only in the console log and the
-    # run's own ledger, never in the .exit file.
-    def _on_term(_signum, _frame):
-        # Deliberately does NOT signal the child: the whole point of the
-        # detach is that killing the launcher leaves the driver alone.
-        sys.exit(0)
-
+    # run's own ledger, never in the .exit file. TERM / INT are ignored so
+    # an interrupted terminal does not take the launcher down early.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     rc = proc.wait()

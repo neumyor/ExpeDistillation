@@ -223,14 +223,8 @@ class UnitSummary:
 class PhaseReport:
     """One execute phase's trial records and derived unit summaries.
 
-    ``learning_usable`` is False for the final test: the caller must not
-    feed that phase's summaries into decision.  This is a runtime envelope,
-    not a persisted report card.
+    A runtime envelope, not a persisted report card.
     """
 
-    phase_kind: str
-    learning_usable: bool
     sheets: List[AnswerSheet]
     units: List[UnitSummary]
-    summary: Dict[str, Any] = field(default_factory=dict)
-    external: Any = None

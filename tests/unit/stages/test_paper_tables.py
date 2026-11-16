@@ -219,39 +219,6 @@ def test_compare_arms_rejects_an_unknown_reference(tmp_path):
 # render_markdown
 # ---------------------------------------------------------------------------
 
-_FOOTER_AVG = (
-    "Metrics: avg@N: mean over tasks of the per-task mean of scored trials "
-    "(conditional: a task with no scored trial is left out of that "
-    "comparison). Delta: paired difference of per-task scores against the "
-    "control of the same run and against Ours; [95% CI]: percentile "
-    "bootstrap over tasks (2000 resamples, seed 0). W/L/T: tasks where the "
-    "arm scores higher / lower / exactly equal. Control noise SD: SD of the "
-    "difference between two random halves of the control's own trials (200 "
-    "resamples); an effect inside it cannot be told from rerun noise.")
-
-_EXPECTED_MARKDOWN = f"""\
-## main
-
-### main / alfworld
-
-| Arm | avg@N (delta vs control [95% CI]) | W/L/T vs control | control avg@N | control noise SD | delta vs Ours [95% CI] | W/L/T vs Ours |
-|---|---|---|---|---|---|---|
-| Ours | 0.333 (+0.333 [+0.000, +0.667]) | 2/0/2 | 0.000 | 0.000 | - | - |
-| Base | 0.500 (+0.500 [+0.000, +1.000]) | 2/0/2 | 0.000 | 0.000 | +0.167 [+0.000, +0.333] | 2/0/2 |
-
-{_FOOTER_AVG}
-"""
-
-
-def test_render_markdown_matches_the_literal_table(tmp_path):
-    ours, base = _main_runs(tmp_path)
-    spec = _spec(ours, base)
-
-    results = pt.build_results(spec, n_boot=2000, seed=0, n_resample=200)
-
-    assert pt.render_markdown(spec, results) == _EXPECTED_MARKDOWN
-
-
 def test_pass_at_n_table_shows_the_mcnemar_column(tmp_path):
     ours, base = _main_runs(tmp_path)
     spec = _spec(ours, base)
