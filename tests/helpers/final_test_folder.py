@@ -64,7 +64,7 @@ class FolderPlugin(BenchmarkPlugin):
 
     @property
     def skill_folder_prompt_name(self):
-        return "TB_TASK_PROMPT_FOLDER" if self.capable else None
+        return "TB_SKILL_READ" if self.capable else None
 
 
 class CattingPlugin(FolderPlugin):

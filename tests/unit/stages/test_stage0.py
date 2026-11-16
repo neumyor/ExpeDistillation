@@ -456,7 +456,7 @@ def test_unrelated_prompt_registration_does_not_change_digests(
     frozen = load_manifest(ctx.run_dir)["prompt_digests"]
     assert "OTHER_BENCH_TASK" not in frozen
     assert "SEARCHQA_TASK_PROMPT" not in frozen
-    assert "TB_TASK_PROMPT" not in frozen
+    assert "TB_TERMINUS_TEMPLATE" not in frozen
 
 
 @pytest.mark.parametrize("bench, aux_metric", [

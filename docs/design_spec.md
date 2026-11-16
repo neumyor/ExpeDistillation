@@ -583,7 +583,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 |---|---|---|---|---|
 | `vocabulary` | 学习提示词的词汇槽（`LearningContext`：智能体是谁、能力族、最终动作、可观察的信号、段标签示例等） | 有 | 有 | 有 |
 | `protocol` | 给写作者的环境事实（执行者每一步看到什么、技能怎样打开） | 有 | 有 | 有 |
-| `executor_prompts` | 执行提示词的注册名 | `TB_TASK_PROMPT`、`TB_TASK_PROMPT_FOLDER`、`TB_TASK_PROMPT_READ`、`TB_TASK_PROMPT_READ_PLAYBOOK` | `ALFWORLD_TASK_PROMPT_SYSTEM`、`ALFWORLD_TASK_PROMPT_NO_HISTORY`、`ALFWORLD_TASK_PROMPT`、`ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER`、`ALFWORLD_TASK_PROMPT_FOLDER`、`ALFWORLD_TASK_PROMPT_CORRECTION` | `SEARCHQA_TASK_PROMPT`、`SEARCHQA_TASK_PROMPT_FOLDER` |
+| `executor_prompts` | 执行提示词的注册名 | `TB_TERMINUS_TEMPLATE`、`TB_SKILL_READ`、`TB_DISCIPLINE` | `ALFWORLD_TASK_PROMPT_SYSTEM`、`ALFWORLD_TASK_PROMPT_NO_HISTORY`、`ALFWORLD_TASK_PROMPT`、`ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER`、`ALFWORLD_TASK_PROMPT_FOLDER`、`ALFWORLD_TASK_PROMPT_CORRECTION` | `SEARCHQA_TASK_PROMPT`、`SEARCHQA_TASK_PROMPT_FOLDER` |
 | `playbook_seed` | playbook 的初始文本 | 空 | 空 | 空 |
 | `playbook_facts` | 从摸底答卷计算统计事实的函数 | `tb/playbook.py` | `alfworld/playbook.py` | 无 |
 | `playbook_checks` | playbook 必须包含的部分（`PlaybookRequirement`） | 5 项 | 6 项 | 无 |
@@ -882,14 +882,17 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   插件用能力位 `skill_folder_prompt_name` 声明支持，不支持的插件在派发前被拒绝；
   库为空时与 5.2 相同：物化一个空的 `skill_folder/`，单元仍挂清单（没有文件）、用文件夹执行
   提示词，playbook 照常显示；
-- **TB 的技能文件夹**：技能目录随 skills 上传进沙箱 `/opt/openclaw-skills/<task>/`，
-  任务级 `SKILL.md` 是 `TB_SKILL_FOLDER_GUIDANCE`。Harbor 的 Terminus 扫描
-  `<task>/<skill>/SKILL.md`、解析 YAML 头、把名字、描述和完整路径拼成
-  `<available_skills>` 放进首轮提示词。folder 单元总是上传 `SKILL_READ_SUFFIX.md`：
-  内容是 `TB_TASK_PROMPT_READ`（选卡规则、shell 操作规范、阈值留余量、完成前自检），
-  清单带 playbook 时用 `TB_TASK_PROMPT_READ_PLAYBOOK` 把 playbook 放在它前面；
-  Terminus 用这个文件代替内置的后缀，所以 playbook 出现在首轮提示词的任务描述之后
-  （插件属性 `playbook_in_skills_block = False`）；
+- **TB 的技能文件夹**：TB 的首轮提示词由 Harbor 组装，依次是 Terminus 自己的模板
+  （`TB_TERMINUS_TEMPLATE` 是它的逐字节副本，只用于冻结 digest 和给诊断渲染任务文本）
+  与任务描述、本插件上传的 `SKILL_READ_SUFFIX.md`、Terminus 自己生成的
+  `<available_skills>`。技能目录随 skills 上传进沙箱 `/opt/openclaw-skills/<task>/`；
+  Terminus 只列出 `<task>/<skill>/SKILL.md`（带 YAML 头），任务级 `SKILL.md` 只是挂载
+  检查要求存在的占位文件，智能体看不到。所以执行侧能控制的只有后缀，全部文本在
+  `benchmarks/tb/protocol.py`：后缀依次是 playbook（标题与 ALFWorld 相同）、
+  `whole_bank` 的技能块（只在整库交付时有）、读卡规则 `TB_SKILL_READ`（只在 folder
+  单元有，与 ALFWorld 的 ReadSkill 规则同义：卡可选，用 `cat <位置>` 打开，最多 3 张，
+  描述与当前情况相符才打开）、工作纪律 `TB_DISCIPLINE`（shell 卫生、阈值留余量、完成前
+  自检）。不带技能的单元不上传后缀（插件属性 `playbook_in_skills_block = False`）；
 - **本地 benchmark（SearchQA、ALFWorld）的渐进式披露**（`benchmarks/skill_folder.py`）：
   提示词里只有 `<available_skills>` 目录（名称、描述、位置，XML 形状与 Terminus 一致，
   内容读自物化文件的 YAML 头）；模型回复读取动作时，循环自己返回整份 `SKILL.md`，

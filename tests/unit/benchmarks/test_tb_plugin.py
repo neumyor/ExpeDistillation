@@ -14,6 +14,8 @@ from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import _reset_registry, get_plugin
 from expedistill.benchmarks.tb import TBPlugin
 from expedistill.benchmarks.tb.plugin import result_facts, retryable_unscored
+from expedistill.benchmarks.tb.protocol import (
+    MOUNT_PLACEHOLDER, READ_SUFFIX_FILENAME, render_suffix)
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
 from expedistill.infra.reliability import ConfigError, InfrastructureError
 from expedistill.infra.usage import UsageRecorder
@@ -280,14 +282,17 @@ def test_run_with_skills_uploads_skill_md(tmp_path):
     assert outcome.meta["skills_injected"] is True
     assert outcome.meta["remote_skill_file"] == (
         f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext/SKILL.md")
-    # The uploaded SKILL.md is the D9 block verbatim...
+    # The task-level SKILL.md is the mount placeholder; the D9 block rides
+    # the suffix beside it...
+    task_dir = f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext"
     local_skill = tmp_path / "work" / "skills" / "train-fasttext" / "SKILL.md"
-    assert local_skill.read_text(encoding="utf-8") == skills_block
-    assert link.puts[0] == (str(local_skill),
-                            f"{ROOT}/skills/ed_train-fasttext_tok/"
-                            f"train-fasttext/SKILL.md")
+    assert local_skill.read_text(encoding="utf-8") == MOUNT_PLACEHOLDER
+    assert link.puts[0] == (str(local_skill), f"{task_dir}/SKILL.md")
+    assert link.remote_files[f"{task_dir}/{READ_SUFFIX_FILENAME}"].decode(
+        "utf-8") == render_suffix(skills_block=skills_block)
     # Then the remote submit meta (uploaded last, before the launch).
     assert [remote for _, remote in link.puts[1:]] == [
+        f"{task_dir}/{READ_SUFFIX_FILENAME}",
         f"{ROOT}/jobs/ed_train-fasttext_tok.ed_meta.json"]
     # ...and the runner was pointed at the per-run skills root.
     submit = next(cmd for cmd in link.commands if "nohup" in cmd)
@@ -796,13 +801,13 @@ def test_import_registers_plugin_and_prompt():
     _reset_registry()
     reload_plugin("tb")
     assert get_plugin("tb").name == "tb"
-    assert "TB_TASK_PROMPT" in PROMPTS
-    assert "TB_TASK_PROMPT_FOLDER" in PROMPTS
+    assert "TB_TERMINUS_TEMPLATE" in PROMPTS
+    assert "TB_SKILL_READ" in PROMPTS
     # The registered instance resolves the standard interface names and
     # its skill-folder capability prompt (M3).
     plugin = get_plugin("tb")
-    assert plugin.task_prompt_name == "TB_TASK_PROMPT"
-    assert plugin.skill_folder_prompt_name == "TB_TASK_PROMPT_FOLDER"
+    assert plugin.task_prompt_name == "TB_TERMINUS_TEMPLATE"
+    assert plugin.skill_folder_prompt_name == "TB_SKILL_READ"
     assert plugin.view_rules.max_obs_chars == 8000
 
 

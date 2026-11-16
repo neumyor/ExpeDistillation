@@ -63,16 +63,18 @@ declares the task complete. A verifier then checks the sandbox state
 against the task's success condition. In a skill-folder trial the skills
 are files mounted read-only at /opt/openclaw-skills/<task>/, listed in the
 prompt's <available_skills> section with the location of each SKILL.md; the
-reader opens a skill by reading that file from the terminal."""
+reader opens a skill by reading that file from the terminal. Opening a card
+is optional and costs one command; the card's text then stays in the
+conversation. The reader opens at most 3 cards per task, and only when a
+card's description matches its current situation."""
 
 PROMPT_PACK = PromptPack(
     vocabulary=_VOCABULARY,
     protocol=_PROTOCOL,
     executor_prompts=(
-        "TB_TASK_PROMPT",
-        "TB_TASK_PROMPT_FOLDER",
-        "TB_TASK_PROMPT_READ",
-        "TB_TASK_PROMPT_READ_PLAYBOOK",
+        "TB_TERMINUS_TEMPLATE",
+        "TB_SKILL_READ",
+        "TB_DISCIPLINE",
     ),
     playbook_seed="",
     playbook_facts=facts_from_sheets,

@@ -8,25 +8,24 @@ verifier, and rebuilds the stepwise trajectory from the trial directory.
 Submission design (mirrors the outer ``scripts/tb21`` reference link; the
 runner script there is the real remote entry point):
 
-1. **Skills delivery**: a non-empty skills block is uploaded verbatim as
-   ``<root>/skills/<run_id>/<task>/SKILL.md`` (scp) and the runner is put in
-   ``TBENCH_EVAL_MODE=skills`` with ``TBENCH_SKILL_ROOT`` pointing at the
-   per-run directory. The Tencent skill agent/environment reads
-   ``<TBENCH_SKILL_ROOT>/<task>/SKILL.md`` and injects it into the agent's
-   task prompt, so the remote agent sees the skills block as part of its
-   task prompt. Bare runs (empty block) use ``TBENCH_EVAL_MODE=bare``.
-   **Skill-folder units (the real_folder execution, M3)** ride the same
-   mechanism: the task-level SKILL.md carries the folder GUIDANCE
-   (``TB_SKILL_FOLDER_GUIDANCE``), while each active skill is uploaded
-   as its own ``<skill>/SKILL.md`` directory beside it into the same
-   per-run directory, which the environment mounts into the sandbox
-   read-only at ``/opt/openclaw-skills/<task>/``. Harbor's Terminus agent
-   discovers the per-skill files itself, parses their YAML frontmatter,
-   and appends an ``<available_skills>`` list with each exact location to
-   the initial prompt. The agent cats what it needs, every command stays
-   in the recorded terminal session, and the plugin neither intercepts
-   nor budgets the reads (M4 parses them). The catalog file remains a
-   fallback, not the prompt's directory.
+1. **Skills delivery**: every skills-mode trial (``TBENCH_EVAL_MODE=skills``)
+   gets a per-run directory ``<root>/skills/<run_id>/<task>/`` (scp), which
+   the Tencent skill environment mounts read-only at
+   ``/opt/openclaw-skills/<task>/``. What the agent reads comes from the
+   skill-read suffix uploaded beside it as ``SKILL_READ_SUFFIX.md``: the
+   vendored ``TencentSkillTerminus2`` appends that file to the task
+   description (``tb/protocol.py`` builds it). A whole-bank unit's skills
+   block rides the suffix. A **skill-folder unit (the real_folder
+   execution, M3)** also ships each active skill as its own
+   ``<skill>/SKILL.md``; Harbor's Terminus agent discovers those files,
+   parses their YAML frontmatter and appends an ``<available_skills>``
+   list with each exact location to the initial prompt, and the suffix
+   carries the card-reading rule. The task-level ``SKILL.md`` is only the
+   mount check's placeholder: Terminus never lists it. The agent cats what
+   it needs, every command stays in the recorded terminal session, and the
+   plugin neither intercepts nor budgets the reads (M4 parses them). Bare
+   runs (no skills block, no folder) use ``TBENCH_EVAL_MODE=bare`` and get
+   no suffix.
 2. **Launch**: one ssh round trip runs ``nohup setsid env <VARS> bash
    <runner> > <root>/logs/<run_id>.log 2>&1 < /dev/null & echo $!``. The
    runner is detached from the ssh session, so a dropped connection cannot
@@ -136,9 +135,10 @@ from typing import Any, Dict, List, Mapping, NoReturn, Optional, Sequence, Tuple
 from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
 from expedistill.benchmarks.tb.prompt_pack import PROMPT_PACK
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
-from expedistill.benchmarks.tb.skill_read import (
+from expedistill.benchmarks.tb.protocol import (
+    MOUNT_PLACEHOLDER,
     READ_SUFFIX_FILENAME,
-    render_read_suffix,
+    render_suffix,
 )
 from expedistill.benchmarks.tb.trajectory import (
     reconstruct_skip_counts,
@@ -151,56 +151,13 @@ from expedistill.infra.reliability import (
     InfrastructureError,
 )
 from expedistill.infra.store import write_json
-from expedistill.prompts.registry import PromptSpec, register
 
 __all__ = [
     "TBPlugin",
-    "TB_SKILL_FOLDER_GUIDANCE",
-    "TB_TASK_PROMPT",
-    "TB_TASK_PROMPT_FOLDER",
     "result_facts",
     "retryable_unscored",
     "runner_env",
 ]
-
-# --------------------------------------------------------------------------
-# B2: the TB task execution prompt.
-#
-# Exactly the three interface variables {instruction}, {skills_block},
-# {history}; the same template serves bare and skills runs ({skills_block}
-# renders empty when bare). Note the remote caveat: Harbor's Terminus agent
-# composes its own prompt, so this template is the frozen protocol of what
-# the remote agent effectively receives -- the skills block reaches it via
-# the SKILL.md mechanism above, and the {history} slot is empty because the
-# remote agent manages its own terminal history. The digest is what the
-# manifest freezes; the text change discipline is the same as every prompt.
-# --------------------------------------------------------------------------
-TB_TASK_PROMPT = register(
-    PromptSpec(
-        name="TB_TASK_PROMPT",
-        template="""You are an AI assistant solving a command-line task inside a Linux sandbox.
-You act through a terminal: inspect the environment, run shell commands, read
-their output, and iterate until the task is done.
-
-SKILLS (lessons distilled from earlier runs; use them as references when they
-apply to the current task, and ignore them when they do not):
-{skills_block}
-TASK:
-{instruction}
-
-TERMINAL HISTORY (most recent state last):
-{history}
-Decide your next action from the terminal state above. Work in small,
-verifiable steps, check the effect of each command before moving on, and do
-not declare the task complete until you have verified the goal against the
-task description.
-""",
-        description=(
-            "E1 TB runner: terminal-agent execution prompt; the skills slot "
-            "renders empty for bare runs."
-        ),
-    )
-)
 
 #: The runner script on the benchmark host. There is no default: where it
 #: lives is a property of the host, so EXPEDISTILL_TB_RUNNER must name it.
@@ -208,79 +165,6 @@ RUNNER_ENV = "EXPEDISTILL_TB_RUNNER"
 
 #: Optional ``:``-separated absolute prefixes the remote root must sit under.
 ALLOWED_ROOTS_ENV = "EXPEDISTILL_TB_ALLOWED_ROOTS"
-
-# --------------------------------------------------------------------------
-# B2: the skill-folder guidance and the folder unit's task prompt
-# (skill-folder M3).
-#
-# A folder unit's remote trial rides the SAME skills-mode mechanism a
-# skills-block trial does: the plugin uploads a per-run directory under
-# ``<TBENCH_SKILL_ROOT>/<run_id>/<task_name>/`` whose task-level SKILL.md
-# is the guidance below, and the TencentTaskSkillE2BEnvironment (outer
-# scripts/tb21, vendored tencent_tb2_skill_env.py) uploads that WHOLE
-# directory -- SKILL.md and every other file in it -- into the sandbox
-# read-only at ``/opt/openclaw-skills/<task_name>/``. Each active skill
-# is its own ``<skill>/SKILL.md`` directory under that task directory.
-# Harbor's Terminus agent discovers those files itself and appends an
-# ``<available_skills>`` list to the initial prompt, so this guidance
-# points at that list instead of carrying a catalog. The path wording is
-# a remote contract: it must name /opt/openclaw-skills, the mount the
-# vendored environment hardcodes.
-# --------------------------------------------------------------------------
-TB_SKILL_FOLDER_GUIDANCE = """Your task's skill folder is mounted read-only inside this sandbox at
-/opt/openclaw-skills/<task>/.
-The available skills are listed in the <available_skills> section of this
-prompt, each with the exact location of its SKILL.md. Before starting the
-task itself, read the location of at least one skill that could plausibly
-help with the task. You MUST do this at least once before running any
-command for the task itself, even if the task looks simple. After that,
-read only the skill the current step needs, one at a time; do not open many
-skill files at once; come back to the available-skills list when a later
-step needs another one. These skills are lessons distilled from earlier
-runs: use them as references when they apply to the current task, and
-ignore them when they do not."""
-
-TB_TASK_PROMPT_FOLDER = register(
-    PromptSpec(
-        name="TB_TASK_PROMPT_FOLDER",
-        template=(
-            "You are an AI assistant solving a command-line task inside a "
-            "Linux sandbox.\n"
-            "You act through a terminal: inspect the environment, run "
-            "shell commands, read\n"
-            "their output, and iterate until the task is done.\n"
-            "\n"
-            "SKILL FOLDER (lessons distilled from earlier runs live as "
-            "files in this\n"
-            "sandbox; use them as references when they apply to the "
-            "current task, and\n"
-            "ignore them when they do not):\n"
-            + TB_SKILL_FOLDER_GUIDANCE + "\n"
-            "\n"
-            "TASK:\n"
-            "{instruction}\n"
-            "\n"
-            "TERMINAL HISTORY (most recent state last):\n"
-            "{history}\n"
-            "Decide your next action from the terminal state above. Work "
-            "in small,\n"
-            "verifiable steps, check the effect of each command before "
-            "moving on, and do\n"
-            "not declare the task complete until you have verified the "
-            "goal against\n"
-            "the task description.\n"
-        ),
-        description=(
-            "E1 TB runner, skill-folder mode (the real_folder execution): "
-            "the folder unit's task prompt -- the SKILLS slot is replaced "
-            "by the folder guidance section (TB_SKILL_FOLDER_GUIDANCE "
-            "verbatim, which is also what the remote skill agent injects "
-            "as the trial's task-level SKILL.md). Harbor's Terminus agent "
-            "adds the <available_skills> list; no catalog text is part of "
-            "this prompt and there is no {skills_block} slot."
-        ),
-    )
-)
 
 #: Poll/deadline knobs (ssh round trips are expensive: poll modestly).
 POLL_ENV = "EXPEDISTILL_TB_POLL_SECONDS"
@@ -559,15 +443,6 @@ _FOLDER_MANIFEST_KEY = "skill_folder"
 _FOLDER_DIR_KEY = "skill_folder_dir"
 
 
-def _read_suffix_of(manifest: Dict[str, Any]) -> str:
-    """The skill-read suffix a folder unit uploads: ``TB_TASK_PROMPT_READ``,
-    with the manifest's playbook in front when it carries one. Uploaded
-    always, so the text the agent reads is the frozen prompt rather than
-    the vendored agent's built-in copy."""
-    playbook = manifest.get("playbook_text")
-    return render_read_suffix(playbook if isinstance(playbook, str) else "")
-
-
 def _folder_of(task: Task) -> Optional[Tuple[Dict[str, Any], Path]]:
     """A folder unit's (manifest, materialized local directory), or None.
 
@@ -663,16 +538,17 @@ class TBPlugin(BenchmarkPlugin):
     the trajectory from the trial directory."""
 
     name = "tb"
-    task_prompt_name = "TB_TASK_PROMPT"
-    # The skill-folder capability (M3): a folder unit runs under the
-    # folder prompt registered above, and ``run`` brings the
-    # materialized folder into the sandbox through the skills-mode
-    # directory (the module docstring's submission design).
-    skill_folder_prompt_name = "TB_TASK_PROMPT_FOLDER"
-    #: A folder unit's playbook reaches the agent as the front of the
-    #: skill-read suffix (``tb/skill_read.py``). A non-folder skills block
-    #: becomes the trial's SKILL.md, and an empty one is the bare mode, so
-    #: a playbook there would turn a bare trial into a skills-mode trial.
+    #: Terminus's own template (``tb/protocol.py``): what every trial runs
+    #: under, bare or not.
+    task_prompt_name = "TB_TERMINUS_TEMPLATE"
+    # The skill-folder capability (M3): a folder unit's suffix carries this
+    # card-reading rule, and ``run`` brings the materialized folder into
+    # the sandbox through the skills-mode directory (the module
+    # docstring's submission design).
+    skill_folder_prompt_name = "TB_SKILL_READ"
+    #: A folder unit's playbook reaches the agent at the front of the
+    #: suffix. An empty skills block is the bare mode, so a playbook there
+    #: would turn a bare trial into a skills-mode trial.
     playbook_in_skills_block = False
     verdict_rule = "tb_scorer"
     prompt_pack = PROMPT_PACK
@@ -761,21 +637,25 @@ class TBPlugin(BenchmarkPlugin):
         workdir.mkdir(parents=True, exist_ok=True)
         link = self._link if self._link is not None else RemoteLink()
         run_id = self._make_run_id(task_name, task)
-        # A folder unit rides the skills-mode mechanism with the folder
-        # guidance as its task-level SKILL.md. Harbor's Terminus agent
-        # discovers the per-skill <skill>/SKILL.md files and appends the
-        # <available_skills> list; the catalog file is only a fallback.
-        # An empty bank is still a folder unit: the same guidance and
-        # read suffix (with the playbook in front), an empty skill list.
+        # Every skills-mode trial reads the suffix (tb/protocol.py); the
+        # task-level SKILL.md only satisfies the sandbox's mount check.
+        # Harbor's Terminus agent discovers a folder unit's per-skill
+        # <skill>/SKILL.md files and appends the <available_skills> list.
+        # An empty bank is still a folder unit: the same suffix (with the
+        # playbook in front), an empty skill list.
         folder = _folder_of(task)
+        prompt_name = self.task_prompt_name
         if folder is not None:
-            skill_md = TB_SKILL_FOLDER_GUIDANCE
-            folder_prompt_name = self.skill_folder_prompt_name
-            read_suffix = _read_suffix_of(folder[0])
+            playbook = folder[0].get("playbook_text")
+            read_suffix: Optional[str] = render_suffix(
+                playbook=playbook if isinstance(playbook, str) else "",
+                folder=True)
+            prompt_name = self.skill_folder_prompt_name
+        elif skills_block.strip():
+            read_suffix = render_suffix(skills_block=skills_block)
         else:
-            skill_md = skills_block
             read_suffix = None
-            folder_prompt_name = self.task_prompt_name
+        skill_md = MOUNT_PLACEHOLDER if read_suffix is not None else ""
         poll_seconds = _env_float(POLL_ENV, DEFAULT_POLL_SECONDS,
                                   self._poll_seconds)
         deadline_seconds = _env_float(DEADLINE_ENV, DEFAULT_DEADLINE_SECONDS,
@@ -788,7 +668,7 @@ class TBPlugin(BenchmarkPlugin):
             "model": model_name,
             "run_id": run_id,
             "max_input_tokens": max_input_tokens,
-            "prompt_name": folder_prompt_name,
+            "prompt_name": prompt_name,
         }
         try:
             # Root resolution and everything after it goes over the wire, so
@@ -1033,12 +913,11 @@ class TBPlugin(BenchmarkPlugin):
         a reused or rejoined run reports the same provenance without
         uploading anything.
 
-        A folder unit (``folder`` is its (manifest, local directory)) rides
-        the skills mode: its task-level SKILL.md is the folder guidance
-        (the caller passes the finished body as ``skill_md``), and each
-        active skill's ``<skill>/SKILL.md`` reaches the sandbox beside
-        it through the same per-run directory. Harbor's Terminus agent
-        discovers those files and renders <available_skills>.
+        A skills-mode trial (``skill_md`` is the mount placeholder)
+        gets the per-run directory; a folder unit (``folder`` is its
+        (manifest, local directory)) also ships each active skill's
+        ``<skill>/SKILL.md`` there, which Harbor's Terminus agent
+        discovers and renders as <available_skills>.
         The trajectory keeps every terminal command, so what the agent
         actually cat'd stays in the record for M4's parsing -- execution
         here neither intercepts nor budgets the reads."""
@@ -1081,13 +960,12 @@ class TBPlugin(BenchmarkPlugin):
                              conditions: Dict[str, Any],
                              folder: Optional[Tuple[Dict[str, Any], Path]],
                              read_suffix: Optional[str] = None) -> None:
-        """Fresh launches only: upload the run's SKILL.md (the D9 block
-        verbatim, or the folder guidance for a folder unit; the remote
-        skill agent wraps it into the agent's task prompt), a folder
-        unit's per-skill ``<skill>/SKILL.md`` files and catalog beside it
-        (the whole per-run directory reaches the sandbox -- module
-        docstring), then the remote submit meta -- last, so a meta on the
-        remote side means everything else is already there."""
+        """Fresh launches only: upload the run's task-level SKILL.md (the
+        mount placeholder) and the suffix beside it, a folder unit's
+        per-skill ``<skill>/SKILL.md`` files and catalog (the whole
+        per-run directory reaches the sandbox -- module docstring), then
+        the remote submit meta -- last, so a meta on the remote side means
+        everything else is already there."""
         dirs = [f"{root}/jobs"]
         if skill_meta["eval_mode"] == "skills":
             dirs.append(f"{skill_meta['remote_skill_root']}/{task_name}")
@@ -1112,8 +990,8 @@ class TBPlugin(BenchmarkPlugin):
                 link.put(str(local), alias_file,
                          timeout=SUBMIT_TIMEOUT_SECONDS)
             if read_suffix is not None:
-                # The vendored agent reads this file in place of its
-                # built-in skill-read suffix (see tb/skill_read.py).
+                # The vendored agent appends this file to the task
+                # description in place of its built-in suffix.
                 local_suffix = local.parent / READ_SUFFIX_FILENAME
                 local_suffix.write_text(read_suffix, encoding="utf-8")
                 link.put(str(local_suffix),
@@ -1165,8 +1043,8 @@ class TBPlugin(BenchmarkPlugin):
                 "driver must materialize the folder before dispatch")
         names = _folder_file_names(manifest)
         if not names:
-            # An empty bank ships no files: the unit keeps the folder
-            # guidance and the read suffix, its skill list is empty.
+            # An empty bank ships no files: the unit keeps the suffix,
+            # its skill list is empty.
             return
         missing = [name for name in names
                    if not (folder_dir / name).is_file()]
@@ -1255,12 +1133,11 @@ class TBPlugin(BenchmarkPlugin):
         the forwarded runner knobs, the context ceiling and the uploaded
         content's bytes.
 
-        Skills mode digests the SKILL.md; a folder unit additionally
-        folds in the manifest's bank fingerprint, catalog text and the
-        exact bytes of every file the manifest ships -- the SKILL.md
-        bytes alone are not enough, and a run id whose folder changed (a
-        changed bank or different frontmatter) must not be reused as
-        if it were the same trial."""
+        Skills mode digests the SKILL.md and the suffix; a folder unit
+        additionally folds in the manifest's bank fingerprint, catalog
+        text and the exact bytes of every file the manifest ships -- a
+        run id whose folder changed (a changed bank or different
+        frontmatter) must not be reused as if it were the same trial."""
         knobs = {knob: os.environ.get(knob) or "" for knob in _FORWARDED_KNOBS}
         knobs["TBENCH_MAX_INPUT_TOKENS"] = str(max_input_tokens)
         env_digest = hashlib.sha256(json.dumps(
@@ -1278,8 +1155,8 @@ class TBPlugin(BenchmarkPlugin):
                     str(manifest.get("description_mode")),
                     _folder_dir_digest(folder_dir, names),
                 ])
-                if read_suffix is not None:
-                    digest_payload += "\n" + read_suffix
+            if read_suffix is not None:
+                digest_payload += "\n" + read_suffix
             skill_digest = hashlib.sha256(
                 digest_payload.encode("utf-8")).hexdigest()
         return {

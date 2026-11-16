@@ -229,7 +229,7 @@ def test_summary_prints_role_prompt_usage_section(capsys, tmp_path):
         {"role": "judge", "prompt": "JUDGE", "model": "m",
          "in_tokens": None, "out_tokens": None, "request_id": "r2",
          "status": "error", "meta": {"error": "InfrastructureError"}},
-        {"role": "executor_weak", "prompt": "TB_TASK_PROMPT", "model": "m",
+        {"role": "executor_weak", "prompt": "TB_TERMINUS_TEMPLATE", "model": "m",
          "in_tokens": 2000, "out_tokens": None, "request_id": "r3",
          "status": "ok", "meta": None},
     ]
@@ -251,8 +251,8 @@ def test_summary_prints_role_prompt_usage_section(capsys, tmp_path):
     assert "est_in_med=100" in judge_line
     assert "in_over_est=1.2" in judge_line
     tb_line = next(line for line in out.splitlines()
-                   if "TB_TASK_PROMPT" in line)
-    assert "executor_weak | TB_TASK_PROMPT |" in tb_line
+                   if "TB_TERMINUS_TEMPLATE" in line)
+    assert "executor_weak | TB_TERMINUS_TEMPLATE |" in tb_line
     # Never-reported output usage prints as unknown, never as a fake 0 size.
     assert "out_med=-" in tb_line
     assert "unknown=" in tb_line

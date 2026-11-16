@@ -114,8 +114,8 @@ def test_the_pack_overrides_the_playbook_update_with_matching_slots():
     assert _slots(get_prompt(PLAYBOOK_PROMPT_NAME)) \
         == _slots(get_prompt("PLAYBOOK_UPDATE"))
     # The prompt tells the writer what the agent already receives.
-    assert get_prompt("TB_TASK_PROMPT_READ") in get_prompt(
-        PLAYBOOK_PROMPT_NAME)
+    for name in ("TB_SKILL_READ", "TB_DISCIPLINE"):
+        assert get_prompt(name) in get_prompt(PLAYBOOK_PROMPT_NAME)
     assert not plugin.playbook_in_skills_block
 
 

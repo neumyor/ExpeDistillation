@@ -164,8 +164,9 @@ src/expedistill/
     tb/                   TerminalBench：plugin.py 插件（远程 Harbor 提交、取回、
                           技能文件夹上传）；remote.py 远程主机与本机两种传输；
                           trajectory.py 从 Harbor 的 trajectory.json 重建逐步轨迹；
-                          skill_read.py skill-read 后缀的具名 prompt 与渲染（带
-                          playbook 时放在后缀前面，上传为 SKILL_READ_SUFFIX.md）；
+                          protocol.py 执行侧全部文本：Terminus 模板副本、
+                          读卡规则、工作纪律与后缀拼装（上传为
+                          SKILL_READ_SUFFIX.md，playbook 在最前面）；
                           playbook.py 摸底事实提取与 TB_PLAYBOOK_UPDATE；
                           prompt_pack.py 提示词包
     searchqa/             适配外层 benchmark/searchqa-eval/：plugin.py 插件；

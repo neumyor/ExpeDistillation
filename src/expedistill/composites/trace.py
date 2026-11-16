@@ -135,8 +135,10 @@ def task_instruction(benchmark: str, task_id: str) -> str:
             f"benchmark {benchmark!r} did not load task {raw_id!r} for "
             f"{task_id!r}: the arms must never run a different set than "
             "the executions")
+    # Every slot a registered task prompt may carry, rendered empty.
     return get_prompt(plugin.task_prompt_name).format(
-        instruction=match[0].instruction, skills_block="", history="")
+        instruction=match[0].instruction, skills_block="", history="",
+        terminal_state="")
 
 
 def execution_instruction(

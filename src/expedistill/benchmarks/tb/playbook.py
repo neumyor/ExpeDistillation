@@ -12,8 +12,8 @@ Terminal Bench. This module is what the prompt pack hands it:
   of a failing weak trial;
 * ``TB_PLAYBOOK_UPDATE`` replaces the method's ``PLAYBOOK_UPDATE`` (the
   pack's ``overrides``): the same placeholders, plus the guidance on reading
-  these facts and the skill-read suffix the agent is already given, so the
-  playbook adds rules instead of repeating that text.
+  these facts and the suffix text the agent already gets after the playbook
+  (``tb/protocol.py``), so the playbook adds rules instead of repeating it.
 
 Only train-split baseline sheets reach this code, so nothing about the test
 tasks can leak into the playbook. Everything here is computed from the
@@ -27,7 +27,7 @@ from collections import Counter
 from typing import Dict, List, Sequence
 
 from expedistill.benchmarks.base import PlaybookRequirement
-from expedistill.benchmarks.tb.skill_read import TB_TASK_PROMPT_READ
+from expedistill.benchmarks.tb.protocol import TB_DISCIPLINE, TB_SKILL_READ
 from expedistill.core.answer_sheet import AnswerSheet
 from expedistill.prompts.registry import PromptSpec, register
 
@@ -326,8 +326,8 @@ TB_PLAYBOOK_UPDATE = register(
         name=PLAYBOOK_PROMPT_NAME,
         template="""You maintain the GLOBAL PLAYBOOK for a weaker {agent_kind} agent that solves {benchmark_name} tasks.
 The playbook is placed in the agent's first message, right after the task
-description and in front of its skill-selection instructions, and stays in
-its conversation for the whole task. The agent works through a terminal: it
+description and in front of its card-reading rule and working discipline,
+and stays in its conversation for the whole task. The agent works through a terminal: it
 types commands, reads the screen, and finishes by declaring the task
 complete. The playbook is general working discipline that helps on every
 task; it is not a skill card, never replaces a skill card that matches the
@@ -379,12 +379,13 @@ How to read the facts:
   shape of good and bad sequences, never copy a command from them.
 
 THE AGENT ALREADY RECEIVES THE FOLLOWING TEXT AFTER YOUR PLAYBOOK. Do not
-repeat any of it, do not contradict it, and do not restate its shell hygiene,
-threshold or completion-gate rules. Add only what the facts and notes show it
-lacks:
+repeat any of it, do not contradict it, and do not restate its card-reading,
+shell hygiene, threshold or completion-gate rules. Add only what the facts and
+notes show it lacks:
 
 ----
-""" + TB_TASK_PROMPT_READ.template.replace("{", "{{").replace("}", "}}") + """
+""" + (TB_SKILL_READ.template + "\n\n" + TB_DISCIPLINE.template).replace(
+    "{", "{{").replace("}", "}}") + """
 ----
 
 {profile_section}
@@ -412,9 +413,6 @@ Hard limits:
   Aim for 1,500 to 3,500 characters; the limit is 20,000. The agent keeps the
   whole text in context for a long task, so every sentence must earn its
   place.
-- The reader context above may state length targets and merging rules for
-  skill cards. They do not apply to this playbook. Its rules about what the
-  reader can and cannot do still apply in full.
 
 {correction_note}End your reply with the playbook in exactly this shape, and write
 nothing after the closing tag:

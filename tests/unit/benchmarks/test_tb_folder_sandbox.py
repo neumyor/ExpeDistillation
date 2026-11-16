@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from expedistill.benchmarks.base import Task
-from expedistill.benchmarks.tb.plugin import TB_SKILL_FOLDER_GUIDANCE
+from expedistill.benchmarks.tb.protocol import MOUNT_PLACEHOLDER
 from tests.helpers.tb_fake_remote import (
     HANDLE,
     ROOT,
@@ -46,7 +46,7 @@ def _folder_task(tmp_path, task_name="train-fasttext"):
                       "skill_folder_dir": str(materialized(tmp_path))})
 
 
-def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
+def test_folder_unit_ships_the_folder_and_the_placeholder(tmp_path):
     link = FakeRemoteLink(
         polls=[f"RESULT {TRIAL}/result.json\n"],
         remote_files=trial_files_with_cat())
@@ -56,11 +56,10 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
 
     outcome = plugin.run(_folder_task(tmp_path), HANDLE, CATALOG, workdir)
 
-    # The prompt-side injection is the GUIDANCE, never the catalog.
+    # The task-level SKILL.md is the mount placeholder, never the catalog.
     skill_remote = f"{ROOT}/skills/ed_train-fasttext_tok/train-fasttext/SKILL.md"
     local_skill = workdir / "skills" / "train-fasttext" / "SKILL.md"
-    assert local_skill.read_text(encoding="utf-8") == TB_SKILL_FOLDER_GUIDANCE
-    assert TB_SKILL_FOLDER_GUIDANCE != CATALOG
+    assert local_skill.read_text(encoding="utf-8") == MOUNT_PLACEHOLDER
     assert (skill_remote, ) == tuple(
         remote for local, remote in link.puts if remote == skill_remote)
     # The catalog and every manifest file ride the same directory as ONE
@@ -94,10 +93,10 @@ def test_folder_unit_ships_the_folder_and_the_guidance(tmp_path):
     assert "TBENCH_EVAL_MODE=skills" in submit
     assert (f"TBENCH_SKILL_ROOT={ROOT}/skills/ed_train-fasttext_tok"
             in submit)
-    # The outcome's meta records the folder facts and the folder prompt.
+    # The outcome's meta records the folder facts and the card rule.
     assert outcome.meta["eval_mode"] == "skills"
     assert outcome.meta["skills_injected"] is True
-    assert outcome.meta["prompt_name"] == "TB_TASK_PROMPT_FOLDER"
+    assert outcome.meta["prompt_name"] == "TB_SKILL_READ"
     assert outcome.meta["skill_folder"] == {
         "local_dir": str(folder_dir),
         "bank_fingerprint": MANIFEST["bank_fingerprint"],
@@ -173,7 +172,7 @@ def test_folder_unit_refuses_an_unmaterialized_directory(tmp_path):
         plugin.run(task, HANDLE, CATALOG, tmp_path / "work")
 
 
-def test_a_bare_unit_uploads_no_folder_and_no_guidance(tmp_path):
+def test_a_bare_unit_uploads_no_folder_and_no_suffix(tmp_path):
     # The control arm's bare unit: no manifest on the task, an empty
     # skills block, and therefore no upload at all -- the pre-folder
     # behaviour, byte for byte.
@@ -188,7 +187,7 @@ def test_a_bare_unit_uploads_no_folder_and_no_guidance(tmp_path):
 
     assert outcome.meta["eval_mode"] == "bare"
     assert outcome.meta["skills_injected"] is False
-    assert outcome.meta["prompt_name"] == "TB_TASK_PROMPT"
+    assert outcome.meta["prompt_name"] == "TB_TERMINUS_TEMPLATE"
     assert "skill_folder" not in outcome.meta
     assert not any("skills/" in remote for _, remote in link.puts)
 

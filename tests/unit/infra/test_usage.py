@@ -213,17 +213,17 @@ def test_by_role_prompt_calibration_ratio_needs_both_values(tmp_path):
 
 
 def test_by_role_prompt_tolerates_tb_rows_without_meta(tmp_path):
-    # TB remote rows (role executor_weak, prompt TB_TASK_PROMPT) never
+    # TB remote rows (role executor_weak, prompt TB_TERMINUS_TEMPLATE) never
     # carry the new meta keys; they must aggregate without crashing and
     # surface as unknown, never as clean zeros.
     path = tmp_path / "usage.jsonl"
     _write_rows(path, [
-        _row("executor_weak", "TB_TASK_PROMPT", in_tokens=1000),
-        _row("executor_weak", "TB_TASK_PROMPT", in_tokens=2000),
-        _row("executor_weak", "TB_TASK_PROMPT", status="error"),
+        _row("executor_weak", "TB_TERMINUS_TEMPLATE", in_tokens=1000),
+        _row("executor_weak", "TB_TERMINUS_TEMPLATE", in_tokens=2000),
+        _row("executor_weak", "TB_TERMINUS_TEMPLATE", status="error"),
     ])
     group = UsageStats(path).by_role_prompt()[("executor_weak",
-                                              "TB_TASK_PROMPT")]
+                                              "TB_TERMINUS_TEMPLATE")]
     assert group["n_calls"] == 3
     assert group["n_ok"] == 2
     assert group["n_error"] == 1

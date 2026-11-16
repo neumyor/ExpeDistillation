@@ -46,7 +46,7 @@ _FOLDER_MANIFEST = {
 # ---------------------------------------------------------------------------
 
 _FOLDER_PROMPTS = [
-    ("tb", "TB_TASK_PROMPT_FOLDER"),
+    ("tb", "TB_SKILL_READ"),
     ("searchqa", "SEARCHQA_TASK_PROMPT_FOLDER"),
     ("alfworld", "ALFWORLD_TASK_PROMPT_FOLDER"),
 ]
@@ -121,7 +121,7 @@ def test_a_folder_unit_on_a_capable_plugin_reaches_run_unchanged(monkeypatch, tm
     # exactly as a normal one (manifest and path ride the task's meta,
     # which is the plugin's own channel).
     plugin = serve_plugin(monkeypatch, StubPlugin(
-        skill_folder_prompt_name="TB_TASK_PROMPT_FOLDER"))
+        skill_folder_prompt_name="TB_SKILL_READ"))
     task = _folder_task()
     run_one(phase_label="p03:practice", benchmark="fakebench", task=task,
             model_role="weak", model_name="weak-model",
@@ -149,8 +149,8 @@ def test_stage0_freezes_the_folder_prompt_digest(benchmark, prompt_name):
 def test_stage0_freezes_the_tb_prompts_beside_the_folder_prompt():
     ensure_plugin("tb")
     digests = _prompt_digests("tb")
-    for name in ("TB_TASK_PROMPT", "TB_TASK_PROMPT_READ",
-                 "TB_TASK_PROMPT_READ_PLAYBOOK", "TB_PLAYBOOK_UPDATE"):
+    for name in ("TB_TERMINUS_TEMPLATE", "TB_DISCIPLINE",
+                 "TB_PLAYBOOK_UPDATE"):
         assert digests[name] == digest(name)
 
 
@@ -159,7 +159,7 @@ def test_stage0_refuses_an_unregistered_folder_prompt_name(
     plugin = ensure_plugin("tb")
     monkeypatch.setattr(
         type(plugin), "skill_folder_prompt_name",
-        "TB_TASK_PROMPT_MISSING", raising=False)
+        "TB_SKILL_READ_MISSING", raising=False)
     with pytest.raises(ConfigError,
                        match="skill_folder_prompt_name"):
         _prompt_digests("tb")

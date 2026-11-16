@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-# Importing the TB plugin registers TB_TASK_PROMPT_FOLDER, the folder prompt
+# Importing the TB plugin registers TB_SKILL_READ, the folder prompt
 # the fake plugin below declares (the freeze checks that it is registered).
 import expedistill.benchmarks.tb.plugin  # noqa: F401
 from expedistill import cli
@@ -83,7 +83,7 @@ class RecordingPlugin(BenchmarkPlugin):
 
     @property
     def skill_folder_prompt_name(self):
-        return "TB_TASK_PROMPT_FOLDER"
+        return "TB_SKILL_READ"
 
 
 @pytest.fixture()
