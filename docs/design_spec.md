@@ -385,7 +385,7 @@ TB 的终测对照是外部 campaign 成绩文件（`model_key` 跟随学生模�
 **B1 的采样温度**：所有方法侧模型调用固定使用 `temperature = 1.0`，配置文件不能覆盖。
 思考型模型在 `temperature = 0` 下容易反复输出同一段推理、把输出预算耗尽后返回空内容；
 固定 `1.0` 避开这一退化。温度是解码设置，不属于实验身份，不进入配置与 manifest。
-ALFWorld 的执行协议沿用外层统一 runner 的 `temperature 0`（见 3.3 的 runner 表）。
+ALFWorld 的执行协议原本沿用外层统一 runner 的 `temperature 0`，2026-11-13 改为 `temperature 0.95`：自建 vLLM 上的学生在贪心解码下，20 条复放的摸底提示词里有 2 条思考陷入重复、写到 65536 上限，采样解码避开了这一退化（见 3.3 的 runner 表）。
 
 ### 3.3 功能积木
 
@@ -405,7 +405,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 |---|---|---|
 | TB runner | TerminalBench | 委托 Harbor + 沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹（`benchmarks/tb/trajectory.py`）。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地共用 ReAct 循环（`benchmarks/react_loop.py`）一步一步执行到结束，环境与判分来自外层 `benchmark/searchqa-eval/` |
-| ALFWorld runner | ALFWorld | 本地执行，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0、50 步预算）；环境在外层 venv 的子进程里运行，需要 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
+| ALFWorld runner | ALFWorld | 本地执行，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0.95、50 步预算）；环境在外层 venv 的子进程里运行，需要 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
 
 两套本地 runner 的每局步数上限用环境变量配：SearchQA 是
 `EXPEDISTILL_SEARCHQA_MAX_STEPS`（默认 6），ALFWorld 是
@@ -589,6 +589,12 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | `playbook_facts` | 从摸底答卷计算统计事实的函数 | `tb/playbook.py` | `alfworld/playbook.py` | 无 |
 | `playbook_checks` | playbook 必须包含的部分（`PlaybookRequirement`） | 5 项 | 6 项 | 无 |
 | `overrides` | 方法提示词名 → 本 benchmark 的替换提示词名 | `PLAYBOOK_UPDATE` → `TB_PLAYBOOK_UPDATE` | `PLAYBOOK_UPDATE` → `ALFWORLD_PLAYBOOK_UPDATE` | 无 |
+
+`ALFWORLD_PLAYBOOK_UPDATE` 的搜索规则里有一条两物体任务的规则（2026-11-15 起，"P1"）：
+两物体任务算两次搜索。交付第一件、目的地只显示一件之后，第二次搜索从顺序的第一个种类重来，
+单向、容器已搜完、种类已搜完三条规则随之重置，第一次搜索经过的地方重新允许访问。学生只看得到
+最近两步，"记住看到过的副本再回去拿"无法执行，所以用"重来"代替。依据与 5 次 run 的结果见
+`docs/reports/alfworld_e1_prompt_improvement_plan_20261115.md`。
 
 接线：`cli.py` 构建模型句柄时（`run` 与分析子命令两处），把 `vocabulary` 的词汇与
 `protocol` 填进句柄的 `prompt_defaults`，把 `overrides` 填进 `prompt_aliases`；

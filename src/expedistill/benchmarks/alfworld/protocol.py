@@ -18,7 +18,7 @@ unified protocol:
   contain no CJK. An invalid reply gets exactly one correction request with
   the same diagnostics the unified runner uses; a still-invalid reply
   executes ``look``;
-* temperature 0, seed 0, at most 50 environment steps (the engine's own
+* temperature 0.95, seed 0, at most 50 environment steps (the engine's own
   budget). The output cap is 65536 (the config-level budget): at the
   unified runner's 4096 the reasoning teacher truncated on 19.3% of its
   baseline replies. A client-side generation cap does not change the
@@ -93,12 +93,16 @@ FOLDER_PROMPT_NO_HISTORY_NAME = "ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER"
 FOLDER_PROMPT_NAME = "ALFWORLD_TASK_PROMPT_FOLDER"
 CORRECTION_PROMPT_NAME = "ALFWORLD_TASK_PROMPT_CORRECTION"
 
-#: The generation settings of the unified runner, except the output budget:
-#: the paper's runs use the config-level 65536 so a reasoning teacher is not
-#: cut off mid-thought (measured on exp3 K=5: 19.3% of D's baseline replies
-#: hit 4096 and needed a correction). The templates are still the unified
-#: ones; a client cap of 65536 is a generation setting, not a prompt change.
-TEMPERATURE = 0.0
+#: The generation settings of the unified runner, except the output budget
+#: and the temperature. The paper's runs use the config-level 65536 so a
+#: reasoning teacher is not cut off mid-thought (measured on exp3 K=5: 19.3%
+#: of D's baseline replies hit 4096 and needed a correction). The unified
+#: runner's temperature 0 is replaced by 0.95: under greedy decoding the
+#: student served by vLLM looped in its thinking until the 65536 cap on
+#: 2 of 20 replayed baseline prompts (2026-11-13), while sampling avoided it.
+#: The templates are still the unified ones; both are generation settings,
+#: not prompt changes.
+TEMPERATURE = 0.95
 MAX_OUTPUT_TOKENS = 65536
 #: Diagnostic override; a run at another budget is not comparable with the
 #: 65536 runs and must be reported separately.
@@ -306,7 +310,7 @@ def _correction_variables(original_prompt: str, model_response: str,
 
 
 def protocol_handle(handle: ModelHandle) -> ModelHandle:
-    """The handle's protocol slice: temperature 0, output budget, seed 0.
+    """The handle's protocol slice: temperature 0.95, output budget, seed 0.
 
     Built per episode (dataclasses.replace) so the run's accounting and
     request dumps stay on the same handle. The config's model options are

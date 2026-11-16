@@ -24,8 +24,9 @@ Execution runs under the outer eval repo's unified protocol
 (``benchmarks/alfworld/protocol.py``): the same system message, the same
 step templates (no history at step 1, the last two interactions afterwards),
 the engine's admissible action list, ``<think>...</think><action>...</action>``
-replies, one correction request for an invalid reply, temperature 0,
-``max_tokens`` 4096 and the engine's own 50-step budget. The earlier local
+replies, one correction request for an invalid reply, and the engine's own
+50-step budget (temperature and output cap: ``protocol.TEMPERATURE`` and
+``protocol.MAX_OUTPUT_TOKENS``). The earlier local
 prompt repeated the room description every step and accepted free-form
 commands; it measured a materially easier protocol and its numbers are not
 comparable with the unified runner's.

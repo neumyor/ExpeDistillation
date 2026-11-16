@@ -728,6 +728,12 @@ checked, and a playbook without them is rejected and written again.
      first step;
    - the walk is one-way: it does not restart from the beginning in the
      same search;
+   - a two-object task is TWO searches: the second search starts once the
+     first copy is delivered and the destination shows only one copy; it
+     restarts the order from its first kind, and the one-way, container and
+     class-exhaustion rules start over with it, so places of the first search
+     are allowed again (a second copy is often in a place the first search
+     already passed);
    - container rule: after the reader opens a container and the
      observation does not show the object inside, that container is done;
    - instance sweep within a kind: the next go-to is the next numbered
@@ -752,7 +758,9 @@ checked, and a playbook without them is rejected and written again.
    back. Say in one sentence which of this rule and the recovery rule
    applies to which noun. After a clean, heat or cool, go straight to the
    destination. In a two-object task, after the first delivery, check the
-   destination just used for a second copy before walking on.
+   destination just used for a second copy, then start the second search
+   from the first kind of the order; never carry the first search's
+   "finished" or "done" verdicts into the second search.
 6. The mistakes the failing examples and the notes show, each as one short
    prohibition the reader can check against what it sees now.
 

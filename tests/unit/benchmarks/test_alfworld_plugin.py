@@ -215,7 +215,7 @@ def test_task_prompt_is_the_unified_protocol():
     assert get_prompt(SYSTEM_PROMPT_NAME) == \
         "You are an expert agent operating in the ALFRED Embodied Environment."
     assert SYSTEM_PROMPT == get_prompt(SYSTEM_PROMPT_NAME)
-    assert TEMPERATURE == 0.0 and MAX_OUTPUT_TOKENS == 65536
+    assert TEMPERATURE == 0.95 and MAX_OUTPUT_TOKENS == 65536
 
 
 def test_task_prompt_renders_bare_and_with_skills():
@@ -404,7 +404,7 @@ def test_run_uses_the_unified_generation_settings(plugin, eval_env, tmp_path):
     task = plugin.load_tasks([GAME_REL])[0]
     plugin.run(task, handle, "", tmp_path)
     call = handle.client.calls[0]
-    assert call["temperature"] == TEMPERATURE == 0.0
+    assert call["temperature"] == TEMPERATURE == 0.95
     assert call["max_tokens"] == MAX_OUTPUT_TOKENS == 65536
 
 
