@@ -72,6 +72,15 @@ class ModelOutputError(ReliabilityError):
         self.finish_reason = finish_reason
 
 
+class ResumableShortfall(ReliabilityError):
+    """Some units of a phase failed in a way a later run may fix (their model
+    output failed and they still have runs left); every finished unit is on
+    disk. The phase stops at the end of its step so later steps never read
+    a partial input, and re-running the same command retries those units."""
+
+    retryable = True
+
+
 class ProviderRefusalError(ReliabilityError):
     """The provider rejected the request (auth, permission, unknown model,
     oversized request): repeating the same request cannot help."""

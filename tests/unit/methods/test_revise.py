@@ -38,12 +38,12 @@ def _row(skill, side):
                        basis_unit="u")
 
 
-def _apply(env, side, write):
+def _apply(env, side, write, final=True):
     store, skill, sources, phase_dir = env
     return revise.apply_revision(
         store=store, phase=PHASE, row=_row(skill, side),
         phase_dir=phase_dir, run_dir=phase_dir.parents[1], sources=sources,
-        write=write)
+        write=write, final=final)
 
 
 def _content(skill):
@@ -121,6 +121,19 @@ def test_an_unchanged_rewrite_and_a_failed_one_only_write_receipts(env):
     outcomes = [row["outcome"]
                 for row in read_jsonl(phase_dir / ledger.OUTCOMES_NAME)]
     assert outcomes == ["unchanged_after_revision", "revision_failed"]
+
+
+def test_a_failed_rewrite_with_runs_left_raises_without_a_receipt(env):
+    store, skill, sources, phase_dir = env
+
+    def broken(s):
+        raise ModelOutputError("no valid rewrite")
+
+    with pytest.raises(ModelOutputError):
+        _apply(env, "content", broken, final=False)
+    assert not (phase_dir / ledger.OUTCOMES_NAME).exists()
+    # The next run lands it from the same plan.
+    assert _apply(env, "content", _content) == "content_revised"
 
 
 def test_a_rewrite_of_a_discarded_card_is_a_bug(env):

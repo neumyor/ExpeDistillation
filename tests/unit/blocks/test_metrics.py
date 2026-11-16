@@ -67,6 +67,7 @@ def test_summarize_empty():
         "tasks": 0,
         "avg_at_n": None,
         "avg_at_n_conservative": 0.0,
+        "avg_at_n_invalid_as_failure": 0.0,
         "pass_at_n": 0.0,
         "infra_tasks": [],
         "aux": None,
@@ -121,3 +122,14 @@ def test_summarize_aux_metric_without_aux_counts_is_rejected():
     with pytest.raises(ValueError, match="aux_success"):
         summarize({"a": _counts(1, 1, 0, 0)},
                   aux_metric="sub_em")
+
+
+def test_invalid_as_failure_counts_every_planned_attempt():
+    # t1: 2 of 3 valid, 1 success; t2: no valid trial at all.
+    summary = summarize({
+        "t1": {"attempts": 3, "valid": 2, "success": 1, "infra": 1},
+        "t2": {"attempts": 3, "valid": 0, "success": 0, "infra": 3},
+    })
+    assert summary["avg_at_n"] == pytest.approx(0.5)
+    assert summary["avg_at_n_conservative"] == pytest.approx(0.25)
+    assert summary["avg_at_n_invalid_as_failure"] == pytest.approx(1 / 6)

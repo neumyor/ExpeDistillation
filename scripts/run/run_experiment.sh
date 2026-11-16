@@ -10,8 +10,8 @@
 #   PYTHON     interpreter (default .venv/bin/python)
 #
 # Sources .env (never committed) before starting. The driver is detached with
-# start_new_session (macOS has no setsid command); its pidfile is the only
-# liveness source -- never use pgrep -f.
+# start_new_session (macOS has no setsid command) and the script returns at
+# once; its pidfile is the only liveness source -- never use pgrep -f.
 #
 # Example:
 #   scripts/run/run_experiment.sh configs/experiments/searchqa_paper_e1_ours.yaml
@@ -57,8 +57,8 @@ echo "pidfile: $RUN_DIR/driver.pid"
 echo "console: $RUN_DIR/driver.console.log"
 echo "resume:  $PYTHON -m expedistill.cli run --config $CONFIG --run-dir $RUN_DIR --workers $WORKERS $*"
 
-# The launcher parks until the driver exits (it is the parent and reaps it);
-# the paths above are printed first so the caller can monitor immediately.
+# The launcher returns once the driver runs; a detached waiter records the
+# driver's exit code in driver.pid.exit when it ends.
 exec "$PYTHON" "$ROOT/scripts/smoke/launch_detached.py" \
     --pidfile "$RUN_DIR/driver.pid" \
     --log "$RUN_DIR/driver.console.log" \

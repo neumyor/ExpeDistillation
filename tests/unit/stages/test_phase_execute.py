@@ -399,6 +399,22 @@ def _holes_setup(monkeypatch, tmp_path, role):
 
 
 @pytest.mark.parametrize("role", ["baseline", "practice"])
+def test_a_resume_fills_a_hole_once_the_infrastructure_is_back(
+        monkeypatch, tmp_path, role):
+    plugin, ctx, phase, holes, accepted_path = _holes_setup(
+        monkeypatch, tmp_path, role)
+    with pytest.raises(InfrastructureError, match="infra_missing"):
+        phase_execute.run(ctx, phase)
+
+    plugin.behavior = lambda record: _outcome(record["task_id"], True)
+    summary = phase_execute.run(ctx, phase).summary
+
+    assert summary["complete"] is True
+    assert summary["infra_missing"] == []
+    assert not accepted_path.exists()
+
+
+@pytest.mark.parametrize("role", ["baseline", "practice"])
 def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path, role):
     plugin, ctx, phase, holes, accepted_path = _holes_setup(
         monkeypatch, tmp_path, role)
@@ -420,13 +436,17 @@ def test_redispatch_budget_then_exhausted_hole(monkeypatch, tmp_path, role):
     assert t2_passes == [1]
     assert all(entry["passes"] == 0
                for unit_id, entry in state.items() if "t2" not in unit_id)
-    # A resume without the flag re-raises without re-dispatching past the
-    # budget; with the flag the holes are accepted durably and the phase
-    # completes.
+    # A resume offers the hole to K1 once more (each run is one more
+    # pass), never re-dispatches past the spent budget, and re-raises
+    # while the hole stays; with the flag the holes are accepted durably
+    # and the phase completes.
     calls_before = len(plugin.calls)
     with pytest.raises(InfrastructureError):
         phase_execute.run(ctx, phase)
-    assert len(plugin.calls) == calls_before  # budget spent: no new calls
+    assert len(plugin.calls) > calls_before
+    state = read_json(directory / "weak" / phase_execute.REDISPATCH_NAME)
+    assert [entry["passes"] for unit_id, entry in state.items()
+            if "t2" in unit_id] == [1]
 
     accepting = make_ctx(tmp_path, ctx.config, handles=ctx.handles,
                          allow_infra_shortfall=True)

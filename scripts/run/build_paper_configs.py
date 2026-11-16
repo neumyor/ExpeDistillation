@@ -178,18 +178,31 @@ SEQUENCE_OURS = ["baseline", "learn", "practice", "learn", "practice",
 #: Weak-model samples per task in each practice phase.
 PRACTICE_ATTEMPTS = {"tb21": 2, "alfworld": 3, "searchqa": 1}
 
+#: Card-writing guards that differ from the defaults. A TB segment's
+#: rendered steps run to ~12-17k characters at the median (terminal
+#: output), so the 1,200-character default kept about a tenth of it: the
+#: writer gets 48,000 per segment (88% of strong segments whole) and at
+#: most 6 segments per side, the typing call 4,000 per segment in chunks
+#: of 40.
+AUTHOR_OVERRIDES = {"tb21": {"max_segments_per_card": 6,
+                             "max_chars_per_segment": 48000,
+                             "typing_max_chars_per_segment": 4000,
+                             "typing_chunk_size": 40}}
+
 
 # ---------------------------------------------------------------------------
 # Phase definitions
 # ---------------------------------------------------------------------------
 
-def _learn_phase() -> Dict[str, Any]:
+def _learn_phase(bench: str) -> Dict[str, Any]:
     """The one learn definition: the review parameters and the
-    ``subtask_cards`` author with its default guards spelled out."""
-    return {"author": {"name": "subtask_cards", "typing_chunk_size": 100,
-                       "max_segments_per_card": 8,
-                       "max_chars_per_segment": 1200,
-                       "write_retry_limit": 2},
+    ``subtask_cards`` author with its guards spelled out (the defaults,
+    with the benchmark's ``AUTHOR_OVERRIDES``)."""
+    author = {"name": "subtask_cards", "typing_chunk_size": 100,
+              "max_segments_per_card": 8, "max_chars_per_segment": 1200,
+              "write_retry_limit": 2}
+    author.update(AUTHOR_OVERRIDES.get(bench, {}))
+    return {"author": author,
             "review": {"name": "review", "K": 5, "retry_limit": 2,
                        "write_lessons": True},
             "kind": "learn", "role": "learn"}
@@ -298,7 +311,7 @@ def phases_of(arm: Arm, bench: str, test: Dict[str, Any]
         return ["test"], {"test": test}
     phases = {
         "baseline": _baseline_phase(),
-        "learn": _learn_phase(),
+        "learn": _learn_phase(bench),
         "practice": _practice_phase(arm.practice_tasks,
                                     PRACTICE_ATTEMPTS[bench]),
         "test": test,

@@ -19,8 +19,10 @@ kind         prompt                output check
 With no note and no facts there is nothing to learn from: the old text is
 returned unchanged and no model is called. A reply that fails its check is
 sent back with the problem named (the missing playbook parts by their
-description), at most ``REPAIRS`` times, then a ModelOutputError. Nothing
-is written to disk here.
+description), at most ``REPAIRS`` times, then a ModelOutputError. A call
+that brought back no usable reply at all (``call_model`` raising
+ModelOutputError, e.g. empty content on the plain-text playbook call) uses
+the same budget and is asked again. Nothing is written to disk here.
 
 Playbook reply contract (the prompt ends with the same shape): the reply
 ends with the playbook between ``<playbook>`` and ``</playbook>``. A
@@ -137,9 +139,13 @@ def evolve_text(
     }
     problem = "no acceptable reply"
     for _ in range(REPAIRS + 1):
-        reply = call_model(handle, prompt, variables,
-                           output_json=kind == "profile",
-                           usage=usage, run_dir=run_dir)
+        try:
+            reply = call_model(handle, prompt, variables,
+                               output_json=kind == "profile",
+                               usage=usage, run_dir=run_dir)
+        except ModelOutputError as exc:
+            problem = str(exc)
+            continue
         try:
             text = (_extract_profile(reply) if kind == "profile"
                     else extract_playbook(reply))

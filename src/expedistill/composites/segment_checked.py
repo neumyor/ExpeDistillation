@@ -129,6 +129,7 @@ def segment_checked(
     segment_retry_limit: int,
     usage: Any = None,
     run_dir: Optional[Union[str, Path]] = None,
+    give_up: bool = True,
 ) -> Optional[List[Subtask]]:
     """Segment ``trajectory`` into validated Subtasks, or None if unrecoverable.
 
@@ -138,6 +139,10 @@ def segment_checked(
     after ``segment_retry_limit + 1`` attempts have all failed -- with one
     "skipped" audit record appended per the K2 contract -- or None at once,
     with no model call, when an earlier call already skipped it.
+
+    With ``give_up=False`` the exhausted attempts raise ModelOutputError
+    instead and write no audit record, so a later call may try again (the
+    learn phase grants a unit several runs before it gives up).
     """
     stored = _stored_subtasks(store, trajectory.trajectory_id)
     if stored:
@@ -162,6 +167,10 @@ def segment_checked(
         if not errors:
             break
     else:
+        if not give_up:
+            raise ModelOutputError(
+                f"K2: {trajectory.trajectory_id} could not be segmented in "
+                f"{attempts_allowed} attempt(s): {'; '.join(errors)}")
         append_jsonl(audit_path, {
             "trajectory_id": trajectory.trajectory_id,
             "attempts": attempts_allowed,

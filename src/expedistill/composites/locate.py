@@ -21,11 +21,15 @@ A chunk's new types are appended before its assignments. A crash between
 the two leaves types no segment uses; the next call drops them before it
 types anything, so the resumed table and every later prompt equal those of
 an uninterrupted run. A chunk whose reply stays unusable after its repairs
-records each of its segments in ``failed_units.jsonl`` (a terminal record:
-a resume does not type them again); an infrastructure failure is recorded
-too and raised, and a resume types the chunk again.
+is split in half and each half typed again, down to single segments, so one
+bad reply loses at most one segment. A single segment that still fails is
+recorded in ``failed_units.jsonl``, once per call; it is given up once it
+has failed in ``runs`` calls, and until then a later call types it again.
+An infrastructure failure is recorded too and raised, and a resume types
+the chunk again.
 """
 
+from collections import Counter
 from pathlib import Path
 from typing import (
     Any, Dict, List, Mapping, Optional, Sequence, Set, Union)
@@ -52,6 +56,7 @@ __all__ = [
     "TYPING_REPAIRS",
     "load_assignments",
     "load_type_table",
+    "model_failure_counts",
     "segment_one",
     "strong_trajectories",
     "type_pending",
@@ -84,10 +89,12 @@ def _record_empty_skip(run_dir: Path, trajectory_id: str) -> None:
 def segment_one(*, store: Store, trajectory: Trajectory, phase_label: str,
                 K: int, retry_limit: int, view_rules: Any, handle: Any,
                 usage: Any = None,
-                run_dir: Union[str, Path, None] = None
-                ) -> Optional[List[Subtask]]:
+                run_dir: Union[str, Path, None] = None,
+                give_up: bool = True) -> Optional[List[Subtask]]:
     """The trajectory's segments (stored ones on resume), or None when it
-    has no step or K2 gave it up (both are terminal audit records)."""
+    has no step or K2 gave it up (both are terminal audit records). With
+    ``give_up=False`` a failed segmentation raises ModelOutputError and
+    stays retryable (``segment_checked``)."""
     if not trajectory.steps:
         _record_empty_skip(Path(run_dir) if run_dir is not None
                            else store.run_dir, trajectory.trajectory_id)
@@ -95,7 +102,8 @@ def segment_one(*, store: Store, trajectory: Trajectory, phase_label: str,
     return segment_checked(
         store=store, trajectory=trajectory, phase_label=phase_label, K=K,
         view_rules=view_rules, handle=handle,
-        segment_retry_limit=retry_limit, usage=usage, run_dir=run_dir)
+        segment_retry_limit=retry_limit, usage=usage, run_dir=run_dir,
+        give_up=give_up)
 
 
 def strong_trajectories(store: Store, baseline_label: str,
@@ -149,12 +157,14 @@ def _drop_unused_types(run_dir: Path, phase_label: str) -> None:
                     [row.to_dict() for row in kept])
 
 
-def _given_up(run_dir: Path, phase_label: str) -> Set[str]:
-    """Segments whose typing failed terminally in this phase."""
-    return {row["unit_id"]
-            for row in UnitFailureRecorder(run_dir).list_failures()
-            if row.get("stage") == phase_label
-            and row.get("error_class") == ModelOutputError.__name__}
+def model_failure_counts(run_dir: Union[str, Path],
+                         phase_label: str) -> Counter:
+    """How many times each unit's model output failed in this phase (one
+    ledger row per failed call of the unit)."""
+    return Counter(row["unit_id"]
+                   for row in UnitFailureRecorder(run_dir).list_failures()
+                   if row.get("stage") == phase_label
+                   and row.get("error_class") == ModelOutputError.__name__)
 
 
 def _type_chunk(cards: Mapping[str, str], table: Sequence[SubtaskType], *,
@@ -177,12 +187,13 @@ def _type_chunk(cards: Mapping[str, str], table: Sequence[SubtaskType], *,
 
 def type_pending(*, store: Store, run_dir: Union[str, Path],
                  phase_label: str, chunk_size: int, max_chars: int,
-                 view_rules: Any, handle: Any, usage: Any = None
-                 ) -> Dict[str, int]:
+                 view_rules: Any, handle: Any, usage: Any = None,
+                 runs: int = 1) -> Dict[str, Any]:
     """Type every segment this phase cut that has no type yet; returns
     ``typed`` (segments typed by this call), ``new_types`` (table rows
-    this call added) and ``given_up`` (segments terminally untyped, this
-    call or earlier)."""
+    this call added), ``given_up`` (segments untyped for good: failed in
+    ``runs`` calls, this one included) and ``retry`` (the ids of the
+    segments that failed in this call and are typed again by the next)."""
     run_dir = Path(run_dir)
     _drop_unused_types(run_dir, phase_label)
     assigned = load_assignments(run_dir)
@@ -191,10 +202,12 @@ def type_pending(*, store: Store, run_dir: Union[str, Path],
         for subtask_id in store.ids("subtasks")
         if subtask_id not in assigned)
         if subtask.phase_label == phase_label]
-    given_up = _given_up(run_dir, phase_label) & {
-        subtask.subtask_id for subtask in ours}
+    failures = model_failure_counts(run_dir, phase_label)
+    given_up = {subtask.subtask_id for subtask in ours
+                if failures[subtask.subtask_id] >= runs}
     pending = [subtask for subtask in ours
                if subtask.subtask_id not in given_up]
+    retry: Set[str] = set()
     recorder = UnitFailureRecorder(run_dir)
     trajectories: Dict[str, Trajectory] = {}
 
@@ -208,21 +221,27 @@ def type_pending(*, store: Store, run_dir: Union[str, Path],
             subtask, render_steps_view(steps[start:end], view_rules,
                                        start_index=start), max_chars)
 
-    typed = 0
-    new_types = 0
-    size = max(1, int(chunk_size))
-    for offset in range(0, len(pending), size):
-        chunk = pending[offset:offset + size]
+    counts = {"typed": 0, "new_types": 0}
+
+    def type_chunk(chunk: List[Subtask]) -> None:
         cards = {subtask.subtask_id: card(subtask) for subtask in chunk}
         try:
             result = _type_chunk(cards, load_type_table(run_dir),
                                  phase_label=phase_label, handle=handle,
                                  usage=usage, run_dir=run_dir)
         except ModelOutputError as exc:
-            for subtask in chunk:
-                recorder.record(subtask.subtask_id, phase_label, exc, exc)
-            given_up.update(subtask.subtask_id for subtask in chunk)
-            continue
+            if len(chunk) > 1:
+                middle = len(chunk) // 2
+                type_chunk(chunk[:middle])
+                type_chunk(chunk[middle:])
+                return
+            subtask_id = chunk[0].subtask_id
+            recorder.record(subtask_id, phase_label, exc, exc)
+            if failures[subtask_id] + 1 >= runs:
+                given_up.add(subtask_id)
+            else:
+                retry.add(subtask_id)
+            return
         except InfrastructureError as exc:
             recorder.record(chunk[0].subtask_id, phase_label, exc, exc)
             raise
@@ -234,7 +253,11 @@ def type_pending(*, store: Store, run_dir: Union[str, Path],
                 "type_id": result.assignments[subtask_id],
                 "phase_label": phase_label,
             })
-        typed += len(result.assignments)
-        new_types += len(result.new_types)
-    return {"typed": typed, "new_types": new_types,
-            "given_up": len(given_up)}
+        counts["typed"] += len(result.assignments)
+        counts["new_types"] += len(result.new_types)
+
+    size = max(1, int(chunk_size))
+    for offset in range(0, len(pending), size):
+        type_chunk(pending[offset:offset + size])
+    return {"typed": counts["typed"], "new_types": counts["new_types"],
+            "given_up": len(given_up), "retry": sorted(retry)}

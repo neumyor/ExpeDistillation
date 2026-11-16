@@ -27,9 +27,10 @@ def final_test_delta(with_bank: Dict[str, Any],
     The final summary computes the test delta itself. It is a summary
     statistic, NOT a decision: test results never reach a learn phase.
 
-    D3 pre-registers two avg@N disciplines (conditional ``avg_at_n`` and
-    the TB21 ``avg_at_n_conservative``); both deltas are reported side by
-    side so nobody picks the friendlier one after seeing the numbers.
+    D3 pre-registers three avg@N disciplines (conditional ``avg_at_n``,
+    the TB21 ``avg_at_n_conservative`` and ``avg_at_n_invalid_as_failure``);
+    all deltas are reported side by side so nobody picks the friendlier one
+    after seeing the numbers.
 
     ``avg_at_n`` is None when an arm has no valid trial at all; a delta
     between a number and nothing is not zero (that would claim "no
@@ -52,6 +53,9 @@ def final_test_delta(with_bank: Dict[str, Any],
         # trial / no tasks), so their deltas are always numbers.
         "avg_at_n_conservative": (with_bank["avg_at_n_conservative"]
                                   - control["avg_at_n_conservative"]),
+        "avg_at_n_invalid_as_failure": (
+            with_bank["avg_at_n_invalid_as_failure"]
+            - control["avg_at_n_invalid_as_failure"]),
         "pass_at_n": with_bank["pass_at_n"] - control["pass_at_n"],
         "aux": _aux_delta(with_bank.get("aux"), control.get("aux")),
     }

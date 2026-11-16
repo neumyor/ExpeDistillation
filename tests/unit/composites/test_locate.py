@@ -63,10 +63,11 @@ def _by_label(system, user):
     return json_script({"new_types": new_types, "assignments": assignments})
 
 
-def _type(store, tmp_path, handle, chunk_size=100):
+def _type(store, tmp_path, handle, chunk_size=100, runs=1):
     return locate.type_pending(store=store, run_dir=tmp_path,
                                phase_label=LEARN, chunk_size=chunk_size,
-                               max_chars=500, view_rules=None, handle=handle)
+                               max_chars=500, view_rules=None, handle=handle,
+                               runs=runs)
 
 
 @pytest.fixture()
@@ -82,7 +83,8 @@ def test_every_new_segment_gets_a_type_in_subtask_order(store, tmp_path):
 
     counts = _type(store, tmp_path, handle)
 
-    assert counts == {"typed": 4, "new_types": 3, "given_up": 0}
+    assert counts == {"typed": 4, "new_types": 3, "given_up": 0,
+                      "retry": []}
     table = locate.load_type_table(tmp_path)
     assert [(row.type_id, row.name, row.phase_label) for row in table] == [
         ("type/001", "find", LEARN), ("type/002", "heat", LEARN),
@@ -148,13 +150,26 @@ def test_types_a_crash_left_unused_are_dropped_first(store, tmp_path):
     assert len(locate.load_assignments(tmp_path)) == 4
 
 
+BAD_REPLY = json_script({"new_types": [], "assignments": []})
+
+
+def _bad_for(subtask_ids):
+    """Unusable for every prompt that holds one of ``subtask_ids``."""
+    def reply(system, user):
+        if any(f"SUBTASK_ID: {subtask_id}\n" in user
+               for subtask_id in subtask_ids):
+            return BAD_REPLY
+        return _by_label(system, user)
+    return reply
+
+
 def test_an_unusable_reply_is_a_terminal_record_per_segment(store, tmp_path):
-    bad = json_script({"new_types": [], "assignments": []})
-    handle = make_fake_handle(script=[bad] * (locate.TYPING_REPAIRS + 1))
+    handle = make_fake_handle(script=lambda system, user: BAD_REPLY)
 
     counts = _type(store, tmp_path, handle)
 
-    assert counts == {"typed": 0, "new_types": 0, "given_up": 4}
+    assert counts == {"typed": 0, "new_types": 0, "given_up": 4,
+                      "retry": []}
     assert "rejected" in handle.client.calls[1]["user"]
     failures = UnitFailureRecorder(tmp_path).list_failures()
     assert len(failures) == 4
@@ -162,6 +177,36 @@ def test_an_unusable_reply_is_a_terminal_record_per_segment(store, tmp_path):
         ModelOutputError.__name__}
     again = make_fake_handle(script=[])
     assert _type(store, tmp_path, again)["given_up"] == 4
+    assert again.client.calls == []
+
+
+def test_a_failing_chunk_is_halved_until_only_the_bad_segment_fails(
+        store, tmp_path):
+    bad = make_subtask_id(make_trajectory_id(
+        "p01:baseline", "tb:t2", "weak", 0), 1)
+    handle = make_fake_handle(script=_bad_for([bad]))
+
+    counts = _type(store, tmp_path, handle)
+
+    assert counts["typed"] == 3
+    assert counts["given_up"] == 1
+    assert [row["unit_id"] for row
+            in UnitFailureRecorder(tmp_path).list_failures()] == [bad]
+
+
+def test_a_failed_segment_is_typed_again_until_its_runs_are_spent(
+        store, tmp_path):
+    bad = make_subtask_id(make_trajectory_id(
+        "p01:baseline", "tb:t2", "weak", 0), 1)
+    for run in (1, 2):
+        counts = _type(store, tmp_path,
+                       make_fake_handle(script=_bad_for([bad])), runs=3)
+        assert counts["retry"] == [bad] and counts["given_up"] == 0, run
+    counts = _type(store, tmp_path,
+                   make_fake_handle(script=_bad_for([bad])), runs=3)
+    assert counts["retry"] == [] and counts["given_up"] == 1
+    again = make_fake_handle(script=[])
+    assert _type(store, tmp_path, again, runs=3)["given_up"] == 1
     assert again.client.calls == []
 
 

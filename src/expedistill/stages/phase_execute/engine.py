@@ -257,10 +257,13 @@ def run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     """Dispatch and re-dispatch one arm's units; return stored trials.
 
     ``accepted`` is the CALLER's durable accepted-hole set: accepted holes
-    are never re-dispatched and never re-raised.  The re-dispatch loop is
-    the frozen rule 6: a unit whose dispatch died with nothing stored is
-    re-offered to K1 while the budget lasts.  The bookkeeping is durable, so
-    a resumed phase continues the same budget.
+    are never re-dispatched and never re-raised.  Every call first offers
+    every unit to K1 (K1 skips stored trials, so a resumed phase dispatches
+    exactly its holes: each run of the phase is one more pass over them).
+    The re-dispatch loop is the frozen rule 6 on top of that: a unit whose
+    dispatch died with nothing stored is re-offered while its budget lasts,
+    all such units together in one K1 batch per round.  The budget is
+    durable, so a resumed phase continues the same budget.
 
     This function deliberately builds no unit summaries: it returns the
     stored trajectories and the unaccepted hole ids.  Coverage and unit
@@ -268,25 +271,27 @@ def run_arm_units(ctx: StageContext, phase: PhaseInstance, *,
     """
     state_path = execute_phase_dir(ctx, phase, arm) / REDISPATCH_NAME
     state = _redispatch_state(state_path)
-    open_budget = [plan for plan in plans
-                   if state.get(plan.unit.unit_id,
-                                {}).get("passes", 0) < limit]
-    dispatch_arm(ctx, phase, plans=open_budget, store=store, arm=arm,
+    dispatch_arm(ctx, phase, plans=plans, store=store, arm=arm,
                  skip_unit_ids=accepted)
+    for plan in plans:
+        state.setdefault(plan.unit.unit_id, {"passes": 0})
+    while True:
+        due = [plan for plan in plans
+               if state[plan.unit.unit_id]["passes"] < limit
+               and _missing_attempts(store, phase.label, plan,
+                                     accepted=accepted)]
+        if not due:
+            break
+        for plan in due:
+            state[plan.unit.unit_id]["passes"] += 1  # one more K1 offer
+        _save_redispatch_state(state_path, state)
+        dispatch_arm(ctx, phase, plans=due, store=store, arm=arm,
+                     skip_unit_ids=accepted)
+    _save_redispatch_state(state_path, state)
     holes: Set[str] = set()
     for plan in plans:
-        entry = state.setdefault(plan.unit.unit_id, {"passes": 0})
-        while True:
-            missing = _missing_attempts(store, phase.label, plan,
-                                        accepted=accepted)
-            if not missing or entry["passes"] >= limit:
-                break  # nothing to re-offer, or the budget is spent
-            entry["passes"] += 1  # one more K1 offer of the holes
-            _save_redispatch_state(state_path, state)
-            dispatch_arm(ctx, phase, plans=[plan], store=store, arm=arm,
-                         skip_unit_ids=accepted)
-        _save_redispatch_state(state_path, state)
-        holes.update(missing)
+        holes.update(_missing_attempts(store, phase.label, plan,
+                                       accepted=accepted))
 
     planned_ids = {trajectory_id for plan in plans
                    for trajectory_id in planned_trajectory_ids(

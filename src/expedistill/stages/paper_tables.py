@@ -46,9 +46,10 @@ __all__ = [
     "write_results_json",
 ]
 
-#: The three pre-registered metrics, primary first.  The markdown renders one
-#: of them per call (default: the primary); the JSON always carries all three.
-METRICS = ("avg_at_n", "avg_at_n_conservative", "pass_at_n")
+#: The pre-registered metrics, primary first.  The markdown renders one of
+#: them per call (default: the primary); the JSON always carries all of them.
+METRICS = ("avg_at_n", "avg_at_n_conservative", "avg_at_n_invalid_as_failure",
+           "pass_at_n")
 
 _ARMS = ("with_bank", "control")
 _SUMMARY_NAME = "phase_summary.json"
@@ -87,7 +88,12 @@ def _test_phase(manifest: Mapping[str, Any], requested: Optional[str]
 def _check_against_summary(own: Mapping[str, Any], summary: Mapping[str, Any],
                            *, arm: str, run_dir: Path) -> None:
     recorded = summary[arm]
-    for key in ("tasks", "avg_at_n", "avg_at_n_conservative", "pass_at_n"):
+    for key in ("tasks", "avg_at_n", "avg_at_n_conservative",
+                "avg_at_n_invalid_as_failure", "pass_at_n"):
+        if key not in recorded:
+            # A summary written before this metric existed; the number is
+            # recomputed from the answer sheets all the same.
+            continue
         mine, theirs = own[key], recorded[key]
         same = (mine is None and theirs is None) or (
             mine is not None and theirs is not None
@@ -104,11 +110,14 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
              ) -> Dict[str, Any]:
     """One finished run's test-phase scores, read-only.
 
-    Returns ``{"with_bank": TaskScores, "control": TaskScores, "meta": {...}}``.
+    Returns ``{"with_bank": TaskScores, "control": TaskScores,
+    "all_attempts": {"with_bank": ..., "control": ...}, "meta": {...}}``.
     A trial score is 1.0 (verdict success) or 0.0 (failure); a trial with
     any other verdict (invalid, never graded, missing, accepted hole) is
     NOT scored 0: it is left out of its task's list and named under
-    ``meta["unscored"]``.  A task left with no scored trial keeps an empty
+    ``meta["unscored"]``.  ``all_attempts`` scores every planned attempt
+    instead, anything but a success as 0.0 (the invalid-as-failure
+    discipline).  A task left with no scored trial keeps an empty
     list, so the conditional discipline can drop it and the conservative
     discipline can count it as 0, exactly as ``blocks/metrics.summarize``.
     The recomputed avg@N / conservative avg@N / pass@N must equal
@@ -138,6 +147,8 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
     for sheet in report.sheets:
         sheets_by_unit.setdefault(sheet.coverage.unit_id, []).append(sheet)
     scores: Dict[str, Dict[str, List[float]]] = {arm: {} for arm in _ARMS}
+    all_attempts: Dict[str, Dict[str, List[float]]] = {
+        arm: {} for arm in _ARMS}
     unscored: Dict[str, List[Dict[str, Any]]] = {arm: [] for arm in _ARMS}
     expected: Dict[str, int] = {}
     roles = set()
@@ -165,6 +176,11 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
                     "reason": (sheet.coverage.cause or verdict
                                or "ungraded")})
         scores[unit.arm][unit.task_ref] = trials
+        successes = sum(1 for sheet in ordered if sheet.grading
+                        and sheet.grading.verdict == RUN_SUCCESS)
+        planned = max(unit.expected_attempts, len(trials))
+        all_attempts[unit.arm][unit.task_ref] = (
+            [1.0] * successes + [0.0] * (planned - successes))
         expected[unit.arm] = max(expected.get(unit.arm, 0),
                                  unit.expected_attempts)
         roles.add(unit.role)
@@ -177,7 +193,7 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
     if len(roles) != 1:
         raise ValueError(f"{run_dir}: the test phase mixes roles {roles}")
     for arm in _ARMS:
-        _check_against_summary(paired_stats.arm_metrics(scores[arm]),
+        _check_against_summary(_arm_summary(scores[arm], all_attempts[arm]),
                                summary, arm=arm, run_dir=run_dir)
 
     role = roles.pop()
@@ -185,6 +201,7 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
     return {
         "with_bank": scores["with_bank"],
         "control": scores["control"],
+        "all_attempts": all_attempts,
         "meta": {
             "run_dir": str(run_dir),
             "phase_label": label,
@@ -210,15 +227,29 @@ def load_arm(run_dir: Any, phase_label: Optional[str] = None
 # Comparing arms
 # ---------------------------------------------------------------------------
 
-def _paired_all(a: paired_stats.TaskScores, b: paired_stats.TaskScores, *,
+def _arm_summary(scores: paired_stats.TaskScores,
+                 all_attempts: paired_stats.TaskScores) -> Dict[str, Any]:
+    """One arm's numbers under every metric (the phase summary's keys)."""
+    summary = paired_stats.arm_metrics(scores)
+    summary["avg_at_n_invalid_as_failure"] = paired_stats.arm_metrics(
+        all_attempts)["avg_at_n_conservative"]
+    return summary
+
+
+def _paired_all(a: paired_stats.TaskScores, b: paired_stats.TaskScores,
+                a_all: paired_stats.TaskScores,
+                b_all: paired_stats.TaskScores, *,
                 n_boot: int, seed: int, level: float) -> Dict[str, Any]:
-    """The three metrics' paired statistics for ``a`` against ``b``."""
+    """Every metric's paired statistics for ``a`` against ``b``; ``a_all``
+    and ``b_all`` are the same arms scored over every planned attempt."""
     common = dict(n_boot=n_boot, seed=seed, level=level)
     return {
         "avg_at_n": paired_stats.paired_mean_difference(
             a, b, unscored="exclude", **common),
         "avg_at_n_conservative": paired_stats.paired_mean_difference(
             a, b, unscored="zero", **common),
+        "avg_at_n_invalid_as_failure": paired_stats.paired_mean_difference(
+            a_all, b_all, unscored="zero", **common),
         "pass_at_n": paired_stats.pass_at_n_difference(a, b, **common),
     }
 
@@ -247,15 +278,19 @@ def compare_arms(arms: Mapping[str, Mapping[str, Any]], *,
         control = arm["control"]
         splittable = any(len(trials) >= 2 for trials in control.values())
         out[label] = {
-            "summary": {key: paired_stats.arm_metrics(arm[key])
+            "summary": {key: _arm_summary(arm[key], arm["all_attempts"][key])
                         for key in _ARMS},
-            "vs_control": _paired_all(arm["with_bank"], control,
-                                      n_boot=n_boot, seed=seed, level=level),
+            "vs_control": _paired_all(
+                arm["with_bank"], control, arm["all_attempts"]["with_bank"],
+                arm["all_attempts"]["control"],
+                n_boot=n_boot, seed=seed, level=level),
             "noise_floor": (paired_stats.noise_floor(
                 control, n_resample=n_resample, seed=seed, level=level)
                 if splittable else None),
             "vs_reference": (
                 _paired_all(arm["with_bank"], arms[reference]["with_bank"],
+                            arm["all_attempts"]["with_bank"],
+                            arms[reference]["all_attempts"]["with_bank"],
                             n_boot=n_boot, seed=seed, level=level)
                 if reference is not None and label != reference else None),
         }
@@ -379,6 +414,7 @@ def build_results(table_spec: Mapping[str, Any], *, n_boot: int = 10000,
 
 _METRIC_NAME = {"avg_at_n": "avg@N",
                 "avg_at_n_conservative": "avg@N (conservative)",
+                "avg_at_n_invalid_as_failure": "avg@N (invalid as failure)",
                 "pass_at_n": "pass@N"}
 
 _METRIC_DEFINITION = {
@@ -389,6 +425,10 @@ _METRIC_DEFINITION = {
     "avg_at_n_conservative": (
         "avg@N (conservative): as avg@N, but every task counts and a task "
         "with no scored trial scores 0"),
+    "avg_at_n_invalid_as_failure": (
+        "avg@N (invalid as failure): mean over tasks of successes over the "
+        "task's planned attempts, so a trial without a scorer verdict or an "
+        "attempt that never came back counts as a failure"),
     "pass_at_n": (
         "pass@N: share of tasks with at least one successful trial (a task "
         "with no scored trial counts and cannot pass)"),

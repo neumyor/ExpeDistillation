@@ -16,6 +16,7 @@ validate a config without loading the drivers.
 """
 
 from dataclasses import dataclass, fields
+from typing import Optional
 
 from expedistill.core.config import ConfigError
 
@@ -33,7 +34,10 @@ class CardAuthoringParams:
     - ``max_segments_per_card``: the most material segments one card
       writing call reads;
     - ``max_chars_per_segment``: the character budget of one segment's
-      rendered steps;
+      rendered steps in the card writer's material;
+    - ``typing_max_chars_per_segment``: the same budget in the typing
+      call, which needs less than the writer; None (the default) uses
+      ``max_chars_per_segment``;
     - ``write_retry_limit``: how many times a card whose output fails the
       checks is rewritten (after ``call_model``'s own format budget).
     """
@@ -41,11 +45,21 @@ class CardAuthoringParams:
     typing_chunk_size: int = 100
     max_segments_per_card: int = 8
     max_chars_per_segment: int = 1200
+    typing_max_chars_per_segment: Optional[int] = None
     write_retry_limit: int = 2
+
+    @property
+    def typing_chars(self) -> int:
+        """The per-segment character budget of the typing call."""
+        if self.typing_max_chars_per_segment is None:
+            return self.max_chars_per_segment
+        return self.typing_max_chars_per_segment
 
     def __post_init__(self) -> None:
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name == "typing_max_chars_per_segment" and value is None:
+                continue
             floor = 0 if item.name == "write_retry_limit" else 1
             if isinstance(value, bool) or not isinstance(value, int) \
                     or value < floor:

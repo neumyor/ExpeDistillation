@@ -13,6 +13,12 @@ the reference pipeline:
   (Deviation from tb_stats.py, which divides the rate sum by ALL tasks and
   thereby scores infra-only tasks as 0; the per-task-mean-then-task-mean over
   valid tasks is the definition this repo froze.)
+* ``avg@N (invalid as failure)`` -- per task, successes over the task's
+  planned attempts, then the mean over all tasks: a trial without a scorer
+  verdict, and an attempt that never came back, both count as a failure.
+  This is how an external campaign that only recorded 0/1 rewards scored
+  such trials, so it is reported beside the two avg@N above, never in
+  place of them.
 * ``pass@N`` -- the share of tasks with at least one success among their
   valid trials; a task with no scored trial counts in the denominator but
   can never pass, matching tb_stats.py.
@@ -56,6 +62,8 @@ def summarize(
     - ``avg_at_n_conservative`` (conservative): tb_stats.py's denominator —
       every task counts, a task with no valid trial contributes 0. Use this
       one when comparing against the TB21 campaign numbers; report both.
+    - ``avg_at_n_invalid_as_failure``: per task success / planned attempts,
+      then the mean over all tasks (an invalid trial or a hole is a 0).
 
     ``aux_metric`` names the plugin-declared auxiliary metric whose per-task
     ``aux_success`` counts ``task_metrics`` carries; the summary then reports ``aux`` =
@@ -102,6 +110,11 @@ def summarize(
         "tasks": n_tasks,
         "avg_at_n": sum(rates) / len(rates) if rates else None,
         "avg_at_n_conservative": conservative,
+        "avg_at_n_invalid_as_failure": (
+            sum(per_task["success"] / per_task["attempts"]
+                for per_task in task_metrics.values()
+                if per_task["attempts"] > 0) / n_tasks
+            if n_tasks else 0.0),
         "pass_at_n": len(passed) / n_tasks if n_tasks else 0.0,
         "infra_tasks": sorted(
             task_id for task_id, per_task in task_metrics.items()

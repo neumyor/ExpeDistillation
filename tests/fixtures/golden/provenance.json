@@ -1,5 +1,5 @@
 {
-  "base_commit": "3a6e713f35e7023b1766aeda71f9158f2e14c9e9",
+  "base_commit": "3bd0a01e2440b091ee07a8712f8e3812d2933ff8",
   "combos": {
     "folder": {
       "crash_points": [
@@ -23,5 +23,5 @@
     "revise",
     "new_cards"
   ],
-  "generated_on": "2026-11-13"
+  "generated_on": "2026-11-16"
 }

@@ -14,13 +14,14 @@ from types import SimpleNamespace
 
 import pytest
 
+from expedistill.composites import evolving_text
 from expedistill.composites import learn_ledger as ledger
 from expedistill.composites.phase_bank import load_phase_bank
 from expedistill.composites.provenance import PROVENANCE_NAME
 from expedistill.core.config import ExecutePhaseSpec, LearnPhaseSpec
 from expedistill.core.models import Skill
 from expedistill.infra.reliability import (
-    CodeBugError, InfrastructureError, UnitFailureRecorder)
+    CodeBugError, InfrastructureError, ResumableShortfall, UnitFailureRecorder)
 from expedistill.infra.store import read_json, read_jsonl
 from expedistill.stages import phase_learn
 from tests.helpers.golden_harness import PinnedClient
@@ -144,6 +145,38 @@ def test_content_then_trigger_evidence_revises_both_sides(tmp_path):
     assert '"answer the question": 1 failed trial(s)' in playbook
 
 
+class _ContentFailsOnce(PinnedClient):
+    """The content rewrite is unusable until ``failing`` is cleared."""
+
+    failing = True
+
+    def _revise(self, user):
+        if self.failing and "Rewrite ONLY the content" in " ".join(
+                user.split()):
+            return "```json\n{}\n```"
+        return super()._revise(user)
+
+
+def test_a_waiting_content_rewrite_holds_back_the_trigger_rewrite(tmp_path):
+    client = _ContentFailsOnce()
+    run = LearnRun(tmp_path / "run", client=client)
+    run_through(run, 2, practice)
+    with pytest.raises(ResumableShortfall, match="rewrites"):
+        run.learn(3, client=client)
+    assert run.store.load("skills", CARD, Skill).version == 1
+    assert not (run.phase_dir(3) / ledger.OUTCOMES_NAME).exists()
+
+    client.failing = False
+    run.learn(3, client=client)
+
+    assert [(row["action"], row["outcome"], row["version"])
+            for row in _rows(run, 3, ledger.OUTCOMES_NAME)] == [
+        ("revise_content", "content_revised", 2),
+        ("revise_trigger", "trigger_revised", 3)]
+    assert [entry["side"] for entry in run.store.load(
+        "skills", CARD, Skill).rewrite_history] == ["content", "trigger"]
+
+
 def test_the_diagnosis_sees_the_catalog_and_the_opened_card(tmp_path):
     client = PinnedClient()
     run = LearnRun(tmp_path / "run", client=client)
@@ -195,20 +228,62 @@ class _BadDiagnosis(PinnedClient):
         return super()._trial_analysis(user)
 
 
-def test_an_unusable_diagnosis_is_terminal_and_gives_no_evidence(tmp_path):
+def _learn_until_it_finishes(run, client):
+    """Run learn phase 1 the way an operator resumes it: each run that
+    stops on units waiting for a retry is run again."""
+    stops = 0
+    while True:
+        try:
+            return run.learn(1, client=client), stops
+        except ResumableShortfall:
+            stops += 1
+
+
+def test_an_unusable_diagnosis_is_retried_then_given_up(tmp_path):
     client = _BadDiagnosis()
     run = LearnRun(tmp_path / "run", client=client)
-    run_through(run, 1)
+    run_through(run, 0)
 
-    summary = read_json(run.phase_dir(1) / phase_learn.SUMMARY_NAME)
+    summary, stops = _learn_until_it_finishes(run, client)
+
+    assert stops == phase_learn.MODEL_RUNS - 1
     assert (summary["diagnosed"], summary["diagnosis_failed"],
             summary["located"]) == (1, 1, 1)
     failures = UnitFailureRecorder(run.run_dir).list_failures()
-    assert [row["error_class"] for row in failures] == ["ModelOutputError"]
+    assert [row["error_class"] for row in failures] \
+        == ["ModelOutputError"] * phase_learn.MODEL_RUNS
     asked = len(client.calls)
     (run.phase_dir(1) / phase_learn.SUMMARY_NAME).unlink()
-    run.learn(1)
+    run.learn(1, client=client)
     assert len(client.calls) == asked   # nothing asked again
+
+
+class _BadDiagnosisOnce(_BadDiagnosis):
+    """Task two's diagnosis is unusable in the first run only."""
+
+    def __init__(self):
+        super().__init__()
+        self.failing = True
+
+    def _trial_analysis(self, user):
+        if self.failing:
+            return super()._trial_analysis(user)
+        return PinnedClient._trial_analysis(self, user)
+
+
+def test_a_diagnosis_that_failed_once_is_retried_by_the_next_run(tmp_path):
+    client = _BadDiagnosisOnce()
+    run = LearnRun(tmp_path / "run", client=client)
+    run_through(run, 0)
+    with pytest.raises(ResumableShortfall, match="diagnosis"):
+        run.learn(1, client=client)
+    assert not (run.phase_dir(1) / phase_learn.SUMMARY_NAME).exists()
+
+    client.failing = False
+    summary = run.learn(1, client=client)
+
+    assert (summary["diagnosed"], summary["diagnosis_failed"],
+            summary["located"]) == (2, 0, 2)
 
 
 class _Unsegmentable(PinnedClient):
@@ -221,17 +296,69 @@ class _Unsegmentable(PinnedClient):
 
 
 def test_a_failure_that_cannot_be_located_is_recorded(tmp_path):
-    run = LearnRun(tmp_path / "run", client=_Unsegmentable())
-    run_through(run, 1)
+    client = _Unsegmentable()
+    run = LearnRun(tmp_path / "run", client=client)
+    run_through(run, 0)
 
-    summary = read_json(run.phase_dir(1) / phase_learn.SUMMARY_NAME)
+    summary, stops = _learn_until_it_finishes(run, client)
+
+    assert stops == phase_learn.MODEL_RUNS - 1
     assert (summary["diagnosed"], summary["located"],
             summary["unlocated"]) == (2, 1, 1)
     failures = UnitFailureRecorder(run.run_dir).list_failures()
-    assert [row["error_class"] for row in failures] == ["Unlocated"]
+    assert [row["error_class"] for row in failures] \
+        == ["ModelOutputError"] * (phase_learn.MODEL_RUNS - 1) + ["Unlocated"]
     audit = read_jsonl(run.run_dir / "stage2_segments"
                        / "segmentation_audit.jsonl")
     assert [row["status"] for row in audit] == ["skipped"]
+
+
+class _NoPlaybook(PinnedClient):
+    """The playbook writer never gives a usable reply."""
+
+    def _playbook_update(self, user):
+        return "no playbook here"
+
+
+def test_a_playbook_that_cannot_be_written_keeps_the_previous_text(tmp_path):
+    client = _NoPlaybook()
+    run = LearnRun(tmp_path / "run", client=client)
+    run_through(run, 0)
+
+    summary, stops = _learn_until_it_finishes(run, client)
+
+    assert stops == phase_learn.MODEL_RUNS - 1
+    assert summary["playbook_version"] == 1
+    kept = evolving_text.read_text(run.run_dir, run.label(1), "playbook")
+    assert (kept.text, kept.source_sheet_ids) == ("", [])
+    failures = UnitFailureRecorder(run.run_dir).list_failures()
+    assert [row["unit_id"] for row in failures] \
+        == ["playbook"] * phase_learn.MODEL_RUNS
+    assert summary["outcomes"] == {"written": 1}
+
+
+class _BadCards(PinnedClient):
+    """The card writer never gives a usable card."""
+
+    def _card_write(self, user):
+        return "```json\n{}\n```"
+
+
+def test_a_card_that_cannot_be_written_is_retried_then_receipted(tmp_path):
+    client = _BadCards()
+    run = LearnRun(tmp_path / "run", client=client)
+    run_through(run, 0)
+    with pytest.raises(ResumableShortfall, match="the cards"):
+        run.learn(1, client=client)
+    stopped = read_json(run.phase_dir(1) / phase_learn.SUMMARY_NAME)
+    assert stopped["model_retry"] == ["type/002"] and "bank" not in stopped
+    assert not (run.phase_dir(1) / ledger.OUTCOMES_NAME).exists()
+
+    summary, stops = _learn_until_it_finishes(run, client)
+
+    assert stops == phase_learn.MODEL_RUNS - 2
+    assert summary["outcomes"] == {"write_failed": 1}
+    assert "model_retry" not in summary
 
 
 class _DownForCards(PinnedClient):

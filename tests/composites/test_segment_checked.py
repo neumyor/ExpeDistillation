@@ -12,7 +12,7 @@ import pytest
 
 from expedistill.composites.segment_checked import segment_checked
 from expedistill.core.models import Step, Subtask, Trajectory
-from expedistill.infra.reliability import InfrastructureError
+from expedistill.infra.reliability import InfrastructureError, ModelOutputError
 from expedistill.infra.store import Store, read_jsonl
 from tests.helpers.fake_llm import json_script, make_fake_handle
 
@@ -252,6 +252,22 @@ def test_model_output_error_exhaustion_is_skipped_not_crashed(tmp_path):
     records = read_jsonl(tmp_path / "stage2_segments" / "segmentation_audit.jsonl")
     assert records[0]["status"] == "skipped"
     assert records[0]["last_errors"]
+
+
+def test_exhaustion_without_give_up_raises_and_writes_no_audit(tmp_path):
+    store = Store(tmp_path)
+    handle = make_fake_handle(script=[
+        json_script({"start": 0}),
+        json_script([42]),
+    ])
+    with pytest.raises(ModelOutputError, match="could not be segmented"):
+        segment_checked(
+            store=store, phase_label=LEARN,
+            trajectory=make_trajectory(), K=4, view_rules=None,
+            handle=handle, segment_retry_limit=1, run_dir=tmp_path,
+            give_up=False)
+    assert read_jsonl(
+        tmp_path / "stage2_segments" / "segmentation_audit.jsonl") == []
 
 
 # ---------------------------------------------------------------------------

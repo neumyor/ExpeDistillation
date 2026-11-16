@@ -7,9 +7,8 @@ artifact (before the first learn phase, the run-level bank).
 
 1. **Diagnose** every failed trial (``methods/diagnose``): the reason, the
    failing step, the scope and the two notes, one row per trial in
-   ``findings.jsonl``. A diagnosis whose reply stays unusable is a terminal
-   record in ``failed_units.jsonl``: the trial gives neither notes nor
-   evidence.
+   ``findings.jsonl``. A diagnosis whose reply stays unusable is recorded in
+   ``failed_units.jsonl`` and retried by the next run (below).
 2. **Locate** (``composites/locate``): cut every failed trajectory (and, in
    the first learn phase, the strong baseline trajectories the
    ``trajectory_select`` rule keeps), then type every new segment into the
@@ -24,6 +23,16 @@ artifact (before the first learn phase, the run-level bank).
    per gap type, a content then a trigger rewrite per card with that
    evidence, the delete rule in place of a second content rewrite in a
    row. Receipts in ``outcomes.jsonl``.
+
+A unit whose model output stays unusable after its in-call repairs (a
+diagnosis, a cut, a typed segment, the profile, the playbook, a card or a
+rewrite) is recorded in ``failed_units.jsonl`` and the phase stops at the
+end of that unit's group with ResumableShortfall (exit code 3), so no later
+group reads a partial input; the next run retries exactly those units. A
+unit that has failed in ``MODEL_RUNS`` runs is given up: a trial without
+diagnosis gives neither notes nor evidence, a segment stays untyped, a
+card or rewrite gets its ``write_failed`` / ``revision_failed`` receipt, and
+the profile or playbook keeps the previous learn phase's text.
 
 Steps without a data dependency run in one pool (``--workers``), the groups
 one after the other:
@@ -91,6 +100,7 @@ from expedistill.infra.reliability import (
     CodeBugError,
     InfrastructureError,
     ModelOutputError,
+    ResumableShortfall,
     UnitFailureRecorder,
 )
 from expedistill.infra.store import (
@@ -126,6 +136,10 @@ UNLOCATED = "Unlocated"
 #: The receipt of a gap whose type's one card id is taken by a discarded
 #: card: no new card is written for it.
 SKIPPED_DISCARDED = "skipped_discarded"
+
+#: How many runs of the phase a unit whose model output fails gets before
+#: it is given up (one failure record per run).
+MODEL_RUNS = 3
 
 
 def run(ctx: Any, phase: PhaseInstance) -> PhaseResult:
@@ -171,6 +185,11 @@ class _Learn:
         self.recorder = UnitFailureRecorder(ctx.run_dir)
         self.lock = threading.Lock()
         self._instructions: Dict[str, str] = {}
+        #: Model-output failures per unit before this run, and the units
+        #: that failed in this run with runs left.
+        self.prior_failures = locate.model_failure_counts(ctx.run_dir,
+                                                          phase.label)
+        self.retry: Set[str] = set()
 
         self.names = names
         self.specs = specs
@@ -206,22 +225,49 @@ class _Learn:
                     self.benchmark, task_id)
             return self._instructions[task_id]
 
-    def _terminal_failures(self) -> Set[str]:
-        """Unit ids whose model output failed terminally in this phase."""
-        return {row["unit_id"] for row in self.recorder.list_failures()
-                if row.get("stage") == self.phase.label
-                and row.get("error_class") == ModelOutputError.__name__}
+    def _given_up(self) -> Set[str]:
+        """Unit ids whose model output failed in ``MODEL_RUNS`` runs."""
+        counts = locate.model_failure_counts(self.ctx.run_dir,
+                                             self.phase.label)
+        return {unit_id for unit_id, count in counts.items()
+                if count >= MODEL_RUNS}
+
+    def _last_run(self, unit_id: str) -> bool:
+        """True when a failure of ``unit_id`` in this run gives it up."""
+        return self.prior_failures[unit_id] + 1 >= MODEL_RUNS
 
     def _record(self, unit_id: str, exc: Any) -> None:
         self.recorder.record(unit_id, self.phase.label, exc, exc)
+
+    def _model_failed(self, unit_id: str, exc: Any) -> bool:
+        """Record a model-output failure of ``unit_id``; True when the unit
+        is given up, otherwise it is retried by the next run."""
+        self._record(unit_id, exc)
+        if self._last_run(unit_id):
+            return True
+        with self.lock:
+            self.retry.add(unit_id)
+        return False
+
+    def _stop_for_retries(self, step: str) -> None:
+        """End the phase at a group boundary while units wait for a retry."""
+        if self.retry:
+            raise ResumableShortfall(
+                f"{self.phase.label}: {len(self.retry)} unit(s) of {step} "
+                f"failed on model output ({', '.join(sorted(self.retry))}); "
+                f"each gets up to {MODEL_RUNS} runs -- see failed_units.jsonl, "
+                "then re-run the same command to retry them")
 
     # -- the phase -----------------------------------------------------------
 
     def run(self) -> Dict[str, Any]:
         findings, undiagnosed = self.group_a()
+        self._stop_for_retries("diagnosis and cutting")
         profile = self.group_b(findings)
+        self._stop_for_retries("typing and the profile")
         evidence, unlocated = self.group_c(findings)
         playbook = self.group_d(findings, evidence, profile)
+        self._stop_for_retries("the playbook")
         infra_failed = self.group_e(evidence, findings, profile, playbook)
         summary = self.summary(findings, undiagnosed, unlocated, evidence,
                                profile, playbook)
@@ -233,6 +279,10 @@ class _Learn:
                 f"still pending on infrastructure errors "
                 f"({', '.join(sorted(infra_failed))}); see "
                 "failed_units.jsonl, then resume the run to retry them")
+        if self.retry:
+            summary["model_retry"] = sorted(self.retry)
+            write_json(self.phase_dir / SUMMARY_NAME, summary, indent=2)
+            self._stop_for_retries("the cards and rewrites")
         self.check_provenance()
         summary["bank"] = write_phase_bank(self.store, self.ctx.run_dir,
                                            self.phase.label)
@@ -250,7 +300,7 @@ class _Learn:
 
     def group_a(self) -> Tuple[Dict[str, Finding], Set[str]]:
         findings = self._load_findings()
-        undiagnosed = self._terminal_failures() & set(self.sheets)
+        undiagnosed = self._given_up() & set(self.sheets)
         units: List[Tuple[str, Any]] = [
             ("diagnose", sheet) for sheet in self.failed
             if sheet.sheet_id not in findings
@@ -287,10 +337,15 @@ class _Learn:
                         phase_label=self.phase.label, K=self.review.K,
                         retry_limit=self.review.retry_limit,
                         view_rules=self.view_rules, handle=handles[kind],
-                        usage=self.ctx.usage, run_dir=self.ctx.run_dir)
-            except (InfrastructureError, ModelOutputError) as exc:
+                        usage=self.ctx.usage, run_dir=self.ctx.run_dir,
+                        give_up=self._last_run(unit_id))
+            except InfrastructureError as exc:
                 self._record(unit_id, exc)
                 return unit_id, exc
+            except ModelOutputError as exc:
+                if self._model_failed(unit_id, exc) and kind == "diagnose":
+                    return unit_id, exc
+                return unit_id, None
             return unit_id, None
 
         results = run_units(work, units, self.workers)
@@ -323,14 +378,16 @@ class _Learn:
         profile."""
         def work(kind: str) -> Optional[EvolvingText]:
             if kind == "types":
-                locate.type_pending(
+                typed = locate.type_pending(
                     store=self.store, run_dir=self.ctx.run_dir,
                     phase_label=self.phase.label,
                     chunk_size=self.author.typing_chunk_size,
-                    max_chars=self.author.max_chars_per_segment,
+                    max_chars=self.author.typing_chars,
                     view_rules=self.view_rules,
                     handle=self.ctx.handle("segmenter"),
-                    usage=self.ctx.usage)
+                    usage=self.ctx.usage, runs=MODEL_RUNS)
+                with self.lock:
+                    self.retry.update(typed["retry"])
                 return None
             return self._evolve(
                 evolving_text.PROFILE,
@@ -353,10 +410,23 @@ class _Learn:
             self.ctx.run_dir, self.names, self.specs, self.phase.index,
             kind)
         old = previous.text if previous is not None else seed
-        text = evolve_text(
-            kind, old, [note for _, note in notes], facts,
-            self.ctx.handle("author"), profile=profile, checks=checks,
-            usage=self.ctx.usage, run_dir=self.ctx.run_dir)
+        try:
+            text = evolve_text(
+                kind, old, [note for _, note in notes], facts,
+                self.ctx.handle("author"), profile=profile, checks=checks,
+                usage=self.ctx.usage, run_dir=self.ctx.run_dir)
+        except ModelOutputError as exc:
+            given_up = self._model_failed(kind, exc)
+            # Given up: the phase keeps the previous text and its version,
+            # fed by no note of this phase. Otherwise the item is never
+            # written: the phase stops at the end of this group.
+            item = EvolvingText(
+                kind=kind, text=old,
+                version=previous.version if previous is not None else 1,
+                phase_label=self.phase.label)
+            if given_up:
+                evolving_text.write_text(self.ctx.run_dir, item)
+            return item
         item = EvolvingText(
             kind=kind, text=text,
             version=(previous.version + 1) if previous is not None else 1,
@@ -522,9 +592,9 @@ class _Learn:
                 params=self.author, usage=self.ctx.usage,
                 run_dir=self.ctx.run_dir)
         except ModelOutputError as exc:
-            self._record(plan.type_id, exc)
-            ledger.append_outcome(self.phase, row, None, "write_failed",
-                                  None, self.phase_dir, str(exc)[:300])
+            if self._model_failed(plan.type_id, exc):
+                ledger.append_outcome(self.phase, row, None, "write_failed",
+                                      None, self.phase_dir, str(exc)[:300])
             return
         record_version(
             self.store, self.phase_dir, self.ctx.run_dir, skill,
@@ -568,13 +638,19 @@ class _Learn:
                                 basis_unit=self._basis(plan.content)),
                     self.phase_dir)
                 return
-            self._rewrite(plan.skill_id, plan.content, "content", findings,
-                          lambda skill, steps, diagnosis: revise_content(
-                              skill, evidence_steps=steps,
-                              diagnosis=diagnosis, playbook=playbook,
-                              profile=profile, handle=handle,
-                              usage=self.ctx.usage,
-                              run_dir=self.ctx.run_dir))
+            waiting = self._rewrite(
+                plan.skill_id, plan.content, "content", findings,
+                lambda skill, steps, diagnosis: revise_content(
+                    skill, evidence_steps=steps,
+                    diagnosis=diagnosis, playbook=playbook,
+                    profile=profile, handle=handle,
+                    usage=self.ctx.usage,
+                    run_dir=self.ctx.run_dir))
+            if waiting:
+                # The trigger rewrite waits too: landing it now would put the
+                # card one version past the content rewrite's plan, which the
+                # next run would read as a content rewrite already landed.
+                return
         if plan.trigger:
             catalog = self.facts[plan.trigger[0].sheet_id].catalog
             self._rewrite(plan.skill_id, plan.trigger, "trigger", findings,
@@ -586,7 +662,8 @@ class _Learn:
                               run_dir=self.ctx.run_dir))
 
     def _rewrite(self, skill_id: str, items: Sequence[routing.Evidence],
-                 side: str, findings: Dict[str, Finding], ask: Any) -> None:
+                 side: str, findings: Dict[str, Finding], ask: Any) -> bool:
+        """Land one rewrite; True when it failed and waits for the next run."""
         row = TaskListRow(target_kind="skill", target_id=skill_id,
                           action=f"revise_{side}",
                           reason=f"{side}_evidence",
@@ -603,13 +680,19 @@ class _Learn:
                  for item in items])
             return ask(skill, steps, diagnosis)
 
-        outcome = apply_revision(
-            store=self.store, phase=self.phase, row=row,
-            phase_dir=self.phase_dir, run_dir=self.ctx.run_dir,
-            sources=[window[0] for window in windows], write=write)
+        unit_id = f"{skill_id}/{row.action}"
+        try:
+            outcome = apply_revision(
+                store=self.store, phase=self.phase, row=row,
+                phase_dir=self.phase_dir, run_dir=self.ctx.run_dir,
+                sources=[window[0] for window in windows], write=write,
+                final=self._last_run(unit_id))
+        except ModelOutputError as exc:
+            return not self._model_failed(unit_id, exc)
         if outcome == "revision_failed":
-            self._record(skill_id, ModelOutputError(
+            self._model_failed(unit_id, ModelOutputError(
                 f"{row.action} of {skill_id!r} produced no valid rewrite"))
+        return False
 
     # -- the commit point ----------------------------------------------------------
 
@@ -650,7 +733,7 @@ class _Learn:
             scopes[finding.scope] += 1
         new_types = sum(1 for row in self.types.values()
                         if row.phase_label == self.phase.label)
-        given_up = (self._terminal_failures()
+        given_up = (self._given_up()
                     & {subtask_id for subtask_id, subtask
                        in self.subtasks.items()
                        if subtask.phase_label == self.phase.label})

@@ -127,8 +127,11 @@ reward + 原样的 correctness）、coverage（这张 trial 该不该有、有�
 - 一个类型最多一张卡（`skill_id = <type_id>/skill`）。卡已被删除的类型再拿到缺口证据时不写新卡，
   回执 `skipped_discarded`；
 - 同一张卡在一个相位里两侧都有证据时，先改正文、再改触发条件，各自一个版本；
-- 诊断失败的答卷记进 `failed_units.jsonl`，既没有笔记也没有证据；一步都没有的失败答卷没有可指认的
-  出错步，直接记为诊断失败（不调模型）。诊断成功但定位失败（出错步不在任何已归类的段里）的答卷
+- 学习相位里模型输出不可用的单元（诊断、切段、归类的段、画像、playbook、写卡、改写）记进
+  `failed_units.jsonl`，相位在该单元所在的步骤结束时停下（退出码 3），下一次运行只重试这些单元；
+  一个单元在 3 次运行里都失败才放弃：诊断放弃的答卷既没有笔记也没有证据，段不归类，卡回执
+  `write_failed` / `revision_failed`，画像与 playbook 沿用上一个学习相位的版本。一步都没有的失败
+  答卷没有可指认的出错步，直接记为诊断失败（不调模型）。诊断成功但定位失败（出错步不在任何已归类的段里）的答卷
   记一行错误类别为 `Unlocated` 的 `failed_units.jsonl`，它的笔记照常进画像与 playbook，但不产生卡证据；
 - 卡只有两种状态：`active`（交付使用）与 `discarded`。没有待检验、已接受之分；
 - 每个学习相位都把本相位全部证据写进 `evidence.jsonl`，触发证据的计数另交给 playbook 写作者。
@@ -178,7 +181,7 @@ reward + 原样的 correctness）、coverage（这张 trial 该不该有、有�
 |---|---|
 | `role` | 恒为 `learn` |
 | `review` | 学习参数：`K`（每条轨迹最多切几段，缺省 5）、`retry_limit`（切段校验不过时的重切次数，缺省 2）、`write_lessons`（弱模型失败段是否进写卡材料，缺省 `true`） |
-| `author` | 写卡方法：`subtask_cards`，参数 `typing_chunk_size`（一次归类调用最多带几个段，100）/ `max_segments_per_card`（一张卡的写作材料最多几个段，8）/ `max_chars_per_segment`（每段渲染步骤的字符上限，1200）/ `write_retry_limit`（写卡输出不合格时的重写次数，2） |
+| `author` | 写卡方法：`subtask_cards`，参数 `typing_chunk_size`（一次归类调用最多带几个段，100）/ `max_segments_per_card`（一张卡的写作材料最多几个段，8）/ `max_chars_per_segment`（写卡材料里每段渲染步骤的字符上限，1200）/ `typing_max_chars_per_segment`（归类时每段的字符上限，缺省等于上一项）/ `write_retry_limit`（写卡输出不合格时的重写次数，2）。TB 的终端输出长，切段中位约 1.3 万到 1.7 万字符，TB 配置取 40 / 6 / 48000 / 4000 |
 
 学习流程固定为五步（5.4），每个学习相位都执行同样的五步，配置只决定参数。
 
@@ -637,8 +640,10 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 误触发率 = 打开且不适用的对 / 打开的对（两者都在 (trial, 卡) 对上汇总，不按 trial 平均）；
 遵循度 = 被打开的卡的步骤得分均值（followed 记 1、partial 记 0.5、skipped 记 0，
 not_reached 不计）；成功率按"适用且打开 / 适用未打开 / 无适用卡"分层报告。
-`paper-tables` 的主指标是条件口径的 avg@N，保守口径与 pass@N 同时写进 JSON；无效、缺失、
-空洞和未判分的 trial 不当作 0，列在 `meta["unscored"]`。
+`paper-tables` 的主指标是条件口径的 avg@N，保守口径、无效计为失败的口径与 pass@N 同时写进
+JSON；前两种口径里无效、缺失、空洞和未判分的 trial 不当作 0，列在 `meta["unscored"]`；无效计为
+失败的口径按每道题计划的尝试次数作分母，这些 trial 都记 0（只记 0/1 奖励的外部 campaign 就是这样
+计分的），两种都报，不择一。
 
 ---
 
@@ -863,7 +868,7 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
 
 - 派发了却什么都没存下的采样按 `invalid_redispatch_limit` 重新派发；已存的无效运行不重跑（5.5）；
 - 有未接受的基础设施空洞时写完摘要后以基础设施错误停下（退出码 3），续跑
-  只补空洞；接受的空洞是本 run 的持久决定（见 5.7）。
+  先把空洞再派一轮，只补空洞；接受的空洞是本 run 的持久决定（见 5.7）。
 
 ### 5.3 终测相位（test）
 
@@ -917,7 +922,8 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
 - **不进学习**：delta 由 `decision.final_test_delta` 直接进摘要。摘要并列报告三种口径
   （事先登记）：`avg_at_n`（条件口径：先在每道题的有效执行里求成功率，再对至少有一次
   有效执行的题求平均）、`avg_at_n_conservative`（保守口径：所有题都进分母，没有有效
-  执行的题记 0）、pass@N；任一臂没有有效执行时条件口径的 delta 记 null；
+  执行的题记 0）、`avg_at_n_invalid_as_failure`（无效计为失败：每道题的成功数除以计划的尝试
+  次数，无效与空洞都记 0）、pass@N；任一臂没有有效执行时条件口径的 delta 记 null；
 - **辅助指标同口径并列**（插件声明了 `aux_metric_name` 时，如 SearchQA 的 `sub_em`）：
   两臂摘要各带 `aux` 一节，辅助指标永远只并列，不替换主指标。
 
@@ -949,8 +955,8 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   最多 2 次（在 `call_model` 的 JSON 格式重试之外）；
 - 一步都没有的失败答卷没有可指认的出错步：不调模型，直接按模型输出错误处理（终态，同下）；
 - 诊断逐条写进 `findings.jsonl`，续跑只问缺的。重问后仍不可用的诊断（模型输出错误）记进
-  `failed_units.jsonl`，该答卷既没有笔记也没有证据，这条记录是终态，续跑跳过。基础设施错误
-  同样记账，全部答卷问完后相位在这一步停下（退出码 3），续跑重试。
+  `failed_units.jsonl`，全部答卷问完后相位在这一步停下（退出码 3），下一次运行重问；在 3 次
+  运行里都失败的答卷放弃，既没有笔记也没有证据。基础设施错误同样记账、同样停下，续跑重试。
 
 **第 2 步：定位**（`composites/locate.py`，角色 segmenter）。
 
@@ -967,10 +973,10 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
    `stage2_segments/segment_types.jsonl`，两者只追加。一块的新类型先于它的归属写盘；两次追加之间
    崩溃会留下没有段用到的类型，下一次归类前删掉本相位这样的类型再继续——这是"只追加"的唯一例外，
    更早相位的行从不改动；
-4. 定位不了的失败不产生卡证据，笔记照常进第 4 步：K2 重切耗尽的轨迹记在
-   `segmentation_audit.jsonl`（本 run 内终态）；重问后仍不可用的归类块把其中每段记进
-   `failed_units.jsonl`（终态，续跑不再归类）；出错步不在任何已归类段里的答卷记一行错误类别为
-   `Unlocated` 的 `failed_units.jsonl`。
+4. 定位不了的失败不产生卡证据，笔记照常进第 4 步：K2 重切耗尽的轨迹记进 `failed_units.jsonl`、
+   下一次运行重切，第 3 次运行仍失败才在 `segmentation_audit.jsonl` 记终态；重问后仍不可用的
+   归类块对半拆开重新归类，直到单段，单段仍不可用才记进 `failed_units.jsonl`，同样最多 3 次
+   运行；出错步不在任何已归类段里的答卷记一行错误类别为 `Unlocated` 的 `failed_units.jsonl`。
 
 **第 3 步：分配证据**（`composites/evidence.py`，纯函数）。按 1.5 的表为每条定位成功的失败
 写一行 `evidence.jsonl`：答卷 id、出错步、出错段、类型、该类型在用的卡（可为空）、出错前是否
@@ -1004,8 +1010,9 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   回执 `skipped_no_material`；类型的卡已被删除（`discarded`，编号被占）时不写，回执
   `skipped_discarded`；
 - 写卡回复不合格（四个字段、3–7 步）时带原因重写（`CARDS_CORRECTION`），最多 `write_retry_limit`
-  次；仍不合格回执 `write_failed`。`write_failed` 与改写的 `revision_failed` 另各记一行
-  `failed_units.jsonl`；
+  次；仍不合格记一行 `failed_units.jsonl`，相位写完摘要（带 `model_retry` 列表）后在产出工件前
+  停下（退出码 3），下一次运行重写；在 3 次运行里都失败才回执 `write_failed`。改写同理，放弃时
+  回执 `revision_failed`；
 - 一次改写只修改一侧字段，版本号加一，`rewrite_history` 记录被改的旧字段；一个相位里两侧
   都有证据时先改正文、再改触发条件；
 - 上一个学习相位也给这张卡正文证据时不再改写，状态设为 `discarded`，原因
@@ -1061,7 +1068,9 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   success / failure / invalid（无效 = 运行没有正常完成，不能算模型成绩：判分器没跑、例外死亡）；
 - 摸底与练习相位里，只有派发了却什么都没存下的采样（执行的重试耗尽，`engine.run_arm_units`
   按应有轨迹编号核对）会被相位调度重新派给执行，预算是 `invalid_redispatch_limit`（按臂、按单元
-  持久计数 `<臂>/redispatch.json`，续跑接着同一预算）；预算耗尽仍缺的采样是基础设施空洞（5.7），
+  持久计数 `<臂>/redispatch.json`，续跑接着同一预算；同一轮要重派的单元一起派发）；每次运行（含续跑）
+  开始时先把全部单元交给执行一次，已存的采样跳过，所以续跑总会把空洞再派一轮，不占重派预算；
+  预算耗尽仍缺的采样是基础设施空洞（5.7），
   单元没有一次有效运行、且有采样缺失时报 not_testable / `invalid_redispatch_exhausted`；
 - 已经落盘的运行从不重跑：没拿到判分结果（`correctness = null`）的运行判为 invalid，每次采样的
   轨迹编号是确定的，重新采样会超出冻结的采样深度；全部落盘运行都未判分的单元是 `all_holes`
@@ -1078,7 +1087,7 @@ playbook 下重新执行全部训练题，test 相位每次全量重跑。同一
 - 执行单元耗尽基础设施重试后不落盘，磁盘上表现为"轨迹缺失"；摘要按应有
   单元集合计数（`infra_missing`）；
 - 有未接受的空洞 → 写完摘要后以基础设施错误停下（退出码 3），同一条命令
-  重跑只补空洞；
+  重跑把空洞再派一轮，只补空洞；
 - `--allow-infra-shortfall` 接受空洞：被接受的单元 ID 先写进持久记录再继续，
   之后每次启动都跳过、按空洞计分（开关只决定新出现的空洞接不接受，已接受的无法撤回）。
   摸底相位的记录在 run 级的 `stage1_baseline/accepted_infra_shortfall.json`（两臂共用）；练习与
@@ -1190,7 +1199,7 @@ expedistill fork-run --source-run <源 run 目录> --config <新配置> --run-di
 expedistill import-baseline --source-run <已有 run> --config <新配置> --run-dir <新 run 目录>
 expedistill import-bank --source <路径> --source-format markdown_file|skill_folder|notes_jsonl --run-dir <新 run 目录> --origin <方法名>
 expedistill judge-skills --run-dir <run 目录> --out-dir <输出目录> --phase pNN:<名> [--arm with_bank] [--bank-phase 标签] [--judge-model 模型]
-expedistill paper-tables --spec <JSON> [--out-md 路径] [--out-json 路径] [--n-boot 10000] [--seed 0] [--metric avg_at_n|avg_at_n_conservative|pass_at_n]
+expedistill paper-tables --spec <JSON> [--out-md 路径] [--out-json 路径] [--n-boot 10000] [--seed 0] [--metric avg_at_n|avg_at_n_conservative|avg_at_n_invalid_as_failure|pass_at_n]
 expedistill segmentation-metrics --arm LABEL=RUN_DIR [--arm LABEL=RUN_DIR ...] [--out-md 路径] [--out-json 路径]
 ```
 
@@ -1232,9 +1241,10 @@ expedistill segmentation-metrics --arm LABEL=RUN_DIR [--arm LABEL=RUN_DIR ...] [
   配置错误、服务方拒绝、模型输出错误逃出相位（已完成的单元都已落盘，先查看
   落盘的响应再重跑；supervisor 不得对它自动循环续跑）；`summary` 发现 run
   不完整也是 1；
-- `3`：基础设施耗尽、可以直接续跑——相位跑完其余单元后仍有单元耗尽重试，
-  已完成的单元都已落盘，CLI 打印带全部运行设置的续跑命令；supervisor 可以
-  对 3 做有限次自动续跑，对 1 直接停下；
+- `3`：可以直接续跑——相位跑完其余单元后仍有单元耗尽基础设施重试，或学习相位里
+  有模型输出失败、还有运行次数的单元（`ResumableShortfall`）；已完成的单元都已落盘，
+  续跑只重试这些单元；CLI 打印带全部运行设置的续跑命令；supervisor 可以对 3 做有限次
+  自动续跑，对 1 直接停下；
 - `2`：命令行用法错误。
 
 代码 bug 和未归类的异常不捕获，保留完整的报错回溯退出（进程退出码也是 1，supervisor
@@ -1245,8 +1255,11 @@ expedistill segmentation-metrics --arm LABEL=RUN_DIR [--arm LABEL=RUN_DIR ...] [
 
 ### run 跑完后的完整性检查
 
-仓库没有专门的审计脚本。一个 run 的数字进结果表之前，先跑 `expedistill summary`，再逐项
-人工核对下面的记录；任何一项不过，run 作废（在 run 目录写 `INVALID.md` 说明原因）：
+一个 run 的数字进结果表之前，先跑 `expedistill summary`，再跑
+`python scripts/audit/audit_run.py <run 目录>`（自动核对下面 6 项，另查轨迹编号与文件一致、
+单元失败账本、执行回复被截断的次数；TB 另查读卡后缀已上传、各相位无效 trial 数、弱模型 trial
+的 Harbor 配置不带 `reasoning_effort`）；任何一项 FAIL，run 作废（在 run 目录写 `INVALID.md`
+说明原因）。要核对的记录：
 
 1. `expedistill summary --run-dir <run>` 退出码为 0：进度账本覆盖冻结序列的每个相位；
 2. 每个执行相位的 `phase_summary.json` 里 `infra_missing` 为空；接受过的空洞
@@ -1266,9 +1279,13 @@ driver 与 Harbor 放在同一台基准主机上：命令走本机 `bash`、文�
 ssh/scp。run 目录、审计和分析都留在基准主机上。
 
 - 切换方式：基准主机上的密钥文件里设 `EXPEDISTILL_TB_HOST=local`；
-- 部署：`scripts/remote/deploy_bench_host.sh`（rsync，一个提交一个目录，从不覆盖）；
+- 部署：`scripts/remote/deploy_bench_host.sh`（干净部署从 `git archive HEAD` 导出，
+  `--force` 部署工作区；一个提交一个目录，从不覆盖）；
 - 启动与续跑：`scripts/remote/start_run_bench_host.sh`，`WORKERS` 和 `ROLLOUT_WORKERS`
-  分别对应上表两个并行度；
+  分别对应上表两个并行度；启动后立即返回，并把完整启动命令写进 `<run 目录>/launch.sh`，
+  续跑用 `bash <run 目录>/launch.sh`；
+- 自动续跑：`scripts/remote/supervise_run.py <run 目录>` 只在退出码 3 时按间隔重跑
+  `launch.sh`，连续多次没有进展就停下；
 - 完整步骤、目录约定、环境变量和查看方式见 `scripts/remote/README.md`；
   设计取舍见 `docs/decisions/run_on_benchmark_host_20261029.md`。
 

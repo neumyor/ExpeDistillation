@@ -154,12 +154,16 @@ def revise_content(skill: Skill, *, evidence_steps: str, diagnosis: str,
 def apply_revision(*, store: Any, phase: Any, row: TaskListRow,
                    phase_dir: Any, run_dir: Any,
                    sources: Sequence[TraceRef],
-                   write: Callable[[Skill], Revision]) -> str:
+                   write: Callable[[Skill], Revision],
+                   final: bool = True) -> str:
     """Land one rewrite operation; returns the receipt's outcome
     (``receipted`` when an earlier call already landed it).
 
     ``write`` produces the rewrite of the stored card (the model call);
-    ``sources`` are the evidence positions behind the new version.
+    ``sources`` are the evidence positions behind the new version. When
+    the rewrite raises ModelOutputError, a ``final`` call receipts
+    ``revision_failed``; otherwise the error propagates with no receipt, so
+    a later call can try the operation again.
     """
     if ledger.receipt_of(phase, row, phase_dir) is not None:
         return "receipted"
@@ -188,6 +192,8 @@ def apply_revision(*, store: Any, phase: Any, row: TaskListRow,
     try:
         revision = write(skill)
     except ModelOutputError as exc:
+        if not final:
+            raise
         ledger.append_outcome(phase, row, skill.skill_id, "revision_failed",
                               skill.version, phase_dir, str(exc)[:300])
         return "revision_failed"

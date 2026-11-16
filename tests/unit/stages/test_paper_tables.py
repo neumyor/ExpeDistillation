@@ -77,6 +77,44 @@ def test_load_arm_numbers_equal_the_phase_summary(tmp_path):
     assert summary["with_bank"]["pass_at_n"] == pytest.approx(2 / 4)
     assert summary["control"]["avg_at_n"] == pytest.approx(1 / 3)
     assert summary["control"]["pass_at_n"] == pytest.approx(2 / 4)
+    # invalid as failure: every planned attempt counts, t3 1/3, t4 0
+    assert arm["all_attempts"]["with_bank"]["alfworld:t3"] \
+        == [1.0, 0.0, 0.0]
+    assert summary["with_bank"]["avg_at_n_invalid_as_failure"] \
+        == pytest.approx((2 / 3 + 0 + 1 / 3 + 0) / 4)
+
+
+def test_the_invalid_as_failure_delta_scores_unscored_trials_zero(tmp_path):
+    run = write_test_run(
+        tmp_path,
+        with_bank={"t1": [S, INVALID, INVALID], "t2": [S, S, S]},
+        control={"t1": [S, F, F], "t2": [S, S, S]})
+
+    compared = pt.compare_arms({"Ours": pt.load_arm(run)})["arms"]["Ours"]
+
+    # Scored trials only, Ours wins t1 (1 vs 1/3); over every planned
+    # attempt the two arms tie on both tasks.
+    assert compared["vs_control"]["avg_at_n"]["delta"] \
+        == pytest.approx((1 - 1 / 3) / 2)
+    assert compared["vs_control"]["avg_at_n_invalid_as_failure"]["delta"] \
+        == pytest.approx(0.0)
+    assert compared["summary"]["with_bank"]["avg_at_n_invalid_as_failure"] \
+        == pytest.approx((1 / 3 + 1) / 2)
+
+
+def test_a_summary_from_before_the_invalid_as_failure_metric_still_loads(
+        tmp_path):
+    run = write_test_run(tmp_path, with_bank={"t1": [S, INVALID, F]},
+                         control={"t1": [F, F, S]})
+    path = run / "phases" / "p03_test" / "phase_summary.json"
+    summary = json.loads(path.read_text())
+    for arm in ("with_bank", "control"):
+        del summary[arm]["avg_at_n_invalid_as_failure"]
+    path.write_text(json.dumps(summary))
+
+    arm = pt.load_arm(run)
+
+    assert arm["all_attempts"]["with_bank"]["alfworld:t1"] == [1.0, 0.0, 0.0]
 
 
 def test_unscored_trials_are_listed_and_never_scored_zero(tmp_path):

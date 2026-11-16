@@ -91,3 +91,22 @@ def test_the_playbook_reader_profile_reaches_the_prompt():
 def test_extract_playbook_names_what_is_wrong(reply, problem):
     with pytest.raises(ValueError, match=problem):
         extract_playbook(reply)
+
+
+def test_an_empty_playbook_reply_is_asked_again():
+    # The plain-text playbook call has no format re-ask in call_model: an
+    # empty reply raises there, and the writer asks again within its own
+    # budget instead of stopping the learn phase.
+    handle = make_fake_handle(script=[
+        ModelOutputError("empty content"), _tagged(BODY)])
+    assert evolve_text("playbook", "old", ["note"], "", handle) \
+        == BODY.strip()
+    assert len(handle.client.calls) == 2
+
+
+def test_replies_that_stay_empty_are_a_model_output_error():
+    handle = make_fake_handle(
+        script=[ModelOutputError("empty content")] * (REPAIRS + 1))
+    with pytest.raises(ModelOutputError, match="empty content"):
+        evolve_text("playbook", "old", ["note"], "", handle)
+    assert len(handle.client.calls) == REPAIRS + 1

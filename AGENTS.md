@@ -365,10 +365,8 @@ src/expedistill/
 ```
 scripts/
   run/        启动实验与准备实验输入：
-              run_experiment.sh <配置名>：加载环境变量、脱离终端启动 driver、
+              run_experiment.sh <配置名>：加载环境变量、脱离终端启动 driver 后立即返回、
                                   写 pidfile 与续跑命令（不含方法参数）
-              supervise_tb_run.py：TB 终测相位的 detached supervisor（读 pidfile、
-                                  轮询产物文件，driver 退出后按摘要判断是否重跑同一条命令）
               build_paper_configs.py：按论文实验矩阵生成全部配置
                                   （`configs/experiments/<bench>_paper_<exp>_<arm>.yaml`，
                                   `--check` 校验与磁盘一致，`--print-index` 打印
@@ -376,12 +374,24 @@ scripts/
               paper_splits.py：论文配置共用的划分（含 ALFWorld 的 val 列表）、TB 任务表
                                   与外部对照文件信息
               build_bare_control.py：把一次 ALFWorld 裸跑写成该学生模型的冻结成绩文件
-  remote/     在基准主机上运行实验：deploy_bench_host.sh（rsync 部署，一个提交一个目录；未提交的改动加 `--force`，目录名带时间戳、永不覆盖）、
-              start_run_bench_host.sh（在基准主机上起/续跑 run）、README.md（运维手册）；
+  remote/     在基准主机上运行实验：
+              deploy_bench_host.sh：rsync 部署，一个提交一个目录、永不覆盖；不加
+                                  `--force` 时用 `git archive HEAD` 导出，只带已提交的内容；
+                                  `--force` 带上工作区的改动，目录名带时间戳
+              start_run_bench_host.sh：在基准主机上起/续跑 run，立即返回；每次启动写
+                                  `<run 目录>/launch.sh`，`bash launch.sh` 原样重复这次启动
+              supervise_run.py：detached supervisor（`supervisor.pid` / `supervisor.log`），
+                                  等 driver 结束，退出码 3 时隔一段时间运行 launch.sh 续跑，
+                                  其他退出码或连续多次没有进展时停下并记录原因
+              README.md：运维手册（部署、import-baseline、启动、续跑、supervisor、查看、审计）；
               driver 与 Harbor 同机，run 目录、分析、审计都留在基准主机
-  audit/      scan_private.py：提交前扫描已跟踪文件里的私有部署信息
+  audit/      audit_run.py：run 完整性审计（设计正本第七节 1–6 项与额外检查，TB 另查读卡
+                                  后缀、invalid 计数、弱模型的 reasoning_effort），只读，
+                                  有 FAIL 时退出码非零
+              scan_private.py：提交前扫描已跟踪文件里的私有部署信息
   smoke/      冒烟与启动工具：gen_searchqa_fake_plan.py（SearchQA 假模型冒烟的计划文件）、
-              launch_detached.py（start_new_session 启动长命令并写 pidfile）、
+              launch_detached.py（在新会话里启动长命令与守候进程后立即返回；写 pidfile，
+              守候进程在命令结束时写 `<pidfile>.exit`）、
               smoke_tb_dryrun.py / smoke_tb_live.py（TB 提交链路的 DRY_RUN 与单题真实冒烟）
 ```
 
@@ -441,9 +451,9 @@ configs/
 6. **失败分类处置**（`infra/reliability.py`）：基础设施异常重试、模型输出格式
    错误按次数修复、配置错误立即停止、代码 bug 立即停止整个流程。失败单元单独
    记录，不得混进成功结果，也不得悄悄丢掉；
-7. **每个 run 跑完先做完整性检查，再使用它的数字**：`expedistill summary`
-   加设计正本第七节"run 跑完后的完整性检查"列出的人工核对项（`scripts/audit/`
-   只有提交前的私有信息扫描）。有问题的 run 一律作废（在 run 目录写 `INVALID.md`
+7. **每个 run 跑完先做完整性检查，再使用它的数字**：`expedistill summary`，
+   再跑 `python scripts/audit/audit_run.py <run 目录>`（设计正本第七节"run 跑完后的
+   完整性检查"）。有问题的 run 一律作废（在 run 目录写 `INVALID.md`
    说明原因），不进结果表，并在 log.md 记录；
 8. **修复只在新 run 目录里重建**，不在有问题的 run 上原地修补；
 9. 长任务前的检查按外层 AGENTS.md 第一节：先 1–2 道题跑通全链路、检查不变量、

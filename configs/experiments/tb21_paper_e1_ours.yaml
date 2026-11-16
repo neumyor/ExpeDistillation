@@ -30,10 +30,11 @@ phases:
   learn:
     author:
       name: subtask_cards
-      typing_chunk_size: 100
-      max_segments_per_card: 8
-      max_chars_per_segment: 1200
+      typing_chunk_size: 40
+      max_segments_per_card: 6
+      max_chars_per_segment: 48000
       write_retry_limit: 2
+      typing_max_chars_per_segment: 4000
     review:
       name: review
       K: 5

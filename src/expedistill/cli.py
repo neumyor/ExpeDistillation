@@ -25,11 +25,12 @@ The subcommands:
     budget escaped a stage) exits 1 too:
     finished units are saved and re-running the same command retries the
     call, but a human should look first -- a supervisor must not loop on it;
-  - InfrastructureError exits EXIT_INFRA_RESUMABLE (3): a stage finished
-    every other unit and some units exhausted their infra retries; every
-    finished unit is on disk, so re-running the same command resumes and
-    retries only those. The distinct code lets a supervisor tell "resume
-    me" apart from "fix me".
+  - InfrastructureError and ResumableShortfall exit EXIT_INFRA_RESUMABLE
+    (3): a stage finished every other unit and some units exhausted their
+    infra retries or failed on model output with runs left; every finished
+    unit is on disk, so re-running the same command resumes and retries
+    only those. The distinct code lets a supervisor tell "resume me" apart
+    from "fix me".
 
   CodeBugError and any unknown exception are code bugs and keep their
   traceback.
@@ -98,6 +99,7 @@ from expedistill.infra.reliability import (
     InfrastructureError,
     ModelOutputError,
     ProviderRefusalError,
+    ResumableShortfall,
 )
 from expedistill.infra.runlock import RunLock, RunLockedError
 from expedistill.infra.manifest import MANIFEST_NAME
@@ -956,7 +958,8 @@ def build_parser() -> argparse.ArgumentParser:
     tables.add_argument("--seed", type=int, default=0)
     tables.add_argument(
         "--metric", default="avg_at_n",
-        choices=("avg_at_n", "avg_at_n_conservative", "pass_at_n"))
+        choices=("avg_at_n", "avg_at_n_conservative",
+                 "avg_at_n_invalid_as_failure", "pass_at_n"))
     tables.set_defaults(func=_cmd_paper_tables)
 
     segmentation = sub.add_parser(
@@ -1001,14 +1004,14 @@ def main(argv: Optional[List[str]] = None) -> int:
               file=sys.stderr)
         return 1
     except ModelOutputError as exc:
-        print(f"error: the model's output stayed malformed after its repair "
+        print(f"error: the model gave no usable output after its repair "
               f"budget: {exc}\n"
               "finished units are saved; inspect the logged responses, then "
               "re-run the same command to retry the failed call:\n"
               f"  {_resume_hint(args)}",
               file=sys.stderr)
         return 1
-    except InfrastructureError as exc:
+    except (InfrastructureError, ResumableShortfall) as exc:
         print(f"error: {exc}\n"
               "finished units are saved; re-run the same command to resume "
               f"(only the failed units are retried):\n  {_resume_hint(args)}",

@@ -2866,6 +2866,7 @@
       "aux": null,
       "avg_at_n": 0.0,
       "avg_at_n_conservative": 0.0,
+      "avg_at_n_invalid_as_failure": 0.0,
       "infra_tasks": [],
       "pass_at_n": 0.0,
       "tasks": 3
@@ -3595,6 +3596,7 @@
       "aux": null,
       "avg_at_n": 0.0,
       "avg_at_n_conservative": 0.0,
+      "avg_at_n_invalid_as_failure": 0.0,
       "infra_tasks": [],
       "pass_at_n": 0.0,
       "tasks": 3
@@ -4201,6 +4203,7 @@
       "aux": null,
       "avg_at_n": 0.0,
       "avg_at_n_conservative": 0.0,
+      "avg_at_n_invalid_as_failure": 0.0,
       "infra_tasks": [],
       "pass_at_n": 0.0,
       "tasks": 1
@@ -4210,6 +4213,7 @@
       "aux": null,
       "avg_at_n": 1.0,
       "avg_at_n_conservative": 1.0,
+      "avg_at_n_invalid_as_failure": 1.0,
       "pass_at_n": 1.0
     },
     "infra_accepted": {
@@ -4226,6 +4230,7 @@
       "aux": null,
       "avg_at_n": 1.0,
       "avg_at_n_conservative": 1.0,
+      "avg_at_n_invalid_as_failure": 1.0,
       "infra_tasks": [],
       "pass_at_n": 1.0,
       "tasks": 1
@@ -4369,6 +4374,7 @@
           "aux": null,
           "avg_at_n": 0.0,
           "avg_at_n_conservative": 0.0,
+          "avg_at_n_invalid_as_failure": 0.0,
           "infra_tasks": [],
           "pass_at_n": 0.0,
           "tasks": 3
@@ -4462,6 +4468,7 @@
           "aux": null,
           "avg_at_n": 0.0,
           "avg_at_n_conservative": 0.0,
+          "avg_at_n_invalid_as_failure": 0.0,
           "infra_tasks": [],
           "pass_at_n": 0.0,
           "tasks": 3
@@ -4551,6 +4558,7 @@
           "aux": null,
           "avg_at_n": 0.0,
           "avg_at_n_conservative": 0.0,
+          "avg_at_n_invalid_as_failure": 0.0,
           "infra_tasks": [],
           "pass_at_n": 0.0,
           "tasks": 1
@@ -4560,6 +4568,7 @@
           "aux": null,
           "avg_at_n": 1.0,
           "avg_at_n_conservative": 1.0,
+          "avg_at_n_invalid_as_failure": 1.0,
           "pass_at_n": 1.0
         },
         "infra_accepted": {
@@ -4576,6 +4585,7 @@
           "aux": null,
           "avg_at_n": 1.0,
           "avg_at_n_conservative": 1.0,
+          "avg_at_n_invalid_as_failure": 1.0,
           "infra_tasks": [],
           "pass_at_n": 1.0,
           "tasks": 1
