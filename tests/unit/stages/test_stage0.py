@@ -484,6 +484,10 @@ def test_a_real_plugin_freezes_its_task_prompt_digests(
     for name in owned:
         assert frozen[name] == prompts.digest(name)
     assert set(frozen) == set(prompts.METHOD_PROMPT_NAMES) | owned
+    # A pack without a grader report section freezes the same pack keys
+    # it did before the field existed.
+    assert set(manifest["prompt_pack"]) == {
+        "vocabulary", "protocol", "playbook_seed", "overrides"}
     # The plugin's declared auxiliary metric is frozen by name.
     assert manifest["aux_metric"] == aux_metric
 
@@ -726,6 +730,47 @@ def test_the_pack_freezes_its_texts_executor_prompts_and_override_targets(
         method: "FAKE_REPLACEMENT"}
     for name in ("FAKE_STEP", "FAKE_REPLACEMENT"):
         assert manifest["prompt_digests"][name] == prompts.digest(name)
+
+
+def test_the_grader_report_section_freezes_its_digest_and_name(
+        monkeypatch, tmp_path):
+    _register(monkeypatch, "FAKE_REPORT", "REPORT:\n{report}")
+    serve_plugin(monkeypatch, _pack_plugin(grader_report_prompt="FAKE_REPORT"))
+    ctx = make_ctx(tmp_path, make_config())
+    stage0_freeze.run(ctx)
+    manifest = load_manifest(ctx.run_dir)
+    assert manifest["prompt_digests"]["FAKE_REPORT"] \
+        == prompts.digest("FAKE_REPORT")
+    assert manifest["prompt_pack"]["grader_report_prompt"] == "FAKE_REPORT"
+
+
+@pytest.mark.parametrize("template, match", [
+    (None, "no prompt of that name is registered"),
+    ("REPORT", "it must have exactly"),
+    ("{report} and {extra}", "it must have exactly"),
+])
+def test_a_bad_grader_report_section_is_refused(
+        monkeypatch, tmp_path, template, match):
+    if template is not None:
+        _register(monkeypatch, "FAKE_REPORT", template)
+    serve_plugin(monkeypatch, _pack_plugin(grader_report_prompt="FAKE_REPORT"))
+    ctx = make_ctx(tmp_path, make_config())
+    with pytest.raises(ConfigError, match=match):
+        stage0_freeze.run(ctx)
+    assert not (ctx.run_dir / "manifest.json").exists()
+
+
+def test_tb_freezes_its_diagnosis_override_and_report_section():
+    from tests.helpers.plugins import ensure_plugin
+
+    plugin = ensure_plugin("tb")
+    digests = stage0_freeze._prompt_digests("tb")
+    for name in ("TB_TRIAL_FAILURE_ANALYSIS", "TB_DIAGNOSIS_GRADER_REPORT"):
+        assert digests[name] == prompts.digest(name)
+    pack = stage0_freeze._frozen_pack(plugin.prompt_pack)
+    assert pack["overrides"]["TRIAL_FAILURE_ANALYSIS"] \
+        == "TB_TRIAL_FAILURE_ANALYSIS"
+    assert pack["grader_report_prompt"] == "TB_DIAGNOSIS_GRADER_REPORT"
 
 
 def test_an_override_with_other_placeholders_is_refused(

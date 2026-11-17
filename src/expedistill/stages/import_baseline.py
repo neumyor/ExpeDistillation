@@ -16,7 +16,11 @@ label (``ids.make_trajectory_id``), and saves the records as Trajectory
 schema 3 in the new run's trajectory store (``Store`` kind
 ``trajectories``: ``<run>/stage1_baseline/trajectories/``, where the
 baseline phase looks for stored units). Every other field is copied
-unchanged. Only the new config's train tasks are imported.
+unchanged, with one addition: given the benchmark's plugin, the execution
+facts its runner records today and the source record lacks (the plugin's
+``backfill_meta``: TB's grader report, read from the verifier log the
+record points to) are added to ``meta``. Only the new config's train tasks
+are imported.
 
 The identity checks run before anything is written; each failure is a
 ConfigError:
@@ -31,14 +35,17 @@ ConfigError:
   exactly one.
 
 ``BASELINE_ORIGIN.md`` at the new run's root records the source, the
-check results, the per-role counts and successes, and one sha256 over the
-sorted per-file sha256 of the imported source files. After the import a
+check results, the per-role counts and successes, the facts added to
+``meta`` and how many records got each, and one sha256 over the sorted
+per-file sha256 of the imported source files (the source files as read,
+before any addition). After the import a
 normal ``run`` treats the baseline units as done and still writes the
 answer sheets, verdicts and summary; a trajectory judged invalid is
 re-dispatched by the phase's ordinary ``invalid_redispatch_limit`` path.
 
-This is a narrow tool for one product, the baseline trajectories; it
-reads nothing else of the source run.
+This is a narrow tool for one product, the baseline trajectories; of the
+source run it reads nothing else, and outside it only what the plugin's
+``backfill_meta`` reads.
 """
 
 import hashlib
@@ -81,11 +88,13 @@ Key = Tuple[str, str, int]
 
 
 def import_baseline(*, source_run: Any, config_path: Any,
-                    run_dir: Any) -> Dict[str, Any]:
+                    run_dir: Any, plugin: Any = None) -> Dict[str, Any]:
     """Write ``source_run``'s baseline trajectories for the new config's
     train tasks into the fresh ``run_dir``; return a JSON-safe summary
     (``run_dir``, ``source_run``, ``phase_label``, ``trajectories``,
-    ``by_role``, ``source_files_sha256``)."""
+    ``by_role``, ``backfilled``, ``source_files_sha256``). ``plugin`` is
+    the benchmark's plugin, whose ``backfill_meta`` adds what the source
+    records lack; without it nothing is added."""
     source_run = Path(source_run).expanduser().resolve()
     run_path = Path(run_dir)
     try:
@@ -98,8 +107,14 @@ def import_baseline(*, source_run: Any, config_path: Any,
     train = [ids.make_task_id(config.benchmark, task)
              for task in config.split["train"]]
     selected = _select(source_run, config, train)
-    trajectories = [_rewritten(raw, label, key)
-                    for key, (_, raw) in sorted(selected.items())]
+    backfill = plugin.backfill_meta if plugin is not None else None
+    backfilled: Dict[str, int] = {}
+    trajectories = []
+    for key, (_, raw) in sorted(selected.items()):
+        added = dict(backfill(raw.get("meta") or {})) if backfill else {}
+        for name in added:
+            backfilled[name] = backfilled.get(name, 0) + 1
+        trajectories.append(_rewritten(raw, label, key, added))
     digest = _files_digest([path for path, _ in selected.values()])
 
     with RunLock(run_path):
@@ -111,7 +126,8 @@ def import_baseline(*, source_run: Any, config_path: Any,
         (run_path / BASELINE_ORIGIN_NAME).write_text(
             _render_origin(source_run=source_run, config_path=config_path,
                            label=label, checks=checks, train=train,
-                           by_role=by_role, digest=digest),
+                           by_role=by_role, backfilled=backfilled,
+                           total=len(trajectories), digest=digest),
             encoding="utf-8")
     return {
         "run_dir": str(run_path),
@@ -119,6 +135,7 @@ def import_baseline(*, source_run: Any, config_path: Any,
         "phase_label": label,
         "trajectories": len(trajectories),
         "by_role": by_role,
+        "backfilled": dict(sorted(backfilled.items())),
         "source_files_sha256": digest,
     }
 
@@ -292,11 +309,21 @@ def _select(source_run: Path, config: ExperimentConfig,
     return {key: items[0] for key, items in found.items()}
 
 
-def _rewritten(raw: Mapping[str, Any], label: str, key: Key) -> Trajectory:
-    """The record under its phase-tagged id, every other field unchanged."""
+def _rewritten(raw: Mapping[str, Any], label: str, key: Key,
+               added: Mapping[str, Any]) -> Trajectory:
+    """The record under its phase-tagged id, every other field unchanged
+    but for the ``added`` meta facts, which are new keys only."""
     data = dict(raw)
     data["trajectory_id"] = ids.make_trajectory_id(label, *key)
     data["schema_version"] = TRAJECTORY_SCHEMA_VERSION
+    if added:
+        meta = dict(raw.get("meta") or {})
+        taken = sorted(set(added) & set(meta))
+        if taken:
+            raise ConfigError(
+                f"source trajectory {raw.get('trajectory_id')!r} already "
+                f"records {taken}; a backfill adds missing facts only")
+        data["meta"] = {**meta, **added}
     trajectory = Trajectory.from_dict(data)
     written = trajectory.to_dict()
     if written != data:
@@ -347,13 +374,15 @@ def _require_fresh_run_dir(run_dir: Path) -> None:
 def _render_origin(*, source_run: Path, config_path: Any, label: str,
                    checks: Sequence[str], train: Sequence[str],
                    by_role: Mapping[str, Mapping[str, int]],
+                   backfilled: Mapping[str, int], total: int,
                    digest: str) -> str:
     lines = [
         "# 复用的摸底轨迹（BASELINE_ORIGIN）",
         "",
         f"- 源 run：`{source_run}`",
         f"- 新配置：`{config_path}`",
-        f"- 摸底相位：`{label}`（轨迹编号按这个标签改写，其余字段原样）",
+        f"- 摸底相位：`{label}`（轨迹编号按这个标签改写，其余字段原样，"
+        "只在 meta 里补充下面列出的执行事实）",
         f"- 导入的训练题：{len(train)} 道",
         "",
         "## 核对结果（全部通过）",
@@ -371,6 +400,13 @@ def _render_origin(*, source_run: Path, config_path: Any, label: str,
     ]
     lines += [f"| {role} | {counts['count']} | {counts['successes']} |"
               for role, counts in by_role.items()]
+    lines += ["", "## 补充的执行事实", ""]
+    if backfilled:
+        lines += ["| meta 键 | 补上的条数 | 未能补上的条数 |", "|---|---|---|"]
+        lines += [f"| `{name}` | {count} | {total - count} |"
+                  for name, count in sorted(backfilled.items())]
+    else:
+        lines.append("无（插件没有可补充的执行事实，或源轨迹都已记录）")
     lines += [
         "",
         "## 源文件摘要",

@@ -107,7 +107,7 @@ def test_requirements_name_every_labelled_part():
 def test_the_pack_overrides_the_playbook_update_with_matching_slots():
     plugin = TBPlugin()
     pack = plugin.prompt_pack
-    assert pack.overrides == {"PLAYBOOK_UPDATE": PLAYBOOK_PROMPT_NAME}
+    assert pack.overrides["PLAYBOOK_UPDATE"] == PLAYBOOK_PROMPT_NAME
     assert pack.playbook_facts([]) == "(no scored baseline trials)"
     assert [check.name for check in pack.playbook_checks] \
         == [check.name for check in playbook_requirements()]

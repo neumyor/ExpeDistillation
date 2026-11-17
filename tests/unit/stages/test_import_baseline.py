@@ -160,12 +160,76 @@ def test_the_cli_prints_one_json_line_and_refuses_a_second_import(
     argv = ["import-baseline", "--source-run", str(source), "--config",
             str(_write_config(tmp_path)), "--run-dir", str(tmp_path / "new")]
 
-    assert cli.main(argv) == 0
-    line = capsys.readouterr().out.strip()
-    assert line.startswith("import-baseline: ")
-    assert json.loads(line[len("import-baseline: "):])["trajectories"] == 6
-    assert cli.main(argv) == 1
-    assert "already holds" in capsys.readouterr().err
+    # The CLI resolves the config's benchmark plugin (its backfill hook).
+    with installed_plugin(GoldenPlugin()):
+        assert cli.main(argv) == 0
+        line = capsys.readouterr().out.strip()
+        assert line.startswith("import-baseline: ")
+        summary = json.loads(line[len("import-baseline: "):])
+        assert summary["trajectories"] == 6
+        assert summary["backfilled"] == {}
+        assert cli.main(argv) == 1
+        assert "already holds" in capsys.readouterr().err
+
+
+class _ReportBackfill:
+    """A plugin stand-in whose backfill recovers a report for weak records
+    only, the way a runner recovers facts for some records but not all."""
+
+    def backfill_meta(self, meta):
+        if "report_of" in meta:
+            return {}
+        return ({"grader_report": "E  assert 0"}
+                if meta.get("workdir") == "/weak" else {})
+
+
+def test_the_plugin_backfill_adds_missing_meta_facts(tmp_path):
+    records = [
+        _source_record(task, role, 0,
+                       meta={"workdir": f"/{role}"})
+        for task in SOURCE_TRAIN for role in ("strong", "weak")]
+    source = _write_source(tmp_path, records=records)
+
+    summary = import_baseline(source_run=source,
+                              config_path=_write_config(tmp_path),
+                              run_dir=tmp_path / "new",
+                              plugin=_ReportBackfill())
+
+    assert summary["backfilled"] == {"grader_report": 3}
+    store = Store(tmp_path / "new")
+    for trajectory_id in store.ids("trajectories"):
+        meta = read_json(store.path_for("trajectories", trajectory_id))["meta"]
+        if meta["workdir"] == "/weak":
+            assert meta == {"workdir": "/weak", "grader_report": "E  assert 0"}
+        else:
+            assert meta == {"workdir": "/strong"}
+    text = (tmp_path / "new" / BASELINE_ORIGIN_NAME).read_text("utf-8")
+    assert "| `grader_report` | 3 | 3 |" in text
+    # The digest is over the source files as read, before any addition.
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert _import(plain, _write_source(plain, records=records))[
+        "source_files_sha256"] == summary["source_files_sha256"]
+
+
+def test_without_a_plugin_nothing_is_added(tmp_path):
+    summary = _import(tmp_path, _write_source(tmp_path))
+    assert summary["backfilled"] == {}
+    text = (tmp_path / "new" / BASELINE_ORIGIN_NAME).read_text("utf-8")
+    assert "无（插件没有可补充的执行事实" in text
+
+
+def test_a_backfill_never_overwrites_a_recorded_fact(tmp_path):
+    class Overwrite:
+        def backfill_meta(self, meta):
+            return {"workdir": "/rewritten"}
+
+    source = _write_source(tmp_path)
+    with pytest.raises(ConfigError, match="adds missing facts only"):
+        import_baseline(source_run=source,
+                        config_path=_write_config(tmp_path),
+                        run_dir=tmp_path / "new", plugin=Overwrite())
+    assert _wrote_nothing(tmp_path)
 
 
 # ---------------------------------------------------------------------------

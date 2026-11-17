@@ -13,7 +13,11 @@ import pytest
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.registry import _reset_registry, get_plugin
 from expedistill.benchmarks.tb import TBPlugin
-from expedistill.benchmarks.tb.plugin import result_facts, retryable_unscored
+from expedistill.benchmarks.tb.plugin import (
+    grader_report,
+    result_facts,
+    retryable_unscored,
+)
 from expedistill.benchmarks.tb.protocol import (
     MOUNT_PLACEHOLDER, READ_SUFFIX_FILENAME, render_suffix)
 from expedistill.benchmarks.tb.remote import ENV_HOST, ENV_KEY, ENV_ROOT, RemoteLink
@@ -224,6 +228,73 @@ def test_runner_env_is_the_submission_contract(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# The grader report (pure) and its backfill into older records
+# ---------------------------------------------------------------------------
+
+def test_the_grader_report_keeps_what_the_tests_rejected():
+    report = grader_report(fixture_text("verifier_failed.txt"))
+    assert report.splitlines() == [
+        "E       FileNotFoundError: [Errno 2] No such file or directory: "
+        "'/app/answer.txt'",
+        "",
+        "FAILED ../tests/test_outputs.py::test_command_output_content_example"
+        " - FileNo...",
+        "",
+        "============================== 1 failed in 0.04s "
+        "===============================",
+    ]
+    # The installs before the session are dropped.
+    assert "Installed" not in report
+
+
+def test_a_passing_or_empty_log_reports_only_its_totals_or_nothing():
+    assert grader_report(fixture_text("verifier_collected.txt")) == (
+        "============================== 5 passed in 12.30s "
+        "==============================")
+    assert grader_report(None) == ""
+    assert grader_report("") == ""
+    assert grader_report("pip install ok\nno pytest here\n") == ""
+
+
+def test_the_grader_report_is_bounded():
+    many = "\n".join(f"E   assert {i} == 0 " + "x" * 400 for i in range(200))
+    log = ("============================= test session starts "
+           "==============================\n" + many
+           + "\n============================== 200 failed in 1.00s "
+           "===============================\n")
+    report = grader_report(log)
+    assert len(report) <= 3004
+    assert report.endswith("...")
+    assert all(len(line) <= 304 for line in report.splitlines())
+
+
+def test_backfill_reads_the_verifier_log_an_older_record_points_to(tmp_path):
+    log = tmp_path / "test-stdout.txt"
+    log.write_text(fixture_text("verifier_failed.txt"), encoding="utf-8")
+    plugin = TBPlugin()
+    added = plugin.backfill_meta({"remote": {"verifier_log": str(log)}})
+    assert added == {
+        "grader_report": grader_report(fixture_text("verifier_failed.txt"))}
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    (workdir / "verifier_test_stdout.txt").write_text(
+        fixture_text("verifier_failed.txt"), encoding="utf-8")
+    assert plugin.backfill_meta({"local": {"workdir": str(workdir)}}) \
+        == added
+
+
+def test_backfill_adds_nothing_it_cannot_read_or_already_has(tmp_path):
+    plugin = TBPlugin()
+    assert plugin.backfill_meta({"grader_report": "kept"}) == {}
+    assert plugin.backfill_meta({}) == {}
+    assert plugin.backfill_meta(
+        {"remote": {"verifier_log": str(tmp_path / "gone.txt")}}) == {}
+    # A relative path names no file the reader can be sure of.
+    assert plugin.backfill_meta(
+        {"local": {"workdir": "runs/old/work/x"}}) == {}
+
+
+# ---------------------------------------------------------------------------
 # run(): end to end against the fake link
 # ---------------------------------------------------------------------------
 
@@ -248,6 +319,8 @@ def test_run_success_end_to_end(tmp_path):
     assert meta["skipped_other"] == 2
     assert meta["skipped_parse_failures"] == meta["skipped_handoffs"] == 0
     assert meta["verifier_ran"] is True
+    assert meta["grader_report"] == grader_report(
+        fixture_text("verifier_collected.txt"))
     assert meta["remote"]["result"] == f"{TRIAL}/result.json"
     assert meta["timing"]["duration_s"] >= 0
     # One submit command with the runner, detached, echoing the pid.
@@ -372,6 +445,8 @@ def test_run_model_timeout_result_is_unscored_not_retried(tmp_path):
     assert outcome.meta["exception_type"] == "AgentTimeoutError"
     assert outcome.meta["exception_message"]
     assert outcome.meta["reward"] is None
+    # No verifier log came back: an empty report, never a missing key.
+    assert outcome.meta["grader_report"] == ""
 
 
 def test_run_verifier_log_fetch_failure_is_infra_and_retried(tmp_path):

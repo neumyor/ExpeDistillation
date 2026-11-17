@@ -151,10 +151,11 @@ src/expedistill/
                           让整条相位序列在真实 benchmark 插件上零网络运行（smoke）
   benchmarks/             第 3 层：benchmark 插件
     base.py               插件接口：load_tasks / run / view_rules / task_prompt_name；
-                          PromptPack 与 PlaybookRequirement；可选能力
-                          skill_folder_prompt_name（技能文件夹执行，None=不支持）、
-                          verdict_rule（缺省 `scorer`）、aux_metric_name、
-                          playbook_in_skills_block
+                          PromptPack（含可选的 grader_report_prompt）与
+                          PlaybookRequirement；可选能力 skill_folder_prompt_name
+                          （技能文件夹执行，None=不支持）、verdict_rule（缺省
+                          `scorer`）、aux_metric_name、playbook_in_skills_block、
+                          backfill_meta（import-baseline 给旧轨迹补执行事实，缺省不补）
     react_loop.py         本地 benchmark 共用的逐步 ReAct 执行循环
     skill_folder.py       本地 benchmark 的渐进式技能披露：<available_skills>
                           目录与 ReadSkill[<位置>] 读取（循环自己响应，
@@ -162,12 +163,15 @@ src/expedistill/
     aux.py                辅助指标的插件接线（声明与打分器包装）
     registry.py           按名字取插件
     tb/                   TerminalBench：plugin.py 插件（远程 Harbor 提交、取回、
-                          技能文件夹上传）；remote.py 远程主机与本机两种传输；
+                          技能文件夹上传；从判分日志摘取 grader_report 存进轨迹
+                          meta）；remote.py 远程主机与本机两种传输；
                           trajectory.py 从 Harbor 的 trajectory.json 重建逐步轨迹；
                           protocol.py 执行侧全部文本：Terminus 模板副本、
                           读卡规则、工作纪律与后缀拼装（上传为
                           SKILL_READ_SUFFIX.md，playbook 在最前面）；
                           playbook.py 摸底事实提取与 TB_PLAYBOOK_UPDATE；
+                          diagnose.py 诊断的替换提示词 TB_TRIAL_FAILURE_ANALYSIS
+                          与判分报告段 TB_DIAGNOSIS_GRADER_REPORT；
                           prompt_pack.py 提示词包
     searchqa/             适配外层 benchmark/searchqa-eval/：plugin.py 插件；
                           env.py 评测环境与判分器的加载；prompt_pack.py 提示词包
@@ -281,8 +285,9 @@ src/expedistill/
                           playbook、演化技能库），按 A–E 五组并行，账本按确定顺序提交
     fork_run.py           分叉工具：把已完结 run 的前 K 个相位与它们产生的 run 级对象
                           拷进新 run，新配置从第 K+1 个相位接着跑（`fork-run` 子命令）
-    import_baseline.py    复用摸底：把已有 run 的摸底轨迹改写编号后写进新 run，新 run 的
-                          摸底零执行（`import-baseline` 子命令）
+    import_baseline.py    复用摸底：把已有 run 的摸底轨迹改写编号后写进新 run，meta 里
+                          补上插件 backfill_meta 取回的执行事实，新 run 的摸底零执行
+                          （`import-baseline` 子命令）
     import_bank.py        把外部方法的产物（markdown / 技能文件夹 / notes）写成
                           测试专用 run 的技能库（`import-bank` 子命令）
     analysis_common.py    只读分析的共用约束：输出目录不得在被读的 run 里，
@@ -497,12 +502,19 @@ configs/
 
 ### 新增或修改 prompt
 
-1. prompt 是 `prompts/` 下的具名常量，带一句话说明用途和所属积木；
+1. 每个 prompt 都是具名常量，带一句话说明用途和所属积木。各 benchmark 共用的方法
+   提示词放在 `prompts/` 下，benchmark 之间的差异只经词汇槽与 `protocol` 进入；
+   只属于某个 benchmark 的提示词放在 `benchmarks/<名字>/` 下（见第 4 条）。
+   `tests/unit/prompts/test_freeze.py` 只允许这两处登记；
 2. 每个 prompt 的 digest 写进 manifest。**改一个字也是新实验**，必须新建 run
    目录，不得在旧 run 上续跑；
 3. 输出格式（JSON 字段）与 prompt 放在一起定义，两者一起改；
-4. benchmark 专用的提示词（执行提示词、替换提示词）登记在 `benchmarks/<名字>/`，
-   并写进该 benchmark 提示词包的 `executor_prompts` 或 `overrides`。
+4. benchmark 专用的提示词登记在 `benchmarks/<名字>/`，并在插件或提示词包里声明，
+   冻结步只冻结声明过的：任务提示词（`task_prompt_name`）、技能文件夹提示词
+   （`skill_folder_prompt_name`）、执行提示词（`executor_prompts`）、替换某个方法
+   提示词的提示词（`overrides`，占位符必须与被替换的相同）、诊断的判分报告段
+   （`grader_report_prompt`，只有一个 `{report}` 槽）。没有声明的登记会被
+   `test_freeze.py` 拒绝。
 
 ### 修改数据对象
 

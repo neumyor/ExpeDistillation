@@ -258,6 +258,9 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
         names.add(extra)
     _check_overrides(benchmark, pack.overrides)
     names.update(pack.overrides.values())
+    if pack.grader_report_prompt is not None:
+        _check_grader_report_prompt(benchmark, pack.grader_report_prompt)
+        names.add(pack.grader_report_prompt)
     return {
         name: (prompts.digest(name) if name in prompts.PROMPTS else None)
         for name in sorted(names)
@@ -291,6 +294,21 @@ def _check_overrides(benchmark: str, overrides: Any) -> None:
                 f"{sorted(actual - expected)}")
 
 
+def _check_grader_report_prompt(benchmark: str, name: str) -> None:
+    """The grader report section is registered and fills exactly one
+    ``{report}`` slot, the only variable the diagnosis hands it."""
+    if name not in prompts.PROMPTS:
+        raise ConfigError(
+            f"benchmark {benchmark!r} declares grader_report_prompt "
+            f"{name!r} but no prompt of that name is registered")
+    if _placeholders(name) != {"report"}:
+        raise ConfigError(
+            f"benchmark {benchmark!r} declares grader_report_prompt "
+            f"{name!r}, whose placeholders are "
+            f"{sorted(_placeholders(name))}; it must have exactly "
+            "{report}")
+
+
 def build_manifest(config: Any, tasks: Sequence[Any], *,
                    split: Dict[str, Sequence[str]]) -> Dict[str, Any]:
     """The frozen manifest payload (B4 ``freeze``'s input), pure: the same
@@ -321,12 +339,17 @@ def build_manifest(config: Any, tasks: Sequence[Any], *,
 def _frozen_pack(pack: Any) -> Dict[str, Any]:
     """The manifest form of a prompt pack: its texts. The named prompts
     freeze through ``prompt_digests``; the facts and checks are code."""
-    return {
+    frozen = {
         "vocabulary": pack.vocabulary.to_dict(),
         "protocol": pack.protocol,
         "playbook_seed": pack.playbook_seed,
         "overrides": dict(pack.overrides),
     }
+    # Written only when declared, so a pack without one (ALFWorld,
+    # SearchQA) freezes the same bytes it did before the field existed.
+    if pack.grader_report_prompt is not None:
+        frozen["grader_report_prompt"] = pack.grader_report_prompt
+    return frozen
 
 
 def _resolve_phase_methods(config: Any) -> None:

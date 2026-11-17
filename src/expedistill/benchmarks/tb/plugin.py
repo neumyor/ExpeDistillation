@@ -154,6 +154,7 @@ from expedistill.infra.store import write_json
 
 __all__ = [
     "TBPlugin",
+    "grader_report",
     "result_facts",
     "retryable_unscored",
     "runner_env",
@@ -281,6 +282,58 @@ def result_facts(result: Dict[str, Any],
         "exception_type": exception.get("exception_type"),
         "exception_message": _short(exception.get("exception_message")),
     }
+
+
+#: The grader report's bounds: what the failure diagnosis reads.
+_REPORT_MAX_CHARS = 3000
+_REPORT_MAX_ERROR_LINES = 40
+_REPORT_MAX_SUMMARY_LINES = 30
+_REPORT_LINE_CHARS = 300
+_PYTEST_SESSION_RE = re.compile(r"^=+ test session starts =+$", re.MULTILINE)
+_PYTEST_SUMMARY_RE = re.compile(r"^=+ short test summary info =+$")
+_PYTEST_TOTALS_RE = re.compile(
+    r"^=+ .*\b(passed|failed|error|errors|skipped)\b.* in [0-9.]+s.*=+$")
+
+
+def grader_report(verifier_log: Optional[str]) -> str:
+    """The part of one trial's verifier log that says what was rejected:
+    the pytest failure lines (``E ...``), the short test summary and the
+    totals line of the last pytest session, bounded in size. Empty when the
+    log is missing or holds no pytest session. Pure.
+
+    The package installs before the session (apt, pip) are dropped: they
+    say nothing about the deliverable and are most of a log's length."""
+    if not verifier_log:
+        return ""
+    starts = list(_PYTEST_SESSION_RE.finditer(verifier_log))
+    if not starts:
+        return ""
+    lines = verifier_log[starts[-1].start():].splitlines()
+
+    def clipped(line: str) -> str:
+        line = line.rstrip()
+        return (line if len(line) <= _REPORT_LINE_CHARS
+                else line[:_REPORT_LINE_CHARS] + " ...")
+
+    errors = [clipped(line) for line in lines
+              if line.startswith("E ")][:_REPORT_MAX_ERROR_LINES]
+    summary: List[str] = []
+    totals = ""
+    in_summary = False
+    for line in lines:
+        if _PYTEST_TOTALS_RE.match(line.strip()):
+            totals = line.strip()
+            in_summary = False
+        elif _PYTEST_SUMMARY_RE.match(line.strip()):
+            in_summary = True
+        elif in_summary and line.strip():
+            summary.append(clipped(line))
+    parts = ["\n".join(errors), "\n".join(summary[:_REPORT_MAX_SUMMARY_LINES]),
+             totals]
+    report = "\n\n".join(part for part in parts if part)
+    if len(report) > _REPORT_MAX_CHARS:
+        report = report[:_REPORT_MAX_CHARS].rstrip() + "\n..."
+    return report
 
 
 def retryable_unscored(facts: Dict[str, Any]) -> bool:
@@ -1394,6 +1447,30 @@ class TBPlugin(BenchmarkPlugin):
     # Completion
     # ------------------------------------------------------------------
 
+    def backfill_meta(self, meta: Mapping[str, Any]) -> Dict[str, Any]:
+        """The grader report of a trajectory recorded before the runner
+        stored one, read from the verifier log its ``meta`` points to.
+
+        Only logs readable as local files count: the benchmark host's
+        Harbor log (``meta["remote"]["verifier_log"]``, readable where the
+        driver runs next to Harbor) or the copy in an absolute local work
+        directory. Nothing readable means nothing to add."""
+        if "grader_report" in meta:
+            return {}
+        remote = meta.get("remote")
+        local = meta.get("local")
+        candidates = []
+        if isinstance(remote, Mapping) and remote.get("verifier_log"):
+            candidates.append(Path(str(remote["verifier_log"])))
+        if isinstance(local, Mapping) and local.get("workdir"):
+            candidates.append(Path(str(local["workdir"]))
+                              / "verifier_test_stdout.txt")
+        for path in candidates:
+            if path.is_absolute() and path.is_file():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                return {"grader_report": grader_report(text)}
+        return {}
+
     def _finish(self, link: RemoteLink, workdir: Path, meta: Dict[str, Any],
                 result_remote: str, started: float, polls: int, handle: Any,
                 run_id: str, task_name: str) -> RunOutcome:
@@ -1450,6 +1527,9 @@ class TBPlugin(BenchmarkPlugin):
                 f"TB trial {run_id}: verifier log fetch failed "
                 f"(refetches on retry): {verifier_fetch_error}") from None
         meta.update(facts)
+        # What the hidden tests rejected, for the learn phase's diagnosis;
+        # a fact like the reward, so it is recorded for every trial.
+        meta["grader_report"] = grader_report(verifier_log)
         reward = facts["reward"]
 
         if retryable_unscored(facts):

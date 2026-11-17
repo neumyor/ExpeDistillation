@@ -325,8 +325,9 @@ class _Learn:
                         item, self.facts[item.sheet_id],
                         handle=handles[kind],
                         instruction_for=self.instruction_for,
-                        view_rules=self.view_rules, usage=self.ctx.usage,
-                        run_dir=self.ctx.run_dir)
+                        view_rules=self.view_rules,
+                        report_prompt=self.pack.grader_report_prompt,
+                        usage=self.ctx.usage, run_dir=self.ctx.run_dir)
                     with self.lock:
                         append_jsonl(self.phase_dir / FINDINGS_NAME,
                                      finding.to_dict())

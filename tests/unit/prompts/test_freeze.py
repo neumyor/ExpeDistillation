@@ -9,8 +9,8 @@ outside the two homes these tests pin:
    would register only when something else happens to import it, and its
    name would drift in and out of manifests);
 2. ``register(PromptSpec(...))`` appears only in ``prompts/`` and in
-   ``benchmarks/<name>/`` -- and each benchmark package registers at most
-   ONE prompt, its own task prompt (a second registration would either
+   ``benchmarks/<name>/`` -- and a benchmark package registers only the
+   prompts its plugin declares (an undeclared registration would either
    miss the freeze entirely or leak a benchmark-private prompt into
    every manifest of that benchmark).
 """
@@ -125,7 +125,7 @@ def test_each_benchmark_registers_only_prompts_its_plugin_declares():
 
     A plugin declares the prompts it runs under: ``task_prompt_name``, the
     optional ``skill_folder_prompt_name``, and its prompt pack's
-    ``executor_prompts`` and override targets.
+    ``executor_prompts``, override targets and ``grader_report_prompt``.
     Stage 0 freezes exactly those. A registration outside the declared set
     would either miss the freeze or leak a benchmark-private prompt into
     every manifest of that benchmark.
@@ -141,6 +141,8 @@ def test_each_benchmark_registers_only_prompts_its_plugin_declares():
             declared.add(plugin.skill_folder_prompt_name)
         declared.update(plugin.prompt_pack.executor_prompts)
         declared.update(plugin.prompt_pack.overrides.values())
+        if plugin.prompt_pack.grader_report_prompt is not None:
+            declared.add(plugin.prompt_pack.grader_report_prompt)
         registered = set()
         for path in package.glob("*.py"):
             registered |= _registered_names(path)

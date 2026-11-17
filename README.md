@@ -286,6 +286,10 @@ runs/<实验名>_<时间>/
 | `playbook_facts` | 从摸底答卷计算统计事实的函数（可以没有） |
 | `playbook_checks` | playbook 必须包含的部分 |
 | `overrides` | 用本 benchmark 自己的提示词替换某个方法提示词（例如 `PLAYBOOK_UPDATE`） |
+| `grader_report_prompt` | 诊断时接在任务说明之后的判分报告段（可以没有；TB 有） |
+
+方法提示词在 `prompts/`，各 benchmark 共用；只属于某个 benchmark 的提示词都登记在
+`benchmarks/<名字>/`，并在插件或提示词包里声明，冻结步只冻结声明过的。
 
 调整提示词包，就能改变技能、画像、playbook 的写法，以及执行者看到的内容。
 
@@ -405,8 +409,10 @@ set -a; . ./.env; set +a
 
 它核对 benchmark、两个执行模型名、两臂采样次数一致，新配置的训练题都在源 run 里且每个
 （任务、角色、序号）恰好一条，不过任何一条就报配置错误、什么都不写；通过后把源 run 的摸底
-轨迹改写编号写进新 run，并写 `BASELINE_ORIGIN.md` 记录来源与核对结果。之后照常 `run`，
-摸底相位零模型调用。
+轨迹改写编号写进新 run，并写 `BASELINE_ORIGIN.md` 记录来源与核对结果。插件能从源轨迹
+指向的文件取回、源轨迹又没有记录的执行事实（TB 的判分报告）会补进轨迹的 `meta`，条数也写进
+`BASELINE_ORIGIN.md`；这只在判分日志能作为本机文件读到时生效，即在基准主机上执行导入。
+之后照常 `run`，摸底相位零模型调用。
 
 长时间实验建议用 `scripts/run/run_experiment.sh <配置名>`：它加载 `.env`，把 driver
 脱离当前终端启动，并写出 pidfile 与续跑命令。判断任务是否还活着请读 pidfile，

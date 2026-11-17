@@ -6,6 +6,7 @@ pins that the prompts render to the same wording (line wrapping aside).
 """
 
 from expedistill.benchmarks.base import PromptPack
+from expedistill.benchmarks.tb.diagnose import GRADER_REPORT_PROMPT_NAME
 from expedistill.benchmarks.tb.playbook import (
     PLAYBOOK_PROMPT_NAME,
     facts_from_sheets,
@@ -79,5 +80,7 @@ PROMPT_PACK = PromptPack(
     playbook_seed="",
     playbook_facts=facts_from_sheets,
     playbook_checks=tuple(playbook_requirements()),
-    overrides={"PLAYBOOK_UPDATE": PLAYBOOK_PROMPT_NAME},
+    overrides={"PLAYBOOK_UPDATE": PLAYBOOK_PROMPT_NAME,
+               "TRIAL_FAILURE_ANALYSIS": "TB_TRIAL_FAILURE_ANALYSIS"},
+    grader_report_prompt=GRADER_REPORT_PROMPT_NAME,
 )

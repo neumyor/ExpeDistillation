@@ -568,7 +568,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | `SEGMENT` | segmenter | 学习相位的切段（失败轨迹与强模型轨迹） |
 | `SUBTASK_TYPING` | segmenter | 学习相位把新段归入子任务类型 |
 | `CARDS_CORRECTION` | segmenter / author | 归类或写卡回复不合格时填进 `correction_note` 的重问说明 |
-| `TRIAL_FAILURE_ANALYSIS` | author | 学习相位诊断一张失败的摸底或练习答卷 |
+| `TRIAL_FAILURE_ANALYSIS` | author | 学习相位诊断一张失败的摸底或练习答卷（TB 用 `TB_TRIAL_FAILURE_ANALYSIS` 替换） |
 | `DIAGNOSIS_CORRECTION` | author | 诊断回复不可用时填进 `correction_note` 的重问说明 |
 | `PROFILE_UPDATE` / `PLAYBOOK_UPDATE` | author | 每个学习相位的文本演化 |
 | `EVOLVE_CORRECTION` / `PLAYBOOK_PARTS_CORRECTION` | author | 文本演化回复不合格时填进 `correction_note` 的重写说明 |
@@ -590,7 +590,8 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | `playbook_seed` | playbook 的初始文本 | 空 | 空 | 空 |
 | `playbook_facts` | 从摸底答卷计算统计事实的函数 | `tb/playbook.py` | `alfworld/playbook.py` | 无 |
 | `playbook_checks` | playbook 必须包含的部分（`PlaybookRequirement`） | 5 项 | 6 项 | 无 |
-| `overrides` | 方法提示词名 → 本 benchmark 的替换提示词名 | `PLAYBOOK_UPDATE` → `TB_PLAYBOOK_UPDATE` | `PLAYBOOK_UPDATE` → `ALFWORLD_PLAYBOOK_UPDATE` | 无 |
+| `overrides` | 方法提示词名 → 本 benchmark 的替换提示词名 | `PLAYBOOK_UPDATE` → `TB_PLAYBOOK_UPDATE`；`TRIAL_FAILURE_ANALYSIS` → `TB_TRIAL_FAILURE_ANALYSIS` | `PLAYBOOK_UPDATE` → `ALFWORLD_PLAYBOOK_UPDATE` | 无 |
+| `grader_report_prompt` | 诊断的判分报告段（一个 `{report}` 槽）；答卷记录了判分报告（`metrics.grader_report`）时，诊断把这一段接在任务说明之后 | `TB_DIAGNOSIS_GRADER_REPORT` | 无 | 无 |
 
 `ALFWORLD_PLAYBOOK_UPDATE` 的搜索规则里有一条两物体任务的规则（2026-11-15 起，"P1"）：
 两物体任务算两次搜索。交付第一件、目的地只显示一件之后，第二次搜索从顺序的第一个种类重来，
@@ -602,12 +603,18 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 `protocol` 填进句柄的 `prompt_defaults`，把 `overrides` 填进 `prompt_aliases`；
 `call_model` 取提示词时先查 `prompt_aliases`，再按"`GENERIC` 缺省 < 句柄 `prompt_defaults`
 < 调用方变量"的优先级填槽。冻结步检查：每个执行提示词与替换提示词都已注册，替换提示词的
-占位符集合与被替换的提示词相同。
+占位符集合与被替换的提示词相同；声明了判分报告段的，它已注册且占位符恰好是 `{report}`。
+学习相位把提示词包的 `grader_report_prompt` 传给诊断，方法层只按名字取提示词。
+
+提示词放在哪里：各 benchmark 共用的方法提示词在 `prompts/`，benchmark 之间的差异只经
+`vocabulary` 与 `protocol` 进入；只属于某个 benchmark 的提示词（执行提示词、替换提示词、
+判分报告段）登记在 `benchmarks/<名字>/`，并在插件或提示词包里声明。
 
 **冻结面**：manifest 冻结全部已注册方法 prompt 的 digest（`prompts.METHOD_PROMPT_NAMES`），
-外加本 benchmark 的任务提示词、技能文件夹提示词、提示词包的执行提示词与替换提示词；
-提示词包的 `vocabulary`、`protocol`、`playbook_seed`、`overrides` 原文写进 manifest 的
-`prompt_pack`；`playbook_facts` 与 `playbook_checks` 是代码，由正式 run 固定的提交覆盖。
+外加本 benchmark 的任务提示词、技能文件夹提示词、提示词包的执行提示词、替换提示词与判分
+报告段；提示词包的 `vocabulary`、`protocol`、`playbook_seed`、`overrides` 原文写进 manifest
+的 `prompt_pack`，声明了 `grader_report_prompt` 的另写它的名字（没有声明的包写出的键与
+引入这个字段之前相同）；`playbook_facts` 与 `playbook_checks` 是代码，由正式 run 固定的提交覆盖。
 两条静态测试守住冻结面：`prompts/*.py` 每个模块必须进 `prompts/__init__.py` 的 import
 清单；prompt 注册只允许出现在 `prompts/` 与 `benchmarks/<名字>/`。改一个字的 prompt
 文本即视为新实验，必须新建 run 目录。
@@ -630,7 +637,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 | 工具 | 回答什么 | 模型调用 |
 |---|---|---|
 | `import-bank`（`stages/import_bank.py`） | 把其他方法产出的技能（markdown 文档、`<名字>/SKILL.md` 文件夹、notes 行）写成测试专用 run 的 run 根技能库（状态 `active`），技能编号 `import/<来源>/<键>`，原文存进 `Skill.verbatim_text` | 无 |
-| `import-baseline`（`stages/import_baseline.py`） | 在新 run 第一次 `run` 之前，把已有 run 的摸底轨迹（schema 2，编号不带相位）改写编号（相位标签取新配置序列第一项）后以 schema 3 写进新 run 的轨迹存储，只导入新配置的 train 任务，其余字段原样；新 run 的摸底相位零执行，照常产出答卷、判定与摘要；导入的轨迹都已存，没拿到判分结果的照常判为无效、不重跑（只有什么都没存下的采样才按 `invalid_redispatch_limit` 重派）。核对 benchmark、两个执行模型名、两臂采样次数、新配置的 train 列表 ⊆ 源任务集、每个（任务、角色、序号）恰好一条、源轨迹 schema 为 2，任何一条不过即配置错误、什么都不写；新 run 目录已有 manifest 或轨迹时拒绝。写 `BASELINE_ORIGIN.md`（源 run 路径、核对结果、逐角色条数与成功数、全部导入文件 sha256 清单的摘要） | 无 |
+| `import-baseline`（`stages/import_baseline.py`） | 在新 run 第一次 `run` 之前，把已有 run 的摸底轨迹（schema 2，编号不带相位）改写编号（相位标签取新配置序列第一项）后以 schema 3 写进新 run 的轨迹存储，只导入新配置的 train 任务，其余字段原样，只在 `meta` 里补上插件 `backfill_meta` 能取回、源轨迹没有记录的执行事实（TB：从轨迹指向的判分日志重新摘取 `grader_report`，只补新键、不覆盖已有键）；新 run 的摸底相位零执行，照常产出答卷、判定与摘要；导入的轨迹都已存，没拿到判分结果的照常判为无效、不重跑（只有什么都没存下的采样才按 `invalid_redispatch_limit` 重派）。核对 benchmark、两个执行模型名、两臂采样次数、新配置的 train 列表 ⊆ 源任务集、每个（任务、角色、序号）恰好一条、源轨迹 schema 为 2，任何一条不过即配置错误、什么都不写；新 run 目录已有 manifest 或轨迹时拒绝。写 `BASELINE_ORIGIN.md`（源 run 路径、核对结果、逐角色条数与成功数、补充的执行事实与条数、全部导入文件 sha256 清单的摘要，摘要按读到的源文件计算） | 无 |
 | `fork-run`（`stages/fork_run.py`） | 把已完结 run 的前 K 个相位拷进新 run，让新配置从第 K+1 个相位接着跑 | 无 |
 | `judge-skills`（`stages/judge_skills.py`，`blocks/adherence.py`，`composites/trigger_metrics.py`） | 一个 test 或 practice 相位里，技能目录展示后：该适用的卡有没有被打开（触发召回）、不适用的卡有没有被打开（误触发）、打开之后步骤有没有被执行（遵循度） | 每个 trial 一次适用性判定，每张被打开的卡一次遵循度判定 |
 | `paper-tables`（`stages/paper_tables.py`，`composites/paired_stats.py`） | 已完结的 run 之间的配对比较：按任务自助法的置信区间、胜负平、McNemar 精确检验、单臂噪声底；行列顺序跟随 spec，不按结果排序 | 无 |
@@ -949,6 +956,10 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
 
 - 对每张失败答卷调用 `TRIAL_FAILURE_ANALYSIS`。输入：协议、任务说明、完整的执行步骤（含读取
   动作）、执行者看到的目录与 playbook、执行者打开过的卡全文（裸跑时填 "(none)"）。诊断不读画像；
+- benchmark 声明了判分报告段、答卷又记录了判分报告时，任务说明之后接上这一段。TB 的插件从
+  判分日志里摘取失败断言、测试摘要和汇总行（最多 3,000 字符）存进轨迹 `meta`，替换提示词
+  `TB_TRIAL_FAILURE_ANALYSIS` 要求诊断从报告出发找出偏离的那一步，并且不得把报告里的值、
+  文件名或期望输出写进两条笔记；
 - 输出 `reason`（失败原因）、`failing_step`（决定性出错的那一步，0 起）、`scope`
   （`subtask` / `general`）、`model_note`、`playbook_note`；
 - `failing_step` 越界、`scope` 越界、`reason` 为空的回复带原因重问（`DIAGNOSIS_CORRECTION`），

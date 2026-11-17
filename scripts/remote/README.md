@@ -104,6 +104,11 @@ cd <deploy-base>/<commit>
 新 run 目录里不能已有 manifest 或轨迹；导入的检查项与 `BASELINE_ORIGIN.md` 的内容见
 README 的命令行一节。导入后正常启动，摸底相位不调用模型，照常写答卷与摘要。
 
+TB 的源轨迹若没有记录判分报告（`meta.grader_report`），导入时按轨迹 `meta.remote.verifier_log`
+指向的 Harbor 判分日志重新摘取，所以要在基准主机上执行，并且源 run 的 Harbor jobs 目录还在。
+`BASELINE_ORIGIN.md` 的"补充的执行事实"一节写明补上了多少条、多少条没补上；没补上的轨迹，
+诊断照旧只看轨迹。
+
 ## 启动（在基准主机上，命令立即返回）
 
 ```bash

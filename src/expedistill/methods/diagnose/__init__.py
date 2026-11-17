@@ -5,7 +5,10 @@ weak trial of a baseline or practice phase. The prompt shows what the
 executor saw (the catalog and the playbook of a practice trial, the full
 text of every card it opened; "(none)" for a bare baseline trial) and the
 whole trial numbered from 0, read actions included. The diagnosis does not
-read the profile, so the evidence stays independent of it.
+read the profile, so the evidence stays independent of it. A benchmark that
+records what its hidden checks rejected (TB's verifier report) names the
+prompt section that carries it (``report_prompt``); the section is appended
+to the task text, so the method prompt's slots stay the same.
 
 A reply the diagnosis cannot use (a ``failing_step`` outside the trial's
 steps, a ``scope`` outside ``subtask`` / ``general``, an empty ``reason``)
@@ -21,7 +24,10 @@ from typing import Any, Callable, Dict, Mapping, Optional
 from expedistill import prompts
 from expedistill.blocks.view import render_steps_view
 from expedistill.composites.sheet_facts import SheetFacts
-from expedistill.composites.trace import execution_instruction
+from expedistill.composites.trace import (
+    execution_grader_report,
+    execution_instruction,
+)
 from expedistill.core.answer_sheet import AnswerSheet
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
 from expedistill.llm.call import call_model
@@ -108,11 +114,14 @@ def diagnose_trial(
     handle: Any,
     instruction_for: Optional[Callable[[str], str]] = None,
     view_rules: Any = None,
+    report_prompt: Optional[str] = None,
     usage: Any = None,
     run_dir: Any = None,
 ) -> Finding:
     """Diagnose one failed trial; ``facts`` are the sheet's own
-    (``composites.sheet_facts``)."""
+    (``composites.sheet_facts``). ``report_prompt`` is the benchmark's
+    grader report section (its prompt pack's ``grader_report_prompt``);
+    with it and a recorded report, the task text ends with the report."""
     execution = sheet.execution
     if execution is None or facts.sheet_id != sheet.sheet_id:
         raise CodeBugError(
@@ -123,10 +132,14 @@ def diagnose_trial(
         raise ModelOutputError(
             f"{_PROMPT}: sheet {sheet.sheet_id!r} recorded no step, so no "
             "failing step can be named")
+    task_text = (execution_instruction(execution, instruction_for)
+                 or execution.task_ref)
+    report = execution_grader_report(execution)
+    if report_prompt is not None and report:
+        task_text = (task_text.rstrip() + "\n\n"
+                     + prompts.get(report_prompt).format(report=report))
     variables = {
-        "task_instruction": (execution_instruction(execution,
-                                                   instruction_for)
-                             or execution.task_ref),
+        "task_instruction": task_text,
         "trial_steps": render_steps_view(steps, view_rules),
         "last_step": str(len(steps) - 1),
         "skill_catalog": facts.catalog.strip() or "(none)",

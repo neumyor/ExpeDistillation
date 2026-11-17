@@ -44,6 +44,7 @@ from expedistill.prompts import get as get_prompt
 __all__ = [
     "WRITER_BEFORE_STEPS",
     "check_ref",
+    "execution_grader_report",
     "execution_instruction",
     "instruction_with_initial",
     "load_sheet",
@@ -159,6 +160,14 @@ def execution_instruction(
         except Exception:
             instruction = ""
     return instruction_with_initial(metrics, instruction)
+
+
+def execution_grader_report(execution: Any) -> str:
+    """The grader report an execution recorded (``metrics["grader_report"]``:
+    what the benchmark's hidden checks rejected, in the plugin's own
+    extract), or "" when the benchmark records none."""
+    metrics = execution.metrics or {}
+    return str(metrics.get("grader_report") or "")
 
 
 def check_ref(run_dir: Union[str, Path], ref: TraceRef) -> None:

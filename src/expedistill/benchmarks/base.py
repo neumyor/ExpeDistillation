@@ -120,6 +120,10 @@ class PromptPack:
     - ``overrides``: method prompt name -> registered replacement name,
       wired into every handle's ``prompt_aliases``. Stage 0 refuses a
       replacement that is unregistered or whose placeholders differ.
+    - ``grader_report_prompt``: the registered name of the section that
+      carries a trial's grader report into the failure diagnosis (one
+      ``{report}`` slot), or None when the benchmark records no report.
+      Stage 0 freezes its digest.
     """
 
     vocabulary: LearningContext
@@ -129,6 +133,7 @@ class PromptPack:
     playbook_facts: Optional[Callable[[Sequence[AnswerSheet]], str]]
     playbook_checks: Tuple[PlaybookRequirement, ...]
     overrides: Mapping[str, str]
+    grader_report_prompt: Optional[str] = None
 
 
 #: The pack of a plugin that declares none: GENERIC wording, nothing else.
@@ -354,3 +359,11 @@ class BenchmarkPlugin(abc.ABC):
         not a measurement of anything).
         """
         return None
+
+    def backfill_meta(self, meta: Mapping[str, Any]) -> Dict[str, Any]:
+        """Execution facts this plugin's runner records today that an
+        earlier run's trajectory ``meta`` lacks, recovered from what that
+        ``meta`` points to (``import-baseline`` adds them to the imported
+        record). The keys returned are new keys only; an empty dict (the
+        default) means there is nothing to recover."""
+        return {}

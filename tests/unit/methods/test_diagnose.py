@@ -1,11 +1,13 @@
 """Learn step 1: the trial diagnosis and its repairs."""
 
+import dataclasses
 import json
 
 import pytest
 
 from expedistill.composites.sheet_facts import SheetFacts, sheet_facts
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
+from expedistill.prompts import PROMPTS, PromptSpec
 from tests.helpers.fake_llm import json_script, make_fake_handle
 from expedistill.methods.diagnose import REPAIRS, Finding, diagnose_trial
 from tests.helpers.traces import execution_sheet
@@ -62,6 +64,53 @@ def test_the_prompt_shows_what_a_practice_trial_saw_and_opened():
     for text in ("THE CATALOG LINE", "THE PLAYBOOK", "THE CARD TEXT",
                  "first read at step 1", "ReadSkill[type-001-skill]"):
         assert text in prompt
+
+
+@pytest.fixture
+def report_section():
+    """A benchmark's grader report section, registered for one test."""
+    name = "TEST_GRADER_REPORT"
+    PROMPTS[name] = PromptSpec(name=name, template="REPORT:\n{report}",
+                               description="test section")
+    yield name
+    PROMPTS.pop(name)
+
+
+def _with_report(sheet, report):
+    execution = dataclasses.replace(
+        sheet.execution,
+        metrics={**(sheet.execution.metrics or {}), "grader_report": report})
+    return dataclasses.replace(sheet, execution=execution)
+
+
+def test_a_recorded_grader_report_ends_the_task_text(report_section):
+    sheet, facts = _baseline()
+    sheet = _with_report(sheet, "E   assert 1 == 2")
+    handle = make_fake_handle(script=[_reply()])
+
+    diagnose_trial(sheet, facts, handle=handle, report_prompt=report_section)
+
+    prompt = handle.client.calls[0]["user"]
+    assert "REPORT:\nE   assert 1 == 2" in prompt
+    # Inside the TASK section, before the trial's steps.
+    assert prompt.index("REPORT:") < prompt.index("step 0")
+
+
+@pytest.mark.parametrize("report, section", [
+    ("E   assert 1 == 2", None),   # the benchmark declares no section
+    ("", "TEST_GRADER_REPORT"),    # the trial recorded no report
+])
+def test_without_a_section_or_a_report_the_prompt_is_unchanged(
+        report_section, report, section):
+    sheet, facts = _baseline()
+    plain = make_fake_handle(script=[_reply()])
+    diagnose_trial(sheet, facts, handle=plain)
+
+    handle = make_fake_handle(script=[_reply()])
+    diagnose_trial(_with_report(sheet, report), facts, handle=handle,
+                   report_prompt=section)
+
+    assert handle.client.calls[0]["user"] == plain.client.calls[0]["user"]
 
 
 @pytest.mark.parametrize("bad, problem", [

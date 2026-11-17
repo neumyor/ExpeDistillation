@@ -616,9 +616,14 @@ def _cmd_fork_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_import_baseline(args: argparse.Namespace) -> int:
+    try:
+        benchmark = load_config(str(args.config)).benchmark
+    except (ValueError, OSError) as exc:
+        raise ConfigError(f"invalid config {args.config}: {exc}") from exc
     summary = import_baseline(source_run=args.source_run,
                               config_path=args.config,
-                              run_dir=args.run_dir)
+                              run_dir=args.run_dir,
+                              plugin=resolve_plugin(benchmark))
     print("import-baseline: " + json.dumps(
         summary, ensure_ascii=False, sort_keys=True))
     return 0
