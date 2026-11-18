@@ -124,7 +124,8 @@ def test_each_benchmark_registers_only_prompts_its_plugin_declares():
     """Every prompt a benchmark registers must be in its frozen set.
 
     A plugin declares the prompts it runs under: ``task_prompt_name``, the
-    optional ``skill_folder_prompt_name``, and its prompt pack's
+    optional ``skill_folder_prompt_name`` and
+    ``skill_folder_mandatory_prompt_name``, and its prompt pack's
     ``executor_prompts``, override targets and ``grader_report_prompt``.
     Stage 0 freezes exactly those. A registration outside the declared set
     would either miss the freeze or leak a benchmark-private prompt into
@@ -137,8 +138,10 @@ def test_each_benchmark_registers_only_prompts_its_plugin_declares():
             continue
         plugin = ensure_plugin(package.name)
         declared = {plugin.task_prompt_name}
-        if plugin.skill_folder_prompt_name is not None:
-            declared.add(plugin.skill_folder_prompt_name)
+        for folder_prompt in (plugin.skill_folder_prompt_name,
+                              plugin.skill_folder_mandatory_prompt_name):
+            if folder_prompt is not None:
+                declared.add(folder_prompt)
         declared.update(plugin.prompt_pack.executor_prompts)
         declared.update(plugin.prompt_pack.overrides.values())
         if plugin.prompt_pack.grader_report_prompt is not None:

@@ -34,6 +34,7 @@ __all__ = [
     "READ_SUFFIX_FILENAME",
     "TB_DISCIPLINE",
     "TB_SKILL_READ",
+    "TB_SKILL_READ_MANDATORY",
     "TB_TERMINUS_TEMPLATE",
     "render_suffix",
 ]
@@ -158,14 +159,50 @@ Before you declare the task complete:
 )
 
 
+#: The suffix of the 2026-10-29 test run (avg@3 0.5214), byte for byte as
+#: its 117 trials received it: a card read before the first task command
+#: is required, followed by that run's shell hygiene and graded thresholds
+#: (no completion gate). A folder delivery with ``read_rule: mandatory``
+#: sends it in place of ``TB_SKILL_READ`` plus ``TB_DISCIPLINE``.
+TB_SKILL_READ_MANDATORY = register(
+    PromptSpec(
+        name="TB_SKILL_READ_MANDATORY",
+        template="""Before running any task command:
+1. Read the task description and decide what the task needs.
+2. Read the skill directory in <available_skills>. Each entry says what the skill teaches and when to use it.
+3. Choose the skill whose description best matches the task, and cat its SKILL.md. You MUST cat at least one skill file this way before running any task command, even if the task looks simple.
+Read only the skills you need, one at a time; do not open several at once. If the list is no longer visible, cat catalog.md in the same folder.
+Shell hygiene, every task:
+- Never nest heredocs. Write a multi-line file with one top-level heredoc, or with `printf`/`python3 - <<'PY'`; if the content itself needs a here-doc, write the inner script to a file first.
+- After any multi-line input, run `echo SHELL_OK` and see it before the next step.
+- If the prompt stops echoing: Ctrl-C, then `reset`, then open a new shell (`tmux new-window`). Do not keep typing into a dead terminal; save partial results before switching.
+Graded thresholds:
+- For a required performance ratio, leave 30-50% headroom (target 1.5x when 1.2x is required). Measure several times and use the median, not one lucky run.
+- For a numeric estimate with a tolerance, make the Monte Carlo error much smaller than that tolerance (more samples or chains than needed), rerun once with a different seed, and submit only when both runs fall inside the band.""",
+        description=(
+            "TB executor, skill-folder units under read_rule mandatory: the "
+            "2026-10-29 suffix (a required card read, shell hygiene, graded "
+            "thresholds), replacing TB_SKILL_READ and TB_DISCIPLINE."
+        ),
+    )
+)
+
+
 def render_suffix(*, playbook: Optional[str] = None,
-                  skills_block: str = "", folder: bool = False) -> str:
+                  skills_block: str = "", folder: bool = False,
+                  mandatory: bool = False) -> str:
     """The suffix of one skills-mode trial: the playbook block, a
     whole-bank skills block, the card rule (folder units only) and the
-    discipline, in that order."""
+    discipline, in that order. ``mandatory`` (folder units only) swaps the
+    card rule and the discipline for ``TB_SKILL_READ_MANDATORY``."""
+    if mandatory and not folder:
+        raise ValueError("a mandatory card read needs a folder unit")
     parts = [format_playbook_block(playbook or "").strip(),
              (skills_block or "").strip()]
-    if folder:
-        parts.append(registry.get("TB_SKILL_READ"))
-    parts.append(registry.get("TB_DISCIPLINE"))
+    if mandatory:
+        parts.append(registry.get("TB_SKILL_READ_MANDATORY"))
+    else:
+        if folder:
+            parts.append(registry.get("TB_SKILL_READ"))
+        parts.append(registry.get("TB_DISCIPLINE"))
     return "\n\n".join(part for part in parts if part)

@@ -6,6 +6,7 @@ phase's delivery mapping before anything freezes.
 
 from dataclasses import dataclass
 
+from expedistill.benchmarks.base import READ_RULE_OPTIONAL, READ_RULES
 from expedistill.core.config import ConfigError
 from expedistill.inject.skill_text import (
     DEFAULT_DESCRIPTION_MODE,
@@ -43,15 +44,26 @@ class FolderParams:
     Harbor's Terminus discovers those files itself and renders the
     ``<available_skills>`` list, so the catalog file is a fallback, not
     the agent's primary directory.
+
+    ``read_rule`` is ``optional`` (the benchmark's folder prompt: opening
+    a card is the agent's choice) or ``mandatory`` (the benchmark's
+    ``skill_folder_mandatory_prompt_name``: a card read before the first
+    task command is required); a benchmark without the mandatory variant
+    refuses the phase.
     """
 
     description_mode: str = DEFAULT_DESCRIPTION_MODE
+    read_rule: str = READ_RULE_OPTIONAL
 
     def __post_init__(self) -> None:
         if self.description_mode not in DESCRIPTION_MODES:
             raise ConfigError(
                 "methods.delivery.folder description_mode must be one of "
                 f"{DESCRIPTION_MODES}, got {self.description_mode!r}")
+        if self.read_rule not in READ_RULES:
+            raise ConfigError(
+                "methods.delivery.folder read_rule must be one of "
+                f"{READ_RULES}, got {self.read_rule!r}")
 
 
 @dataclass(frozen=True)

@@ -167,6 +167,19 @@ def test_a_folder_c_phase_on_an_incapable_plugin_stops_loudly(
     assert plugin.calls == []  # refused before any unit ran
 
 
+def test_a_mandatory_folder_phase_needs_the_mandatory_prompt(
+        monkeypatch, tmp_path):
+    # FolderPlugin declares the folder prompt but no mandatory variant.
+    plugin = serve_plugin(monkeypatch, FolderPlugin(capable=True))
+    ctx = folder_ctx(tmp_path)
+    write_bank(ctx, [skill_card(1)])
+    phase = folder_c_phase(read_rule="mandatory")
+
+    with pytest.raises(ConfigError, match="no mandatory card read"):
+        phase_execute.run(ctx, phase)
+    assert plugin.calls == []
+
+
 # ---------------------------------------------------------------------------
 # The phase summary carries the per-unit read sets
 # ---------------------------------------------------------------------------

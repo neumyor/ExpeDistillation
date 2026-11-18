@@ -24,13 +24,16 @@ class StubPlugin(BenchmarkPlugin):
 
     def __init__(self, name="fakebench", *, tasks=(), outcome=None,
                  error=None, aux_metric_name=None,
-                 skill_folder_prompt_name=None):
+                 skill_folder_prompt_name=None,
+                 skill_folder_mandatory_prompt_name=None):
         self._name = name
         self._tasks = list(tasks)
         self.outcome = outcome if outcome is not None else RunOutcome()
         self.error = error
         self.aux_metric_name = aux_metric_name
         self.skill_folder_prompt_name = skill_folder_prompt_name
+        self.skill_folder_mandatory_prompt_name = \
+            skill_folder_mandatory_prompt_name
         self.calls = []
 
     @property

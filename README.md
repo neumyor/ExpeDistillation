@@ -293,7 +293,8 @@ runs/<实验名>_<时间>/
 
 调整提示词包，就能改变技能、画像、playbook 的写法，以及执行者看到的内容。
 
-可选能力：声明 `skill_folder_prompt_name` 即支持技能文件夹交付；声明 `aux_metric_name`
+可选能力：声明 `skill_folder_prompt_name` 即支持技能文件夹交付，另声明
+`skill_folder_mandatory_prompt_name` 即支持 `folder` 交付的 `read_rule: mandatory`；声明 `aux_metric_name`
 提供一个并列报告的辅助指标；`verdict_rule` 指定缺省判分规则。新增 benchmark 不需要修改
 `blocks/` 及以上的任何代码。步骤见 [AGENTS.md](AGENTS.md) 第七节。
 

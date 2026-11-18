@@ -13,7 +13,10 @@ together). Pinned here:
 * a plugin WITH the capability runs the folder unit through unchanged
   (E1 adds no folder behaviour of its own -- the plugin owns that);
 * stage 0 freezes the declared folder prompt's digest and refuses an
-  unregistered name.
+  unregistered name;
+* the mandatory-read variant (``skill_folder_mandatory_prompt_name``):
+  tb declares it, the others do not, E1 refuses a mandatory folder unit
+  on a plugin without it, and stage 0 freezes it like the folder prompt.
 """
 
 import dataclasses
@@ -175,3 +178,73 @@ def test_a_plugin_without_the_capability_freezes_no_extra_prompt(
             plugin.prompt_pack, executor_prompts=("SEARCHQA_TASK_PROMPT",)))
     digests = _prompt_digests("searchqa")
     assert "SEARCHQA_TASK_PROMPT_FOLDER" not in digests
+
+
+# ---------------------------------------------------------------------------
+# The mandatory-read variant
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("benchmark, prompt_name", [
+    ("tb", "TB_SKILL_READ_MANDATORY"),
+    ("searchqa", None),
+    ("alfworld", None),
+])
+def test_only_tb_declares_a_mandatory_read_prompt(benchmark, prompt_name):
+    plugin = ensure_plugin(benchmark)
+    assert plugin.skill_folder_mandatory_prompt_name == prompt_name
+    assert prompt_name is None or prompt_name in PROMPTS
+
+
+def _mandatory_task():
+    return Task(task_id="t1", instruction="do t1",
+                meta={"skill_folder": dict(_FOLDER_MANIFEST,
+                                           read_rule="mandatory"),
+                      "skill_folder_dir": "/tmp/folder"})
+
+
+def test_a_mandatory_unit_needs_the_mandatory_prompt(
+        monkeypatch, tmp_path, _no_fakebench):
+    plugin = serve_plugin(monkeypatch, StubPlugin(
+        skill_folder_prompt_name="TB_SKILL_READ"))
+    with pytest.raises(ConfigError, match="mandatory card read") as caught:
+        run_one(phase_label="p07:test", benchmark="fakebench",
+                task=_mandatory_task(), model_role="weak",
+                model_name="weak-model", attempt_index=0,
+                skills_injected="bank:000000000000",
+                skills_block="## Skill folder catalog\n",
+                handle=HANDLE, workdir=tmp_path)
+    assert "skill_folder_mandatory_prompt_name" in str(caught.value)
+    assert plugin.calls == []
+
+
+def test_a_mandatory_unit_reaches_a_plugin_that_declares_it(
+        monkeypatch, tmp_path, _no_fakebench):
+    plugin = serve_plugin(monkeypatch, StubPlugin(
+        skill_folder_prompt_name="TB_SKILL_READ",
+        skill_folder_mandatory_prompt_name="TB_SKILL_READ_MANDATORY"))
+    run_one(phase_label="p07:test", benchmark="fakebench",
+            task=_mandatory_task(), model_role="weak",
+            model_name="weak-model", attempt_index=0,
+            skills_injected="bank:000000000000",
+            skills_block="## Skill folder catalog\n",
+            handle=HANDLE, workdir=tmp_path)
+    assert len(plugin.calls) == 1
+
+
+def test_stage0_freezes_the_mandatory_prompt_with_tb_runs_only():
+    for benchmark, _ in _FOLDER_PROMPTS:
+        ensure_plugin(benchmark)
+    assert _prompt_digests("tb")["TB_SKILL_READ_MANDATORY"] \
+        == digest("TB_SKILL_READ_MANDATORY")
+    for benchmark in ("searchqa", "alfworld"):
+        assert "TB_SKILL_READ_MANDATORY" not in _prompt_digests(benchmark)
+
+
+def test_stage0_refuses_an_unregistered_mandatory_prompt_name(monkeypatch):
+    plugin = ensure_plugin("tb")
+    monkeypatch.setattr(
+        type(plugin), "skill_folder_mandatory_prompt_name",
+        "TB_SKILL_READ_MANDATORY_MISSING", raising=False)
+    with pytest.raises(ConfigError,
+                       match="skill_folder_mandatory_prompt_name"):
+        _prompt_digests("tb")

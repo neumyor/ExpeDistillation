@@ -1,7 +1,10 @@
 """TB's executor protocol: the texts the agent receives, the suffix that
 carries them, and what each kind of unit uploads for the vendored agent."""
 
+import hashlib
 import string
+
+import pytest
 
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.tb.protocol import (
@@ -25,9 +28,10 @@ def _fields(template):
             if name}
 
 
-def _folder_task(tmp_path, playbook="", bank=BANK):
+def _folder_task(tmp_path, playbook="", bank=BANK, read_rule="optional"):
     row = make_row("tb:train-fasttext", None, "",
-                   {"skill_folder": skill_folder_manifest(bank)})
+                   {"skill_folder": skill_folder_manifest(
+                       bank, read_rule=read_rule)})
     manifest = with_playbook([row], playbook)[0].aux["skill_folder"]
     folder_dir = materialized(tmp_path) if bank else tmp_path / "empty"
     folder_dir.mkdir(exist_ok=True)
@@ -59,6 +63,37 @@ def test_the_executor_texts_fill_only_their_own_slots():
         == {"instruction", "terminal_state"}
     assert _fields(get_prompt("TB_SKILL_READ")) == set()
     assert _fields(get_prompt("TB_DISCIPLINE")) == set()
+    assert _fields(get_prompt("TB_SKILL_READ_MANDATORY")) == set()
+
+
+#: sha256 of the suffix tail all 117 trials of the 2026-10-29 test run
+#: received, from "Before running any task command:" to the end of the
+#: graded thresholds. Pinned: the mandatory variant is that text, byte for
+#: byte, or it is not the condition it claims to reproduce.
+_SUFFIX_20261029_SHA256 = (
+    "0c0e5ec05859221310e36d108c31d5640ef6dd8384119c9fcea3474c5b788f27")
+
+
+def test_the_mandatory_rule_is_the_20261029_suffix_byte_for_byte():
+    text = get_prompt("TB_SKILL_READ_MANDATORY")
+    assert hashlib.sha256(text.encode("utf-8")).hexdigest() \
+        == _SUFFIX_20261029_SHA256
+    assert "You MUST cat at least one skill file" in text
+
+
+def test_the_mandatory_suffix_replaces_the_rule_and_the_discipline():
+    mandatory = get_prompt("TB_SKILL_READ_MANDATORY")
+    suffix = render_suffix(playbook=PLAYBOOK, folder=True, mandatory=True)
+    assert suffix == render_suffix(playbook=PLAYBOOK, folder=False,
+                                   skills_block="").replace(
+        get_prompt("TB_DISCIPLINE"), mandatory)
+    assert suffix.startswith(PLAYBOOK_HEADER)
+    assert suffix.endswith(mandatory)
+    assert get_prompt("TB_SKILL_READ") not in suffix
+    assert get_prompt("TB_DISCIPLINE") not in suffix
+    assert render_suffix(folder=True, mandatory=True) == mandatory
+    with pytest.raises(ValueError, match="folder unit"):
+        render_suffix(skills_block=SKILLS, mandatory=True)
 
 
 def test_the_suffix_orders_playbook_skills_card_rule_discipline():
@@ -82,6 +117,14 @@ def test_a_folder_unit_uploads_the_placeholder_and_the_suffix(tmp_path):
     assert _uploaded(link, READ_SUFFIX_FILENAME) \
         == render_suffix(playbook=PLAYBOOK, folder=True)
     assert outcome.meta["prompt_name"] == "TB_SKILL_READ"
+
+
+def test_a_mandatory_folder_unit_uploads_the_mandatory_suffix(tmp_path):
+    task = _folder_task(tmp_path, PLAYBOOK, read_rule="mandatory")
+    link, outcome = _run(tmp_path, task, CATALOG)
+    assert _uploaded(link, READ_SUFFIX_FILENAME) \
+        == render_suffix(playbook=PLAYBOOK, folder=True, mandatory=True)
+    assert outcome.meta["prompt_name"] == "TB_SKILL_READ_MANDATORY"
 
 
 def test_an_empty_bank_keeps_the_suffix_and_ships_no_skill(tmp_path):
@@ -118,6 +161,9 @@ def test_the_suffix_is_part_of_the_launch_conditions(tmp_path):
     with_pb = plugin._conditions(
         *args, render_suffix(playbook=PLAYBOOK, folder=True))
     assert plain["skill_sha256"] != with_pb["skill_sha256"]
+    mandatory = plugin._conditions(
+        *args, render_suffix(playbook=PLAYBOOK, folder=True, mandatory=True))
+    assert mandatory["skill_sha256"] != with_pb["skill_sha256"]
     whole = ("run", "skills", MOUNT_PLACEHOLDER, None, 131072)
     assert plugin._conditions(*whole, render_suffix(skills_block=SKILLS)) \
         != plugin._conditions(*whole, render_suffix(skills_block=SKILLS + "x"))

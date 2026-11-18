@@ -12,6 +12,7 @@ consumes it, before any of its work.
 from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence
 
+from expedistill.benchmarks.base import READ_RULE_KEY, READ_RULE_MANDATORY
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.composites import evolving_text, verdicts
 from expedistill.core.config import (
@@ -195,14 +196,22 @@ def executor_depth(ctx: StageContext, params: Any, role: str) -> int:
 
 def _require_folder_capability(spec: ExecutePhaseSpec,
                                benchmark: str) -> None:
-    """A folder delivery needs a plugin that declares its folder prompt."""
+    """A folder delivery needs a plugin that declares its folder prompt,
+    and a mandatory read rule one that declares its mandatory prompt."""
     if spec.delivery["name"] != FOLDER_DELIVERY_NAME:
         return
-    if resolve_plugin(benchmark).skill_folder_prompt_name is None:
+    plugin = resolve_plugin(benchmark)
+    if plugin.skill_folder_prompt_name is None:
         raise ConfigError(
             f"benchmark {benchmark!r} does not support skill folders "
             "(the real_folder execution): its plugin declares no "
             "skill_folder_prompt_name")
+    if spec.delivery.get(READ_RULE_KEY) == READ_RULE_MANDATORY \
+            and plugin.skill_folder_mandatory_prompt_name is None:
+        raise ConfigError(
+            f"benchmark {benchmark!r} has no mandatory card read (the "
+            "folder delivery's read_rule: mandatory): its plugin declares "
+            "no skill_folder_mandatory_prompt_name")
 
 
 def _playbook_text(ctx: StageContext, phase: PhaseInstance,

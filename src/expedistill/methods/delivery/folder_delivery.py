@@ -42,6 +42,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, Dict, List, Sequence, Union
 
+from expedistill.benchmarks.base import READ_RULE_KEY, READ_RULE_OPTIONAL
 from expedistill.core.contracts import ExecutionUnitList
 from expedistill.core.models import Skill
 from expedistill.inject.skills import bank_reference
@@ -178,7 +179,8 @@ def render_catalog(skills: Sequence[Union[Skill, Mapping[str, Any]]],
 
 
 def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
-                          description_mode: str = DEFAULT_DESCRIPTION_MODE
+                          description_mode: str = DEFAULT_DESCRIPTION_MODE,
+                          read_rule: str = READ_RULE_OPTIONAL
                           ) -> Dict[str, Any]:
     """The folder manifest a folder unit carries (M3's materialization
     input)::
@@ -203,7 +205,11 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
     refused loudly: a silent shadow would be a wrong folder, and an
     empty member set renders NO catalog at all (the D9 null-state
     lesson: an empty injection is the empty string, never a header
-    claiming experience exists)."""
+    claiming experience exists).
+
+    A ``read_rule`` other than the default ``optional`` is written under
+    ``read_rule``; the default adds no key, so an optional-read manifest
+    is byte-identical to one built before the rule existed."""
     active = units.active_bank(bank)
     files: List[Dict[str, Any]] = []
     owner_of: Dict[str, str] = {}
@@ -229,6 +235,8 @@ def skill_folder_manifest(bank: Sequence[Union[Skill, Mapping[str, Any]]],
         "description_mode": description_mode,
         "files": files,
     }
+    if read_rule != READ_RULE_OPTIONAL:
+        manifest[READ_RULE_KEY] = read_rule
     return manifest
 
 
@@ -246,9 +254,11 @@ def resolve(bank: Sequence[Union[Skill, Mapping[str, Any]]], tasks: Any,
     renders the ``<available_skills>`` list; the catalog file is not
     the primary directory and no benchmark prompt needs to inline it.
     ``params.description_mode`` is carried in the manifest so the
-    materializer and the catalog use the same composition rule.
+    materializer and the catalog use the same composition rule, and a
+    mandatory ``params.read_rule`` so the runner picks its prompt.
     """
-    manifest = skill_folder_manifest(bank, params.description_mode)
+    manifest = skill_folder_manifest(bank, params.description_mode,
+                                     params.read_rule)
     injected = bank_reference(units.active_bank(bank))
     block = manifest["catalog_text"]
     return [units.make_row(units.task_ref(task), injected, block,

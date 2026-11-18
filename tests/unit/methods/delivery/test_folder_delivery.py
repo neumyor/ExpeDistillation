@@ -279,3 +279,28 @@ def test_the_registry_resolves_the_folder_entry():
 def test_description_mode_is_validated():
     with pytest.raises(ConfigError, match="description_mode"):
         FolderParams(description_mode="unknown")
+
+
+def test_read_rule_is_validated():
+    with pytest.raises(ConfigError, match="read_rule"):
+        FolderParams(read_rule="sometimes")
+
+
+def test_only_a_mandatory_read_rule_enters_the_manifest():
+    bank, _ = _bank()
+    # The default adds no key: an optional-read manifest is byte-identical
+    # to one built before the rule existed.
+    assert "read_rule" not in skill_folder_manifest(bank)
+    assert skill_folder_manifest(bank, read_rule="optional") \
+        == skill_folder_manifest(bank)
+    rows = folder_driver.resolve(bank, _tasks("t1"),
+                                 FolderParams(read_rule="mandatory"))
+    manifest = rows[0].aux["skill_folder"]
+    assert manifest["read_rule"] == "mandatory"
+    assert {key: value for key, value in manifest.items()
+            if key != "read_rule"} == skill_folder_manifest(bank)
+    # The unit ids do not change: the rule is how cards are offered, not
+    # which skills are injected.
+    assert [row.unit_id for row in rows] == [
+        row.unit_id for row in folder_driver.resolve(
+            bank, _tasks("t1"), FolderParams())]

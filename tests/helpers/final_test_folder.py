@@ -121,12 +121,12 @@ def folder_ctx(tmp_path):
     return folder_ctx_at(tmp_path / "run")
 
 
-def folder_c_phase(compare="fresh_bare"):
+def folder_c_phase(compare="fresh_bare", **delivery_params):
     return PhaseInstance(
         index=2, name="test", label="p03:test",
         spec=ExecutePhaseSpec(
             role="test", tasks="test",
-            delivery={"name": "folder"},
+            delivery={"name": "folder", **delivery_params},
             execution={"name": "real_folder"},
             compare=(CompareSpec(against=compare)
                      if compare is not None else None),

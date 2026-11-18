@@ -32,7 +32,8 @@ that system's method, not this design's).
 from pathlib import Path
 from typing import Any, Union
 
-from expedistill.benchmarks.base import RunOutcome, Task
+from expedistill.benchmarks.base import (
+    READ_RULE_KEY, READ_RULE_MANDATORY, RunOutcome, Task)
 from expedistill.benchmarks.registry import resolve_plugin
 from expedistill.core.ids import make_task_id, make_trajectory_id
 from expedistill.core.models import Trajectory
@@ -96,12 +97,19 @@ def run_one(
     # layer, so a folder unit can never slip through any future path. A
     # configuration error, not a code bug: the config chose the folder
     # play for a benchmark whose plugin never declared it.
-    if task.meta.get("skill_folder") is not None \
-            and plugin.skill_folder_prompt_name is None:
+    folder = task.meta.get("skill_folder")
+    if folder is not None and plugin.skill_folder_prompt_name is None:
         raise ConfigError(
             f"benchmark {benchmark!r} does not support skill folders (the "
             "real_folder execution): its plugin declares no "
             "skill_folder_prompt_name, and a skill-folder unit needs one")
+    if folder is not None \
+            and folder.get(READ_RULE_KEY) == READ_RULE_MANDATORY \
+            and plugin.skill_folder_mandatory_prompt_name is None:
+        raise ConfigError(
+            f"benchmark {benchmark!r} has no mandatory card read: its "
+            "plugin declares no skill_folder_mandatory_prompt_name, and "
+            "this unit's folder sets read_rule mandatory")
     task_id = make_task_id(benchmark, task.task_id)
     trajectory_id = make_trajectory_id(
         phase_label, task_id, model_role, attempt_index)

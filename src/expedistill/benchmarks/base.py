@@ -31,7 +31,20 @@ __all__ = [
     "GENERIC_PACK",
     "BaseEnv",
     "BenchmarkPlugin",
+    "READ_RULE_KEY",
+    "READ_RULE_MANDATORY",
+    "READ_RULE_OPTIONAL",
+    "READ_RULES",
 ]
+
+#: How a folder unit asks the agent to read skill cards: ``optional`` runs
+#: under the plugin's ``skill_folder_prompt_name``, ``mandatory`` under its
+#: ``skill_folder_mandatory_prompt_name``. The folder delivery writes a
+#: non-default rule into its manifest under ``READ_RULE_KEY``.
+READ_RULE_OPTIONAL = "optional"
+READ_RULE_MANDATORY = "mandatory"
+READ_RULES = (READ_RULE_OPTIONAL, READ_RULE_MANDATORY)
+READ_RULE_KEY = "read_rule"
 
 
 @dataclass
@@ -332,6 +345,13 @@ class BenchmarkPlugin(abc.ABC):
     #: one attribute (stage 0 digests the named prompt into the
     #: manifest and refuses an unregistered name) and cannot drift.
     skill_folder_prompt_name: Optional[str] = None
+
+    #: The prompt a folder unit runs under when its delivery sets
+    #: ``read_rule: mandatory`` (a card read before the first task command
+    #: is required); ``None`` means the benchmark has no such variant, and
+    #: a mandatory folder phase is refused before dispatch (E1 refuses the
+    #: unit as the second layer). Frozen by stage 0 like the folder prompt.
+    skill_folder_mandatory_prompt_name: Optional[str] = None
 
     #: Every benchmark-specific prompt input (``PromptPack``). The pipeline
     #: wires its vocabulary, protocol and overrides into every model handle;

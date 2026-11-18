@@ -234,15 +234,19 @@ def _prompt_digests(benchmark: str) -> Dict[str, Optional[str]]:
     an unregistered name is a ConfigError, not a None entry (a folder
     prompt is plugin code, not a test fake; the plugin's own task prompt
     keeps the None-on-unregistered contract for the fake-benchmarks).
+    ``skill_folder_mandatory_prompt_name`` freezes the same way.
     """
     plugin = get_plugin(benchmark)
     names = set(prompts.METHOD_PROMPT_NAMES)
     names.add(plugin.task_prompt_name)
-    folder_prompt = plugin.skill_folder_prompt_name
-    if folder_prompt is not None:
+    for attribute in ("skill_folder_prompt_name",
+                      "skill_folder_mandatory_prompt_name"):
+        folder_prompt = getattr(plugin, attribute)
+        if folder_prompt is None:
+            continue
         if folder_prompt not in prompts.PROMPTS:
             raise ConfigError(
-                f"benchmark {benchmark!r} declares skill_folder_prompt_name "
+                f"benchmark {benchmark!r} declares {attribute} "
                 f"{folder_prompt!r} but no prompt of that name is "
                 "registered -- the folder prompt is part of the frozen "
                 "protocol, so the plugin and its registration disagree")

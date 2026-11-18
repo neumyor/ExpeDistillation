@@ -169,7 +169,7 @@ reward + 原样的 correctness）、coverage（这张 trial 该不该有、有�
 |---|---|
 | `role` | `baseline` / `practice` / `test`，显式声明，加载期核对与字段一致 |
 | `tasks` | 跑冻结的哪个列表：`baseline` 只能是 `train`；`practice` 是 `train` 或 `val`；`test` 角色与 `test` 列表是同一件事，两者必须同时成立 |
-| `delivery` | 交付方法（带 `name` 的映射）：`none` / `whole_bank`（可选 `verbatim: true`）/ `folder`（可选 `description_mode`）；说明见 `src/expedistill/methods/delivery/README.md` |
+| `delivery` | 交付方法（带 `name` 的映射）：`none` / `whole_bank`（可选 `verbatim: true`）/ `folder`（可选 `description_mode`、`read_rule`）；说明见 `src/expedistill/methods/delivery/README.md` |
 | `execution` | 执行方法：`real`（真实 benchmark 执行；摸底写 `arms: [executor_strong, executor_weak]`）/ `real_folder`（真实执行，技能以文件夹送进执行环境，参数 `executor`（缺省 `executor_weak`）与 `attempts`（缺省取该执行者的全局次数））；说明见 `src/expedistill/methods/execution/README.md` |
 | `compare` | 对照来源，只有 test 角色可写：`against: fresh_bare`（相位内现场跑一条裸臂）或 `against: external_campaign`（对照读外部冻结成绩文件，零执行，必须带 `external` 块：`path`（相对路径相对配置文件所在目录解析，冻结为绝对路径）+ `sha256`（成绩文件字节的校验和）+ `model_key`（成绩文件里对应本 run 执行者的模型键）） |
 | `acceptance` | 验收判分规则名（可选；缺省用 benchmark 的默认规则，TB 是 `tb_scorer`，其余是 `scorer`） |
@@ -892,6 +892,9 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   `summary_then_when_to_use`（缺省）。派发前相位驱动把清单物化成相位目录下的
   `skill_folder/`（`materialize_skill_folder` 幂等；库指纹与相位库不符是代码 bug）。
   插件用能力位 `skill_folder_prompt_name` 声明支持，不支持的插件在派发前被拒绝；
+  `read_rule` 缺省 `optional`；`mandatory` 要求第一条任务命令之前至少读一张卡，写进清单的
+  `read_rule` 键，插件用 `skill_folder_mandatory_prompt_name` 声明这个变体的提示词（冻结步
+  同样冻结它的 digest），没有声明的插件在派发前被拒绝，E1 逐单元再拒一次；
   库为空时与 5.2 相同：物化一个空的 `skill_folder/`，单元仍挂清单（没有文件）、用文件夹执行
   提示词，playbook 照常显示；
 - **TB 的技能文件夹**：TB 的首轮提示词由 Harbor 组装，依次是 Terminus 自己的模板
@@ -904,7 +907,10 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
   `whole_bank` 的技能块（只在整库交付时有）、读卡规则 `TB_SKILL_READ`（只在 folder
   单元有，与 ALFWorld 的 ReadSkill 规则同义：卡可选，用 `cat <位置>` 打开，最多 3 张，
   描述与当前情况相符才打开）、工作纪律 `TB_DISCIPLINE`（shell 卫生、阈值留余量、完成前
-  自检）。不带技能的单元不上传后缀（插件属性 `playbook_in_skills_block = False`）；
+  自检）。folder 交付设 `read_rule: mandatory` 时，读卡规则与工作纪律换成
+  `TB_SKILL_READ_MANDATORY`：2026-10-29 那次终测后缀的逐字节原文（第一条任务命令之前
+  必须 `cat` 至少一张卡，加上当时的 shell 卫生与阈值留余量，没有完成前自检）。
+  不带技能的单元不上传后缀（插件属性 `playbook_in_skills_block = False`）；
 - **本地 benchmark（SearchQA、ALFWorld）的渐进式披露**（`benchmarks/skill_folder.py`）：
   提示词里只有 `<available_skills>` 目录（名称、描述、位置，XML 形状与 Terminus 一致，
   内容读自物化文件的 YAML 头）；模型回复读取动作时，循环自己返回整份 `SKILL.md`，

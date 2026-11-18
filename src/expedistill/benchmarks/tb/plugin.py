@@ -132,7 +132,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, NoReturn, Optional, Sequence, Tuple
 
-from expedistill.benchmarks.base import BenchmarkPlugin, RunOutcome, Task, ViewRules
+from expedistill.benchmarks.base import (
+    READ_RULE_KEY,
+    READ_RULE_MANDATORY,
+    BenchmarkPlugin,
+    RunOutcome,
+    Task,
+    ViewRules,
+)
 from expedistill.benchmarks.tb.prompt_pack import PROMPT_PACK
 from expedistill.benchmarks.tb.remote import ENV_ROOT, RemoteLink
 from expedistill.benchmarks.tb.protocol import (
@@ -599,6 +606,9 @@ class TBPlugin(BenchmarkPlugin):
     # the sandbox through the skills-mode directory (the module
     # docstring's submission design).
     skill_folder_prompt_name = "TB_SKILL_READ"
+    #: ``read_rule: mandatory`` folder units send the 2026-10-29 suffix
+    #: (a card read before the first task command is required).
+    skill_folder_mandatory_prompt_name = "TB_SKILL_READ_MANDATORY"
     #: A folder unit's playbook reaches the agent at the front of the
     #: suffix. An empty skills block is the bare mode, so a playbook there
     #: would turn a bare trial into a skills-mode trial.
@@ -700,10 +710,12 @@ class TBPlugin(BenchmarkPlugin):
         prompt_name = self.task_prompt_name
         if folder is not None:
             playbook = folder[0].get("playbook_text")
+            mandatory = folder[0].get(READ_RULE_KEY) == READ_RULE_MANDATORY
             read_suffix: Optional[str] = render_suffix(
                 playbook=playbook if isinstance(playbook, str) else "",
-                folder=True)
-            prompt_name = self.skill_folder_prompt_name
+                folder=True, mandatory=mandatory)
+            prompt_name = (self.skill_folder_mandatory_prompt_name
+                           if mandatory else self.skill_folder_prompt_name)
         elif skills_block.strip():
             read_suffix = render_suffix(skills_block=skills_block)
         else:
