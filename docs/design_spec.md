@@ -408,7 +408,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 |---|---|---|
 | TB runner | TerminalBench | 委托 Harbor + 沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹（`benchmarks/tb/trajectory.py`）。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地共用 ReAct 循环（`benchmarks/react_loop.py`）一步一步执行到结束，环境与判分来自外层 `benchmark/searchqa-eval/` |
-| SWE-bench runner | SWE-bench Verified | 每个单元用外层 `benchmark/swebench-eval` 自己的 Python 环境调用一次桥接脚本 `scripts/run_unit.py`（mini-SWE-agent 只有 bash 工具，E2B 沙箱，官方 swebench 判分），读回单元目录的 `traj.json` 与判分结果。技能块插在 `<pr_description>` 前、标题 `## Skill Knowledge`（与那边的基线方法相同位置），文件夹单元的技能文件写进 agent 沙箱的 `/skills/`，`read_rule: mandatory` 时读卡规则换成 `SWEBENCH_SKILL_READ_MANDATORY`（第一条任务命令之前必须读一张卡，论文配置的 practice 与 test 都用它）。接口见 `docs/decisions/swebench_plugin_20261118.md` |
+| SWE-bench runner | SWE-bench Verified | 每个单元用外层 `benchmark/swebench-eval` 自己的 Python 环境调用一次桥接脚本 `scripts/run_unit.py`（mini-SWE-agent 只有 bash 工具，E2B 沙箱，官方 swebench 判分），读回单元目录的 `traj.json` 与判分结果。技能块插在 `<pr_description>` 前、标题 `## Skill Knowledge`（与那边的基线方法相同位置），文件夹单元的技能文件写进 agent 沙箱的 `/skills/`。读卡规则不在技能块里，放在消息末尾 `</instructions>` 之后的 `<skill_rule>` 段（放在技能块里时 Qwen 0/7 个 val 单元读卡，放在末尾 5/6）；`read_rule: mandatory` 时是 `SWEBENCH_SKILL_READ_MANDATORY`（第一条任务命令之前必须读一张卡，论文配置的 practice 与 test 都用它）。接口见 `docs/decisions/swebench_plugin_20261118.md` |
 | ALFWorld runner | ALFWorld | 本地执行，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0.95、固定的输出上限 65536、50 步预算）；环境在外层 venv 的子进程里运行，需要 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
 
 两套本地 runner 的每局步数上限用环境变量配：SearchQA 是

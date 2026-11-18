@@ -13,10 +13,16 @@ The harness places a skill block in front of ``<pr_description>`` under its
 own ``## Skill Knowledge`` header, the same slot the harness's skill methods
 use. :func:`render_block` builds that block's text: the global playbook
 (``inject.skills.format_playbook_block``), the ``<available_skills>`` list of
-a folder unit with the card-reading rule ``SWEBENCH_SKILL_READ``, or
-``SWEBENCH_SKILL_READ_MANDATORY`` under ``read_rule: mandatory`` (or a
-whole-bank skills block), and the working rules ``SWEBENCH_DISCIPLINE``. A
-bare unit sends no block, so its prompt is the harness's bare prompt.
+a folder unit (or a whole-bank skills block), and the working rules
+``SWEBENCH_DISCIPLINE``. A bare unit sends no block, so its prompt is the
+harness's bare prompt.
+
+A folder unit's card-reading rule (:func:`card_rule`: ``SWEBENCH_SKILL_READ``,
+or ``SWEBENCH_SKILL_READ_MANDATORY`` under ``read_rule: mandatory``) goes to
+the end of the message instead, after ``</instructions>`` in the harness's
+``<skill_rule>`` slot: placed in the skill block, Qwen opened no card in 7
+val units under the mandatory rule; at the end, 5 of 6 opened one at the
+first step (docs/decisions/swebench_plugin_20261118.md).
 """
 
 from typing import Optional
@@ -34,6 +40,7 @@ __all__ = [
     "SWEBENCH_SKILL_READ",
     "SWEBENCH_SKILL_READ_MANDATORY",
     "SWEBENCH_SYSTEM_TEMPLATE",
+    "card_rule",
     "render_block",
 ]
 
@@ -249,26 +256,33 @@ def _available_skills(folder: SkillFolder) -> str:
 
 
 def render_block(*, folder: Optional[SkillFolder] = None,
-                 skills_block: str = "", mandatory: bool = False) -> str:
+                 skills_block: str = "") -> str:
     """The skill block of one unit, "" for a bare unit.
 
     A folder unit: the playbook, then (when the folder has cards) the
-    ``## Skills`` list with the card rule (``SWEBENCH_SKILL_READ_MANDATORY``
-    when ``mandatory``), then the working rules. Any other unit with a
+    ``## Skills`` list, then the working rules. Any other unit with a
     non-empty ``skills_block`` (a whole bank, or a playbook alone): that
     block, then the working rules."""
-    if mandatory and folder is None:
-        raise ValueError("a mandatory card read needs a folder unit")
     if folder is not None:
         parts = [format_playbook_block(folder.playbook_text).strip()]
-        rule = ("SWEBENCH_SKILL_READ_MANDATORY" if mandatory
-                else "SWEBENCH_SKILL_READ")
         if folder.cards:
-            parts.append(f"## Skills\n{_available_skills(folder)}\n\n"
-                         + registry.get(rule))
+            parts.append(f"## Skills\n{_available_skills(folder)}")
     elif (skills_block or "").strip():
         parts = [skills_block.strip()]
     else:
         return ""
     parts.append(registry.get("SWEBENCH_DISCIPLINE"))
     return "\n\n".join(part for part in parts if part)
+
+
+def card_rule(*, folder: Optional[SkillFolder] = None,
+              mandatory: bool = False) -> str:
+    """The card-reading rule of one unit, "" when it lists no card (no
+    folder, or a folder without cards): ``SWEBENCH_SKILL_READ_MANDATORY``
+    when ``mandatory``, else ``SWEBENCH_SKILL_READ``."""
+    if mandatory and folder is None:
+        raise ValueError("a mandatory card read needs a folder unit")
+    if folder is None or not folder.cards:
+        return ""
+    return registry.get("SWEBENCH_SKILL_READ_MANDATORY" if mandatory
+                        else "SWEBENCH_SKILL_READ")

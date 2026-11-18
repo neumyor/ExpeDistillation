@@ -10,7 +10,11 @@ import pytest
 
 from expedistill.benchmarks.base import Task
 from expedistill.benchmarks.skill_folder import SkillFolder
-from expedistill.benchmarks.swebench.protocol import SKILL_MOUNT, render_block
+from expedistill.benchmarks.swebench.protocol import (
+    SKILL_MOUNT,
+    card_rule,
+    render_block,
+)
 from expedistill.benchmarks.tb.protocol import TB_SKILL_READ
 from expedistill.inject.skills import format_playbook_block
 from expedistill.prompts import get as get_prompt
@@ -91,28 +95,26 @@ def test_a_folder_block_lists_the_cards_at_their_sandbox_locations(
     assert render_block(folder=folder) == (
         format_playbook_block(PLAYBOOK)
         + "## Skills\n" + listing + "\n\n"
-        + get_prompt("SWEBENCH_SKILL_READ") + "\n\n"
         + get_prompt("SWEBENCH_DISCIPLINE"))
     for card in folder.cards:
         assert f"<location>/skills/{card.location}</location>" in listing
 
 
-def test_a_mandatory_folder_block_swaps_in_the_mandatory_card_rule(
-        tmp_path):
+def test_the_card_rule_travels_apart_from_the_block(tmp_path):
     folder = _folder(tmp_path)
-    optional = render_block(folder=folder)
-    mandatory = render_block(folder=folder, mandatory=True)
-    assert mandatory == optional.replace(
-        get_prompt("SWEBENCH_SKILL_READ"),
-        get_prompt("SWEBENCH_SKILL_READ_MANDATORY"))
-    rule = get_prompt("SWEBENCH_SKILL_READ_MANDATORY")
+    block = render_block(folder=folder)
+    assert get_prompt("SWEBENCH_SKILL_READ") not in block
+    assert get_prompt("SWEBENCH_SKILL_READ_MANDATORY") not in block
+    assert card_rule(folder=folder) == get_prompt("SWEBENCH_SKILL_READ")
+    rule = card_rule(folder=folder, mandatory=True)
+    assert rule == get_prompt("SWEBENCH_SKILL_READ_MANDATORY")
     assert "You MUST cat at least one skill file" in rule
     assert "/skills/catalog.md" in rule
     # No cards: nothing to read, so no card rule at all.
-    assert render_block(folder=SkillFolder(None, [], ""), mandatory=True) \
-        == get_prompt("SWEBENCH_DISCIPLINE")
+    assert card_rule(folder=SkillFolder(None, [], ""), mandatory=True) == ""
+    assert card_rule() == ""
     with pytest.raises(ValueError, match="needs a folder unit"):
-        render_block(skills_block="## Skill rules\n- one\n", mandatory=True)
+        card_rule(mandatory=True)
 
 
 def test_a_folder_without_cards_or_playbook_sends_only_the_rules(tmp_path):

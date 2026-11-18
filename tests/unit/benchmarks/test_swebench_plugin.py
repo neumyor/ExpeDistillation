@@ -363,6 +363,7 @@ def test_a_folder_unit_sends_its_block_and_its_folder(
                                    tmp_path / "work")
     (call,) = bridge.calls()
     assert call["block"] == render_block(folder=SkillFolder.from_task(task))
+    assert call["rule"] == get_prompt("SWEBENCH_SKILL_READ")
     assert _argument(call["argv"], "--skill-dir") \
         == meta["skill_folder_dir"]
     assert sorted(call["skill_files"]) == sorted(
@@ -379,10 +380,10 @@ def test_a_mandatory_folder_unit_sends_the_mandatory_card_rule(
     task = _task(**meta)
     outcome = SWEBenchPlugin().run(task, handle, "", tmp_path / "work")
     (call,) = bridge.calls()
-    assert call["block"] == render_block(folder=SkillFolder.from_task(task),
-                                         mandatory=True)
-    assert get_prompt("SWEBENCH_SKILL_READ_MANDATORY") in call["block"]
-    assert get_prompt("SWEBENCH_SKILL_READ") not in call["block"]
+    assert call["block"] == render_block(folder=SkillFolder.from_task(task))
+    assert call["rule"] == get_prompt("SWEBENCH_SKILL_READ_MANDATORY")
+    rule_file = Path(_argument(call["argv"], "--skill-rule-file"))
+    assert rule_file.parent == tmp_path / "work" / "a00"
     assert outcome.meta["prompt_name"] == "SWEBENCH_SKILL_READ_MANDATORY"
 
 
@@ -393,6 +394,7 @@ def test_an_empty_folder_still_sends_the_playbook_and_the_rules(
     (call,) = bridge.calls()
     assert call["block"] == (f"Global playbook:\n{PLAYBOOK}\n\n"
                              + get_prompt("SWEBENCH_DISCIPLINE"))
+    assert call["rule"] is None and "--skill-rule-file" not in call["argv"]
     assert call["skill_files"] == []
 
 
@@ -404,6 +406,7 @@ def test_a_whole_bank_unit_sends_its_skills_block(bridge, handle, tmp_path):
     assert call["block"] == ("## Skill rules\n- Reproduce the bug first."
                              "\n\n" + get_prompt("SWEBENCH_DISCIPLINE"))
     assert "--skill-dir" not in call["argv"]
+    assert call["rule"] is None
     assert outcome.meta["prompt_name"] == "SWEBENCH_INSTANCE_TEMPLATE"
 
 

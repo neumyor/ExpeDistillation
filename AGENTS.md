@@ -179,7 +179,7 @@ src/expedistill/
                           用那边自己的 Python 环境调用一次 scripts/run_unit.py，读回
                           单元目录）；trajectory.py 从 traj.json 还原逐步轨迹；
                           protocol.py 执行提示词副本、读卡规则 SWEBENCH_SKILL_READ
-                          与强制版 SWEBENCH_SKILL_READ_MANDATORY、
+                          与强制版 SWEBENCH_SKILL_READ_MANDATORY（放在消息末尾）、
                           人工规则 SWEBENCH_DISCIPLINE 与技能块的拼接；diagnose.py
                           诊断的替换提示词与判分报告段；prompt_pack.py 提示词包
     alfworld/             适配外层 benchmark/alfworld-eval/：plugin.py 插件；

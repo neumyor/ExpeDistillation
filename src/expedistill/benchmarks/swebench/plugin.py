@@ -8,7 +8,8 @@ script in the harness's own environment
 
     <root>/.venv/bin/python <root>/scripts/run_unit.py run --instance <id>
         --out <dir> --model <model id> --max-input-tokens <N>
-        [--skill-block-file <file>] [--skill-dir <dir>]
+        [--skill-block-file <file>] [--skill-rule-file <file>]
+        [--skill-dir <dir>]
 
 ``<root>`` is ``EXPEDISTILL_SWEBENCH_ROOT``, read when tasks are loaded or a
 unit runs, never at import. The bridge reads the harness's own ``.env``, so
@@ -16,14 +17,15 @@ no endpoint or key passes through this process.
 
 - Skill block: a bare unit sends none, so its prompt is the harness's bare
   prompt. Any other unit sends ``protocol.render_block``'s text, which the
-  bridge places before ``<pr_description>``; a folder unit also sends its
-  materialized folder, which the bridge writes to /skills in the agent
-  sandbox.
+  bridge places before ``<pr_description>``; a folder unit with cards also
+  sends its card-reading rule (``protocol.card_rule``), which the bridge
+  places after ``</instructions>``, and its materialized folder, which the
+  bridge writes to /skills in the agent sandbox.
 - Attempts: every call gets a fresh directory under ``workdir`` (named by
   K1's ``attempt_token``), and the bridge a fresh ``--out`` inside it,
   because the harness's runner returns an existing final unit instead of
-  running it again. The block file and the bridge's stdout and stderr are
-  kept beside it.
+  running it again. The block and rule files and the bridge's stdout and
+  stderr are kept beside it.
 - Outcome: the bridge prints its JSON as the last stdout line. Exit 0 with
   status ``final`` is the scorer's verdict (``resolved``); exit 0 with
   status ``infra`` raises ``InfrastructureError`` (K1 retries the unit; the
@@ -53,7 +55,7 @@ from expedistill.benchmarks.base import (
 )
 from expedistill.benchmarks.skill_folder import SkillFolder
 from expedistill.benchmarks.swebench.prompt_pack import PROMPT_PACK
-from expedistill.benchmarks.swebench.protocol import render_block
+from expedistill.benchmarks.swebench.protocol import card_rule, render_block
 from expedistill.benchmarks.swebench.trajectory import (
     initial_prompt,
     steps_from_messages,
@@ -81,6 +83,7 @@ _ATTEMPT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 #: Files of one attempt directory.
 _OUT_DIR = "out"
 _BLOCK_FILE = "skill_block.txt"
+_RULE_FILE = "skill_rule.txt"
 _STDOUT_FILE = "bridge_stdout.txt"
 _STDERR_FILE = "bridge_stderr.txt"
 _STDERR_TAIL_CHARS = 2000
@@ -315,8 +318,8 @@ class SWEBenchPlugin(BenchmarkPlugin):
         mandatory = folder is not None and (
             task.meta["skill_folder"].get(READ_RULE_KEY)
             == READ_RULE_MANDATORY)
-        block = render_block(folder=folder, skills_block=skills_block or "",
-                             mandatory=mandatory)
+        block = render_block(folder=folder, skills_block=skills_block or "")
+        rule = card_rule(folder=folder, mandatory=mandatory)
         if mandatory:
             prompt_name = self.skill_folder_mandatory_prompt_name
         elif folder is not None:
@@ -332,6 +335,10 @@ class SWEBenchPlugin(BenchmarkPlugin):
             block_file = attempt / _BLOCK_FILE
             block_file.write_text(block, encoding="utf-8")
             args += ["--skill-block-file", str(block_file)]
+        if rule:
+            rule_file = attempt / _RULE_FILE
+            rule_file.write_text(rule, encoding="utf-8")
+            args += ["--skill-rule-file", str(rule_file)]
         folder_dir = task.meta.get("skill_folder_dir") \
             if folder is not None else None
         if folder_dir:

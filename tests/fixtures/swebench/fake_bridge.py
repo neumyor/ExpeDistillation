@@ -6,7 +6,8 @@ bridge's contract (docs/decisions/swebench_plugin_20261118.md) without a
 sandbox or a model, steered by environment variables:
 
 - ``FAKE_BRIDGE_LOG``: a JSON-lines file; every call appends its argv, the
-  text of ``--skill-block-file`` and the files under ``--skill-dir``;
+  texts of ``--skill-block-file`` and ``--skill-rule-file`` and the files
+  under ``--skill-dir``;
 - ``FAKE_BRIDGE_CASE``: the recorded unit directory ``run`` copies to
   ``<out>/<instance>/rep0/`` (default: the ``resolved`` fixture);
 - ``FAKE_BRIDGE_MODE``: ``final`` (default), ``infra`` (exit 0 with status
@@ -52,11 +53,13 @@ def _describe(args):
 def _run(args):
     block = (Path(args.skill_block_file).read_text(encoding="utf-8")
              if args.skill_block_file else None)
+    rule = (Path(args.skill_rule_file).read_text(encoding="utf-8")
+            if args.skill_rule_file else None)
     files = (sorted(str(p.relative_to(args.skill_dir))
                     for p in Path(args.skill_dir).rglob("*") if p.is_file())
              if args.skill_dir else None)
     out_existed = Path(args.out).exists()
-    _log(args, {"block": block, "skill_files": files,
+    _log(args, {"block": block, "rule": rule, "skill_files": files,
                 "out_existed": out_existed})
     mode = os.environ.get("FAKE_BRIDGE_MODE", "final")
     print("fake bridge: starting", args.instance, file=sys.stderr)
@@ -96,6 +99,7 @@ def main():
     run.add_argument("--model", required=True)
     run.add_argument("--max-input-tokens", type=int, required=True)
     run.add_argument("--skill-block-file")
+    run.add_argument("--skill-rule-file")
     run.add_argument("--skill-dir")
     args = parser.parse_args()
     return _describe(args) if args.command == "describe" else _run(args)
