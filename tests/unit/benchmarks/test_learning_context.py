@@ -16,6 +16,8 @@ from expedistill.benchmarks.alfworld.prompt_pack import PROMPT_PACK as ALFWORLD_
 from expedistill.benchmarks.alfworld.plugin import ALFWorldPlugin
 from expedistill.benchmarks.searchqa.prompt_pack import PROMPT_PACK as SEARCHQA_PACK
 from expedistill.benchmarks.searchqa.plugin import SearchQAPlugin
+from expedistill.benchmarks.swebench.prompt_pack import PROMPT_PACK as SWEBENCH_PACK
+from expedistill.benchmarks.swebench.plugin import SWEBenchPlugin
 from expedistill.benchmarks.tb.prompt_pack import PROMPT_PACK as TB_PACK
 from expedistill.benchmarks.tb.plugin import TBPlugin
 from expedistill.prompts import METHOD_PROMPT_NAMES, PROMPTS, get
@@ -25,13 +27,15 @@ from tests.helpers.prompts import placeholders
 
 ALFWORLD_CONTEXT = ALFWORLD_PACK.vocabulary
 SEARCHQA_CONTEXT = SEARCHQA_PACK.vocabulary
+SWEBENCH_CONTEXT = SWEBENCH_PACK.vocabulary
 TB_CONTEXT = TB_PACK.vocabulary
 
 SNAPSHOT = json.loads(
     (Path(__file__).resolve().parents[2] / "fixtures" / "prompts"
      / "learning_prompts_tb.json").read_text(encoding="utf-8"))
 
-CONTEXTS = [GENERIC, TB_CONTEXT, ALFWORLD_CONTEXT, SEARCHQA_CONTEXT]
+CONTEXTS = [GENERIC, TB_CONTEXT, ALFWORLD_CONTEXT, SEARCHQA_CONTEXT,
+            SWEBENCH_CONTEXT]
 
 #: Words that must not reach a model outside the TB benchmark.
 TB_VOCABULARY = ("Terminal Bench", "TB21", "terminal agent", "bash",
@@ -121,6 +125,7 @@ def test_each_plugin_declares_its_context():
     assert TBPlugin.prompt_pack.vocabulary is TB_CONTEXT
     assert ALFWorldPlugin.prompt_pack.vocabulary is ALFWORLD_CONTEXT
     assert SearchQAPlugin.prompt_pack.vocabulary is SEARCHQA_CONTEXT
+    assert SWEBenchPlugin.prompt_pack.vocabulary is SWEBENCH_CONTEXT
 
 
 # -- the wording is grounded in the plugin prompts ---------------------------

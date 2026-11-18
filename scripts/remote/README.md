@@ -53,12 +53,16 @@ EXPEDISTILL_TB_HOST=local
 EXPEDISTILL_TB_ROOT=<bench-root>
 EXPEDISTILL_TB_RUNNER=<基准主机上 runner 脚本的绝对路径>
 EXPEDISTILL_TB_ALLOWED_ROOTS=<可选：":" 分隔的绝对前缀>
+EXPEDISTILL_SWEBENCH_ROOT=<swebench-eval 的目录，只有 SWE-bench 的 run 需要>
 ```
 
 - `EXPEDISTILL_TB_HOST=local` 表示 driver 就在基准主机上：命令走本机 `bash`，文件走
   本机复制，不需要 `EXPEDISTILL_TB_KEY`。留空仍是配置错误，防止漏配后把远程命令
   跑在本机；
 - `EXPEDISTILL_TB_RUNNER` 没有默认值，缺失时第一次提交就报配置错误；
+- `EXPEDISTILL_SWEBENCH_ROOT` 指向基准主机上的 swebench-eval 目录。SWE-bench 插件每个单元用
+  它的 `.venv/bin/python scripts/run_unit.py` 执行一次，模型端点和密钥由那边自己的 `.env`
+  提供，不经过这个密钥文件；
 - `EXPEDISTILL_TB_ALLOWED_ROOTS` 是共享主机上的保护：设置后 `EXPEDISTILL_TB_ROOT` 必须
   在其中某个前缀之下，写错路径时报错，不会写进别人的目录；
 - `EXPEDISTILL_LLM_PROVIDER` 可选，缺省为 `openai_compat`；

@@ -5,7 +5,7 @@
 playbook 注入弱模型的 prompt，是它们影响弱模型的唯一途径。
 
 本仓库是这套方法的实验框架：一条命令跑完"摸底 → 写 Skill → 带库练习、按失败修改 Skill → 终测"
-的整个流程，支持 ALFWorld、SearchQA、TerminalBench 三个 benchmark，
+的整个流程，支持 ALFWorld、SearchQA、TerminalBench、SWE-bench Verified 四个 benchmark，
 也能用同一套执行与评测流程比较其他 Skill 学习方法（ExpeL、GEPA、SkillOpt 等）。
 
 | 想做什么 | 去哪里 |
@@ -114,7 +114,7 @@ baseline → learn → practice → learn → practice → learn → test
 
 ```yaml
 schema_version: 9
-benchmark: alfworld              # alfworld / searchqa / tb
+benchmark: alfworld              # alfworld / searchqa / tb / swebench
 models:
   executor_strong: <强模型名>
   executor_weak:   <弱模型名>    # 其余角色（segmenter、author、rewriter、judge）缺省用强模型
@@ -372,6 +372,7 @@ cp .env.example .env
 | `EXPEDISTILL_LLM_ENDPOINTS` / `EXPEDISTILL_LLM_API_KEYS` | 可选，让个别模型走另一个端点 |
 | `EXPEDISTILL_ALFWORLD_EVAL_DIR`、`EXPEDISTILL_ALFWORLD_VENV`、`ALFWORLD_DATA`、`ALFWORLD_CONFIG`、`ALFWORLD_BENCH_SRC` | 跑 ALFWorld 时需要 |
 | `EXPEDISTILL_SEARCHQA_EVAL_DIR` | 跑 SearchQA 时需要 |
+| `EXPEDISTILL_SWEBENCH_ROOT` | 跑 SWE-bench 时需要：外层 `benchmark/swebench-eval` 的目录，执行用它自己的 `.venv` 和 `.env` |
 | `EXPEDISTILL_TB_*` | 跑 TerminalBench 时需要，见 [scripts/remote/README.md](scripts/remote/README.md) |
 
 ### 5.4 启动一次实验

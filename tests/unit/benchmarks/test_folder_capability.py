@@ -5,8 +5,8 @@ the plugin cannot run a folder unit; the name doubles as the folder
 prompt's B2 registration, so the capability and its prompt freeze
 together). Pinned here:
 
-* the real plugins: tb, searchqa and alfworld declare it (and the name
-  each names is really registered);
+* the real plugins: tb, searchqa, alfworld and swebench declare it (and
+  the name each names is really registered);
 * E1's guard: a folder unit (the delivery's manifest on the task)
   reaching a plugin without the capability is a loud ConfigError
   naming the benchmark, never a silent plain-injection run;
@@ -15,8 +15,9 @@ together). Pinned here:
 * stage 0 freezes the declared folder prompt's digest and refuses an
   unregistered name;
 * the mandatory-read variant (``skill_folder_mandatory_prompt_name``):
-  tb declares it, the others do not, E1 refuses a mandatory folder unit
-  on a plugin without it, and stage 0 freezes it like the folder prompt.
+  tb and swebench declare it, the others do not, E1 refuses a mandatory
+  folder unit on a plugin without it, and stage 0 freezes it like the
+  folder prompt.
 """
 
 import dataclasses
@@ -52,6 +53,7 @@ _FOLDER_PROMPTS = [
     ("tb", "TB_SKILL_READ"),
     ("searchqa", "SEARCHQA_TASK_PROMPT_FOLDER"),
     ("alfworld", "ALFWORLD_TASK_PROMPT_FOLDER"),
+    ("swebench", "SWEBENCH_SKILL_READ"),
 ]
 
 
@@ -188,8 +190,9 @@ def test_a_plugin_without_the_capability_freezes_no_extra_prompt(
     ("tb", "TB_SKILL_READ_MANDATORY"),
     ("searchqa", None),
     ("alfworld", None),
+    ("swebench", "SWEBENCH_SKILL_READ_MANDATORY"),
 ])
-def test_only_tb_declares_a_mandatory_read_prompt(benchmark, prompt_name):
+def test_the_mandatory_read_prompt_of_each_benchmark(benchmark, prompt_name):
     plugin = ensure_plugin(benchmark)
     assert plugin.skill_folder_mandatory_prompt_name == prompt_name
     assert prompt_name is None or prompt_name in PROMPTS
@@ -231,13 +234,18 @@ def test_a_mandatory_unit_reaches_a_plugin_that_declares_it(
     assert len(plugin.calls) == 1
 
 
-def test_stage0_freezes_the_mandatory_prompt_with_tb_runs_only():
+def test_stage0_freezes_each_mandatory_prompt_with_its_own_runs_only():
     for benchmark, _ in _FOLDER_PROMPTS:
         ensure_plugin(benchmark)
-    assert _prompt_digests("tb")["TB_SKILL_READ_MANDATORY"] \
-        == digest("TB_SKILL_READ_MANDATORY")
-    for benchmark in ("searchqa", "alfworld"):
-        assert "TB_SKILL_READ_MANDATORY" not in _prompt_digests(benchmark)
+    mandatory = {"tb": "TB_SKILL_READ_MANDATORY",
+                 "swebench": "SWEBENCH_SKILL_READ_MANDATORY"}
+    for benchmark, name in mandatory.items():
+        assert _prompt_digests(benchmark)[name] == digest(name)
+    for benchmark in ("tb", "searchqa", "alfworld", "swebench"):
+        digests = _prompt_digests(benchmark)
+        for owner, name in mandatory.items():
+            if owner != benchmark:
+                assert name not in digests, (benchmark, name)
 
 
 def test_stage0_refuses_an_unregistered_mandatory_prompt_name(monkeypatch):

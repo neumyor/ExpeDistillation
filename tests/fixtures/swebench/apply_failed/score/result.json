@@ -1,0 +1,9 @@
+{
+  "instance_id": "django__django-16429",
+  "resolved": false,
+  "applied": false,
+  "status": "apply_failed",
+  "error": ">>>>> Patch Apply Failed: patch: **** Only garbage was found in the patch input.\n",
+  "runtime_sec": null,
+  "sandbox_id": "sandbox-score"
+}

@@ -175,6 +175,13 @@ src/expedistill/
                           prompt_pack.py 提示词包
     searchqa/             适配外层 benchmark/searchqa-eval/：plugin.py 插件；
                           env.py 评测环境与判分器的加载；prompt_pack.py 提示词包
+    swebench/             适配外层 benchmark/swebench-eval/：plugin.py 插件（每个单元
+                          用那边自己的 Python 环境调用一次 scripts/run_unit.py，读回
+                          单元目录）；trajectory.py 从 traj.json 还原逐步轨迹；
+                          protocol.py 执行提示词副本、读卡规则 SWEBENCH_SKILL_READ
+                          与强制版 SWEBENCH_SKILL_READ_MANDATORY、
+                          人工规则 SWEBENCH_DISCIPLINE 与技能块的拼接；diagnose.py
+                          诊断的替换提示词与判分报告段；prompt_pack.py 提示词包
     alfworld/             适配外层 benchmark/alfworld-eval/：plugin.py 插件；
                           env.py 子进程环境封装；protocol.py 与外层统一 runner 一致
                           的执行协议（系统消息、第一步模板、历史窗口、动作解析、
@@ -433,7 +440,7 @@ configs/
 ```
 
 1. 一份配置对应一个实验，文件名即实验名：`<bench>_paper_<exp>_<arm>.yaml`
-   （`bench` ∈ {`tb21`, `alfworld`, `searchqa`}）；改配置先改生成脚本，再重新生成；
+   （`bench` ∈ {`tb21`, `alfworld`, `searchqa`, `swebench`}）；改配置先改生成脚本，再重新生成；
 2. 已经启动过正式 run 的配置**保持原样**，参数要变就给新臂起新名字；
 3. 配置只写方法参数和模型名，**端点地址、密钥从环境变量读**，不写进仓库、
    配置、日志或 manifest。需要的环境变量列在 `.env.example`。
@@ -536,7 +543,7 @@ tests/
   composites/    组合积木测试（假模型 + 临时 run 目录，含中断续跑）
   golden/        回归测试（2 组合 golden 矩阵 + 崩溃续跑验证 + 修订窗口探针）：
                  generate.py 重新生成快照，test_golden_matrix.py 核对
-  fixtures/      benchmark 原始输出录像（tb / alfworld / searchqa）、学习提示词
+  fixtures/      benchmark 原始输出录像（tb / alfworld / searchqa / swebench）、学习提示词
                  渲染样例（prompts/）、golden 矩阵的 2 组合快照（golden/）
   helpers/       多个测试文件共用的测试工具，一处定义，契约变了只改这里：
                  fake_llm.py（假模型 FakeClient）、fake_plugin.py（经导入机制
@@ -710,7 +717,7 @@ pytest tests/golden -q
 
 **测试夹具**（`tests/fixtures/`）：
 - `golden/`：2 个组合的完整快照（约 680 KB）
-- `tb/`、`alfworld/`、`searchqa/`：原始输出录像
+- `tb/`、`alfworld/`、`searchqa/`、`swebench/`：原始输出录像
 - `prompts/`：学习提示词的渲染样例
 
 **不要做的事**：
@@ -798,7 +805,7 @@ ruff check src tests scripts --select E9,F
 ## 九、外部依赖与远程
 
 1. 外部依赖路径（外层 `benchmark/searchqa-eval/`、`benchmark/alfworld-eval/`、
-   TB 远程工作区）通过环境变量传入，代码里不写死绝对路径；
+   `benchmark/swebench-eval/`、TB 远程工作区）通过环境变量传入，代码里不写死绝对路径；
 2. ALFWorld 插件运行在 `benchmark/alfworld-eval` 的 venv 下，需要
    `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` 三个环境变量；
 3. 远程基准主机上只在分配给自己的目录下工作（可用 `EXPEDISTILL_TB_ALLOWED_ROOTS`

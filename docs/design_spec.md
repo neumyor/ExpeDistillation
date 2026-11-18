@@ -149,7 +149,7 @@ reward + 原样的 correctness）、coverage（这张 trial 该不该有、有�
 
 | 字段 | 说明 |
 |---|---|
-| `benchmark` | benchmark 名字（`tb` / `searchqa` / `alfworld`） |
+| `benchmark` | benchmark 名字（`tb` / `searchqa` / `alfworld` / `swebench`） |
 | `models` | 模型角色表：角色 → 模型名。必须给出 `executor_strong` 与 `executor_weak` 两个锚点，其余角色按 `ROLE_DEFAULTS` 补齐（全部用强模型）。角色：`executor_strong`、`executor_weak`、`segmenter`、`author`、`rewriter`、`judge`（`judge` 只供 `judge-skills` 分析工具） |
 | `n_attempts_strong` / `n_attempts_weak` | 摸底两臂的采样次数；终测按执行者取其中之一；练习缺省取 `n_attempts_weak`，可用执行参数 `attempts` 覆盖 |
 | `split` | 显式 train / val / test / reserved 列表（`val` 可缺省为空，四个列表两两不相交），或 `{ratio, seed}` |
@@ -292,7 +292,7 @@ phases:
 
 论文配置全部由 `scripts/run/build_paper_configs.py` 生成，划分、TB 任务表和外部对照
 文件信息在 `scripts/run/paper_splits.py`。文件名是 `<bench>_paper_<exp>_<arm>.yaml`，
-`bench` ∈ {`tb21`, `alfworld`, `searchqa`}。`--check` 校验磁盘上的配置与生成结果一致，
+`bench` ∈ {`tb21`, `alfworld`, `searchqa`, `swebench`}；SWE-bench 只有参照方法 `e1_ours` 一份配置（它的基线在外层 `benchmark/swebench-eval` 里跑过），对照读那边 Qwen 裸跑 test 的冻结成绩文件。`--check` 校验磁盘上的配置与生成结果一致，
 `--print-index` 打印每个臂与参照臂相差的键。
 
 | 实验 | 臂 | 与参照的差别 |
@@ -408,6 +408,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 |---|---|---|
 | TB runner | TerminalBench | 委托 Harbor + 沙箱执行一次 rollout，结束后从 Harbor trial 目录还原逐步轨迹（`benchmarks/tb/trajectory.py`）。driver 与 Harbor 同机（`EXPEDISTILL_TB_HOST=local`）时命令走本机 `bash`、文件走本机复制；driver 在别的机器时经 ssh/scp |
 | SearchQA runner | SearchQA | 本地共用 ReAct 循环（`benchmarks/react_loop.py`）一步一步执行到结束，环境与判分来自外层 `benchmark/searchqa-eval/` |
+| SWE-bench runner | SWE-bench Verified | 每个单元用外层 `benchmark/swebench-eval` 自己的 Python 环境调用一次桥接脚本 `scripts/run_unit.py`（mini-SWE-agent 只有 bash 工具，E2B 沙箱，官方 swebench 判分），读回单元目录的 `traj.json` 与判分结果。技能块插在 `<pr_description>` 前、标题 `## Skill Knowledge`（与那边的基线方法相同位置），文件夹单元的技能文件写进 agent 沙箱的 `/skills/`，`read_rule: mandatory` 时读卡规则换成 `SWEBENCH_SKILL_READ_MANDATORY`（第一条任务命令之前必须读一张卡，论文配置的 practice 与 test 都用它）。接口见 `docs/decisions/swebench_plugin_20261118.md` |
 | ALFWorld runner | ALFWorld | 本地执行，协议与外层 `benchmark/alfworld-eval` 的统一 runner 一致（`benchmarks/alfworld/protocol.py`：相同的 system 消息与 user 模板、最近 2 步历史、环境给出的可行动作列表、`<think>…</think><action>…</action>` 严格解析、一次纠错、temperature 0.95、固定的输出上限 65536、50 步预算）；环境在外层 venv 的子进程里运行，需要 `ALFWORLD_DATA` / `ALFWORLD_CONFIG` / `ALFWORLD_BENCH_SRC` |
 
 两套本地 runner 的每局步数上限用环境变量配：SearchQA 是
@@ -582,16 +583,16 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 **提示词包**：每个 benchmark 一个文件 `benchmarks/<name>/prompt_pack.py`，导出
 `PROMPT_PACK`（`benchmarks/base.py` 的 `PromptPack`），插件用 `prompt_pack` 属性声明：
 
-| 字段 | 内容 | TB | ALFWorld | SearchQA |
-|---|---|---|---|---|
-| `vocabulary` | 学习提示词的词汇槽（`LearningContext`：智能体是谁、能力族、最终动作、可观察的信号、段标签示例等） | 有 | 有 | 有 |
-| `protocol` | 给写作者的环境事实（执行者每一步看到什么、技能怎样打开） | 有 | 有 | 有 |
-| `executor_prompts` | 执行提示词的注册名 | `TB_TERMINUS_TEMPLATE`、`TB_SKILL_READ`、`TB_DISCIPLINE` | `ALFWORLD_TASK_PROMPT_SYSTEM`、`ALFWORLD_TASK_PROMPT_NO_HISTORY`、`ALFWORLD_TASK_PROMPT`、`ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER`、`ALFWORLD_TASK_PROMPT_FOLDER`、`ALFWORLD_TASK_PROMPT_CORRECTION` | `SEARCHQA_TASK_PROMPT`、`SEARCHQA_TASK_PROMPT_FOLDER` |
-| `playbook_seed` | playbook 的初始文本 | 空 | 空 | 空 |
-| `playbook_facts` | 从摸底答卷计算统计事实的函数 | `tb/playbook.py` | `alfworld/playbook.py` | 无 |
-| `playbook_checks` | playbook 必须包含的部分（`PlaybookRequirement`） | 5 项 | 6 项 | 无 |
-| `overrides` | 方法提示词名 → 本 benchmark 的替换提示词名 | `PLAYBOOK_UPDATE` → `TB_PLAYBOOK_UPDATE`；`TRIAL_FAILURE_ANALYSIS` → `TB_TRIAL_FAILURE_ANALYSIS` | `PLAYBOOK_UPDATE` → `ALFWORLD_PLAYBOOK_UPDATE` | 无 |
-| `grader_report_prompt` | 诊断的判分报告段（一个 `{report}` 槽）；答卷记录了判分报告（`metrics.grader_report`）时，诊断把这一段接在任务说明之后 | `TB_DIAGNOSIS_GRADER_REPORT` | 无 | 无 |
+| 字段 | 内容 | TB | ALFWorld | SearchQA | SWE-bench |
+|---|---|---|---|---|---|
+| `vocabulary` | 学习提示词的词汇槽（`LearningContext`：智能体是谁、能力族、最终动作、可观察的信号、段标签示例等） | 有 | 有 | 有 | 有 |
+| `protocol` | 给写作者的环境事实（执行者每一步看到什么、技能怎样打开） | 有 | 有 | 有 | 有 |
+| `executor_prompts` | 执行提示词的注册名 | `TB_TERMINUS_TEMPLATE`、`TB_SKILL_READ`、`TB_DISCIPLINE` | `ALFWORLD_TASK_PROMPT_SYSTEM`、`ALFWORLD_TASK_PROMPT_NO_HISTORY`、`ALFWORLD_TASK_PROMPT`、`ALFWORLD_TASK_PROMPT_NO_HISTORY_FOLDER`、`ALFWORLD_TASK_PROMPT_FOLDER`、`ALFWORLD_TASK_PROMPT_CORRECTION` | `SEARCHQA_TASK_PROMPT`、`SEARCHQA_TASK_PROMPT_FOLDER` | `SWEBENCH_INSTANCE_TEMPLATE`、`SWEBENCH_SYSTEM_TEMPLATE`、`SWEBENCH_SKILL_READ`、`SWEBENCH_DISCIPLINE` |
+| `playbook_seed` | playbook 的初始文本 | 空 | 空 | 空 | 空 |
+| `playbook_facts` | 从摸底答卷计算统计事实的函数 | `tb/playbook.py` | `alfworld/playbook.py` | 无 | 无 |
+| `playbook_checks` | playbook 必须包含的部分（`PlaybookRequirement`） | 5 项 | 6 项 | 无 | 无 |
+| `overrides` | 方法提示词名 → 本 benchmark 的替换提示词名 | `PLAYBOOK_UPDATE` → `TB_PLAYBOOK_UPDATE`；`TRIAL_FAILURE_ANALYSIS` → `TB_TRIAL_FAILURE_ANALYSIS` | `PLAYBOOK_UPDATE` → `ALFWORLD_PLAYBOOK_UPDATE` | 无 | `TRIAL_FAILURE_ANALYSIS` → `SWEBENCH_TRIAL_FAILURE_ANALYSIS` |
+| `grader_report_prompt` | 诊断的判分报告段（一个 `{report}` 槽）；答卷记录了判分报告（`metrics.grader_report`）时，诊断把这一段接在任务说明之后 | `TB_DIAGNOSIS_GRADER_REPORT` | 无 | 无 | `SWEBENCH_DIAGNOSIS_GRADER_REPORT` |
 
 `ALFWORLD_PLAYBOOK_UPDATE` 的搜索规则里有一条两物体任务的规则（2026-11-15 起，"P1"）：
 两物体任务算两次搜索。交付第一件、目的地只显示一件之后，第二次搜索从顺序的第一个种类重来，
