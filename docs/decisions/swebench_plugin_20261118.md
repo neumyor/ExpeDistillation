@@ -107,6 +107,15 @@ ExpeDistill（Python 3.10）与 swebench-eval（Python 3.12）不能在一个进
 
 新代码的渲染与末尾位置检查时 agent 收到的第一条消息逐字节相同（pydata__xarray-4629，9795 字符）。
 
+运行目录（基准主机 runs 目录下）：
+
+| run | 代码 | 状态 |
+|---|---|---|
+| `swebench_paper_e1_ours_20261118_1844` | 本仓库 `b819d5a`，swebench-eval `b2989f6` | p01 完成后于 19:58 停止，目录保留（`STOPPED.md`）；p02 未完成 |
+| `swebench_paper_e1_ours_20261118_2005` | 本仓库 `0e73970`，swebench-eval `1f1b9e3` | `fork-run --through p01` 自旧 run，20:00 启动 |
+
+新 run 从旧 run 复制的只有 p01（摸底）：180 条轨迹，强模型 90 个单元、弱模型 90 个单元（train 30 题 × 3 次 × 2）。p00 冻结在新 run 里重新做（提示词 digest 与旧 run 全部相同，配置只差对照文件绝对路径里的代码目录，sha256 相同）；p02 学习在新 run 里重新做。复制后的空跑（不可达的模型端点，`--until-phase 0`）零模型调用。
+
 ## 规模
 
 | 相位 | 单元 |
