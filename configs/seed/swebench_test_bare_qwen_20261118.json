@@ -1,0 +1,276 @@
+{
+  "qwen_avg@3": 0.6,
+  "qwen_pass@3": 0.7666666666666667,
+  "tasks": {
+    "qwen:astropy__astropy-13977": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    },
+    "qwen:astropy__astropy-14995": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:django__django-11119": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:django__django-15382": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:django__django-16662": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:matplotlib__matplotlib-23299": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    },
+    "qwen:matplotlib__matplotlib-24627": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "success_rate": 0.3333333333333333
+    },
+    "qwen:matplotlib__matplotlib-26342": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:mwaskom__seaborn-3069": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 0.6666666666666666
+    },
+    "qwen:psf__requests-2931": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "success_rate": 0.3333333333333333
+    },
+    "qwen:psf__requests-5414": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:pydata__xarray-3095": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:pydata__xarray-4687": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "success_rate": 0.3333333333333333
+    },
+    "qwen:pydata__xarray-6721": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:pylint-dev__pylint-4970": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    },
+    "qwen:pylint-dev__pylint-6386": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.3333333333333333
+    },
+    "qwen:pylint-dev__pylint-7080": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    },
+    "qwen:pytest-dev__pytest-5262": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:pytest-dev__pytest-7490": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:pytest-dev__pytest-7521": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.3333333333333333
+    },
+    "qwen:scikit-learn__scikit-learn-12682": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:scikit-learn__scikit-learn-14053": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:scikit-learn__scikit-learn-9288": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:sphinx-doc__sphinx-7748": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    },
+    "qwen:sphinx-doc__sphinx-7889": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        0.0
+      ],
+      "success_rate": 0.6666666666666666
+    },
+    "qwen:sphinx-doc__sphinx-8593": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "success_rate": 0.3333333333333333
+    },
+    "qwen:sympy__sympy-18211": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "success_rate": 1.0
+    },
+    "qwen:sympy__sympy-20438": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    },
+    "qwen:sympy__sympy-21847": {
+      "n": 3,
+      "rewards": [
+        1.0,
+        1.0,
+        0.0
+      ],
+      "success_rate": 0.6666666666666666
+    },
+    "qwen:sympy__sympy-21930": {
+      "n": 3,
+      "rewards": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "success_rate": 0.0
+    }
+  }
+}

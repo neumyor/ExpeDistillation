@@ -3,9 +3,9 @@
 Purpose: every paper config of one benchmark trains and tests on the same
 tasks, so the lists live once here and the generator copies them into each
 config. ALFWorld also has a validation list (``val``) for practice phases
-that run on it. TB additionally carries the full task list and the external
-campaign control file (path relative to configs/experiments, pinned by
-sha256).
+that run on it. TB additionally carries the full task list; TB and SWE-bench
+carry their external control file (path relative to configs/experiments,
+pinned by sha256).
 List order is significant: it is the order the configs list the tasks in.
 """
 
@@ -2237,12 +2237,89 @@ SEARCHQA_TEST: List[str] = [
 ]
 
 
+#: SWE-bench Verified, the frozen split of benchmark/swebench-eval
+#: (data/split_v1.json) minus the tasks whose gold patch does not resolve
+#: in that harness; its val list is not used.
+SWEBENCH_TRAIN: List[str] = [
+    'astropy__astropy-14508',
+    'astropy__astropy-7336',
+    'astropy__astropy-8707',
+    'django__django-14034',
+    'django__django-15098',
+    'django__django-15252',
+    'django__django-16429',
+    'matplotlib__matplotlib-22871',
+    'matplotlib__matplotlib-24570',
+    'matplotlib__matplotlib-26291',
+    'mwaskom__seaborn-3187',
+    'psf__requests-6028',
+    'pydata__xarray-3677',
+    'pydata__xarray-4966',
+    'pydata__xarray-6938',
+    'pylint-dev__pylint-6903',
+    'pylint-dev__pylint-7277',
+    'pytest-dev__pytest-5809',
+    'pytest-dev__pytest-5840',
+    'pytest-dev__pytest-6202',
+    'scikit-learn__scikit-learn-11578',
+    'scikit-learn__scikit-learn-13135',
+    'scikit-learn__scikit-learn-15100',
+    'scikit-learn__scikit-learn-26323',
+    'sphinx-doc__sphinx-8475',
+    'sphinx-doc__sphinx-8638',
+    'sphinx-doc__sphinx-9591',
+    'sympy__sympy-13091',
+    'sympy__sympy-14531',
+    'sympy__sympy-16766',
+]
+
+SWEBENCH_TEST: List[str] = [
+    'astropy__astropy-13977',
+    'astropy__astropy-14995',
+    'django__django-11119',
+    'django__django-15382',
+    'django__django-16662',
+    'matplotlib__matplotlib-23299',
+    'matplotlib__matplotlib-24627',
+    'matplotlib__matplotlib-26342',
+    'mwaskom__seaborn-3069',
+    'psf__requests-2931',
+    'psf__requests-5414',
+    'pydata__xarray-3095',
+    'pydata__xarray-4687',
+    'pydata__xarray-6721',
+    'pylint-dev__pylint-4970',
+    'pylint-dev__pylint-6386',
+    'pylint-dev__pylint-7080',
+    'pytest-dev__pytest-5262',
+    'pytest-dev__pytest-7490',
+    'pytest-dev__pytest-7521',
+    'scikit-learn__scikit-learn-12682',
+    'scikit-learn__scikit-learn-14053',
+    'scikit-learn__scikit-learn-9288',
+    'sphinx-doc__sphinx-7748',
+    'sphinx-doc__sphinx-7889',
+    'sphinx-doc__sphinx-8593',
+    'sympy__sympy-18211',
+    'sympy__sympy-20438',
+    'sympy__sympy-21847',
+    'sympy__sympy-21930',
+]
+
+#: The bare Qwen test run of benchmark/swebench-eval (30 tasks x 3), the
+#: control every SWE-bench method there was compared against.
+SWEBENCH_EXTERNAL_PATH = "../seed/swebench_test_bare_qwen_20261118.json"
+SWEBENCH_EXTERNAL_SHA256 = (
+    "05f81a31320dee2d14b1adab20859524844132322d214136662e0c651aa8b909")
+
+
 SPLITS: Dict[str, Dict[str, List[str]]] = {
     "tb21": {"train": TB21_TRAIN, "test": TB21_TEST,
              "reserved": TB21_RESERVED},
     "alfworld": {"train": ALFWORLD_TRAIN, "val": ALFWORLD_VAL,
                  "test": ALFWORLD_TEST},
     "searchqa": {"train": SEARCHQA_TRAIN, "test": SEARCHQA_TEST},
+    "swebench": {"train": SWEBENCH_TRAIN, "test": SWEBENCH_TEST},
 }
 
 #: Benchmarks whose configs carry an explicit ``tasks`` list.
@@ -2251,3 +2328,10 @@ TASKS: Dict[str, List[str]] = {"tb21": TB21_TASKS}
 #: The TB external campaign control file.
 TB21_EXTERNAL: Dict[str, str] = {"path": TB21_EXTERNAL_PATH,
                                  "sha256": TB21_EXTERNAL_SHA256}
+
+#: The external control file of each benchmark that has one.
+EXTERNAL: Dict[str, Dict[str, str]] = {
+    "tb21": TB21_EXTERNAL,
+    "swebench": {"path": SWEBENCH_EXTERNAL_PATH,
+                 "sha256": SWEBENCH_EXTERNAL_SHA256},
+}

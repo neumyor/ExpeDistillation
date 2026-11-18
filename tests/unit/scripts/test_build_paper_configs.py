@@ -25,6 +25,7 @@ BUILDER = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(BUILDER)
 
 BENCHMARKS = BUILDER.BENCHMARKS
+BASELINE_BENCHMARKS = BUILDER.BASELINE_BENCHMARKS
 NAMES = sorted(BUILDER.generate(
     BUILDER.DEFAULT_D_MODELS, BUILDER.DEFAULT_Q_MODEL))
 BASELINES = ("skillopt", "evoskill", "trace2skill", "gepa", "expel",
@@ -99,7 +100,8 @@ def test_the_matrix_has_the_expected_files():
     assert per_bench["alfworld"] == sorted(
         ["e1_ours", "e1_ours_val", "e1_bare_q", "e1_bare_d", "e1_bare_x"]
         + external)
-    assert len(NAMES) == 44
+    assert per_bench["swebench"] == ["e1_ours"]
+    assert len(NAMES) == 45
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -149,6 +151,9 @@ def test_split_and_global_keys_are_identical_across_arms(bench, files):
         assert counts == {"train": 20, "test": 39, "reserved": 30}
     else:
         assert "tasks" not in ours
+    if bench == "swebench":
+        counts = {key: len(value) for key, value in ours["split"].items()}
+        assert counts == {"train": 30, "test": 30}
     for name, cfg in mine.items():
         changed = {path.split(".")[0] for path in _diff(cfg, ours)}
         assert changed <= {"sequence", "phases", "models", "token_budgets"}, \
@@ -157,7 +162,8 @@ def test_split_and_global_keys_are_identical_across_arms(bench, files):
 
 def test_only_alfworld_has_a_val_list():
     splits = BUILDER.paper_splits.SPLITS
-    assert "val" not in splits["tb21"] and "val" not in splits["searchqa"]
+    for bench in ("tb21", "searchqa", "swebench"):
+        assert "val" not in splits[bench]
     val = splits["alfworld"]["val"]
     assert len(val) == len(set(val)) == 39
     assert all(task.startswith("json_2.1.1/valid_seen/") for task in val)
@@ -201,8 +207,22 @@ def test_the_teacher_fills_every_role_but_the_weak_executor(bench, files):
         for role in ROLES}
     for role, entry in ours["token_budgets"]["roles"].items():
         expected = 262144 if ours["models"][role] == Q_MODEL else 524288
+        if role.startswith("executor_") and bench == "swebench":
+            # SWE-bench's harness caps every executor at 131072.
+            expected = 131072
         assert entry == {"max_output_tokens": 65536,
                          "max_input_tokens": expected}, role
+
+
+def test_only_swebench_folder_units_must_read_a_card(files):
+    for name, cfg in files.items():
+        for phase in cfg["phases"].values():
+            delivery = phase.get("delivery") or {}
+            if delivery.get("name") != "folder":
+                continue
+            expected = ("mandatory" if name.startswith("swebench_")
+                        else None)
+            assert delivery.get("read_rule") == expected, name
 
 
 def test_ours_val_differs_from_ours_in_the_practice_list_only(files):
@@ -218,7 +238,7 @@ def test_ours_val_differs_from_ours_in_the_practice_list_only(files):
 # The test-only arms
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("bench", BENCHMARKS)
+@pytest.mark.parametrize("bench", BASELINE_BENCHMARKS)
 def test_baseline_configs_run_the_test_phase_only(bench, files):
     # A test-only arm has no learn phase that could evolve a playbook, so
     # its test phase is the reference test phase with the playbook off.
@@ -242,7 +262,7 @@ def test_baseline_configs_run_the_test_phase_only(bench, files):
         assert whole["phases"]["test"]["execution"] == {"name": "real"}
 
 
-@pytest.mark.parametrize("bench", BENCHMARKS)
+@pytest.mark.parametrize("bench", BASELINE_BENCHMARKS)
 def test_the_six_baselines_differ_only_by_file_name(bench, files):
     for variant in ("folder", "whole"):
         configs = [files[_name(bench, f"e1_{baseline}_{variant}")]
@@ -294,6 +314,14 @@ def test_the_control_follows_the_benchmark_and_the_student(files):
         assert external["path"] == "../seed/alfworld_bare_q_20261102.json"
         assert external != BUILDER.POOLED_CONTROL
         assert len(external["sha256"]) == 64
+    # SWE-bench: the bare Qwen test run of benchmark/swebench-eval.
+    compare = files[_name("swebench", "e1_ours")]["phases"]["test"][
+        "compare"]
+    assert compare == {
+        "against": "external_campaign",
+        "external": {"model_key": "qwen",
+                     "path": BUILDER.paper_splits.SWEBENCH_EXTERNAL_PATH,
+                     "sha256": BUILDER.paper_splits.SWEBENCH_EXTERNAL_SHA256}}
 
 
 def test_method_arms_show_the_evolved_playbook_and_test_only_arms_do_not(
