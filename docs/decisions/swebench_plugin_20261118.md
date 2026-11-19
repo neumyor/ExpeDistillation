@@ -132,3 +132,20 @@ ExpeDistill（Python 3.10）与 swebench-eval（Python 3.12）不能在一个进
 2. node29 上真实冒烟：2 道 train 题强、弱各 1 次，加 1 个带两张手写技能卡的文件夹单元；检查第一条用户消息、读卡检测、断网、补丁内容、token 记录。
 3. `export_settings.py` 的设置快照与 test_bare 对比，除插入块以外相同。
 4. 每个相位结束后审计；学到的技能库用 swebench-eval 的 `scan_artifacts.py --leak` 扫描。
+
+## 人工规则第二版（看过 test 失败轨迹后的修改）
+
+日期：2026-11-19。正式 run `swebench_paper_e1_ours_20261118_2005` 的 test 是 59/90（0.656），比旧 DeepSeek 学生的 64/90 少 5 个单元。用户要求读我们更差的 8 个任务（xarray-4687、scikit-learn-12682、pylint-6386、pylint-7080、astropy-13977、sympy-21930、requests-2931、requests-5414）的失败轨迹，对照旧 DeepSeek 的成功，决定往 `SWEBENCH_DISCIPLINE` 加三条通用规则，并在 test 上重跑看效果。
+
+**这一版的证据来自 test 题。** 第一版人工规则只看 train 和 val（需求第 7 条），这一版不满足这个条件，所以：
+
+- 新 run 的 test 成绩不能当作与第一版同一设定下的无偏结果。论文里单独标注为“看过第一次 test 的失败轨迹后改写的人工规则”，两个 test 成绩并列报告，不替换第一版。
+- 新规则里不含任何任务名、仓库名、测试名；三条都按失败的类型写成通用文字。
+
+三条规则（`SWEBENCH_DISCIPLINE`）：
+
+1. 编辑前先写下 PR 描述暗示的公共变化（签名、参数名、选项）。PR 点名或建议了接口就照它暴露，不要改成硬编码行为；新参数按同一函数或类里已有参数的命名方式命名。（xarray-4687：三次都把应加的 `keep_attrs` 参数改成了内部硬编码；scikit-learn-12682：新参数没有沿用同类 `transform_*` 的命名）
+2. 提交前，对 PR 描述提到的每种写法（长短选项、`.`、相对和绝对路径、各类输入）都跑一遍复现并比较输出，有差异就是没做完；测试因环境问题中止时，不用 `-x`，也不当作无关，要选其他测试，让改动代码的全部测试真的跑起来。（pylint-6386、pylint-7080、requests-5414）
+3. 自己的检查显示结果和调用者或测试的期望不一致（类型或值错误，或某种输入仍然失败），就判定修复是错的：按调用者分别处理，不提交折中方案。（requests-2931、astropy-13977）
+
+没有改的东西：playbook 的写法、技能清单、读卡规则及位置、配置文件（`swebench_paper_e1_ours.yaml` 原样使用，prompt digest 变了所以是新 run）。旧 run 仍固定在 `0e73970`。

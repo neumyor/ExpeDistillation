@@ -226,11 +226,14 @@ SWEBENCH_DISCIPLINE = register(
         name="SWEBENCH_DISCIPLINE",
         template="""Working rules, every task:
 - Keep command output short: read code with `grep -n` and `sed -n '<start>,<end>p'`, and end long commands with `| head -n 80` or `| tail -n 80`. Run tests quietly (`pytest -q`) and show only the tail. Long outputs fill the context, and when it is full the task ends without a submission.
+- Before you edit, write down the public change the PR description implies (function signature, parameter name, option). If it names or suggests an interface, expose exactly that instead of hard-coding a behavior, and name a new parameter after the sibling parameters of the same function or class.
 - Before you edit, follow the call path from the code in the PR description's example to the place where the behavior is decided, and fix it there; the line that raises the error is not always that place.
 - Find the existing tests of the code you change (`grep -rn "<function or class name>"` in the repository's test directories), run them before and after your edit, and read how they call the code. Do not edit them.
 - Change only what the PR description needs, in the style of the surrounding code.
 Before you submit:
 - Run your reproduction script and the existing tests of every file you changed once more, and read the output.
+- Run the reproduction through every form the PR description names (long and short options, `.`, relative and absolute paths, each kind of input) and compare the outputs; any difference means the fix is unfinished. If a test run stops on a setup error, do not use `-x` and do not call it unrelated: select other tests so that every test of the code you changed actually runs.
+- If your own check shows a result that disagrees with what the callers or tests expect (a wrong type or value, or an input kind that still fails), the fix is wrong: handle each caller separately instead of submitting a compromise.
 - Write the patch with `git diff -- <the source files you changed> > patch.txt`, then run `cat patch.txt` as its own command and check that it starts with `diff --git`, has `--- a/` and `+++ b/` lines, and contains every change you made. If it is empty or shows anything else, fix it first.
 - Submit with exactly `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt` as its own command. Never submit by printing a source file or any other text.""",
         description=(
