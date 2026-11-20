@@ -13,6 +13,10 @@
 #   SERVED_NAME      model name on the wire (default qwen3.6-35b-a3b)
 #   REPLICA_BASE_PORT  first replica port (default 8110)
 #   LB_LISTEN        host:port of the endpoint (default 127.0.0.1:8010)
+#   AFFINITY_REGEX   requests whose first user message gives the same match are
+#                    routed to the same replica, which keeps its prefix cache
+#                    warm (default: the first 150 characters)
+#   AFFINITY_CHARS   length of the default key (default 150)
 #   MAX_MODEL_LEN, MAX_NUM_SEQS, GPU_UTIL   (262144, 64, 0.90)
 #   WAIT_SECONDS     how long to wait for every replica (default 2400)
 #   VLLM_API_KEY     when set, every replica requires it as a bearer key
@@ -103,8 +107,11 @@ for ((i = 0; i < index; i++)); do
   echo "replica $i healthy"
 done
 
+affinity=()
+[ -n "${AFFINITY_REGEX:-}" ] && affinity+=(--affinity-regex "$AFFINITY_REGEX")
+[ -n "${AFFINITY_CHARS:-}" ] && affinity+=(--affinity-chars "$AFFINITY_CHARS")
 nohup setsid "$VLLM_ENV/bin/python" "$HERE/vllm_lb.py" --listen "$LB_LISTEN" \
-  "${backends[@]}" > "$VLLM_RUN_DIR/lb.log" 2>&1 < /dev/null &
+  "${backends[@]}" ${affinity[@]+"${affinity[@]}"} > "$VLLM_RUN_DIR/lb.log" 2>&1 < /dev/null &
 echo $! > "$VLLM_RUN_DIR/lb.pid"
 sleep 3
 alive "$VLLM_RUN_DIR/lb.pid" || { echo "load balancer died" >&2; exit 1; }
