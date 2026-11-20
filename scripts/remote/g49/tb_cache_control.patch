@@ -1,0 +1,42 @@
+--- a/run_tencent_tb21_smoke_niuyiming.sh
++++ b/run_tencent_tb21_smoke_niuyiming.sh
+@@ -57,6 +57,14 @@
+ : "${RUN_ID:=tb21_tencent_${TBENCH_RUN_MODE}_$(date +%Y%m%d_%H%M%S)}"
+ : "${MODEL_API_BASE:=https://llm-center.modelbest.co/v1}"
+ : "${MODEL_NAME:=qwen3.6-flash-distill}"
++# Explicit prompt-cache markers, only for the models named in TBENCH_CACHE_CONTROL_MODELS
++# (space separated). The agent puts cache_control on the last message of every request, which
++# makes an endpoint that caches only on markers (the Qwen gateway) reuse the previous step's
++# prefix. It changes no model output; a model that caches by itself is left out of the list.
++CACHE_CONTROL_LINES=""
++if [[ " ${TBENCH_CACHE_CONTROL_MODELS:-} " == *" ${MODEL_NAME:-} "* && -n "${TBENCH_CACHE_CONTROL_MODELS:-}" ]]; then
++  CACHE_CONTROL_LINES="        cache_control: last_message"
++fi
+ # Terminus context/output ceilings. The ExpeDistillation plugin sets the
+ # input cap per role (weak 256K, strong 512K); direct campaign runs keep
+ # the historical 131072 / 65536 defaults.
+@@ -221,6 +229,7 @@
+       llm_call_kwargs:
+         top_p: 0.95
+         max_tokens: ${TBENCH_MAX_OUTPUT_TOKENS}
++${CACHE_CONTROL_LINES}
+         extra_body:
+           top_k: 20
+           enable_thinking: true
+--- a/vendor/tb21-tencent-skill/python/tencent_sandbox_terminus.py
++++ b/vendor/tb21-tencent-skill/python/tencent_sandbox_terminus.py
+@@ -112,6 +112,14 @@
+     ) -> LLMResponse:
+         messages = list(message_history or [])
+         messages.append({"role": "user", "content": prompt})
++        if self._call_kwargs.get("cache_control") == "last_message":
++            # Explicit prompt-cache marker on the last message of the request (earlier messages are
++            # left as they are): an endpoint that caches only on markers, like the Qwen gateway,
++            # reuses the prefix it cached on the previous step. No effect on the model output.
++            last = messages[-1]
++            if isinstance(last.get("content"), str):
++                messages[-1] = {**last, "content": [{"type": "text", "text": last["content"],
++                                                     "cache_control": {"type": "ephemeral"}}]}
+         payload: dict[str, Any] = {
+             "model": self._model_name,
+             "messages": messages,

@@ -205,6 +205,9 @@ _FORWARDED_KNOBS = (
     "TBENCH_VERIFIER_MULTIPLIER",
     "TBENCH_SETUP_MULTIPLIER",
     "TBENCH_VERIFIER_OVERRIDE",
+    # Space-separated model names whose requests carry an explicit prompt-cache
+    # marker on the last message (the runner decides per MODEL_NAME).
+    "TBENCH_CACHE_CONTROL_MODELS",
 )
 
 #: TB task ids are directory names in the remote dataset; anything outside

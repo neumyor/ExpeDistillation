@@ -225,6 +225,10 @@ def test_runner_env_is_the_submission_contract(monkeypatch):
     env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "bare", None,
                      max_input_tokens=262144)
     assert env["TBENCH_MAX_INPUT_TOKENS"] == "262144"
+    # the cache-marker model list is a forwarded knob, absent unless set
+    monkeypatch.setenv("TBENCH_CACHE_CONTROL_MODELS", "qwen3.6-flash-distill")
+    env = runner_env("ed_x_a00", "/j", "/r", "t", "m", "bare", None)
+    assert env["TBENCH_CACHE_CONTROL_MODELS"] == "qwen3.6-flash-distill"
 
 
 # ---------------------------------------------------------------------------
