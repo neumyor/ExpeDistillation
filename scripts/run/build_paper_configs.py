@@ -84,16 +84,34 @@ the difference)
                             after bare D (2026-11-02), so it is not run and
                             no control file is built for it
 
-The ablation arms (e2 teacher -> student, e3 segmentation budget, e4
-revision scope and no_skills, e5 coverage) are defined in the decision
-document's section 6 and come back here when the ablations run.
+The ablation arms (ALFWorld only; docs/decisions/paper_ablation_switches_
+20261119.md) differ from ``e1_ours`` in the review / author switches and in
+the sequence:
+    e1  no_skills           review.cards false: the bank is never touched,
+                            the profile and the playbook still evolve
+    e2  written_once        baseline, learn, test
+    e3  body_only           learn 2 and 3 are ``learn_scoped``
+                            (revise_scope content_only); ``learn`` is
+                            unchanged, so p01-p03 fork from the reference
+    e4  trigger_only        the same with revise_scope trigger_only
+    e5  prefix_authoring    baseline, learn, test; the learn phase writes a
+                            card's trigger side from the steps before each
+                            segment (author.trigger_view prefix)
+    e6  no_profile          review.evolve_profile false
+    e7  k1                  review.K 1
+    e8  <arm>_nopb          the arm of ``<arm>``'s own run with the final
+                            test's playbook off, for ours, written_once,
+                            body_only, trigger_only, prefix_authoring,
+                            no_profile and k1; forked through that run's
+                            last learn phase, only the test is run
 """
 
 import argparse
 import copy
+import dataclasses
 import hashlib
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
@@ -189,6 +207,13 @@ RULES = {
 SEQUENCE_OURS = ["baseline", "learn", "practice", "learn", "practice",
                  "learn", "test"]
 
+#: The ablation sequences. ``learn_scoped`` is a second learn definition,
+#: identical to ``learn`` apart from the arm's revise_scope: p02 stays the
+#: reference's ``learn``, so p01-p03 fork from the reference run unchanged.
+SEQUENCE_WRITTEN_ONCE = ["baseline", "learn", "test"]
+SEQUENCE_SCOPED = ["baseline", "learn", "practice", "learn_scoped",
+                   "practice", "learn_scoped", "test"]
+
 #: Weak-model samples per task in each practice phase.
 PRACTICE_ATTEMPTS = {"tb21": 2, "alfworld": 3, "searchqa": 1,
                      "swebench": 2}
@@ -213,17 +238,22 @@ AUTHOR_OVERRIDES = {"tb21": dict(_LONG_SEGMENT_GUARDS),
 # Phase definitions
 # ---------------------------------------------------------------------------
 
-def _learn_phase(bench: str) -> Dict[str, Any]:
-    """The one learn definition: the review parameters and the
-    ``subtask_cards`` author with its guards spelled out (the defaults,
-    with the benchmark's ``AUTHOR_OVERRIDES``)."""
-    author = {"name": "subtask_cards", "typing_chunk_size": 100,
-              "max_segments_per_card": 8, "max_chars_per_segment": 1200,
-              "write_retry_limit": 2}
-    author.update(AUTHOR_OVERRIDES.get(bench, {}))
-    return {"author": author,
-            "review": {"name": "review", "K": 5, "retry_limit": 2,
-                       "write_lessons": True},
+def _learn_phase(bench: str, review: Optional[Dict[str, Any]] = None,
+                 author: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """A learn definition: the review parameters and the ``subtask_cards``
+    author with its guards spelled out (the defaults, with the benchmark's
+    ``AUTHOR_OVERRIDES``). ``review`` and ``author`` are an ablation's
+    extra or replaced keys; without them the definition is the
+    reference's, byte for byte."""
+    author_params = {"name": "subtask_cards", "typing_chunk_size": 100,
+                     "max_segments_per_card": 8,
+                     "max_chars_per_segment": 1200, "write_retry_limit": 2}
+    author_params.update(AUTHOR_OVERRIDES.get(bench, {}))
+    author_params.update(author or {})
+    review_params = {"name": "review", "K": 5, "retry_limit": 2,
+                     "write_lessons": True}
+    review_params.update(review or {})
+    return {"author": author_params, "review": review_params,
             "kind": "learn", "role": "learn"}
 
 
@@ -295,6 +325,15 @@ class Arm:
     practice_tasks: str = "train"
     #: The stem ``--print-index`` diffs this arm against.
     reference: str = "e1_ours"
+    #: The method's sequence; None is the reference's.
+    sequence: Optional[Tuple[str, ...]] = None
+    #: Keys added to (or replacing) the ``learn`` definition's review and
+    #: author mappings, and to ``learn_scoped``'s review mapping.
+    review: Dict[str, Any] = field(default_factory=dict)
+    author: Dict[str, Any] = field(default_factory=dict)
+    scoped_review: Dict[str, Any] = field(default_factory=dict)
+    #: The final test's playbook; ``off`` is the no-playbook final test.
+    test_playbook: str = "evolved"
 
 
 def arms() -> List[Arm]:
@@ -326,8 +365,51 @@ def arms() -> List[Arm]:
             "bank; the run that freezes that model's control file",
             method=False, benchmarks=("alfworld",), student=student,
             test="whole"))
+    out.extend(_ablation_arms())
     return out
 
+
+def _ablation_arms() -> List[Arm]:
+    """The ALFWorld ablation arms and, for each arm with a learned playbook,
+    its no-playbook final test."""
+    alfworld = {"benchmarks": ("alfworld",)}
+    learned = [
+        Arm("e2_written_once", "e2",
+            "baseline, learn, test: the bank is written once and never "
+            "revised", sequence=tuple(SEQUENCE_WRITTEN_ONCE), **alfworld),
+        Arm("e3_body_only", "e3",
+            "learn 2 and 3 rewrite the body only (revise_scope "
+            "content_only)", sequence=tuple(SEQUENCE_SCOPED),
+            scoped_review={"revise_scope": "content_only"}, **alfworld),
+        Arm("e4_trigger_only", "e4",
+            "learn 2 and 3 rewrite the trigger only (revise_scope "
+            "trigger_only)", sequence=tuple(SEQUENCE_SCOPED),
+            scoped_review={"revise_scope": "trigger_only"}, **alfworld),
+        Arm("e5_prefix_authoring", "e5",
+            "baseline, learn, test; a new card's trigger side is written "
+            "from the steps before each segment",
+            sequence=tuple(SEQUENCE_WRITTEN_ONCE),
+            author={"trigger_view": "prefix"}, **alfworld),
+        Arm("e6_no_profile", "e6",
+            "the profile is never evolved (review.evolve_profile false)",
+            review={"evolve_profile": False}, **alfworld),
+        Arm("e7_k1", "e7", "review.K 1: one segment per trajectory",
+            review={"K": 1}, **alfworld),
+    ]
+    reference = Arm("e1_ours", "e1", "", benchmarks=BENCHMARKS)
+    no_playbook = [
+        dataclasses.replace(
+            arm, stem=f"e8_{arm.stem.split('_', 1)[1]}_nopb", exp="e8",
+            summary=f"{arm.stem}'s run with the final test's playbook off",
+            benchmarks=("alfworld",), reference=arm.stem,
+            test_playbook="off")
+        for arm in [reference] + learned]
+    no_skills = Arm(
+        "e1_no_skills", "e1",
+        "review.cards false: the bank is never written, rewritten or "
+        "discarded; the profile and the playbook still evolve",
+        review={"cards": False}, **alfworld)
+    return [no_skills] + learned + no_playbook
 
 def phases_of(arm: Arm, bench: str, test: Dict[str, Any]
               ) -> Tuple[List[str], Dict[str, Any]]:
@@ -336,12 +418,14 @@ def phases_of(arm: Arm, bench: str, test: Dict[str, Any]
         return ["test"], {"test": test}
     phases = {
         "baseline": _baseline_phase(),
-        "learn": _learn_phase(bench),
+        "learn": _learn_phase(bench, arm.review, arm.author),
+        "learn_scoped": _learn_phase(
+            bench, {**arm.review, **arm.scoped_review}, arm.author),
         "practice": _practice_phase(bench, arm.practice_tasks,
                                     PRACTICE_ATTEMPTS[bench]),
         "test": test,
     }
-    return list(SEQUENCE_OURS), phases
+    return list(arm.sequence or SEQUENCE_OURS), phases
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +526,7 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
                  cache_prefix_tokens: Optional[int] = None) -> Dict[str, Any]:
     compare = _test_compare(source, bench, arm, d_model, q_model, x_model)
     test = _final_test_phase(bench, arm.test, compare,
-                             "evolved" if arm.method else "off")
+                             arm.test_playbook if arm.method else "off")
     sequence, phases = phases_of(arm, bench, test)
     models = _models(arm.student, d_model, q_model, x_model)
     model_options: Dict[str, Dict[str, Any]] = {

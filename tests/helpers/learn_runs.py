@@ -70,7 +70,11 @@ def _slug(skill_id: str) -> str:
     return skill_id.replace("/", "-")
 
 
-def _config() -> ExperimentConfig:
+def _config(review: Optional[Dict[str, Any]] = None,
+            author: Optional[Dict[str, Any]] = None) -> ExperimentConfig:
+    method = reference_method()
+    method["phases"]["learn"]["review"].update(review or {})
+    method["phases"]["learn"]["author"].update(author or {})
     return ExperimentConfig.from_dict({
         "benchmark": FAKE_BENCH,
         "models": {"executor_strong": STRONG_MODEL,
@@ -81,18 +85,20 @@ def _config() -> ExperimentConfig:
         "rules": {"segment_select": "strong_success_weak_failed",
                   "trajectory_select": "all"},
         "token_budgets": {"default_max_output_tokens": 65536},
-        **reference_method(),
+        **method,
         "schema_version": 9,
     })
 
 
 class LearnRun:
-    """The reference sequence's run directory, phase by phase."""
+    """The reference sequence's run directory, phase by phase;
+    ``review`` and ``author`` add keys to the learn definition."""
 
     def __init__(self, run_dir: Path, client: Any = None,
-                 workers: int = 1) -> None:
+                 workers: int = 1, *, review: Optional[Dict[str, Any]] = None,
+                 author: Optional[Dict[str, Any]] = None) -> None:
         self.run_dir = Path(run_dir)
-        self.config = _config()
+        self.config = _config(review, author)
         self.store = Store(self.run_dir)
         self.client = client if client is not None else PinnedClient()
         self.workers = workers

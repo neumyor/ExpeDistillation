@@ -34,6 +34,16 @@ diagnosis gives neither notes nor evidence, a segment stays untyped, a
 card or rewrite gets its ``write_failed`` / ``revision_failed`` receipt, and
 the profile or playbook keeps the previous learn phase's text.
 
+Three ablation switches of ``review`` leave the flow as it is and change one
+step. ``cards: false`` skips step 5 (and the strong baseline cuts that only
+step 5 reads), so the bank is published as it was; each gap type gets a
+``skipped_cards_off`` receipt. ``revise_scope`` sets the
+out-of-scope evidence aside before step 5 plans its units, with a
+``skipped_out_of_scope`` receipt. ``evolve_profile: false`` publishes an
+empty profile in step 4 without a model call. The author parameter
+``trigger_view: prefix`` changes how step 5 writes a new card
+(``methods/cards/writer.write_card_prefix``).
+
 Steps without a data dependency run in one pool (``--workers``), the groups
 one after the other:
 
@@ -106,8 +116,11 @@ from expedistill.infra.reliability import (
 from expedistill.infra.store import (
     append_jsonl, read_json, read_jsonl, write_json, write_jsonl)
 from expedistill.methods.registry import resolve_params
-from expedistill.methods.cards.material import collect_material
-from expedistill.methods.cards.writer import write_card
+from expedistill.methods.cards.material import (
+    collect_material,
+    prefix_material,
+)
+from expedistill.methods.cards.writer import write_card, write_card_prefix
 from expedistill.methods.diagnose import Finding, diagnose_trial
 from expedistill.methods.evolve_text import evolve_text
 from expedistill.methods.revise import (
@@ -136,6 +149,17 @@ UNLOCATED = "Unlocated"
 #: The receipt of a gap whose type's one card id is taken by a discarded
 #: card: no new card is written for it.
 SKIPPED_DISCARDED = "skipped_discarded"
+
+#: The receipt of evidence a ``revise_scope`` ablation does not rewrite.
+SKIPPED_OUT_OF_SCOPE = "skipped_out_of_scope"
+
+#: The receipt of a gap type in a phase that writes no cards
+#: (``cards: false``).
+SKIPPED_CARDS_OFF = "skipped_cards_off"
+
+#: The reason suffix of a prefix-authoring card whose trigger side could
+#: not come from a prefix: every material segment starts at step 0.
+PREFIX_UNAVAILABLE = "prefix_unavailable_segments_start_at_step_0"
 
 #: How many runs of the phase a unit whose model output fails gets before
 #: it is given up (one failure record per run).
@@ -307,7 +331,7 @@ class _Learn:
             and sheet.sheet_id not in undiagnosed]
         units += [("cut", trajectory)
                   for trajectory in self._failed_trajectories()]
-        if self.first:
+        if self.first and self.review.cards:
             units += [("cut", trajectory)
                       for trajectory in locate.strong_trajectories(
                           self.store, self.baseline_label,
@@ -390,6 +414,8 @@ class _Learn:
                 with self.lock:
                     self.retry.update(typed["retry"])
                 return None
+            if not self.review.evolve_profile:
+                return self._empty_profile()
             return self._evolve(
                 evolving_text.PROFILE,
                 [(item.sheet_id, item.model_note)
@@ -397,6 +423,19 @@ class _Learn:
                 facts="", seed="", checks=(), profile="")
 
         return run_units(work, ["types", "profile"], self.workers)[1]
+
+    def _empty_profile(self) -> EvolvingText:
+        """The profile of a phase that does not evolve one: empty text,
+        so every writer reads the neutral no-profile section."""
+        existing = evolving_text.read_text(self.ctx.run_dir,
+                                           self.phase.label,
+                                           evolving_text.PROFILE)
+        if existing is not None:
+            return existing
+        item = EvolvingText(kind=evolving_text.PROFILE, text="", version=1,
+                            phase_label=self.phase.label)
+        evolving_text.write_text(self.ctx.run_dir, item)
+        return item
 
     def _evolve(self, kind: str, notes: Sequence[Tuple[str, str]], *,
                 facts: str, seed: str, checks: Sequence[Any],
@@ -507,13 +546,19 @@ class _Learn:
     def group_e(self, evidence: Sequence[routing.Evidence],
                 findings: Dict[str, Finding], profile: EvolvingText,
                 playbook: EvolvingText) -> Set[str]:
+        if not self.review.cards:
+            self.plans = []
+            self._receipt_cards_off(evidence)
+            return set()
         previous: List[routing.Evidence] = []
         if self.previous_learn is not None:
             path = phase_bank_dir(self.ctx.run_dir, self.previous_learn) \
                 / EVIDENCE_NAME
             previous = [routing.Evidence.from_dict(row)
                         for row in read_jsonl(path)]
-        plans = routing.plan_cards(evidence, previous)
+        in_scope, aside = routing.split_by_scope(evidence, self.review.scope)
+        self._receipt_out_of_scope(aside)
+        plans = routing.plan_cards(in_scope, previous)
         self.plans = plans
         discarded = routing.discarded_types(self.bank)
 
@@ -534,6 +579,41 @@ class _Learn:
         results = run_units(work, plans, self.workers)
         ledger.commit_order(self.phase_dir)
         return {target for target in results if target is not None}
+
+    def _receipt_cards_off(self, evidence: Sequence[routing.Evidence]
+                           ) -> None:
+        """One receipt per gap type: the evidence is recorded, no card is
+        written."""
+        gaps: Dict[str, List[routing.Evidence]] = {}
+        for item in evidence:
+            if item.category == routing.GAP:
+                gaps.setdefault(item.type_id, []).append(item)
+        for type_id, items in sorted(gaps.items()):
+            row = TaskListRow(target_kind="type", target_id=type_id,
+                              action="add", reason=routing.GAP,
+                              basis_unit=self._basis(items))
+            if ledger.receipt_of(self.phase, row, self.phase_dir) is None:
+                ledger.append_outcome(
+                    self.phase, row, None, SKIPPED_CARDS_OFF, None,
+                    self.phase_dir, row.reason)
+
+    def _receipt_out_of_scope(self, aside: Sequence[routing.Evidence]
+                              ) -> None:
+        """One receipt per card and side whose evidence the revise scope
+        sets aside; the rows stay in ``evidence.jsonl``."""
+        by_card: Dict[Tuple[str, str], List[routing.Evidence]] = {}
+        for item in aside:
+            by_card.setdefault((item.skill_id, item.category), []).append(
+                item)
+        for (skill_id, side), items in sorted(by_card.items()):
+            row = TaskListRow(target_kind="skill", target_id=skill_id,
+                              action=f"revise_{side}",
+                              reason=f"{side}_evidence",
+                              basis_unit=self._basis(items))
+            if ledger.receipt_of(self.phase, row, self.phase_dir) is None:
+                ledger.append_outcome(
+                    self.phase, row, skill_id, SKIPPED_OUT_OF_SCOPE, None,
+                    self.phase_dir, row.reason)
 
     def _basis(self, items: Sequence[routing.Evidence]) -> str:
         return self.facts[items[0].sheet_id].unit_id
@@ -586,12 +666,28 @@ class _Learn:
             item["subtask"].trajectory_id, item["subtask"].step_range[0])
             for item in material.strong]
         sources += self._failing_refs(plan.gap)
+        reason = row.reason
         try:
-            skill = write_card(
-                self.types[plan.type_id], material, profile=profile,
-                playbook=playbook, handle=self.ctx.handle("author"),
-                params=self.author, usage=self.ctx.usage,
-                run_dir=self.ctx.run_dir)
+            if self.author.trigger_view == "prefix":
+                skill, from_prefix = write_card_prefix(
+                    self.types[plan.type_id], material,
+                    prefix_material(
+                        material, before_steps=WRITER_BEFORE_STEPS,
+                        load_trajectory=lambda trajectory_id:
+                        self.store.load("trajectories", trajectory_id,
+                                        Trajectory),
+                        view_rules=self.view_rules),
+                    profile=profile, playbook=playbook,
+                    handle=self.ctx.handle("author"), params=self.author,
+                    usage=self.ctx.usage, run_dir=self.ctx.run_dir)
+                if not from_prefix:
+                    reason = f"{reason}; {PREFIX_UNAVAILABLE}"
+            else:
+                skill = write_card(
+                    self.types[plan.type_id], material, profile=profile,
+                    playbook=playbook, handle=self.ctx.handle("author"),
+                    params=self.author, usage=self.ctx.usage,
+                    run_dir=self.ctx.run_dir)
         except ModelOutputError as exc:
             if self._model_failed(plan.type_id, exc):
                 ledger.append_outcome(self.phase, row, None, "write_failed",
@@ -604,7 +700,7 @@ class _Learn:
                        sources=sources,
                        note=f"card for {self.types[plan.type_id].name}"))
         ledger.append_outcome(self.phase, row, skill.skill_id, "written", 1,
-                              self.phase_dir, row.reason)
+                              self.phase_dir, reason)
 
     def _failing_refs(self, items: Sequence[routing.Evidence]
                       ) -> List[TraceRef]:

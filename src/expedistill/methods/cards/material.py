@@ -11,7 +11,8 @@
 
 Each experience is a dict: ``subtask`` (the stored Subtask) and
 ``steps_view`` (its rendered steps, with the trajectory's own step
-numbers). No store writes, no model calls.
+numbers). :func:`prefix_material` re-renders the same experiences from the
+steps before each segment. No store writes, no model calls.
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +22,7 @@ from expedistill.blocks.rules import get_segment_select
 from expedistill.blocks.view import render_steps_view
 from expedistill.core.models import Subtask, Trajectory
 
-__all__ = ["Material", "collect_material"]
+__all__ = ["Material", "collect_material", "prefix_material"]
 
 
 @dataclass(frozen=True)
@@ -65,3 +66,29 @@ def collect_material(*, type_id: str, subtasks: Mapping[str, Subtask],
 
     return Material(strong=[experience(sub) for sub in strong],
                     weak=[experience(sub) for sub in weak])
+
+
+def prefix_material(material: Material, *, before_steps: int,
+                    load_trajectory: Callable[[str], Trajectory],
+                    view_rules: Any = None) -> Material:
+    """``material`` with every experience's steps replaced by the (at
+    most ``before_steps``) steps right before its segment starts.
+
+    A segment that starts at step 0 has no prefix and is left out, so
+    either list may come back shorter or empty."""
+    def experience(item: Dict[str, Any]) -> Dict[str, Any]:
+        start = item["subtask"].step_range[0]
+        first = max(0, start - before_steps)
+        steps = load_trajectory(item["subtask"].trajectory_id).steps
+        return {"subtask": item["subtask"],
+                "steps_view": render_steps_view(
+                    steps[first:start], view_rules, start_index=first)}
+
+    def has_prefix(item: Dict[str, Any]) -> bool:
+        return item["subtask"].step_range[0] > 0
+
+    return Material(
+        strong=[experience(item) for item in material.strong
+                if has_prefix(item)],
+        weak=[experience(item) for item in material.weak
+              if has_prefix(item)])

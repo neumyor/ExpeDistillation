@@ -165,3 +165,42 @@ def test_trigger_facts_count_the_unopened_cards_per_type():
 
 def test_trigger_facts_are_empty_without_trigger_evidence():
     assert routing.trigger_facts([_evidence(routing.CONTENT)], {}) == ""
+
+
+# -- the revise scope -------------------------------------------------------------
+
+def _mixed():
+    return [_evidence(routing.GAP, sheet="s1", skill=None,
+                      type_id="type/009"),
+            _evidence(routing.CONTENT, sheet="s2"),
+            _evidence(routing.TRIGGER, sheet="s3", skill="type/002/skill",
+                      type_id="type/002"),
+            _evidence(routing.NONE, sheet="s4", type_id="type/004")]
+
+
+def test_the_default_scope_sets_nothing_aside():
+    rows = _mixed()
+    kept, aside = routing.split_by_scope(rows, routing.REVISE_BOTH)
+    assert kept == rows and aside == []
+
+
+@pytest.mark.parametrize("scope, aside_category", [
+    (routing.REVISE_TRIGGER_ONLY, routing.CONTENT),
+    (routing.REVISE_CONTENT_ONLY, routing.TRIGGER)])
+def test_a_scope_sets_aside_the_other_sides_evidence_only(scope,
+                                                          aside_category):
+    kept, aside = routing.split_by_scope(_mixed(), scope)
+    assert [row.category for row in aside] == [aside_category]
+    assert aside_category not in {row.category for row in kept}
+    # Gap evidence and the none rows are untouched by every scope.
+    assert {routing.GAP, routing.NONE} <= {row.category for row in kept}
+
+
+def test_set_aside_content_evidence_does_not_count_toward_the_delete_rule():
+    before = [_evidence(routing.CONTENT, sheet="s1")]
+    now = [_evidence(routing.CONTENT, sheet="s2")]
+    kept, _ = routing.split_by_scope(now, routing.REVISE_TRIGGER_ONLY)
+    assert routing.plan_cards(kept, before) == []
+    kept, _ = routing.split_by_scope(now, routing.REVISE_CONTENT_ONLY)
+    plan, = routing.plan_cards(kept, before)
+    assert plan.delete

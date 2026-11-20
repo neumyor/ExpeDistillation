@@ -125,7 +125,8 @@ def judge_phase(
     out_dir = prepare_out_dir(run_dir, out_dir, {
         "run_dir": str(run_dir.resolve()), "phase_label": phase_label,
         "arm": arm, "bank_phase_label": bank_label,
-        "judge_model": judge_handle.name})
+        "judge_model": judge_handle.name,
+        "temperature": judge_handle.temperature})
     view_rules, instruction_for = _benchmark_hooks(
         run_dir, view_rules, instruction_for)
 

@@ -17,13 +17,15 @@ trajectory's read actions (``composites.skill_use``), never from the model.
 
 :func:`plan_cards` turns one phase's evidence into one unit per card or
 type; :func:`content_failed_twice` is the delete rule (content evidence for
-the same card in the previous learn phase too); :func:`trigger_facts` is
-the trigger-evidence count text the playbook writer reads.
+the same card in the previous learn phase too); :func:`split_by_scope`
+sets aside the evidence a ``revise_scope`` ablation does not act on;
+:func:`trigger_facts` is the trigger-evidence count text the playbook
+writer reads.
 """
 
 from dataclasses import asdict, dataclass, field
 from typing import (
-    Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set)
+    Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple)
 
 from expedistill.core.models import Subtask
 from expedistill.infra.reliability import CodeBugError
@@ -42,7 +44,12 @@ __all__ = [
     "discarded_types",
     "error_segment",
     "plan_cards",
+    "REVISE_BOTH",
+    "REVISE_CONTENT_ONLY",
+    "REVISE_SCOPES",
+    "REVISE_TRIGGER_ONLY",
     "route",
+    "split_by_scope",
     "trigger_facts",
 ]
 
@@ -58,6 +65,15 @@ SCOPE_GENERAL = "general"
 
 #: The discard reason of the delete rule.
 CONTENT_FAILED_TWICE = "content_failed_twice"
+
+#: Which side of a card a learn phase may rewrite (``review.revise_scope``).
+REVISE_BOTH = "both"
+REVISE_TRIGGER_ONLY = "trigger_only"
+REVISE_CONTENT_ONLY = "content_only"
+REVISE_SCOPES = (REVISE_BOTH, REVISE_TRIGGER_ONLY, REVISE_CONTENT_ONLY)
+
+#: The evidence category a scope does not act on.
+_OUT_OF_SCOPE = {REVISE_TRIGGER_ONLY: CONTENT, REVISE_CONTENT_ONLY: TRIGGER}
 
 
 @dataclass(frozen=True)
@@ -179,6 +195,18 @@ def plan_cards(evidence: Sequence[Evidence],
             delete=(skill_id is not None and bool(slot[CONTENT])
                     and content_failed_twice(skill_id, previous))))
     return plans
+
+
+def split_by_scope(evidence: Sequence[Evidence], scope: str
+                   ) -> Tuple[List[Evidence], List[Evidence]]:
+    """``(in scope, set aside)`` for a ``revise_scope``: the set-aside rows
+    are the category the scope does not rewrite. They stay in
+    ``evidence.jsonl`` but never reach :func:`plan_cards`, so they neither
+    cause a rewrite nor count toward the delete rule."""
+    skipped_category = _OUT_OF_SCOPE.get(scope)
+    kept = [item for item in evidence if item.category != skipped_category]
+    aside = [item for item in evidence if item.category == skipped_category]
+    return kept, aside
 
 
 def trigger_facts(evidence: Iterable[Evidence],

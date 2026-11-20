@@ -26,6 +26,7 @@ from expedistill.benchmarks.registry import (
 )
 from expedistill.blocks.rules import SEGMENT_SELECT
 from expedistill.core.config import DEFAULT_RULES, ExperimentConfig
+from expedistill.core.config import ConfigError as CoreConfigError
 from expedistill.infra.manifest import FrozenProtocolChanged, load as load_manifest
 from expedistill.infra.store import Store, read_json
 from expedistill.infra.usage import UsageRecorder
@@ -814,3 +815,69 @@ def test_an_unregistered_pack_prompt_is_refused(
     ctx = make_ctx(tmp_path, make_config())
     with pytest.raises(ConfigError, match=match):
         stage0_freeze.run(ctx)
+
+
+# ---------------------------------------------------------------------------
+# The ablation switches: absent unless an ablation turns one on
+# ---------------------------------------------------------------------------
+
+_SWITCHES = ("cards", "revise_scope", "evolve_profile", "trigger_view")
+
+
+def test_a_config_without_switches_freezes_no_switch_key(
+        monkeypatch, tmp_path):
+    serve_plugin(monkeypatch, StagePlugin())
+    ctx = make_ctx(tmp_path, make_config())
+    stage0_freeze.run(ctx)
+    learn = load_manifest(ctx.run_dir)["config"]["phases"]["learn"]
+    assert learn["review"] == {"name": "review", "K": 4}
+    assert learn["author"] == {"name": "subtask_cards"}
+    assert not [key for key in _SWITCHES
+                if key in learn["review"] or key in learn["author"]]
+
+
+def test_a_switch_is_frozen_exactly_as_written(monkeypatch, tmp_path):
+    serve_plugin(monkeypatch, StagePlugin())
+    phases = copy.deepcopy(PHASES)
+    phases["learn"]["review"].update(revise_scope="content_only",
+                                     evolve_profile=False)
+    phases["learn"]["author"].update(trigger_view="prefix")
+    ctx = make_ctx(tmp_path, make_config(phases=phases))
+    stage0_freeze.run(ctx)
+    learn = load_manifest(ctx.run_dir)["config"]["phases"]["learn"]
+    assert learn["review"] == {"name": "review", "K": 4,
+                               "revise_scope": "content_only",
+                               "evolve_profile": False}
+    assert learn["author"] == {"name": "subtask_cards",
+                               "trigger_view": "prefix"}
+
+
+@pytest.mark.parametrize("review, author, match", [
+    ({"cards": False, "revise_scope": "both"}, {}, "mutually exclusive"),
+    ({"cards": False, "revise_scope": "trigger_only"}, {},
+     "mutually exclusive"),
+    ({"revise_scope": "body"}, {}, "revise_scope"),
+    ({"evolve_profile": "no"}, {}, "evolve_profile"),
+    ({}, {"trigger_view": "suffix"}, "trigger_view"),
+])
+def test_a_bad_switch_stops_the_freeze_before_anything_is_written(
+        monkeypatch, tmp_path, review, author, match):
+    serve_plugin(monkeypatch, StagePlugin())
+    phases = copy.deepcopy(PHASES)
+    phases["learn"]["review"].update(review)
+    phases["learn"]["author"].update(author)
+    ctx = make_ctx(tmp_path, make_config(phases=phases))
+    with pytest.raises(CoreConfigError, match=match):
+        stage0_freeze.run(ctx)
+    assert not (ctx.run_dir / "manifest.json").exists()
+
+
+def test_prefix_authoring_with_cards_off_is_refused(monkeypatch, tmp_path):
+    serve_plugin(monkeypatch, StagePlugin())
+    phases = copy.deepcopy(PHASES)
+    phases["learn"]["review"]["cards"] = False
+    phases["learn"]["author"]["trigger_view"] = "prefix"
+    ctx = make_ctx(tmp_path, make_config(phases=phases))
+    with pytest.raises(ConfigError, match="trigger_view"):
+        stage0_freeze.run(ctx)
+    assert not (ctx.run_dir / "manifest.json").exists()

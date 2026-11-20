@@ -7,8 +7,17 @@ from expedistill.core.models import Step, Subtask, SubtaskType, Trajectory
 from expedistill.infra.reliability import CodeBugError, ModelOutputError
 from tests.helpers.fake_llm import json_script, make_fake_handle
 from expedistill.methods.cards import CardAuthoringParams
-from expedistill.methods.cards.material import Material, collect_material
-from expedistill.methods.cards.writer import MAX_STEPS, MIN_STEPS, write_card
+from expedistill.methods.cards.material import (
+    Material,
+    collect_material,
+    prefix_material,
+)
+from expedistill.methods.cards.writer import (
+    MAX_STEPS,
+    MIN_STEPS,
+    write_card,
+    write_card_prefix,
+)
 
 LEARN = "p04:learn"
 TYPE = SubtaskType(type_id="type/002", name="heat the object",
@@ -154,3 +163,110 @@ def test_writing_without_strong_material_is_a_bug():
     with pytest.raises(CodeBugError):
         write_card(TYPE, Material(), profile="", playbook="",
                    handle=make_fake_handle(), params=CardAuthoringParams())
+
+
+# -- prefix authoring --------------------------------------------------------------
+
+def _prefix(world, material, before_steps=15):
+    trajectories, _, _ = world
+    return prefix_material(material, before_steps=before_steps,
+                           load_trajectory=trajectories.__getitem__)
+
+
+def test_the_prefix_view_is_the_steps_before_each_segment(world):
+    material = _material(world, max_segments=8)
+    prefix = _prefix(world, material)
+    by_segment = {item["subtask"].subtask_id: item["steps_view"]
+                  for item in prefix.strong}
+    # The three segments at step 0 have no prefix and are left out; the
+    # three at step 2 see steps 0 and 1.
+    assert len(_material(world, max_segments=8).strong) == 6
+    assert len(by_segment) == 3 and all(
+        item["subtask"].step_range[0] == 2 for item in prefix.strong)
+    two = next(view for key, view in by_segment.items()
+               if key.endswith("seg02") and "tb:t3" in key)
+    assert "step 0" in two and "step 1" in two and "step 2" not in two
+    assert "a2" not in two
+
+
+def test_the_prefix_view_keeps_at_most_the_asked_steps_before(world):
+    material = _material(world)
+    prefix = _prefix(world, material, before_steps=1)
+    two = next(item["steps_view"] for item in prefix.strong
+               if item["subtask"].step_range[0] == 2)
+    assert two.startswith("step 1") and "step 0" not in two
+
+
+def test_a_material_whose_segments_all_start_at_zero_has_no_prefix(world):
+    trajectories, subtasks, _ = world
+    first = Material(strong=[
+        {"subtask": sub, "steps_view": "x"} for sub in subtasks.values()
+        if sub.step_range[0] == 0 and sub.source == "strong"])
+    assert first.strong
+    assert prefix_material(first, before_steps=15,
+                           load_trajectory=trajectories.__getitem__) \
+        == Material()
+
+
+def _tagged(kind):
+    return json_script({
+        "summary": f"{kind} summary.", "when_to_use": f"{kind} when.",
+        "steps": [f"{kind} step {index}." for index in range(3)],
+        "not_applicable_when": f"{kind} not applicable."})
+
+
+def test_the_prefix_card_takes_its_body_from_the_first_call_and_its_trigger_from_the_second(
+        world):
+    material = _material(world)
+    prefix = _prefix(world, material)
+    handle = make_fake_handle(script=[_tagged("full"), _tagged("prefix")])
+
+    skill, from_prefix = write_card_prefix(
+        TYPE, material, prefix, profile="", playbook="",
+        handle=handle, params=CardAuthoringParams())
+
+    assert from_prefix is True
+    assert (skill.summary, skill.when_to_use) == (
+        "prefix summary.", "prefix when.")
+    assert skill.steps == ["full step 0.", "full step 1.", "full step 2."]
+    assert skill.not_applicable_when == "full not applicable."
+    assert skill.source_subtasks == sorted(_ids(material.strong)
+                                           + _ids(material.weak))
+    first, second = (call["user"] for call in handle.client.calls)
+    assert "a2" in first or "a1" in first
+    assert "a2" not in second
+    assert second.count("SUBTASK_ID:") < first.count("SUBTASK_ID:")
+
+
+def test_without_a_usable_prefix_the_first_call_alone_writes_the_card(world):
+    material = _material(world)
+    handle = make_fake_handle(script=[_tagged("full")])
+
+    skill, from_prefix = write_card_prefix(
+        TYPE, material, Material(), profile="", playbook="",
+        handle=handle, params=CardAuthoringParams())
+
+    assert from_prefix is False
+    assert len(handle.client.calls) == 1
+    assert (skill.summary, skill.when_to_use) == (
+        "full summary.", "full when.")
+
+
+def test_an_unusable_second_reply_is_rewritten_like_the_first(world):
+    material = _material(world)
+    handle = make_fake_handle(script=[
+        _tagged("full"), _card(steps=1), _tagged("prefix")])
+
+    skill, _ = write_card_prefix(
+        TYPE, material, _prefix(world, material), profile="", playbook="",
+        handle=handle, params=CardAuthoringParams())
+
+    assert skill.summary == "prefix summary."
+    assert "rejected" in handle.client.calls[2]["user"]
+
+
+def test_a_prefix_card_without_strong_material_is_a_bug():
+    with pytest.raises(CodeBugError):
+        write_card_prefix(TYPE, Material(), Material(), profile="",
+                          playbook="", handle=make_fake_handle(),
+                          params=CardAuthoringParams())

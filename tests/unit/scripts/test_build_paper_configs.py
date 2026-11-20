@@ -15,6 +15,8 @@ import pytest
 import yaml
 
 from expedistill.core.config import load_config
+from expedistill.infra.reliability import ConfigError
+from expedistill.stages.fork_run import _check_same_prefix
 from expedistill.stages.stage0_freeze import _resolve_phase_methods
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -86,9 +88,19 @@ def test_diff_paths_compares_a_leaf_key_whole():
 # The matrix and the loader
 # ---------------------------------------------------------------------------
 
+#: The ALFWorld ablation arms and their final tests without the playbook.
+ABLATIONS = ("e1_no_skills", "e2_written_once", "e3_body_only",
+             "e4_trigger_only", "e5_prefix_authoring", "e6_no_profile",
+             "e7_k1")
+NOPB = {"e8_ours_nopb": "e1_ours",
+        **{f"e8_{stem.split('_', 1)[1]}_nopb": stem
+           for stem in ABLATIONS[1:]}}
+
+
 def test_the_matrix_has_the_expected_files():
     assert {name.partition("_paper_")[2].split("_")[0]
-            for name in NAMES} == {"e1"}
+            for name in NAMES} == {"e1", "e2", "e3", "e4", "e5", "e6", "e7",
+                                   "e8"}
     per_bench = {bench: sorted(name.partition("_paper_")[2][:-5]
                                for name in NAMES
                                if name.startswith(bench + "_paper_"))
@@ -99,9 +111,9 @@ def test_the_matrix_has_the_expected_files():
     assert per_bench["searchqa"] == sorted(["e1_ours", "e1_bare"] + external)
     assert per_bench["alfworld"] == sorted(
         ["e1_ours", "e1_ours_val", "e1_bare_q", "e1_bare_d", "e1_bare_x"]
-        + external)
+        + external + list(ABLATIONS) + list(NOPB))
     assert per_bench["swebench"] == ["e1_ours"]
-    assert len(NAMES) == 45
+    assert len(NAMES) == 45 + len(ABLATIONS) + len(NOPB)
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -235,6 +247,164 @@ def test_ours_val_differs_from_ours_in_the_practice_list_only(files):
 
 
 # ---------------------------------------------------------------------------
+# The ablation arms (docs/decisions/paper_ablation_switches_20261119.md)
+# ---------------------------------------------------------------------------
+
+_SWITCH_KEYS = ("cards", "revise_scope", "evolve_profile", "trigger_view")
+
+
+#: The arms whose learn definitions carry a switch key; no other config
+#: does, so every other config freezes the manifest it always did.
+SWITCHED = {"e1_no_skills", "e3_body_only", "e4_trigger_only",
+            "e5_prefix_authoring", "e6_no_profile",
+            "e8_body_only_nopb", "e8_trigger_only_nopb",
+            "e8_prefix_authoring_nopb", "e8_no_profile_nopb"}
+
+
+def test_only_the_switched_arms_carry_a_switch_key(files):
+    for name, cfg in files.items():
+        carried = [key for spec in cfg["phases"].values()
+                   if spec["kind"] == "learn"
+                   for family in ("review", "author") for key in spec[family]
+                   if key in _SWITCH_KEYS]
+        assert bool(carried) == (name.partition("_paper_")[2][:-5]
+                                 in SWITCHED), name
+    # The reference's learn definition has no switch key at all.
+    ours = files[_name("alfworld", "e1_ours")]["phases"]["learn"]
+    assert set(ours["review"]) == {"name", "K", "retry_limit",
+                                   "write_lessons"}
+    assert set(ours["author"]) == {"name", "typing_chunk_size",
+                                   "max_segments_per_card",
+                                   "max_chars_per_segment",
+                                   "write_retry_limit"}
+
+
+@pytest.mark.parametrize("stem, differs", [
+    ("e1_no_skills", ["phases.learn.review.cards"]),
+    ("e2_written_once", ["phases.practice", "sequence"]),
+    ("e3_body_only", ["phases.learn_scoped", "sequence"]),
+    ("e4_trigger_only", ["phases.learn_scoped", "sequence"]),
+    ("e5_prefix_authoring", ["phases.learn.author.trigger_view",
+                             "phases.practice", "sequence"]),
+    ("e6_no_profile", ["phases.learn.review.evolve_profile"]),
+    ("e7_k1", ["phases.learn.review.K"]),
+])
+def test_an_ablation_differs_from_the_reference_in_its_own_keys(
+        stem, differs, files):
+    ours = files[_name("alfworld", "e1_ours")]
+    assert _diff(files[_name("alfworld", stem)], ours) == sorted(differs)
+
+
+def test_the_switch_values(files):
+    def learn(stem, name="learn"):
+        return files[_name("alfworld", stem)]["phases"][name]
+
+    assert learn("e1_no_skills")["review"]["cards"] is False
+    assert learn("e6_no_profile")["review"]["evolve_profile"] is False
+    assert learn("e7_k1")["review"]["K"] == 1
+    assert learn("e5_prefix_authoring")["author"]["trigger_view"] == "prefix"
+    assert learn("e3_body_only", "learn_scoped")["review"][
+        "revise_scope"] == "content_only"
+    assert learn("e4_trigger_only", "learn_scoped")["review"][
+        "revise_scope"] == "trigger_only"
+
+
+@pytest.mark.parametrize("stem", ["e3_body_only", "e4_trigger_only"])
+def test_the_scoped_arms_keep_the_reference_learn_for_the_first_round(
+        stem, files):
+    ours = files[_name("alfworld", "e1_ours")]
+    arm = files[_name("alfworld", stem)]
+    assert arm["phases"]["learn"] == ours["phases"]["learn"]
+    assert arm["sequence"] == [
+        "baseline", "learn", "practice", "learn_scoped", "practice",
+        "learn_scoped", "test"]
+    scoped = {key: value for key, value in
+              arm["phases"]["learn_scoped"].items()}
+    scoped["review"] = {key: value for key, value in scoped["review"].items()
+                        if key != "revise_scope"}
+    assert scoped == ours["phases"]["learn"]
+
+
+def test_the_short_arms_run_baseline_learn_test(files):
+    for stem in ("e2_written_once", "e5_prefix_authoring"):
+        cfg = files[_name("alfworld", stem)]
+        assert cfg["sequence"] == ["baseline", "learn", "test"]
+        assert cfg["phases"]["test"]["playbook"] == "evolved"
+        assert sorted(cfg["phases"]) == ["baseline", "learn", "test"]
+
+
+@pytest.mark.parametrize("stem, base", sorted(NOPB.items()))
+def test_a_no_playbook_arm_is_its_base_with_the_final_playbook_off(
+        stem, base, files):
+    arm = files[_name("alfworld", stem)]
+    reference = files[_name("alfworld", base)]
+    assert _diff(arm, reference) == ["phases.test.playbook"]
+    assert "playbook" not in arm["phases"]["test"]
+    assert reference["phases"]["test"]["playbook"] == "evolved"
+    assert arm["sequence"] == reference["sequence"]
+
+
+def test_the_ablation_arms_are_alfworld_only():
+    for bench in ("tb21", "searchqa", "swebench"):
+        for stem in list(ABLATIONS) + list(NOPB):
+            assert _name(bench, stem) not in NAMES
+
+
+# How many phases each arm's run copies from which run with ``fork-run``:
+# (source arm, target arm, copied phase count).
+FORKS = [
+    ("e1_ours", "e1_no_skills", 1),
+    ("e1_ours", "e2_written_once", 2),
+    ("e1_ours", "e3_body_only", 3),
+    ("e1_ours", "e4_trigger_only", 3),
+    ("e1_ours", "e5_prefix_authoring", 1),
+    ("e1_ours", "e6_no_profile", 1),
+    ("e1_ours", "e7_k1", 1),
+    # The no-playbook final tests copy everything through the last learn
+    # phase of the arm's own run and rerun only the test.
+    ("e1_ours", "e8_ours_nopb", 6),
+    ("e2_written_once", "e8_written_once_nopb", 2),
+    ("e3_body_only", "e8_body_only_nopb", 6),
+    ("e4_trigger_only", "e8_trigger_only_nopb", 6),
+    ("e5_prefix_authoring", "e8_prefix_authoring_nopb", 2),
+    ("e6_no_profile", "e8_no_profile_nopb", 6),
+    ("e7_k1", "e8_k1_nopb", 6),
+]
+
+
+def _config_of(stem):
+    return load_config(str(CONFIG_DIR / _name("alfworld", stem)))
+
+
+@pytest.mark.parametrize("source, target, count", FORKS)
+def test_fork_run_accepts_every_planned_prefix(source, target, count):
+    # The same check ``fork-run`` makes before it copies anything: the
+    # first ``count`` phases are defined the same way and everything else
+    # that acts on them is equal.
+    _check_same_prefix(_config_of(source), _config_of(target), count)
+
+
+@pytest.mark.parametrize("source, target, count", [
+    # A learn phase that differs is not copied.
+    ("e1_ours", "e1_no_skills", 2),
+    ("e1_ours", "e6_no_profile", 2),
+    ("e1_ours", "e7_k1", 2),
+    ("e1_ours", "e5_prefix_authoring", 2),
+    # The scoped learn phase starts at the fourth phase.
+    ("e1_ours", "e3_body_only", 4),
+    ("e1_ours", "e4_trigger_only", 4),
+    # The short arms have a different third phase.
+    ("e1_ours", "e2_written_once", 3),
+    # The no-playbook test is the last phase and differs.
+    ("e1_ours", "e8_ours_nopb", 7),
+])
+def test_fork_run_refuses_a_prefix_that_would_copy_a_changed_phase(
+        source, target, count):
+    with pytest.raises(ConfigError):
+        _check_same_prefix(_config_of(source), _config_of(target), count)
+
+
+# ---------------------------------------------------------------------------
 # The test-only arms
 # ---------------------------------------------------------------------------
 
@@ -329,9 +499,10 @@ def test_method_arms_show_the_evolved_playbook_and_test_only_arms_do_not(
     for name, cfg in files.items():
         has_learn = any(spec.get("kind") == "learn"
                         for spec in cfg["phases"].values())
+        without = "_nopb." in name
         for spec in cfg["phases"].values():
             if spec.get("role") in ("practice", "test"):
-                if has_learn:
+                if has_learn and not (without and spec["role"] == "test"):
                     assert spec.get("playbook") == "evolved", name
                 else:
                     assert "playbook" not in spec, name

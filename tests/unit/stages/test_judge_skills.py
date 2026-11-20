@@ -66,9 +66,11 @@ def run_dir(tmp_path):
     return run
 
 
-def _judge(run_dir, out_dir, script=None, *, name="judge-model", **kwargs):
+def _judge(run_dir, out_dir, script=None, *, name="judge-model",
+           temperature=1.0, **kwargs):
     handle = make_fake_handle(
-        "judge", script or skill_use_judge_script(_applicable), name=name)
+        "judge", script or skill_use_judge_script(_applicable), name=name,
+        temperature=temperature)
     summary = judge_skills.judge_phase(
         run_dir, LABEL, out_dir, handle, view_rules=ViewRules(),
         instruction_for=_instruction, **kwargs)
@@ -308,6 +310,15 @@ def test_a_resume_with_another_judge_model_is_refused(run_dir, tmp_path):
     assert json.loads(
         (tmp_path / "out" / PINNED_NAME).read_text())["judge_model"] \
         == "judge-model"
+
+
+def test_a_resume_with_another_temperature_is_refused(run_dir, tmp_path):
+    _judge(run_dir, tmp_path / "out", temperature=0.95)
+
+    with pytest.raises(ConfigError, match="fresh output directory"):
+        _judge(run_dir, tmp_path / "out", temperature=1.0)
+    assert json.loads(
+        (tmp_path / "out" / PINNED_NAME).read_text())["temperature"] == 0.95
 
 
 def test_the_bank_is_the_latest_artifact_before_the_phase(run_dir, tmp_path):

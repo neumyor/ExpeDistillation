@@ -180,8 +180,8 @@ reward + 原样的 correctness）、coverage（这张 trial 该不该有、有�
 | 字段 | 说明 |
 |---|---|
 | `role` | 恒为 `learn` |
-| `review` | 学习参数：`K`（每条轨迹最多切几段，缺省 5）、`retry_limit`（切段校验不过时的重切次数，缺省 2）、`write_lessons`（弱模型失败段是否进写卡材料，缺省 `true`） |
-| `author` | 写卡方法：`subtask_cards`，参数 `typing_chunk_size`（一次归类调用最多带几个段，100）/ `max_segments_per_card`（一张卡的写作材料最多几个段，8）/ `max_chars_per_segment`（写卡材料里每段渲染步骤的字符上限，1200）/ `typing_max_chars_per_segment`（归类时每段的字符上限，缺省等于上一项）/ `write_retry_limit`（写卡输出不合格时的重写次数，2）。TB 的终端输出长，切段中位约 1.3 万到 1.7 万字符，TB 配置取 40 / 6 / 48000 / 4000 |
+| `review` | 学习参数：`K`（每条轨迹最多切几段，缺省 5）、`retry_limit`（切段校验不过时的重切次数，缺省 2）、`write_lessons`（弱模型失败段是否进写卡材料，缺省 `true`）；消融开关 `cards`、`revise_scope`、`evolve_profile`（2.5，缺省不写进配置） |
+| `author` | 写卡方法：`subtask_cards`，参数 `typing_chunk_size`（一次归类调用最多带几个段，100）/ `max_segments_per_card`（一张卡的写作材料最多几个段，8）/ `max_chars_per_segment`（写卡材料里每段渲染步骤的字符上限，1200）/ `typing_max_chars_per_segment`（归类时每段的字符上限，缺省等于上一项）/ `write_retry_limit`（写卡输出不合格时的重写次数，2）。TB 的终端输出长，切段中位约 1.3 万到 1.7 万字符，TB 配置取 40 / 6 / 48000 / 4000；消融开关 `trigger_view`（`full` / `prefix`，2.5，缺省不写进配置） |
 
 学习流程固定为五步（5.4），每个学习相位都执行同样的五步，配置只决定参数。
 
@@ -276,9 +276,19 @@ phases:
 | 练习相位 `tasks` | `train` / `val` | 在训练集还是验证集上练习 |
 | 执行相位 `playbook` | `off` / `evolved` | 练习与终测分别配置；学习相位总是演化 playbook |
 
-设计已定、做消融时再实现的两个开关（`docs/decisions/evidence_driven_evolution_20261113.md` 3.5）：
-`review.revise_scope`（`auto` / `trigger_only` / `content_only`：范围之外的证据照常记录，但不改写、
-不计入删除）与 `review.cards`（`false` 时不写卡、不改卡，只演化画像与 playbook，即 `no_skills` 臂）。
+消融开关（决定文档 `docs/decisions/paper_ablation_switches_20261119.md`）。四个开关的缺省都是完整方法，
+**缺省值不写进配置**：没有这些键的配置，清单、提示词摘要与单元编号都与开关存在之前相同，不升
+schema 版本，`fork-run` 可以照常复制它们的相位。
+
+| 开关 | 位置 | 取值 | 作用 |
+|---|---|---|---|
+| `cards` | 学习相位 `review` | `true`（缺省）/ `false` | `false`：学习相位不写、不改、不丢弃任何技能，技能库工件原样发布；画像与 playbook 照常演化，证据照常分配和记录（全部是缺口），每个缺口类型写一条回执 `skipped_cards_off`；摸底里强模型轨迹的切段只给写卡提供材料，这时不做。练习与终测看到格式相同的空技能目录（`no_skills` 臂） |
+| `revise_scope` | 学习相位 `review` | `both`（缺省）/ `trigger_only` / `content_only` | 范围之外的证据照常写进 `evidence.jsonl`，每张卡每侧写一条回执 `skipped_out_of_scope`，但不触发改写，也不计入"相邻两轮正文证据即删除"；缺口证据在所有取值下都写新卡。与 `cards: false` 同时出现是配置错误 |
+| `evolve_profile` | 学习相位 `review` | `true`（缺省）/ `false` | `false`：不调 `PROFILE_UPDATE`，每个学习相位发布空画像（版本 1），所有写作者读到 `prompts/profile.py` 的无画像中性段落 |
+| `trigger_view` | 学习相位 `author` | `full`（缺省）/ `prefix` | `prefix`：新卡的正文（`steps`、`not_applicable_when`）取自照常的一次 `CARD_WRITE` 调用；触发描述（`summary`、`when_to_use`）取自对同一批素材段再调一次 `CARD_WRITE`，该次调用里每段的步骤视图换成段起点之前最多 `WRITER_BEFORE_STEPS`（15）步。起点为 0 的段没有前缀，在第二次调用里省略；没有任何强模型段有前缀时不做第二次调用，触发描述沿用第一次调用的结果，回执的原因写 `gap; prefix_unavailable_segments_start_at_step_0`。只影响缺口写新卡，改写不变；与 `cards: false` 同时出现是配置错误 |
+
+`judge-skills` 的判定调用温度缺省 0.95（`--temperature`），方法侧的调用保持 1.0；温度写进输出目录的
+`analysis_config.json`，续跑时不同即拒绝。
 
 ### 2.6 schema 版本
 
@@ -302,8 +312,18 @@ phases:
 | e1 | `<方法>_folder` / `<方法>_whole` | 六个外部方法（skillopt、evoskill、trace2skill、gepa、expel、agentbrew），序列只有 `test`，在 `import-bank` 准备的 run 目录上跑；`_whole` 用 `whole_bank`（`verbatim: true`）+ `real` |
 | e1 | `bare`（SearchQA）、`bare_q` / `bare_d` / `bare_x`（ALFWorld） | 空技能库的裸跑；ALFWorld 的裸跑结果由 `scripts/run/build_bare_control.py` 写成冻结成绩文件，其余 ALFWorld 臂用 `external_campaign` 读它 |
 
-消融（e2 教师 → 学生、e3 切段预算、e4 改写范围与 `no_skills`、e5 覆盖）的臂定义见决定文档第六节，
-做消融时再加回生成脚本。
+ALFWorld 的消融臂（决定文档 `docs/decisions/paper_ablation_switches_20261119.md`）：
+
+| 实验 | 臂 | 与 `e1_ours` 的差别 | 用 `fork-run` 复制 |
+|---|---|---|---|
+| e1 | `no_skills` | `review.cards: false` | p01 |
+| e2 | `written_once` | 序列 `baseline, learn, test` | p01–p02 |
+| e3 | `body_only` | 第二、三次学习用另一个定义 `learn_scoped`（`revise_scope: content_only`，其余与 `learn` 相同） | p01–p03 |
+| e4 | `trigger_only` | 同上，`revise_scope: trigger_only` | p01–p03 |
+| e5 | `prefix_authoring` | 序列 `baseline, learn, test`；`author.trigger_view: prefix` | p01 |
+| e6 | `no_profile` | `review.evolve_profile: false` | p01 |
+| e7 | `k1` | `review.K: 1` | p01 |
+| e8 | `<臂>_nopb`（`ours`、`written_once`、`body_only`、`trigger_only`、`prefix_authoring`、`no_profile`、`k1`） | 与对应臂相同，终测相位 `playbook` 为 `off` | 对应臂的 run 的前缀，到它最后一个学习相位为止 |
 
 凡是带学习相位的臂，`practice` 与终测都是 `playbook: evolved`；只有 `test` 一个相位的臂
 （外部方法与裸跑）没有学习相位，`playbook` 用缺省的 `off`。终测对照臂始终不带 playbook，
@@ -632,7 +652,7 @@ E1 把 benchmark 自带判分器的结果原样写进 `correctness`（`true` = �
 ### 3.9 论文分析与准备工具
 
 这些工具读已完结的 run，结果写到 run 之外的目录，从不写被读的 run。`judge-skills`
-的输出目录首次设置写进 `analysis_config.json`，续跑时设置不同即拒绝
+的输出目录首次设置（含判定温度）写进 `analysis_config.json`，续跑时设置不同即拒绝
 （`stages/analysis_common.py`）。
 
 | 工具 | 回答什么 | 模型调用 |
@@ -1038,6 +1058,20 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
 - 版本守卫：改写调用前先把起始版本写进 `revisions.jsonl`，新版本经 `record_version` 落盘，
   再写回执；续跑跳过有回执的卡，版本已经加一的卡只补回执、不调用模型。
 
+**消融开关**（2.5）各改变上面五步中的一处，其余照旧：
+
+- `cards: false`：不做第 5 步，也不切摸底里的强模型轨迹（它们只给写卡提供材料）；库工件原样发布，
+  `card_units` 为 0，没有 Provenance，`outcomes.jsonl` 里每个缺口类型一条 `skipped_cards_off`
+  （完整性检查的第 4 项要求有证据的目标都有回执）；
+- `revise_scope`：第 3 步照常写 `evidence.jsonl`；第 5 步规划单元之前，范围之外的证据（`trigger_only`
+  时的正文证据，`content_only` 时的触发证据）被拿出，不进 `plan_cards`，所以不触发改写，也不进
+  删除规则的判断（上一个学习相位的证据照常读，只有本相位范围内的正文证据才可能触发删除）。
+  每张卡每侧写一条 `skipped_out_of_scope` 回执，续跑不重复写；
+- `evolve_profile: false`：第 4 步不调 `PROFILE_UPDATE`，写出空文本、版本 1 的 `profile.json`
+  （读取方要求每个学习相位都有这个文件）；
+- `trigger_view: prefix`：第 5 步缺口写新卡时见 2.5。第一次调用的结果在第二次调用成功之前不落盘，
+  所以两次调用之间崩溃，续跑从头问这张卡的两次调用。
+
 **来源与上下文**（`docs/decisions/provenance_trace_context_20261029.md`）：
 
 - `TraceRef` 只能由 `trace_at(sheet, step)` 构造：参数必须是一张摸底或练习答卷，
@@ -1073,6 +1107,8 @@ not_testable；not_testable 的原因 `invalid_redispatch_exhausted`、`all_hole
 | `written` | 缺口写出新卡 |
 | `skipped_no_material` | 缺口没有同类型的强模型成功段，不写卡 |
 | `skipped_discarded` | 缺口类型的卡已被删除，不写新卡 |
+| `skipped_cards_off` | `cards: false`：缺口类型的证据只记录，不写卡 |
+| `skipped_out_of_scope` | `revise_scope` 把这一侧的证据拿出了范围，不改写（动作 `revise_content` / `revise_trigger` 标明是哪一侧） |
 | `write_failed` | 写卡输出在 `write_retry_limit` 次重写后仍不合格，不写卡（终态） |
 | `content_revised` / `trigger_revised` | 改写产出新版本 |
 | `unchanged_after_revision` | 改写结果与原字段相同，不产生新版本 |
@@ -1216,7 +1252,7 @@ expedistill summary --run-dir <run 目录>
 expedistill fork-run --source-run <源 run 目录> --config <新配置> --run-dir <新 run 目录> --through pNN
 expedistill import-baseline --source-run <已有 run> --config <新配置> --run-dir <新 run 目录>
 expedistill import-bank --source <路径> --source-format markdown_file|skill_folder|notes_jsonl --run-dir <新 run 目录> --origin <方法名>
-expedistill judge-skills --run-dir <run 目录> --out-dir <输出目录> --phase pNN:<名> [--arm with_bank] [--bank-phase 标签] [--judge-model 模型]
+expedistill judge-skills --run-dir <run 目录> --out-dir <输出目录> --phase pNN:<名> [--arm with_bank] [--bank-phase 标签] [--judge-model 模型] [--temperature 0.95]
 expedistill paper-tables --spec <JSON> [--out-md 路径] [--out-json 路径] [--n-boot 10000] [--seed 0] [--metric avg_at_n|avg_at_n_conservative|avg_at_n_invalid_as_failure|pass_at_n]
 expedistill segmentation-metrics --arm LABEL=RUN_DIR [--arm LABEL=RUN_DIR ...] [--out-md 路径] [--out-json 路径]
 ```
@@ -1226,7 +1262,7 @@ expedistill segmentation-metrics --arm LABEL=RUN_DIR [--arm LABEL=RUN_DIR ...] [
   manifest 冻结的序列推导；账本缺相位时退出码 1；
 - `import-baseline`、`import-bank`、`judge-skills`、`paper-tables`、`segmentation-metrics`
   的用途见 3.9。输出目录不能在被读的 run 里。`judge-skills` 缺省用被读 run
-  冻结的 judge 模型，并带着该 run 冻结的 token 预算、模型参数和提示词包构造句柄；
+  冻结的 judge 模型，并带着该 run 冻结的 token 预算、模型参数和提示词包构造句柄，采样温度缺省 0.95；
   `paper-tables` 与 `segmentation-metrics` 的数值错误退出码为 2；
 - `fork-run` 把已完结、空闲的源 run 的前 K 个相位（`--through p05` 是 p01 到 p05）
   连同运行级对象存储拷进新 run 目录，零模型调用。新配置必须以同样的 K 个相位开头、

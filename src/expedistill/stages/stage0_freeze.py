@@ -394,8 +394,13 @@ def _resolve_phase_methods(config: Any) -> None:
                     spec.compare.external.path,
                     spec.compare.external.sha256)
         elif isinstance(spec, LearnPhaseSpec):
-            resolve_params("review", spec.review)
-            resolve_params("author", spec.author)
+            review = resolve_params("review", spec.review)
+            author = resolve_params("author", spec.author)
+            if not review.cards and author.trigger_view != "full":
+                raise ConfigError(
+                    f"phases.{name}: review.cards is false, so no card is "
+                    f"written and author.trigger_view "
+                    f"{author.trigger_view!r} has nothing to act on")
 
 
 def run(ctx: StageContext) -> Dict[str, Any]:

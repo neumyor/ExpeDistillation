@@ -10,7 +10,13 @@
 #
 # Input : .env (EXPEDISTILL_TB_HOST / EXPEDISTILL_TB_KEY of this machine) and
 #         EXPEDISTILL_DEPLOY_BASE, the absolute directory on the benchmark host
-#         that holds one code directory per commit.
+#         that holds one code directory per commit. EXPEDISTILL_DEPLOY_ENV
+#         names another env file to read instead of .env (one file per host,
+#         kept outside the repository); EXPEDISTILL_REMOTE_PYTHON is the python
+#         that creates the remote venv (default python3; the package needs
+#         3.9 to 3.11); EXPEDISTILL_REMOTE_PROXY, when set, is an http proxy
+#         URL the remote pip uses (a host without outbound access reaches
+#         the package mirror through scripts/remote/egress_tunnel.sh).
 # Output: $EXPEDISTILL_DEPLOY_BASE/<commit>/  holding src/, configs/,
 #         scripts/, pyproject.toml, README.md, AGENTS.md, a venv, and
 #         DEPLOYED_FROM. It prints the remote directory on the last line.
@@ -33,7 +39,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
-[[ -f .env ]] && { set -a; . ./.env; set +a; }
+DEPLOY_ENV="${EXPEDISTILL_DEPLOY_ENV:-.env}"
+if [[ -n "${EXPEDISTILL_DEPLOY_ENV:-}" && ! -f "$DEPLOY_ENV" ]]; then
+    echo "EXPEDISTILL_DEPLOY_ENV $DEPLOY_ENV does not exist" >&2; exit 2
+fi
+[[ -f "$DEPLOY_ENV" ]] && { set -a; . "$DEPLOY_ENV"; set +a; }
+REMOTE_PYTHON="${EXPEDISTILL_REMOTE_PYTHON:-python3}"
+REMOTE_PROXY="${EXPEDISTILL_REMOTE_PROXY:-}"
 : "${EXPEDISTILL_TB_HOST:?EXPEDISTILL_TB_HOST is not set (.env)}"
 : "${EXPEDISTILL_TB_KEY:?EXPEDISTILL_TB_KEY is not set (.env)}"
 : "${EXPEDISTILL_DEPLOY_BASE:?EXPEDISTILL_DEPLOY_BASE is not set (.env)}"
@@ -82,12 +94,15 @@ fi
     "${SHIPPED[@]}" \
     "$EXPEDISTILL_TB_HOST:$REMOTE_DIR/")
 
-"${SSH[@]}" "$EXPEDISTILL_TB_HOST" bash -s "$REMOTE_DIR" "$COMMIT" "$DIRTY_B64" <<'REMOTE'
+"${SSH[@]}" "$EXPEDISTILL_TB_HOST" bash -s "$REMOTE_DIR" "$COMMIT" "$DIRTY_B64" "$REMOTE_PYTHON" "$REMOTE_PROXY" <<'REMOTE'
 set -euo pipefail
-dir="$1"; commit="$2"; dirty_note="$(printf '%s' "${3:-}" | base64 -d)"
+dir="$1"; commit="$2"; dirty_note="$(printf '%s' "${3:-}" | base64 -d)"; py="$4"; proxy="${5:-}"
+if [[ -n "$proxy" ]]; then
+    export HTTPS_PROXY="$proxy" HTTP_PROXY="$proxy" NO_PROXY=127.0.0.1,localhost
+fi
 cd "$dir"
 if [[ ! -x .venv/bin/python ]]; then
-    python3 -m venv .venv
+    "$py" -m venv .venv
 fi
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -e .

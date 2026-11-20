@@ -9,7 +9,13 @@ most one card (``skill_id = <type_id>/skill``), so two cards never cover
 one type.
 
 * ``material`` -- a type's strong successful and weak failed segments;
-* ``writer`` -- ``write_card``, one card for one type.
+* ``writer`` -- ``write_card``, one card for one type; ``write_card_prefix``,
+  the prefix-authoring variant (below).
+
+With ``trigger_view: prefix`` the card's trigger side (``summary``,
+``when_to_use``) is written from what the agent saw BEFORE each material
+segment started, the view the agent has when it decides whether to open the
+card; the content side still comes from the segments themselves.
 
 This light package holds the author family's params class, so stage 0 can
 validate a config without loading the drivers.
@@ -20,7 +26,11 @@ from typing import Optional
 
 from expedistill.core.config import ConfigError
 
-__all__ = ["CardAuthoringParams"]
+__all__ = ["CardAuthoringParams", "TRIGGER_VIEWS"]
+
+#: Where the trigger side of a new card is written from: the material
+#: segments themselves (the method) or the steps before each of them.
+TRIGGER_VIEWS = ("full", "prefix")
 
 
 @dataclass(frozen=True)
@@ -39,7 +49,10 @@ class CardAuthoringParams:
       call, which needs less than the writer; None (the default) uses
       ``max_chars_per_segment``;
     - ``write_retry_limit``: how many times a card whose output fails the
-      checks is rewritten (after ``call_model``'s own format budget).
+      checks is rewritten (after ``call_model``'s own format budget);
+    - ``trigger_view``: ``full`` (the method) or ``prefix`` (the
+      prefix-authoring ablation: a second writing call over the steps
+      before each segment supplies the trigger side).
     """
 
     typing_chunk_size: int = 100
@@ -47,6 +60,7 @@ class CardAuthoringParams:
     max_chars_per_segment: int = 1200
     typing_max_chars_per_segment: Optional[int] = None
     write_retry_limit: int = 2
+    trigger_view: str = "full"
 
     @property
     def typing_chars(self) -> int:
@@ -56,8 +70,14 @@ class CardAuthoringParams:
         return self.typing_max_chars_per_segment
 
     def __post_init__(self) -> None:
+        if self.trigger_view not in TRIGGER_VIEWS:
+            raise ConfigError(
+                "author method 'subtask_cards': trigger_view must be one "
+                f"of {list(TRIGGER_VIEWS)}, got {self.trigger_view!r}")
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name == "trigger_view":
+                continue
             if item.name == "typing_max_chars_per_segment" and value is None:
                 continue
             floor = 0 if item.name == "write_retry_limit" else 1

@@ -30,7 +30,7 @@ def test_the_bounds_are_inclusive():
                                  typing_max_chars_per_segment=1,
                                  write_retry_limit=0)
     assert [getattr(params, item.name) for item in fields(params)] \
-        == [1, 1, 1, 1, 0]
+        == [1, 1, 1, 1, 0, "full"]
 
 
 def test_typing_uses_the_writer_budget_unless_it_has_its_own():
@@ -38,3 +38,14 @@ def test_typing_uses_the_writer_budget_unless_it_has_its_own():
     assert CardAuthoringParams(
         max_chars_per_segment=48000,
         typing_max_chars_per_segment=4000).typing_chars == 4000
+
+
+def test_the_trigger_view_is_full_unless_prefix_authoring_is_asked_for():
+    assert CardAuthoringParams().trigger_view == "full"
+    assert CardAuthoringParams(trigger_view="prefix").trigger_view == "prefix"
+
+
+@pytest.mark.parametrize("value", ["tail", "", None, True])
+def test_a_trigger_view_outside_the_two_values_is_refused(value):
+    with pytest.raises(ConfigError, match="trigger_view"):
+        CardAuthoringParams(trigger_view=value)

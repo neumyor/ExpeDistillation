@@ -648,14 +648,21 @@ def _frozen_config(run_dir: Path) -> ExperimentConfig:
     return ExperimentConfig.from_dict(read_json(path)["config"])
 
 
+#: The sampling temperature of ``judge-skills``' calls: the student's
+#: execution temperature, not the 1.0 of the method's own calls.
+JUDGE_TEMPERATURE = 0.95
+
+
 def _analysis_handle(cfg: ExperimentConfig, args: argparse.Namespace,
-                     role: str, model_name: str, out_dir: Path) -> Any:
+                     role: str, model_name: str, out_dir: Path,
+                     temperature: float) -> Any:
     """A handle for an analysis call: the run's own budgets and model
     options for ``role``, the benchmark's prompt pack, and the analysis
     output directory as its request log and usage ledger."""
     prompt_defaults, prompt_aliases = _prompt_pack_wiring(cfg.benchmark)
     return make_handle(
         role, model_name, _default_client(model_name, args.llm_timeout),
+        temperature=temperature,
         extra_body=dict(cfg.model_options.get(model_name, {})),
         max_tokens=cfg.max_output_tokens_for(role),
         max_input_tokens=cfg.max_input_tokens_for(role),
@@ -668,7 +675,8 @@ def _analysis_handle(cfg: ExperimentConfig, args: argparse.Namespace,
 def _cmd_judge_skills(args: argparse.Namespace) -> int:
     cfg = _frozen_config(args.run_dir)
     model = args.judge_model or cfg.models["judge"]
-    handle = _analysis_handle(cfg, args, "judge", model, args.out_dir)
+    handle = _analysis_handle(cfg, args, "judge", model, args.out_dir,
+                              args.temperature)
     summary = judge_phase(
         args.run_dir, args.phase, args.out_dir, handle,
         arm=args.arm, workers=args.workers,
@@ -949,6 +957,11 @@ def build_parser() -> argparse.ArgumentParser:
                               "test phase, every trial of a practice phase)")
     judging.add_argument("--judge-model", default=None,
                          help="default: the run's frozen judge model")
+    judging.add_argument("--temperature", type=float,
+                         default=JUDGE_TEMPERATURE,
+                         help="sampling temperature of the judge calls "
+                              f"(default {JUDGE_TEMPERATURE}; the method's "
+                              "own calls stay at 1.0)")
     judging.set_defaults(func=_cmd_judge_skills)
 
     tables = sub.add_parser(

@@ -139,6 +139,21 @@ def test_judge_skills_accepts_another_judge_model(
     assert seen["handle"].name == "other-judge"
 
 
+def test_judge_calls_sample_at_095_unless_told_otherwise(
+        monkeypatch, tmp_path, source_run):
+    monkeypatch.setattr(cli, "_default_client", _Recorder())
+    seen = {}
+    monkeypatch.setattr(
+        cli, "judge_phase",
+        lambda run_dir, phase, out_dir, handle, **kw:
+        seen.setdefault("temperatures", []).append(handle.temperature) or {})
+    base = ["judge-skills", "--run-dir", str(source_run),
+            "--out-dir", str(tmp_path / "out"), "--phase", "p06:test"]
+    cli.main(base)
+    cli.main(base + ["--temperature", "0.3"])
+    assert seen["temperatures"] == [0.95, 0.3]
+
+
 def test_a_run_without_a_manifest_is_refused(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(cli, "_default_client", _Recorder())
     code = cli.main(["judge-skills", "--run-dir", str(tmp_path / "nowhere"),

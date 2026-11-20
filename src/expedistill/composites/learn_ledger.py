@@ -137,15 +137,16 @@ def land_delete(store: Store, phase: Any, row: TaskListRow,
 
 def commit_order(phase_dir) -> None:
     """Rewrite the phase's receipt, revision and provenance ledgers in a
-    fixed order: receipts and plans by target id (a target's own rows keep
-    their order: content before trigger), provenance by skill id and
+    fixed order: receipts and plans by target id and action (a card's
+    rows then read delete, content, trigger), provenance by skill id and
     version."""
     for name in (OUTCOMES_NAME, REVISIONS_NAME):
         path = phase_dir / name
         if path.exists():
             rows = read_jsonl(path)
             write_jsonl(path, sorted(
-                rows, key=lambda row: str(row.get("target_id"))))
+                rows, key=lambda row: (str(row.get("target_id")),
+                                       str(row.get("action")))))
     path = phase_dir / _provenance.PROVENANCE_NAME
     if path.exists():
         rows = read_jsonl(path)
