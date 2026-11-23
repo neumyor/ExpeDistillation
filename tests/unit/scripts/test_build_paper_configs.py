@@ -48,6 +48,16 @@ def _name(bench, stem):
     return f"{bench}_paper_{stem}.yaml"
 
 
+#: The benchmarks the ablation arms run on, and the one key the reference
+#: file does not carry: TB's ablation arms read a card first in the final
+#: test only (the reference file keeps its frozen definition).
+ABLATION_BENCHES = ("alfworld", "tb21", "swebench")
+
+
+def _read_rule_diff(bench):
+    return ["phases.test.delivery.read_rule"] if bench == "tb21" else []
+
+
 @pytest.fixture(scope="module")
 def files():
     """Every generated config as read from disk (what a run would load)."""
@@ -107,13 +117,15 @@ def test_the_matrix_has_the_expected_files():
                  for bench in BENCHMARKS}
     external = sorted(f"e1_{baseline}_{variant}" for baseline in BASELINES
                       for variant in ("folder", "whole"))
-    assert per_bench["tb21"] == sorted(["e1_ours"] + external)
+    assert per_bench["tb21"] == sorted(
+        ["e1_ours"] + external + list(ABLATIONS) + list(NOPB))
     assert per_bench["searchqa"] == sorted(["e1_ours", "e1_bare"] + external)
     assert per_bench["alfworld"] == sorted(
         ["e1_ours", "e1_ours_val", "e1_bare_q", "e1_bare_d", "e1_bare_x"]
         + external + list(ABLATIONS) + list(NOPB))
-    assert per_bench["swebench"] == ["e1_ours"]
-    assert len(NAMES) == 45 + len(ABLATIONS) + len(NOPB)
+    assert per_bench["swebench"] == sorted(
+        ["e1_ours"] + list(ABLATIONS) + list(NOPB))
+    assert len(NAMES) == 45 + 3 * (len(ABLATIONS) + len(NOPB))
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -226,15 +238,21 @@ def test_the_teacher_fills_every_role_but_the_weak_executor(bench, files):
                          "max_input_tokens": expected}, role
 
 
-def test_only_swebench_folder_units_must_read_a_card(files):
+def test_only_swebench_and_the_tb_ablation_tests_must_read_a_card(files):
+    # SWE-bench: practice and test. TB: only the final test of an ablation
+    # arm (the reference file keeps its frozen definition).
     for name, cfg in files.items():
-        for phase in cfg["phases"].values():
+        stem = name.partition("_paper_")[2][:-5]
+        tb_ablation = (name.startswith("tb21_")
+                       and stem in set(ABLATIONS) | set(NOPB))
+        for phase_name, phase in cfg["phases"].items():
             delivery = phase.get("delivery") or {}
             if delivery.get("name") != "folder":
                 continue
-            expected = ("mandatory" if name.startswith("swebench_")
-                        else None)
-            assert delivery.get("read_rule") == expected, name
+            must_read = (name.startswith("swebench_")
+                         or (tb_ablation and phase["role"] == "test"))
+            expected = "mandatory" if must_read else None
+            assert delivery.get("read_rule") == expected, (name, phase_name)
 
 
 def test_ours_val_differs_from_ours_in_the_practice_list_only(files):
@@ -289,15 +307,18 @@ def test_only_the_switched_arms_carry_a_switch_key(files):
     ("e6_no_profile", ["phases.learn.review.evolve_profile"]),
     ("e7_k1", ["phases.learn.review.K"]),
 ])
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
 def test_an_ablation_differs_from_the_reference_in_its_own_keys(
-        stem, differs, files):
-    ours = files[_name("alfworld", "e1_ours")]
-    assert _diff(files[_name("alfworld", stem)], ours) == sorted(differs)
+        bench, stem, differs, files):
+    ours = files[_name(bench, "e1_ours")]
+    assert _diff(files[_name(bench, stem)], ours) == sorted(
+        differs + _read_rule_diff(bench))
 
 
-def test_the_switch_values(files):
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
+def test_the_switch_values(bench, files):
     def learn(stem, name="learn"):
-        return files[_name("alfworld", stem)]["phases"][name]
+        return files[_name(bench, stem)]["phases"][name]
 
     assert learn("e1_no_skills")["review"]["cards"] is False
     assert learn("e6_no_profile")["review"]["evolve_profile"] is False
@@ -309,11 +330,12 @@ def test_the_switch_values(files):
         "revise_scope"] == "trigger_only"
 
 
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
 @pytest.mark.parametrize("stem", ["e3_body_only", "e4_trigger_only"])
 def test_the_scoped_arms_keep_the_reference_learn_for_the_first_round(
-        stem, files):
-    ours = files[_name("alfworld", "e1_ours")]
-    arm = files[_name("alfworld", stem)]
+        bench, stem, files):
+    ours = files[_name(bench, "e1_ours")]
+    arm = files[_name(bench, stem)]
     assert arm["phases"]["learn"] == ours["phases"]["learn"]
     assert arm["sequence"] == [
         "baseline", "learn", "practice", "learn_scoped", "practice",
@@ -325,29 +347,52 @@ def test_the_scoped_arms_keep_the_reference_learn_for_the_first_round(
     assert scoped == ours["phases"]["learn"]
 
 
-def test_the_short_arms_run_baseline_learn_test(files):
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
+def test_the_short_arms_run_baseline_learn_test(bench, files):
     for stem in ("e2_written_once", "e5_prefix_authoring"):
-        cfg = files[_name("alfworld", stem)]
+        cfg = files[_name(bench, stem)]
         assert cfg["sequence"] == ["baseline", "learn", "test"]
         assert cfg["phases"]["test"]["playbook"] == "evolved"
         assert sorted(cfg["phases"]) == ["baseline", "learn", "test"]
 
 
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
 @pytest.mark.parametrize("stem, base", sorted(NOPB.items()))
 def test_a_no_playbook_arm_is_its_base_with_the_final_playbook_off(
-        stem, base, files):
-    arm = files[_name("alfworld", stem)]
-    reference = files[_name("alfworld", base)]
-    assert _diff(arm, reference) == ["phases.test.playbook"]
+        bench, stem, base, files):
+    arm = files[_name(bench, stem)]
+    reference = files[_name(bench, base)]
+    expected = ["phases.test.playbook"]
+    if base == "e1_ours":
+        expected += _read_rule_diff(bench)
+    assert _diff(arm, reference) == sorted(expected)
     assert "playbook" not in arm["phases"]["test"]
     assert reference["phases"]["test"]["playbook"] == "evolved"
     assert arm["sequence"] == reference["sequence"]
 
 
-def test_the_ablation_arms_are_alfworld_only():
-    for bench in ("tb21", "searchqa", "swebench"):
-        for stem in list(ABLATIONS) + list(NOPB):
-            assert _name(bench, stem) not in NAMES
+def test_the_ablation_arms_skip_searchqa():
+    for stem in list(ABLATIONS) + list(NOPB):
+        assert _name("searchqa", stem) not in NAMES
+        for bench in ABLATION_BENCHES:
+            assert _name(bench, stem) in NAMES
+
+
+def test_the_final_tests_of_the_ablation_arms_read_a_card_first_on_tb(files):
+    # TB's reference file keeps the frozen definition (no read rule); the
+    # ablation arms follow the mandatory-read fork of the reference run.
+    assert "read_rule" not in files[_name("tb21", "e1_ours")][
+        "phases"]["test"]["delivery"]
+    for stem in list(ABLATIONS) + list(NOPB):
+        cfg = files[_name("tb21", stem)]
+        assert cfg["phases"]["test"]["delivery"]["read_rule"] == "mandatory"
+        # the practice phases stay as the reference run's
+        if "practice" in cfg["phases"]:
+            assert "read_rule" not in cfg["phases"]["practice"]["delivery"]
+    # ALFWorld never gets a read rule
+    for stem in list(ABLATIONS) + list(NOPB):
+        cfg = files[_name("alfworld", stem)]
+        assert "read_rule" not in cfg["phases"]["test"]["delivery"]
 
 
 # How many phases each arm's run copies from which run with ``fork-run``:
@@ -372,16 +417,18 @@ FORKS = [
 ]
 
 
-def _config_of(stem):
-    return load_config(str(CONFIG_DIR / _name("alfworld", stem)))
+def _config_of(stem, bench="alfworld"):
+    return load_config(str(CONFIG_DIR / _name(bench, stem)))
 
 
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
 @pytest.mark.parametrize("source, target, count", FORKS)
-def test_fork_run_accepts_every_planned_prefix(source, target, count):
+def test_fork_run_accepts_every_planned_prefix(bench, source, target, count):
     # The same check ``fork-run`` makes before it copies anything: the
     # first ``count`` phases are defined the same way and everything else
     # that acts on them is equal.
-    _check_same_prefix(_config_of(source), _config_of(target), count)
+    _check_same_prefix(_config_of(source, bench), _config_of(target, bench),
+                       count)
 
 
 @pytest.mark.parametrize("source, target, count", [
@@ -398,10 +445,12 @@ def test_fork_run_accepts_every_planned_prefix(source, target, count):
     # The no-playbook test is the last phase and differs.
     ("e1_ours", "e8_ours_nopb", 7),
 ])
+@pytest.mark.parametrize("bench", ABLATION_BENCHES)
 def test_fork_run_refuses_a_prefix_that_would_copy_a_changed_phase(
-        source, target, count):
+        bench, source, target, count):
     with pytest.raises(ConfigError):
-        _check_same_prefix(_config_of(source), _config_of(target), count)
+        _check_same_prefix(_config_of(source, bench),
+                           _config_of(target, bench), count)
 
 
 # ---------------------------------------------------------------------------

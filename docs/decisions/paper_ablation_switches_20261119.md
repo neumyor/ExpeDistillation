@@ -152,3 +152,11 @@ E1 没有对应的无 playbook 终测（技能库为空，终测去掉 playbook 
   段卡片里的标签与描述仍是段本身的。这是复用现有提示词的代价，不改提示词是本次的约束。
 - `content_only` 臂的 playbook 仍读触发证据计数：计数属于"记录"，不属于改写范围。
 - 判定温度改为 0.95 之前已经用 1.0 写过的判定输出目录不能续跑，要用新目录。
+
+## 2026-11-23 补充：消融臂扩到 Terminal-Bench 和 SWE-bench
+
+用户要求 TB 和 SWE-bench 也做同一套消融（去技能库、Written once、Body only、Trigger only、Prefix authoring、No profile、K=1，以及各自的无 playbook 终测）。开关本身与 benchmark 无关，所以只改生成器：`ABLATION_BENCHMARKS = (alfworld, tb21, swebench)`，每个 benchmark 生成 14 份配置（共新增 28 份，ALFWorld 的 14 份逐字节不变）。
+
+- **读卡规则：** SWE-bench 的练习和终测本来就是强制读卡（`FOLDER_READ_RULES`），不变。TB 的参考运行 `tb21_paper_e1_ours_20261116_1612` 没有读卡规则，用户之前定了 TB 保留强制读卡，对应的是它的分叉 `tb21_ours_mandatory_read_20261117_1810`（p01–p06 复制过来，只有终测加 `read_rule: mandatory`）。TB 的消融臂照这个做法：只有终测加强制读卡，练习不加（`TEST_READ_RULES`、`Arm.mandatory_read`）。`tb21_paper_e1_ours.yaml` 保持冻结的定义，所以 TB 消融与参考的配置差里多一项 `phases.test.delivery.read_rule`，比较时参考运行应取 1810 而不是 1612。
+- **fork 来源：** TB 用 1612，SWE-bench 用 `swebench_paper_e1_ours_20261119_0953`，复制相位数与 ALFWorld 的表相同；每个臂开跑前仍要做真实 `fork-run` 加零模型调用回放。
+- 测试：`tests/unit/scripts/test_build_paper_configs.py` 的消融测试对三个 benchmark 参数化。

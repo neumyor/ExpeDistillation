@@ -84,8 +84,8 @@ the difference)
                             after bare D (2026-11-02), so it is not run and
                             no control file is built for it
 
-The ablation arms (ALFWorld only; docs/decisions/paper_ablation_switches_
-20261119.md) differ from ``e1_ours`` in the review / author switches and in
+The ablation arms (ALFWorld, Terminal-Bench and SWE-bench; docs/decisions/
+paper_ablation_switches_20261119.md) differ from ``e1_ours`` in the review / author switches and in
 the sequence:
     e1  no_skills           review.cards false: the bank is never touched,
                             the profile and the playbook still evolve
@@ -183,6 +183,14 @@ DESCRIPTION_MODE = "summary_then_when_to_use"
 #: (optional): SWE-bench's practice and test units must read a card before
 #: their first task command (docs/decisions/swebench_plugin_20261118.md).
 FOLDER_READ_RULES = {"swebench": "mandatory"}
+#: TB's ablation arms read a card before their first task command in the
+#: final test only (the practice phases stay as the reference run's), the
+#: convention of the mandatory-read fork of the TB reference run
+#: (tb21_ours_mandatory_read, 2026-11-17). The reference arm's own file
+#: keeps its frozen definition.
+TEST_READ_RULES = {"tb21": "mandatory"}
+#: The benchmarks the ablation arms run on.
+ABLATION_BENCHMARKS = ("alfworld", "tb21", "swebench")
 
 ROLES = ("executor_strong", "executor_weak", "segmenter", "author",
          "rewriter", "judge")
@@ -283,7 +291,8 @@ def _practice_phase(bench: str, tasks: str, attempts: int) -> Dict[str, Any]:
 
 
 def _final_test_phase(bench: str, kind: str, compare: Dict[str, Any],
-                      playbook: str) -> Dict[str, Any]:
+                      playbook: str, mandatory_read: bool = False
+                      ) -> Dict[str, Any]:
     """The test phase: ``folder`` pairs with real_folder, ``whole`` is the
     whole-bank injection under plain real, ``whole_verbatim`` the same with
     every skill text injected exactly as stored (imported baseline
@@ -291,6 +300,8 @@ def _final_test_phase(bench: str, kind: str, compare: Dict[str, Any],
     n_attempts_weak."""
     if kind == "folder":
         delivery = _folder_delivery(bench)
+        if mandatory_read and bench in TEST_READ_RULES:
+            delivery["read_rule"] = TEST_READ_RULES[bench]
         execution = {"name": "real_folder"}
     elif kind in ("whole", "whole_verbatim"):
         delivery = {"name": "whole_bank"}
@@ -334,6 +345,9 @@ class Arm:
     scoped_review: Dict[str, Any] = field(default_factory=dict)
     #: The final test's playbook; ``off`` is the no-playbook final test.
     test_playbook: str = "evolved"
+    #: The ablation arms' final test requires a card read first on the
+    #: benchmarks in TEST_READ_RULES.
+    mandatory_read: bool = False
 
 
 def arms() -> List[Arm]:
@@ -370,9 +384,9 @@ def arms() -> List[Arm]:
 
 
 def _ablation_arms() -> List[Arm]:
-    """The ALFWorld ablation arms and, for each arm with a learned playbook,
-    its no-playbook final test."""
-    alfworld = {"benchmarks": ("alfworld",)}
+    """The ablation arms (ALFWorld, Terminal-Bench, SWE-bench) and, for each
+    arm with a learned playbook, its no-playbook final test."""
+    alfworld = {"benchmarks": ABLATION_BENCHMARKS, "mandatory_read": True}
     learned = [
         Arm("e2_written_once", "e2",
             "baseline, learn, test: the bank is written once and never "
@@ -401,8 +415,8 @@ def _ablation_arms() -> List[Arm]:
         dataclasses.replace(
             arm, stem=f"e8_{arm.stem.split('_', 1)[1]}_nopb", exp="e8",
             summary=f"{arm.stem}'s run with the final test's playbook off",
-            benchmarks=("alfworld",), reference=arm.stem,
-            test_playbook="off")
+            benchmarks=ABLATION_BENCHMARKS, reference=arm.stem,
+            test_playbook="off", mandatory_read=True)
         for arm in [reference] + learned]
     no_skills = Arm(
         "e1_no_skills", "e1",
@@ -526,7 +540,8 @@ def build_config(source: Source, bench: str, arm: Arm, d_model: str,
                  cache_prefix_tokens: Optional[int] = None) -> Dict[str, Any]:
     compare = _test_compare(source, bench, arm, d_model, q_model, x_model)
     test = _final_test_phase(bench, arm.test, compare,
-                             arm.test_playbook if arm.method else "off")
+                             arm.test_playbook if arm.method else "off",
+                             mandatory_read=arm.mandatory_read)
     sequence, phases = phases_of(arm, bench, test)
     models = _models(arm.student, d_model, q_model, x_model)
     model_options: Dict[str, Dict[str, Any]] = {
