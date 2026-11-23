@@ -17,6 +17,9 @@
 #         3.9 to 3.11); EXPEDISTILL_REMOTE_PROXY, when set, is an http proxy
 #         URL the remote pip uses (a host without outbound access reaches
 #         the package mirror through scripts/remote/egress_tunnel.sh).
+#         EXPEDISTILL_REMOTE_PIP_INDEX, when set, is the package index the
+#         remote pip uses instead of the host's own configuration (for a
+#         mirror that refuses the default one).
 # Output: $EXPEDISTILL_DEPLOY_BASE/<commit>/  holding src/, configs/,
 #         scripts/, pyproject.toml, README.md, AGENTS.md, a venv, and
 #         DEPLOYED_FROM. It prints the remote directory on the last line.
@@ -46,6 +49,7 @@ fi
 [[ -f "$DEPLOY_ENV" ]] && { set -a; . "$DEPLOY_ENV"; set +a; }
 REMOTE_PYTHON="${EXPEDISTILL_REMOTE_PYTHON:-python3}"
 REMOTE_PROXY="${EXPEDISTILL_REMOTE_PROXY:-}"
+REMOTE_PIP_INDEX="${EXPEDISTILL_REMOTE_PIP_INDEX:-}"
 : "${EXPEDISTILL_TB_HOST:?EXPEDISTILL_TB_HOST is not set (.env)}"
 : "${EXPEDISTILL_TB_KEY:?EXPEDISTILL_TB_KEY is not set (.env)}"
 : "${EXPEDISTILL_DEPLOY_BASE:?EXPEDISTILL_DEPLOY_BASE is not set (.env)}"
@@ -94,9 +98,12 @@ fi
     "${SHIPPED[@]}" \
     "$EXPEDISTILL_TB_HOST:$REMOTE_DIR/")
 
-"${SSH[@]}" "$EXPEDISTILL_TB_HOST" bash -s "$REMOTE_DIR" "$COMMIT" "$DIRTY_B64" "$REMOTE_PYTHON" "$REMOTE_PROXY" <<'REMOTE'
+"${SSH[@]}" "$EXPEDISTILL_TB_HOST" bash -s "$REMOTE_DIR" "$COMMIT" "$DIRTY_B64" "$REMOTE_PYTHON" "$REMOTE_PROXY" "$REMOTE_PIP_INDEX" <<'REMOTE'
 set -euo pipefail
-dir="$1"; commit="$2"; dirty_note="$(printf '%s' "${3:-}" | base64 -d)"; py="$4"; proxy="${5:-}"
+dir="$1"; commit="$2"; dirty_note="$(printf '%s' "${3:-}" | base64 -d)"; py="$4"; proxy="${5:-}"; pip_index="${6:-}"
+if [[ -n "$pip_index" ]]; then
+    export PIP_INDEX_URL="$pip_index"
+fi
 if [[ -n "$proxy" ]]; then
     export HTTPS_PROXY="$proxy" HTTP_PROXY="$proxy" NO_PROXY=127.0.0.1,localhost
 fi
